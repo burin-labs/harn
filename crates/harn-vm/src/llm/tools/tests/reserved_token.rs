@@ -8,19 +8,18 @@
 //! `llamacpp` OpenAI-compat fallback route in `vm_call_llm_api` bypasses. So the
 //! assembled completion reached the tagged tool-call parser in raw wire form.
 //!
-//! Why that loses calls: the tagged parser anchors on `<tool_call>` blocks. With
-//! the wire form there are no such blocks, so parsing falls entirely to the
-//! fragile bare-call rescue scanner — which, when a tool name isn't in the
-//! effective known-tool set, silently drops the call with NO diagnostic (0
-//! calls, 0 errors). The canonical form instead gives the tagged parser real
+//! Why that used to lose calls: the tagged parser anchors on `<tool_call>`
+//! blocks. With the wire form there are no such blocks, so parsing used to fall
+//! entirely to the fragile bare-call rescue scanner — which, when a tool name
+//! wasn't in the effective known-tool set, silently dropped the call with NO
+//! diagnostic (0 calls, 0 errors). Canonicalization gives the tagged parser real
 //! `<tool_call>` blocks, so the call is either dispatched or surfaced as a
-//! diagnostic the loop can replay — it is never silently lost. The captured
-//! field bytes below reproduce exactly that 0-calls/0-errors silent loss on the
-//! wire form.
+//! diagnostic the loop can replay. Newer salvage logic also diagnoses the raw
+//! wire form; the regression is silent loss, not the exact recovery path.
 //!
-//! The fix moves the remap into the shared transport funnel
-//! (`vm_call_llm_api_with_body`) so it fires identically on every route —
-//! registered and unregistered, streaming and non-streaming.
+//! The remap lives in the shared transport funnel (`vm_call_llm_api_with_body`)
+//! so it fires identically on every route — registered and unregistered,
+//! streaming and non-streaming.
 
 use super::parse_text_tool_calls_with_tools;
 use super::sample_tool_registry;
@@ -35,24 +34,28 @@ const MULTIBLOCK: &str = include_str!("../../testdata/qwen36_multiblock_response
 const EDIT_BLOCK: &str = include_str!("../../testdata/qwen36_reserved_token_response.txt");
 
 #[test]
-fn wire_form_silently_loses_calls_canonical_does_not() {
+fn wire_form_and_canonical_form_do_not_silently_lose_calls() {
     // The exact field condition: the tagged parser has no `<tool_call>` blocks
-    // to anchor on, bare-rescue finds no known tool, and the calls vanish with
-    // NO diagnostic. This 0-calls / 0-errors silent loss is precisely why the
-    // agent saw "nothing happened" and hallucinated completion.
+    // to anchor on before transport canonicalization. Older parser behavior let
+    // these raw wire-form calls vanish with 0 calls and 0 diagnostics, which is
+    // why the agent saw "nothing happened" and hallucinated completion. The
+    // parser may now recover a diagnostic directly from the raw wire form, but
+    // it still must not dispatch calls before canonicalization.
     let wire = parse_text_tool_calls_with_tools(MULTIBLOCK, None);
     assert_eq!(
         wire.calls.len(),
         0,
-        "wire form yields zero calls (the field bug)"
+        "raw reserved-token wire form should not dispatch before canonicalization"
     );
     assert!(
-        wire.errors.is_empty(),
-        "wire form yields zero per-call diagnostics too — the calls are silently lost: {:?}",
-        wire.errors
+        !wire.errors.is_empty() || !wire.violations.is_empty(),
+        "raw wire form must surface a repair signal, not silently lose calls: \
+         errors={:?} violations={:?}",
+        wire.errors,
+        wire.violations
     );
 
-    // After the remap the same bytes carry real `<tool_call>` blocks, so the
+    // After the remap, the same bytes carry real `<tool_call>` blocks, so the
     // tagged parser sees them. With no registry the blocks surface as
     // structured diagnostics (not silence) the loop can act on; the regression
     // is the *silent* loss, which canonicalization eliminates.

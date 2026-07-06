@@ -216,11 +216,13 @@ pub(crate) struct TextToolParseResult {
     /// preferred public answer surface and supersedes generic
     /// `<assistant_prose>` for `prose` rendering.
     pub user_response: Option<String>,
-    /// Protocol-level grammar violations (stray text outside tags, unknown
-    /// tags, unclosed tags, malformed `<done>` contents). Distinct from
-    /// `errors`, which carry per-call parse diagnostics. The agent loop
-    /// replays these to the model as structured `protocol_violation`
-    /// feedback so it can self-correct.
+    /// Protocol-level grammar violations (unknown tags, unclosed tags,
+    /// malformed `<done>` contents, ambiguous recovered batches). Harmless
+    /// stray prose is canonicalized into prose blocks and a single recovered
+    /// bare call is canonicalized into a tool-call block instead of becoming a
+    /// violation. Distinct from `errors`, which carry per-call parse
+    /// diagnostics. The agent loop replays these to the model as structured
+    /// `protocol_violation` feedback so it can self-correct.
     pub violations: Vec<String>,
     /// Count of calls recovered from top-level stray text rather than a
     /// recognized call wrapper. The agent loop uses this to bound ambiguous

@@ -632,26 +632,31 @@ fn tagged_parser_accepts_compact_protocol_tag_aliases() {
 }
 
 #[test]
-fn tagged_parser_flags_stray_prose_outside_tags() {
+fn tagged_parser_wraps_stray_prose_alongside_tool_call() {
     let tools = sample_tool_registry();
     let text = "def foo():\n    pass\n\n<tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert!(
-        !result.violations.is_empty(),
-        "stray prose before <tool_call> must be flagged"
+        result.violations.is_empty(),
+        "stray prose before <tool_call> should be canonicalized instead of wasting a retry: {:?}",
+        result.violations
     );
-    // The inside-tag call still parses; the model sees the violation on the
-    // next turn but the runtime doesn't lose the action.
     assert_eq!(result.calls.len(), 1);
+    assert!(
+        result.canonical.contains("<assistant_prose>"),
+        "canonical replay should wrap the stray text: {}",
+        result.canonical
+    );
 }
 
 #[test]
-fn tagged_parser_executes_bare_tool_call_with_soft_violation() {
+fn tagged_parser_executes_single_bare_tool_call_without_protocol_violation() {
     // Pre-v0.5.82 bare calls without `<tool_call>` wrappers were flagged
     // AND dropped, which stranded weaker locally-hosted models that kept
-    // emitting the same right-shape-wrong-wrapper response. Now we
-    // execute the call and surface a soft violation so the model still
-    // learns the canonical wrapping next turn.
+    // emitting the same right-shape-wrong-wrapper response. Later corpus
+    // mining showed the soft violation still burned another paid turn even
+    // though exactly one useful call had landed, so the single-call case is
+    // now pure salvage: canonical replay carries the wrapper signal.
     let tools = sample_tool_registry();
     let text = "edit({ action: \"create\", path: \"a.rs\", content: \"x\" })";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
@@ -671,14 +676,11 @@ fn tagged_parser_executes_bare_tool_call_with_soft_violation() {
     );
     assert_eq!(result.recovered_from_stray_count, 1);
     assert!(
-        !result.violations.is_empty(),
-        "bare call still warrants a violation so the model wraps next turn"
+        result.violations.is_empty(),
+        "a single recovered call should not trigger parse_guidance: {:?}",
+        result.violations
     );
-    assert!(
-        result.violations[0].contains("bare text") || result.violations[0].contains("<tool_call>"),
-        "violation must name the missing wrapper: {}",
-        result.violations[0]
-    );
+    assert!(result.canonical.contains("<tool_call>"));
 }
 
 #[test]
@@ -691,7 +693,10 @@ fn tagged_parser_counts_multi_call_top_level_stray_recovery() {
     assert_eq!(result.calls.len(), 2, "calls: {:?}", result.calls);
     assert_eq!(result.recovered_from_stray_count, 2);
     assert!(
-        result.violations.iter().any(|v| v.contains("bare text")),
+        result
+            .violations
+            .iter()
+            .any(|v| v.contains("bare multi-call batch")),
         "violations: {:?}",
         result.violations
     );
@@ -891,9 +896,12 @@ fn tagged_parser_empty_response_flags_violation() {
     let text = "just prose with no tags at all";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert!(
-        !result.violations.is_empty(),
-        "response with no tags must violate"
+        result.violations.is_empty(),
+        "plain prose is salvageable assistant prose: {:?}",
+        result.violations
     );
+    assert_eq!(result.prose, "just prose with no tags at all");
+    assert!(result.canonical.contains("<assistant_prose>"));
 }
 
 #[test]
@@ -918,16 +926,18 @@ fn tagged_parser_preserves_heredoc_inside_tool_call() {
 }
 
 #[test]
-fn tagged_parser_canonical_omits_raw_stray_text() {
+fn tagged_parser_canonical_wraps_raw_stray_text() {
     let tools = sample_tool_registry();
     let text = "leading garbage\n<assistant_prose>Narration.</assistant_prose>";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    // Canonical reflects only the well-formed tagged content.
+    // Canonical wraps harmless top-level narration instead of replaying raw
+    // provider bytes. Protocol-looking fragments still stay violations.
     assert_eq!(
         result.canonical.trim(),
-        "<assistant_prose>\nNarration.\n</assistant_prose>"
+        "<assistant_prose>\nleading garbage\n</assistant_prose>\n\n\
+         <assistant_prose>\nNarration.\n</assistant_prose>"
     );
-    assert!(!result.canonical.contains("leading garbage"));
+    assert!(result.violations.is_empty());
 }
 
 #[test]

@@ -24,11 +24,12 @@ use crate::value::VmValue;
 ///   <done>##DONE##</done>
 /// ```
 ///
-/// Anything else at the top level — stray prose, code, unknown tags,
-/// unclosed tags — is reported as a `violation`. Malformed call bodies
-/// are reported as `errors` (per-call diagnostics). The function always
-/// runs to completion so every violation can be surfaced to the model
-/// on the next turn.
+/// Harmless top-level narration is canonicalized into prose blocks, and one
+/// recovered bare call is canonicalized into a tool-call block. Ambiguous
+/// recovered call batches, unknown tags, and unclosed tags are reported as
+/// `violations`; malformed call bodies are reported as `errors` (per-call
+/// diagnostics). The function always runs to completion so every actionable
+/// violation can be surfaced to the model on the next turn.
 ///
 /// The `canonical` field is the response re-emitted in the tagged form.
 /// It's what should be replayed as the assistant history entry, not the
@@ -95,14 +96,17 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 }
                 break;
             }
-            report_stray(
-                &src[start..cursor],
-                &mut violations,
-                tools_val,
-                &mut calls,
-                &mut canonical_parts,
-                &mut recovered_from_stray_count,
-            );
+            let mut stray = StrayReportContext {
+                errors: &mut errors,
+                violations: &mut violations,
+                calls: &mut calls,
+                assistant_prose_parts: &mut assistant_prose_parts,
+                user_response_parts: &mut user_response_parts,
+                canonical_parts: &mut canonical_parts,
+                done_marker: &mut done_marker,
+                recovered_from_stray_count: &mut recovered_from_stray_count,
+            };
+            report_stray(&src[start..cursor], tools_val, &mut stray);
             continue;
         }
 
@@ -113,14 +117,17 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             while cursor < bytes.len() && bytes[cursor] != b'\n' {
                 cursor += 1;
             }
-            report_stray(
-                &src[start..cursor],
-                &mut violations,
-                tools_val,
-                &mut calls,
-                &mut canonical_parts,
-                &mut recovered_from_stray_count,
-            );
+            let mut stray = StrayReportContext {
+                errors: &mut errors,
+                violations: &mut violations,
+                calls: &mut calls,
+                assistant_prose_parts: &mut assistant_prose_parts,
+                user_response_parts: &mut user_response_parts,
+                canonical_parts: &mut canonical_parts,
+                done_marker: &mut done_marker,
+                recovered_from_stray_count: &mut recovered_from_stray_count,
+            };
+            report_stray(&src[start..cursor], tools_val, &mut stray);
             continue;
         }
 
@@ -129,14 +136,17 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             while cursor < bytes.len() && bytes[cursor] != b'\n' {
                 cursor += 1;
             }
-            report_stray(
-                &src[start..cursor],
-                &mut violations,
-                tools_val,
-                &mut calls,
-                &mut canonical_parts,
-                &mut recovered_from_stray_count,
-            );
+            let mut stray = StrayReportContext {
+                errors: &mut errors,
+                violations: &mut violations,
+                calls: &mut calls,
+                assistant_prose_parts: &mut assistant_prose_parts,
+                user_response_parts: &mut user_response_parts,
+                canonical_parts: &mut canonical_parts,
+                done_marker: &mut done_marker,
+                recovered_from_stray_count: &mut recovered_from_stray_count,
+            };
+            report_stray(&src[start..cursor], tools_val, &mut stray);
             continue;
         }
 
@@ -483,6 +493,16 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         }
     }
 
+    if calls.is_empty()
+        && user_response_parts.is_empty()
+        && done_marker.is_none()
+        && !violations.is_empty()
+        && !assistant_prose_parts.is_empty()
+    {
+        assistant_prose_parts.clear();
+        canonical_parts.clear();
+    }
+
     let response_is_effectively_empty = calls.is_empty()
         && assistant_prose_parts.is_empty()
         && user_response_parts.is_empty()
@@ -525,6 +545,10 @@ fn known_top_level_open_tag(fragment: &str) -> Option<&'static str> {
         .split_whitespace()
         .next()
         .unwrap_or("");
+    accepted_response_tag_name(name)
+}
+
+fn accepted_response_tag_name(name: &str) -> Option<&'static str> {
     match name {
         "tool_call" | "toolcall" => Some("tool_call"),
         "assistant_prose" | "assistantprose" => Some("assistant_prose"),
@@ -1124,14 +1148,18 @@ fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
 /// the parser flagged-and-dropped these calls, which was correct in
 /// principle but stranded weaker locally-hosted models in loops where
 /// they kept re-emitting the same right-shape-wrong-wrapper response.
-fn report_stray(
-    fragment: &str,
-    violations: &mut Vec<String>,
-    tools_val: Option<&VmValue>,
-    calls: &mut Vec<serde_json::Value>,
-    canonical_parts: &mut Vec<String>,
-    recovered_from_stray_count: &mut usize,
-) {
+struct StrayReportContext<'a> {
+    errors: &'a mut Vec<String>,
+    violations: &'a mut Vec<String>,
+    calls: &'a mut Vec<serde_json::Value>,
+    assistant_prose_parts: &'a mut Vec<String>,
+    user_response_parts: &'a mut Vec<String>,
+    canonical_parts: &'a mut Vec<String>,
+    done_marker: &'a mut Option<String>,
+    recovered_from_stray_count: &'a mut usize,
+}
+
+fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayReportContext<'_>) {
     let trimmed = fragment.trim();
     if trimmed.is_empty() {
         return;
@@ -1157,24 +1185,122 @@ fn report_stray(
                 .get("arguments")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
-            canonical_parts.push(text_tool_call_block(&render_canonical_call(&name, &args)));
-            calls.push(call.clone());
+            ctx.canonical_parts
+                .push(text_tool_call_block(&render_canonical_call(&name, &args)));
+            ctx.calls.push(call.clone());
         }
-        *recovered_from_stray_count += sniff.calls.len();
-        violations.push(format!(
-            "Tool call(s) ({}) were emitted as bare text outside `<tool_call>` tags. \
-             Executed this turn so work moves forward; please wrap each call in \
-             `<tool_call>...</tool_call>` on subsequent turns.",
-            names.join(", ")
-        ));
-    } else {
-        violations.push(format!(
-            "Stray text outside response tags: {:?}. Wrap all prose in \
-             <assistant_prose>...</assistant_prose> or <user_response>...</user_response>, \
-             and every tool call in <tool_call>...</tool_call>.",
-            preview_str(trimmed, 120)
-        ));
+        *ctx.recovered_from_stray_count += sniff.calls.len();
+        let prose = sniff.prose.trim();
+        if !prose.is_empty() && should_salvage_stray_prose(prose) {
+            push_assistant_prose(prose, ctx.assistant_prose_parts, ctx.canonical_parts);
+        }
+        if sniff.calls.len() > 1 {
+            ctx.violations.push(format!(
+                "Tool call(s) ({}) were emitted as a bare multi-call batch outside \
+                 `<tool_call>` tags. The batch is ambiguous; retry with one \
+                 well-formed `<tool_call>...</tool_call>` block.",
+                names.join(", ")
+            ));
+        }
+    } else if !sniff.errors.is_empty() {
+        ctx.errors.extend(sniff.errors);
+    } else if !salvage_stray_done(
+        trimmed,
+        ctx.user_response_parts,
+        ctx.canonical_parts,
+        ctx.done_marker,
+    ) {
+        if should_salvage_stray_prose(trimmed) {
+            push_assistant_prose(trimmed, ctx.assistant_prose_parts, ctx.canonical_parts);
+        } else {
+            ctx.violations.push(format!(
+                "Stray text outside response tags: {:?}. Wrap all prose in \
+                 <assistant_prose>...</assistant_prose> or <user_response>...</user_response>, \
+                 and every tool call in <tool_call>...</tool_call>.",
+                preview_str(trimmed, 120)
+            ));
+        }
     }
+}
+
+fn push_assistant_prose(
+    body: &str,
+    assistant_prose_parts: &mut Vec<String>,
+    canonical_parts: &mut Vec<String>,
+) {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    assistant_prose_parts.push(trimmed.to_string());
+    canonical_parts.push(format!("<assistant_prose>\n{trimmed}\n</assistant_prose>"));
+}
+
+fn push_user_response(
+    body: &str,
+    user_response_parts: &mut Vec<String>,
+    canonical_parts: &mut Vec<String>,
+) {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    user_response_parts.push(trimmed.to_string());
+    canonical_parts.push(format!("<user_response>\n{trimmed}\n</user_response>"));
+}
+
+fn salvage_stray_done(
+    body: &str,
+    user_response_parts: &mut Vec<String>,
+    canonical_parts: &mut Vec<String>,
+    done_marker: &mut Option<String>,
+) -> bool {
+    const DEFAULT_DONE_SENTINEL: &str = "##DONE##";
+    let Some((before, after)) = body.split_once(DEFAULT_DONE_SENTINEL) else {
+        return false;
+    };
+    if !after.trim().is_empty() {
+        return false;
+    }
+    push_user_response(before, user_response_parts, canonical_parts);
+    *done_marker = Some(DEFAULT_DONE_SENTINEL.to_string());
+    canonical_parts.push(format!("<done>{DEFAULT_DONE_SENTINEL}</done>"));
+    true
+}
+
+fn should_salvage_stray_prose(body: &str) -> bool {
+    !has_response_protocol_fragment(body)
+}
+
+fn has_response_protocol_fragment(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("_call>") {
+        return true;
+    }
+    let mut rest = lower.as_str();
+    while let Some(start) = rest.find('<') {
+        let candidate = &rest[start..];
+        let end = candidate
+            .find('>')
+            .map(|offset| offset + 1)
+            .unwrap_or(candidate.len());
+        if response_protocol_fragment_tag(&candidate[..end]).is_some() {
+            return true;
+        }
+        if end >= candidate.len() {
+            break;
+        }
+        rest = &candidate[end..];
+    }
+    false
+}
+
+fn response_protocol_fragment_tag(fragment: &str) -> Option<&'static str> {
+    let inner = fragment.trim().strip_prefix('<')?;
+    let inner = inner.strip_prefix('/').unwrap_or(inner).trim_start();
+    let inner = inner.strip_suffix('>').unwrap_or(inner);
+    let name = inner.split_whitespace().next().unwrap_or("");
+    accepted_response_tag_name(name)
 }
 
 /// Parse a single `<tool_call>` body. Expects exactly one bare
