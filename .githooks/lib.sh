@@ -122,18 +122,37 @@ hook_default_target_dir() {
   printf '%s/harn-target/%s-%s\n' "${TMPDIR:-/tmp}" "$repo_parent" "$repo_leaf"
 }
 
-hook_export_cargo_target_dir() {
-  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+hook_export_cargo_build_dir() {
+  if [ -n "${CARGO_BUILD_BUILD_DIR:-}" ]; then
     return 0
   fi
 
-  target_dir=$(hook_target_dir)
-  if [ -z "$target_dir" ]; then
-    target_dir=$(hook_default_target_dir)
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+  if [ -f "$repo_root/scripts/lib/cargo_env.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$repo_root/scripts/lib/cargo_env.sh"
+    if harn_export_cargo_build_dir_under_target "$CARGO_TARGET_DIR"; then
+      printf '=== Hook: using Cargo build dir %s ===\n' "$CARGO_BUILD_BUILD_DIR" >&2
+    fi
+    return 0
   fi
-  mkdir -p "$target_dir"
-  export CARGO_TARGET_DIR="$target_dir"
-  printf '=== Hook: using Cargo target dir %s ===\n' "$CARGO_TARGET_DIR" >&2
+
+  CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR/build"
+  export CARGO_BUILD_BUILD_DIR
+  printf '=== Hook: using Cargo build dir %s ===\n' "$CARGO_BUILD_BUILD_DIR" >&2
+}
+
+hook_export_cargo_target_dir() {
+  if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+    target_dir=$(hook_target_dir)
+    if [ -z "$target_dir" ]; then
+      target_dir=$(hook_default_target_dir)
+    fi
+    export CARGO_TARGET_DIR="$target_dir"
+    printf '=== Hook: using Cargo target dir %s ===\n' "$CARGO_TARGET_DIR" >&2
+  fi
+  mkdir -p "$CARGO_TARGET_DIR"
+  hook_export_cargo_build_dir
 }
 
 hook_build_harn_bin() {

@@ -17,6 +17,7 @@ set -euo pipefail
 {
   printf 'args=%s\n' "$*"
   printf 'CARGO_TARGET_DIR=%s\n' "${CARGO_TARGET_DIR-__unset__}"
+  printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
   printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
   printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
 } >> "$FAKE_CARGO_RECORD"
@@ -46,8 +47,9 @@ SH
 chmod +x "$fake_bin/cargo"
 
 hook_repo="$tmp_root/hook-repo"
-mkdir -p "$hook_repo/.githooks"
+mkdir -p "$hook_repo/.githooks" "$hook_repo/scripts/lib"
 cp "$repo_root/.githooks/lib.sh" "$hook_repo/.githooks/lib.sh"
+cp "$repo_root/scripts/lib/cargo_env.sh" "$hook_repo/scripts/lib/cargo_env.sh"
 git -C "$hook_repo" init --quiet
 
 (
@@ -78,6 +80,11 @@ if ! grep -Fxq "CARGO_TARGET_DIR=$target_dir" "$record"; then
   cat "$record" >&2
   exit 1
 fi
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir/build" "$record"; then
+  echo "hook_ensure_harn did not default CARGO_BUILD_BUILD_DIR under CARGO_TARGET_DIR" >&2
+  cat "$record" >&2
+  exit 1
+fi
 if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
   echo "hook_ensure_harn did not clear RUSTC_WRAPPER" >&2
   cat "$record" >&2
@@ -85,6 +92,32 @@ if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
 fi
 if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
   echo "hook_ensure_harn did not clear CARGO_BUILD_RUSTC_WRAPPER" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+: > "$record"
+custom_build_dir="$tmp_root/custom build dir"
+(
+  cd "$hook_repo"
+  # shellcheck source=/dev/null
+  . ./.githooks/lib.sh
+  RUSTC_WRAPPER=sccache \
+    CARGO_BUILD_RUSTC_WRAPPER=sccache \
+    CARGO_TARGET_DIR="$target_dir" \
+    CARGO_BUILD_BUILD_DIR="$custom_build_dir" \
+    FAKE_CARGO_RECORD="$record" \
+    PATH="$fake_bin:$PATH" \
+    hook_ensure_harn > "$tmp_root/hook-harn-path-preserve-build-dir.txt"
+)
+
+if [[ "$(cat "$tmp_root/hook-harn-path-preserve-build-dir.txt")" != "$target_dir/debug/harn" ]]; then
+  echo "hook_ensure_harn did not preserve CARGO_TARGET_DIR with a custom build dir" >&2
+  cat "$tmp_root/hook-harn-path-preserve-build-dir.txt" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$custom_build_dir" "$record"; then
+  echo "hook_ensure_harn did not preserve explicit CARGO_BUILD_BUILD_DIR" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -111,6 +144,11 @@ if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
 fi
 if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
   echo "check_no_rust_prompt_prose did not clear CARGO_BUILD_RUSTC_WRAPPER" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir/build" "$record"; then
+  echo "check_no_rust_prompt_prose did not default CARGO_BUILD_BUILD_DIR under CARGO_TARGET_DIR" >&2
   cat "$record" >&2
   exit 1
 fi

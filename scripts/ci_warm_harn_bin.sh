@@ -2,6 +2,9 @@
 set -euo pipefail
 
 github_env="${GITHUB_ENV:-}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/lib/cargo_env.sh
+source "$script_dir/lib/cargo_env.sh"
 
 usage() {
   cat <<'EOF'
@@ -56,6 +59,7 @@ if [[ -n "${HARN_BIN:-}" ]]; then
   fi
 else
   echo "=== Warming Harn CLI binary ==="
+  harn_export_cargo_build_dir_under_target "${CARGO_TARGET_DIR:-}" || true
   cargo build --quiet --bin harn
   HARN_BIN="$(debug_harn_binary)"
   if [[ ! -x "$HARN_BIN" ]]; then
