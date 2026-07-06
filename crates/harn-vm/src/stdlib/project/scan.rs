@@ -224,6 +224,7 @@ impl ProjectFingerprint {
 #[derive(Debug, Default)]
 struct FingerprintSignals {
     languages: BTreeSet<String>,
+    source_language_counts: BTreeMap<String, usize>,
     frameworks: BTreeSet<String>,
     package_managers: BTreeSet<String>,
     test_runners: BTreeSet<String>,
@@ -244,6 +245,20 @@ struct FingerprintSignals {
     has_vite_config: bool,
     has_pytest_signal: bool,
     has_unittest_signal: bool,
+}
+
+impl FingerprintSignals {
+    fn add_language_signal(&mut self, language: &str) {
+        self.languages.insert(language.to_string());
+    }
+
+    fn add_source_language(&mut self, language: &str) {
+        self.add_language_signal(language);
+        *self
+            .source_language_counts
+            .entry(language.to_string())
+            .or_default() += 1;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -560,7 +575,7 @@ pub(super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
 
     if signals.has_next_dep && signals.has_next_config {
         signals.frameworks.insert("next".to_string());
-        signals.languages.insert("typescript".to_string());
+        signals.add_language_signal("typescript");
         signals.build_tools.insert("next".to_string());
     }
     if signals.node_project
@@ -637,17 +652,13 @@ pub(super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
         }
     }
 
-    let languages = ordered_values(&signals.languages, PROJECT_LANGUAGE_ORDER);
+    let languages = ranked_project_languages(&signals);
     let frameworks = ordered_values(&signals.frameworks, PROJECT_FRAMEWORK_ORDER);
     let package_managers = ordered_values(&signals.package_managers, PROJECT_PACKAGE_MANAGER_ORDER);
     let test_runners = ordered_values(&signals.test_runners, PROJECT_TEST_RUNNER_ORDER);
     let build_tools = ordered_values(&signals.build_tools, PROJECT_BUILD_TOOL_ORDER);
     let ci = ordered_values(&signals.ci, PROJECT_CI_ORDER);
-    let primary_language = match languages.as_slice() {
-        [] => "unknown".to_string(),
-        [only] => only.clone(),
-        _ => "mixed".to_string(),
-    };
+    let primary_language = primary_project_language(&languages, &signals);
 
     ProjectFingerprint {
         primary_language,
@@ -723,10 +734,10 @@ fn inspect_fingerprint_dir(rel: &str, name: &str, signals: &mut FingerprintSigna
     }
     match name {
         "crates" => {
-            signals.languages.insert("rust".to_string());
+            signals.add_language_signal("rust");
         }
         "cmd" | "pkg" => {
-            signals.languages.insert("go".to_string());
+            signals.add_language_signal("go");
         }
         ".git" => {}
         ".hg" => {}
@@ -773,44 +784,44 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
             inspect_python_requirements(path, signals);
         }
         "setup.py" => {
-            signals.languages.insert("python".to_string());
+            signals.add_language_signal("python");
             signals.python_project = true;
             signals.python_needs_pip = true;
             inspect_python_text(read_text_if_exists(path.to_path_buf()).as_deref(), signals);
         }
         "go.mod" => {
-            signals.languages.insert("go".to_string());
+            signals.add_language_signal("go");
             signals.package_managers.insert("go-mod".to_string());
             signals.build_tools.insert("go".to_string());
             signals.test_runners.insert("go-test".to_string());
         }
         "Package.swift" => {
-            signals.languages.insert("swift".to_string());
+            signals.add_language_signal("swift");
             signals.package_managers.insert("spm".to_string());
             signals.build_tools.insert("spm".to_string());
             signals.test_runners.insert("xctest".to_string());
         }
         "Gemfile" => inspect_gemfile(path, signals),
         "build.sbt" => {
-            signals.languages.insert("scala".to_string());
+            signals.add_language_signal("scala");
             signals.build_tools.insert("sbt".to_string());
         }
         "build.gradle.kts" => {
-            signals.languages.insert("kotlin".to_string());
+            signals.add_language_signal("kotlin");
             signals.build_tools.insert("gradle".to_string());
         }
         "mix.exs" => {
-            signals.languages.insert("elixir".to_string());
+            signals.add_language_signal("elixir");
             signals.package_managers.insert("mix".to_string());
             signals.build_tools.insert("mix".to_string());
         }
         "pom.xml" => {
-            signals.languages.insert("java".to_string());
+            signals.add_language_signal("java");
             signals.build_tools.insert("maven".to_string());
         }
         "composer.json" => inspect_composer_json(path, signals),
         "build.zig" | "build.zig.zon" => {
-            signals.languages.insert("zig".to_string());
+            signals.add_language_signal("zig");
             signals.build_tools.insert("zig".to_string());
         }
         _ => {}
@@ -818,22 +829,31 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
 
     if NEXT_CONFIG_NAMES.contains(&name) {
         signals.has_next_config = true;
-        signals.languages.insert("typescript".to_string());
+        signals.node_project = true;
+        signals.add_language_signal("typescript");
         signals.build_tools.insert("next".to_string());
     }
     if VITEST_CONFIG_NAMES.contains(&name) {
+        signals.node_project = true;
+        signals.add_language_signal("typescript");
         signals.test_runners.insert("vitest".to_string());
         signals.has_tests = true;
     }
     if JEST_CONFIG_NAMES.contains(&name) {
+        signals.node_project = true;
+        signals.add_language_signal("typescript");
         signals.test_runners.insert("jest".to_string());
         signals.has_tests = true;
     }
     if VITE_CONFIG_NAMES.contains(&name) {
+        signals.node_project = true;
+        signals.add_language_signal("typescript");
         signals.has_vite_config = true;
         signals.build_tools.insert("vite".to_string());
     }
     if MOCHA_CONFIG_NAMES.contains(&name) {
+        signals.node_project = true;
+        signals.add_language_signal("typescript");
         signals.test_runners.insert("mocha".to_string());
         signals.has_tests = true;
     }
@@ -846,62 +866,26 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
         signals.test_runners.insert("nextest".to_string());
     }
 
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("rs") => {
-            signals.languages.insert("rust".to_string());
-        }
-        Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
-            signals.languages.insert("typescript".to_string());
+    if let Some(language) =
+        source_language_for_file(name, path.extension().and_then(|ext| ext.to_str()))
+    {
+        signals.add_source_language(language);
+        if language == "typescript" {
             signals.node_project = true;
         }
-        Some("py") => {
-            signals.languages.insert("python".to_string());
+        if language == "python" {
             signals.python_project = true;
         }
-        Some("go") => {
-            signals.languages.insert("go".to_string());
-        }
-        Some("swift") => {
-            signals.languages.insert("swift".to_string());
-        }
-        Some("rb") => {
-            signals.languages.insert("ruby".to_string());
+        if language == "ruby" {
             signals.ruby_project = true;
         }
-        Some("scala") | Some("sc") => {
-            signals.languages.insert("scala".to_string());
-        }
-        Some("kt") | Some("kts") => {
-            signals.languages.insert("kotlin".to_string());
-        }
-        Some("java") => {
-            signals.languages.insert("java".to_string());
-        }
-        Some("ex") | Some("exs") => {
-            signals.languages.insert("elixir".to_string());
-        }
-        Some("zig") | Some("zon") => {
-            signals.languages.insert("zig".to_string());
-        }
-        Some("php") => {
-            signals.languages.insert("php".to_string());
-        }
-        Some("cs") => {
-            signals.languages.insert("csharp".to_string());
-        }
-        Some("c") | Some("h") => {
-            signals.languages.insert("c".to_string());
-        }
-        Some("cpp") | Some("cc") | Some("cxx") | Some("hpp") | Some("hh") | Some("hxx")
-        | Some("mm") => {
-            signals.languages.insert("cpp".to_string());
-        }
-        _ => {}
+    } else if path.extension().and_then(|ext| ext.to_str()) == Some("h") {
+        signals.add_language_signal("c");
     }
 }
 
 fn inspect_cargo_manifest(path: &Path, signals: &mut FingerprintSignals) {
-    signals.languages.insert("rust".to_string());
+    signals.add_language_signal("rust");
     signals.package_managers.insert("cargo".to_string());
     signals.build_tools.insert("cargo".to_string());
     signals.test_runners.insert("cargo-test".to_string());
@@ -938,10 +922,10 @@ fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals) {
     }
     if deps.contains("react") {
         signals.frameworks.insert("react".to_string());
-        signals.languages.insert("typescript".to_string());
+        signals.add_language_signal("typescript");
     }
     if deps.contains("typescript") {
-        signals.languages.insert("typescript".to_string());
+        signals.add_language_signal("typescript");
     }
     if deps.contains("vite") {
         signals.has_vite_dep = true;
@@ -984,7 +968,7 @@ fn inspect_pyproject(path: &Path, signals: &mut FingerprintSignals) {
     let Some(text) = read_text_if_exists(path.to_path_buf()) else {
         return;
     };
-    signals.languages.insert("python".to_string());
+    signals.add_language_signal("python");
     signals.python_project = true;
     inspect_python_text(Some(&text), signals);
 
@@ -1008,7 +992,7 @@ fn inspect_pyproject(path: &Path, signals: &mut FingerprintSignals) {
 }
 
 fn inspect_python_requirements(path: &Path, signals: &mut FingerprintSignals) {
-    signals.languages.insert("python".to_string());
+    signals.add_language_signal("python");
     signals.python_project = true;
     signals.python_needs_pip = true;
     signals.build_tools.insert("pip".to_string());
@@ -1039,7 +1023,7 @@ fn inspect_python_text(text: Option<&str>, signals: &mut FingerprintSignals) {
 }
 
 fn inspect_composer_json(path: &Path, signals: &mut FingerprintSignals) {
-    signals.languages.insert("php".to_string());
+    signals.add_language_signal("php");
     signals.php_project = true;
     signals.package_managers.insert("composer".to_string());
     signals.build_tools.insert("composer".to_string());
@@ -1069,7 +1053,7 @@ fn inspect_composer_json(path: &Path, signals: &mut FingerprintSignals) {
 }
 
 fn inspect_gemfile(path: &Path, signals: &mut FingerprintSignals) {
-    signals.languages.insert("ruby".to_string());
+    signals.add_language_signal("ruby");
     signals.ruby_project = true;
     signals.package_managers.insert("bundler".to_string());
     signals.build_tools.insert("bundler".to_string());
@@ -1198,6 +1182,134 @@ fn composer_script_commands(value: &serde_json::Value) -> Vec<&str> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn source_language_for_file(name: &str, extension: Option<&str>) -> Option<&'static str> {
+    if is_tooling_source_file(name) {
+        return None;
+    }
+    match extension {
+        Some("rs") => Some("rust"),
+        Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
+            Some("typescript")
+        }
+        Some("py") => Some("python"),
+        Some("go") => Some("go"),
+        Some("swift") => Some("swift"),
+        Some("rb") => Some("ruby"),
+        Some("scala") | Some("sc") => Some("scala"),
+        Some("kt") | Some("kts") => Some("kotlin"),
+        Some("java") => Some("java"),
+        Some("ex") | Some("exs") => Some("elixir"),
+        Some("zig") | Some("zon") => Some("zig"),
+        Some("php") => Some("php"),
+        Some("cs") => Some("csharp"),
+        Some("c") => Some("c"),
+        Some("cpp") | Some("cc") | Some("cxx") | Some("hpp") | Some("hh") | Some("hxx")
+        | Some("mm") => Some("cpp"),
+        Some("h") => None,
+        _ => None,
+    }
+}
+
+fn is_tooling_source_file(name: &str) -> bool {
+    matches!(
+        name,
+        "Package.swift"
+            | "build.gradle.kts"
+            | "build.zig"
+            | "build.zig.zon"
+            | "mix.exs"
+            | "setup.py"
+    ) || NEXT_CONFIG_NAMES.contains(&name)
+        || VITEST_CONFIG_NAMES.contains(&name)
+        || JEST_CONFIG_NAMES.contains(&name)
+        || VITE_CONFIG_NAMES.contains(&name)
+        || MOCHA_CONFIG_NAMES.contains(&name)
+}
+
+fn ranked_project_languages(signals: &FingerprintSignals) -> Vec<String> {
+    let ordered_signals = ordered_values(&signals.languages, PROJECT_LANGUAGE_ORDER);
+    if signals.source_language_counts.is_empty() {
+        return ordered_signals;
+    }
+
+    let mut source_languages = signals
+        .source_language_counts
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    source_languages.sort_by(|left, right| {
+        let right_count = signals
+            .source_language_counts
+            .get(right)
+            .copied()
+            .unwrap_or_default();
+        let left_count = signals
+            .source_language_counts
+            .get(left)
+            .copied()
+            .unwrap_or_default();
+        right_count
+            .cmp(&left_count)
+            .then_with(|| language_order_rank(left).cmp(&language_order_rank(right)))
+            .then_with(|| left.cmp(right))
+    });
+
+    let mut ranked = source_languages;
+    for language in ordered_signals {
+        if !ranked.contains(&language) {
+            ranked.push(language);
+        }
+    }
+    ranked
+}
+
+fn primary_project_language(languages: &[String], signals: &FingerprintSignals) -> String {
+    if languages.is_empty() {
+        return "unknown".to_string();
+    }
+    if signals.source_language_counts.is_empty() {
+        return if languages.len() == 1 {
+            languages[0].clone()
+        } else {
+            "mixed".to_string()
+        };
+    }
+
+    let source_languages = languages
+        .iter()
+        .filter(|language| {
+            signals
+                .source_language_counts
+                .contains_key(language.as_str())
+        })
+        .collect::<Vec<_>>();
+    let Some(first) = source_languages.first() else {
+        return if languages.len() == 1 {
+            languages[0].clone()
+        } else {
+            "mixed".to_string()
+        };
+    };
+
+    let top_count = signals
+        .source_language_counts
+        .get(first.as_str())
+        .copied()
+        .unwrap_or_default();
+    let total_count = signals.source_language_counts.values().sum::<usize>();
+    if top_count * 2 > total_count {
+        return (*first).clone();
+    }
+    "mixed".to_string()
+}
+
+fn language_order_rank(language: &str) -> usize {
+    PROJECT_LANGUAGE_ORDER
+        .iter()
+        .position(|candidate| *candidate == language)
+        .unwrap_or(usize::MAX)
 }
 
 fn collect_toml_keys(parsed: &toml::Value, paths: &[&[&str]]) -> BTreeSet<String> {
