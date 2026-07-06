@@ -11,6 +11,7 @@ use std::time::Duration;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::process::EnvMode;
 use crate::value_args;
 
 /// Pull the single dict argument from a builtin call's argv. The dict
@@ -118,6 +119,28 @@ pub(crate) fn optional_string_map(
             param: key,
             message: format!("expected dict<string,string>, got {}", describe(other)),
         }),
+    }
+}
+
+/// Parse the shared process-tool `env_mode` option.
+pub(crate) fn optional_env_mode(
+    builtin: &'static str,
+    map: &harn_vm::value::DictMap,
+    env_supplied: bool,
+) -> Result<EnvMode, HostlibError> {
+    match optional_string(builtin, map, "env_mode")?.as_deref() {
+        Some("inherit_clean") => Ok(EnvMode::InheritClean),
+        Some("replace") => Ok(EnvMode::Replace),
+        Some("patch") => Ok(EnvMode::Patch),
+        Some(other) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: "env_mode",
+            message: format!(
+                "unsupported env_mode {other:?}; expected inherit_clean, replace, or patch"
+            ),
+        }),
+        None if env_supplied => Ok(EnvMode::Replace),
+        None => Ok(EnvMode::InheritClean),
     }
 }
 

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/toolchain_facts.response.json",
+  "title": "tools.toolchain_facts response",
+  "description": "Toolchain identity, cache identity, and declared state-path facts for verification profiles.",
+  "type": "object",
+  "properties": {
+    "toolchains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "available": { "type": "boolean" },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "unparsed", "failed", "timed_out", "spawn_failed", "blocked"]
+          },
+          "command": { "type": "string" },
+          "version": { "type": ["string", "null"] },
+          "raw_version": { "type": "string" },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "exit_code": { "type": ["integer", "null"] },
+          "timed_out": { "type": "boolean" },
+          "error": { "type": ["string", "null"] },
+          "cache_env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "value": { "type": ["string", "null"] },
+                "source": {
+                  "type": "string",
+                  "enum": ["probe_env", "process_env", "unset"]
+                }
+              },
+              "required": ["value", "source"],
+              "additionalProperties": false
+            }
+          },
+          "state_paths": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "resolved_path": { "type": "string" },
+                "exists": { "type": "boolean" },
+                "kind": {
+                  "type": "string",
+                  "enum": ["file", "directory", "other", "missing"]
+                }
+              },
+              "required": ["path", "resolved_path", "exists", "kind"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "name",
+          "available",
+          "status",
+          "command",
+          "version",
+          "raw_version",
+          "duration_ms",
+          "exit_code",
+          "timed_out",
+          "error",
+          "cache_env",
+          "state_paths"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["toolchains"],
+  "additionalProperties": false
+}

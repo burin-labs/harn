@@ -1033,6 +1033,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "tools",
+        "toolchain_facts",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/toolchain_facts.request.json"),
+    ),
+    (
+        "tools",
+        "toolchain_facts",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/toolchain_facts.response.json"),
+    ),
+    (
+        "tools",
         "enable",
         SchemaKind::Request,
         include_str!("../schemas/tools/enable.request.json"),
