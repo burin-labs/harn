@@ -436,6 +436,13 @@ accepts these fields:
 | `batch_input_mode` | string | Batch submission mode: `jsonl_file`, `inline_requests`, or `jsonl_or_inline`. |
 | `batch_discount_percent` | int | Published discount versus equivalent synchronous traffic, when known. |
 | `batch_turnaround_hours` | int | Published target or maximum turnaround window, in hours, when known. |
+| `batch_max_requests` | int | Published maximum request/item count per batch, when known. |
+| `batch_max_input_bytes` | int | Published maximum submitted request-file/body size in bytes, when known. |
+| `batch_result_retention_days` | int | Published provider-side result artifact retention window, when known. |
+| `batch_result_ordering` | string | Result ordering contract: `custom_id_rejoin`, `provider_ordered`, or `unknown`. |
+| `batch_partial_failure` | string | Partial failure semantics: `per_request`, `whole_batch`, or `unknown`. |
+| `batch_cancellation` | string | Cancellation support: `supported`, `not_supported`, or `unknown`. |
+| `batch_security_notes` | list of strings | Non-secret provider storage/security notes safe to surface in catalogs and receipts. |
 | `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | Provider-side prompt caching is available. |
@@ -480,12 +487,17 @@ editing the manifest is awkward:
 Batch APIs are modeled as Harn provider capability data instead of Burin eval
 branches. `provider_capabilities(provider, model)` reports an effective
 `batch_api` flag from the provider catalog's `batch` feature plus any
-model-specific capability row, and only reports wire/input details when that
-effective flag is true. Use batch lanes only for asynchronous work that does
-not need turn-by-turn tool feedback: offline grading, prompt/corpus refreshes,
-distillation jobs, and low-priority eval analysis. Live coding-agent loops
-still need synchronous provider calls because every tool result influences the
-next model turn. `harn models batch plan` also reports
+model-specific capability row, and only reports lifecycle details when that
+effective flag is true: provider wire/input shape, published limits,
+custom-id/result ordering, partial-failure behavior, cancellation support,
+retention, and non-secret storage notes. Use batch lanes only for asynchronous
+work that does not need turn-by-turn tool feedback: offline grading,
+prompt/corpus refreshes, distillation jobs, and low-priority eval analysis.
+Live coding-agent loops still need synchronous provider calls because every
+tool result influences the next model turn. Meter-stick pass@1 gates must keep
+batch-derived judge/corpus evidence separate from live interactive agent-loop
+evidence unless a future Harn resumable batch-step protocol makes those runs
+behaviorally comparable. `harn models batch plan` also reports
 `batch.harn_live_adapter` so provider capability stays distinct from Harn's
 current live submit/status/download implementation: routes without a live
 adapter are still useful for manifest/prepare dry runs, but need a provider

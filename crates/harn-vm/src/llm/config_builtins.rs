@@ -1048,6 +1048,160 @@ fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
     ))
 }
 
+fn optional_batch_string(batch_api: bool, value: Option<&str>) -> VmValue {
+    batch_api
+        .then_some(value)
+        .flatten()
+        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+        .unwrap_or(VmValue::Nil)
+}
+
+fn optional_batch_u32(batch_api: bool, value: Option<u32>) -> VmValue {
+    batch_api
+        .then_some(value)
+        .flatten()
+        .map(|value| VmValue::Int(value as i64))
+        .unwrap_or(VmValue::Nil)
+}
+
+fn optional_batch_u64(batch_api: bool, value: Option<u64>) -> VmValue {
+    batch_api
+        .then_some(value)
+        .flatten()
+        .and_then(|value| i64::try_from(value).ok())
+        .map(VmValue::Int)
+        .unwrap_or(VmValue::Nil)
+}
+
+fn optional_batch_string_list(batch_api: bool, items: &[String]) -> VmValue {
+    if batch_api && !items.is_empty() {
+        string_list_to_vm_value(items.to_vec())
+    } else {
+        VmValue::Nil
+    }
+}
+
+fn batch_support_to_vm_value(
+    batch_api: bool,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> VmValue {
+    if !batch_api {
+        return VmValue::Nil;
+    }
+    let (Some(wire_format), Some(input_mode)) = (
+        caps.batch_wire_format.as_deref(),
+        caps.batch_input_mode.as_deref(),
+    ) else {
+        return VmValue::Nil;
+    };
+    let mut dict = crate::value::DictMap::new();
+    dict.insert(crate::value::intern_key("api"), VmValue::Bool(true));
+    dict.insert(
+        crate::value::intern_key("wire_format"),
+        VmValue::String(arcstr::ArcStr::from(wire_format)),
+    );
+    dict.insert(
+        crate::value::intern_key("input_mode"),
+        VmValue::String(arcstr::ArcStr::from(input_mode)),
+    );
+    dict.insert(
+        crate::value::intern_key("discount_percent"),
+        optional_batch_u32(batch_api, caps.batch_discount_percent),
+    );
+    dict.insert(
+        crate::value::intern_key("turnaround_hours"),
+        optional_batch_u32(batch_api, caps.batch_turnaround_hours),
+    );
+    dict.insert(
+        crate::value::intern_key("max_requests"),
+        optional_batch_u64(batch_api, caps.batch_max_requests),
+    );
+    dict.insert(
+        crate::value::intern_key("max_input_bytes"),
+        optional_batch_u64(batch_api, caps.batch_max_input_bytes),
+    );
+    dict.insert(
+        crate::value::intern_key("result_retention_days"),
+        optional_batch_u32(batch_api, caps.batch_result_retention_days),
+    );
+    dict.insert(
+        crate::value::intern_key("result_ordering"),
+        optional_batch_string(batch_api, caps.batch_result_ordering.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("partial_failure"),
+        optional_batch_string(batch_api, caps.batch_partial_failure.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("cancellation"),
+        optional_batch_string(batch_api, caps.batch_cancellation.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("security_notes"),
+        optional_batch_string_list(batch_api, &caps.batch_security_notes),
+    );
+    VmValue::dict(dict)
+}
+
+fn insert_batch_support_fields(
+    dict: &mut crate::value::DictMap,
+    batch_api: bool,
+    caps: &crate::llm::capabilities::Capabilities,
+) {
+    dict.insert(
+        crate::value::intern_key("batch_api"),
+        VmValue::Bool(batch_api),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_wire_format"),
+        optional_batch_string(batch_api, caps.batch_wire_format.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_input_mode"),
+        optional_batch_string(batch_api, caps.batch_input_mode.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_discount_percent"),
+        optional_batch_u32(batch_api, caps.batch_discount_percent),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_turnaround_hours"),
+        optional_batch_u32(batch_api, caps.batch_turnaround_hours),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_max_requests"),
+        optional_batch_u64(batch_api, caps.batch_max_requests),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_max_input_bytes"),
+        optional_batch_u64(batch_api, caps.batch_max_input_bytes),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_result_retention_days"),
+        optional_batch_u32(batch_api, caps.batch_result_retention_days),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_result_ordering"),
+        optional_batch_string(batch_api, caps.batch_result_ordering.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_partial_failure"),
+        optional_batch_string(batch_api, caps.batch_partial_failure.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_cancellation"),
+        optional_batch_string(batch_api, caps.batch_cancellation.as_deref()),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_security_notes"),
+        optional_batch_string_list(batch_api, &caps.batch_security_notes),
+    );
+    dict.insert(
+        crate::value::intern_key("batch"),
+        batch_support_to_vm_value(batch_api, caps),
+    );
+}
+
 fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     let mut dict = crate::value::DictMap::new();
     dict.put_str("id", resolved.id.as_str());
@@ -1177,42 +1331,7 @@ pub(crate) fn capabilities_to_vm_value(
         crate::value::intern_key("background_mode"),
         VmValue::Bool(caps.background_mode),
     );
-    dict.insert(
-        crate::value::intern_key("batch_api"),
-        VmValue::Bool(batch_api),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_wire_format"),
-        batch_api
-            .then_some(caps.batch_wire_format.as_deref())
-            .flatten()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_input_mode"),
-        batch_api
-            .then_some(caps.batch_input_mode.as_deref())
-            .flatten()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_discount_percent"),
-        batch_api
-            .then_some(caps.batch_discount_percent)
-            .flatten()
-            .map(|value| VmValue::Int(value as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_turnaround_hours"),
-        batch_api
-            .then_some(caps.batch_turnaround_hours)
-            .flatten()
-            .map(|value| VmValue::Int(value as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    insert_batch_support_fields(&mut dict, batch_api, caps);
     dict.insert(
         crate::value::intern_key("tool_approval_policy"),
         caps.tool_approval_policy
@@ -1607,42 +1726,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         crate::value::intern_key("capabilities"),
         string_list_to_vm_value(model.capabilities.clone()),
     );
-    dict.insert(
-        crate::value::intern_key("batch_api"),
-        VmValue::Bool(batch_api),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_wire_format"),
-        batch_api
-            .then_some(capabilities.batch_wire_format.as_deref())
-            .flatten()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_input_mode"),
-        batch_api
-            .then_some(capabilities.batch_input_mode.as_deref())
-            .flatten()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_discount_percent"),
-        batch_api
-            .then_some(capabilities.batch_discount_percent)
-            .flatten()
-            .map(|value| VmValue::Int(value as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("batch_turnaround_hours"),
-        batch_api
-            .then_some(capabilities.batch_turnaround_hours)
-            .flatten()
-            .map(|value| VmValue::Int(value as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    insert_batch_support_fields(&mut dict, batch_api, &capabilities);
     dict.insert(
         crate::value::intern_key("pricing"),
         model
@@ -2284,6 +2368,49 @@ mod tests {
             direct_openai.get("batch_turnaround_hours"),
             Some(VmValue::Int(24))
         ));
+        assert!(matches!(
+            direct_openai.get("batch_max_requests"),
+            Some(VmValue::Int(50_000))
+        ));
+        assert!(matches!(
+            direct_openai.get("batch_max_input_bytes"),
+            Some(VmValue::Int(209_715_200))
+        ));
+        assert!(matches!(
+            direct_openai.get("batch_result_retention_days"),
+            Some(VmValue::Int(30))
+        ));
+        match direct_openai.get("batch_result_ordering") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "custom_id_rejoin"),
+            other => panic!("expected custom_id_rejoin batch ordering, got {other:?}"),
+        }
+        match direct_openai.get("batch_partial_failure") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "per_request"),
+            other => panic!("expected per_request batch partial failure, got {other:?}"),
+        }
+        match direct_openai.get("batch_cancellation") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "supported"),
+            other => panic!("expected supported batch cancellation, got {other:?}"),
+        }
+        match direct_openai.get("batch_security_notes") {
+            Some(VmValue::List(notes)) => assert!(
+                notes.len() >= 2,
+                "expected public batch storage/security notes"
+            ),
+            other => panic!("expected batch security notes list, got {other:?}"),
+        }
+        let direct_openai_batch = direct_openai
+            .get("batch")
+            .and_then(VmValue::as_dict)
+            .expect("expected nested batch support");
+        match direct_openai_batch.get("wire_format") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "openai"),
+            other => panic!("expected nested openai wire format, got {other:?}"),
+        }
+        assert!(matches!(
+            direct_openai_batch.get("max_requests"),
+            Some(VmValue::Int(50_000))
+        ));
 
         let openrouter_family = provider_capabilities_builtin(
             &[
@@ -2304,6 +2431,14 @@ mod tests {
         ));
         assert!(matches!(
             openrouter_family.get("batch_discount_percent"),
+            Some(VmValue::Nil)
+        ));
+        assert!(matches!(
+            openrouter_family.get("batch_max_requests"),
+            Some(VmValue::Nil)
+        ));
+        assert!(matches!(
+            openrouter_family.get("batch_result_ordering"),
             Some(VmValue::Nil)
         ));
 
@@ -2338,6 +2473,14 @@ mod tests {
             together.get("batch_turnaround_hours"),
             Some(VmValue::Int(24))
         ));
+        match together.get("batch_result_ordering") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "custom_id_rejoin"),
+            other => panic!("expected openai-compatible batch result ordering, got {other:?}"),
+        }
+        match together.get("batch_cancellation") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "unknown"),
+            other => panic!("expected unknown batch cancellation, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2371,6 +2514,41 @@ mod tests {
             openai.get("batch_turnaround_hours"),
             Some(VmValue::Int(24))
         ));
+        assert!(matches!(
+            openai.get("batch_max_requests"),
+            Some(VmValue::Int(50_000))
+        ));
+        assert!(matches!(
+            openai.get("batch_max_input_bytes"),
+            Some(VmValue::Int(209_715_200))
+        ));
+        match openai.get("batch_result_ordering") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "custom_id_rejoin"),
+            other => panic!("expected openai batch result ordering, got {other:?}"),
+        }
+        match openai.get("batch_partial_failure") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "per_request"),
+            other => panic!("expected openai batch partial failure, got {other:?}"),
+        }
+        match openai.get("batch_cancellation") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "supported"),
+            other => panic!("expected openai batch cancellation, got {other:?}"),
+        }
+        match openai.get("batch_security_notes") {
+            Some(VmValue::List(notes)) => assert!(
+                !notes.is_empty(),
+                "expected batch security notes in llm catalog row"
+            ),
+            other => panic!("expected batch security notes list, got {other:?}"),
+        }
+        let openai_batch = openai
+            .get("batch")
+            .and_then(VmValue::as_dict)
+            .expect("expected nested batch catalog row");
+        match openai_batch.get("result_ordering") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "custom_id_rejoin"),
+            other => panic!("expected nested openai batch ordering, got {other:?}"),
+        }
     }
 
     #[test]

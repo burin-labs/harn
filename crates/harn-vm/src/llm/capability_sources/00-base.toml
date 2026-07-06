@@ -63,6 +63,23 @@
 #                     traffic, when known.
 #   batch_turnaround_hours:
 #                     published target or maximum turnaround window, in hours.
+#   batch_max_requests:
+#                     published maximum request/item count per batch.
+#   batch_max_input_bytes:
+#                     published maximum submitted request-file/body size in bytes.
+#   batch_result_retention_days:
+#                     published provider-side result artifact retention window.
+#   batch_result_ordering:
+#                     result ordering contract: custom_id_rejoin,
+#                     provider_ordered, or unknown.
+#   batch_partial_failure:
+#                     partial failure semantics: per_request, whole_batch, or
+#                     unknown.
+#   batch_cancellation:
+#                     cancellation support: supported, not_supported, or unknown.
+#   batch_security_notes:
+#                     non-secret provider storage/security notes safe to surface
+#                     in catalogs and receipts.
 #   tool_approval_policy:
 #                     approval policy story for provider-executed tools.
 #   max_tools       : cap on tool-definition count the provider will accept.

@@ -7,6 +7,16 @@ batch_wire_format = "anthropic_messages"
 batch_input_mode = "inline_requests"
 batch_discount_percent = 50
 batch_turnaround_hours = 24
+batch_max_requests = 100000
+batch_max_input_bytes = 268435456
+batch_result_retention_days = 29
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Batch data is scoped to the workspace that owns the API key.",
+  "Request and response data is retained for up to 29 days unless deleted after processing.",
+]
 seed_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
@@ -16,6 +26,16 @@ batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
 batch_turnaround_hours = 24
+batch_max_requests = 50000
+batch_max_input_bytes = 209715200
+batch_result_retention_days = 30
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Batch rate limits use a separate provider pool from synchronous model calls.",
+  "Output and error files can use a configurable expiration between 1 hour and 30 days.",
+]
 top_k_supported = false
 
 [provider_defaults.openrouter]
@@ -33,6 +53,9 @@ batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
 batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "unknown"
 reasoning_wire_format = "enabled"
 
 [provider_defaults.ollama]
@@ -49,11 +72,18 @@ batch_wire_format = "gemini"
 batch_input_mode = "jsonl_or_inline"
 batch_discount_percent = 50
 batch_turnaround_hours = 24
+batch_max_input_bytes = 2147483648
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "unknown"
 
 [provider_defaults.mistral]
 batch_wire_format = "mistral"
 batch_input_mode = "jsonl_or_inline"
 batch_discount_percent = 50
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
 top_k_supported = false
 
 [provider_defaults.cohere]
@@ -63,6 +93,9 @@ top_k_supported = false
 batch_wire_format = "xai"
 batch_input_mode = "jsonl_or_inline"
 batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
 top_k_supported = false
 
 [provider_defaults.groq]
@@ -70,12 +103,18 @@ batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
 batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "unknown"
 
 [provider_defaults.fireworks]
 batch_wire_format = "fireworks"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
 batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
 
 [provider_defaults.moonshot]
 top_k_supported = false
@@ -111,6 +150,9 @@ top_k_supported = false
 [provider_defaults.parasail]
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
 top_k_supported = false
 
 [provider_defaults.atlas]

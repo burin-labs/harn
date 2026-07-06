@@ -235,10 +235,21 @@ fn __provider_group(models: list) -> dict {
 fn __candidate(entry: dict, workload: string) -> dict {
   let provider = safe_string(entry["provider"], "")
   let id = safe_string(entry["id"], "")
-  let discount = __safe_int(entry["batch_discount_percent"])
-  let turnaround = __safe_int(entry["batch_turnaround_hours"])
-  let wire_format = safe_string(entry["batch_wire_format"], "")
-  let input_mode = safe_string(entry["batch_input_mode"], "")
+  let batch_entry = safe_dict(entry["batch"])
+  let typed_discount = __safe_int(batch_entry["discount_percent"])
+  let typed_turnaround = __safe_int(batch_entry["turnaround_hours"])
+  let discount = if typed_discount == nil {
+    __safe_int(entry["batch_discount_percent"])
+  } else {
+    typed_discount
+  }
+  let turnaround = if typed_turnaround == nil {
+    __safe_int(entry["batch_turnaround_hours"])
+  } else {
+    typed_turnaround
+  }
+  let wire_format = safe_string(batch_entry["wire_format"], safe_string(entry["batch_wire_format"], ""))
+  let input_mode = safe_string(batch_entry["input_mode"], safe_string(entry["batch_input_mode"], ""))
   let live_adapter = __live_batch_adapter(provider, wire_format)
   let recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
   var constraints = []
@@ -282,6 +293,13 @@ fn __candidate(entry: dict, workload: string) -> dict {
       input_mode: input_mode,
       discount_percent: discount,
       turnaround_hours: turnaround,
+      max_requests: __safe_int(batch_entry["max_requests"]),
+      max_input_bytes: __safe_int(batch_entry["max_input_bytes"]),
+      result_retention_days: __safe_int(batch_entry["result_retention_days"]),
+      result_ordering: safe_string(batch_entry["result_ordering"], "unknown"),
+      partial_failure: safe_string(batch_entry["partial_failure"], "unknown"),
+      cancellation: safe_string(batch_entry["cancellation"], "unknown"),
+      security_notes: safe_list(batch_entry["security_notes"]),
       harn_live_adapter: live_adapter,
     },
     workload: workload,

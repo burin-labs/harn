@@ -99,6 +99,33 @@ pub struct ProviderRule {
     /// publishes one.
     #[serde(default)]
     pub batch_turnaround_hours: Option<u32>,
+    /// Maximum requests/items per provider batch, when published.
+    #[serde(default)]
+    pub batch_max_requests: Option<u64>,
+    /// Maximum submitted request-file/body bytes per provider batch, when
+    /// published.
+    #[serde(default)]
+    pub batch_max_input_bytes: Option<u64>,
+    /// Number of days provider-side result artifacts remain available, when
+    /// published.
+    #[serde(default)]
+    pub batch_result_retention_days: Option<u32>,
+    /// Result ordering contract. Known values: `custom_id_rejoin`,
+    /// `provider_ordered`, `unknown`.
+    #[serde(default)]
+    pub batch_result_ordering: Option<String>,
+    /// Partial-failure semantics. Known values: `per_request`, `whole_batch`,
+    /// `unknown`.
+    #[serde(default)]
+    pub batch_partial_failure: Option<String>,
+    /// Cancellation support. Known values: `supported`, `not_supported`,
+    /// `unknown`.
+    #[serde(default)]
+    pub batch_cancellation: Option<String>,
+    /// Provider-published storage/security notes safe to surface in catalogs
+    /// and receipts. Never store secrets here.
+    #[serde(default)]
+    pub batch_security_notes: Option<Vec<String>>,
     /// Approval policy modes available when provider-hosted tools execute.
     #[serde(default)]
     pub tool_approval_policy: Option<String>,
@@ -468,6 +495,13 @@ impl ProviderRule {
             batch_input_mode,
             batch_discount_percent,
             batch_turnaround_hours,
+            batch_max_requests,
+            batch_max_input_bytes,
+            batch_result_retention_days,
+            batch_result_ordering,
+            batch_partial_failure,
+            batch_cancellation,
+            batch_security_notes,
             tool_approval_policy,
             max_tools,
             prompt_caching,
@@ -549,6 +583,16 @@ impl ProviderRule {
         fill_opt(&mut self.batch_input_mode, batch_input_mode);
         fill_opt(&mut self.batch_discount_percent, batch_discount_percent);
         fill_opt(&mut self.batch_turnaround_hours, batch_turnaround_hours);
+        fill_opt(&mut self.batch_max_requests, batch_max_requests);
+        fill_opt(&mut self.batch_max_input_bytes, batch_max_input_bytes);
+        fill_opt(
+            &mut self.batch_result_retention_days,
+            batch_result_retention_days,
+        );
+        fill_opt(&mut self.batch_result_ordering, batch_result_ordering);
+        fill_opt(&mut self.batch_partial_failure, batch_partial_failure);
+        fill_opt(&mut self.batch_cancellation, batch_cancellation);
+        fill_opt(&mut self.batch_security_notes, batch_security_notes);
         fill_opt(&mut self.tool_approval_policy, tool_approval_policy);
         fill_opt(&mut self.max_tools, max_tools);
         fill_opt(&mut self.prompt_caching, prompt_caching);
@@ -909,6 +953,13 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         batch_input_mode: None,
         batch_discount_percent: None,
         batch_turnaround_hours: None,
+        batch_max_requests: None,
+        batch_max_input_bytes: None,
+        batch_result_retention_days: None,
+        batch_result_ordering: None,
+        batch_partial_failure: None,
+        batch_cancellation: None,
+        batch_security_notes: None,
         max_tools: None,
         prompt_caching: None,
         cache_breakpoint_style: None,
@@ -1024,6 +1075,30 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         batch_turnaround_hours: rule
             .batch_turnaround_hours
             .or(defaults.batch_turnaround_hours),
+        batch_max_requests: rule.batch_max_requests.or(defaults.batch_max_requests),
+        batch_max_input_bytes: rule
+            .batch_max_input_bytes
+            .or(defaults.batch_max_input_bytes),
+        batch_result_retention_days: rule
+            .batch_result_retention_days
+            .or(defaults.batch_result_retention_days),
+        batch_result_ordering: rule
+            .batch_result_ordering
+            .clone()
+            .or_else(|| defaults.batch_result_ordering.clone()),
+        batch_partial_failure: rule
+            .batch_partial_failure
+            .clone()
+            .or_else(|| defaults.batch_partial_failure.clone()),
+        batch_cancellation: rule
+            .batch_cancellation
+            .clone()
+            .or_else(|| defaults.batch_cancellation.clone()),
+        batch_security_notes: rule
+            .batch_security_notes
+            .clone()
+            .or_else(|| defaults.batch_security_notes.clone())
+            .unwrap_or_default(),
         tool_approval_policy: rule.tool_approval_policy.clone(),
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),

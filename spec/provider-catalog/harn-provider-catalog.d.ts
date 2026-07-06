@@ -145,6 +145,7 @@ export interface HarnCatalogModel {
     preserve_thinking: boolean
   }
   prompt_cache: boolean
+  batch?: HarnModelBatchSupport
   pricing?: HarnModelPricing
   deprecation: { status: "active" | "deprecated"; note?: string; superseded_by?: string }
   availability: "serverless" | "dedicated" | "unknown"
@@ -159,6 +160,20 @@ export interface HarnCatalogModel {
   strengths?: string[]
   benchmarks?: Record<string, number>
   fast_mode?: HarnModelFastMode
+}
+
+export interface HarnModelBatchSupport {
+  wire_format: "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai"
+  input_mode: "jsonl_file" | "inline_requests" | "jsonl_or_inline"
+  result_ordering: "custom_id_rejoin" | "provider_ordered" | "unknown"
+  partial_failure: "per_request" | "whole_batch" | "unknown"
+  cancellation: "supported" | "not_supported" | "unknown"
+  discount_percent?: number
+  turnaround_hours?: number
+  max_requests?: number
+  max_input_bytes?: number
+  result_retention_days?: number
+  security_notes?: string[]
 }
 
 export interface HarnToolEmpiricalParity {

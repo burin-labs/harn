@@ -1356,11 +1356,16 @@ credentials; providers that expose Batch APIs still require provider API
 billing.
 
 Human output marks each route as `live submit` or `dry-run only`. JSON output
-includes `batch.harn_live_adapter.{submit,status,download}` so provider Batch
+includes `batch.harn_live_adapter.{submit,status,download}` plus Harn's typed
+batch lifecycle facts: wire/input mode, published discounts and turnaround,
+request/file ceilings, result ordering, per-request failure semantics,
+cancellation support, retention, and non-secret storage notes. Provider Batch
 API capability stays separate from Harn's current live adapter coverage. Routes
 with `batch_api: true` but no Harn live adapter can still be planned,
 manifested, and prepared for offline adapter work; `submit`, `status`, and
-`download` fail before network calls until that provider adapter exists.
+`download` fail before network calls until that provider adapter exists. Treat
+async batch receipts as offline eval/corpus artifacts, not as live interactive
+agent-loop pass@1 evidence for the meter stick.
 
 ## harn models batch manifest
 

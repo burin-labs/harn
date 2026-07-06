@@ -174,6 +174,7 @@ export interface HarnCatalogModel {
     preserve_thinking: boolean
   }
   prompt_cache: boolean
+  batch?: HarnModelBatchSupport
   pricing?: HarnModelPricing
   deprecation: { status: "active" | "deprecated"; note?: string; superseded_by?: string }
   availability: "serverless" | "dedicated" | "unknown"
@@ -188,6 +189,20 @@ export interface HarnCatalogModel {
   strengths?: string[]
   benchmarks?: Record<string, number>
   fast_mode?: HarnModelFastMode
+}
+
+export interface HarnModelBatchSupport {
+  wire_format: "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai"
+  input_mode: "jsonl_file" | "inline_requests" | "jsonl_or_inline"
+  result_ordering: "custom_id_rejoin" | "provider_ordered" | "unknown"
+  partial_failure: "per_request" | "whole_batch" | "unknown"
+  cancellation: "supported" | "not_supported" | "unknown"
+  discount_percent?: number
+  turnaround_hours?: number
+  max_requests?: number
+  max_input_bytes?: number
+  result_retention_days?: number
+  security_notes?: string[]
 }
 
 export interface HarnToolEmpiricalParity {
@@ -498,6 +513,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let formatPreferences: HarnModelFormatPreferences
     public let reasoning: HarnModelReasoning
     public let promptCache: Bool
+    public let batch: HarnModelBatchSupport?
     public let pricing: HarnModelPricing?
     public let deprecation: HarnModelDeprecation
     public let availability: String
@@ -542,6 +558,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case formatPreferences = "format_preferences"
         case reasoning
         case promptCache = "prompt_cache"
+        case batch
         case pricing
         case deprecation
         case availability
@@ -582,6 +599,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         formatPreferences = try container.decode(HarnModelFormatPreferences.self, forKey: .formatPreferences)
         reasoning = try container.decode(HarnModelReasoning.self, forKey: .reasoning)
         promptCache = try container.decode(Bool.self, forKey: .promptCache)
+        batch = try container.decodeIfPresent(HarnModelBatchSupport.self, forKey: .batch)
         pricing = try container.decodeIfPresent(HarnModelPricing.self, forKey: .pricing)
         deprecation = try container.decode(HarnModelDeprecation.self, forKey: .deprecation)
         availability = try container.decode(String.self, forKey: .availability)
@@ -596,6 +614,34 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
         benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
         fastMode = try container.decodeIfPresent(HarnModelFastMode.self, forKey: .fastMode)
+    }
+}
+
+public struct HarnModelBatchSupport: Codable, Sendable, Equatable {
+    public let wireFormat: String
+    public let inputMode: String
+    public let resultOrdering: String
+    public let partialFailure: String
+    public let cancellation: String
+    public let discountPercent: Int?
+    public let turnaroundHours: Int?
+    public let maxRequests: Int?
+    public let maxInputBytes: Int?
+    public let resultRetentionDays: Int?
+    public let securityNotes: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case wireFormat = "wire_format"
+        case inputMode = "input_mode"
+        case resultOrdering = "result_ordering"
+        case partialFailure = "partial_failure"
+        case cancellation
+        case discountPercent = "discount_percent"
+        case turnaroundHours = "turnaround_hours"
+        case maxRequests = "max_requests"
+        case maxInputBytes = "max_input_bytes"
+        case resultRetentionDays = "result_retention_days"
+        case securityNotes = "security_notes"
     }
 }
 

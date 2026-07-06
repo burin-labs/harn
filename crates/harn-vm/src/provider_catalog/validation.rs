@@ -169,6 +169,19 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 }
             }
         }
+        let has_batch_tag = model.capability_tags.iter().any(|tag| tag == "batch");
+        match (&model.batch, has_batch_tag) {
+            (Some(batch), true) => validate_batch_support(model, batch, &mut result),
+            (Some(_), false) => result.errors.push(format!(
+                "model {} declares batch support but capability_tags omits batch",
+                model.id
+            )),
+            (None, true) => result.errors.push(format!(
+                "model {} capability_tags includes batch but model.batch is missing",
+                model.id
+            )),
+            (None, false) => {}
+        }
     }
 
     let mut route_pairs = BTreeSet::new();

@@ -283,6 +283,18 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
         .find(|model| model["provider"] == "openai")
         .expect("openai batch model");
     assert_eq!(openai["batch"]["wire_format"], "openai");
+    assert_eq!(openai["batch"]["max_requests"], 50_000);
+    assert_eq!(openai["batch"]["max_input_bytes"], 209_715_200);
+    assert_eq!(openai["batch"]["result_retention_days"], 30);
+    assert_eq!(openai["batch"]["result_ordering"], "custom_id_rejoin");
+    assert_eq!(openai["batch"]["partial_failure"], "per_request");
+    assert_eq!(openai["batch"]["cancellation"], "supported");
+    assert!(
+        openai["batch"]["security_notes"]
+            .as_array()
+            .is_some_and(|notes| !notes.is_empty()),
+        "OpenAI batch plan should include public storage/security notes"
+    );
     assert_eq!(openai["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(openai["batch"]["harn_live_adapter"]["status"], true);
     assert_eq!(openai["batch"]["harn_live_adapter"]["download"], true);
@@ -321,6 +333,10 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
         .find(|model| model["provider"] == "gemini")
         .expect("gemini batch model");
     assert_eq!(gemini["batch"]["wire_format"], "gemini");
+    assert_eq!(gemini["batch"]["max_input_bytes"], 2_147_483_648_u64);
+    assert_eq!(gemini["batch"]["result_ordering"], "custom_id_rejoin");
+    assert_eq!(gemini["batch"]["partial_failure"], "per_request");
+    assert_eq!(gemini["batch"]["cancellation"], "unknown");
     assert_eq!(gemini["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(gemini["batch"]["harn_live_adapter"]["status"], true);
     assert_eq!(gemini["batch"]["harn_live_adapter"]["download"], true);
