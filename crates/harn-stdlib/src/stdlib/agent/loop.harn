@@ -122,7 +122,7 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
   // and (2) when the caller set `output_validation` (e.g. the `verifier`
   // profile), which explicitly opts into per-turn schema enforcement at the
   // llm_call layer — stripping `output_schema` would silently disable it.
-  let call_opts = if (llm_opts?._output_schema_repair ?? false) || (llm_opts?.output_validation != nil) {
+  let call_opts = if (llm_opts?._output_schema_repair ?? false) || llm_opts?.output_validation != nil {
     llm_opts
   } else {
     omit(llm_opts, ["output_schema"])
