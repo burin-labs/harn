@@ -9,6 +9,43 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.21
+
+### Added
+
+- **Model batch planning now exposes provider operational notes (#3872).**
+  `provider_capabilities`, `llm_catalog`, and `harn models batch plan --json`
+  now report provider-specific submit/retry/rejoin constraints so offline
+  batch runners can stay provider-neutral.
+- **Optional subscript access now supports `?.[...]` syntax.** Harn code can use
+  `obj?.["content-type"]` and `items?.[0]` as the canonical optional subscript
+  spelling; the older `obj?[key]` form remains accepted for compatibility.
+
+### Changed
+
+- **Connector secrets and inline runner ergonomics.** `harn run` now installs
+  the configured secret provider chain for package-scoped scripts by default,
+  connector OAuth secrets share canonical `namespace/name` parsing and exported
+  token-name constants, and `harn run -e` accepts complete Harn programs with
+  pipeline entrypoints instead of always wrapping inline source as a snippet.
+
+### Fixed
+
+- **Project fingerprint language ranking.** `project_fingerprint` now ranks
+  actual source-file languages ahead of manifest-only tooling hints, so
+  frontend build files no longer make PHP or Ruby projects look TypeScript-first
+  and C++ projects with `.h` headers no longer look C-first (#4195).
+- Restored the `mkdir -p` contract for content-producing filesystem writes.
+  The scoped-write hardening first shipped in v0.9.18 (#4147) resolved parent
+  directories at open time via a symlink-safe parent-fd walk, but that walk
+  required every ancestor directory to already exist. As a result, `write_file`,
+  `write_file_bytes`, `append_file`, `harness.fs.write_text`, and `http_download`
+  could fail with "No such file or directory" when writing into a not-yet-created
+  directory. These writes now recreate missing ancestor directories in the
+  sandboxed path, unrestricted path, and test overlay fallback. Structural
+  operations (copy, move, remove, single `mkdir`) keep their "parent must already
+  exist" semantics.
+
 ## v0.9.20
 
 ### Fixed
