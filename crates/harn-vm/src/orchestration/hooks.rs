@@ -620,6 +620,15 @@ pub fn register_vm_hook(
     handler_name: impl Into<String>,
     closure: Arc<VmClosure>,
 ) {
+    // The handler closure is retained in this thread-local past the lifetime of
+    // the VM that registered it (it may fire from a later, unrelated VM), so
+    // pin its module scope — otherwise the sibling `pub fn`s its body calls
+    // become unresolvable once the registering VM's `module_cache` drops, and
+    // the call falls through to host-bridge dispatch. See
+    // `VmClosure::retained_for_host_registry`. The lazy handler path
+    // (`register_vm_hook_lazy`) sidesteps this by re-resolving against the
+    // firing VM instead.
+    let closure = closure.retained_for_host_registry();
     RUNTIME_HOOKS.with(|hooks| {
         hooks.borrow_mut().push(RuntimeHook {
             event,

@@ -1184,6 +1184,7 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
         source_dir: None,
         module_functions: None,
         module_state: None,
+        retained_module_scope: None,
     })))
 }
 

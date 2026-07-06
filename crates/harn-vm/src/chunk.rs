@@ -2241,6 +2241,7 @@ mod tests {
             source_dir: None,
             module_functions: None,
             module_state: None,
+            retained_module_scope: None,
         }))
     }
 }
