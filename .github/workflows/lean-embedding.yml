@@ -50,6 +50,8 @@ jobs:
         run: .github/scripts/merge-group-path-gate.sh
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         if: steps.scope.outputs.run_gate == 'true'
+        with:
+          toolchain: stable
       - name: Measure lean vs full embedding surface
         if: steps.scope.outputs.run_gate == 'true'
         run: ./scripts/measure_lean_embedding.sh
