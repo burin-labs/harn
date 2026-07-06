@@ -119,9 +119,18 @@ pipeline main(task) {
     .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
-    assert_eq!(lines[1], "1", "expected exactly one repair call; lines: {lines:?}");
-    assert_eq!(lines[2], "true", "expected output_valid true; lines: {lines:?}");
-    assert_eq!(lines[3], "42", "expected output.answer == 42; lines: {lines:?}");
+    assert_eq!(
+        lines[1], "1",
+        "expected exactly one repair call; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "true",
+        "expected output_valid true; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "42",
+        "expected output.answer == 42; lines: {lines:?}"
+    );
 }
 
 /// Terminal answer is already schema-valid JSON — no repair call fires.
@@ -177,9 +186,18 @@ pipeline main(task) {
     .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
-    assert_eq!(lines[1], "0", "expected zero repair calls; lines: {lines:?}");
-    assert_eq!(lines[2], "true", "expected output_valid true; lines: {lines:?}");
-    assert_eq!(lines[3], "7", "expected output.answer == 7; lines: {lines:?}");
+    assert_eq!(
+        lines[1], "0",
+        "expected zero repair calls; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "true",
+        "expected output_valid true; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "7",
+        "expected output.answer == 7; lines: {lines:?}"
+    );
 }
 
 /// Persistently off-shape (both the terminal answer and the repair re-ask
@@ -227,7 +245,10 @@ pipeline main(task) {
     .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
-    assert_eq!(lines[1], "false", "expected output_valid false; lines: {lines:?}");
+    assert_eq!(
+        lines[1], "false",
+        "expected output_valid false; lines: {lines:?}"
+    );
 }
 
 /// With `output_schema` unset the run carries no `output`/`output_valid`
@@ -270,8 +291,14 @@ pipeline main(task) {
     .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
-    assert_eq!(lines[1], "true", "expected no output_valid key; lines: {lines:?}");
-    assert_eq!(lines[2], "false", "expected no output key; lines: {lines:?}");
+    assert_eq!(
+        lines[1], "true",
+        "expected no output_valid key; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "false",
+        "expected no output key; lines: {lines:?}"
+    );
 }
 
 /// Tool-calling mid-loop still works when `output_schema` is set: the model
@@ -352,7 +379,16 @@ pipeline main(task) {
     .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
-    assert_eq!(lines[1], "true", "expected the lookup tool to have fired; lines: {lines:?}");
-    assert_eq!(lines[2], "true", "expected output_valid true; lines: {lines:?}");
-    assert_eq!(lines[3], "99", "expected output.answer == 99; lines: {lines:?}");
+    assert_eq!(
+        lines[1], "true",
+        "expected the lookup tool to have fired; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "true",
+        "expected output_valid true; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "99",
+        "expected output.answer == 99; lines: {lines:?}"
+    );
 }
