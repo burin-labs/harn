@@ -1,7 +1,7 @@
 pipeline test(task) {
   // A default expression is evaluated at call time and may reference the
   // enclosing scope — including a binding with the same name as the parameter.
-  let n = 7
+  const n = 7
   fn double_default(n = n * 2) {
     return n
   }

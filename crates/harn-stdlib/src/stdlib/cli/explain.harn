@@ -29,7 +29,7 @@
  *   HARN_OUTPUT_JSON       — "1" for the JSON envelope, otherwise human text.
  */
 fn trim_trailing_newlines(s: string) -> string {
-  var out = s
+  let out = s
   while len(out) > 0 && (out[len(out) - 1] == "\n" || out[len(out) - 1] == "\r") {
     out = out[0:len(out) - 1]
   }
@@ -37,17 +37,17 @@ fn trim_trailing_newlines(s: string) -> string {
 }
 
 fn render_human(entry: dict) -> string {
-  var out = entry["code"] + " — " + entry["summary"] + "\n"
+  let out = entry["code"] + " — " + entry["summary"] + "\n"
   out = out + "\n"
   out = out + trim_trailing_newlines(entry["explanation"]) + "\n"
-  let repair = entry["repair"]
+  const repair = entry["repair"]
   if repair != nil {
     out = out + "\n"
     out = out + "Repair: " + repair["id"] + " [" + repair["safety"] + "] — "
       + repair["summary"]
       + "\n"
   }
-  let related = entry["related"] ?? []
+  const related = entry["related"] ?? []
   if len(related) > 0 {
     out = out + "\n"
     out = out + "See also:\n"
@@ -62,19 +62,19 @@ fn render_envelope_json(entry: dict) -> string {
   // Build the canonical envelope shape. Harn's json_stringify sorts
   // dict keys alphabetically, so the wire-order differs from serde's
   // struct-field order; callers compare this surface structurally.
-  let related_codes = []
-  var related_strs = related_codes
-  let related = entry["related"] ?? []
+  const related_codes = []
+  let related_strs = related_codes
+  const related = entry["related"] ?? []
   for other in related {
     related_strs = related_strs.push(other["code"])
   }
-  var repairs = []
-  let repair = entry["repair"]
+  let repairs = []
+  const repair = entry["repair"]
   if repair != nil {
     repairs = repairs
       .push({id: repair["id"], safety: repair["safety"], summary: repair["summary"]})
   }
-  let envelope = {
+  const envelope = {
     schemaVersion: 1,
     code: entry["code"],
     category: entry["category"],
@@ -88,21 +88,21 @@ fn render_envelope_json(entry: dict) -> string {
 }
 
 fn main(harness: Harness) {
-  let raw = harness.env.get_or("HARN_EXPLAIN_ENTRY_JSON", "")
+  const raw = harness.env.get_or("HARN_EXPLAIN_ENTRY_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_EXPLAIN_ENTRY_JSON not set by dispatch shim")
     exit(70)
   }
-  let entry = json_parse(raw)
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const entry = json_parse(raw)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     harness.stdio.println(render_envelope_json(entry))
   } else {
     // print! (no trailing newline) — `render_human` already emits its
     // own newlines. Drop the last newline that would be doubled.
-    let text = render_human(entry)
-    let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+    const text = render_human(entry)
+    const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
       text[0:len(text) - 1]
     } else {
       text

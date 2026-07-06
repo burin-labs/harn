@@ -7,13 +7,13 @@
 import { create, domain, domain_wildcard } from "std/net_policy"
 
 fn main(harness: Harness) {
-  let policy = create(
+  const policy = create(
     {allow: [domain_wildcard("*.github.com")], deny: [domain("evil.github.com")], default: "deny"},
   )
-  let restricted = harness.with_net_policy(policy)
-  let ok = restricted.net.get("https://api.github.com/probe")
+  const restricted = harness.with_net_policy(policy)
+  const ok = restricted.net.get("https://api.github.com/probe")
   harness.stdio.println("api=" + ok)
-  var deny_err = nil
+  let deny_err = nil
   try {
     restricted.net.get("https://evil.github.com/x")
   } catch (e) {

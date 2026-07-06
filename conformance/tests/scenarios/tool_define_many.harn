@@ -1,7 +1,7 @@
 import "std/tools"
 
 pipeline test(task) {
-  let specs: list<ToolDefinitionSpec> = [
+  const specs: list<ToolDefinitionSpec> = [
     {
       name: "search_code",
       description: "Search code",
@@ -18,11 +18,11 @@ pipeline test(task) {
       },
     },
   ]
-  let registry: ToolRegistry = tool_define_many(tool_registry(), specs)
+  const registry: ToolRegistry = tool_define_many(tool_registry(), specs)
   assert(tool_count(registry) == 2, "tool_define_many registers both tools")
   assert(tool_find(registry, "search_code").parameters.query.type == "string", "inline config works")
   assert(tool_find(registry, "read_file").outputSchema.type == "string", "nested config works")
-  let fresh: ToolRegistry = tool_registry_from([{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}])
+  const fresh: ToolRegistry = tool_registry_from([{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}])
   assert(tool_count(fresh) == 1, "tool_registry_from creates a registry")
   log("tool_define_many tests passed")
 }

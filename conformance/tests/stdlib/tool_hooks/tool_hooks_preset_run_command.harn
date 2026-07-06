@@ -19,7 +19,7 @@ import {
  *     envelope when `inner` is omitted).
  */
 pipeline default() {
-  let rust_rule = tool_rule(
+  const rust_rule = tool_rule(
     {
       id: "rust.cargo.target_dir",
       pattern: "^cargo (build|test)\\b",
@@ -29,7 +29,7 @@ pipeline default() {
       rewrite: { command, _context -> command + " --target-dir target-shared" },
     },
   )
-  let python_rule = tool_rule(
+  const python_rule = tool_rule(
     {
       id: "python.find_versus_rg",
       pattern: "^find \\.",
@@ -39,16 +39,16 @@ pipeline default() {
       rewrite: { command, _context -> "rg --files" },
     },
   )
-  let rust_cat = catalogue({id: "harn-canon/rust", stack: "rust", rules: [rust_rule]})
-  let py_cat = catalogue({id: "harn-canon/python", stack: "python", rules: [python_rule]})
-  let registry = tool_hooks_register(tool_hooks_register(tool_hooks_registry(), rust_cat), py_cat)
+  const rust_cat = catalogue({id: "harn-canon/rust", stack: "rust", rules: [rust_rule]})
+  const py_cat = catalogue({id: "harn-canon/python", stack: "python", rules: [python_rule]})
+  const registry = tool_hooks_register(tool_hooks_register(tool_hooks_registry(), rust_cat), py_cat)
   /* Pure inner: echoes the command it saw so the test can confirm
    * whether the wrapper forwarded the original, the rewrite, or
    * nothing at all. */
-  let inner = { args -> return {ok: true, ran: args.command} }
+  const inner = { args -> return {ok: true, ran: args.command} }
   /* Rust-scoped wrapper: only rust rules match. */
-  let rust_wrapper = preset_run_command({stacks: ["rust"], registry: registry, inner: inner})
-  let rust_result = rust_wrapper({command: "cargo build --release"})
+  const rust_wrapper = preset_run_command({stacks: ["rust"], registry: registry, inner: inner})
+  const rust_result = rust_wrapper({command: "cargo build --release"})
   __io_println(rust_result.action)
   __io_println(rust_result.rule_id)
   __io_println(rust_result.catalogue_id)
@@ -59,19 +59,19 @@ pipeline default() {
   __io_println(rust_result.result.ran)
   /* Python catalogue is filtered out by `stacks: ["rust"]`, so a find
    * command becomes a no-match passthrough that runs `inner` unchanged. */
-  let passthrough_result = rust_wrapper({command: "find . -name foo"})
+  const passthrough_result = rust_wrapper({command: "find . -name foo"})
   __io_println(passthrough_result.ok)
   __io_println(passthrough_result.ran)
   /* Same wrapper, no inner: returns the decision envelope so the caller
    * can drive the executor itself. */
-  let preview_wrapper = preset_run_command({stacks: ["rust"], registry: registry})
-  let preview = preview_wrapper({command: "cargo test"})
+  const preview_wrapper = preset_run_command({stacks: ["rust"], registry: registry})
+  const preview = preview_wrapper({command: "cargo test"})
   __io_println(preview.action)
   __io_println(preview.command)
   __io_println(preview.rule_id)
   /* Custom rules take priority over the registered catalogues even when
    * stacks would have filtered the registered catalogue out. */
-  let custom_rule = tool_rule(
+  const custom_rule = tool_rule(
     {
       id: "custom.git_push_force",
       pattern: "git push.* --force",
@@ -80,7 +80,7 @@ pipeline default() {
       explanation: "Use --force-with-lease",
     },
   )
-  let deny_wrapper = preset_run_command(
+  const deny_wrapper = preset_run_command(
     {
       stacks: ["rust"],
       registry: registry,
@@ -89,7 +89,7 @@ pipeline default() {
       inner: inner,
     },
   )
-  let denied = deny_wrapper({command: "git push origin main --force"})
+  const denied = deny_wrapper({command: "git push origin main --force"})
   __io_println(denied.action)
   __io_println(denied.rule_id)
   __io_println(denied.catalogue_id)
@@ -97,14 +97,14 @@ pipeline default() {
   __io_println(denied.explanation)
   /* When the same denying wrapper sees a registered-catalogue match,
    * deny still fires (the rule from the registry, not the custom one). */
-  let registered_denied = deny_wrapper({command: "cargo build"})
+  const registered_denied = deny_wrapper({command: "cargo build"})
   __io_println(registered_denied.action)
   __io_println(registered_denied.rule_id)
   /* Passthrough-with-audit: matched, tagged, still ran. */
-  let audit_wrapper = preset_run_command(
+  const audit_wrapper = preset_run_command(
     {stacks: ["python"], registry: registry, mode: tool_hooks_mode_passthrough_only_audit, inner: inner},
   )
-  let audited = audit_wrapper({command: "find . -name 'x'"})
+  const audited = audit_wrapper({command: "find . -name 'x'"})
   __io_println(audited.action)
   __io_println(audited.rule_id)
   __io_println(audited.original_command)
@@ -112,26 +112,26 @@ pipeline default() {
   __io_println(audited.result.ran)
   /* String-shaped args: the wrapper accepts a bare command string for
    * call-sites that haven't materialized an args dict. */
-  let string_wrapper = preset_run_command({stacks: ["python"], registry: registry, inner: inner})
-  let stringed = string_wrapper("find . -name baz")
+  const string_wrapper = preset_run_command({stacks: ["python"], registry: registry, inner: inner})
+  const stringed = string_wrapper("find . -name baz")
   __io_println(stringed.action)
   __io_println(stringed.command)
   __io_println(stringed.result.ran)
   /* llm_classifier (TH-05): construction validates the config shape so
    * obvious typos surface at wrapper-build time rather than first
    * dispatch. Empty model, out-of-range threshold, etc. all throw. */
-  let bad_model = try {
+  const bad_model = try {
     preset_run_command({llm_classifier: {model: ""}})
   }
   __io_println(is_err(bad_model))
   __io_println(contains(to_string(unwrap_err(bad_model)), "llm_classifier.model"))
-  let bad_threshold = try {
+  const bad_threshold = try {
     preset_run_command({llm_classifier: {model: "haiku", threshold: 1.5}})
   }
   __io_println(is_err(bad_threshold))
   __io_println(contains(to_string(unwrap_err(bad_threshold)), "threshold"))
   /* Valid classifier config: constructor accepts and returns a closure. */
-  let cls_wrapper = preset_run_command(
+  const cls_wrapper = preset_run_command(
     {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
   )
   __io_println(type_of(cls_wrapper))

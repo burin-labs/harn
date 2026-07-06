@@ -95,26 +95,26 @@ fn __status_upper(status: string) -> string {
  * their primary row.
  */
 fn __render_checks_section(checks: list) -> string {
-  var out = ""
+  let out = ""
   for raw_check in checks {
-    let check = __safe_dict(raw_check)
-    let status = __safe_string(check["status"], "")
-    let label = __safe_string(check["label"], "")
-    let detail = __safe_string(check["detail"], "")
-    let status_upper = __status_upper(status)
-    let status_padded = str_pad(status_upper, 4, " ", "left")
-    let label_padded = str_pad(label, 24, " ", "right")
+    const check = __safe_dict(raw_check)
+    const status = __safe_string(check["status"], "")
+    const label = __safe_string(check["label"], "")
+    const detail = __safe_string(check["detail"], "")
+    const status_upper = __status_upper(status)
+    const status_padded = str_pad(status_upper, 4, " ", "left")
+    const label_padded = str_pad(label, 24, " ", "right")
     out = out + status_padded + "  " + label_padded + " " + detail + "\n"
     if status != "ok" && status != "skip" {
-      let fix = check["fix_command"]
+      const fix = check["fix_command"]
       if type_of(fix) == "string" && fix != "" {
         out = out + "       fix: " + fix + "\n"
       }
-      let docs = check["docs_url"]
+      const docs = check["docs_url"]
       if type_of(docs) == "string" && docs != "" {
         out = out + "       docs: " + docs + "\n"
       }
-      let blocks = __safe_list(check["blocks"])
+      const blocks = __safe_list(check["blocks"])
       if len(blocks) > 0 {
         out = out + "       blocks: " + join(blocks, ", ") + "\n"
       }
@@ -124,18 +124,18 @@ fn __render_checks_section(checks: list) -> string {
 }
 
 fn __render_targets_section(targets: list) -> string {
-  var out = "--- Targets ---\n"
+  let out = "--- Targets ---\n"
   for raw_target in targets {
-    let target = __safe_dict(raw_target)
-    let triple = __safe_string(target["triple"], "")
-    let triple_padded = str_pad(triple, 32, " ", "right")
-    let installed = if __safe_bool(target["installed"], false) {
+    const target = __safe_dict(raw_target)
+    const triple = __safe_string(target["triple"], "")
+    const triple_padded = str_pad(triple, 32, " ", "right")
+    const installed = if __safe_bool(target["installed"], false) {
       "installed"
     } else {
       "missing"
     }
-    let buildable_raw = target["buildable"]
-    let buildable = if buildable_raw == nil {
+    const buildable_raw = target["buildable"]
+    const buildable = if buildable_raw == nil {
       "not probed"
     } else if __safe_bool(buildable_raw, false) {
       "buildable"
@@ -143,7 +143,7 @@ fn __render_targets_section(targets: list) -> string {
       "not buildable"
     }
     out = out + "  " + triple_padded + " " + installed + ", " + buildable + "\n"
-    let reasons = __safe_list(target["reasons"])
+    const reasons = __safe_list(target["reasons"])
     for reason in reasons {
       if type_of(reason) == "string" {
         out = out + "       " + reason + "\n"
@@ -154,20 +154,20 @@ fn __render_targets_section(targets: list) -> string {
 }
 
 fn __render_providers_section(providers: list) -> string {
-  var out = "--- Providers ---\n"
+  let out = "--- Providers ---\n"
   for raw_provider in providers {
-    let provider = __safe_dict(raw_provider)
-    let name = __safe_string(provider["name"], "")
-    let name_padded = str_pad(name, 24, " ", "right")
-    let configured = if __safe_bool(provider["configured"], false) {
+    const provider = __safe_dict(raw_provider)
+    const name = __safe_string(provider["name"], "")
+    const name_padded = str_pad(name, 24, " ", "right")
+    const configured = if __safe_bool(provider["configured"], false) {
       "configured"
     } else {
       "no credentials"
     }
-    let probed = __safe_bool(provider["probed"], false)
-    let reachable_raw = provider["reachable"]
-    let latency_raw = provider["latency_ms"]
-    let reachable = if !probed {
+    const probed = __safe_bool(provider["probed"], false)
+    const reachable_raw = provider["reachable"]
+    const latency_raw = provider["latency_ms"]
+    const reachable = if !probed {
       "not probed"
     } else if reachable_raw == nil {
       "probed"
@@ -181,7 +181,7 @@ fn __render_providers_section(providers: list) -> string {
       "unreachable"
     }
     out = out + "  " + name_padded + " " + configured + ", " + reachable + "\n"
-    let errors = __safe_list(provider["errors"])
+    const errors = __safe_list(provider["errors"])
     for error in errors {
       if type_of(error) == "string" {
         out = out + "       " + error + "\n"
@@ -192,23 +192,23 @@ fn __render_providers_section(providers: list) -> string {
 }
 
 fn __render_capabilities_section(capabilities: list) -> string {
-  var out = "--- Stdlib capabilities ---\n"
+  let out = "--- Stdlib capabilities ---\n"
   for raw_capability in capabilities {
-    let capability = __safe_dict(raw_capability)
-    let name = __safe_string(capability["name"], "")
-    let name_padded = str_pad(name, 24, " ", "right")
-    let profiles = __safe_list(capability["available_in_sandbox_profile"])
+    const capability = __safe_dict(raw_capability)
+    const name = __safe_string(capability["name"], "")
+    const name_padded = str_pad(name, 24, " ", "right")
+    const profiles = __safe_list(capability["available_in_sandbox_profile"])
     out = out + "  " + name_padded + " sandbox: " + join(profiles, ", ") + "\n"
   }
   return out
 }
 
 fn __render_summary_section(summary: dict) -> string {
-  var out = "--- Summary ---\n"
-  let ok_count = __safe_int(summary["ok"], 0)
-  let warn_count = __safe_int(summary["warning"], 0)
-  let fail_count = __safe_int(summary["blocking"], 0)
-  let skip_count = __safe_int(summary["skip"], 0)
+  let out = "--- Summary ---\n"
+  const ok_count = __safe_int(summary["ok"], 0)
+  const warn_count = __safe_int(summary["warning"], 0)
+  const fail_count = __safe_int(summary["blocking"], 0)
+  const skip_count = __safe_int(summary["skip"], 0)
   out = out + "OK=" + to_string(ok_count)
     + " WARN="
     + to_string(warn_count)
@@ -217,7 +217,7 @@ fn __render_summary_section(summary: dict) -> string {
     + " SKIP="
     + to_string(skip_count)
     + "\n"
-  let blocked = __safe_list(summary["blocked_flows"])
+  const blocked = __safe_list(summary["blocked_flows"])
   if len(blocked) > 0 {
     out = out + "blocked: " + join(blocked, ", ") + "\n"
   }
@@ -243,7 +243,7 @@ fn __render_summary_section(summary: dict) -> string {
  *   <next_step>
  */
 fn __render_human(report: dict) -> string {
-  var out = "Harn doctor\n\n"
+  let out = "Harn doctor\n\n"
   out = out + __render_checks_section(__safe_list(report["checks"]))
   out = out + "\n"
   out = out + __render_targets_section(__safe_list(report["targets"]))
@@ -260,13 +260,13 @@ fn __render_human(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_DOCTOR_REPORT_JSON", "")
+  const raw = harness.env.get_or("HARN_DOCTOR_REPORT_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_DOCTOR_REPORT_JSON not set by dispatch shim")
     return 70
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse doctor report: " + to_string(e))
@@ -276,13 +276,13 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("internal error: doctor report must be a JSON object")
     return 70
   }
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     // Use the pre-serialised envelope from the Rust shim verbatim so
     // the byte stream keeps serde's declaration-order field layout.
     // Re-serialising via
     // `json_stringify_pretty` here would alphabetise the keys.
-    let envelope_raw = harness.env.get_or("HARN_DOCTOR_REPORT_ENVELOPE_JSON", "")
+    const envelope_raw = harness.env.get_or("HARN_DOCTOR_REPORT_ENVELOPE_JSON", "")
     if envelope_raw == "" {
       harness.stdio
         .eprintln("internal error: HARN_DOCTOR_REPORT_ENVELOPE_JSON not set by dispatch shim")
@@ -295,8 +295,8 @@ fn main(harness: Harness) -> int {
     // `harness.stdio.println` add exactly one.
     harness.stdio.println(__render_human(report))
   }
-  let summary = __safe_dict(report["summary"])
-  let blocking = __safe_int(summary["blocking"], 0)
+  const summary = __safe_dict(report["summary"])
+  const blocking = __safe_int(summary["blocking"], 0)
   if blocking > 0 {
     return 1
   }

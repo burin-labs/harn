@@ -11,10 +11,10 @@ fn handle_issue(event: TriggerEvent) -> dict {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let trigger_id = "trigger-autonomy-budget-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const trigger_id = "trigger-autonomy-budget-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -33,13 +33,13 @@ pipeline test(task) {
     },
   )
   // Burn the daily quota.
-  let first: DispatchHandle = trigger_fire(
+  const first: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-1-" + unique}},
   )
   __io_println(first.status)
   // Next event hits the cap and is rerouted to approval.
-  let second: DispatchHandle = trigger_fire(
+  const second: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-2-" + unique}},
   )
@@ -48,10 +48,10 @@ pipeline test(task) {
   __io_println(second.result?.reason)
   __io_println(second.result?.reviewers[0])
   // The HITL approval request is queryable from `hitl.approvals`.
-  let pending = hitl_pending({}).filter({ row -> row.agent == trigger_id })
+  const pending = hitl_pending({}).filter({ row -> row.agent == trigger_id })
   __io_println(len(pending) >= 1)
   // The trust graph captures the act_auto -> act_with_approval transition.
-  let transitions: list<TrustRecord> = trust_query({agent: trigger_id, action: "autonomy.tier_transition"})
+  const transitions: list<TrustRecord> = trust_query({agent: trigger_id, action: "autonomy.tier_transition"})
   __io_println(len(transitions) == 1)
   __io_println(transitions[0].autonomy_tier)
   __io_println(transitions[0].outcome)

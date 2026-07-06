@@ -1,8 +1,8 @@
 pipeline test(task) {
-  let a: string? = "hello"
+  const a: string? = "hello"
   log(a)
-  let b: string? = nil
+  const b: string? = nil
   log(b)
-  let c: int | float = 3.14
+  const c: int | float = 3.14
   log(c)
 }

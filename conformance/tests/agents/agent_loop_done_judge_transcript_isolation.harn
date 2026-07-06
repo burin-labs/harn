@@ -13,8 +13,8 @@ pipeline default() {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"complete\"}"),
     ],
     { ->
-      let session = "done-judge-isolation-" + uuid()
-      let captured = agent_capture_events(
+      const session = "done-judge-isolation-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Finish once.",
@@ -30,9 +30,9 @@ pipeline default() {
           },
         ) },
       )
-      let messages = agent_session_messages(session)
-      let encoded = json_stringify(messages)
-      let judges = judge_events(captured.events)
+      const messages = agent_session_messages(session)
+      const encoded = json_stringify(messages)
+      const judges = judge_events(captured.events)
       require len(judges) == 1, "done_judge should emit one decision"
       __io_println(captured.result.status)
       __io_println(len(messages))

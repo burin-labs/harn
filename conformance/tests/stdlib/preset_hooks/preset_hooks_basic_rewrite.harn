@@ -11,9 +11,9 @@ import { preset_run_command } from "std/tool_hooks"
  */
 pipeline default() {
   pipeline_lifecycle_audit_log_take()
-  let inner = { args -> {ok: true, ran: args.command} }
-  let wrapper = preset_run_command({stacks: ["rust"], inner: inner})
-  let result = wrapper({command: "cargo build --release"})
+  const inner = { args -> {ok: true, ran: args.command} }
+  const wrapper = preset_run_command({stacks: ["rust"], inner: inner})
+  const result = wrapper({command: "cargo build --release"})
   /* The envelope reports rewrite + rule provenance. */
   __io_println(result.action)
   __io_println(result.rule_id)
@@ -26,7 +26,7 @@ pipeline default() {
   /* Rewrite mode emits exactly two audit entries: tool_rewrite +
    * tool_hooks.reminder_injected. The reminder body names the rewrite
    * so an agent can paraphrase it back to the user. */
-  let log = pipeline_lifecycle_audit_log_take()
+  const log = pipeline_lifecycle_audit_log_take()
   __io_println(len(log))
   __io_println(log[0].kind)
   __io_println(log[0].payload.rule_id)

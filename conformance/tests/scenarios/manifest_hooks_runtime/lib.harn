@@ -1,5 +1,5 @@
 pub fn deny_write_like_tools(event) {
-  let name = event?.tool?.name ?? ""
+  const name = event?.tool?.name ?? ""
   if contains(name, "write") || contains(name, "edit") {
     return {deny: "manifest denied " + name}
   }

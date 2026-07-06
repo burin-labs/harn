@@ -13,12 +13,12 @@ import {
 } from "std/testing"
 
 fn body_basic_host_scope() {
-  let v = host_call("inner.op", {})
+  const v = host_call("inner.op", {})
   return {v: v, inner_count: host_call_count(), inner_calls: host_calls()}
 }
 
 fn body_context_host_scope(_context) {
-  let v = host_call("inner.op", {})
+  const v = host_call("inner.op", {})
   return {v: v, context: _context, inner_count: host_call_count()}
 }
 
@@ -28,20 +28,20 @@ fn body_thrown_inner() {
 }
 
 fn body_inner_nested() {
-  let v = host_call("inner.op", {})
+  const v = host_call("inner.op", {})
   return {v: v, count: host_call_count()}
 }
 
 fn body_outer_nested() {
-  let outer_v = host_call("outer.op", {})
-  let inner_summary = with_host_mocks([{capability: "inner", operation: "op", result: "inner_v"}], body_inner_nested)
-  let after = host_call("outer.op", {})
+  const outer_v = host_call("outer.op", {})
+  const inner_summary = with_host_mocks([{capability: "inner", operation: "op", result: "inner_v"}], body_inner_nested)
+  const after = host_call("outer.op", {})
   return {outer_v: outer_v, inner_summary: inner_summary, after: after, outer_count: host_call_count()}
 }
 
 fn body_call_assertions() {
-  let read = host_call("ws.read", {path: "x"})
-  let write_err = try {
+  const read = host_call("ws.read", {path: "x"})
+  const write_err = try {
     host_call("ws.write", {path: "y"})
   } catch (e) {
     e
@@ -55,13 +55,13 @@ fn body_call_assertions() {
 }
 
 fn body_llm_capture() {
-  let r = llm_call("hello", nil, {provider: "mock"})
+  const r = llm_call("hello", nil, {provider: "mock"})
   return {text: r.text, count: llm_call_count(), calls: llm_calls()}
 }
 
 fn body_combined_mocks() {
-  let h = host_call("h.op", {})
-  let l = llm_call("ask", nil, {provider: "mock"})
+  const h = host_call("h.op", {})
+  const l = llm_call("ask", nil, {provider: "mock"})
   return {h: h, l: l.text}
 }
 
@@ -72,7 +72,7 @@ pipeline test_with_mocks(task) {
   mock_host_result("outer", "op", "outer_result", nil)
   host_call("outer.op", {})
   assert_eq(host_call_count(), 1)
-  let basic = with_host_mocks(
+  const basic = with_host_mocks(
     [{capability: "inner", operation: "op", result: "inner_result"}],
     body_basic_host_scope,
   )
@@ -84,7 +84,7 @@ pipeline test_with_mocks(task) {
   assert_eq(host_call("outer.op", {}), "outer_result")
   // === one-arg fixture bodies receive a nil context ===
   clear_host_mocks()
-  let context_body = with_host_mocks(
+  const context_body = with_host_mocks(
     [{capability: "inner", operation: "op", result: "context_result"}],
     body_context_host_scope,
   )
@@ -94,7 +94,7 @@ pipeline test_with_mocks(task) {
   // === thrown body still cleans up ===
   clear_host_mocks()
   mock_host_result("outer", "op", "outer_result", nil)
-  let caught = try {
+  const caught = try {
     with_host_mocks([{capability: "inner", operation: "op", result: "inner_result"}], body_thrown_inner)
     "unreachable"
   } catch (e) {
@@ -105,7 +105,7 @@ pipeline test_with_mocks(task) {
   assert_eq(host_call("outer.op", {}), "outer_result")
   // === nested scopes ===
   clear_host_mocks()
-  let nested = with_host_mocks([{capability: "outer", operation: "op", result: "outer_v"}], body_outer_nested)
+  const nested = with_host_mocks([{capability: "outer", operation: "op", result: "outer_v"}], body_outer_nested)
   assert_eq(nested.outer_v, "outer_v")
   assert_eq(nested.inner_summary.v, "inner_v")
   assert_eq(nested.inner_summary.count, 1)
@@ -113,7 +113,7 @@ pipeline test_with_mocks(task) {
   assert_eq(nested.outer_count, 2)
   // === host call assertions inside scope ===
   clear_host_mocks()
-  let asserted = with_host_mocks(
+  const asserted = with_host_mocks(
     [
       {capability: "ws", operation: "read", result: "data", params: {path: "x"}},
       {capability: "ws", operation: "write", error: "denied", params: {path: "y"}},
@@ -128,7 +128,7 @@ pipeline test_with_mocks(task) {
   // === LLM mock scope captures calls ===
   clear_host_mocks()
   llm_mock_clear()
-  let captured = with_llm_mocks([{text: "scoped"}], body_llm_capture)
+  const captured = with_llm_mocks([{text: "scoped"}], body_llm_capture)
   assert_eq(captured.text, "scoped")
   assert_eq(captured.count, 1)
   assert_eq(len(captured.calls), 1)
@@ -138,7 +138,7 @@ pipeline test_with_mocks(task) {
   // outer scope clean (no leaked pushed scope, no leaked outer mock).
   clear_host_mocks()
   mock_host_result("outer", "op", "outer_result", nil)
-  let bad_entry_err = try {
+  const bad_entry_err = try {
     with_host_mocks([{operation: "broken"}], body_basic_host_scope)
     "unreachable"
   } catch (e) {
@@ -147,7 +147,7 @@ pipeline test_with_mocks(task) {
   assert_eq(host_call("outer.op", {}), "outer_result")
   assert(contains(bad_entry_err, "with_host_mocks"))
   // Pop with no matching push must throw a clear error.
-  let pop_err = try {
+  const pop_err = try {
     host_mock_pop_scope()
     "unreachable"
   } catch (e) {
@@ -157,7 +157,7 @@ pipeline test_with_mocks(task) {
   // === with_mocks combines host and llm ===
   clear_host_mocks()
   llm_mock_clear()
-  let combined = with_mocks(
+  const combined = with_mocks(
     {host_mocks: [{capability: "h", operation: "op", result: "host_v"}], llm_mocks: [{text: "llm_v"}]},
     body_combined_mocks,
   )

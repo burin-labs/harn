@@ -1,8 +1,8 @@
 import { shell_quote } from "std/runtime"
 
-let DEFAULT_COLD_MS = 250.0
+const DEFAULT_COLD_MS = 250.0
 
-let DEFAULT_REGRESSION_X = 1.25
+const DEFAULT_REGRESSION_X = 1.25
 
 /**
  * Future port tickets can append rows here and add matching
@@ -13,7 +13,7 @@ pub fn tracked_commands() {
 }
 
 fn env_or(name: string, fallback: string) -> string {
-  let value = harness.env.get(name)
+  const value = harness.env.get(name)
   if value == nil || value == "" {
     return fallback
   }
@@ -21,7 +21,7 @@ fn env_or(name: string, fallback: string) -> string {
 }
 
 fn require_env(name: string) -> string {
-  let value = harness.env.get(name)
+  const value = harness.env.get(name)
   if value == nil || value == "" {
     harness.stdio.eprintln("error: missing required env var ${name}")
     exit(2)
@@ -30,11 +30,11 @@ fn require_env(name: string) -> string {
 }
 
 pub fn parse_positive_int(name: string, raw: string) {
-  let parsed = to_int(raw.trim())
+  const parsed = to_int(raw.trim())
   if parsed == nil {
     return {ok: false, value: 0, error: "${name} must be an integer, got '${raw}'"}
   }
-  let value = parsed ?? 0
+  const value = parsed ?? 0
   if value <= 0 {
     return {ok: false, value: 0, error: "${name} must be positive"}
   }
@@ -42,7 +42,7 @@ pub fn parse_positive_int(name: string, raw: string) {
 }
 
 fn is_number(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "int" || kind == "float"
 }
 
@@ -54,15 +54,15 @@ fn number_or(value, fallback: float) -> float {
 }
 
 pub fn load_budgets_text(text: string) {
-  let raw = toml_parse(text)
-  let defaults = raw?.defaults ?? {}
-  let commands_table = raw?.commands ?? {}
-  let default_cold = number_or(defaults?.cold_ms, DEFAULT_COLD_MS)
-  let default_ratio = number_or(defaults?.regression_x, DEFAULT_REGRESSION_X)
-  var resolved = {}
+  const raw = toml_parse(text)
+  const defaults = raw?.defaults ?? {}
+  const commands_table = raw?.commands ?? {}
+  const default_cold = number_or(defaults?.cold_ms, DEFAULT_COLD_MS)
+  const default_ratio = number_or(defaults?.regression_x, DEFAULT_REGRESSION_X)
+  let resolved = {}
   for cmd in tracked_commands() {
-    let key = to_string(cmd.key)
-    let entry = commands_table[key] ?? {}
+    const key = to_string(cmd.key)
+    const entry = commands_table[key] ?? {}
     resolved = resolved
       + {
       [key]: {
@@ -79,7 +79,7 @@ fn load_budgets(path: string) {
 }
 
 pub fn load_baseline_text(text: string) {
-  let trimmed = text.trim()
+  const trimmed = text.trim()
   if trimmed == "" {
     return {}
   }
@@ -95,7 +95,7 @@ fn save_baseline(path: string, payload) {
 }
 
 fn command_stdout_or(cmd: string, args: list<string>, fallback: string) -> string {
-  let res = harness.process.spawn_captured({cmd: cmd, args: args})
+  const res = harness.process.spawn_captured({cmd: cmd, args: args})
   if res.success {
     return res.stdout.trim()
   }
@@ -103,7 +103,7 @@ fn command_stdout_or(cmd: string, args: list<string>, fallback: string) -> strin
 }
 
 fn current_commit_sha(repo_root: string) -> string {
-  let res = harness.process
+  const res = harness.process
     .spawn_captured({cmd: "git", args: ["rev-parse", "HEAD"], cwd: repo_root})
   if res.success {
     return res.stdout.trim()
@@ -121,22 +121,22 @@ fn host_label() -> string {
 }
 
 pub fn most_recent_baseline_for(payload, key: string, exclude_sha: string) {
-  var found = false
-  var best_sha = ""
-  var best_captured = ""
-  var best_cold = 0.0
+  let found = false
+  let best_sha = ""
+  let best_captured = ""
+  let best_cold = 0.0
   for entry in entries(payload ?? {}) {
-    let sha = entry.key
+    const sha = entry.key
     if sha == exclude_sha {
       continue
     }
-    let commands = entry.value?.commands ?? {}
-    let command = commands[key]
-    let cold = command?.cold_ms
+    const commands = entry.value?.commands ?? {}
+    const command = commands[key]
+    const cold = command?.cold_ms
     if !is_number(cold) {
       continue
     }
-    let captured = to_string(entry.value?.captured_at ?? "")
+    const captured = to_string(entry.value?.captured_at ?? "")
     if !found || captured > best_captured {
       found = true
       best_sha = sha
@@ -151,12 +151,12 @@ pub fn most_recent_baseline_for(payload, key: string, exclude_sha: string) {
 }
 
 pub fn build_invocation(args_template: list<string>, tmpdir: string) -> list<string> {
-  let trace_input = path_join(tmpdir, "trace_input.jsonl")
-  let trace_output = path_join(tmpdir, "trace_output.jsonl")
+  const trace_input = path_join(tmpdir, "trace_input.jsonl")
+  const trace_output = path_join(tmpdir, "trace_output.jsonl")
   if !harness.fs.exists(trace_input) {
     harness.fs.write_text(trace_input, "{\"prompt\":\"hi\",\"response\":\"hi\"}\n")
   }
-  var rendered: list<string> = []
+  let rendered: list<string> = []
   for piece in args_template {
     rendered = rendered
       + [
@@ -169,7 +169,7 @@ pub fn build_invocation(args_template: list<string>, tmpdir: string) -> list<str
 }
 
 fn path_env() -> string {
-  let value = harness.env.get("PATH")
+  const value = harness.env.get("PATH")
   if value == nil || value == "" {
     return "/usr/bin:/bin:/usr/sbin:/sbin"
   }
@@ -188,7 +188,7 @@ pub fn isolated_env_args(cache_dir: string, home_dir: string) -> list<string> {
 }
 
 fn command_exists(cmd: string) -> bool {
-  let res = try {
+  const res = try {
     harness.process.spawn_captured({cmd: "sh", args: ["-c", "command -v " + shell_quote(cmd)]})
   } catch (err) {
     return false
@@ -203,7 +203,7 @@ fn reset_cache_dir(cache_dir: string) -> nil {
 }
 
 fn median(values: list<float>) -> float {
-  let sorted = values.sort()
+  const sorted = values.sort()
   return sorted[sorted.count / 2]
 }
 
@@ -214,8 +214,8 @@ fn measure_with_hyperfine(
   home_dir: string,
   result_path: string,
 ) -> float {
-  let prepare_cmd = "rm -rf " + shell_quote(cache_dir) + " && mkdir -p " + shell_quote(cache_dir)
-  let args = [
+  const prepare_cmd = "rm -rf " + shell_quote(cache_dir) + " && mkdir -p " + shell_quote(cache_dir)
+  const args = [
     "--warmup",
     "1",
     "--runs",
@@ -231,20 +231,20 @@ fn measure_with_hyperfine(
   ]
     + isolated_env_args(cache_dir, home_dir)
     + invocation
-  let res = harness.process.spawn_captured({cmd: "hyperfine", args: args})
+  const res = harness.process.spawn_captured({cmd: "hyperfine", args: args})
   if !res.success {
     if res.stderr != "" {
       harness.stdio.eprint(res.stderr)
     }
     throw "hyperfine failed (exit ${res.exit_code})"
   }
-  let payload = json_parse(harness.fs.read_text(result_path))
-  let results = payload?.results ?? []
+  const payload = json_parse(harness.fs.read_text(result_path))
+  const results = payload?.results ?? []
   if results.count == 0 {
     throw "hyperfine produced no results"
   }
-  let first = results[0]
-  let seconds = if first?.median != nil {
+  const first = results[0]
+  const seconds = if first?.median != nil {
     number_or(first.median, 0.0)
   } else {
     let times = first?.times ?? []
@@ -257,13 +257,13 @@ fn measure_with_hyperfine(
 }
 
 fn measure_with_monotonic(invocation: list<string>, runs: int, cache_dir: string, home_dir: string) -> float {
-  var samples: list<float> = []
+  let samples: list<float> = []
   for _ in range(0, runs) {
     reset_cache_dir(cache_dir)
-    let start = harness.clock.monotonic_ms()
-    let res = harness.process
+    const start = harness.clock.monotonic_ms()
+    const res = harness.process
       .spawn_captured({cmd: "env", args: isolated_env_args(cache_dir, home_dir) + invocation})
-    let elapsed = harness.clock.monotonic_ms() - start
+    const elapsed = harness.clock.monotonic_ms() - start
     if !res.success {
       if res.stderr != "" {
         harness.stdio.eprint(res.stderr)
@@ -276,39 +276,39 @@ fn measure_with_monotonic(invocation: list<string>, runs: int, cache_dir: string
 }
 
 fn measure_cold_start(cmd, tmp_root: string, harn_bin: string, iterations: int, use_hyperfine: bool) -> float {
-  let key = to_string(cmd.key)
-  let per_cmd_root = path_join(tmp_root, key.replace(" ", "_").replace("/", "_"))
+  const key = to_string(cmd.key)
+  const per_cmd_root = path_join(tmp_root, key.replace(" ", "_").replace("/", "_"))
   harness.fs.mkdir(per_cmd_root)
-  let args = build_invocation(cmd.args, per_cmd_root)
-  let cache_dir = path_join(per_cmd_root, "harn_cache")
-  let home_dir = path_join(per_cmd_root, "fake_home")
+  const args = build_invocation(cmd.args, per_cmd_root)
+  const cache_dir = path_join(per_cmd_root, "harn_cache")
+  const home_dir = path_join(per_cmd_root, "fake_home")
   harness.fs.mkdir(home_dir)
-  let invocation = [harn_bin] + args
+  const invocation = [harn_bin] + args
   if use_hyperfine {
-    let result_path = path_join(per_cmd_root, "hyperfine.json")
+    const result_path = path_join(per_cmd_root, "hyperfine.json")
     return measure_with_hyperfine(invocation, iterations, cache_dir, home_dir, result_path)
   }
   return measure_with_monotonic(invocation, iterations, cache_dir, home_dir)
 }
 
 pub fn round_ms(value: float) -> float {
-  let thousandths = to_int(round(value * 1000.0)) ?? 0
+  const thousandths = to_int(round(value * 1000.0)) ?? 0
   return (to_float(thousandths) ?? 0.0) / 1000.0
 }
 
 fn fixed(value: float, digits: int) -> string {
-  var scale = 1
+  let scale = 1
   for _ in range(0, digits) {
     scale = scale * 10
   }
-  var scaled = to_int(round(value * (to_float(scale) ?? 1.0))) ?? 0
-  var sign = ""
+  let scaled = to_int(round(value * (to_float(scale) ?? 1.0))) ?? 0
+  let sign = ""
   if scaled < 0 {
     sign = "-"
     scaled = -scaled
   }
-  let whole = scaled / scale
-  var frac = to_string(scaled % scale)
+  const whole = scaled / scale
+  let frac = to_string(scaled % scale)
   while frac.len() < digits {
     frac = "0" + frac
   }
@@ -319,7 +319,7 @@ fn fixed(value: float, digits: int) -> string {
 }
 
 fn fixed_signed(value: float, digits: int) -> string {
-  let prefix = if value >= 0.0 {
+  const prefix = if value >= 0.0 {
     "+"
   } else {
     ""
@@ -328,7 +328,7 @@ fn fixed_signed(value: float, digits: int) -> string {
 }
 
 fn repeat_spaces(count: int) -> string {
-  var out = ""
+  let out = ""
   for _ in range(0, count) {
     out = out + " "
   }
@@ -336,7 +336,7 @@ fn repeat_spaces(count: int) -> string {
 }
 
 fn pad_left(value, width: int) -> string {
-  let text = to_string(value)
+  const text = to_string(value)
   if text.len() >= width {
     return text
   }
@@ -344,7 +344,7 @@ fn pad_left(value, width: int) -> string {
 }
 
 fn pad_right(value, width: int) -> string {
-  let text = to_string(value)
+  const text = to_string(value)
   if text.len() >= width {
     return text
   }
@@ -352,16 +352,16 @@ fn pad_right(value, width: int) -> string {
 }
 
 pub fn failure_reasons(cold_ms: float, budget, baseline) -> list<string> {
-  var reasons: list<string> = []
-  let budget_ms = number_or(budget?.cold_ms, DEFAULT_COLD_MS)
-  let ratio = number_or(budget?.regression_x, DEFAULT_REGRESSION_X)
+  let reasons: list<string> = []
+  const budget_ms = number_or(budget?.cold_ms, DEFAULT_COLD_MS)
+  const ratio = number_or(budget?.regression_x, DEFAULT_REGRESSION_X)
   if cold_ms > budget_ms {
     reasons = reasons + ["exceeds budget " + fixed(budget_ms, 1) + " ms"]
   }
-  let baseline_ms = baseline?.cold_ms
+  const baseline_ms = baseline?.cold_ms
   if baseline_ms != nil && cold_ms > number_or(baseline_ms, 0.0) * ratio {
-    let sha = to_string(baseline?.sha ?? "-")
-    let shown_sha = if sha == "-" {
+    const sha = to_string(baseline?.sha ?? "-")
+    const shown_sha = if sha == "-" {
       "-"
     } else {
       sha
@@ -389,19 +389,19 @@ pub fn failure_reasons(cold_ms: float, budget, baseline) -> list<string> {
 }
 
 fn row_line(key: string, cold_ms: float, budget, baseline, reasons: list<string>) -> string {
-  let baseline_ms = baseline?.cold_ms
-  let baseline_str = if baseline_ms == nil {
+  const baseline_ms = baseline?.cold_ms
+  const baseline_str = if baseline_ms == nil {
     "-"
   } else {
     fixed(number_or(baseline_ms, 0.0), 1)
   }
-  let delta = if baseline_ms == nil {
+  const delta = if baseline_ms == nil {
     "-"
   } else {
     fixed_signed((cold_ms - number_or(baseline_ms, 0.0)) / number_or(baseline_ms, 1.0) * 100.0, 1)
       + "%"
   }
-  let status = if reasons.count > 0 {
+  const status = if reasons.count > 0 {
     "FAIL"
   } else {
     "ok"
@@ -420,26 +420,26 @@ fn row_line(key: string, cold_ms: float, budget, baseline, reasons: list<string>
 }
 
 pub fn select_commands(filter_raw: string) {
-  let commands = tracked_commands()
-  let trimmed = filter_raw.trim()
+  const commands = tracked_commands()
+  const trimmed = filter_raw.trim()
   if trimmed == "" {
     return {ok: true, commands: commands, missing: []}
   }
-  var wanted: list<string> = []
+  let wanted: list<string> = []
   for raw in split(trimmed, ",") {
-    let name = raw.trim()
+    const name = raw.trim()
     if name != "" && !wanted.contains(name) {
       wanted = wanted + [name]
     }
   }
-  var selected = []
+  let selected = []
   for cmd in commands {
     if wanted.contains(to_string(cmd.key)) {
       selected = selected + [cmd]
     }
   }
-  var missing = []
-  let keys = selected.map({ cmd -> to_string(cmd.key) }).to_list()
+  let missing = []
+  const keys = selected.map({ cmd -> to_string(cmd.key) }).to_list()
   for name in wanted {
     if !keys.contains(name) {
       missing = missing + [name]
@@ -457,9 +457,9 @@ pub fn merge_baseline(
   version: string,
   captured_at: string,
 ) {
-  let existing_entry = payload[sha] ?? {}
-  let existing_commands = existing_entry?.commands ?? {}
-  var merged_commands = existing_commands
+  const existing_entry = payload[sha] ?? {}
+  const existing_commands = existing_entry?.commands ?? {}
+  let merged_commands = existing_commands
   for entry in entries(measurements ?? {}) {
     if merged_commands[entry.key] != nil && !update_baseline {
       continue
@@ -478,18 +478,18 @@ pub fn merge_baseline(
 }
 
 fn main(harness: Harness) -> int {
-  let harn_bin = require_env("HARN_BIN")
-  let budgets_file = require_env("HARN_CLI_BUDGETS_FILE")
-  let baseline_file = require_env("HARN_CLI_BASELINE_FILE")
-  let repo_root = require_env("HARN_CLI_REPO_ROOT")
-  let iterations_res = parse_positive_int("HARN_CLI_ITERATIONS", require_env("HARN_CLI_ITERATIONS"))
+  const harn_bin = require_env("HARN_BIN")
+  const budgets_file = require_env("HARN_CLI_BUDGETS_FILE")
+  const baseline_file = require_env("HARN_CLI_BASELINE_FILE")
+  const repo_root = require_env("HARN_CLI_REPO_ROOT")
+  const iterations_res = parse_positive_int("HARN_CLI_ITERATIONS", require_env("HARN_CLI_ITERATIONS"))
   if !iterations_res.ok {
     harness.stdio.eprintln("error: ${iterations_res.error}")
     return 2
   }
-  let iterations = iterations_res.value
-  let update_baseline = env_or("HARN_CLI_UPDATE_BASELINE", "0") == "1"
-  let selection = select_commands(env_or("HARN_CLI_COMMANDS_FILTER", ""))
+  const iterations = iterations_res.value
+  const update_baseline = env_or("HARN_CLI_UPDATE_BASELINE", "0") == "1"
+  const selection = select_commands(env_or("HARN_CLI_COMMANDS_FILTER", ""))
   if !selection.ok {
     harness.stdio
       .eprintln(
@@ -497,17 +497,17 @@ fn main(harness: Harness) -> int {
     )
     return 2
   }
-  let budgets = load_budgets(budgets_file)
-  let baseline = load_baseline(baseline_file)
-  let sha = current_commit_sha(repo_root)
-  let use_hyperfine = command_exists("hyperfine")
-  let timer_label = if use_hyperfine {
+  const budgets = load_budgets(budgets_file)
+  const baseline = load_baseline(baseline_file)
+  const sha = current_commit_sha(repo_root)
+  const use_hyperfine = command_exists("hyperfine")
+  const timer_label = if use_hyperfine {
     "hyperfine"
   } else {
     "monotonic fallback"
   }
-  let version = harn_version(harn_bin)
-  let host = host_label()
+  const version = harn_version(harn_bin)
+  const host = host_label()
   harness.stdio.println("# CLI cold-start benchmark (iterations=${iterations}, timer=${timer_label})")
   harness.stdio.println("# harn: ${version}  host: ${host}  commit: ${sha}")
   harness.stdio
@@ -524,20 +524,20 @@ fn main(harness: Harness) -> int {
       + " "
       + pad_left("status", 10),
   )
-  var measurements = {}
-  var failures: list<string> = []
-  let tmp_root = path_join(harness.fs.temp_dir(), "harn-cli-coldstart-" + uuid_v7())
+  let measurements = {}
+  let failures: list<string> = []
+  const tmp_root = path_join(harness.fs.temp_dir(), "harn-cli-coldstart-" + uuid_v7())
   harness.fs.mkdir(tmp_root)
   defer {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_root]})
   }
   for cmd in selection.commands {
-    let key = to_string(cmd.key)
-    let cold_ms = measure_cold_start(cmd, tmp_root, harn_bin, iterations, use_hyperfine)
+    const key = to_string(cmd.key)
+    const cold_ms = measure_cold_start(cmd, tmp_root, harn_bin, iterations, use_hyperfine)
     measurements = measurements + {[key]: {cold_ms: round_ms(cold_ms)}}
-    let budget = budgets[key]
-    let baseline_ref = most_recent_baseline_for(baseline, key, sha)
-    let reasons = failure_reasons(cold_ms, budget, baseline_ref)
+    const budget = budgets[key]
+    const baseline_ref = most_recent_baseline_for(baseline, key, sha)
+    const reasons = failure_reasons(cold_ms, budget, baseline_ref)
     if reasons.count > 0 {
       failures = failures + [key + ": " + join(reasons, "; ")]
     }
@@ -551,7 +551,7 @@ fn main(harness: Harness) -> int {
     }
     return 1
   }
-  let merged = merge_baseline(baseline, sha, measurements, update_baseline, host, version, date_now_iso())
+  const merged = merge_baseline(baseline, sha, measurements, update_baseline, host, version, date_now_iso())
   save_baseline(baseline_file, merged)
   return 0
 }

@@ -1,6 +1,6 @@
 pipeline default() {
-  let x = 99
-  var result = ""
+  const x = 99
+  let result = ""
   match x {
     1 -> { result = "one" }
     other -> { result = "value is " + to_string(other) }

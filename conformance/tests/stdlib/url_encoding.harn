@@ -1,9 +1,9 @@
 pipeline default(task) {
   // Basic URL encoding
-  let encoded = url_encode("hello world")
+  const encoded = url_encode("hello world")
   __io_println(encoded)
   // Round-trip
-  let decoded = url_decode(encoded)
+  const decoded = url_decode(encoded)
   __io_println(decoded)
   // Special characters
   __io_println(url_encode("a=1&b=2"))

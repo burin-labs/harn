@@ -1,7 +1,7 @@
 import { bounded_loop } from "std/personas/prelude"
 
 pipeline test(task) {
-  let opts = {
+  const opts = {
     persona: "loop_captain",
     step: "drain_queue",
     trace_id: "trace-loop",
@@ -10,7 +10,7 @@ pipeline test(task) {
     max_iterations: 5,
     progress_required: true,
   }
-  let completed = bounded_loop(
+  const completed = bounded_loop(
     0,
     fn(state) {
       let next = state + 1
@@ -23,7 +23,7 @@ pipeline test(task) {
   __io_println(completed.iterations)
   __io_println(completed.stopped_reason)
   __io_println(completed.receipt.schema)
-  let stalled = bounded_loop(7, fn(state) { return {state: state, progress: false} }, opts)
+  const stalled = bounded_loop(7, fn(state) { return {state: state, progress: false} }, opts)
   __io_println(stalled.status)
   __io_println(stalled.state)
   __io_println(stalled.iterations)

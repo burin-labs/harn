@@ -5,7 +5,7 @@ pipeline test(task) {
     [],
     { ->
       llm_call("disabled", nil, {provider: "mock", model: "mock-model", thinking: {mode: "disabled"}})
-      let disabled = llm_mock_calls()[0].thinking
+      const disabled = llm_mock_calls()[0].thinking
       assert(disabled.mode == "disabled", "disabled mode reaches mock provider")
     },
   )
@@ -17,7 +17,7 @@ pipeline test(task) {
         nil,
         {provider: "mock", model: "claude-opus-4-6", thinking: {mode: "enabled", budget_tokens: 8000}},
       )
-      let enabled = llm_mock_calls()[0].thinking
+      const enabled = llm_mock_calls()[0].thinking
       assert(enabled.mode == "enabled", "enabled mode reaches mock provider")
       assert(enabled.budget_tokens == 8000, "enabled budget reaches mock provider")
     },
@@ -30,7 +30,7 @@ pipeline test(task) {
         nil,
         {provider: "mock", model: "claude-opus-4-7", thinking: {mode: "adaptive"}},
       )
-      let adaptive = llm_mock_calls()[0].thinking
+      const adaptive = llm_mock_calls()[0].thinking
       assert(adaptive.mode == "adaptive", "adaptive mode reaches mock provider")
     },
   )
@@ -38,7 +38,7 @@ pipeline test(task) {
     [],
     { ->
       llm_call("effort", nil, {provider: "mock", model: "o3", thinking: {mode: "effort", level: "high"}})
-      let effort = llm_mock_calls()[0].thinking
+      const effort = llm_mock_calls()[0].thinking
       assert(effort.mode == "effort", "effort mode reaches mock provider")
       assert(effort.level == "high", "effort level reaches mock provider")
     },
@@ -46,12 +46,12 @@ pipeline test(task) {
   with_llm_script(
     [{text: "reasoned answer", thinking_summary: "checked constraints"}],
     { ->
-      let openai_effort = llm_call(
+      const openai_effort = llm_call(
         "openai reasoning",
         nil,
         {provider: "openai", model: "o3", thinking: {mode: "effort", level: "high"}},
       )
-      let openai_call = llm_mock_calls()[0].thinking
+      const openai_call = llm_mock_calls()[0].thinking
       assert(openai_call.mode == "effort", "openai effort mode reaches mock transport")
       assert(openai_call.level == "high", "openai effort level reaches mock transport")
       assert(openai_effort.text == "reasoned answer", "openai effort call uses mock response")

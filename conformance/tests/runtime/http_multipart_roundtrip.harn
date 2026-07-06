@@ -1,6 +1,6 @@
 pipeline default() {
   http_mock("POST", "https://api.example.com/upload", {status: 201, body: "uploaded", headers: {}})
-  let response = harness.net
+  const response = harness.net
     .post(
     "https://api.example.com/upload",
     {
@@ -10,8 +10,8 @@ pipeline default() {
       ],
     },
   )
-  let calls = http_mock_calls()
-  let body = calls[0].body ?? ""
+  const calls = http_mock_calls()
+  const body = calls[0].body ?? ""
   __io_println(response.status)
   __io_println(calls[0].headers["content-type"])
   __io_println(contains(body, "name=\"meta\""))

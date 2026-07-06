@@ -10,21 +10,21 @@
 pipeline main(task) {
   log("=== Eval Workflow ===")
   // Check baseline usage before any LLM calls
-  let usage_before = llm_usage()
+  const usage_before = llm_usage()
   log("Initial usage: ${usage_before.call_count} calls, ${usage_before.input_tokens} input tokens")
   // Simulate an eval loop over multiple test cases
-  let test_cases = [
+  const test_cases = [
     {input: "What is 2+2?", expected: "4", category: "math"},
     {input: "Capital of France?", expected: "Paris", category: "geography"},
     {input: "Color of grass?", expected: "green", category: "common-sense"},
   ]
-  let passed = 0
-  let total = len(test_cases)
+  const passed = 0
+  const total = len(test_cases)
   for tc in test_cases {
     // In production, replace with an actual llm_call:
     //   let answer = llm_call(tc.input, "Answer in one word.")
-    let answer = tc.expected
-    let correct = answer == tc.expected
+    const answer = tc.expected
+    const correct = answer == tc.expected
     if correct {
       passed = passed + 1
     }
@@ -37,15 +37,15 @@ pipeline main(task) {
   }
   // mock for demo
   // Record aggregate metrics
-  let accuracy = passed / total
+  const accuracy = passed / total
   eval_metric("accuracy", accuracy, {total: total, passed: passed})
   eval_metric("test_suite_size", total)
   // Check final usage
-  let usage_after = llm_usage()
+  const usage_after = llm_usage()
   eval_metric("total_llm_calls", usage_after.call_count)
   eval_metric("total_input_tokens", usage_after.input_tokens)
   // Retrieve and display all recorded metrics
-  let metrics = eval_metrics()
+  const metrics = eval_metrics()
   log("")
   log("=== Recorded Metrics ===")
   for m in metrics {

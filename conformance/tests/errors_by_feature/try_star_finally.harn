@@ -11,8 +11,8 @@ pipeline test(task) {
   // --- try* inside try/finally (no catch): the outer try/finally must
   //     run finally once, then the throw escapes past it. We wrap in
   //     an outer try/catch so the throw is observable as a value. ---
-  var counter_a = 0
-  let r_a = try {
+  let counter_a = 0
+  const r_a = try {
     try {
       let _ = try* boom()
       "u1"
@@ -25,8 +25,8 @@ pipeline test(task) {
   log("finally_only: ${r_a} counter=${counter_a}")
   // --- try* inside try/catch/finally where the catch handles the
   //     rethrown error: finally must fire exactly once. ---
-  var counter_b = 0
-  let r_b = try {
+  let counter_b = 0
+  const r_b = try {
     let _ = try* boom()
     "u2"
   } catch (e) {
@@ -38,8 +38,8 @@ pipeline test(task) {
   // --- Nested: outer try/finally wraps inner try/catch where the
   //     catch catches the try* rethrow. Outer finally must NOT fire
   //     (no throw escapes the inner catch); inner has no finally. ---
-  var counter_c = 0
-  let r_c = try {
+  let counter_c = 0
+  const r_c = try {
     let inner = try {
       let _ = try* boom()
       "u3"

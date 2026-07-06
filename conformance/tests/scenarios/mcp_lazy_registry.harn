@@ -5,7 +5,7 @@
  */
 pipeline default() {
   // Empty registry reports no servers.
-  let status = mcp_registry_status()
+  const status = mcp_registry_status()
   __io_println(status.count)
   // Ensuring an unknown server throws — catch + print.
   try {

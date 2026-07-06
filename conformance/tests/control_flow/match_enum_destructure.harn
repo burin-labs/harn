@@ -3,15 +3,15 @@ pipeline default() {
     Ok(value)
     Err(message)
   }
-  let val = Result.Ok(42)
-  var output = ""
+  const val = Result.Ok(42)
+  let output = ""
   match val {
     Result.Ok(v) -> { output = "got: " + to_string(v) }
     Result.Err(msg) -> { output = "error: " + msg }
   }
   __io_println(output)
-  let err = Result.Err("not found")
-  var output2 = ""
+  const err = Result.Err("not found")
+  let output2 = ""
   match err {
     Result.Ok(v) -> { output2 = "got: " + to_string(v) }
     Result.Err(msg) -> { output2 = "error: " + msg }

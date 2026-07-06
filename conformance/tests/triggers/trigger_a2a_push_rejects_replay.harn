@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("a2a_push_rejects_replay")
+  const result = trigger_test_harness("a2a_push_rejects_replay")
   __io_println(result.ok)
   __io_println(result.details.jti == "a2a-jti-replay")
   __io_println(result.details.replay_rejected)

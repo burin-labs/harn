@@ -16,14 +16,14 @@ fn review_verdict(review) {
 }
 
 pipeline run(task) {
-  let review = sample_review()
-  let verdict = review_verdict(review)
-  let handoff = if verdict == "needs_follow_up" {
+  const review = sample_review()
+  const verdict = review_verdict(review)
+  const handoff = if verdict == "needs_follow_up" {
     "merge_captain"
   } else {
     nil
   }
-  let result = {
+  const result = {
     persona: "review_captain",
     execution_mode: "dry_run",
     approval_required: false,

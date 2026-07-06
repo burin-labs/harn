@@ -7,7 +7,7 @@ import {
 } from "std/llm/media"
 
 pipeline test(task) {
-  let png_path = "media_helper_fixture.png"
+  const png_path = "media_helper_fixture.png"
   harness.fs
     .write_bytes(
     png_path,
@@ -15,21 +15,21 @@ pipeline test(task) {
       "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
     ),
   )
-  let block = image_content(png_path, {detail: "low"})
+  const block = image_content(png_path, {detail: "low"})
   harness.fs.delete(png_path)
   assert(block.type == "image", "image block type")
   assert(block.media_type == "image/png", "media type inferred")
   assert(block.detail == "low", "detail propagated")
   assert(len(block.base64) > 0, "file was encoded")
-  let message = image_message("https://example.com/image.webp", "caption", {})
+  const message = image_message("https://example.com/image.webp", "caption", {})
   assert(message.content[0].text == "caption", "text block created")
   assert(message.content[1].url == "https://example.com/image.webp", "url image kept as url")
   assert(media_type_for_path("clip.mp3") == "audio/mpeg", "audio type inferred")
   assert(media_type_for_path("clip.mp4") == "video/mp4", "video type inferred")
-  let video = video_content("https://example.com/demo.webm")
+  const video = video_content("https://example.com/demo.webm")
   assert(video.type == "video", "video block type")
   assert(video.url == "https://example.com/demo.webm", "url video kept as url")
-  let video_msg = video_message("https://example.com/demo.mp4", "summarize", {})
+  const video_msg = video_message("https://example.com/demo.mp4", "summarize", {})
   assert(video_msg.content[0].text == "summarize", "video text block created")
   assert(video_msg.content[1].type == "video", "video message block created")
   log("llm_media_helpers tests passed")

@@ -46,9 +46,9 @@ fn __recommended_tool(value) -> string {
 }
 
 fn __render_human(report: dict) -> string {
-  var out = "local provider recommendations\n"
+  let out = "local provider recommendations\n"
   out = out + "source: " + __safe_string(report["source"], "") + "\n"
-  let recommendations = __safe_list(report["recommendations"])
+  const recommendations = __safe_list(report["recommendations"])
   if len(recommendations) == 0 {
     return out + "(no local model outcomes found)\n"
   }
@@ -56,12 +56,12 @@ fn __render_human(report: dict) -> string {
     if type_of(rec) != "dict" {
       continue
     }
-    let rank = __safe_int(rec["rank"], 0)
-    let provider = __safe_string(rec["provider"], "")
-    let model = __safe_string(rec["model"], "")
-    let status = __safe_string(rec["status"], "")
-    let selector = __safe_string(rec["selector"], "")
-    let tool_format = __recommended_tool(rec["recommended_tool_format"])
+    const rank = __safe_int(rec["rank"], 0)
+    const provider = __safe_string(rec["provider"], "")
+    const model = __safe_string(rec["model"], "")
+    const status = __safe_string(rec["status"], "")
+    const selector = __safe_string(rec["selector"], "")
+    const tool_format = __recommended_tool(rec["recommended_tool_format"])
     out = out + to_string(rank) + ". " + provider + " " + model
       + " ("
       + status
@@ -70,7 +70,7 @@ fn __render_human(report: dict) -> string {
       + ", tools "
       + tool_format
       + ")\n"
-    let caveats = __safe_list(rec["caveats"])
+    const caveats = __safe_list(rec["caveats"])
     for caveat in caveats {
       if type_of(caveat) == "string" {
         out = out + "   caveat: " + caveat + "\n"
@@ -81,25 +81,25 @@ fn __render_human(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_PROVIDERS_RECOMMEND_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_PROVIDERS_RECOMMEND_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_PROVIDERS_RECOMMEND_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio
       .eprintln("internal error: failed to parse providers-recommend payload: " + to_string(e))
     return 70
   }
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     // Forward the pretty-printed bytes the dispatch shim handed us so
     // we don't lose serde's float fidelity (`score`/`recommended_*`
     // fields) through Harn's `json_parse`/`json_stringify` round-trip.
-    let pretty = harness.env.get_or("HARN_PROVIDERS_RECOMMEND_PAYLOAD_PRETTY", "")
+    const pretty = harness.env.get_or("HARN_PROVIDERS_RECOMMEND_PAYLOAD_PRETTY", "")
     if pretty != "" {
       harness.stdio.println(pretty)
     } else {
@@ -107,12 +107,12 @@ fn main(harness: Harness) -> int {
     }
     return 0
   }
-  let text = __render_human(report)
+  const text = __render_human(report)
   // The host renderer always ended each line with `println!`; the
   // last println leaves a single trailing newline. Strip the trailing
   // newline so `harness.stdio.println` can re-add exactly one and the
   // bytes match the Rust path.
-  let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+  const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
     text[0:len(text) - 1]
   } else {
     text

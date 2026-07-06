@@ -1,9 +1,9 @@
 pipeline main(task) {
-  let session = agent_session_open(
+  const session = agent_session_open(
     "reanchor-conformance",
     {workspace_anchor: {primary: "/workspace/main", anchored_at: "2026-05-23T00:00:00Z"}},
   )
-  let res = agent_session_reanchor(
+  const res = agent_session_reanchor(
     session,
     {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"},
     {reason: "switch to lib"},
@@ -13,24 +13,24 @@ pipeline main(task) {
   assert(res.anchor.primary == "/workspace/lib", "anchor updated")
   assert(!res.compacted, "compaction off by default")
   assert(res.session_id == session, "same session id when carry_transcript=true")
-  let live = agent_session_workspace_anchor(session)
+  const live = agent_session_workspace_anchor(session)
   assert(live?.primary == "/workspace/lib", "session sees the new anchor")
-  let snap = agent_session_snapshot(session)
-  let events = snap.events
-  let anchor_changed = events.filter({ ev -> ev?.kind == "AnchorChanged" })
+  const snap = agent_session_snapshot(session)
+  const events = snap.events
+  const anchor_changed = events.filter({ ev -> ev?.kind == "AnchorChanged" })
   assert(len(anchor_changed) == 1, "AnchorChanged transcript event emitted exactly once")
   assert(
     anchor_changed[0]?.metadata?.current?.primary == "/workspace/lib",
     "AnchorChanged records new primary",
   )
-  let unchanged = agent_session_reanchor(session, {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"})
+  const unchanged = agent_session_reanchor(session, {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"})
   assert(unchanged.ok, "second reanchor reports ok")
   assert(!unchanged.changed, "no-op reanchor reports unchanged")
-  let snap2 = agent_session_snapshot(session)
-  let events2 = snap2.events
-  let anchor_changed2 = events2.filter({ ev -> ev?.kind == "AnchorChanged" })
+  const snap2 = agent_session_snapshot(session)
+  const events2 = snap2.events
+  const anchor_changed2 = events2.filter({ ev -> ev?.kind == "AnchorChanged" })
   assert(len(anchor_changed2) == 1, "no-op reanchor does not emit another event")
-  let invalid = try {
+  const invalid = try {
     agent_session_reanchor(
       session,
       {primary: "/workspace/foo"},
@@ -38,7 +38,7 @@ pipeline main(task) {
     )
   }
   assert(is_err(invalid), "compact+drop-transcript is rejected")
-  let forked = agent_session_reanchor(
+  const forked = agent_session_reanchor(
     session,
     {primary: "/workspace/forked", anchored_at: "2026-05-23T00:00:20Z"},
     {carry_transcript: false},

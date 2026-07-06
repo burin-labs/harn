@@ -31,7 +31,7 @@ pipeline default() {
   __io_println(to_bool_or("", true))
   __io_println(to_bool_or(0, true))
   __io_println(to_bool_or([1], false))
-  let nested = {Outer: {INNER: {Final: "ok"}}}
+  const nested = {Outer: {INNER: {Final: "ok"}}}
   __io_println(dict_path_ci(nested, ["outer", "inner", "final"]))
   __io_println(dict_path_ci(nested, ["outer", "missing"]) == nil)
   __io_println(first_non_nil([nil, nil, "first", "second"]))

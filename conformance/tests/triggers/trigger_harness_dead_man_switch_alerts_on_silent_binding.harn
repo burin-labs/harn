@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("dead_man_switch_alerts_on_silent_binding")
+  const result = trigger_test_harness("dead_man_switch_alerts_on_silent_binding")
   __io_println(result.ok)
   __io_println(len(result.alerts) == 1)
   __io_println(result.alerts[0].binding_id == "deadman.fixture")

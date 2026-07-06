@@ -10,7 +10,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
 fn probe(reg, cmd) {
   /* Empty stacks so we exercise the "filter pass-through for stackless
    * catalogues" branch. */
-  let m = tool_hooks_match(reg, cmd, {stacks: []})
+  const m = tool_hooks_match(reg, cmd, {stacks: []})
   if len(m) > 0 {
     __io_println(m[0].rule_id + " " + m[0].severity)
   } else {
@@ -19,7 +19,7 @@ fn probe(reg, cmd) {
 }
 
 pipeline default() {
-  let reg = tool_hooks_seed_registry([])
+  const reg = tool_hooks_seed_registry([])
   /* git_push_force_main: long, short, in-place force-with-lease=false,
    * and trailing-position --force all denied. */
   probe(reg, "git push --force origin main")

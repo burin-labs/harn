@@ -1,10 +1,10 @@
 pipeline default() {
-  let _ = 1
-  let _ = 2
+  const _ = 1
+  const _ = 2
   __io_println("simple")
-  let [_, _, keep_list] = [10, 20, 30]
+  const [_, _, keep_list] = [10, 20, 30]
   __io_println(keep_list)
-  let {drop_a: _, drop_b: _, keep_dict} = {drop_a: 1, drop_b: 2, keep_dict: 3}
+  const {drop_a: _, drop_b: _, keep_dict} = {drop_a: 1, drop_b: 2, keep_dict: 3}
   __io_println(keep_dict)
   for [_, value] in [[1, "a"], [2, "b"]] {
     __io_println(value)

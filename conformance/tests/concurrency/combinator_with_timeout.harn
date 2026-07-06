@@ -12,35 +12,35 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
 import { with_timeout } from "std/lifecycle/combinators"
 
 pipeline default() {
-  let fast = { _harness, return_value -> return return_value + "_fast" }
-  let slow = { _harness, return_value ->
+  const fast = { _harness, return_value -> return return_value + "_fast" }
+  const slow = { _harness, return_value ->
     let _ = advance_time(2000)
     return return_value + "_slow"
   }
   pipeline_on_finish(
     { harness, return_value ->
-      let _ = mock_time(0)
-      let fast_wrap = with_timeout(fast, 500)
-      let fast_result = fast_wrap(harness, return_value)
-      let fast_audits = lifecycle_audit_log_take()
+      const _ = mock_time(0)
+      const fast_wrap = with_timeout(fast, 500)
+      const fast_result = fast_wrap(harness, return_value)
+      const fast_audits = lifecycle_audit_log_take()
       harness.stdio.println("fast=" + fast_result)
       harness.stdio.println("fast_audit_count=" + to_string(len(fast_audits)))
-      let slow_wrap = with_timeout(slow, 500)
-      let slow_result = slow_wrap(harness, return_value)
-      let slow_audits = lifecycle_audit_log_take()
+      const slow_wrap = with_timeout(slow, 500)
+      const slow_result = slow_wrap(harness, return_value)
+      const slow_audits = lifecycle_audit_log_take()
       harness.stdio.println("slow_timed_out=" + to_string(slow_result.__timed_out))
       harness.stdio.println("slow_timeout_ms=" + to_string(slow_result.timeout_ms))
       harness.stdio.println("slow_elapsed_ge=" + to_string(slow_result.elapsed_ms >= 500))
       harness.stdio.println("slow_return_value=" + slow_result.return_value)
       harness.stdio.println("slow_audit_kind=" + slow_audits[0].kind)
       harness.stdio.println("slow_audit_timeout=" + to_string(slow_audits[0].payload.timeout_ms))
-      let no_deadline = with_timeout(slow, 0)
-      let _ = advance_time(1000)
-      let unbounded = no_deadline(harness, return_value)
-      let trailing = lifecycle_audit_log_take()
+      const no_deadline = with_timeout(slow, 0)
+      const _ = advance_time(1000)
+      const unbounded = no_deadline(harness, return_value)
+      const trailing = lifecycle_audit_log_take()
       harness.stdio.println("unbounded=" + unbounded)
       harness.stdio.println("unbounded_audit_count=" + to_string(len(trailing)))
-      let _ = unmock_time()
+      const _ = unmock_time()
       return return_value
     },
   )

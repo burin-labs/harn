@@ -9,7 +9,7 @@ import { ast_search } from "std/ast"
  * `obj?.prop ?? fallback` shape and reading each capture by name.
  */
 fn write_fixture(dir: string, name: string, body: string) -> string {
-  let path = path_join(dir, name)
+  const path = path_join(dir, name)
   harness.fs.write_text(path, body)
   return path
 }
@@ -17,7 +17,7 @@ fn write_fixture(dir: string, name: string, body: string) -> string {
 pipeline default() {
   // 1) TypeScript optional-chain + nullish-coalescing, the codemod shape.
   //    Every capture (`@obj`, `@prop`, `@fallback`) is bound by name.
-  let ts = ast_search(
+  const ts = ast_search(
     {
       source: "const a = cfg?.timeout ?? 30;\nconst b = opts?.retries ?? 3;\n",
       language: "typescript",
@@ -36,7 +36,7 @@ pipeline default() {
   __io_println(ts.matches[0].captures.obj.range.start_row == 0)
   __io_println(ts.matches[1].captures.obj.range.start_row == 1)
   // 2) Rust: bind two captures per match across multiple matches.
-  let rs = ast_search(
+  const rs = ast_search(
     {
       source: "fn main() {\n    let x = 1;\n    let y = 2;\n}\n",
       language: "rust",
@@ -47,7 +47,7 @@ pipeline default() {
   __io_println(rs.matches[0].captures.name.text == "x" && rs.matches[0].captures.value.text == "1")
   __io_println(rs.matches[1].captures.name.text == "y" && rs.matches[1].captures.value.text == "2")
   // 3) Python: a third grammar, proving the primitive is grammar-agnostic.
-  let py = ast_search(
+  const py = ast_search(
     {
       source: "def greet(name):\n    return name\n\ndef bye(name):\n    return name\n",
       language: "python",
@@ -58,7 +58,7 @@ pipeline default() {
   __io_println(py.matches[0].captures.fn.text == "greet")
   __io_println(py.matches[1].captures.fn.text == "bye")
   // 4) `max_matches` truncates in document order and flags it.
-  let capped = ast_search(
+  const capped = ast_search(
     {
       source: "let a = 1; let b = 2; let c = 3;\n",
       language: "rust",
@@ -70,23 +70,23 @@ pipeline default() {
   __io_println(capped.matches[0].captures.lit.text == "1")
   __io_println(capped.matches[1].captures.lit.text == "2")
   // 5) File-path input: grammar is inferred from the extension.
-  let root = path_join(
+  const root = path_join(
     harness.fs.temp_dir(),
     "harn_ast_search_" + to_string(harness.random.gen_range(100000, 999999)),
   )
   harness.fs.mkdir(root)
-  let go_path = write_fixture(root, "lib.go", "package main\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n")
-  let go = ast_search({path: go_path, query: "(function_declaration name: (identifier) @fn)"})
+  const go_path = write_fixture(root, "lib.go", "package main\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n")
+  const go = ast_search({path: go_path, query: "(function_declaration name: (identifier) @fn)"})
   __io_println(go.ok && go.language == "go")
   __io_println(go.matches[0].captures.fn.text == "Add")
   // 6) Empty result set is `ok`, not an error.
-  let empty = ast_search({source: "fn main() {}\n", language: "rust", query: "(integer_literal) @lit"})
+  const empty = ast_search({source: "fn main() {}\n", language: "rust", query: "(integer_literal) @lit"})
   __io_println(empty.ok && empty.match_count == 0 && len(empty.matches) == 0)
   // 7) Invalid query and unknown grammar surface structured errors.
-  let bad = ast_search({source: "fn main() {}\n", language: "rust", query: "(((("})
+  const bad = ast_search({source: "fn main() {}\n", language: "rust", query: "(((("})
   __io_println(!bad.ok && bad.result == "invalid_query")
-  let no_caps = ast_search({source: "fn main() {}\n", language: "rust", query: "(integer_literal)"})
+  const no_caps = ast_search({source: "fn main() {}\n", language: "rust", query: "(integer_literal)"})
   __io_println(no_caps.result == "invalid_query" && contains(no_caps.details, "no captures"))
-  let unknown = ast_search({source: "whatever", query: "(x) @y"})
+  const unknown = ast_search({source: "whatever", query: "(x) @y"})
   __io_println(unknown.result == "unsupported_language")
 }

@@ -14,16 +14,16 @@
 // Exits 2 when Cargo.toml and CHANGELOG.md already match (no bump needed).
 import { bump_type } from "std/semver"
 
-let CARGO_PATH = "Cargo.toml"
+const CARGO_PATH = "Cargo.toml"
 
-let CHANGELOG_PATH = "CHANGELOG.md"
+const CHANGELOG_PATH = "CHANGELOG.md"
 
 /**
  * Pull the workspace version literal from a Cargo.toml. Errors loudly
  * if no `version = "..."` line is at the top of the file.
  */
 pub fn read_cargo_version() -> string {
-  let captures = regex_captures(r"(?m)^version = \x22([^\x22]+)\x22", harness.fs.read_text(CARGO_PATH))
+  const captures = regex_captures(r"(?m)^version = \x22([^\x22]+)\x22", harness.fs.read_text(CARGO_PATH))
   if captures.count == 0 {
     throw "could not find workspace version in ${CARGO_PATH}"
   }
@@ -32,7 +32,7 @@ pub fn read_cargo_version() -> string {
 
 /** Pull the topmost `## vX.Y.Z` heading from CHANGELOG.md. */
 pub fn read_changelog_top_version() -> string {
-  let captures = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)\s*$", harness.fs.read_text(CHANGELOG_PATH))
+  const captures = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)\s*$", harness.fs.read_text(CHANGELOG_PATH))
   if captures.count == 0 {
     throw "no `## vX.Y.Z` heading found in ${CHANGELOG_PATH}"
   }
@@ -47,7 +47,7 @@ pub fn read_changelog_top_version() -> string {
  * stdout.
  */
 pub fn detect(current: string, target: string) -> string {
-  let kind = bump_type(current, target)
+  const kind = bump_type(current, target)
   if kind == nil {
     throw "${current} -> ${target} is not a single patch/minor/major bump"
   }
@@ -56,8 +56,8 @@ pub fn detect(current: string, target: string) -> string {
 
 pipeline main(task) {
   try {
-    let current = read_cargo_version()
-    let target = read_changelog_top_version()
+    const current = read_cargo_version()
+    const target = read_changelog_top_version()
     if current == target {
       __io_eprintln("warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump")
       return 2

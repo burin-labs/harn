@@ -1,7 +1,7 @@
 import { tree_of_thoughts } from "std/llm/ensemble"
 
 fn grid_expand(state, k) {
-  let moves = [
+  const moves = [
     {name: "right", x: state.x + 1, y: state.y},
     {name: "up", x: state.x, y: state.y + 1},
     {name: "left", x: state.x - 1, y: state.y},
@@ -20,7 +20,7 @@ fn grid_done(state) {
 }
 
 pipeline test(task) {
-  let bfs = tree_of_thoughts(
+  const bfs = tree_of_thoughts(
     {
       initial_state: {name: "start", x: 0, y: 0},
       expand: grid_expand,
@@ -35,7 +35,7 @@ pipeline test(task) {
   assert_eq(bfs.best_score, 10)
   assert_eq(bfs.best_path.map({ state -> state.name }), ["start", "right", "right", "up", "up"])
   assert_eq(bfs.tree.best_id, bfs.best_node.id)
-  let dfs = tree_of_thoughts(
+  const dfs = tree_of_thoughts(
     {
       initial_state: {name: "start", x: 0, y: 0},
       expand: grid_expand,
@@ -48,7 +48,7 @@ pipeline test(task) {
   )
   assert(dfs.ok, "dfs finds the goal")
   assert_eq(dfs.best_path.map({ state -> state.name }), ["start", "right", "right", "up", "up"])
-  let shallow = tree_of_thoughts(
+  const shallow = tree_of_thoughts(
     {
       initial_state: {name: "start", x: 0, y: 0},
       expand: grid_expand,
@@ -62,7 +62,7 @@ pipeline test(task) {
   assert(!shallow.ok, "max_depth can bound search before a terminal state")
   assert_eq(shallow.best_path.map({ state -> state.name }), ["start", "right"])
   assert_eq(shallow.stop_reason, "exhausted")
-  let beam = tree_of_thoughts(
+  const beam = tree_of_thoughts(
     {
       initial_state: {name: "start", x: 0, y: 0},
       expand: grid_expand,
@@ -76,7 +76,7 @@ pipeline test(task) {
   )
   assert(beam.ok, "beam keeps the highest-scoring branch")
   assert_eq(beam.best_path.map({ state -> state.name }), ["start", "right", "right", "up", "up"])
-  let stopped = tree_of_thoughts(
+  const stopped = tree_of_thoughts(
     {
       initial_state: {name: "start", x: 0, y: 0},
       expand: grid_expand,

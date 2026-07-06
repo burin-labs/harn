@@ -1,5 +1,5 @@
 pipeline test(task) {
-  var ran = false
+  let ran = false
   while false {
     ran = true
   }

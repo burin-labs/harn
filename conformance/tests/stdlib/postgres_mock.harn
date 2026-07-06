@@ -1,7 +1,7 @@
 import "std/postgres"
 
 pipeline default() {
-  let db = pg_mock_pool(
+  const db = pg_mock_pool(
     [
       {
         sql: "select id, payload from receipts where tenant_id = $1",
@@ -15,19 +15,19 @@ pipeline default() {
       },
     ],
   )
-  let rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
+  const rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
   __io_println(rows[0].id)
   __io_println(rows[0].payload.ok)
   __io_println(
     pg_query_one(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"]).observed_at,
   )
-  let result = pg_execute(
+  const result = pg_execute(
     db,
     "insert into audit_records(tenant_id, action) values ($1, $2)",
     ["tenant-a", "receipt.read"],
   )
   __io_println(result.rows_affected)
-  let calls = pg_mock_calls(db)
+  const calls = pg_mock_calls(db)
   __io_println(len(calls))
   __io_println(calls[0].params[0])
 }

@@ -1,7 +1,7 @@
 import { with_llm_script } from "std/testing"
 
 fn policy_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_secret",
@@ -76,12 +76,12 @@ fn one_call(name, args, approval_policy) {
 }
 
 pipeline main() {
-  let secret = one_call("read_secret", {path: "config/.env"}, {rules: [{allow: "*"}]})
-  let secret_events = json_stringify(transcript_events_by_kind(secret?.transcript, "PermissionDeny"))
+  const secret = one_call("read_secret", {path: "config/.env"}, {rules: [{allow: "*"}]})
+  const secret_events = json_stringify(transcript_events_by_kind(secret?.transcript, "PermissionDeny"))
   __io_println(secret?.tools?.rejected[0] == "read_secret")
   __io_println(secret_events.contains("sensitive_path"))
   __io_println(secret_events.contains("harn.permission_policy_decision.v1"))
-  let ask = one_call(
+  const ask = one_call(
     "fetch_url",
     {url: "https://api.example.com/v1/issues", method: "post"},
     {
@@ -93,26 +93,26 @@ pipeline main() {
       ],
     },
   )
-  let ask_events = json_stringify(transcript_events_by_kind(ask?.transcript, "PermissionDeny"))
+  const ask_events = json_stringify(transcript_events_by_kind(ask?.transcript, "PermissionDeny"))
   __io_println(ask?.tools?.rejected[0] == "fetch_url")
   __io_println(ask_events.contains("managed network approval"))
   __io_println(ask_events.contains("\"action\":\"ask\""))
-  let allowed = one_call(
+  const allowed = one_call(
     "run_command",
     {argv: ["npm", "test"]},
     {allow_sensitive_paths: true, rules: [{allow: {tool: "run_command", command_identity: "npm"}}]},
   )
-  let grant_events = json_stringify(transcript_events_by_kind(allowed?.transcript, "PermissionGrant"))
+  const grant_events = json_stringify(transcript_events_by_kind(allowed?.transcript, "PermissionGrant"))
   __io_println(len(allowed?.tools?.rejected) == 0)
   __io_println(grant_events.contains("command_rule"))
-  let mcp = one_call(
+  const mcp = one_call(
     "github__create_issue",
     {title: "blocked"},
     {
       rules: [{deny: {mcp_server: "github", mcp_tool: "create_issue"}, reason: "MCP issue creation blocked"}],
     },
   )
-  let mcp_events = json_stringify(transcript_events_by_kind(mcp?.transcript, "PermissionDeny"))
+  const mcp_events = json_stringify(transcript_events_by_kind(mcp?.transcript, "PermissionDeny"))
   __io_println(mcp?.tools?.rejected[0] == "github__create_issue")
   __io_println(mcp_events.contains("mcp_rule"))
   with_llm_script(
@@ -125,7 +125,7 @@ pipeline main() {
       },
     ],
     { ->
-      let repeated = agent_loop(
+      const repeated = agent_loop(
         "Run twice.",
         "Use tools.",
         {
@@ -137,7 +137,7 @@ pipeline main() {
           approval_policy: {allow_sensitive_paths: true, repeat_limit: 1, repeat_action: "deny"},
         },
       )
-      let repeat_events = json_stringify(transcript_events_by_kind(repeated?.transcript, "PermissionDeny"))
+      const repeat_events = json_stringify(transcript_events_by_kind(repeated?.transcript, "PermissionDeny"))
       __io_println(repeated?.tools?.rejected[0] == "run_command")
       __io_println(repeat_events.contains("repeated_call"))
     },

@@ -1,6 +1,6 @@
 pipeline test(task) {
   fn sum(...nums) {
-    var total = 0
+    let total = 0
     for n in nums {
       total += n
     }

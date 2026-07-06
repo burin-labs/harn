@@ -16,7 +16,7 @@ fn __tool_search_config(value) {
   if type_of(value) != "dict" {
     return nil
   }
-  let variant = value?.variant ?? "bm25"
+  const variant = value?.variant ?? "bm25"
   return {
     variant: variant,
     mode: value?.mode ?? "auto",
@@ -34,7 +34,7 @@ fn __tool_search_provider_has_native(opts, cfg) {
   if cfg.variant == "hybrid" {
     return false
   }
-  let info = try {
+  const info = try {
     if opts?.model != nil {
       llm_model_info(opts.model)
     } else if opts?.provider != nil {
@@ -45,7 +45,7 @@ fn __tool_search_provider_has_native(opts, cfg) {
   } catch (_e) {
     nil
   }
-  let caps = try {
+  const caps = try {
     if info != nil && info?.capabilities != nil {
       info.capabilities
     } else if info != nil {
@@ -62,7 +62,7 @@ fn __tool_search_provider_has_native(opts, cfg) {
 }
 
 fn __tool_search_client_requested(opts) {
-  let cfg = __tool_search_config(opts?.tool_search)
+  const cfg = __tool_search_config(opts?.tool_search)
   if cfg == nil {
     return false
   }
@@ -115,7 +115,7 @@ fn __tool_search_estimate_tokens(entry) {
 }
 
 fn __tool_search_strategy(cfg) {
-  let strategy = cfg?.strategy ?? cfg?.variant ?? "bm25"
+  const strategy = cfg?.strategy ?? cfg?.variant ?? "bm25"
   if type_of(strategy) == "closure" {
     return strategy
   }
@@ -142,7 +142,7 @@ fn __tool_search_strategy_label(strategy) {
 }
 
 fn __tool_search_description(strategy) {
-  let label = __tool_search_strategy_label(strategy)
+  const label = __tool_search_strategy_label(strategy)
   if label == "regex" {
     return "Search for deferred tools. Pass `query` as a case-insensitive regex. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
   }
@@ -154,7 +154,7 @@ fn __tool_search_description(strategy) {
 
 fn __tool_search_normalize_result(value) {
   if type_of(value) == "string" {
-    let parsed = try {
+    const parsed = try {
       json_parse(value)
     }
     if is_ok(parsed) {
@@ -178,14 +178,14 @@ fn __tool_search_normalize_result(value) {
     return {tool_names: []}
   }
   if type_of(value) == "list" {
-    var names = []
-    var ranked = []
+    let names = []
+    let ranked = []
     for item in value {
       if type_of(item) == "string" {
         names = names.push(item)
         ranked = ranked.push({tool_name: item, score: nil, snippet: ""})
       } else if type_of(item) == "dict" {
-        let name = item?.tool_name ?? item?.name
+        const name = item?.tool_name ?? item?.name
         if name != nil {
           names = names.push(name)
           ranked = ranked.push(item + {tool_name: name})
@@ -198,8 +198,8 @@ fn __tool_search_normalize_result(value) {
 }
 
 fn __tool_search_run(args, state) {
-  let query = args?.query ?? ""
-  let raw_result = if type_of(state.strategy) == "closure" {
+  const query = args?.query ?? ""
+  const raw_result = if type_of(state.strategy) == "closure" {
     state.strategy(query, state.deferred_registry, {variant: state.variant})
   } else if type_of(state.strategy) == "dict" && type_of(state.strategy?.handler) == "closure" {
     state.strategy.handler(query, state.deferred_registry, state.strategy)
@@ -210,13 +210,13 @@ fn __tool_search_run(args, state) {
       {strategy: state.strategy, variant: state.variant},
     )
   }
-  let normalized = __tool_search_normalize_result(raw_result)
-  let ranked = normalized?.ranked ?? []
-  var names = []
+  const normalized = __tool_search_normalize_result(raw_result)
+  const ranked = normalized?.ranked ?? []
+  let names = []
   for name in normalized?.tool_names ?? [] {
     names = names.push(name)
   }
-  let diagnostic = if len(names) == 0 {
+  const diagnostic = if len(names) == 0 {
     "no deferred tools matched the query; try broader terms"
   } else {
     nil
@@ -237,13 +237,13 @@ fn __tool_search_synthetic_tool(registry, state) {
 }
 
 fn __tool_search_initial_state(opts) {
-  let cfg = __tool_search_config(opts?.tool_search)
-  let source_tools = __tool_search_tools(opts?.tools)
-  var eager = []
-  var deferred = []
+  const cfg = __tool_search_config(opts?.tool_search)
+  const source_tools = __tool_search_tools(opts?.tools)
+  let eager = []
+  let deferred = []
   for entry in source_tools {
-    let name = entry?.name ?? ""
-    let pinned = __tool_search_contains(cfg.always_loaded, name)
+    const name = entry?.name ?? ""
+    const pinned = __tool_search_contains(cfg.always_loaded, name)
     if entry?.defer_loading && !pinned {
       deferred = deferred.push(entry)
     } else {
@@ -269,17 +269,17 @@ fn __tool_search_initial_state(opts) {
 }
 
 fn __tool_search_build_tools(opts, state) {
-  var visible = []
+  let visible = []
   for entry in state.eager_tools {
     visible = visible.push(entry)
   }
   for name in state.promoted {
-    let entry = __tool_search_find_tool(state.deferred_tools, name)
+    const entry = __tool_search_find_tool(state.deferred_tools, name)
     if entry != nil {
       visible = visible.push(entry)
     }
   }
-  let registry = __tool_search_registry_like(state.original_registry, visible)
+  const registry = __tool_search_registry_like(state.original_registry, visible)
   return __tool_search_synthetic_tool(registry, state)
 }
 
@@ -294,7 +294,7 @@ pub fn agent_tool_search_inject_if_needed(opts) {
   if !__tool_search_client_requested(opts) {
     return opts
   }
-  let state = opts?._tool_search_client ?? __tool_search_initial_state(opts)
+  const state = opts?._tool_search_client ?? __tool_search_initial_state(opts)
   return opts + {_tool_search_client: state, tools: __tool_search_build_tools(opts, state)}
 }
 
@@ -310,7 +310,7 @@ fn __tool_search_call_id(call) {
  * @api_stability: experimental
  */
 pub fn agent_tool_search_emit_queries(session_id, tool_calls, opts) {
-  let state = opts?._tool_search_client
+  const state = opts?._tool_search_client
   if state == nil {
     return
   }
@@ -336,7 +336,7 @@ fn __tool_search_parse_result(result) {
     return result
   }
   if type_of(result) == "string" {
-    let parsed = try {
+    const parsed = try {
       json_parse(result)
     }
     if is_ok(parsed) {
@@ -347,26 +347,26 @@ fn __tool_search_parse_result(result) {
 }
 
 fn __tool_search_apply_budget(state, names) {
-  var promoted = state.promoted
+  let promoted = state.promoted
   for name in names {
     if !__tool_search_contains(promoted, name)
       && __tool_search_find_tool(state.deferred_tools, name) != nil {
       promoted = promoted.push(name)
     }
   }
-  let budget = state?.budget_tokens
+  const budget = state?.budget_tokens
   if budget == nil {
     return state + {promoted: promoted}
   }
-  var total = 0
-  var kept = []
+  let total = 0
+  let kept = []
   for name in promoted {
-    let entry = __tool_search_find_tool(state.deferred_tools, name)
+    const entry = __tool_search_find_tool(state.deferred_tools, name)
     if entry != nil {
-      let estimate = __tool_search_estimate_tokens(entry)
+      const estimate = __tool_search_estimate_tokens(entry)
       while total + estimate > budget && len(kept) > 0 {
-        let evicted = kept[0]
-        let evicted_tool = __tool_search_find_tool(state.deferred_tools, evicted)
+        const evicted = kept[0]
+        const evicted_tool = __tool_search_find_tool(state.deferred_tools, evicted)
         total = total - __tool_search_estimate_tokens(evicted_tool)
         kept = kept.slice(1)
       }
@@ -380,7 +380,7 @@ fn __tool_search_apply_budget(state, names) {
 }
 
 fn __tool_search_promoted_names(state, names) {
-  var out = []
+  let out = []
   for name in names {
     if __tool_search_contains(state.promoted, name) {
       out = out.push(name)
@@ -397,7 +397,7 @@ fn __tool_search_promoted_names(state, names) {
  * @api_stability: experimental
  */
 pub fn agent_tool_search_record_results(session_id, tool_calls, dispatch, opts) {
-  var state = opts?._tool_search_client
+  let state = opts?._tool_search_client
   if state == nil {
     return opts
   }
@@ -405,10 +405,10 @@ pub fn agent_tool_search_record_results(session_id, tool_calls, dispatch, opts) 
     if call?.name != state.name {
       continue
     }
-    let result = __tool_search_parse_result(dispatch[index]?.result)
-    let names = result?.tool_names ?? []
+    const result = __tool_search_parse_result(dispatch[index]?.result)
+    const names = result?.tool_names ?? []
     state = __tool_search_apply_budget(state, names)
-    let promoted = __tool_search_promoted_names(state, names)
+    const promoted = __tool_search_promoted_names(state, names)
     agent_emit_event(
       session_id,
       "tool_search_result",

@@ -3,10 +3,10 @@
  * ${HARN_SKILL_DIR} in the discovered SKILL.md body.
  */
 pipeline test(task) {
-  let found_ship = skill_find(skills, "ship")
+  const found_ship = skill_find(skills, "ship")
   assert(found_ship != nil, "ship skill discovered")
-  let ship = found_ship ?? {}
-  let rendered = skill_render(ship, ["prod", "us-east-1"])
+  const ship = found_ship ?? {}
+  const rendered = skill_render(ship, ["prod", "us-east-1"])
   // $1 / $2 expand positionally.
   assert(contains(rendered, "deploy prod to us-east-1"), "positional args substituted")
   // $ARGUMENTS joins with spaces.
@@ -17,10 +17,10 @@ pipeline test(task) {
     "HARN_SKILL_DIR expanded to the bundle dir",
   )
   // Missing placeholders preserve the literal for author visibility.
-  let partial = skill_render(ship, ["staging"])
+  const partial = skill_render(ship, ["staging"])
   assert(contains(partial, "deploy staging to"), "missing positional arg passes through")
   // Accepts a raw string body too — handy for quick templating.
-  let raw = skill_render("hi $1!", ["world"])
+  const raw = skill_render("hi $1!", ["world"])
   assert(raw == "hi world!", "string body works")
   log("skill_fs_substitute passed")
 }

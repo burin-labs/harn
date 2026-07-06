@@ -15,7 +15,7 @@ fn __tone_voice(tone) {
 }
 
 fn __bulleted(items) {
-  var lines = []
+  let lines = []
   for item in items {
     lines = lines.push("- " + to_string(item))
   }
@@ -23,10 +23,10 @@ fn __bulleted(items) {
 }
 
 fn __examples_block(examples) {
-  var blocks = []
+  let blocks = []
   for ex in examples {
-    let input = to_string(ex?.input ?? "")
-    let output = to_string(ex?.output ?? "")
+    const input = to_string(ex?.input ?? "")
+    const output = to_string(ex?.output ?? "")
     blocks = blocks.push("Input:\n" + input + "\n\nOutput:\n" + output)
   }
   return join(blocks, "\n\n---\n\n")
@@ -36,11 +36,11 @@ fn __output_contract_block(contract) {
   if type_of(contract) != "dict" {
     return ""
   }
-  var lines = []
-  let keys = contract.keys().sort()
+  let lines = []
+  const keys = contract.keys().sort()
   for key in keys {
-    let value = contract[key]
-    let rendered = if type_of(value) == "dict" || type_of(value) == "list" {
+    const value = contract[key]
+    const rendered = if type_of(value) == "dict" || type_of(value) == "list" {
       json_stringify(value)
     } else {
       to_string(value)
@@ -74,7 +74,7 @@ fn __normalize_system_prompt_part(part) {
  * @errors: []
  */
 pub fn system_prompt_part(content, options = nil) {
-  let opts = if type_of(options) == "dict" {
+  const opts = if type_of(options) == "dict" {
     options
   } else {
     {}
@@ -89,7 +89,7 @@ pub fn system_prompt_part(content, options = nil) {
  * @errors: []
  */
 pub fn system_preamble(content, options = nil) {
-  let opts = if type_of(options) == "dict" {
+  const opts = if type_of(options) == "dict" {
     options
   } else {
     {}
@@ -104,7 +104,7 @@ pub fn system_preamble(content, options = nil) {
  * @errors: []
  */
 pub fn system_appendix(content, options = nil) {
-  let opts = if type_of(options) == "dict" {
+  const opts = if type_of(options) == "dict" {
     options
   } else {
     {}
@@ -119,13 +119,13 @@ pub fn system_appendix(content, options = nil) {
  * @errors: []
  */
 pub fn with_system_prompt_parts(options, parts) {
-  let opts = if type_of(options) == "dict" {
+  const opts = if type_of(options) == "dict" {
     options
   } else {
     {}
   }
-  let existing = __prompt_part_list(opts?.system_prompt_parts)
-  var normalized = []
+  const existing = __prompt_part_list(opts?.system_prompt_parts)
+  let normalized = []
   for part in __prompt_part_list(parts) {
     normalized = normalized.push(__normalize_system_prompt_part(part))
   }
@@ -146,14 +146,14 @@ pub fn system_prelude(opts) {
   if type_of(opts) != "dict" {
     throw "system_prelude: opts must be a dict"
   }
-  let persona = opts?.persona
+  const persona = opts?.persona
   if persona == nil || to_string(persona) == "" {
     throw "system_prelude: opts.persona is required"
   }
-  let {tone = "professional", tools = [], constraints = []} = opts ?? {}
-  let output_contract = opts?.output_contract
-  let examples = opts?.examples ?? []
-  var sections = [to_string(persona), __tone_voice(tone)]
+  const {tone = "professional", tools = [], constraints = []} = opts ?? {}
+  const output_contract = opts?.output_contract
+  const examples = opts?.examples ?? []
+  let sections = [to_string(persona), __tone_voice(tone)]
   if type_of(tools) == "list" && len(tools) > 0 {
     sections = sections.push("Tools available:\n" + __bulleted(tools))
   }
@@ -189,8 +189,8 @@ fn __tools_listing(tools) {
  * @errors: []
  */
 pub fn tool_use_prelude(tools, format) {
-  let normalized = lowercase(to_string(format ?? "text"))
-  let listing = __tools_listing(tools)
+  const normalized = lowercase(to_string(format ?? "text"))
+  const listing = __tools_listing(tools)
   if normalized == "native" {
     return join(
       [
@@ -227,16 +227,16 @@ fn __schema_property_lines(properties) {
   if type_of(properties) != "dict" {
     return []
   }
-  var lines = []
-  let keys = properties.keys().sort()
+  let lines = []
+  const keys = properties.keys().sort()
   for key in keys {
-    let prop = properties[key]
-    let kind = if type_of(prop) == "dict" {
+    const prop = properties[key]
+    const kind = if type_of(prop) == "dict" {
       to_string(prop?.type ?? "any")
     } else {
       "any"
     }
-    let desc = if type_of(prop) == "dict" && prop?.description != nil {
+    const desc = if type_of(prop) == "dict" && prop?.description != nil {
       ": " + to_string(prop.description)
     } else {
       ""
@@ -257,36 +257,36 @@ fn __schema_property_lines(properties) {
  * @errors: []
  */
 pub fn structured_output_preface(schema, opts) {
-  let options = opts ?? {}
-  let template = options?.template
+  const options = opts ?? {}
+  const template = options?.template
   if template != nil {
-    let bindings = {schema: schema, schema_json: json_stringify(schema), prompt: options?.prompt ?? ""}
+    const bindings = {schema: schema, schema_json: json_stringify(schema), prompt: options?.prompt ?? ""}
     return render_prompt(to_string(template), bindings)
   }
-  let required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
+  const required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
     schema.required.sort()
   } else {
     []
   }
-  let required_line = if len(required) > 0 {
+  const required_line = if len(required) > 0 {
     "Required keys: " + join(required, ", ") + "."
   } else {
     "No required keys are declared."
   }
-  let properties = if type_of(schema) == "dict" {
+  const properties = if type_of(schema) == "dict" {
     schema?.properties
   } else {
     nil
   }
-  let prop_lines = __schema_property_lines(properties)
-  var sections = [
+  const prop_lines = __schema_property_lines(properties)
+  let sections = [
     "Respond with valid JSON matching this schema. Do not wrap in markdown fences. Do not include prose, commentary, or trailing text.",
     required_line,
   ]
   if len(prop_lines) > 0 {
     sections = sections.push("Properties:\n" + join(prop_lines, "\n"))
   }
-  let hint = options?.hint
+  const hint = options?.hint
   if hint != nil && to_string(hint) != "" {
     sections = sections.push("Hint: " + to_string(hint))
   }

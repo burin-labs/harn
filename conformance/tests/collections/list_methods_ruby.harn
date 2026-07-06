@@ -1,6 +1,6 @@
 /** Test Ruby-inspired list methods */
 pipeline default(task) {
-  let nums = [1, 2, 3, 4, 5, 6, 7, 8]
+  const nums = [1, 2, 3, 4, 5, 6, 7, 8]
   // none
   __io_println(nums.none({ x -> x > 100 }))
   __io_println(nums.none({ x -> x > 5 }))
@@ -16,7 +16,7 @@ pipeline default(task) {
   __io_println(nums.first(3))
   __io_println(nums.last(2))
   // partition
-  let parts = nums.partition({ x -> x % 2 == 0 })
+  const parts = nums.partition({ x -> x % 2 == 0 })
   __io_println(parts.first())
   __io_println(parts.last())
   // chunk
@@ -26,11 +26,11 @@ pipeline default(task) {
   // tally
   __io_println(["a", "b", "a", "c", "b", "a"].tally())
   // min_by / max_by
-  let words = ["hello", "hi", "hey"]
+  const words = ["hello", "hi", "hey"]
   __io_println(words.min_by({ w -> len(w) }))
   __io_println(words.max_by({ w -> len(w) }))
   // group_by — discriminator must be a string (v0.8.43+); coerce explicitly.
-  let grouped = [1, 2, 3, 4, 5, 6].group_by({ x -> to_string(x % 2 == 0) })
+  const grouped = [1, 2, 3, 4, 5, 6].group_by({ x -> to_string(x % 2 == 0) })
   __io_println(grouped)
   // each_cons (sliding window)
   __io_println([1, 2, 3, 4].each_cons(2))

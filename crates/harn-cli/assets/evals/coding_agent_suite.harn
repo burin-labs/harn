@@ -13,9 +13,9 @@ import { write_json } from "std/fs"
 import { write_jsonl } from "std/jsonl"
 import { with_structural_validator } from "std/llm/structural_validator"
 
-let __READ_ONLY_AUDIT_SETTINGS = "DEFAULT_TIMEOUT_SECONDS = 30\n"
+const __READ_ONLY_AUDIT_SETTINGS = "DEFAULT_TIMEOUT_SECONDS = 30\n"
 
-let __READ_ONLY_AUDIT_README = "# Settings\n\nThe default timeout is 30 seconds.\n"
+const __READ_ONLY_AUDIT_README = "# Settings\n\nThe default timeout is 30 seconds.\n"
 
 fn __has_parent_segment(path: string) -> bool {
   for segment in split(path ?? "", "/") {
@@ -27,7 +27,7 @@ fn __has_parent_segment(path: string) -> bool {
 }
 
 fn __safe_relative_path(path: string) -> string {
-  let normalized = replace(trim(path ?? ""), "\\", "/")
+  const normalized = replace(trim(path ?? ""), "\\", "/")
   if normalized == "" {
     throw "path must be non-empty"
   }
@@ -145,9 +145,9 @@ fn __replace_tool(harness: Harness, registry, root: string) {
       returns: {type: "object"},
       annotations: {kind: "edit", side_effect_level: "workspace_write"},
       handler: { args ->
-        let path = __workspace_path(root, args.path)
-        let before = harness.fs.read_text(path)
-        let patch = edit_apply_old_new_patch(
+        const path = __workspace_path(root, args.path)
+        const before = harness.fs.read_text(path)
+        const patch = edit_apply_old_new_patch(
           before,
           args.old_text,
           args.new_text,
@@ -180,7 +180,7 @@ fn __fixture_tools(harness: Harness, root: string, python: string, fixture: stri
   if fixture == "read-only-audit" {
     return agent_host_tools(nil, {root: root, cwd: root, max_inline_bytes: 4000, enabled_tools: ["read_file"]})
   }
-  let tools = agent_host_tools(
+  const tools = agent_host_tools(
     nil,
     {
       root: root,
@@ -230,7 +230,7 @@ fn __seed_python_add_native_mock(python: string) {
 }
 
 fn __seed_python_add_text_mock(python: string) {
-  let python_literal = json_stringify(python)
+  const python_literal = json_stringify(python)
   llm_mock({text: "<tool_call>\nread_file({ path: \"math_utils.py\" })\n</tool_call>"})
   llm_mock(
     {
@@ -301,7 +301,7 @@ fn __seed_cli_help_flag_native_mock(python: string) {
 }
 
 fn __seed_cli_help_flag_text_mock(python: string) {
-  let python_literal = json_stringify(python)
+  const python_literal = json_stringify(python)
   llm_mock({text: "<tool_call>\nread_file({ path: \"app.py\" })\n</tool_call>"})
   llm_mock(
     {
@@ -374,8 +374,8 @@ fn __seed_test_output_first_native_mock(python: string) {
 }
 
 fn __seed_test_output_first_text_mock(python: string) {
-  let python_literal = json_stringify(python)
-  let run_tests = "<tool_call>\nrun_command({ argv: [" + python_literal
+  const python_literal = json_stringify(python)
+  const run_tests = "<tool_call>\nrun_command({ argv: [" + python_literal
     + ", \"-m\", \"unittest\", \"discover\", \"-s\", \"tests\"], capture: { max_inline_bytes: 4000 } })\n</tool_call>"
   llm_mock({text: run_tests})
   llm_mock({text: "<tool_call>\nread_file({ path: \"stats_utils.py\" })\n</tool_call>"})
@@ -447,7 +447,7 @@ fn __seed_docs_symbol_rename_native_mock(python: string) {
 }
 
 fn __seed_docs_symbol_rename_text_mock(python: string) {
-  let python_literal = json_stringify(python)
+  const python_literal = json_stringify(python)
   llm_mock({text: "<tool_call>\nread_file({ path: \"greeter.py\" })\n</tool_call>"})
   llm_mock({text: "<tool_call>\nread_file({ path: \"example.py\" })\n</tool_call>"})
   llm_mock(
@@ -579,8 +579,8 @@ fn __run_unittest(root: string, python: string) {
 }
 
 fn __verify_python_add(harness: Harness, root: string, python: string) {
-  let verify = __run_unittest(root, python)
-  let source = harness.fs.read_text(path_join(root, "math_utils.py"))
+  const verify = __run_unittest(root, python)
+  const source = harness.fs.read_text(path_join(root, "math_utils.py"))
   return __command_verification(
     verify.success && contains(source, "return a + b"),
     verify.exit_code,
@@ -591,15 +591,15 @@ fn __verify_python_add(harness: Harness, root: string, python: string) {
 }
 
 fn __verify_cli_help_flag(harness: Harness, root: string, python: string) {
-  let help = command_run(
+  const help = command_run(
     {argv: [python, "app.py", "--help"], cwd: root},
     {capture: {max_inline_bytes: 12000}, timeout_ms: 30000},
   )
-  let shout = command_run(
+  const shout = command_run(
     {argv: [python, "app.py", "--shout", "Ada"], cwd: root},
     {capture: {max_inline_bytes: 12000}, timeout_ms: 30000},
   )
-  let readme = harness.fs.read_text(path_join(root, "README.md"))
+  const readme = harness.fs.read_text(path_join(root, "README.md"))
   return __command_verification(
     help.success && shout.success && contains(help.stdout, "--shout")
       && contains(shout.stdout, "HELLO, ADA!")
@@ -616,8 +616,8 @@ fn __verify_cli_help_flag(harness: Harness, root: string, python: string) {
 }
 
 fn __verify_test_output_first(harness: Harness, root: string, python: string) {
-  let verify = __run_unittest(root, python)
-  let source = harness.fs.read_text(path_join(root, "stats_utils.py"))
+  const verify = __run_unittest(root, python)
+  const source = harness.fs.read_text(path_join(root, "stats_utils.py"))
   return __command_verification(
     verify.success && contains(source, "return (ordered[mid - 1] + ordered[mid]) / 2"),
     verify.exit_code,
@@ -628,13 +628,13 @@ fn __verify_test_output_first(harness: Harness, root: string, python: string) {
 }
 
 fn __verify_docs_symbol_rename(harness: Harness, root: string, python: string) {
-  let verify = command_run(
+  const verify = command_run(
     {argv: [python, "example.py"], cwd: root},
     {capture: {max_inline_bytes: 12000}, timeout_ms: 30000},
   )
-  let example = harness.fs.read_text(path_join(root, "example.py"))
-  let readme = harness.fs.read_text(path_join(root, "README.md"))
-  let implementation = harness.fs.read_text(path_join(root, "greeter.py"))
+  const example = harness.fs.read_text(path_join(root, "example.py"))
+  const readme = harness.fs.read_text(path_join(root, "README.md"))
+  const implementation = harness.fs.read_text(path_join(root, "greeter.py"))
   return __command_verification(
     verify.success
       && contains(verify.stdout, "Hello, Ada!")
@@ -659,7 +659,7 @@ fn __tool_call_name(call) -> string {
 }
 
 fn __tool_call_args(call) {
-  let args = call?.arguments ?? call?.args ?? call?.tool_args
+  const args = call?.arguments ?? call?.args ?? call?.tool_args
   if type_of(args) == "dict" {
     return args
   }
@@ -667,7 +667,7 @@ fn __tool_call_args(call) {
 }
 
 fn __normalized_tool_path(path) -> string {
-  var normalized = replace(trim(to_string(path ?? "")), "\\", "/")
+  let normalized = replace(trim(to_string(path ?? "")), "\\", "/")
   while starts_with(normalized, "./") {
     normalized = normalized[2:]
   }
@@ -675,16 +675,16 @@ fn __normalized_tool_path(path) -> string {
 }
 
 fn __read_only_audit_tool_calls_are_valid(result) -> bool {
-  let calls = result?.tools?.calls ?? []
+  const calls = result?.tools?.calls ?? []
   if len(calls) == 0 {
     return false
   }
-  var saw_readme = false
+  let saw_readme = false
   for call in calls {
     if __tool_call_name(call) != "read_file" {
       return false
     }
-    let path = __normalized_tool_path(__tool_call_args(call)?.path)
+    const path = __normalized_tool_path(__tool_call_args(call)?.path)
     if path == "" || starts_with(path, "/") || __has_parent_segment(path) {
       return false
     }
@@ -713,10 +713,10 @@ pub fn coding_agent_read_only_audit_verification_success(readme: string, setting
 }
 
 fn __verify_read_only_audit(harness: Harness, root: string, result) {
-  let readme = harness.fs.read_text(path_join(root, "README.md"))
-  let settings = harness.fs.read_text(path_join(root, "settings.py"))
-  let final_text = __final_text(result)
-  let success = coding_agent_read_only_audit_verification_success(readme, settings, result)
+  const readme = harness.fs.read_text(path_join(root, "README.md"))
+  const settings = harness.fs.read_text(path_join(root, "settings.py"))
+  const final_text = __final_text(result)
+  const success = coding_agent_read_only_audit_verification_success(readme, settings, result)
   return __command_verification(
     success,
     if success {
@@ -731,11 +731,11 @@ fn __verify_read_only_audit(harness: Harness, root: string, result) {
 }
 
 fn __verify_no_tool_diagnosis(result) {
-  let final_text = __final_text(result)
-  let normalized = lowercase(final_text)
-  let describes_change = contains(final_text, "return a + b")
+  const final_text = __final_text(result)
+  const normalized = lowercase(final_text)
+  const describes_change = contains(final_text, "return a + b")
     || (contains(normalized, "subtraction") && contains(normalized, "addition"))
-  let success = __tool_call_count(result) == 0
+  const success = __tool_call_count(result) == 0
     && contains(final_text, "PATCH_HINT")
     && describes_change
   return __command_verification(
@@ -774,7 +774,7 @@ fn __verify_fixture(harness: Harness, root: string, fixture: string, python: str
 }
 
 fn __task_prompt(fixture: string, python: string) -> string {
-  let test_cmd = python + " -m unittest discover -s tests"
+  const test_cmd = python + " -m unittest discover -s tests"
   if fixture == "python-add" {
     return "Fix the repository so the test suite passes. Inspect files before editing, make the smallest correct code change, then run `"
       + test_cmd
@@ -830,12 +830,12 @@ fn __run_fixture_agent(
   override_reason = nil,
   structural_validator_config = nil,
 ) {
-  let done_sentinel = if tool_format == "text" {
+  const done_sentinel = if tool_format == "text" {
     "##DONE##"
   } else {
     nil
   }
-  var options = {
+  let options = {
     provider: provider,
     model: model,
     tool_format: tool_format,
@@ -872,7 +872,7 @@ fn __run_fixture_agent(
 }
 
 fn __run_preset_agent(kind: string, task: string, options) {
-  let opts = agent_preset(kind, options)
+  const opts = agent_preset(kind, options)
   return agent_loop(task, opts?.system, opts)
 }
 
@@ -917,7 +917,7 @@ fn __summary(
   verify,
   duration_ms: int,
 ) {
-  let events = transcript_events(result.transcript)
+  const events = transcript_events(result.transcript)
   return {
     schema_version: 2,
     fixture_id: fixture,
@@ -944,7 +944,7 @@ fn __summary(
 }
 
 fn main(harness: Harness) {
-  let args = parse_args(
+  const args = parse_args(
     argv,
     [
       {kind: "option", name: "fixture", flags: ["--fixture"], required: true},
@@ -970,20 +970,20 @@ fn main(harness: Harness) {
   if len(args._errors) > 0 {
     throw join(args._errors, "\n")
   }
-  let output_dir = args.output_dir
+  const output_dir = args.output_dir
   harness.fs.mkdir(output_dir)
-  let root = args.workspace_root ?? path_join(output_dir, "workspace")
+  const root = args.workspace_root ?? path_join(output_dir, "workspace")
   __seed_workspace(harness, root, args.fixture)
   if args.seed_mock {
     __seed_mock(args.fixture, args.tool_format, args.python)
   }
-  let started_ms = harness.clock.now_ms()
-  let step_judge_config = if args.step_judge_json == "" {
+  const started_ms = harness.clock.now_ms()
+  const step_judge_config = if args.step_judge_json == "" {
     nil
   } else {
     json_parse(args.step_judge_json)
   }
-  let structural_validator_config = if args.structural_validator_json == "" {
+  const structural_validator_config = if args.structural_validator_json == "" {
     __default_structural_validator()
   } else {
     let parsed = json_parse(args.structural_validator_json)
@@ -993,12 +993,12 @@ fn main(harness: Harness) {
       parsed
     }
   }
-  let task = if trim(args.task) == "" {
+  const task = if trim(args.task) == "" {
     __task_prompt(args.fixture, args.python)
   } else {
     args.task
   }
-  let result = __run_fixture_agent(
+  const result = __run_fixture_agent(
     args.fixture,
     task,
     args.provider,
@@ -1010,13 +1010,13 @@ fn main(harness: Harness) {
     args.override_reason,
     structural_validator_config,
   )
-  let override_warning = agent_first_tool_format_override_warning_text(transcript_events(result?.transcript))
+  const override_warning = agent_first_tool_format_override_warning_text(transcript_events(result?.transcript))
   if override_warning != nil {
     __io_eprintln(override_warning)
   }
-  let duration_ms = harness.clock.now_ms() - started_ms
-  let verify = __verify_fixture(harness, root, args.fixture, args.python, result)
-  let summary = __summary(
+  const duration_ms = harness.clock.now_ms() - started_ms
+  const verify = __verify_fixture(harness, root, args.fixture, args.python, result)
+  const summary = __summary(
     harness,
     root,
     output_dir,

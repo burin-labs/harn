@@ -1,5 +1,5 @@
 pipeline main() {
-  let same_worker = true
+  const same_worker = true
   __io_println(same_worker)
   __io_println(true)
 }

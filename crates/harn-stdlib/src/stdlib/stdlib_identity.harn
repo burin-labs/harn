@@ -38,7 +38,7 @@ fn __issue(code: string, path: string, message: string) -> ActorChainIssue {
 }
 
 fn __append_unique(values: list<string>, value: string) -> list<string> {
-  let normalized = trim(value)
+  const normalized = trim(value)
   if normalized == "" || contains(values, normalized) {
     return values
   }
@@ -46,7 +46,7 @@ fn __append_unique(values: list<string>, value: string) -> list<string> {
 }
 
 fn __subject_parts(subject: string) -> dict {
-  let split_at = subject.index_of(":")
+  const split_at = subject.index_of(":")
   if split_at < 0 {
     return {kind: "principal", id: subject}
   }
@@ -54,8 +54,8 @@ fn __subject_parts(subject: string) -> dict {
 }
 
 fn __scope_claims(node: dict, path: string) -> dict {
-  var issues = []
-  var scopes = []
+  let issues = []
+  let scopes = []
   if node?.scopes != nil {
     if type_of(node.scopes) != "list" {
       issues = issues
@@ -91,7 +91,7 @@ fn __scope_claims(node: dict, path: string) -> dict {
 }
 
 fn __entry(node, path: string) -> dict {
-  var issues = []
+  let issues = []
   if type_of(node) != "dict" {
     return {issues: [__issue("actor_chain.node_type", path, "node must be a dict")], entry: nil}
   }
@@ -101,10 +101,10 @@ fn __entry(node, path: string) -> dict {
       entry: nil,
     }
   }
-  let scope_result = __scope_claims(node, path)
+  const scope_result = __scope_claims(node, path)
   issues = issues + scope_result.issues
-  let subject = to_string(node.sub)
-  let parts = __subject_parts(subject)
+  const subject = to_string(node.sub)
+  const parts = __subject_parts(subject)
   return {
     issues: issues,
     entry: {subject: subject, kind: parts.kind, id: parts.id, path: path + ".sub", scopes: scope_result.scopes},
@@ -131,10 +131,10 @@ fn __may_act(chain: dict) -> dict {
 }
 
 fn __with_roles(entries: list<dict>) -> list<ActorChainSubject> {
-  var subjects = []
-  let origin_index = len(entries) - 1
+  let subjects = []
+  const origin_index = len(entries) - 1
   for {index, value} in entries.enumerate() {
-    let role = if index == 0 {
+    const role = if index == 0 {
       "current"
     } else if index == origin_index {
       "origin"
@@ -147,11 +147,11 @@ fn __with_roles(entries: list<dict>) -> list<ActorChainSubject> {
 }
 
 fn __report(issues: list<ActorChainIssue>, entries: list<dict>, may_act) -> ActorChainReport {
-  let subjects = __with_roles(entries)
-  var current = nil
-  var origin = nil
-  var actors = []
-  var prior_actors = []
+  const subjects = __with_roles(entries)
+  let current = nil
+  let origin = nil
+  let actors = []
+  let prior_actors = []
   if len(subjects) > 0 {
     current = subjects[0]
     origin = subjects[len(subjects) - 1]
@@ -162,7 +162,7 @@ fn __report(issues: list<ActorChainIssue>, entries: list<dict>, may_act) -> Acto
   if len(actors) > 1 {
     prior_actors = actors.slice(1, len(actors))
   }
-  var report = {
+  let report = {
     ok: len(issues) == 0,
     issues: issues,
     subjects: subjects,
@@ -202,15 +202,15 @@ pub fn actor_chain_subject_parts(subject: string) -> dict {
  * @errors: []
  */
 pub fn actor_chain_report(chain) -> ActorChainReport {
-  var issues = []
-  var entries = []
+  let issues = []
+  let entries = []
   if type_of(chain) != "dict" {
     return __report([__issue("actor_chain.type", "$", "chain must be a dict")], [], nil)
   }
-  var node = chain?.act
-  var path = "act"
+  let node = chain?.act
+  let path = "act"
   while node != nil {
-    let result = __entry(node, path)
+    const result = __entry(node, path)
     issues = issues + result.issues
     if result.entry == nil {
       return __report(issues, entries, nil)
@@ -219,12 +219,12 @@ pub fn actor_chain_report(chain) -> ActorChainReport {
     node = node?.act
     path = path + ".act"
   }
-  let origin = __entry(chain, "$")
+  const origin = __entry(chain, "$")
   issues = issues + origin.issues
   if origin.entry != nil {
     entries = entries + [origin.entry]
   }
-  let may_act = __may_act(chain)
+  const may_act = __may_act(chain)
   issues = issues + may_act.issues
   return __report(issues, entries, may_act.value)
 }
@@ -239,11 +239,11 @@ pub fn actor_chain_report(chain) -> ActorChainReport {
  * @errors: [TypeError, ValueError]
  */
 pub fn actor_chain_require(chain) -> ActorChainReport {
-  let report = actor_chain_report(chain)
+  const report = actor_chain_report(chain)
   if report.ok {
     return report
   }
-  var messages = []
+  let messages = []
   for issue in report.issues {
     messages = messages + [issue.path + ": " + issue.message]
   }
@@ -267,8 +267,8 @@ pub fn actor_chain_subjects(chain) -> list<ActorChainSubject> {
  * @errors: [TypeError, ValueError]
  */
 pub fn actor_chain_summary(chain) -> dict {
-  let report = actor_chain_require(chain)
-  var summary = {
+  const report = actor_chain_require(chain)
+  let summary = {
     subjects: report.subjects,
     current: report.current,
     origin: report.origin,
@@ -285,7 +285,7 @@ pub fn actor_chain_summary(chain) -> dict {
 }
 
 fn __subject_names(subjects: list<ActorChainSubject>) -> list<string> {
-  var names = []
+  let names = []
   for subject in subjects {
     names = names + [subject.subject]
   }
@@ -302,27 +302,27 @@ fn __subject_names(subjects: list<ActorChainSubject>) -> list<string> {
  * @errors: [TypeError, ValueError]
  */
 pub fn actor_chain_format(chain, options: ActorChainFormatOptions = {}) -> string {
-  let report = actor_chain_require(chain)
+  const report = actor_chain_require(chain)
   if report.depth == 0 {
     return ""
   }
-  let style = lowercase(trim(to_string(options.style ?? "for")))
+  const style = lowercase(trim(to_string(options.style ?? "for")))
   if style == "arrow" {
     return join(__subject_names(report.subjects), " -> ")
   }
-  let origin = report.origin
+  const origin = report.origin
   if origin == nil {
     return ""
   }
   if !report.delegated {
     return origin.subject
   }
-  let current = report.current
+  const current = report.current
   if current == nil {
     return origin.subject
   }
-  var rendered = current.subject + " for " + origin.subject
-  let include_prior = options.include_prior ?? true
+  let rendered = current.subject + " for " + origin.subject
+  const include_prior = options.include_prior ?? true
   if include_prior && len(report.prior_actors) > 0 {
     rendered = rendered + " via " + join(__subject_names(report.prior_actors), ", ")
   }

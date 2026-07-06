@@ -6,7 +6,7 @@ import {
 } from "std/workflow/context"
 
 fn ids(artifacts) {
-  var out = []
+  let out = []
   for artifact in artifacts {
     out = out.push(artifact.id)
   }
@@ -14,9 +14,9 @@ fn ids(artifacts) {
 }
 
 pipeline default() {
-  let stage_policy = workflow_stage_context_policy({}, {input_kinds: ["summary"]})
+  const stage_policy = workflow_stage_context_policy({}, {input_kinds: ["summary"]})
   __io_println(stage_policy.include_kinds[0])
-  let selected = workflow_select_stage_artifacts(
+  const selected = workflow_select_stage_artifacts(
     {
       context_policy: {},
       input_contract: {input_kinds: ["summary"]},
@@ -27,7 +27,7 @@ pipeline default() {
     },
   )
   __io_println(json_stringify(ids(selected.artifacts)))
-  let ordered = workflow_select_artifacts(
+  const ordered = workflow_select_artifacts(
     [
       {id: "low", kind: "summary", priority: 1, relevance: 1.0, estimated_tokens: 10},
       {id: "pin", kind: "summary", priority: 0, relevance: 0.0, estimated_tokens: 10},
@@ -36,7 +36,7 @@ pipeline default() {
     {pinned_ids: ["pin"], prioritize_kinds: ["verification_result"], max_artifacts: 2},
   )
   __io_println(json_stringify(ids(ordered)))
-  let adaptive = workflow_select_artifacts_adaptive(
+  const adaptive = workflow_select_artifacts_adaptive(
     [
       {
         id: "old-index",
@@ -63,7 +63,7 @@ pipeline default() {
   __io_println(!contains(ids(adaptive), "old-index"))
   __io_println(contains(ids(adaptive), "dup-high"))
   __io_println(!contains(ids(adaptive), "dup-low"))
-  let oversized = workflow_select_artifacts_adaptive(
+  const oversized = workflow_select_artifacts_adaptive(
     [{id: "big", kind: "summary", text: "0123456789".repeat(300), estimated_tokens: 1000, priority: 1}],
     {max_tokens: 400},
   )

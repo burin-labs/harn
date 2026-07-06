@@ -21,22 +21,22 @@ fn scripted_consent(_justification, _session_id) {
 }
 
 pipeline main() {
-  let root = path_join(harness.fs.temp_dir(), "harn-edit-tools-" + uuid())
-  let outside = path_join(harness.fs.temp_dir(), "harn-edit-tools-outside-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-edit-tools-" + uuid())
+  const outside = path_join(harness.fs.temp_dir(), "harn-edit-tools-outside-" + uuid())
   harness.fs.mkdir(root, true)
   harness.fs.mkdir(outside, true)
-  let tools = agent_edit_tools(nil, {root: root, cwd: root})
+  const tools = agent_edit_tools(nil, {root: root, cwd: root})
   // --- write_file happy path: create + read back ---
-  let wrote = agent_dispatch_tool_call(
+  const wrote = agent_dispatch_tool_call(
     {id: "w1", name: "write_file", arguments: {path: "notes/hello.txt", content: "alpha\nbeta\n"}},
     tools,
   )
   __io_println(wrote.ok)
-  let wrote_data = json_parse(wrote.rendered_result)
+  const wrote_data = json_parse(wrote.rendered_result)
   __io_println(wrote_data.created)
   __io_println(harness.fs.read_text(path_join(root, "notes/hello.txt")))
   // --- edit_file happy path: unique replacement ---
-  let edited = agent_dispatch_tool_call(
+  const edited = agent_dispatch_tool_call(
     {
       id: "e1",
       name: "edit_file",
@@ -45,12 +45,12 @@ pipeline main() {
     tools,
   )
   __io_println(edited.ok)
-  let edited_data = json_parse(edited.rendered_result)
+  const edited_data = json_parse(edited.rendered_result)
   __io_println(edited_data.replacements)
   __io_println(harness.fs.read_text(path_join(root, "notes/hello.txt")))
   // --- edit_file replace_all ---
   harness.fs.write_text(path_join(root, "notes/rep.txt"), "x x x\n")
-  let all = agent_dispatch_tool_call(
+  const all = agent_dispatch_tool_call(
     {
       id: "e2",
       name: "edit_file",
@@ -58,18 +58,18 @@ pipeline main() {
     },
     tools,
   )
-  let all_data = json_parse(all.rendered_result)
+  const all_data = json_parse(all.rendered_result)
   __io_println(all_data.replacements)
   __io_println(harness.fs.read_text(path_join(root, "notes/rep.txt")))
   // --- edit_file uniqueness error (2 matches, no replace_all) ---
-  let ambiguous = agent_dispatch_tool_call(
+  const ambiguous = agent_dispatch_tool_call(
     {id: "e3", name: "edit_file", arguments: {path: "notes/rep.txt", old_string: "y", new_string: "z"}},
     tools,
   )
   __io_println(ambiguous.ok)
   __io_println(contains(ambiguous.error, "not unique"))
   // --- edit_file not-found error ---
-  let missing = agent_dispatch_tool_call(
+  const missing = agent_dispatch_tool_call(
     {
       id: "e4",
       name: "edit_file",
@@ -80,32 +80,32 @@ pipeline main() {
   __io_println(missing.ok)
   __io_println(contains(missing.error, "not found"))
   // --- create_directory mkdir -p ---
-  let made = agent_dispatch_tool_call(
+  const made = agent_dispatch_tool_call(
     {id: "d1", name: "create_directory", arguments: {path: "deep/nested/dir"}},
     tools,
   )
   __io_println(made.ok)
   __io_println(harness.fs.stat(path_join(root, "deep/nested/dir")).is_dir)
   // --- delete_path: file removed ---
-  let del = agent_dispatch_tool_call({id: "x1", name: "delete_path", arguments: {path: "notes/rep.txt"}}, tools)
-  let del_data = json_parse(del.rendered_result)
+  const del = agent_dispatch_tool_call({id: "x1", name: "delete_path", arguments: {path: "notes/rep.txt"}}, tools)
+  const del_data = json_parse(del.rendered_result)
   __io_println(del_data.removed)
   __io_println(harness.fs.exists(path_join(root, "notes/rep.txt")))
   // --- delete_path refuses non-empty dir without recursive ---
-  let refuse = agent_dispatch_tool_call({id: "x2", name: "delete_path", arguments: {path: "notes"}}, tools)
+  const refuse = agent_dispatch_tool_call({id: "x2", name: "delete_path", arguments: {path: "notes"}}, tools)
   __io_println(refuse.ok)
   __io_println(contains(refuse.error, "recursive"))
   __io_println(harness.fs.exists(path_join(root, "notes/hello.txt")))
   // --- delete_path recursive removes the tree ---
-  let purge = agent_dispatch_tool_call(
+  const purge = agent_dispatch_tool_call(
     {id: "x3", name: "delete_path", arguments: {path: "notes", recursive: true}},
     tools,
   )
-  let purge_data = json_parse(purge.rendered_result)
+  const purge_data = json_parse(purge.rendered_result)
   __io_println(purge_data.removed)
   __io_println(harness.fs.exists(path_join(root, "notes")))
   // --- out-of-roots write refused by existing path resolution ---
-  let escape = agent_dispatch_tool_call(
+  const escape = agent_dispatch_tool_call(
     {id: "o1", name: "write_file", arguments: {path: path_join(outside, "evil.txt"), content: "x"}},
     tools,
   )
@@ -118,12 +118,12 @@ pipeline main() {
   __io_println(tool_find(tools, "delete_path").annotations.kind)
   __io_println(tool_find(tools, "edit_file").annotations.side_effect_level)
   // --- read-only stance hides every edit tool, keeps read tools ---
-  let surface = agent_edit_tools(agent_read_tools(nil, {root: root}), {root: root})
+  const surface = agent_edit_tools(agent_read_tools(nil, {root: root}), {root: root})
   with_llm_script(
     [{text: "just researching ##DONE##"}],
     { ->
-      let session = "edit-tools-stance-" + uuid()
-      let _ = agent_loop(
+      const session = "edit-tools-stance-" + uuid()
+      const _ = agent_loop(
         "no changes yet, only investigate",
         nil,
         {
@@ -136,7 +136,7 @@ pipeline main() {
           read_only_stance: {enabled: true, armed: true, consent_check: scripted_consent},
         },
       )
-      let first_tools = llm_mock_calls()[0].tools
+      const first_tools = llm_mock_calls()[0].tools
       __io_println(has_tool(first_tools, "read_file"))
       __io_println(has_tool(first_tools, "write_file"))
       __io_println(has_tool(first_tools, "edit_file"))
@@ -145,24 +145,24 @@ pipeline main() {
     },
   )
   // --- burin-shaped: with_consent + with_audit_log wrap the canonical tools ---
-  let mw_root = path_join(harness.fs.temp_dir(), "harn-edit-tools-mw-" + uuid())
+  const mw_root = path_join(harness.fs.temp_dir(), "harn-edit-tools-mw-" + uuid())
   harness.fs.mkdir(mw_root, true)
-  let edit = agent_edit_tools(nil, {root: mw_root, cwd: mw_root})
-  let dispatch_next = { call -> agent_dispatch_tool_call({id: call.call_id, name: call.tool_name, arguments: call.tool_args}, edit) }
-  let consent_hits = atomic(0)
-  let audit_hits = atomic(0)
-  let approve = { _call ->
+  const edit = agent_edit_tools(nil, {root: mw_root, cwd: mw_root})
+  const dispatch_next = { call -> agent_dispatch_tool_call({id: call.call_id, name: call.tool_name, arguments: call.tool_args}, edit) }
+  const consent_hits = atomic(0)
+  const audit_hits = atomic(0)
+  const approve = { _call ->
     atomic_add(consent_hits, 1)
     return true
   }
-  let audit_sink = { _receipt ->
+  const audit_sink = { _receipt ->
     atomic_add(audit_hits, 1)
     return nil
   }
-  let caller = compose_tool_callers(
+  const caller = compose_tool_callers(
     [with_audit_log({sink: audit_sink}), with_consent(approve), default_tool_caller()],
   )
-  let envelope = {
+  const envelope = {
     call_id: "mw1",
     declared_executor: "harn",
     description: "",
@@ -171,14 +171,14 @@ pipeline main() {
     tool_name: "write_file",
     turn: {iteration: 0, session_id: ""},
   }
-  let mw_result = caller(envelope, dispatch_next)
+  const mw_result = caller(envelope, dispatch_next)
   __io_println(mw_result.status)
   __io_println(atomic_get(consent_hits))
   __io_println(atomic_get(audit_hits))
   __io_println(harness.fs.read_text(path_join(mw_root, "out/mw.txt")))
   // --- deny path: consent short-circuits, underlying write never runs ---
-  let deny_caller = compose_tool_callers([with_consent({ _call -> false }), default_tool_caller()])
-  let denied = deny_caller(
+  const deny_caller = compose_tool_callers([with_consent({ _call -> false }), default_tool_caller()])
+  const denied = deny_caller(
     envelope + {call_id: "mw2", tool_args: {content: "nope", path: "out/denied.txt"}},
     dispatch_next,
   )

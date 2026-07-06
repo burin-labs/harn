@@ -36,8 +36,8 @@ pub fn resolved_options(opts) {
 
 fn __capability_field(caps, capability) {
   if capability == "thinking" {
-    let direct = caps?.thinking ?? false
-    let modes = caps?.thinking_modes ?? []
+    const direct = caps?.thinking ?? false
+    const modes = caps?.thinking_modes ?? []
     return direct || len(modes) > 0
   }
   if capability == "tool_search" {
@@ -83,11 +83,11 @@ fn __capability_field(caps, capability) {
  * @errors: []
  */
 pub fn has_capability(model, capability) {
-  let info = llm_model_info(model)
+  const info = llm_model_info(model)
   if type_of(info) != "dict" {
     return false
   }
-  let caps = info?.capabilities
+  const caps = info?.capabilities
   if type_of(caps) != "dict" {
     return false
   }
@@ -103,7 +103,7 @@ pub fn has_capability(model, capability) {
  * @errors: []
  */
 pub fn family_of(model_id) {
-  let info = llm_model_info(model_id)
+  const info = llm_model_info(model_id)
   if type_of(info) != "dict" {
     return "unknown"
   }
@@ -119,7 +119,7 @@ pub fn family_of(model_id) {
  * @errors: []
  */
 pub fn routing_routes() {
-  let catalog = llm_provider_catalog()
+  const catalog = llm_provider_catalog()
   return catalog?.routing_routes ?? []
 }
 
@@ -131,7 +131,7 @@ pub fn routing_routes() {
  * @errors: []
  */
 pub fn lineage_of(model_id) {
-  let info = llm_model_info(model_id)
+  const info = llm_model_info(model_id)
   if type_of(info) != "dict" {
     return "unknown"
   }
@@ -196,8 +196,8 @@ pub fn equivalent_models(selector) {
  * candidate from `best_available_model`, or nil if there is none.
  */
 fn __available_provider_set() {
-  let status = llm_provider_status()
-  var available = {}
+  const status = llm_provider_status()
+  let available = {}
   for entry in status {
     if entry?.available {
       available[entry.name] = true
@@ -210,7 +210,7 @@ fn __strengths_match(model_strengths, required) {
   if required == nil || len(required) == 0 {
     return true
   }
-  let actual = model_strengths ?? []
+  const actual = model_strengths ?? []
   for tag in required {
     if !actual.contains(tag) {
       return false
@@ -223,11 +223,11 @@ fn __benchmark_match(model_benchmarks, required) {
   if required == nil || len(required) == 0 {
     return true
   }
-  let actual = model_benchmarks ?? {}
+  const actual = model_benchmarks ?? {}
   for entry in required {
-    let key = entry.key
-    let min_value = to_float(entry.value)
-    let actual_value = actual[key]
+    const key = entry.key
+    const min_value = to_float(entry.value)
+    const actual_value = actual[key]
     if actual_value == nil {
       return false
     }
@@ -241,8 +241,8 @@ fn __benchmark_match(model_benchmarks, required) {
 fn __score_model(model) {
   // Higher is better. Compose: tier weight + strength count + best
   // benchmark + open-weight bonus + non-deprecated bonus.
-  var score = 0.0
-  let tier = to_string(model?.tier ?? "")
+  let score = 0.0
+  const tier = to_string(model?.tier ?? "")
   if tier == "frontier" {
     score = score + 40.0
   } else if tier == "reasoning" {
@@ -259,9 +259,9 @@ fn __score_model(model) {
   if !(model?.deprecated ?? false) {
     score = score + 10.0
   }
-  let benchmarks = model?.benchmarks ?? {}
+  const benchmarks = model?.benchmarks ?? {}
   for entry in benchmarks {
-    let value = to_float(entry.value)
+    const value = to_float(entry.value)
     if value > score / 2.0 {
       score = score + value / 10.0
     }
@@ -270,11 +270,11 @@ fn __score_model(model) {
 }
 
 fn __model_matches_identity_filters(model, opts) {
-  let want_tier = opts?.tier
-  let want_provider = opts?.provider
-  let want_equivalence = opts?.equivalence_group
-  let want_logical_model = opts?.logical_model
-  let want_api_dialect = opts?.api_dialect
+  const want_tier = opts?.tier
+  const want_provider = opts?.provider
+  const want_equivalence = opts?.equivalence_group
+  const want_logical_model = opts?.logical_model
+  const want_api_dialect = opts?.api_dialect
   if want_tier != nil && to_string(model?.tier ?? "") != to_string(want_tier) {
     return false
   }
@@ -296,13 +296,13 @@ fn __model_matches_identity_filters(model, opts) {
 }
 
 fn __model_matches_catalog_constraints(model, opts, available) {
-  let want_open_weight = opts?.open_weight
+  const want_open_weight = opts?.open_weight
   if want_open_weight != nil && (model?.open_weight ?? nil) != want_open_weight {
     return false
   }
-  let min_tpm = opts?.min_tpm
+  const min_tpm = opts?.min_tpm
   if min_tpm != nil {
-    let tpm = model?.rate_limits?.tpm
+    const tpm = model?.rate_limits?.tpm
     if tpm == nil || to_float(tpm) < to_float(min_tpm) {
       return false
     }
@@ -310,9 +310,9 @@ fn __model_matches_catalog_constraints(model, opts, available) {
   if (opts?.exclude_deprecated ?? true) && (model?.deprecated ?? false) {
     return false
   }
-  let max_input = opts?.max_input_per_mtok
+  const max_input = opts?.max_input_per_mtok
   if max_input != nil {
-    let price = model?.pricing?.input_per_mtok
+    const price = model?.pricing?.input_per_mtok
     if price != nil && to_float(price) > to_float(max_input) {
       return false
     }
@@ -330,13 +330,13 @@ fn __model_matches_catalog_constraints(model, opts, available) {
 }
 
 fn __filter_models(opts) {
-  let catalog = llm_catalog()
-  let available = if opts?.available_only ?? false {
+  const catalog = llm_catalog()
+  const available = if opts?.available_only ?? false {
     __available_provider_set()
   } else {
     nil
   }
-  var out = []
+  let out = []
   for model in catalog {
     if !__model_matches_identity_filters(model, opts) {
       continue
@@ -393,7 +393,7 @@ fn __relax_step(opts, step) {
   if step == 0 {
     return opts
   }
-  var relaxed = opts
+  let relaxed = opts
   // Step 1: drop min_benchmark.
   if step >= 1 && relaxed?.min_benchmark != nil {
     relaxed = relaxed + {min_benchmark: nil}
@@ -442,11 +442,11 @@ fn __relax_step(opts, step) {
  * @example: best_available_models({tier: "frontier", strengths: ["vision"]})
  */
 pub fn best_available_models(opts = nil) {
-  let original = opts ?? {}
-  var step = 0
+  const original = opts ?? {}
+  let step = 0
   while step <= 7 {
-    let attempt = __relax_step(original, step)
-    let candidates = __filter_models(attempt)
+    const attempt = __relax_step(original, step)
+    const candidates = __filter_models(attempt)
     if len(candidates) > 0 {
       return {models: candidates, relaxed_from: original, relaxed_step: step, relaxed_opts: attempt}
     }
@@ -469,7 +469,7 @@ pub fn best_available_models(opts = nil) {
  * @example: pick_model({tier: "frontier", strengths: ["coding"], available_only: true})
  */
 pub fn pick_model(opts = nil) {
-  let result = best_available_models(opts)
+  const result = best_available_models(opts)
   if len(result.models) == 0 {
     return nil
   }

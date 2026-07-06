@@ -1,4 +1,4 @@
-let payload = "x" * 4000000
+const payload = "x" * 4000000
 
 /** Touch the module payload so imported closures capture module state. */
 pub fn touch() {

@@ -4,17 +4,17 @@
 // the `version` requirement as the only coupling between sibling crates. That
 // requirement must be exact, or a downstream pinning one Harn crate can resolve
 // older siblings from the same semver line.
-let SIBLING_DEP_RE = r"^\s*((?:harn-[A-Za-z0-9-]+|tree-sitter-harn))\s*=\s*\{(.*)\}\s*$"
+const SIBLING_DEP_RE = r"^\s*((?:harn-[A-Za-z0-9-]+|tree-sitter-harn))\s*=\s*\{(.*)\}\s*$"
 
 let VERSION_RE = r#"version\s*=\s*"([^"]+)""#
 
-let SECTION_RE = r"^\s*\[([^\]]+)\]\s*$"
+const SECTION_RE = r"^\s*\[([^\]]+)\]\s*$"
 
-let MANIFEST_GLOBS = ["crates/*/Cargo.toml", "tree-sitter-harn/Cargo.toml"]
+const MANIFEST_GLOBS = ["crates/*/Cargo.toml", "tree-sitter-harn/Cargo.toml"]
 
 pub fn workspace_version_from_text(text: string) -> string {
-  let doc = toml_parse(text)
-  let version = doc.get("workspace")?.get("package")?.get("version")
+  const doc = toml_parse(text)
+  const version = doc.get("workspace")?.get("package")?.get("version")
   if type_of(version) != "string" || version == "" {
     throw "missing [workspace.package] version in Cargo.toml"
   }
@@ -26,8 +26,8 @@ pub fn expected_dependency_version(workspace_version: string) -> string {
 }
 
 pub fn manifest_package_name_from_text(text: string) -> string {
-  let doc = toml_parse(text)
-  let name = doc.get("package")?.get("name")
+  const doc = toml_parse(text)
+  const name = doc.get("package")?.get("name")
   if type_of(name) != "string" || name == "" {
     throw "missing [package] name in Cargo.toml"
   }
@@ -35,13 +35,13 @@ pub fn manifest_package_name_from_text(text: string) -> string {
 }
 
 pub fn manifest_is_publishable_from_text(text: string) -> bool {
-  let doc = toml_parse(text)
-  let publish = doc.get("package")?.get("publish")
+  const doc = toml_parse(text)
+  const publish = doc.get("package")?.get("publish")
   return !(type_of(publish) == "bool" && !publish)
 }
 
 pub fn dependency_section_from_line(line: string) -> string {
-  let section_match = regex_captures(SECTION_RE, line)
+  const section_match = regex_captures(SECTION_RE, line)
   if section_match.count == 0 {
     return ""
   }
@@ -61,12 +61,12 @@ pub fn sibling_dep_errors_from_line_with_context(
   unpublished_sibling_names: list<string>,
   manifest_is_publishable: bool,
 ) -> list<string> {
-  let dep_match = regex_captures(SIBLING_DEP_RE, line)
+  const dep_match = regex_captures(SIBLING_DEP_RE, line)
   if dep_match.count == 0 {
     return []
   }
-  let name = dep_match[0].groups[0]
-  let body = dep_match[0].groups[1]
+  const name = dep_match[0].groups[0]
+  const body = dep_match[0].groups[1]
   if !body.contains("path") {
     return []
   }
@@ -78,11 +78,11 @@ pub fn sibling_dep_errors_from_line_with_context(
     }
     return []
   }
-  let version_match = regex_captures(VERSION_RE, body)
+  const version_match = regex_captures(VERSION_RE, body)
   if version_match.count == 0 {
     return ["${path}:${line_no}: ${name} path dependency must set version = \"${expected_version}\""]
   }
-  let actual = version_match[0].groups[0]
+  const actual = version_match[0].groups[0]
   if actual != expected_version {
     return [
       "${path}:${line_no}: ${name} path dependency version is \"${actual}\", expected \"${expected_version}\"",
@@ -107,12 +107,12 @@ pub fn sibling_dep_errors_from_text_with_context(
   unpublished_sibling_names: list<string>,
   manifest_is_publishable: bool,
 ) -> list<string> {
-  let expected = expected_dependency_version(workspace_version)
-  var errors: list<string> = []
-  var line_no = 1
-  var section = ""
+  const expected = expected_dependency_version(workspace_version)
+  let errors: list<string> = []
+  let line_no = 1
+  let section = ""
   for line in text.lines() {
-    let next_section = dependency_section_from_line(line)
+    const next_section = dependency_section_from_line(line)
     if next_section != "" {
       section = next_section
     }
@@ -140,7 +140,7 @@ pub fn manifest_globs() -> list<string> {
 }
 
 fn checked_manifest_paths() -> list<string> {
-  var paths: list<string> = []
+  let paths: list<string> = []
   for pattern in MANIFEST_GLOBS {
     for path in harness.fs.glob(pattern) {
       paths = paths + [path]
@@ -150,9 +150,9 @@ fn checked_manifest_paths() -> list<string> {
 }
 
 fn unpublished_workspace_package_names(paths: list<string>) -> list<string> {
-  var names: list<string> = []
+  let names: list<string> = []
   for path in paths {
-    let text = harness.fs.read_text(path)
+    const text = harness.fs.read_text(path)
     if !manifest_is_publishable_from_text(text) {
       names = names + [manifest_package_name_from_text(text)]
     }
@@ -161,12 +161,12 @@ fn unpublished_workspace_package_names(paths: list<string>) -> list<string> {
 }
 
 pipeline main(task) {
-  let workspace_version = workspace_version_from_text(harness.fs.read_text("Cargo.toml"))
-  let paths = checked_manifest_paths()
-  let unpublished_sibling_names = unpublished_workspace_package_names(paths)
-  var errors: list<string> = []
+  const workspace_version = workspace_version_from_text(harness.fs.read_text("Cargo.toml"))
+  const paths = checked_manifest_paths()
+  const unpublished_sibling_names = unpublished_workspace_package_names(paths)
+  let errors: list<string> = []
   for path in paths {
-    let text = harness.fs.read_text(path)
+    const text = harness.fs.read_text(path)
     errors = errors
       + sibling_dep_errors_from_text_with_context(
       path,

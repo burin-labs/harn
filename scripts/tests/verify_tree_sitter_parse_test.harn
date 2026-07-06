@@ -2,8 +2,8 @@ import { with_temp_dir } from "std/testing"
 import "../verify_tree_sitter_parse.harn"
 
 fn mkdirs(path: string) -> nil {
-  let parts = split(path_normalize(path), "/")
-  var current = if path.starts_with("/") {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
     "/"
   } else {
     ""
@@ -25,7 +25,7 @@ fn mkdirs(path: string) -> nil {
 }
 
 fn write_file(root: string, rel: string, text: string = "") -> nil {
-  let path = path_join(root, rel)
+  const path = path_join(root, rel)
   mkdirs(dirname(path) ?? root)
   harness.fs.write_text(path, text)
   return nil
@@ -36,7 +36,7 @@ pipeline test_parse_cli_args(task) {
   assert_eq(parse_cli_args([]).strict, false)
   assert_eq(parse_cli_args(["--strict"]).strict, true)
   assert_eq(parse_cli_args(["--help"]).help, true)
-  let bad = parse_cli_args(["--wat"])
+  const bad = parse_cli_args(["--wat"])
   assert_eq(bad.ok, false)
   assert_eq(bad.error, "error: unknown argument: --wat")
 }
@@ -70,7 +70,7 @@ pipeline test_positive_harn_files_skips_error_fixtures_and_other_roots(task) {
       write_file(root, "examples/demo/main.harn", "let y = 2\n")
       write_file(root, "tests/bridge/bridge.harn", "let z = 3\n")
       write_file(root, "other/ignored.harn", "let q = 4\n")
-      let files = positive_harn_files(root).map({ path -> path_normalize(path) }).to_list()
+      const files = positive_harn_files(root).map({ path -> path_normalize(path) }).to_list()
       assert_eq(files.contains(path_normalize(path_join(root, "conformance/tests/good.harn"))), true)
       assert_eq(files.contains(path_normalize(path_join(root, "conformance/tests/bad.harn"))), false)
       assert_eq(files.contains(path_normalize(path_join(root, "examples/demo/main.harn"))), true)

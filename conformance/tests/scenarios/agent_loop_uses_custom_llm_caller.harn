@@ -8,8 +8,8 @@
 import { with_fallback } from "std/llm/handlers"
 
 pipeline default() {
-  let caller_a = { _call -> return {ok: false, status: "auth", error: "bad-key"} }
-  let caller_b = { _call -> return {
+  const caller_a = { _call -> return {ok: false, status: "auth", error: "bad-key"} }
+  const caller_b = { _call -> return {
     ok: true,
     value: {
       text: "FROM-B",
@@ -22,14 +22,14 @@ pipeline default() {
   } }
   // Wrap the fallback in an outer caller so we can println the merged
   // fallback_index for the test before returning to agent_loop.
-  let inner = with_fallback([caller_a, caller_b])
-  let observe = { call ->
+  const inner = with_fallback([caller_a, caller_b])
+  const observe = { call ->
     let env = inner(call)
     __io_println("fallback_index=" + to_string(env?.fallback_index ?? -1))
     __io_println("fallback_total=" + to_string(env?.fallback_total ?? -1))
     return env
   }
-  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: observe, max_iterations: 1})
+  const result = agent_loop("hi", nil, {provider: "mock", llm_caller: observe, max_iterations: 1})
   __io_println(result.status)
   __io_println(result.visible_text)
 }

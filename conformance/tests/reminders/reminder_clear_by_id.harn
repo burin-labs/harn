@@ -1,10 +1,10 @@
 pipeline main() {
-  let first = transcript
+  const first = transcript
     .inject_reminder(transcript(), {body: "first", dedupe_key: "k1"})
-  let second = transcript
+  const second = transcript
     .inject_reminder(first.transcript, {body: "second", dedupe_key: "k2"})
-  let cleared = transcript.clear_reminders(second.transcript, {id: first.reminder_id})
-  let events = transcript_events_by_kind(cleared.transcript, "system_reminder")
+  const cleared = transcript.clear_reminders(second.transcript, {id: first.reminder_id})
+  const events = transcript_events_by_kind(cleared.transcript, "system_reminder")
   __io_println(cleared.removed_count)
   __io_println(len(events))
   __io_println(events[0].reminder.body)

@@ -1,10 +1,10 @@
 pipeline test(task) {
-  let _missing = nil
+  const _missing = nil
   // A nested string literal inside an interpolation hole uses bare double
   // quotes; its contents — including `}` and `{` — must not end the hole.
   log("fallback: ${_missing ?? "unknown"}")
   log("brace in string: ${_missing ?? "a}b{c"}")
-  let _d = {"a}b": 7}
+  const _d = {"a}b": 7}
   log("dict key with brace: ${_d["a}b"]}")
   log("call with brace arg: ${["x}y", "z"].count}")
 }

@@ -7,14 +7,14 @@ pipeline default() {
       {text: "Visible <think>hidden", stop_reason: "stop"},
     ],
     { ->
-      let chunks = stream
+      const chunks = stream
         .collect(llm_stream_call("stream this", nil, {provider: "mock"}), {max: 4})
-      let direct = llm_call("non-stream this", nil, {provider: "mock"})
-      var raw = ""
+      const direct = llm_call("non-stream this", nil, {provider: "mock"})
+      let raw = ""
       for chunk in chunks {
         raw = raw + chunk.delta
       }
-      let final = chunks[len(chunks) - 1]
+      const final = chunks[len(chunks) - 1]
       __io_println(raw == direct.text)
       __io_println(chunks[0].visible_delta == "Visible")
       __io_println(chunks[0].partial == "Visible")
@@ -25,7 +25,7 @@ pipeline default() {
   with_llm_script(
     [{text: "early cancel text", stop_reason: "stop"}],
     { ->
-      let first = stream.first(llm_stream_call("cancel early", nil, {provider: "mock"}))
+      const first = stream.first(llm_stream_call("cancel early", nil, {provider: "mock"}))
       __io_println(first.delta == "early cancel text")
       __io_println(first.finish_reason == nil)
     },
@@ -33,8 +33,8 @@ pipeline default() {
   with_llm_script(
     [{text: "break cancel text", stop_reason: "stop"}],
     { ->
-      var broke_before_terminal = false
-      let cancel_stream = llm_stream_call("break early", nil, {provider: "mock"})
+      let broke_before_terminal = false
+      const cancel_stream = llm_stream_call("break early", nil, {provider: "mock"})
       for chunk in cancel_stream {
         broke_before_terminal = chunk.finish_reason == nil
         break

@@ -10,14 +10,14 @@ import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn preset_agent(kind, prompt, options = nil) {
-  let opts = agent_preset(kind, options)
+  const opts = agent_preset(kind, options)
   return agent_loop(prompt, opts?.system, opts)
 }
 
 pipeline default() {
   // (1) merge_captain — long adaptive budget; tool_using profile;
   // captain max-nudges of 3.
-  let merge = agent_preset("merge_captain")
+  const merge = agent_preset("merge_captain")
   __io_println(merge.profile)
   __io_println(merge.iteration_budget.mode)
   __io_println(merge.iteration_budget.initial)
@@ -31,7 +31,7 @@ pipeline default() {
   // which IS a layer.
   __io_println(merge?.tool_caller != nil)
   // (2) review_captain — tool-using profile, medium adaptive budget.
-  let review = agent_preset("review_captain")
+  const review = agent_preset("review_captain")
   __io_println(review.profile)
   __io_println(review.iteration_budget.mode)
   __io_println(review.iteration_budget.initial)
@@ -41,45 +41,45 @@ pipeline default() {
   __io_println(review?.tool_caller == nil)
   // (3) oncall_captain — tool_using profile + default rate-limit
   // (max_calls=50) layer wired automatically.
-  let oncall = agent_preset("oncall_captain")
+  const oncall = agent_preset("oncall_captain")
   __io_println(oncall.profile)
   __io_println(oncall.iteration_budget.initial)
   __io_println(oncall.iteration_budget.max)
   __io_println(oncall?.tool_caller != nil)
   // (4) release_captain — long adaptive budget. Dry-run is opt-in.
-  let release = agent_preset("release_captain")
+  const release = agent_preset("release_captain")
   __io_println(release.iteration_budget.initial)
   __io_println(release.iteration_budget.max)
   __io_println(release?.tool_caller == nil)
   // (5) Caller-supplied audit/telemetry sinks compose into the stack.
-  let audit_sink = { _record -> nil }
-  let telemetry_sink = { _span -> nil }
-  let merge_with_sinks = agent_preset("merge_captain", {audit_sink: audit_sink, telemetry: telemetry_sink})
+  const audit_sink = { _record -> nil }
+  const telemetry_sink = { _span -> nil }
+  const merge_with_sinks = agent_preset("merge_captain", {audit_sink: audit_sink, telemetry: telemetry_sink})
   __io_println(merge_with_sinks?.tool_caller != nil)
   // (6) Caller-supplied cheap-default + frontier escalation builds
   // the with_routing-backed llm_caller.
-  let cheap = { _call -> {
+  const cheap = { _call -> {
     ok: true,
     value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
   } }
-  let frontier = { _call -> {
+  const frontier = { _call -> {
     ok: true,
     value: {text: "frontier", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
   } }
-  let escalate = { _call -> false }
-  let routed = agent_preset(
+  const escalate = { _call -> false }
+  const routed = agent_preset(
     "release_captain",
     {cheap_caller: cheap, frontier_caller: frontier, escalate_predicate: escalate},
   )
   __io_println(routed?.llm_caller != nil)
   // (7) Caller-supplied tool_caller wins outright over preset-built layers.
-  let custom_caller = { call, next -> next(call) }
-  let overridden = agent_preset("merge_captain", {tool_caller: custom_caller, audit_sink: audit_sink})
+  const custom_caller = { call, next -> next(call) }
+  const overridden = agent_preset("merge_captain", {tool_caller: custom_caller, audit_sink: audit_sink})
   __io_println(overridden.tool_caller == custom_caller)
   // (8) merge_captain default consent ALLOWS read-annotated tools and
   // BLOCKS unannotated/write tools. Drive a real agent_loop through
   // both paths to confirm short-circuit behavior.
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "lookup",
@@ -111,7 +111,7 @@ pipeline default() {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      let merge_run = preset_agent(
+      const merge_run = preset_agent(
         "merge_captain",
         "Try one read and one write.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
@@ -129,7 +129,7 @@ pipeline default() {
       llm_text("<user_response>Stopping.</user_response>"),
     ],
     { ->
-      let oncall_capped = preset_agent(
+      const oncall_capped = preset_agent(
         "oncall_captain",
         "Hammer the same tool.",
         {
@@ -149,7 +149,7 @@ pipeline default() {
       llm_text("<user_response>Dry run preview.</user_response>"),
     ],
     { ->
-      let release_dry = preset_agent(
+      const release_dry = preset_agent(
         "release_captain",
         "Preview the action.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, dry_run: true},
@@ -164,7 +164,7 @@ pipeline default() {
       llm_text("<user_response>Looks good.</user_response>"),
     ],
     { ->
-      let review_run = preset_agent(
+      const review_run = preset_agent(
         "review_captain",
         "Review this PR.",
         {provider: "mock", tools: registry, tool_format: "native"},
@@ -178,7 +178,7 @@ pipeline default() {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      let merge_no_consent = preset_agent(
+      const merge_no_consent = preset_agent(
         "merge_captain",
         "Delete with consent disabled.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, consent: false},

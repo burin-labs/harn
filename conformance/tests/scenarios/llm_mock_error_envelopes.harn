@@ -15,7 +15,7 @@ pipeline default(task) {
       {text: "recovered", tool_calls: []},
     ],
     { ->
-      let first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
+      const first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
       __io_println(first.ok)
       __io_println(first.response == nil)
       __io_println(first.error.status)
@@ -25,7 +25,7 @@ pipeline default(task) {
       __io_println(first.error.provider)
       __io_println(first.error.model)
       __io_println(first.error.retry_after_ms)
-      let second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
+      const second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
       __io_println(second.text)
     },
   )

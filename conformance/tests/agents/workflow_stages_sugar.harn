@@ -8,7 +8,7 @@ import { workflow_stages } from "std/workflow/patterns"
  */
 pipeline default() {
   // 1. Byte-identical to a hand-authored two-stage graph (linear edge auto-wired).
-  let sugar = workflow_stages(
+  const sugar = workflow_stages(
     {
       name: "demo",
       stages: [
@@ -17,7 +17,7 @@ pipeline default() {
       ],
     },
   )
-  let hand = workflow_graph(
+  const hand = workflow_graph(
     {
       name: "demo",
       entry: "act",
@@ -35,14 +35,14 @@ pipeline default() {
   __io_println(sugar.entry == hand.entry)
   __io_println(sugar.name == hand.name)
   // 2. Bare-list form + default ids (`stage_<n>`) + first-stage entry.
-  let bare = workflow_stages([{kind: "stage"}, {kind: "stage"}, {kind: "stage"}])
+  const bare = workflow_stages([{kind: "stage"}, {kind: "stage"}, {kind: "stage"}])
   __io_println(json_stringify(keys(bare.nodes)))
   __io_println(bare.entry)
   __io_println(len(bare.edges))
   __io_println(bare.edges[0].from + "->" + bare.edges[0].to)
   __io_println(bare.edges[1].from + "->" + bare.edges[1].to)
   // 3. Explicit edges override the linear default (branching graphs).
-  let branched = workflow_stages(
+  const branched = workflow_stages(
     {
       name: "loop",
       stages: [{id: "impl", kind: "stage"}, {id: "verify", kind: "verify"}, {id: "repair", kind: "stage"}],

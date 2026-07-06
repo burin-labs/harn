@@ -22,18 +22,18 @@ import {
 } from "std/cli/render"
 
 fn __path_line(harness: Harness, label: string, value: unknown) {
-  let path_ref = safe_dict(value)
-  let path = safe_string(path_ref["path"], "")
+  const path_ref = safe_dict(value)
+  const path = safe_string(path_ref["path"], "")
   if path == "" {
     return
   }
-  let exists = if safe_bool(path_ref["exists"], false) {
+  const exists = if safe_bool(path_ref["exists"], false) {
     "yes"
   } else {
     "no"
   }
-  let hash = safe_string(path_ref["sha256"], "")
-  let suffix = if hash == "" {
+  const hash = safe_string(path_ref["sha256"], "")
+  const suffix = if hash == "" {
     ""
   } else {
     " sha256=" + hash
@@ -54,21 +54,21 @@ fn __path_line(harness: Harness, label: string, value: unknown) {
 }
 
 fn __render_human(harness: Harness, report: dict) {
-  let base = safe_dict(report["base"])
-  let request = safe_dict(report["request"])
-  let target = safe_dict(report["target"])
-  let contract = safe_dict(report["contract"])
-  let training = safe_dict(report["training"])
-  let training_contract = safe_dict(training["contract"])
-  let precision = safe_dict(training["precision"])
-  let template = safe_dict(training["template"])
-  let inputs = safe_dict(report["inputs"])
-  let artifacts = safe_dict(report["artifacts"])
-  let serving = safe_dict(report["serving"])
-  let promotion = safe_dict(report["promotion"])
-  let evidence = safe_dict(promotion["evidence_contract"])
-  let batch_ready = safe_dict(evidence["batch_ready"])
-  let warnings = safe_list(report["warnings"])
+  const base = safe_dict(report["base"])
+  const request = safe_dict(report["request"])
+  const target = safe_dict(report["target"])
+  const contract = safe_dict(report["contract"])
+  const training = safe_dict(report["training"])
+  const training_contract = safe_dict(training["contract"])
+  const precision = safe_dict(training["precision"])
+  const template = safe_dict(training["template"])
+  const inputs = safe_dict(report["inputs"])
+  const artifacts = safe_dict(report["artifacts"])
+  const serving = safe_dict(report["serving"])
+  const promotion = safe_dict(report["promotion"])
+  const evidence = safe_dict(promotion["evidence_contract"])
+  const batch_ready = safe_dict(evidence["batch_ready"])
+  const warnings = safe_list(report["warnings"])
   harness.stdio
     .println(
     "LoRA manifest for "
@@ -79,11 +79,11 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_string(base["provider"], ""),
   )
   harness.stdio.println("  producer: " + safe_string(report["producer"], ""))
-  let output = safe_string(request["output"], "")
+  const output = safe_string(request["output"], "")
   if output != "" {
     harness.stdio.println("  output: " + output)
   }
-  let run_id = safe_string(training["run_id"], "")
+  const run_id = safe_string(training["run_id"], "")
   if run_id != "" {
     harness.stdio.println("  training run: " + run_id)
   }
@@ -116,7 +116,7 @@ fn __render_human(harness: Harness, report: dict) {
       + " dropout="
       + safe_number_string(training["dropout"], ""),
   )
-  let target_modules = safe_list(training["target_modules"])
+  const target_modules = safe_list(training["target_modules"])
   if len(target_modules) > 0 {
     harness.stdio
       .println(
@@ -148,12 +148,12 @@ fn __render_human(harness: Harness, report: dict) {
   __path_line(harness, "dataset", inputs["dataset"])
   __path_line(harness, "corpus", inputs["corpus"])
   __path_line(harness, "export manifest", inputs["export_manifest"])
-  let teacher = safe_dict(inputs["teacher"])
-  let teacher_id = safe_string(teacher["id"], "")
+  const teacher = safe_dict(inputs["teacher"])
+  const teacher_id = safe_string(teacher["id"], "")
   if teacher_id != "" {
     harness.stdio.println("  teacher: " + teacher_id + " via " + safe_string(teacher["provider"], ""))
   }
-  let adapter_reference = safe_string(artifacts["adapter_reference"], "")
+  const adapter_reference = safe_string(artifacts["adapter_reference"], "")
   if adapter_reference != "" {
     harness.stdio.println("  adapter reference: " + adapter_reference)
   }
@@ -181,8 +181,8 @@ fn __render_human(harness: Harness, report: dict) {
 }
 
 fn __render_json(report: dict) -> string {
-  let ok = safe_bool(report["ok"], false)
-  let envelope = if ok {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
     cli_json_envelope({schema_version: 1, ok: true, data: report})
   } else {
     cli_json_envelope(
@@ -201,19 +201,19 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON not set")
     return 70
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse LoRA manifest payload: " + to_string(e))
     return 70
   }
-  let ok = safe_bool(report["ok"], false)
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const ok = safe_bool(report["ok"], false)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {

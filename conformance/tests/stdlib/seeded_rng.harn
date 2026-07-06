@@ -1,6 +1,6 @@
 pipeline test(task) {
-  let rng_a = rng_seed(42)
-  let rng_b = rng_seed(42)
+  const rng_a = rng_seed(42)
+  const rng_b = rng_seed(42)
   assert_eq(random(rng_a), random(rng_b))
   assert_eq(random_int(rng_a, 10, 99), random_int(rng_b, 10, 99))
   assert_eq(

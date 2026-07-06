@@ -12,13 +12,13 @@ import "std/edit"
  *   (via the shared transient staged-fs session).
  */
 fn write_fixture(dir: string, name: string, body: string) -> string {
-  let path = path_join(dir, name)
+  const path = path_join(dir, name)
   harness.fs.write_text(path, body)
   return path
 }
 
 pipeline default() {
-  let root = path_join(
+  const root = path_join(
     harness.fs.temp_dir(),
     "harn_edit_dry_run_" + to_string(harness.random.gen_range(100000, 999999)),
   )
@@ -26,9 +26,9 @@ pipeline default() {
   // 1) Multi-op plan: AST-precise body rewrite + safe text patch on the
   //    rename. Both ops touch the same file so the response yields one
   //    per-file diff that carries both edits.
-  let rs_path = write_fixture(root, "lib.rs", "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n")
-  let before = harness.fs.read_text(rs_path)
-  let bundle = edit_dry_run(
+  const rs_path = write_fixture(root, "lib.rs", "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n")
+  const before = harness.fs.read_text(rs_path)
+  const bundle = edit_dry_run(
     {
       plan: [
         {
@@ -46,15 +46,15 @@ pipeline default() {
   __io_println(bundle.summary.ops_applied == 2)
   __io_println(bundle.summary.ops_rejected == 0)
   __io_println(bundle.summary.files_touched == 1)
-  let diff = bundle.per_file_unified_diff[0].diff
+  const diff = bundle.per_file_unified_diff[0].diff
   __io_println(contains(diff, "--- a/") && contains(diff, "+++ b/"))
   __io_println(contains(diff, "@@ -"))
   __io_println(contains(diff, "fn greeter"))
   __io_println(harness.fs.read_text(rs_path) == before)
   // 2) Rejected ops (ambiguous safe_text_patch + unknown op) surface as
   //    structured rejections without aborting the plan.
-  let multi_path = write_fixture(root, "multi.txt", "todo\ntodo\n")
-  let mixed = edit_dry_run(
+  const multi_path = write_fixture(root, "multi.txt", "todo\ntodo\n")
+  const mixed = edit_dry_run(
     {
       plan: [
         {op: "safe_text_patch", path: multi_path, old_text: "todo", new_text: "done"},
@@ -68,12 +68,12 @@ pipeline default() {
   __io_println(mixed.ops[0].result == "rejected" && mixed.ops[0].reason == "ambiguous")
   __io_println(mixed.ops[1].result == "rejected" && mixed.ops[1].reason == "unknown_op")
   // 3) Empty plan is a no-op: zero ops applied, zero rejected, no diffs.
-  let empty = edit_dry_run({plan: []})
+  const empty = edit_dry_run({plan: []})
   __io_println(empty.result == "no_ops_applied")
   __io_println(empty.summary.files_touched == 0 && len(empty.per_file_unified_diff) == 0)
   // 4) Partial: one applied + one rejected → `result == "partial"`.
-  let part_path = write_fixture(root, "part.rs", "fn alpha() { 1 }\n")
-  let partial = edit_dry_run(
+  const part_path = write_fixture(root, "part.rs", "fn alpha() { 1 }\n")
+  const partial = edit_dry_run(
     {
       plan: [
         {

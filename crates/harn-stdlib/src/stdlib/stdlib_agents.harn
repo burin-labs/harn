@@ -10,7 +10,7 @@ import { llm_call_options } from "std/llm/options"
  * @errors: []
  */
 pub fn workflow_model_spec(config) {
-  let target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
+  const target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
   if target == nil || target == "" {
     return nil
   }
@@ -24,8 +24,8 @@ pub fn workflow_model_spec(config) {
  * @errors: []
  */
 pub fn workflow_options(config) {
-  let spec = workflow_model_spec(config)
-  let option_keys = [
+  const spec = workflow_model_spec(config)
+  const option_keys = [
     "max_tokens",
     "temperature",
     "top_p",
@@ -78,9 +78,9 @@ pub fn workflow_options(config) {
  * @errors: []
  */
 pub fn stage_config(flow, overrides, stage_name) {
-  let combined = (flow ?? {}) + (overrides ?? {})
-  let stage = combined[stage_name] ?? {}
-  let merged = combined + stage
+  const combined = (flow ?? {}) + (overrides ?? {})
+  const stage = combined[stage_name] ?? {}
+  const merged = combined + stage
   return filter_nil(merged + {_stage: stage_name})
 }
 
@@ -91,7 +91,7 @@ pub fn stage_config(flow, overrides, stage_name) {
  * @errors: []
  */
 pub fn stage_prompt(task, config) {
-  let ctx = config?.context
+  const ctx = config?.context
   return prompt_compose(
     task,
     ctx,
@@ -114,8 +114,8 @@ pub fn stage_prompt(task, config) {
  * @errors: []
  */
 pub fn run_stage(task, config) {
-  let prompt = stage_prompt(task, config)
-  let opts = workflow_options(config)
+  const prompt = stage_prompt(task, config)
+  const opts = workflow_options(config)
   if config?.mode == "completion" {
     return llm_completion(prompt?.prompt, config?.suffix, prompt?.system, llm_call_options(opts))
   }
@@ -139,11 +139,11 @@ pub fn verify_command(config) {
   if config?.command == nil || config?.command == "" {
     return nil
   }
-  let shell = host_call("process.get_default_shell", {})
-  let output = host_call("process.exec", {mode: "shell", command: config?.command, shell_id: shell?.id})
-  var ok = output?.success
+  const shell = host_call("process.get_default_shell", {})
+  const output = host_call("process.exec", {mode: "shell", command: config?.command, shell_id: shell?.id})
+  let ok = output?.success
   if config?.expect_status != nil {
-    let actual_status = output?.exit_code ?? output?.legacy_status ?? output?.status
+    const actual_status = output?.exit_code ?? output?.legacy_status ?? output?.status
     ok = actual_status == config.expect_status
   }
   if config?.expect_text != nil {
@@ -181,7 +181,7 @@ pub fn repair_task(original_task, verification, config) {
   if config?.prompt != nil {
     return config?.prompt
   }
-  let summary = json_stringify(verification)
+  const summary = json_stringify(verification)
   return "The previous attempt did not pass verification.\n\nVerification:\n" + summary
     + "\n\nContinue working on the original task and fix the problem.\n\nOriginal task:\n"
     + original_task
@@ -201,7 +201,7 @@ fn __action_graph_parse_input(raw) {
   if type_of(raw) != "string" {
     return raw
   }
-  let text = trim(raw)
+  const text = trim(raw)
   if text == "" {
     return []
   }
@@ -215,7 +215,7 @@ fn __action_graph_non_empty_string(value) {
   if type_of(value) != "string" {
     return nil
   }
-  let text = trim(value)
+  const text = trim(value)
   if text == "" {
     return nil
   }
@@ -224,7 +224,7 @@ fn __action_graph_non_empty_string(value) {
 
 fn __action_graph_first_string(candidates) {
   for value in candidates {
-    let text = __action_graph_non_empty_string(value)
+    const text = __action_graph_non_empty_string(value)
     if text != nil {
       return text
     }
@@ -243,16 +243,16 @@ fn __action_graph_listify(value) {
 }
 
 fn __action_graph_tool_list(raw) {
-  let value = raw?.tools ?? raw?.tool ?? raw?.allowed_tools ?? raw?.capabilities
+  const value = raw?.tools ?? raw?.tool ?? raw?.allowed_tools ?? raw?.capabilities
   if value == nil {
     return []
   }
-  var tools = []
+  let tools = []
   if type_of(value) == "string" {
     return [trim(value)]
   }
   for item in __action_graph_listify(value) {
-    let tool_name = if type_of(item) == "string" {
+    const tool_name = if type_of(item) == "string" {
       trim(item)
     } else {
       trim(item?.name ?? item?.tool ?? item?.id ?? "")
@@ -275,11 +275,11 @@ fn __action_graph_tool_class(tools, phase) {
       "generic"
     }
   }
-  var saw_read = false
-  var saw_write = false
-  var saw_exec = false
+  let saw_read = false
+  let saw_write = false
+  let saw_exec = false
   for tool_name in tools {
-    let name = lowercase(trim(tool_name))
+    const name = lowercase(trim(tool_name))
     if contains(["read", "search", "fetch", "query", "list", "inspect", "grep"], name) {
       saw_read = true
       continue
@@ -307,7 +307,7 @@ fn __action_graph_tool_class(tools, phase) {
 }
 
 fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
-  let explicit = lowercase(
+  const explicit = lowercase(
     trim(raw?.phase ?? raw?.kind ?? raw?.type ?? raw?.category ?? raw?.mode ?? fallback_phase ?? ""),
   )
   if contains(["research", "discover", "analyze", "analysis", "investigate"], explicit) {
@@ -319,7 +319,7 @@ fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
   if contains(["execute", "act", "implementation", "implement", "apply", "fix", "edit"], explicit) {
     return "execute"
   }
-  let text = lowercase(trim(instruction ?? ""))
+  const text = lowercase(trim(instruction ?? ""))
   if starts_with(text, "research ")
     || starts_with(text, "inspect ")
     || starts_with(text, "analyze ")
@@ -332,7 +332,7 @@ fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
     || starts_with(text, "evaluate ") {
     return "verify"
   }
-  let tool_class = __action_graph_tool_class(tools, fallback_phase)
+  const tool_class = __action_graph_tool_class(tools, fallback_phase)
   if tool_class == "read" && explicit != "execute" {
     return "research"
   }
@@ -340,11 +340,11 @@ fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
 }
 
 fn __action_graph_dependency_refs(raw) {
-  let source = raw?.depends_on ?? raw?.dependsOn ?? raw?.dependencies ?? raw?.needs ?? raw?.after
+  const source = raw?.depends_on ?? raw?.dependsOn ?? raw?.dependencies ?? raw?.needs ?? raw?.after
   if source == nil {
     return []
   }
-  var refs = []
+  let refs = []
   for item in __action_graph_listify(source) {
     if item == nil {
       continue
@@ -354,7 +354,7 @@ fn __action_graph_dependency_refs(raw) {
       continue
     }
     if type_of(item) == "dict" {
-      let ref_text = __action_graph_first_string(
+      const ref_text = __action_graph_first_string(
         [item?.id, item?.action_id, item?.title, item?.name, item?.label, item?.task],
       )
       if ref_text != nil {
@@ -362,7 +362,7 @@ fn __action_graph_dependency_refs(raw) {
       }
       continue
     }
-    let text = __action_graph_non_empty_string(item)
+    const text = __action_graph_non_empty_string(item)
     if text != nil {
       refs = refs + [text]
     }
@@ -381,22 +381,22 @@ fn __action_graph_collect_items(parsed) {
     return [parsed]
   }
   for key in ["actions", "plan", "steps", "items", "tasks"] {
-    let value = parsed[key]
+    const value = parsed[key]
     if type_of(value) == "list" {
       return value
     }
     if type_of(value) == "dict" {
-      let nested = __action_graph_collect_items(value)
+      const nested = __action_graph_collect_items(value)
       if len(nested) > 0 {
         return nested
       }
     }
   }
   if type_of(parsed?.batches) == "list" {
-    var flattened = []
+    let flattened = []
     for batch in parsed.batches {
-      let batch_phase = batch?.phase ?? batch?.kind ?? batch?.type
-      let batch_items = batch?.actions ?? batch?.items ?? batch?.steps ?? []
+      const batch_phase = batch?.phase ?? batch?.kind ?? batch?.type
+      const batch_items = batch?.actions ?? batch?.items ?? batch?.steps ?? []
       for item in __action_graph_listify(batch_items) {
         if type_of(item) == "dict" {
           flattened = flattened + [item + {phase: item?.phase ?? batch_phase}]
@@ -409,9 +409,9 @@ fn __action_graph_collect_items(parsed) {
       return flattened
     }
   }
-  var grouped = []
+  let grouped = []
   for phase in ["research", "execute", "verify"] {
-    let value = parsed[phase]
+    const value = parsed[phase]
     if value == nil {
       continue
     }
@@ -430,8 +430,8 @@ fn __action_graph_collect_items(parsed) {
 }
 
 fn __action_graph_aliases_for(canonical_id, source_id, title, index) {
-  var aliases = {}
-  let numeric = format("{}", index + 1)
+  let aliases = {}
+  const numeric = format("{}", index + 1)
   aliases[canonical_id] = canonical_id
   aliases[numeric] = canonical_id
   if source_id != nil {
@@ -444,7 +444,7 @@ fn __action_graph_aliases_for(canonical_id, source_id, title, index) {
 }
 
 fn __action_graph_merge_aliases(base, extra) {
-  var merged = base ?? {}
+  let merged = base ?? {}
   for entry in extra ?? {} {
     merged[entry.key] = entry.value
   }
@@ -452,9 +452,9 @@ fn __action_graph_merge_aliases(base, extra) {
 }
 
 fn __action_graph_append_unique_strings(items, values) {
-  var result = items ?? []
+  let result = items ?? []
   for value in __action_graph_listify(values) {
-    let text = __action_graph_non_empty_string(value)
+    const text = __action_graph_non_empty_string(value)
     if text != nil && !contains(result, text) {
       result = result + [text]
     }
@@ -463,7 +463,7 @@ fn __action_graph_append_unique_strings(items, values) {
 }
 
 fn __action_graph_batch_target_paths(batch) {
-  var target_paths = []
+  let target_paths = []
   for action in batch.actions {
     target_paths = __action_graph_append_unique_strings(
       target_paths,
@@ -474,7 +474,7 @@ fn __action_graph_batch_target_paths(batch) {
 }
 
 fn __action_graph_batch_verification(batch) {
-  let target_paths = __action_graph_batch_target_paths(batch)
+  const target_paths = __action_graph_batch_target_paths(batch)
   if len(target_paths) == 0 {
     return nil
   }
@@ -489,7 +489,7 @@ fn __action_graph_batch_verification(batch) {
 }
 
 fn __action_graph_batch_prompt(batch) {
-  var available_tools = []
+  let available_tools = []
   for action in batch.actions {
     for tool_name in action?.tools ?? [] {
       if !contains(available_tools, tool_name) {
@@ -497,11 +497,11 @@ fn __action_graph_batch_prompt(batch) {
       }
     }
   }
-  let target_paths = __action_graph_batch_target_paths(batch)
-  var create_direct_write = false
-  var has_exact_command = false
+  const target_paths = __action_graph_batch_target_paths(batch)
+  let create_direct_write = false
+  let has_exact_command = false
   for action in batch.actions {
-    let instruction = lowercase(trim(action?.instruction ?? action?.title ?? ""))
+    const instruction = lowercase(trim(action?.instruction ?? action?.title ?? ""))
     if starts_with(instruction, "create ") || starts_with(instruction, "write new ") {
       create_direct_write = true
     }
@@ -509,7 +509,7 @@ fn __action_graph_batch_prompt(batch) {
       has_exact_command = true
     }
   }
-  var lines = [
+  let lines = [
     "You are executing a scheduled action-graph batch.",
     "",
     "Phase: " + batch.phase,
@@ -565,9 +565,9 @@ fn __action_graph_batch_prompt(batch) {
     }
   }
   for action in batch.actions {
-    let title = action?.title ?? action?.instruction ?? action?.id
-    let exact_command = __action_graph_non_empty_string(action?.command ?? action?.metadata?.command)
-    let detail = if exact_command != nil {
+    const title = action?.title ?? action?.instruction ?? action?.id
+    const exact_command = __action_graph_non_empty_string(action?.command ?? action?.metadata?.command)
+    const detail = if exact_command != nil {
       (action?.instruction ?? title) + " Run exactly `${exact_command}`."
     } else {
       action?.instruction ?? title
@@ -578,9 +578,9 @@ fn __action_graph_batch_prompt(batch) {
 }
 
 fn __action_graph_batch(batch_index, phase, tool_class, actions) {
-  var action_ids = []
-  var titles = []
-  var depends_on = []
+  let action_ids = []
+  let titles = []
+  let depends_on = []
   for action in actions {
     action_ids = action_ids + [action.id]
     titles = titles + [action?.title ?? action?.instruction ?? action.id]
@@ -590,7 +590,7 @@ fn __action_graph_batch(batch_index, phase, tool_class, actions) {
       }
     }
   }
-  let batch = {
+  const batch = {
     _type: "action_batch",
     id: format("batch-{}", batch_index + 1),
     phase: phase,
@@ -616,7 +616,7 @@ fn __action_graph_batch_output_kind(phase) {
 }
 
 fn __action_graph_output_kind(template, default_output) {
-  let outputs = template?.output_contract?.output_kinds ?? []
+  const outputs = template?.output_contract?.output_kinds ?? []
   if len(outputs) > 0 {
     return outputs[0]
   }
@@ -654,7 +654,7 @@ fn __action_graph_terminal_kind(template, phase) {
 }
 
 fn __action_graph_node_system(base_system, prompt) {
-  let prefix = __action_graph_non_empty_string(base_system)
+  const prefix = __action_graph_non_empty_string(base_system)
   if prefix == nil {
     return prompt
   }
@@ -662,11 +662,11 @@ fn __action_graph_node_system(base_system, prompt) {
 }
 
 fn __action_graph_batch_tools(batch, template) {
-  let registry = template?.tools
+  const registry = template?.tools
   if registry == nil {
     return nil
   }
-  var selected = []
+  let selected = []
   for action in batch.actions {
     for tool_name in action?.tools ?? [] {
       if !contains(selected, tool_name) {
@@ -684,7 +684,7 @@ fn __action_graph_batch_tools(batch, template) {
 }
 
 fn __action_graph_batch_context_kinds(batch, template) {
-  let explicit = template?.context_policy?.include_kinds ?? []
+  const explicit = template?.context_policy?.include_kinds ?? []
   if len(explicit) > 0 {
     return explicit
   }
@@ -698,18 +698,18 @@ fn __action_graph_batch_context_kinds(batch, template) {
 }
 
 fn __action_graph_batch_node(batch, template) {
-  let local_verification = __action_graph_batch_verification(batch)
-  let model_policy = template?.model_policy ?? {}
-  let output_kind = __action_graph_output_kind(template, __action_graph_batch_output_kind(batch.phase))
-  let output_contract = (template?.output_contract ?? {}) + {output_kinds: [output_kind]}
-  let target_paths = __action_graph_batch_target_paths(batch)
-  let context_policy = (template?.context_policy ?? {})
+  const local_verification = __action_graph_batch_verification(batch)
+  const model_policy = template?.model_policy ?? {}
+  const output_kind = __action_graph_output_kind(template, __action_graph_batch_output_kind(batch.phase))
+  const output_contract = (template?.output_contract ?? {}) + {output_kinds: [output_kind]}
+  const target_paths = __action_graph_batch_target_paths(batch)
+  const context_policy = (template?.context_policy ?? {})
     + {include_kinds: __action_graph_batch_context_kinds(batch, template)}
-  var metadata = template?.metadata ?? {}
+  let metadata = template?.metadata ?? {}
   if local_verification != nil {
     metadata = metadata + {workflow_verification_scope: "local_only"}
   }
-  let approval_policy = if len(target_paths) > 0 {
+  const approval_policy = if len(target_paths) > 0 {
     (template?.approval_policy ?? {}) + {write_path_allowlist: target_paths}
   } else {
     template?.approval_policy ?? {}
@@ -741,13 +741,13 @@ fn __action_graph_terminal_prompt(plan, phase) {
 }
 
 fn __action_graph_terminal_node(plan, phase, template) {
-  let default_output = if phase == "verify" {
+  const default_output = if phase == "verify" {
     "verification_result"
   } else {
     "summary"
   }
-  let node_kind = __action_graph_terminal_kind(template, phase)
-  var verify_payload = nil
+  const node_kind = __action_graph_terminal_kind(template, phase)
+  let verify_payload = nil
   if node_kind == "verify" {
     verify_payload = template?.verify
       ?? filter_nil(
@@ -758,9 +758,9 @@ fn __action_graph_terminal_node(plan, phase, template) {
       },
     )
   }
-  let output_contract = (template?.output_contract ?? {})
+  const output_contract = (template?.output_contract ?? {})
     + {output_kinds: [__action_graph_output_kind(template, default_output)]}
-  let context_policy = (template?.context_policy ?? {})
+  const context_policy = (template?.context_policy ?? {})
     + {
     include_kinds: template?.context_policy?.include_kinds
       ?? ["plan", "summary", "artifact", "verification_result"],
@@ -786,22 +786,22 @@ fn __action_graph_terminal_node(plan, phase, template) {
  * @errors: []
  */
 pub fn action_graph(raw, options = nil) {
-  let parsed = __action_graph_parse_input(raw)
-  let items = __action_graph_collect_items(parsed)
-  var staged = []
-  var aliases = {}
+  const parsed = __action_graph_parse_input(raw)
+  const items = __action_graph_collect_items(parsed)
+  let staged = []
+  let aliases = {}
   for (index, item) in iter(items).enumerate() {
-    let dict = if type_of(item) == "dict" {
+    const dict = if type_of(item) == "dict" {
       item
     } else {
       {title: item, instruction: item}
     }
-    let tools = __action_graph_tool_list(dict)
-    let title = __action_graph_first_string(
+    const tools = __action_graph_tool_list(dict)
+    const title = __action_graph_first_string(
       [dict?.title, dict?.name, dict?.label, dict?.action, dict?.task, dict?.instruction, dict?.summary],
     )
       ?? format("Action {}", index + 1)
-    let instruction = __action_graph_first_string(
+    const instruction = __action_graph_first_string(
       [
         dict?.instruction,
         dict?.prompt,
@@ -814,9 +814,9 @@ pub fn action_graph(raw, options = nil) {
       ],
     )
       ?? title
-    let source_id = __action_graph_first_string([dict?.id, dict?.action_id, dict?.name, dict?.label])
-    let phase = __action_graph_phase(dict, dict?.phase ?? options?.phase, tools, instruction)
-    let canonical_id = format("action-{}", index + 1)
+    const source_id = __action_graph_first_string([dict?.id, dict?.action_id, dict?.name, dict?.label])
+    const phase = __action_graph_phase(dict, dict?.phase ?? options?.phase, tools, instruction)
+    const canonical_id = format("action-{}", index + 1)
     staged = staged
       + [
       {
@@ -836,14 +836,14 @@ pub fn action_graph(raw, options = nil) {
       __action_graph_aliases_for(canonical_id, source_id, title, index),
     )
   }
-  var normalized = []
-  var research_ids = []
-  var execute_ids = []
+  let normalized = []
+  let research_ids = []
+  let execute_ids = []
   for action in staged {
-    var resolved = []
+    let resolved = []
     for ref in action.depends_on {
-      let lookup = lowercase(trim(ref))
-      let target = aliases[lookup] ?? aliases[ref]
+      const lookup = lowercase(trim(ref))
+      const target = aliases[lookup] ?? aliases[ref]
       if target != nil && target != action.id && !contains(resolved, target) {
         resolved = resolved + [target]
       }
@@ -858,7 +858,7 @@ pub fn action_graph(raw, options = nil) {
         research_ids
       }
     }
-    let repaired = action + {depends_on: resolved}
+    const repaired = action + {depends_on: resolved}
     normalized = normalized + [repaired]
     if repaired.phase == "research" {
       research_ids = research_ids + [repaired.id]
@@ -892,26 +892,26 @@ pub fn action_graph(raw, options = nil) {
  * @errors: []
  */
 pub fn action_graph_batches(graph, completed = nil) {
-  let plan = if graph?._type == "action_graph" {
+  const plan = if graph?._type == "action_graph" {
     graph
   } else {
     action_graph(graph, nil)
   }
-  let done = __action_graph_listify(completed)
-  var remaining = []
+  const done = __action_graph_listify(completed)
+  let remaining = []
   for action in plan.actions {
     if !contains(done, action.id) {
       remaining = remaining + [action]
     }
   }
-  var finished = done
-  var batches = []
-  var loop_count = 0
+  let finished = done
+  let batches = []
+  let loop_count = 0
   while len(remaining) > 0 && loop_count < len(plan.actions) + 4 {
-    var ready = []
-    var blocked = []
+    let ready = []
+    let blocked = []
     for action in remaining {
-      var can_run = true
+      let can_run = true
       for dep in action.depends_on {
         if !contains(finished, dep) {
           can_run = false
@@ -927,13 +927,13 @@ pub fn action_graph_batches(graph, completed = nil) {
       ready = [remaining[0]]
       blocked = remaining[1:]
     }
-    let phase = if ready[0]?.phase == "research" || ready[0]?.phase == "execute" || ready[0]?.phase == "verify" {
+    const phase = if ready[0]?.phase == "research" || ready[0]?.phase == "execute" || ready[0]?.phase == "verify" {
       ready[0].phase
     } else {
       "execute"
     }
-    var current_phase = []
-    var next_remaining = blocked
+    let current_phase = []
+    let next_remaining = blocked
     for action in ready {
       if action.phase == phase {
         current_phase = current_phase + [action]
@@ -941,10 +941,10 @@ pub fn action_graph_batches(graph, completed = nil) {
         next_remaining = next_remaining + [action]
       }
     }
-    var grouped = {}
-    var order = []
+    let grouped = {}
+    let order = []
     for action in current_phase {
-      let key = action.tool_class ?? "generic"
+      const key = action.tool_class ?? "generic"
       if grouped[key] == nil {
         grouped[key] = []
         order = order + [key]
@@ -952,7 +952,7 @@ pub fn action_graph_batches(graph, completed = nil) {
       grouped[key] = grouped[key] + [action]
     }
     for key in order {
-      let batch = __action_graph_batch(len(batches), phase, key, grouped[key])
+      const batch = __action_graph_batch(len(batches), phase, key, grouped[key])
       batches = batches + [batch]
       for action in grouped[key] {
         finished = finished + [action.id]
@@ -972,12 +972,12 @@ pub fn action_graph_batches(graph, completed = nil) {
  * @errors: []
  */
 pub fn action_graph_render(graph) {
-  let plan = if graph?._type == "action_graph" {
+  const plan = if graph?._type == "action_graph" {
     graph
   } else {
     action_graph(graph, nil)
   }
-  var lines = ["# Action Graph"]
+  let lines = ["# Action Graph"]
   if plan?.task != nil {
     lines = lines + ["", "Task: " + plan.task]
   }
@@ -985,17 +985,17 @@ pub fn action_graph_render(graph) {
     lines = lines + ["", "Summary: " + plan.summary]
   }
   for phase in ["research", "execute", "verify"] {
-    var phase_lines = []
+    let phase_lines = []
     for action in plan.actions {
       if action.phase != phase {
         continue
       }
-      let deps = if len(action.depends_on) > 0 {
+      const deps = if len(action.depends_on) > 0 {
         " (depends on: " + join(action.depends_on, ", ") + ")"
       } else {
         ""
       }
-      let label = action?.title ?? action?.instruction ?? action.id
+      const label = action?.title ?? action?.instruction ?? action.id
       phase_lines = phase_lines
         + ["- [" + action.id + "] " + label + " [" + action.tool_class + "]" + deps]
     }
@@ -1015,19 +1015,19 @@ pub fn action_graph_render(graph) {
  * @errors: []
  */
 pub fn action_graph_flow(graph, config = nil) {
-  let plan = if graph?._type == "action_graph" {
+  const plan = if graph?._type == "action_graph" {
     graph
   } else {
     action_graph(graph, config)
   }
-  let batches = action_graph_batches(plan)
-  var nodes = {}
-  var edges = []
-  var entry = ""
-  var previous = ""
+  const batches = action_graph_batches(plan)
+  let nodes = {}
+  let edges = []
+  let entry = ""
+  let previous = ""
   for batch in batches {
-    let node_id = replace(batch.id, "-", "_")
-    let template = __action_graph_stage_template(config, batch.phase)
+    const node_id = replace(batch.id, "-", "_")
+    const template = __action_graph_stage_template(config, batch.phase)
     nodes[node_id] = __action_graph_batch_node(batch, template)
     if entry == "" {
       entry = node_id
@@ -1038,11 +1038,11 @@ pub fn action_graph_flow(graph, config = nil) {
     previous = node_id
   }
   for phase in ["verify", "evaluate"] {
-    let template = __action_graph_terminal_template(config, phase)
+    const template = __action_graph_terminal_template(config, phase)
     if len(keys(template ?? {})) == 0 {
       continue
     }
-    let node_id = if phase == "verify" {
+    const node_id = if phase == "verify" {
       "final_verify"
     } else {
       "final_evaluate"
@@ -1078,13 +1078,13 @@ pub fn action_graph_flow(graph, config = nil) {
  * @errors: []
  */
 pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
-  let plan = if graph?._type == "action_graph" {
+  const plan = if graph?._type == "action_graph" {
     graph
   } else {
     action_graph(graph, (config ?? {}) + {task: task})
   }
-  let flow = action_graph_flow(plan, config)
-  let plan_artifact = artifact(
+  const flow = action_graph_flow(plan, config)
+  const plan_artifact = artifact(
     {
       kind: "plan",
       title: config?.plan_title ?? "Action graph",
@@ -1095,8 +1095,8 @@ pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
       relevance: 1.0,
     },
   )
-  let artifacts = (overrides?.artifacts ?? []) + [plan_artifact]
-  let runtime = workflow_execute(task, flow, artifacts, overrides)
+  const artifacts = (overrides?.artifacts ?? []) + [plan_artifact]
+  const runtime = workflow_execute(task, flow, artifacts, overrides)
   return {
     _type: "action_graph_run",
     task: task,
@@ -1119,14 +1119,14 @@ pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
  * @errors: []
  */
 pub fn task_run(task, flow, overrides) {
-  let graph = workflow_graph(flow ?? {})
-  let runtime = workflow_execute(task, graph, overrides?.artifacts ?? [], overrides)
-  let stages = runtime?.run?.stages ?? []
-  var act = nil
-  var verify = nil
-  var repair = nil
-  let artifacts = runtime?.artifacts ?? []
-  let latest_text = if len(artifacts) > 0 {
+  const graph = workflow_graph(flow ?? {})
+  const runtime = workflow_execute(task, graph, overrides?.artifacts ?? [], overrides)
+  const stages = runtime?.run?.stages ?? []
+  let act = nil
+  let verify = nil
+  let repair = nil
+  const artifacts = runtime?.artifacts ?? []
+  const latest_text = if len(artifacts) > 0 {
     artifacts[len(artifacts) - 1]?.text
   } else {
     act?.visible_text
@@ -1144,7 +1144,7 @@ pub fn task_run(task, flow, overrides) {
       repair = stage
     }
   }
-  let status = if verify?.status == "failed" || repair != nil {
+  const status = if verify?.status == "failed" || repair != nil {
     "needs_attention"
   } else {
     runtime?.status ?? "completed"
@@ -1172,8 +1172,8 @@ pub fn task_run(task, flow, overrides) {
  * @errors: []
  */
 pub fn workflow_continue(prev, task, flow, overrides) {
-  let transcript = prev?.transcript ?? prev
-  let merged = (overrides ?? {}) + {transcript: transcript}
+  const transcript = prev?.transcript ?? prev
+  const merged = (overrides ?? {}) + {transcript: transcript}
   return task_run(task, flow, merged)
 }
 
@@ -1184,7 +1184,7 @@ pub fn workflow_continue(prev, task, flow, overrides) {
  * @errors: []
  */
 pub fn workflow_result_text(result) {
-  let raw = if type_of(result) == "string" {
+  const raw = if type_of(result) == "string" {
     result
   } else {
     result?.visible_text ?? result?.text ?? result?.result?.text ?? ""
@@ -1203,9 +1203,9 @@ fn __workflow_existing_transcript(result) {
 }
 
 fn __workflow_build_transcript(task, workflow_name, text: string, metadata) {
-  let base_metadata = metadata ?? {}
-  let transcript_metadata = base_metadata + {workflow: workflow_name}
-  var built = transcript(transcript_metadata)
+  const base_metadata = metadata ?? {}
+  const transcript_metadata = base_metadata + {workflow: workflow_name}
+  let built = transcript(transcript_metadata)
   if task {
     built = add_user(built, [{type: "text", text: task, visibility: "public"}])
   }
@@ -1216,8 +1216,8 @@ fn __workflow_build_transcript(task, workflow_name, text: string, metadata) {
 }
 
 fn __workflow_result_artifacts(existing, text: string, workflow_name) {
-  var run_artifacts = existing ?? []
-  var has_visible_result_artifact = false
+  let run_artifacts = existing ?? []
+  let has_visible_result_artifact = false
   if text {
     for item in run_artifacts {
       if item?.text == text {
@@ -1245,8 +1245,8 @@ fn __workflow_result_artifacts(existing, text: string, workflow_name) {
 }
 
 fn __workflow_result_metadata(base_run, options) {
-  let base_metadata = base_run?.metadata ?? {}
-  let option_metadata = options?.metadata ?? {}
+  const base_metadata = base_run?.metadata ?? {}
+  const option_metadata = options?.metadata ?? {}
   return base_metadata + option_metadata
 }
 
@@ -1257,11 +1257,11 @@ fn __workflow_result_metadata(base_run, options) {
  * @errors: []
  */
 pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
-  let existing = __workflow_existing_transcript(result)
+  const existing = __workflow_existing_transcript(result)
   if existing {
     return existing
   }
-  let text = workflow_result_text(result)
+  const text = workflow_result_text(result)
   return __workflow_build_transcript(task, workflow_name, text, metadata)
 }
 
@@ -1272,19 +1272,19 @@ pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
  * @errors: []
  */
 pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
-  let base_run = if result?._type == "run_record" {
+  const base_run = if result?._type == "run_record" {
     result
   } else {
     result?.run ?? {}
   }
-  let text = workflow_result_text(result)
-  let metadata = __workflow_result_metadata(base_run, options)
-  let transcript = if __workflow_existing_transcript(result) {
+  const text = workflow_result_text(result)
+  const metadata = __workflow_result_metadata(base_run, options)
+  const transcript = if __workflow_existing_transcript(result) {
     __workflow_existing_transcript(result)
   } else {
     __workflow_build_transcript(task, workflow_name, text, metadata)
   }
-  let run_artifacts = __workflow_result_artifacts(
+  const run_artifacts = __workflow_result_artifacts(
     base_run?.artifacts ?? result?.artifacts ?? artifacts,
     text,
     workflow_name,
@@ -1311,24 +1311,24 @@ pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
  * @errors: []
  */
 pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) {
-  let base_run = if result?._type == "run_record" {
+  const base_run = if result?._type == "run_record" {
     result
   } else {
     result?.run ?? {}
   }
-  let text = workflow_result_text(result)
-  let metadata = __workflow_result_metadata(base_run, options)
-  let transcript = if __workflow_existing_transcript(result) {
+  const text = workflow_result_text(result)
+  const metadata = __workflow_result_metadata(base_run, options)
+  const transcript = if __workflow_existing_transcript(result) {
     __workflow_existing_transcript(result)
   } else {
     __workflow_build_transcript(task, workflow_name, text, metadata)
   }
-  let run_artifacts = __workflow_result_artifacts(
+  const run_artifacts = __workflow_result_artifacts(
     base_run?.artifacts ?? result?.artifacts ?? artifacts,
     text,
     workflow_name,
   )
-  let run = run_record(
+  const run = run_record(
     base_run
       + {
       workflow_id: base_run?.workflow_id ?? workflow_name,
@@ -1341,7 +1341,7 @@ pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) 
       metadata: metadata,
     },
   )
-  let persisted = run_record_save(run, options?.path)
+  const persisted = run_record_save(run, options?.path)
   return {
     path: persisted?.path,
     persisted_path: persisted?.path,
@@ -1360,9 +1360,9 @@ pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) 
  * @errors: []
  */
 pub fn handoff_artifact(value) {
-  let item = handoff(value)
-  let target = item?.target_persona_or_human ?? {}
-  let label = target?.label ?? target?.id ?? "unknown"
+  const item = handoff(value)
+  const target = item?.target_persona_or_human ?? {}
+  const label = target?.label ?? target?.id ?? "unknown"
   return artifact(
     {
       kind: "handoff",
@@ -1384,10 +1384,10 @@ pub fn handoff_artifact(value) {
  * @errors: []
  */
 pub fn workflow_session(prev) {
-  let transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
-  let run = prev?.run ?? prev?.result?.run
-  let persisted_path = prev?.persisted_path ?? prev?.path ?? run?.persisted_path
-  let workflow_id = prev?.workflow_id ?? run?.workflow_id ?? prev?.workflow ?? run?.workflow_name
+  const transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
+  const run = prev?.run ?? prev?.result?.run
+  const persisted_path = prev?.persisted_path ?? prev?.path ?? run?.persisted_path
+  const workflow_id = prev?.workflow_id ?? run?.workflow_id ?? prev?.workflow ?? run?.workflow_name
   return {
     _type: "workflow_session",
     workflow_id: workflow_id,
@@ -1413,8 +1413,8 @@ pub fn workflow_session(prev) {
  * @errors: []
  */
 pub fn workflow_session_new(metadata) {
-  let raw = metadata ?? {}
-  let workflow_id = raw?.workflow_id ?? raw?.workflow
+  const raw = metadata ?? {}
+  const workflow_id = raw?.workflow_id ?? raw?.workflow
   return workflow_session({status: "active", workflow_id: workflow_id, transcript: transcript(raw)})
 }
 
@@ -1425,7 +1425,7 @@ pub fn workflow_session_new(metadata) {
  * @errors: []
  */
 pub fn workflow_session_restore(source) {
-  let run = if type_of(source) == "string" {
+  const run = if type_of(source) == "string" {
     run_record_load(source)
   } else {
     source?.run ?? source
@@ -1448,7 +1448,7 @@ pub fn workflow_session_restore(source) {
  * @errors: []
  */
 pub fn workflow_session_fork(prev) {
-  let session = workflow_session(prev)
+  const session = workflow_session(prev)
   return workflow_session(session + {transcript: transcript_fork(session.transcript)})
 }
 
@@ -1459,7 +1459,7 @@ pub fn workflow_session_fork(prev) {
  * @errors: []
  */
 pub fn workflow_session_archive(prev) {
-  let session = workflow_session(prev)
+  const session = workflow_session(prev)
   return workflow_session(session + {status: "archived", transcript: transcript_archive(session.transcript)})
 }
 
@@ -1470,7 +1470,7 @@ pub fn workflow_session_archive(prev) {
  * @errors: []
  */
 pub fn workflow_session_resume(prev) {
-  let session = workflow_session(prev)
+  const session = workflow_session(prev)
   return workflow_session(session + {status: "active", transcript: transcript_resume(session.transcript)})
 }
 
@@ -1481,7 +1481,7 @@ pub fn workflow_session_resume(prev) {
  * @errors: []
  */
 pub fn workflow_compact(prev, options) {
-  let transcript = prev?.transcript ?? prev
+  const transcript = prev?.transcript ?? prev
   return transcript_summarize(transcript, options)
 }
 
@@ -1492,7 +1492,7 @@ pub fn workflow_compact(prev, options) {
  * @errors: []
  */
 pub fn workflow_session_compact(prev, options) {
-  let session = workflow_session(prev)
+  const session = workflow_session(prev)
   return workflow_session(session + {transcript: transcript_summarize(session.transcript, options)})
 }
 
@@ -1503,7 +1503,7 @@ pub fn workflow_session_compact(prev, options) {
  * @errors: []
  */
 pub fn workflow_reset(prev, carry_summary) {
-  let transcript = prev?.transcript ?? prev
+  const transcript = prev?.transcript ?? prev
   if carry_summary && transcript_summary(transcript) {
     return transcript_compact(transcript, {keep_last: 0})
   }
@@ -1517,7 +1517,7 @@ pub fn workflow_reset(prev, carry_summary) {
  * @errors: []
  */
 pub fn workflow_session_reset(prev, carry_summary) {
-  let session = workflow_session(prev)
+  const session = workflow_session(prev)
   return workflow_session(
     {
       workflow_id: session.workflow_id,
@@ -1535,9 +1535,9 @@ pub fn workflow_session_reset(prev, carry_summary) {
  * @errors: []
  */
 pub fn continue_as_new(prev, options = nil) {
-  let session = workflow_session(prev)
-  let carry_summary = options?.carry_summary ?? true
-  let _ = workflow.continue_as_new(session)
+  const session = workflow_session(prev)
+  const carry_summary = options?.carry_summary ?? true
+  const _ = workflow.continue_as_new(session)
   return workflow_session(
     {
       workflow_id: session.workflow_id,
@@ -1557,11 +1557,11 @@ pub fn continue_as_new(prev, options = nil) {
  * @errors: []
  */
 pub fn workflow_session_persist(prev, path) {
-  let session = workflow_session(prev)
+  const session = workflow_session(prev)
   if session.run == nil {
     return session
   }
-  let persisted = run_record_save(session.run, path)
+  const persisted = run_record_save(session.run, path)
   return workflow_session(session + {run: persisted?.run, persisted_path: persisted?.path})
 }
 

@@ -8,7 +8,7 @@
 // The pure fence-extraction / normalization logic lives in `pub fn`s so
 // it is testable without touching the filesystem; only `main` reads the
 // spec, writes temp files, and shells out to the harn binary.
-let SPEC_PATH = "spec/HARN_SPEC.md"
+const SPEC_PATH = "spec/HARN_SPEC.md"
 
 /** True if `c` is an ASCII word character ([A-Za-z0-9_]). */
 pub fn is_word_char(c: string) -> bool {
@@ -31,17 +31,17 @@ fn is_word_or_dot(c: string) -> bool {
  * strip leading/trailing dashes. Empty results become "section".
  */
 pub fn slugify(value: string) -> string {
-  let lowered = value.trim().to_lower()
-  let dashed = regex_replace(r"[^a-z0-9]+", "-", lowered)
-  var start = 0
-  var end = dashed.len()
+  const lowered = value.trim().to_lower()
+  const dashed = regex_replace(r"[^a-z0-9]+", "-", lowered)
+  let start = 0
+  let end = dashed.len()
   while start < end && dashed.char_at(start) == "-" {
     start = start + 1
   }
   while end > start && dashed.char_at(end - 1) == "-" {
     end = end - 1
   }
-  let stripped = dashed.substring(start, end)
+  const stripped = dashed.substring(start, end)
   if stripped == "" {
     return "section"
   }
@@ -53,13 +53,13 @@ pub fn slugify(value: string) -> string {
  * markdown heading line, mirroring Python's `re.sub(r"^#+\s*", "", line)`.
  */
 pub fn heading_text(line: string) -> string {
-  var i = 0
-  let n = line.len()
+  let i = 0
+  const n = line.len()
   while i < n && line.char_at(i) == "#" {
     i = i + 1
   }
   while i < n {
-    let c = line.char_at(i)
+    const c = line.char_at(i)
     if c == " " || c == "\t" || c == "\r" {
       i = i + 1
     } else {
@@ -75,17 +75,17 @@ pub fn heading_text(line: string) -> string {
  * Python's `re.sub(r"(?<![\w.])\.\.\.(?![\w.])", "nil", snippet)`.
  */
 pub fn normalize_snippet(snippet: string) -> string {
-  var out = ""
-  var i = 0
-  let n = snippet.len()
+  let out = ""
+  let i = 0
+  const n = snippet.len()
   while i < n {
     if i + 3 <= n && snippet.substring(i, i + 3) == "..." {
-      let before_ok = if i == 0 {
+      const before_ok = if i == 0 {
         true
       } else {
         !is_word_or_dot(snippet.char_at(i - 1))
       }
-      let after_ok = if i + 3 >= n {
+      const after_ok = if i + 3 >= n {
         true
       } else {
         !is_word_or_dot(snippet.char_at(i + 3))
@@ -108,7 +108,7 @@ pub fn normalize_snippet(snippet: string) -> string {
  * `# error:`.
  */
 pub fn should_skip_snippet(snippet: string) -> bool {
-  let lowered = snippet.to_lower()
+  const lowered = snippet.to_lower()
   return lowered.contains("// error:") || lowered.contains("# error:")
 }
 
@@ -121,7 +121,7 @@ pub fn fence_info(line: string) -> string? {
   if !line.starts_with("```") {
     return nil
   }
-  let rest = line.substring(3, line.len())
+  const rest = line.substring(3, line.len())
   if rest.contains("`") {
     return nil
   }
@@ -145,24 +145,24 @@ pub fn strip_ws(s: string) -> string {
  * `extract_harn_fences` in the Python script.
  */
 pub fn extract_harn_fences(markdown: string) -> list {
-  var fences = []
-  var current_heading = "spec"
-  var in_fence = false
-  var fence_lang = ""
-  var fence_start = 0
-  var fence_lines = []
-  let lines = markdown.split("\n")
-  var line_no = 0
+  let fences = []
+  let current_heading = "spec"
+  let in_fence = false
+  let fence_lang = ""
+  let fence_start = 0
+  let fence_lines = []
+  const lines = markdown.split("\n")
+  let line_no = 0
   for line in lines {
     line_no = line_no + 1
     if !in_fence && line.starts_with("#") {
-      let h = heading_text(line)
+      const h = heading_text(line)
       if h != "" {
         current_heading = h
       }
       continue
     }
-    let info = fence_info(line)
+    const info = fence_info(line)
     if info != nil {
       if !in_fence {
         in_fence = true
@@ -171,7 +171,7 @@ pub fn extract_harn_fences(markdown: string) -> list {
         fence_lines = []
       } else {
         if fence_lang == "harn" {
-          let snippet = strip_ws(fence_lines.join("\n"))
+          const snippet = strip_ws(fence_lines.join("\n"))
           if snippet != "" {
             fences = fences
               + [{heading: current_heading, line: fence_start, snippet: snippet + "\n"}]
@@ -200,7 +200,7 @@ pub fn snippet_filename(idx: int, heading: string, line_no: int) -> string {
 
 /** Zero-pad a non-negative int to at least 3 digits. */
 pub fn pad3(n: int) -> string {
-  let s = "${n}"
+  const s = "${n}"
   if s.len() >= 3 {
     return s
   }
@@ -219,21 +219,21 @@ pub fn pad3(n: int) -> string {
  * `cargo run --bin harn` which builds on demand.
  */
 fn harn_check_argv() -> list<string> {
-  let bin_override = harness.env.get("HARN_CHECK_BIN")
+  const bin_override = harness.env.get("HARN_CHECK_BIN")
   if bin_override != nil && bin_override != "" {
     return [bin_override, "check"]
   }
-  let meta = harness.process
+  const meta = harness.process
     .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
   if meta.success {
-    let parsed = try {
+    const parsed = try {
       json_parse(meta.stdout)
     } catch (err) {
       nil
     }
-    let target_dir = parsed?.target_directory
+    const target_dir = parsed?.target_directory
     if target_dir != nil && target_dir != "" {
-      let bin = target_dir + "/debug/harn"
+      const bin = target_dir + "/debug/harn"
       if harness.fs.exists(bin) {
         return [bin, "check"]
       }
@@ -247,7 +247,7 @@ pipeline main(task) {
     __io_eprintln("error: missing ${SPEC_PATH}")
     return 1
   }
-  let fences = extract_harn_fences(harness.fs.read_text(SPEC_PATH))
+  const fences = extract_harn_fences(harness.fs.read_text(SPEC_PATH))
   if fences.count == 0 {
     __io_eprintln("error: no ```harn fences found in ${SPEC_PATH}")
     return 1
@@ -255,13 +255,13 @@ pipeline main(task) {
   /* The runtime sandbox only permits writes inside the workspace root,
    * so the scratch directory lives there (and is removed afterward)
    * rather than under the system temp dir the Python version used. */
-  let mk = harness.process
+  const mk = harness.process
     .spawn_captured({cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]})
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     return 1
   }
-  let tmpbase = mk.stdout.trim()
+  const tmpbase = mk.stdout.trim()
   /* Remove the scratch directory on every exit path — including an early
    * return or a throw from `write_text`/`spawn_captured` below. Without this
    * an interrupted run leaks a `harn-spec-verify-*` directory into the
@@ -269,23 +269,23 @@ pipeline main(task) {
   defer {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
   }
-  var manifest_lines = []
-  var idx = 0
+  let manifest_lines = []
+  let idx = 0
   for fence in fences {
     idx = idx + 1
     if should_skip_snippet(fence.snippet) {
       continue
     }
-    let name = snippet_filename(idx, fence.heading, fence.line)
-    let path = tmpbase + "/" + name
+    const name = snippet_filename(idx, fence.heading, fence.line)
+    const path = tmpbase + "/" + name
     harness.fs.write_text(path, normalize_snippet(fence.snippet))
     manifest_lines = manifest_lines
       + ["${name}: ${fence.heading} (spec line ${fence.line})"]
   }
-  let argv_prefix = harn_check_argv()
-  let bin = argv_prefix[0]
-  let check_args = argv_prefix.slice(1, argv_prefix.count) + [tmpbase]
-  let result = harness.process
+  const argv_prefix = harn_check_argv()
+  const bin = argv_prefix[0]
+  const check_args = argv_prefix.slice(1, argv_prefix.count) + [tmpbase]
+  const result = harness.process
     .spawn_captured({cmd: bin, args: check_args})
   if result.exit_code != 0 {
     __io_eprintln("language spec verification failed")

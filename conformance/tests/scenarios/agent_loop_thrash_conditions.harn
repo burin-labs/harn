@@ -25,11 +25,11 @@ fn call(name: string, args) {
  * return the pattern of the FIRST warning emitted, or "" if none tripped.
  */
 fn run_actions(config, steps) {
-  var state = agent_stall_initial_state()
-  var first_pattern = ""
-  var trip_count = 0
+  let state = agent_stall_initial_state()
+  let first_pattern = ""
+  let trip_count = 0
   for step in steps {
-    let obs = agent_stall_observe_tool_calls(
+    const obs = agent_stall_observe_tool_calls(
       "thrash-test",
       step.calls,
       1,
@@ -40,7 +40,7 @@ fn run_actions(config, steps) {
       step?.text ?? "",
     )
     state = obs.state
-    let warning = obs.warning
+    const warning = obs.warning
     if warning != nil {
       trip_count = trip_count + 1
       if first_pattern == "" {
@@ -57,9 +57,9 @@ fn run_actions(config, steps) {
 }
 
 pipeline default() {
-  let cfg = {enabled: true, inject_feedback: false}
+  const cfg = {enabled: true, inject_feedback: false}
   // 1. Same action -> byte-identical observation, 4x -> repeated_same_observation.
-  let same_obs = run_actions(
+  const same_obs = run_actions(
     cfg,
     [
       {calls: call("read", {path: "a"}), prev: nil},
@@ -72,7 +72,7 @@ pipeline default() {
   require same_obs.pattern == "repeated_same_observation", "byte-identical observation must trip at threshold"
   __io_println("same_obs=" + same_obs.pattern)
   // Polling exemption: same action, CHANGING observation each turn -> no trip.
-  let polling = run_actions(
+  const polling = run_actions(
     cfg,
     [
       {calls: call("poll", {job: "j"}), prev: nil},
@@ -86,7 +86,7 @@ pipeline default() {
   require polling.trips == 0, "changing observation (polling) must never trip"
   __io_println("polling=" + polling.pattern + ",trips=" + to_string(polling.trips))
   // 2. Same action -> same error, 3x -> repeated_error.
-  let same_err = run_actions(
+  const same_err = run_actions(
     cfg,
     [
       {calls: call("build", {}), prev: nil},
@@ -97,7 +97,7 @@ pipeline default() {
   )
   __io_println("same_err=" + same_err.pattern)
   // Distinct errors from the same action do NOT trip repeated_error.
-  let distinct_err = run_actions(
+  const distinct_err = run_actions(
     cfg,
     [
       {calls: call("build", {}), prev: nil},
@@ -108,7 +108,7 @@ pipeline default() {
   )
   __io_println("distinct_err=" + distinct_err.pattern + ",trips=" + to_string(distinct_err.trips))
   // 3. No-progress monologue: 3 consecutive text-only turns -> no_progress_monologue.
-  let monologue = run_actions(
+  const monologue = run_actions(
     cfg,
     [
       {calls: [], text: "thinking..."},
@@ -118,7 +118,7 @@ pipeline default() {
   )
   __io_println("monologue=" + monologue.pattern)
   // A progress (tool-call) turn resets the monologue streak.
-  let monologue_reset = run_actions(
+  const monologue_reset = run_actions(
     cfg,
     [
       {calls: [], text: "thinking"},
@@ -133,19 +133,19 @@ pipeline default() {
   )
   // 4. Ping-pong: A,B,A,B alternation for 6 cycles -> ping_pong. Each step has a
   // unique observation so the same-observation condition can never fire first.
-  var pingpong_steps = []
+  let pingpong_steps = []
   for i in range(0, 13) {
-    let name = if i % 2 == 0 {
+    const name = if i % 2 == 0 {
       "A"
     } else {
       "B"
     }
     pingpong_steps = pingpong_steps.push({calls: call(name, {}), prev: ok_dispatch(name, "obs-" + to_string(i))})
   }
-  let pingpong = run_actions(cfg, pingpong_steps)
+  const pingpong = run_actions(cfg, pingpong_steps)
   __io_println("pingpong=" + pingpong.pattern)
   // 5. Repeated context-window errors, 2x -> repeated_context_window_error.
-  let ctx = run_actions(
+  const ctx = run_actions(
     cfg,
     [
       {calls: call("summarize", {}), prev: nil},
@@ -162,7 +162,7 @@ pipeline default() {
   __io_println("ctx=" + ctx.pattern)
   // Hard stop after 3 consecutive un-recovered trips. We force three back-to-
   // back same-observation trips with no recovering step between them.
-  let hard = run_actions(
+  const hard = run_actions(
     {enabled: true, inject_feedback: false, repeat_same_observation: 2},
     [
       {calls: call("read", {path: "a"}), prev: nil},
@@ -177,7 +177,7 @@ pipeline default() {
     "hard_stop=" + to_string(hard.hard_stop) + ",consecutive=" + to_string(hard.consecutive),
   )
   // exempt_tools still works as a secondary escape hatch (back-compat).
-  let exempt = run_actions(
+  const exempt = run_actions(
     {enabled: true, inject_feedback: false, exempt_tools: ["poll"]},
     [
       {calls: call("poll", {job: "j"}), prev: nil},
@@ -192,7 +192,7 @@ pipeline default() {
   // fires. Run a full agent_loop with a stalled done_judge but only ONE noop
   // call (below threshold) so no stall warning ever fires; assert zero judge
   // decisions were emitted.
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "noop",
@@ -207,8 +207,8 @@ pipeline default() {
   with_llm_script(
     [{text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]}, llm_text("Done. ##DONE##")],
     { ->
-      let session = "thrash-judge-gate-" + uuid()
-      let captured = agent_capture_events(
+      const session = "thrash-judge-gate-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Finish without stalling.",
@@ -225,8 +225,8 @@ pipeline default() {
           },
         ) },
       )
-      let stalls = captured.events.filter({ event -> event.type == "agent_loop_stall_warning" })
-      let judges = captured.events.filter({ event -> event.type == "judge_decision" })
+      const stalls = captured.events.filter({ event -> event.type == "agent_loop_stall_warning" })
+      const judges = captured.events.filter({ event -> event.type == "judge_decision" })
       require len(stalls) == 0, "no stall warning should fire below threshold"
       require len(judges) == 0, "advisory judge must not be consulted without a deterministic trip"
       __io_println("gate_stalls=" + to_string(len(stalls)))

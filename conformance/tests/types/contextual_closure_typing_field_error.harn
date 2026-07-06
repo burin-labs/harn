@@ -3,6 +3,6 @@ struct Handler {
 }
 
 pipeline default() {
-  let h = Handler {callback: { x -> x + "oops" }}
+  const h = Handler {callback: { x -> x + "oops" }}
   __io_println(0)
 }

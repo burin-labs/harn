@@ -14,7 +14,7 @@ pipeline default() {
       ),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "What is 2 + 2?",
         nil,
         {
@@ -27,7 +27,7 @@ pipeline default() {
       __io_println(result.status)
       __io_println(result.visible_text)
       __io_println(result.llm.iterations)
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(len(calls))
       __io_println(!json_stringify(calls[2].messages).contains("idk"))
       __io_println(json_stringify(calls[2].messages).contains("Show the arithmetic explicitly."))

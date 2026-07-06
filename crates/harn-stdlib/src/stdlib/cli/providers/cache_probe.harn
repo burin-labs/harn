@@ -43,13 +43,13 @@ fn __safe_int(value, fallback: int) -> int {
 }
 
 fn __render_human(report: dict) -> string {
-  let provider = __safe_string(report["provider"], "")
-  let model = __safe_string(report["model"], "")
-  let support = __safe_dict(report["support"])
-  let profile = __safe_dict(support["profile"])
-  let verdict = __safe_string(report["verdict"], "")
-  let counts = __safe_dict(report["bucket_counts"])
-  var out = provider + " " + model
+  const provider = __safe_string(report["provider"], "")
+  const model = __safe_string(report["model"], "")
+  const support = __safe_dict(report["support"])
+  const profile = __safe_dict(support["profile"])
+  const verdict = __safe_string(report["verdict"], "")
+  const counts = __safe_dict(report["bucket_counts"])
+  let out = provider + " " + model
     + " support="
     + __safe_string(support["status"], "")
     + " breakpoint="
@@ -73,12 +73,12 @@ fn __render_human(report: dict) -> string {
     + " provider_field_inconsistent="
     + to_string(__safe_int(counts["provider_field_inconsistent"], 0))
     + "\n"
-  let runs = __safe_list(report["runs"])
+  const runs = __safe_list(report["runs"])
   for run in runs {
     if type_of(run) != "dict" {
       continue
     }
-    let usage = __safe_dict(run["usage"])
+    const usage = __safe_dict(run["usage"])
     out = out + "  run " + to_string(__safe_int(run["run_index"], 0)) + ": "
       + __safe_string(run["classification"], "")
       + " input="
@@ -95,26 +95,26 @@ fn __render_human(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
-    let pretty = harness.env.get_or("HARN_PROVIDER_CACHE_PROBE_PAYLOAD_PRETTY", raw)
+    const pretty = harness.env.get_or("HARN_PROVIDER_CACHE_PROBE_PAYLOAD_PRETTY", raw)
     harness.stdio.println(pretty)
   } else {
-    let report = try {
+    const report = try {
       json_parse(raw)
     } catch (e) {
       harness.stdio
         .eprintln("internal error: failed to parse provider-cache-probe payload: " + to_string(e))
       return 70
     }
-    let text = __render_human(report)
-    let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+    const text = __render_human(report)
+    const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
       text[0:len(text) - 1]
     } else {
       text

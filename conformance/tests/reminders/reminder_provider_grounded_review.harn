@@ -1,7 +1,7 @@
 import { agent_reminder_providers_fire } from "std/agent/state"
 
 pipeline main() {
-  let opts = {
+  const opts = {
     reminders: {
       providers: [
         "-token_pressure",
@@ -14,9 +14,9 @@ pipeline main() {
       ],
     },
   }
-  let session = agent_session_open("reminder-provider-grounded-review")
+  const session = agent_session_open("reminder-provider-grounded-review")
   agent_session_reset(session)
-  let report = agent_reminder_providers_fire(
+  const report = agent_reminder_providers_fire(
     session,
     "post_tool_use",
     {
@@ -28,8 +28,8 @@ pipeline main() {
     },
     opts,
   )
-  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  let reminder = reminders[0].reminder
+  const reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const reminder = reminders[0].reminder
   __io_println(report.fired_count)
   __io_println(report.reports[0].provider)
   __io_println(reminder.tags[0])
@@ -40,9 +40,9 @@ pipeline main() {
   __io_println(contains(reminder.body, "verified:typecheck"))
   __io_println(contains(reminder.body, "cannot find value `missing`"))
   __io_println(contains(reminder.body, "command=cargo check -p demo"))
-  let verifier_session = agent_session_open("reminder-provider-grounded-review-verifier")
+  const verifier_session = agent_session_open("reminder-provider-grounded-review-verifier")
   agent_session_reset(verifier_session)
-  let verifier = agent_reminder_providers_fire(
+  const verifier = agent_reminder_providers_fire(
     verifier_session,
     "post_agent_turn",
     {
@@ -59,14 +59,14 @@ pipeline main() {
     },
     opts,
   )
-  let verifier_reminder = transcript_events_by_kind(agent_session_snapshot(verifier_session), "system_reminder")[0].reminder
+  const verifier_reminder = transcript_events_by_kind(agent_session_snapshot(verifier_session), "system_reminder")[0].reminder
   __io_println(verifier.fired_count)
   __io_println(contains(verifier_reminder.body, "verified:verifier:lint"))
   __io_println(contains(verifier_reminder.body, "forbidden pattern matched"))
   __io_println(contains(verifier_reminder.body, "typecheck verifier returned accept"))
-  let clean_session = agent_session_open("reminder-provider-grounded-review-clean")
+  const clean_session = agent_session_open("reminder-provider-grounded-review-clean")
   agent_session_reset(clean_session)
-  let clean = agent_reminder_providers_fire(
+  const clean = agent_reminder_providers_fire(
     clean_session,
     "post_tool_use",
     {

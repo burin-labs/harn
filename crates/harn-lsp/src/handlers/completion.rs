@@ -496,7 +496,7 @@ where
                 visit_node(a, visitor);
             }
         }
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
             visit_node(value, visitor);
         }
         Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {

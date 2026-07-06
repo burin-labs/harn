@@ -1,40 +1,40 @@
 import "std/waitpoints"
 
 pipeline test(task) {
-  let id = "fan-in-" + uuid()
+  const id = "fan-in-" + uuid()
   waitpoint_create(id)
-  let completed = atomic(0)
-  let w1 = spawn {
+  const completed = atomic(0)
+  const w1 = spawn {
     let result = waitpoint_wait(id, {wait_id: id + "-1"})
     if result.status == "completed" {
       atomic_add(completed, 1)
     }
   }
-  let w2 = spawn {
+  const w2 = spawn {
     let result = waitpoint_wait(id, {wait_id: id + "-2"})
     if result.status == "completed" {
       atomic_add(completed, 1)
     }
   }
-  let w3 = spawn {
+  const w3 = spawn {
     let result = waitpoint_wait(id, {wait_id: id + "-3"})
     if result.status == "completed" {
       atomic_add(completed, 1)
     }
   }
-  let w4 = spawn {
+  const w4 = spawn {
     let result = waitpoint_wait(id, {wait_id: id + "-4"})
     if result.status == "completed" {
       atomic_add(completed, 1)
     }
   }
-  let w5 = spawn {
+  const w5 = spawn {
     let result = waitpoint_wait(id, {wait_id: id + "-5"})
     if result.status == "completed" {
       atomic_add(completed, 1)
     }
   }
-  let signal = waitpoint_complete(id)
+  const signal = waitpoint_complete(id)
   await(w1)
   await(w2)
   await(w3)

@@ -8,9 +8,9 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(task) {
-  let _ = mock_time(1700000000000)
-  let store = memory()
-  let provider = custom(
+  const _ = mock_time(1700000000000)
+  const store = memory()
+  const provider = custom(
     {
       id: "mockSlowDown",
       auth_url: "https://idp.example/authorize",
@@ -43,20 +43,20 @@ pipeline test(task) {
       ],
     },
   )
-  let start_ts = to_int(harness.clock.timestamp())
-  let token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
-  let end_ts = to_int(harness.clock.timestamp())
+  const start_ts = to_int(harness.clock.timestamp())
+  const token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
+  const end_ts = to_int(harness.clock.timestamp())
   assert_eq(token_set.access_token, "OK-SLOW", "device_flow returns token after slow_down")
   // Initial interval=3s; slow_down bumps it to 3+5=8s; one sleep of 8s
   // happens before the successful retry. mock_time advances on sleep, so
   // (end - start) should be at least 8 seconds.
-  let elapsed = end_ts - start_ts
+  const elapsed = end_ts - start_ts
   assert(
     elapsed >= 8,
     "polling honored slow_down bump (elapsed >= 8s, was " + to_string(elapsed) + ")",
   )
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 3, "device + 2 token polls")
-  let _ = unmock_time()
+  const _ = unmock_time()
   log("oauth device flow slow_down ok")
 }

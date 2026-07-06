@@ -13,7 +13,7 @@ pipeline default(task) {
       llm_text("finally"),
     ],
     { ->
-      let r = with_rate_limit(
+      const r = with_rate_limit(
         "mock",
         fn() { llm_call("hello", nil, {provider: "mock"}) },
         {backoff_ms: 1, max_retries: 5},

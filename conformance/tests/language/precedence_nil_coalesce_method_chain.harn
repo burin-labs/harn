@@ -8,7 +8,7 @@ fn entries() {
 }
 
 fn find_match(name) {
-  let normalized = name.lower()
+  const normalized = name.lower()
   for entry in entries() {
     if (entry?.id ?? entry?.language ?? "").lower() == normalized {
       return entry?.language

@@ -30,14 +30,14 @@ pipeline test(task) {
   // Scalar case: each annotation distributes `ActionContainer<Action>`
   // into `ActionContainer<"create"> | ActionContainer<"edit">`; the
   // literal-tagged shape on the RHS then fits one specific branch.
-  let c1: ActionContainer<Action> = {action: "create", process_action: process_create}
-  let c2: ActionContainer<Action> = {action: "edit", process_action: process_edit}
+  const c1: ActionContainer<Action> = {action: "create", process_action: process_create}
+  const c2: ActionContainer<Action> = {action: "edit", process_action: process_edit}
   c1.process_action(c1.action)
   c2.process_action(c2.action)
   // List case: the TS playground example verbatim. A heterogeneous
   // list of container instances assigns into `list<ActionContainer<Action>>`
   // because the element type distributes.
-  let containers: list<ActionContainer<Action>> = [{action: "create", process_action: process_create}, {action: "edit", process_action: process_edit}]
+  const containers: list<ActionContainer<Action>> = [{action: "create", process_action: process_create}, {action: "edit", process_action: process_edit}]
   for c in containers {
     c.process_action(c.action)
   }

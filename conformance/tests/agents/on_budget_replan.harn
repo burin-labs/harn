@@ -1,7 +1,7 @@
 import { OnBudget, replan } from "std/lifecycle/on_budget"
 
 fn reminder_has_no_command_terms(body) {
-  let lowered = lowercase(body)
+  const lowered = lowercase(body)
   return !contains(lowered, "cargo")
     && !contains(lowered, "swift")
     && !contains(lowered, "pytest")
@@ -15,14 +15,14 @@ fn reminder_has_no_command_terms(body) {
 }
 
 pipeline default() {
-  let src = agent_session_open("on-budget-replan-source")
+  const src = agent_session_open("on-budget-replan-source")
   agent_session_inject(src, {role: "user", content: "seed"})
   agent_session_inject(src, {role: "assistant", content: "branch"})
-  let result = replan(harness, {session_id: src, iteration: 2, last_good_iteration: 1, kind: "wall_clock"})
-  let snapshot = agent_session_snapshot(result.session_id)
-  let reminders = transcript_events_by_kind(snapshot, "system_reminder")
-  let body = reminders[0].reminder.body
-  let ns = OnBudget()
+  const result = replan(harness, {session_id: src, iteration: 2, last_good_iteration: 1, kind: "wall_clock"})
+  const snapshot = agent_session_snapshot(result.session_id)
+  const reminders = transcript_events_by_kind(snapshot, "system_reminder")
+  const body = reminders[0].reminder.body
+  const ns = OnBudget()
   __io_println("strategy=" + result.strategy)
   __io_println("branched_at=" + to_string(snapshot.branched_at_event_index))
   __io_println("reminders=" + to_string(len(reminders)))

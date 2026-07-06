@@ -13,6 +13,6 @@ pipeline test(task) {
   fn drain<S>(sink: S, value: int) where S: Sink<int> {
     sink.accept(value)
   }
-  let sink = StringSink({label: "string"})
+  const sink = StringSink({label: "string"})
   drain(sink, 7)
 }

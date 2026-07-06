@@ -12,8 +12,8 @@ pipeline test(task) {
   // String concat
   log("hello" + " " + "world")
   // Repeated concat builds correctly
-  var list = []
-  var n = 0
+  let list = []
+  let n = 0
   while n < 50 {
     list = list + [n]
     n = n + 1

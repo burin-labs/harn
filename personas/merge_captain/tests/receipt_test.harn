@@ -33,23 +33,23 @@ fn _obs() {
 }
 
 pipeline test_approval_state_branches(task) {
-  let policy = _policy()
+  const policy = _policy()
   // Non-mutating actions skip approval altogether.
-  let no_op = approval_state(policy, {state: "waiting_checks", action: "wait"}, false)
+  const no_op = approval_state(policy, {state: "waiting_checks", action: "wait"}, false)
   assert_eq(no_op, "no_mutation")
   // Dry-run trumps autopilot.
-  let dry = approval_state(policy, {state: "queued", action: "enqueue_merge_queue"}, true)
+  const dry = approval_state(policy, {state: "queued", action: "enqueue_merge_queue"}, true)
   assert_eq(dry, "dry_run")
   // require_human_for forces a human review even on no-op-ish actions.
-  let blocked = approval_state(policy, {state: "blocked", action: "request_review"}, false)
+  const blocked = approval_state(policy, {state: "blocked", action: "request_review"}, false)
   assert_eq(blocked, "needs_human")
   // Autopilot lets queued mutations proceed.
-  let auto = approval_state(policy, {state: "queued", action: "enqueue_merge_queue"}, false)
+  const auto = approval_state(policy, {state: "queued", action: "enqueue_merge_queue"}, false)
   assert_eq(auto, "autopilot")
 }
 
 pipeline test_build_receipt_shape(task) {
-  let receipt = build_receipt(
+  const receipt = build_receipt(
     {
       sweep_id: "s",
       observed_at: 1,
@@ -78,7 +78,7 @@ pipeline test_build_receipt_shape(task) {
 }
 
 pipeline test_summarize_sweep_aggregates(task) {
-  let r1 = build_receipt(
+  const r1 = build_receipt(
     {
       sweep_id: "s",
       observed_at: 1,
@@ -91,7 +91,7 @@ pipeline test_summarize_sweep_aggregates(task) {
       dry_run: true,
     },
   )
-  let r2 = build_receipt(
+  const r2 = build_receipt(
     {
       sweep_id: "s",
       observed_at: 1,
@@ -104,7 +104,7 @@ pipeline test_summarize_sweep_aggregates(task) {
       dry_run: true,
     },
   )
-  let summary = summarize_sweep([r1, r2], "s", 1, 2)
+  const summary = summarize_sweep([r1, r2], "s", 1, 2)
   assert_eq(summary._type, "merge_sweep_summary")
   assert_eq(summary.pr_count, 2)
   assert_eq(summary.by_state.queued, 1)

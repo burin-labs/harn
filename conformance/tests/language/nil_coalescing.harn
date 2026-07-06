@@ -1,6 +1,6 @@
 pipeline test(task) {
-  let a = nil ?? "fallback"
+  const a = nil ?? "fallback"
   log(a)
-  let b = "present" ?? "fallback"
+  const b = "present" ?? "fallback"
   log(b)
 }

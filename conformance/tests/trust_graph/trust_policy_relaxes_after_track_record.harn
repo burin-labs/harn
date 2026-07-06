@@ -1,9 +1,9 @@
 import "std/trust"
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let actor_id = "trust-policy-" + unique
+  const actor_id = "trust-policy-" + unique
   record(
     {
       actor_id: actor_id,
@@ -14,7 +14,7 @@ pipeline test(task) {
       autonomy_tier_at_time: "act_with_approval",
     },
   )
-  var i = 0
+  let i = 0
   while i < 10 {
     record(
       {
@@ -29,8 +29,8 @@ pipeline test(task) {
     )
     i = i + 1
   }
-  let policy: CapabilityPolicy = policy_for(actor_id)
-  let records: list<TrustGraphRecord> = query({actor_id: actor_id, action: "merge_pr"})
+  const policy: CapabilityPolicy = policy_for(actor_id)
+  const records: list<TrustGraphRecord> = query({actor_id: actor_id, action: "merge_pr"})
   __io_println(len(records) == 10)
   __io_println(policy.side_effect_level == "network")
 }

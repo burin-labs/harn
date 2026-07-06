@@ -1,19 +1,19 @@
 import { coord_post, coord_read } from "std/coordination"
 
 pipeline default() {
-  let _ = coord_post("session", "ops", {kind: "status", subject: "A"}, {id: "coord-A", session_id: "sess-A"})
-  let _ = coord_post("session", "ops", {kind: "status", subject: "B"}, {id: "coord-B", session_id: "sess-B"})
-  let _ = coord_post(
+  const _ = coord_post("session", "ops", {kind: "status", subject: "A"}, {id: "coord-A", session_id: "sess-A"})
+  const _ = coord_post("session", "ops", {kind: "status", subject: "B"}, {id: "coord-B", session_id: "sess-B"})
+  const _ = coord_post(
     "workspace",
     "ops",
     {kind: "status", subject: "workspace"},
     {id: "coord-W", tenant_id: "tenant-1", workspace_id: "workspace-1"},
   )
-  let sess_a = coord_read("session", "ops", {session_id: "sess-A"})
-  let sess_b = coord_read("session", "ops", {session_id: "sess-B"})
-  let sess_c = coord_read("session", "ops", {session_id: "sess-C"})
-  let workspace = coord_read("workspace", "ops", {tenant_id: "tenant-1", workspace_id: "workspace-1"})
-  let other_tenant_workspace = coord_read("workspace", "ops", {tenant_id: "tenant-2", workspace_id: "workspace-1"})
+  const sess_a = coord_read("session", "ops", {session_id: "sess-A"})
+  const sess_b = coord_read("session", "ops", {session_id: "sess-B"})
+  const sess_c = coord_read("session", "ops", {session_id: "sess-C"})
+  const workspace = coord_read("workspace", "ops", {tenant_id: "tenant-1", workspace_id: "workspace-1"})
+  const other_tenant_workspace = coord_read("workspace", "ops", {tenant_id: "tenant-2", workspace_id: "workspace-1"})
   __io_println(len(sess_a))
   __io_println(sess_a[0].subject)
   __io_println(sess_a[0].scope_id)

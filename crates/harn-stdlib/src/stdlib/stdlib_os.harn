@@ -31,11 +31,11 @@ pub fn os_info() -> dict {
  * @errors: []
  */
 pub fn env_bool(name: string, fallback: bool = false) -> bool {
-  let value = harness.env.get(name)
+  const value = harness.env.get(name)
   if value == nil {
     return fallback
   }
-  let normalized = lowercase(trim(value))
+  const normalized = lowercase(trim(value))
   if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "y"
     || normalized == "on" {
     return true
@@ -54,7 +54,7 @@ pub fn env_bool(name: string, fallback: bool = false) -> bool {
  * @errors: []
  */
 pub fn env_int(name: string, fallback = nil) {
-  let value = harness.env.get(name)
+  const value = harness.env.get(name)
   if value == nil {
     return fallback
   }
@@ -68,11 +68,11 @@ pub fn env_int(name: string, fallback = nil) {
  * @errors: []
  */
 pub fn env_list(name: string, separator = nil) -> list<string> {
-  let value = harness.env.get(name)
+  const value = harness.env.get(name)
   if value == nil || value == "" {
     return []
   }
-  var sep = separator
+  let sep = separator
   if sep == nil {
     sep = if platform() == "windows" {
       ";"
@@ -80,9 +80,9 @@ pub fn env_list(name: string, separator = nil) -> list<string> {
       ":"
     }
   }
-  var out = []
+  let out = []
   for item in split(value, sep) {
-    let trimmed = trim(item)
+    const trimmed = trim(item)
     if trimmed != "" {
       out = out.push(trimmed)
     }
@@ -97,7 +97,7 @@ pub fn env_list(name: string, separator = nil) -> list<string> {
  * @errors: []
  */
 pub fn require_env(name: string) -> string {
-  let value = harness.env.get(name)
+  const value = harness.env.get(name)
   if value == nil || value == "" {
     throw "required environment variable is not set: " + name
   }
@@ -111,26 +111,26 @@ pub fn require_env(name: string) -> string {
  * @errors: []
  */
 pub fn which(binary: string) {
-  let executable = trim(binary ?? "")
+  const executable = trim(binary ?? "")
   if executable == "" {
     return nil
   }
-  let argv = if platform() == "windows" {
+  const argv = if platform() == "windows" {
     ["where", executable]
   } else {
     ["which", executable]
   }
-  let result = try {
+  const result = try {
     command_run({argv: argv}, {capture: {max_inline_bytes: 4096}})
   }
   if !is_ok(result) {
     return nil
   }
-  let out = unwrap(result)
+  const out = unwrap(result)
   if !(out?.success ?? false) {
     return nil
   }
-  let lines = split(trim(out?.stdout ?? ""), "\n").filter({ line -> trim(line) != "" })
+  const lines = split(trim(out?.stdout ?? ""), "\n").filter({ line -> trim(line) != "" })
   if len(lines) == 0 {
     return nil
   }

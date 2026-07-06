@@ -6,10 +6,10 @@ import {
 } from "std/personas/bulletins"
 
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn-bulletin-embed-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-bulletin-embed-" + uuid())
   host_mock_clear()
   host_mock("memory", "embed", {result: {vector: [0.4, 0.6, 0.7], dim: 3, model: "fake"}})
-  let proposed = bulletin_propose(
+  const proposed = bulletin_propose(
     {
       scope: "user",
       scope_key: "kenneth",
@@ -21,12 +21,12 @@ pipeline default() {
       proposed_at: "2026-05-15T00:00:00Z",
     },
   )
-  let namespace = bulletin_memory_namespace(proposed)
+  const namespace = bulletin_memory_namespace(proposed)
   __io_println(namespace)
   // Open the bulletin's memory namespace with the vector backend so the
   // accept path picks the right defaults.
   memory_open(namespace, {backend: "vector", embed_dim: 3, embed_model_hint: "fake", root: root})
-  let receipt = bulletin_accept(
+  const receipt = bulletin_accept(
     proposed,
     {
       embed: true,
@@ -41,7 +41,7 @@ pipeline default() {
   __io_println(receipt.decision.status)
   // Accepted bulletin should be recallable from the bulletin memory
   // namespace.
-  let hits = memory_recall(namespace, "preferences", 5, {root: root})
+  const hits = memory_recall(namespace, "preferences", 5, {root: root})
   __io_println(len(hits))
   __io_println(hits[0].key == proposed.id)
   __io_println(hits[0].provenance.bulletin_id == proposed.id)

@@ -8,9 +8,9 @@ import {
 
 pipeline default() {
   mock_time(1000)
-  let root = path_join(harness.fs.temp_dir(), "coord-dir-lock-" + uuid_v7())
-  let resource = path_join(root, "release-owner.json")
-  let first = coord_acquire_dir_lock(
+  const root = path_join(harness.fs.temp_dir(), "coord-dir-lock-" + uuid_v7())
+  const resource = path_join(root, "release-owner.json")
+  const first = coord_acquire_dir_lock(
     resource,
     {id: "run-A", run_id: "release-A"},
     {ttl_ms: 100, token: "token-A", reason: "release"},
@@ -20,7 +20,7 @@ pipeline default() {
   __io_println(harness.fs.exists(first.lock_path))
   __io_println(first.record.owner.id)
   __io_println(first.record.expires_at_ms)
-  let blocked = coord_acquire_dir_lock(
+  const blocked = coord_acquire_dir_lock(
     resource,
     {id: "run-B", run_id: "release-B"},
     {ttl_ms: 100, token: "token-B", throw_on_conflict: false},
@@ -29,7 +29,7 @@ pipeline default() {
   __io_println(blocked.reason)
   __io_println(blocked.holder.owner.run_id)
   advance_time(101)
-  let second = coord_acquire_dir_lock(
+  const second = coord_acquire_dir_lock(
     resource,
     {id: "run-B", run_id: "release-B"},
     {ttl_ms: 100, token: "token-B", throw_on_conflict: false},
@@ -37,22 +37,22 @@ pipeline default() {
   __io_println(second.acquired)
   __io_println(second.stale_removed.owner.run_id)
   __io_println(second.record.owner.id)
-  let wrong_release = try {
+  const wrong_release = try {
     coord_release_dir_lock(first)
     "released"
   } catch (e) {
     contains(to_string(e), "another token")
   }
   __io_println(wrong_release)
-  let released = coord_release_dir_lock(second)
+  const released = coord_release_dir_lock(second)
   __io_println(released.released)
-  let reaper_path = coord_dir_lock_reaper_path(second.lock_path)
-  let reaper = coord_acquire_dir_lock(
+  const reaper_path = coord_dir_lock_reaper_path(second.lock_path)
+  const reaper = coord_acquire_dir_lock(
     resource,
     {id: "reaper", run_id: "cleanup"},
     {lock_path: reaper_path, ttl_ms: 100, token: "reaper-token"},
   )
-  let during_reap = coord_acquire_dir_lock(
+  const during_reap = coord_acquire_dir_lock(
     resource,
     {id: "run-C", run_id: "release-C"},
     {ttl_ms: 100, token: "token-C", throw_on_conflict: false},
@@ -60,9 +60,9 @@ pipeline default() {
   __io_println(during_reap.acquired)
   __io_println(during_reap.reason)
   __io_println(during_reap.lock_path == reaper.lock_path)
-  let _ = coord_release_dir_lock(reaper)
+  const _ = coord_release_dir_lock(reaper)
   __io_println(harness.fs.exists(second.lock_path))
-  let scoped_value = coord_with_dir_lock(
+  const scoped_value = coord_with_dir_lock(
     resource,
     { lock ->
       __io_println(lock.acquired)
@@ -74,7 +74,7 @@ pipeline default() {
   )
   __io_println(scoped_value)
   __io_println(harness.fs.exists(coord_dir_lock_path(resource)))
-  let scoped_throw = try {
+  const scoped_throw = try {
     coord_with_dir_lock(
       resource,
       { lock ->

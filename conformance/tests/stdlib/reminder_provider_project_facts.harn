@@ -5,9 +5,9 @@ import {
 } from "std/agent/state"
 
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn-reminder-project-facts-" + uuid())
-  let namespace = "project/facts"
-  let store_opts = {root: root, namespace: namespace}
+  const root = path_join(harness.fs.temp_dir(), "harn-reminder-project-facts-" + uuid())
+  const namespace = "project/facts"
+  const store_opts = {root: root, namespace: namespace}
   store_fact(
     {
       kind: "Decision",
@@ -35,21 +35,21 @@ pipeline default() {
     },
     store_opts + {now: "2026-05-23T10:00:02Z"},
   )
-  let provider_opts = {
+  const provider_opts = {
     reminders: {config: {project_facts: {root: root, namespace: namespace, max_facts: 5, min_confidence: 0.5}}},
   }
-  let session = agent_session_open("reminder-provider-project-facts")
+  const session = agent_session_open("reminder-provider-project-facts")
   agent_session_reset(session)
-  let first = agent_reminder_providers_fire(
+  const first = agent_reminder_providers_fire(
     session,
     "session_start",
     {session: {id: session}, task: "project facts recall", iteration: 1},
     provider_opts,
   )
   __io_println(first.fired_count)
-  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
   __io_println(len(reminders))
-  let reminder = reminders[0].reminder
+  const reminder = reminders[0].reminder
   __io_println(reminder.tags[0])
   __io_println(reminder.dedupe_key)
   __io_println(reminder.ttl_turns)
@@ -64,8 +64,8 @@ pipeline default() {
   __io_println(contains(reminder.body, "Low-confidence facts"))
   __io_println(contains(reminder.body, "decision"))
   __io_println(contains(reminder.body, "confidence 0.91"))
-  let refresh_opts = provider_opts + {reminders: provider_opts.reminders + {providers: ["-token_pressure"]}}
-  let below_refresh = agent_reminder_providers_fire(
+  const refresh_opts = provider_opts + {reminders: provider_opts.reminders + {providers: ["-token_pressure"]}}
+  const below_refresh = agent_reminder_providers_fire(
     session,
     "on_budget_threshold",
     {
@@ -78,7 +78,7 @@ pipeline default() {
     refresh_opts,
   )
   __io_println(below_refresh.fired_count)
-  let refresh = agent_reminder_providers_fire(
+  const refresh = agent_reminder_providers_fire(
     session,
     "on_budget_threshold",
     {
@@ -93,13 +93,13 @@ pipeline default() {
   __io_println(refresh.fired_count)
   __io_println(refresh.reports[0].deduped_count)
   __io_println(refresh.reports[0].provider)
-  let post_turn = agent_session_apply_reminder_post_turn(session, 3)
-  let after_post = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const post_turn = agent_session_apply_reminder_post_turn(session, 3)
+  const after_post = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
   __io_println(post_turn.expired_count)
   __io_println(len(after_post))
-  let kind_session = agent_session_open("reminder-provider-project-facts-kind")
+  const kind_session = agent_session_open("reminder-provider-project-facts-kind")
   agent_session_reset(kind_session)
-  let kind_only = agent_reminder_providers_fire(
+  const kind_only = agent_reminder_providers_fire(
     kind_session,
     "session_start",
     {session: {id: kind_session}, task: "constraints only"},
@@ -112,12 +112,12 @@ pipeline default() {
     },
   )
   __io_println(kind_only.fired_count)
-  let kind_reminder = transcript_events_by_kind(agent_session_snapshot(kind_session), "system_reminder")[0].reminder
+  const kind_reminder = transcript_events_by_kind(agent_session_snapshot(kind_session), "system_reminder")[0].reminder
   __io_println(contains(kind_reminder.body, "Project facts reminder runs synchronously"))
   __io_println(contains(kind_reminder.body, "Memory module reuses the BM25 scorer"))
-  let disabled_session = agent_session_open("reminder-provider-project-facts-disabled")
+  const disabled_session = agent_session_open("reminder-provider-project-facts-disabled")
   agent_session_reset(disabled_session)
-  let disabled = agent_reminder_providers_fire(
+  const disabled = agent_reminder_providers_fire(
     disabled_session,
     "session_start",
     {session: {id: disabled_session}, task: "irrelevant"},
@@ -126,10 +126,10 @@ pipeline default() {
     },
   )
   __io_println(disabled.fired_count)
-  let empty_root = path_join(harness.fs.temp_dir(), "harn-reminder-project-facts-empty-" + uuid())
-  let empty_session = agent_session_open("reminder-provider-project-facts-empty")
+  const empty_root = path_join(harness.fs.temp_dir(), "harn-reminder-project-facts-empty-" + uuid())
+  const empty_session = agent_session_open("reminder-provider-project-facts-empty")
   agent_session_reset(empty_session)
-  let empty = agent_reminder_providers_fire(
+  const empty = agent_reminder_providers_fire(
     empty_session,
     "session_start",
     {session: {id: empty_session}, task: "no facts yet"},

@@ -1,6 +1,6 @@
 pipeline default(task) {
   log("Starting agent pipeline")
-  let steps = ["analyze", "plan", "execute", "verify"]
+  const steps = ["analyze", "plan", "execute", "verify"]
   for step in steps {
     log("Step: ${step}")
     retry 3 {

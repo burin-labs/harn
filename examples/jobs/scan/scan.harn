@@ -20,6 +20,6 @@ import "std/triggers"
 /** Echo the JSON request back as a worker report. */
 @job("scan", retry: {max: 3, backoff: "exponential"})
 pub fn scan(event: TriggerEvent) -> dict {
-  let req = event.provider_payload.raw
+  const req = event.provider_payload.raw
   return {status: "ok", echo: req}
 }

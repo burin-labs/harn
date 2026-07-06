@@ -10,7 +10,7 @@ pipeline test(task) {
   // Two fixtures land in the registry: `deploy` (with a rich
   // frontmatter) and `review` (minimal).
   assert(skill_count(skills) == 2, "two bundled skills should load")
-  let deploy = skill_find(skills, "deploy")
+  const deploy = skill_find(skills, "deploy")
   assert(deploy != nil, "deploy skill discovered")
   assert(deploy.name == "deploy", "name matches")
   assert(
@@ -37,7 +37,7 @@ pipeline test(task) {
   // overrides it.
   assert(deploy.source == "project", "deploy came from the project layer (.harn/skills/)")
   assert(deploy.body == nil, "startup registry keeps only the compact card")
-  let review = skill_find(skills, "review")
+  const review = skill_find(skills, "review")
   assert(review != nil, "review skill discovered")
   assert(review.user_invocable, "user_invocable=true preserved")
   // `disable-model-invocation: false` is the default and isn't round-tripped

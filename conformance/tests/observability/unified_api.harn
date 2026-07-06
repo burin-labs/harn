@@ -1,10 +1,10 @@
 import { obs } from "std/observability"
 
 pipeline default() {
-  let o = obs()
+  const o = obs()
   o.reset()
   o.configure({backend: o.Backend.test()})
-  let result = o
+  const result = o
     .span(
     "plan_review",
     {pr_number: 1915},
@@ -14,7 +14,7 @@ pipeline default() {
       return "done"
     },
   )
-  let emitted = o.events_take()
+  const emitted = o.events_take()
   __io_println(result)
   __io_println(len(emitted))
   __io_println(emitted[0].payload.kind)
@@ -25,10 +25,10 @@ pipeline default() {
   __io_println(emitted[2].payload.fields.span_name)
   __io_println(emitted[2].payload.trace_id == emitted[0].payload.trace_id)
   o.configure({backend: o.Backend.test()})
-  let span = o.start_span("imperative", {request_id: "r1"})
+  const span = o.start_span("imperative", {request_id: "r1"})
   o.log_in_span(span, "manual", "warn", {local: true})
   o.end_span(span)
-  let manual = o.events_take()[0].payload
+  const manual = o.events_take()[0].payload
   __io_println(manual.level)
   __io_println(manual.fields.request_id)
   __io_println(manual.fields.local)

@@ -33,9 +33,9 @@ import { __wrap_llm_result, repair_min_max_tokens, with_case_insensitive_keys } 
  */
 pub fn default_llm_caller() {
   return { call ->
-    let provider = __default_caller_render_context_provider(call)
-    let model = __default_caller_render_context_model(call)
-    let pushed = __push_llm_render_context(provider, model)
+    const provider = __default_caller_render_context_provider(call)
+    const model = __default_caller_render_context_model(call)
+    const pushed = __push_llm_render_context(provider, model)
     defer {
       if pushed {
         __pop_llm_render_context()
@@ -75,17 +75,17 @@ fn __opts_dict(opts) {
   return {}
 }
 
-var __llm_handler_circuits = []
+let __llm_handler_circuits = []
 
 fn __llm_handler_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
 fn __circuit_name_for(call) -> string {
-  let opts = call?.opts ?? {}
-  let provider = to_string(opts?.provider ?? "<unset>")
-  let model = to_string(opts?.model ?? "<unset>")
+  const opts = call?.opts ?? {}
+  const provider = to_string(opts?.provider ?? "<unset>")
+  const model = to_string(opts?.model ?? "<unset>")
   return "llm:" + provider + ":" + model
 }
 
@@ -97,7 +97,7 @@ fn __ensure_llm_handler_circuit(name, threshold, reset_ms) {
 }
 
 fn __circuit_open_error(call, name) {
-  let opts = call?.opts ?? {}
+  const opts = call?.opts ?? {}
   return {
     kind: "terminal",
     reason: "circuit_open",
@@ -110,7 +110,7 @@ fn __circuit_open_error(call, name) {
 }
 
 fn __llm_handler_should_skip_cache(prompt, system, opts) -> bool {
-  let predicate = opts?.skip_when
+  const predicate = opts?.skip_when
   if predicate == nil {
     return opts?.tools != nil
   }
@@ -123,7 +123,7 @@ fn __llm_handler_should_skip_cache(prompt, system, opts) -> bool {
 fn __llm_handler_cache_options(opts) -> dict {
   // LLM caches default to a 10-minute TTL when the caller has not supplied
   // any TTL-equivalent. Deterministic builtins set their own.
-  var cache_opts = {store: opts?.store ?? "llm.with_cache"}
+  let cache_opts = {store: opts?.store ?? "llm.with_cache"}
   if opts?.ttl != nil {
     cache_opts = cache_opts + {ttl: opts.ttl}
   } else if opts?.ttl_seconds == nil && opts?.max_age_seconds == nil {
@@ -147,13 +147,13 @@ fn __llm_handler_cache_options(opts) -> dict {
 }
 
 fn __safe_invoke(next, call) {
-  let envelope = try {
+  const envelope = try {
     next(call)
   }
   if is_err(envelope) {
     return {ok: false, status: "exception", error: unwrap_err(envelope)}
   }
-  let value = unwrap(envelope)
+  const value = unwrap(envelope)
   if type_of(value) != "dict" {
     return {ok: false, status: "exception", error: "caller returned non-dict"}
   }
@@ -180,7 +180,7 @@ fn __emit_event(session_id, name, payload) {
   if to_string(session_id) == "" {
     return
   }
-  let _ = try {
+  const _ = try {
     agent_emit_event(session_id, name, payload)
   }
 }
@@ -192,9 +192,9 @@ fn __retry_default_predicate(envelope) {
   if envelope?.ok ?? false {
     return false
   }
-  let status = to_string(envelope?.status ?? "")
-  let retryable_statuses = ["transient", "rate_limited", "timeout", "exception", "network", "provider_5xx", "stream_interrupt"]
-  let never_retry = [
+  const status = to_string(envelope?.status ?? "")
+  const retryable_statuses = ["transient", "rate_limited", "timeout", "exception", "network", "provider_5xx", "stream_interrupt"]
+  const never_retry = [
     "schema_validation",
     "auth",
     "budget_exhausted",
@@ -223,17 +223,17 @@ fn __retry_after_ms(envelope) {
   if type_of(envelope) != "dict" {
     return 0
   }
-  let err = envelope?.error
+  const err = envelope?.error
   if type_of(err) == "dict" {
-    let ra = err?.retry_after_ms
+    const ra = err?.retry_after_ms
     if ra != nil {
       return to_int(ra)
     }
-    let headers = err?.headers
+    const headers = err?.headers
     if type_of(headers) == "dict" {
       for k in headers.keys() {
         if lowercase(to_string(k)) == "retry-after" {
-          let v = to_string(headers[k])
+          const v = to_string(headers[k])
           if v != "" {
             return to_int(v) * 1000
           }
@@ -248,13 +248,13 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
   if attempt < 1 {
     return 0
   }
-  var delay = base_ms
+  let delay = base_ms
   if backoff == "linear" {
     delay = base_ms * attempt
   } else {
     // exponential (default) and jittered share the same base curve
-    var factor = 1
-    var i = 1
+    let factor = 1
+    let i = 1
     while i < attempt {
       factor = factor * 2
       i = i + 1
@@ -265,11 +265,11 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
     delay = max_ms
   }
   if backoff == "jittered" || jitter == "full" {
-    let r = harness.random.gen_f64()
+    const r = harness.random.gen_f64()
     delay = to_int(r * to_float(delay))
   } else if jitter == "equal" {
-    let half = delay / 2
-    let r = harness.random.gen_f64()
+    const half = delay / 2
+    const r = harness.random.gen_f64()
     delay = half + to_int(r * to_float(half))
   }
   if delay < 0 {
@@ -312,18 +312,18 @@ pub fn with_retry(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_retry, next)
   }
-  let cfg = __opts_dict(opts)
-  let {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} = cfg ?? {}
-  let predicate = cfg?.predicate
+  const cfg = __opts_dict(opts)
+  const {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} = cfg ?? {}
+  const predicate = cfg?.predicate
   return { call ->
-    let base_turn = call?.turn ?? {iteration: 0, session_id: "", attempt: 1}
-    var attempt = 1
-    var last_envelope = {ok: false, status: "exception", error: "with_retry: no attempts"}
+    const base_turn = call?.turn ?? {iteration: 0, session_id: "", attempt: 1}
+    let attempt = 1
+    let last_envelope = {ok: false, status: "exception", error: "with_retry: no attempts"}
     while attempt <= max_attempts {
-      let attempt_call = call + {turn: base_turn + {attempt: attempt}}
-      let envelope = __safe_invoke(next, attempt_call)
+      const attempt_call = call + {turn: base_turn + {attempt: attempt}}
+      const envelope = __safe_invoke(next, attempt_call)
       last_envelope = envelope
-      let should_retry = if predicate != nil {
+      const should_retry = if predicate != nil {
         let r = try {
           predicate(envelope)
         }
@@ -338,13 +338,13 @@ pub fn with_retry(next, opts = nil) {
       if !should_retry || attempt >= max_attempts {
         return envelope + {retries_attempted: attempt - 1}
       }
-      let header_delay = if honor_retry_after {
+      const header_delay = if honor_retry_after {
         __retry_after_ms(envelope)
       } else {
         0
       }
-      let backoff_delay = __backoff_delay(harness, attempt, base_ms, max_ms, backoff, jitter)
-      let delay = if header_delay > backoff_delay {
+      const backoff_delay = __backoff_delay(harness, attempt, base_ms, max_ms, backoff, jitter)
+      const delay = if header_delay > backoff_delay {
         header_delay
       } else {
         backoff_delay
@@ -376,7 +376,7 @@ pub fn with_retry(next, opts = nil) {
  * @errors: []
  */
 pub fn with_fallback(callers) {
-  let total = if type_of(callers) == "list" {
+  const total = if type_of(callers) == "list" {
     len(callers)
   } else {
     0
@@ -385,12 +385,12 @@ pub fn with_fallback(callers) {
     if total == 0 {
       return {ok: false, status: "caller_skipped", error: "with_fallback: empty caller list"}
     }
-    var last_envelope = {ok: false, status: "caller_skipped"}
-    var idx = 0
-    let session_id = to_string(call?.turn?.session_id ?? "")
+    let last_envelope = {ok: false, status: "caller_skipped"}
+    let idx = 0
+    const session_id = to_string(call?.turn?.session_id ?? "")
     while idx < total {
-      let inner = callers[idx]
-      let envelope = __safe_invoke(inner, call)
+      const inner = callers[idx]
+      const envelope = __safe_invoke(inner, call)
       last_envelope = envelope
       __emit_event(
         session_id,
@@ -438,12 +438,12 @@ fn __envelope_text(env) {
  * @errors: []
  */
 pub fn with_shadow(primary, shadow, opts = nil) {
-  let cfg = __opts_dict(opts)
-  let sampler = cfg?.sampler
-  let on_diff = cfg?.on_diff
-  let diff_when = cfg?.diff_when ?? "any"
+  const cfg = __opts_dict(opts)
+  const sampler = cfg?.sampler
+  const on_diff = cfg?.on_diff
+  const diff_when = cfg?.diff_when ?? "any"
   return { call ->
-    let sample = if sampler != nil {
+    const sample = if sampler != nil {
       let r = try {
         sampler(call)
       }
@@ -463,17 +463,17 @@ pub fn with_shadow(primary, shadow, opts = nil) {
     if !sample {
       return __safe_invoke(primary, call)
     }
-    let pair = [primary, shadow]
-    let results = parallel each pair { c ->
+    const pair = [primary, shadow]
+    const results = parallel each pair { c ->
       __safe_invoke(c, call)
     }
-    let primary_env = results[0]
-    let shadow_env = results[1]
-    let primary_text = __envelope_text(primary_env)
-    let shadow_text = __envelope_text(shadow_env)
-    let both_ok = (primary_env?.ok ?? false) && (shadow_env?.ok ?? false)
-    let differs = primary_text != shadow_text
-    let should_compare = if diff_when == "ok_only" {
+    const primary_env = results[0]
+    const shadow_env = results[1]
+    const primary_text = __envelope_text(primary_env)
+    const shadow_text = __envelope_text(shadow_env)
+    const both_ok = (primary_env?.ok ?? false) && (shadow_env?.ok ?? false)
+    const differs = primary_text != shadow_text
+    const should_compare = if diff_when == "ok_only" {
       both_ok && differs
     } else {
       differs
@@ -492,7 +492,7 @@ pub fn with_shadow(primary, shadow, opts = nil) {
         },
       )
       if on_diff != nil {
-        let _ = try {
+        const _ = try {
           on_diff(primary_env, shadow_env)
         }
       }
@@ -517,39 +517,39 @@ pub fn with_shadow(primary, shadow, opts = nil) {
  */
 pub fn with_prompt_rewrite(next, rewriter) {
   return { call ->
-    let rewritten = try {
+    const rewritten = try {
       rewriter(call?.prompt, call?.system, call?.opts)
     }
     if is_err(rewritten) {
       return {ok: false, status: "exception", error: unwrap_err(rewritten)}
     }
-    let patch = unwrap(rewritten)
-    let patch_dict = if type_of(patch) == "dict" {
+    const patch = unwrap(rewritten)
+    const patch_dict = if type_of(patch) == "dict" {
       patch
     } else {
       {}
     }
-    let new_prompt = if patch_dict?.prompt != nil {
+    const new_prompt = if patch_dict?.prompt != nil {
       patch_dict.prompt
     } else {
       call?.prompt
     }
-    let new_system = if patch_dict?.system != nil {
+    const new_system = if patch_dict?.system != nil {
       patch_dict.system
     } else {
       call?.system
     }
-    let base_opts = if patch_dict?.opts != nil {
+    const base_opts = if patch_dict?.opts != nil {
       patch_dict.opts
     } else {
       call?.opts
     }
-    let new_opts = if patch_dict?.system != nil {
+    const new_opts = if patch_dict?.system != nil {
       base_opts + {_system_fragments: nil}
     } else {
       base_opts
     }
-    let new_call = {
+    const new_call = {
       prompt: new_prompt,
       system: new_system,
       opts: new_opts,
@@ -585,19 +585,19 @@ pub fn with_logging(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_logging, next)
   }
-  let cfg = __opts_dict(opts)
-  let {level = "info", include_prompt = false} = cfg ?? {}
-  let sink = cfg?.sink
+  const cfg = __opts_dict(opts)
+  const {level = "info", include_prompt = false} = cfg ?? {}
+  const sink = cfg?.sink
   return { call ->
-    let start_ms = harness.clock.now_ms()
-    let envelope = __safe_invoke(next, call)
-    let call_opts = __opts_dict(call?.opts)
-    let status = if envelope?.ok ?? false {
+    const start_ms = harness.clock.now_ms()
+    const envelope = __safe_invoke(next, call)
+    const call_opts = __opts_dict(call?.opts)
+    const status = if envelope?.ok ?? false {
       "ok"
     } else {
       to_string(envelope?.status ?? "unknown")
     }
-    var record = {
+    let record = {
       event: "llm_call_log",
       level: level,
       latency_ms: harness.clock.now_ms() - start_ms,
@@ -612,7 +612,7 @@ pub fn with_logging(next, opts = nil) {
     }
     __emit_event(to_string(call?.turn?.session_id ?? ""), "llm_call_log", record)
     if sink != nil {
-      let _ = try {
+      const _ = try {
         sink(record)
       }
     }
@@ -671,34 +671,34 @@ pub fn with_budget(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_budget, next)
   }
-  let cfg = __opts_dict(opts)
-  let max_total_tokens = cfg?.max_total_tokens
-  let max_input_tokens = cfg?.max_input_tokens
-  let max_output_tokens = cfg?.max_output_tokens
-  let max_calls = cfg?.max_calls
-  let on_exceed = cfg?.on_exceed ?? "short_circuit"
-  let total_in = atomic(0)
-  let total_out = atomic(0)
-  let total_calls = atomic(0)
+  const cfg = __opts_dict(opts)
+  const max_total_tokens = cfg?.max_total_tokens
+  const max_input_tokens = cfg?.max_input_tokens
+  const max_output_tokens = cfg?.max_output_tokens
+  const max_calls = cfg?.max_calls
+  const on_exceed = cfg?.on_exceed ?? "short_circuit"
+  const total_in = atomic(0)
+  const total_out = atomic(0)
+  const total_calls = atomic(0)
   return { call ->
-    let calls_so_far = atomic_get(total_calls)
-    let in_so_far = atomic_get(total_in)
-    let out_so_far = atomic_get(total_out)
-    let exhaustion = __budget_check("max_calls", max_calls, calls_so_far, on_exceed)
+    const calls_so_far = atomic_get(total_calls)
+    const in_so_far = atomic_get(total_in)
+    const out_so_far = atomic_get(total_out)
+    const exhaustion = __budget_check("max_calls", max_calls, calls_so_far, on_exceed)
       ?? __budget_check("max_input_tokens", max_input_tokens, in_so_far, on_exceed)
       ?? __budget_check("max_output_tokens", max_output_tokens, out_so_far, on_exceed)
       ?? __budget_check("max_total_tokens", max_total_tokens, in_so_far + out_so_far, on_exceed)
     if exhaustion != nil {
       return exhaustion
     }
-    let envelope = __safe_invoke(next, call)
-    let _ = atomic_add(total_calls, 1)
+    const envelope = __safe_invoke(next, call)
+    const _ = atomic_add(total_calls, 1)
     if (envelope?.ok ?? false) && type_of(envelope?.value) == "dict" {
-      let usage = __opts_dict(envelope.value?.usage)
-      let in_tokens = to_int(usage?.input_tokens ?? envelope.value?.input_tokens ?? 0)
-      let out_tokens = to_int(usage?.output_tokens ?? envelope.value?.output_tokens ?? 0)
-      let _ = atomic_add(total_in, in_tokens)
-      let _ = atomic_add(total_out, out_tokens)
+      const usage = __opts_dict(envelope.value?.usage)
+      const in_tokens = to_int(usage?.input_tokens ?? envelope.value?.input_tokens ?? 0)
+      const out_tokens = to_int(usage?.output_tokens ?? envelope.value?.output_tokens ?? 0)
+      const _ = atomic_add(total_in, in_tokens)
+      const _ = atomic_add(total_out, out_tokens)
     }
     return envelope
   }
@@ -740,15 +740,15 @@ pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
  */
 pub fn with_cache(first, second = nil, third = nil) {
   if __llm_handler_is_callable(first) {
-    let next = first
-    let cfg = __opts_dict(second)
+    const next = first
+    const cfg = __opts_dict(second)
     return { call ->
-      let opts = __opts_dict(call?.opts)
+      const opts = __opts_dict(call?.opts)
       if __llm_handler_should_skip_cache(call?.prompt, call?.system, opts) {
         return __safe_invoke(next, call)
       }
-      let merged_opts = opts + cfg
-      let session_id = to_string(call?.turn?.session_id ?? merged_opts?.session_id ?? "")
+      const merged_opts = opts + cfg
+      const session_id = to_string(call?.turn?.session_id ?? merged_opts?.session_id ?? "")
       return __with_cache_run(
         harness,
         call?.prompt,
@@ -760,10 +760,10 @@ pub fn with_cache(first, second = nil, third = nil) {
       )
     }
   }
-  let prompt = first
-  let system = second
-  let opts = third ?? {}
-  let session_id = to_string(opts?.session_id ?? "")
+  const prompt = first
+  const system = second
+  const opts = third ?? {}
+  const session_id = to_string(opts?.session_id ?? "")
   return __with_cache_run(
     harness,
     prompt,
@@ -779,16 +779,16 @@ fn __with_cache_run(harness: Harness, prompt, system, opts, session_id, compute,
   if __llm_handler_should_skip_cache(prompt, system, opts) {
     return compute()
   }
-  let key = llm_cache_key(prompt, system, opts)
-  let cache_options = __llm_handler_cache_options(opts)
-  let cached = cache_get(key, cache_options)
+  const key = llm_cache_key(prompt, system, opts)
+  const cache_options = __llm_handler_cache_options(opts)
+  const cached = cache_get(key, cache_options)
   if cached.hit {
     __with_cache_emit_hit(session_id, key, cached, opts)
     return cached.value
   }
-  let started_ms = harness.clock.monotonic_ms()
-  let result = compute()
-  let compute_ms = harness.clock.monotonic_ms() - started_ms
+  const started_ms = harness.clock.monotonic_ms()
+  const result = compute()
+  const compute_ms = harness.clock.monotonic_ms() - started_ms
   if should_store(result) {
     cache_put(key, result, cache_options)
     __with_cache_emit_miss(session_id, key, cached, compute_ms)
@@ -816,21 +816,21 @@ fn __llm_handler_should_store_result(result) -> bool {
 }
 
 fn __with_cache_hit_metrics_from_envelope(cached_value) -> dict {
-  var metrics = {model_calls_avoided: 1}
+  let metrics = {model_calls_avoided: 1}
   if type_of(cached_value) != "dict" {
     return metrics
   }
   // The caller seam wraps the LLM dict in {ok: true, value: ...}; the
   // direct-call form caches the LLM dict directly. Unwrap once so this
   // helper reads the same shape either way.
-  let llm = if cached_value?.value != nil && type_of(cached_value.value) == "dict" {
+  const llm = if cached_value?.value != nil && type_of(cached_value.value) == "dict" {
     cached_value.value
   } else {
     cached_value
   }
-  let usage = llm?.usage
+  const usage = llm?.usage
   if type_of(usage) == "dict" {
-    var tokens_saved = 0
+    let tokens_saved = 0
     if usage?.input_tokens != nil {
       tokens_saved = tokens_saved + to_int(usage.input_tokens)
     }
@@ -900,23 +900,23 @@ pub fn with_circuit_breaker(handler, options = nil) {
   if !__llm_handler_is_callable(handler) {
     return __partial(with_circuit_breaker, handler)
   }
-  let opts = options ?? {}
-  let {threshold = 5, reset_ms = 30000} = opts ?? {}
+  const opts = options ?? {}
+  const {threshold = 5, reset_ms = 30000} = opts ?? {}
   return { call ->
-    let name = opts?.name ?? __circuit_name_for(call)
+    const name = opts?.name ?? __circuit_name_for(call)
     __ensure_llm_handler_circuit(name, threshold, reset_ms)
-    let state = circuit_check(name)
+    const state = circuit_check(name)
     if state == "open" {
       throw __circuit_open_error(call, name)
     }
-    let outcome = try {
+    const outcome = try {
       handler(call)
     }
     if is_err(outcome) {
       circuit_record_failure(name)
       throw unwrap_err(outcome)
     }
-    let result = unwrap(outcome)
+    const result = unwrap(outcome)
     if type_of(result) == "dict" && contains(result.keys(), "ok") && !(result?.ok ?? false) {
       circuit_record_failure(name)
     } else {
@@ -931,7 +931,7 @@ pub fn with_circuit_breaker(handler, options = nil) {
 // -------------------------------------------------------------------------------------------------
 
 fn __repair_default_nudge(error_dict) {
-  var lines = [
+  let lines = [
     "Your previous response did not pass schema validation.",
     "Re-emit valid JSON only:",
     "- Use lowercase keys exactly as specified.",
@@ -939,7 +939,7 @@ fn __repair_default_nudge(error_dict) {
     "- Do not include prose, commentary, or trailing text.",
   ]
   if type_of(error_dict) == "dict" {
-    let detail = to_string(error_dict?.message ?? error_dict?.error ?? "")
+    const detail = to_string(error_dict?.message ?? error_dict?.error ?? "")
     if detail != "" {
       lines = lines.push("Validator said: " + detail)
     }
@@ -948,7 +948,7 @@ fn __repair_default_nudge(error_dict) {
 }
 
 fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
-  let nudge = if __llm_handler_is_callable(strategy) {
+  const nudge = if __llm_handler_is_callable(strategy) {
     let r = try {
       strategy(call?.prompt, call?.system, call?.opts, envelope)
     }
@@ -967,8 +967,8 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
   } else {
     __repair_default_nudge(envelope?.error)
   }
-  let original_prompt = to_string(call?.prompt ?? "")
-  var repaired_opts = __opts_dict(call?.opts)
+  const original_prompt = to_string(call?.prompt ?? "")
+  let repaired_opts = __opts_dict(call?.opts)
   if max_tokens != nil {
     // The repair pass re-issues a structured verdict on the SAME route, so it
     // shares the reasoning channel's budget. A flat repair `max_tokens` (the
@@ -979,9 +979,9 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
     // ever raised, never lowered — a non-reasoning route keeps the requested
     // budget, a reasoning route clears the truncation floor. Reuses the shared
     // `repair_min_max_tokens` so this never drifts from the judge floor.
-    let requested = to_int(max_tokens) ?? 0
-    let floor = repair_min_max_tokens(repaired_opts)
-    let effective = if requested > floor {
+    const requested = to_int(max_tokens) ?? 0
+    const floor = repair_min_max_tokens(repaired_opts)
+    const effective = if requested > floor {
       requested
     } else {
       floor
@@ -1031,24 +1031,24 @@ pub fn with_repair(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_repair, next)
   }
-  let cfg = __opts_dict(opts)
-  let enabled = cfg?.enabled ?? true
-  let strategy = cfg?.strategy
-  let {max_tokens = 600, temperature = 0.0} = cfg ?? {}
+  const cfg = __opts_dict(opts)
+  const enabled = cfg?.enabled ?? true
+  const strategy = cfg?.strategy
+  const {max_tokens = 600, temperature = 0.0} = cfg ?? {}
   return { call ->
-    let first = __safe_invoke(next, call)
+    const first = __safe_invoke(next, call)
     if !enabled {
       return first
     }
     if first?.ok ?? false {
       return first
     }
-    let status = to_string(first?.status ?? "")
+    const status = to_string(first?.status ?? "")
     if status != "schema_validation" {
       return first
     }
-    let repair_call = __repair_apply_strategy(call, first, strategy, max_tokens, temperature)
-    let second = __safe_invoke(next, repair_call)
+    const repair_call = __repair_apply_strategy(call, first, strategy, max_tokens, temperature)
+    const second = __safe_invoke(next, repair_call)
     return second + {repair_attempted: true}
   }
 }
@@ -1090,32 +1090,32 @@ pub fn with_coerce(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_coerce, next)
   }
-  let cfg = __opts_dict(opts)
-  let {lower_keys = true, on_text_json = false} = cfg ?? {}
+  const cfg = __opts_dict(opts)
+  const {lower_keys = true, on_text_json = false} = cfg ?? {}
   return { call ->
-    let envelope = __safe_invoke(next, call)
+    const envelope = __safe_invoke(next, call)
     if !(envelope?.ok ?? false) {
       return envelope
     }
-    let value = if type_of(envelope?.value) == "dict" {
+    const value = if type_of(envelope?.value) == "dict" {
       envelope.value
     } else {
       {}
     }
-    var augmented = envelope
+    let augmented = envelope
     if type_of(value?.data) == "dict" {
-      let normalized = __coerce_value_dict(value.data, lower_keys)
+      const normalized = __coerce_value_dict(value.data, lower_keys)
       augmented = augmented + {value: value + {data: normalized, raw_data: value.data}}
     } else if on_text_json {
-      let text = to_string(value?.text ?? "")
+      const text = to_string(value?.text ?? "")
       if text != "" {
-        let parsed = try {
+        const parsed = try {
           json_parse(text)
         }
         if !is_err(parsed) {
-          let unwrapped = unwrap(parsed)
+          const unwrapped = unwrap(parsed)
           if type_of(unwrapped) == "dict" {
-            let normalized = __coerce_value_dict(unwrapped, lower_keys)
+            const normalized = __coerce_value_dict(unwrapped, lower_keys)
             augmented = augmented + {value: value + {data: normalized}}
           }
         }
@@ -1182,24 +1182,24 @@ pub fn with_timeout(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_timeout, next)
   }
-  let timeout_ms = __timeout_resolve_ms(opts)
-  let cfg = if type_of(opts) == "dict" {
+  const timeout_ms = __timeout_resolve_ms(opts)
+  const cfg = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  let relabel = cfg?.relabel_failures ?? true
+  const relabel = cfg?.relabel_failures ?? true
   return { call ->
-    let original_opts = __opts_dict(call?.opts)
-    let injected = if timeout_ms > 0 && original_opts?.timeout_ms == nil {
+    const original_opts = __opts_dict(call?.opts)
+    const injected = if timeout_ms > 0 && original_opts?.timeout_ms == nil {
       original_opts + {timeout_ms: timeout_ms}
     } else {
       original_opts
     }
-    let deadline_call = call + {opts: injected}
-    let start = harness.clock.now_ms()
-    let envelope = __safe_invoke(next, deadline_call)
-    let elapsed = harness.clock.now_ms() - start
+    const deadline_call = call + {opts: injected}
+    const start = harness.clock.now_ms()
+    const envelope = __safe_invoke(next, deadline_call)
+    const elapsed = harness.clock.now_ms() - start
     if timeout_ms <= 0 {
       return envelope
     }
@@ -1226,15 +1226,15 @@ pub fn with_timeout(next, opts = nil) {
 // -------------------------------------------------------------------------------------------------
 
 fn __routing_resolve(routes, call) {
-  var idx = 0
-  let total = if type_of(routes) == "list" {
+  let idx = 0
+  const total = if type_of(routes) == "list" {
     len(routes)
   } else {
     0
   }
   while idx < total {
-    let route = routes[idx]
-    let matched = if type_of(route) == "dict" {
+    const route = routes[idx]
+    const matched = if type_of(route) == "dict" {
       let predicate = route?.when
       if predicate == nil {
         true
@@ -1294,9 +1294,9 @@ fn __routing_resolve(routes, call) {
  * @errors: []
  */
 pub fn with_routing(opts) {
-  let cfg = __opts_dict(opts)
-  let default_caller = cfg?.default
-  let routes = if type_of(cfg?.routes) == "list" {
+  const cfg = __opts_dict(opts)
+  const default_caller = cfg?.default
+  const routes = if type_of(cfg?.routes) == "list" {
     cfg.routes
   } else {
     []
@@ -1305,13 +1305,13 @@ pub fn with_routing(opts) {
     throw "with_routing: opts.default must be a callable caller"
   }
   return { call ->
-    let pick = __routing_resolve(routes, call)
-    let chosen = if __llm_handler_is_callable(pick.caller) {
+    const pick = __routing_resolve(routes, call)
+    const chosen = if __llm_handler_is_callable(pick.caller) {
       pick.caller
     } else {
       default_caller
     }
-    let route_name = if pick.index >= 0 {
+    const route_name = if pick.index >= 0 {
       pick.name
     } else {
       to_string(cfg?.default_name ?? "default")
@@ -1321,7 +1321,7 @@ pub fn with_routing(opts) {
       "llm_routing_decision",
       {route_index: pick.index, route_name: route_name, used_default: pick.index < 0},
     )
-    let envelope = __safe_invoke(chosen, call)
+    const envelope = __safe_invoke(chosen, call)
     return envelope + {route_index: pick.index, route_name: route_name}
   }
 }
@@ -1346,16 +1346,16 @@ pub fn with_routing(opts) {
  * @errors: []
  */
 pub fn compose(wrappers) {
-  let list = if type_of(wrappers) == "list" {
+  const list = if type_of(wrappers) == "list" {
     wrappers
   } else {
     []
   }
   return { base ->
-    var caller = base
-    var i = len(list) - 1
+    let caller = base
+    let i = len(list) - 1
     while i >= 0 {
-      let w = list[i]
+      const w = list[i]
       caller = w(caller)
       i = i - 1
     }

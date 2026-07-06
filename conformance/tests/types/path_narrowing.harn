@@ -12,7 +12,7 @@ pipeline test(task) {
   // `if`-expression: the then-branch yields the narrowed path `list`, the
   // else-branch yields `list`, so `tokens` is `list` (not `list?`).
   fn resolve(entry: {arguments: list?, command: string?}) -> list {
-    let tokens = if type_of(entry.arguments) == "list" {
+    const tokens = if type_of(entry.arguments) == "list" {
       entry.arguments
     } else {
       to_string(entry.command ?? "").split(" ")

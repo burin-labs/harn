@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * no backreferences/lookaround).
  */
 pipeline test(task) {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "stay",
@@ -51,7 +51,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Refactor the file",
         nil,
         {
@@ -62,11 +62,11 @@ pipeline test(task) {
           max_iterations: 5,
         },
       )
-      let events = transcript_events(result?.transcript)
-      var found_regex_strategy = false
-      var promoted_edit = false
-      var promoted_create = false
-      var promoted_run = false
+      const events = transcript_events(result?.transcript)
+      let found_regex_strategy = false
+      let promoted_edit = false
+      let promoted_create = false
+      let promoted_run = false
       for ev in events {
         if ev.kind == "tool_search_query" {
           assert(ev.metadata?.strategy == "regex", "strategy recorded as regex")
@@ -90,8 +90,8 @@ pipeline test(task) {
       assert(promoted_edit, "regex `edit|create` matches `edit_file`")
       assert(promoted_create, "regex `edit|create` matches `create_file`")
       assert(!promoted_run, "regex `edit|create` must not match `run_shell`")
-      let calls = llm_mock_calls()
-      let second_system = calls[1].system
+      const calls = llm_mock_calls()
+      const second_system = calls[1].system
       assert(contains(second_system, "edit_file"), "edit_file surfaced in turn 2")
       assert(contains(second_system, "create_file"), "create_file surfaced in turn 2")
       assert(!contains(second_system, "run_shell"), "run_shell still deferred")

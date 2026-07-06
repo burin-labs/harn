@@ -1,7 +1,7 @@
 pipeline test(task) {
-  let x = "outer"
+  const x = "outer"
   if true {
-    let y = "inner"
+    const y = "inner"
     log(y)
   }
   log(x)

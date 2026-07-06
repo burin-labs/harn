@@ -15,7 +15,7 @@ fn __agent_progress_status(value, _label) {
   if contains(["pending", "in_progress", "completed"], value) {
     return value
   }
-  let normalized = replace(replace(lowercase(trim(value)), "-", "_"), " ", "_")
+  const normalized = replace(replace(lowercase(trim(value)), "-", "_"), " ", "_")
   if contains(["pending", "todo", "not_started", "queued", "blocked", "waiting"], normalized) {
     return "pending"
   }
@@ -33,7 +33,7 @@ fn __agent_progress_priority(value, _label) {
   if contains(["high", "medium", "low"], value) {
     return value
   }
-  let normalized = lowercase(trim(value))
+  const normalized = lowercase(trim(value))
   if contains(["high", "urgent", "critical", "p0", "p1"], normalized) {
     return "high"
   }
@@ -54,27 +54,27 @@ fn __agent_progress_entries(value) {
   // Lenient by design (cosmetic surface): a single entry passed as a bare dict
   // is wrapped; a non-list/non-dict shape yields no entries instead of aborting
   // the turn. Individual entries that lack usable content are skipped, not fatal.
-  let list = if type_of(value) == "list" {
+  const list = if type_of(value) == "list" {
     value
   } else if type_of(value) == "dict" {
     [value]
   } else {
     []
   }
-  var entries = []
-  var index = 0
+  let entries = []
+  let index = 0
   for raw in list {
-    let label = "agent_progress: entries[" + to_string(index) + "]"
+    const label = "agent_progress: entries[" + to_string(index) + "]"
     index = index + 1
     if type_of(raw) != "dict" {
       continue
     }
-    let content = raw?.content
+    const content = raw?.content
     if type_of(content) != "string" || trim(content) == "" {
       continue
     }
-    var entry = {content: content, status: __agent_progress_status(raw?.status, label)}
-    let priority = __agent_progress_priority(raw?.priority, label)
+    let entry = {content: content, status: __agent_progress_status(raw?.status, label)}
+    const priority = __agent_progress_priority(raw?.priority, label)
     if priority != nil {
       entry = entry + {priority: priority}
     }
@@ -87,19 +87,19 @@ fn __agent_progress_payload(input) {
   if type_of(input) != "dict" {
     throw "agent_progress: argument must be a dict"
   }
-  let message = input?.message
+  const message = input?.message
   if message != nil && type_of(message) != "string" {
     throw "agent_progress: message must be a string or nil"
   }
-  let entries = __agent_progress_entries(input?.entries)
+  const entries = __agent_progress_entries(input?.entries)
   if (message == nil || trim(message) == "") && len(entries) == 0 {
     throw "agent_progress: message or entries is required"
   }
-  let replace = input?.replace ?? true
+  const replace = input?.replace ?? true
   if type_of(replace) != "bool" {
     throw "agent_progress: replace must be a bool"
   }
-  let metadata = input?.metadata ?? {}
+  const metadata = input?.metadata ?? {}
   if type_of(metadata) != "dict" {
     throw "agent_progress: metadata must be a dict"
   }
@@ -116,7 +116,7 @@ fn __agent_progress_payload(input) {
 }
 
 fn __agent_progress_tool_name(config) {
-  let name = config?.name ?? "agent_progress"
+  const name = config?.name ?? "agent_progress"
   if type_of(name) != "string" || trim(name) == "" {
     throw "agent_loop: progress_tool.name must be a non-empty string"
   }
@@ -124,7 +124,7 @@ fn __agent_progress_tool_name(config) {
 }
 
 fn __agent_progress_tool_description(config) {
-  let description = config?.description
+  const description = config?.description
     ?? "Report concise task progress to the host without ending the turn."
   if type_of(description) != "string" || trim(description) == "" {
     throw "agent_loop: progress_tool.description must be a non-empty string"
@@ -133,8 +133,8 @@ fn __agent_progress_tool_description(config) {
 }
 
 fn __agent_progress_tool_nudge(config) {
-  let tool_name = __agent_progress_tool_name(config)
-  let nudge = (config?.system_prompt_nudge
+  const tool_name = __agent_progress_tool_name(config)
+  const nudge = (config?.system_prompt_nudge
     ?? "When useful, call ")
     + tool_name
     + " to report concise progress. Use message for narration, entries for task-list state, and replace=true unless the update should append."
@@ -144,7 +144,7 @@ fn __agent_progress_tool_nudge(config) {
   if type_of(nudge) != "string" {
     throw "agent_loop: progress_tool.system_prompt_nudge must be a string or nil"
   }
-  let trimmed = trim(nudge)
+  const trimmed = trim(nudge)
   if trimmed == "" {
     return nil
   }
@@ -155,7 +155,7 @@ fn __agent_progress_tool_config(value) {
   if value == nil {
     return nil
   }
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "bool" {
     if value {
       return {}
@@ -176,8 +176,8 @@ fn __agent_progress_tool_config(value) {
  * @api_stability: experimental
  */
 pub fn agent_progress(input) {
-  let payload = __agent_progress_payload(input)
-  let session_id = agent_session_current_id()
+  const payload = __agent_progress_payload(input)
+  const session_id = agent_session_current_id()
   if session_id == nil || session_id == "" {
     throw "agent_progress: no active agent session"
   }
@@ -193,7 +193,7 @@ pub fn agent_progress(input) {
  * @api_stability: experimental
  */
 pub fn agent_progress_tool(registry = nil, options = nil) {
-  let config = options ?? {}
+  const config = options ?? {}
   return tool_define(
     registry ?? tool_registry(),
     __agent_progress_tool_name(config),
@@ -227,14 +227,14 @@ pub fn agent_progress_tool(registry = nil, options = nil) {
  * @api_stability: experimental
  */
 pub fn agent_progress_apply_options(options = nil) {
-  let opts = options ?? {}
-  let config = __agent_progress_tool_config(opts?.progress_tool)
+  const opts = options ?? {}
+  const config = __agent_progress_tool_config(opts?.progress_tool)
   if config == nil {
     return opts
   }
-  let tools = agent_progress_tool(opts?.tools, config)
-  let nudge = __agent_progress_tool_nudge(config)
-  var out = opts + {tools: tools}
+  const tools = agent_progress_tool(opts?.tools, config)
+  const nudge = __agent_progress_tool_nudge(config)
+  let out = opts + {tools: tools}
   if nudge != nil {
     out = out + {_progress_tool_system_prompt_nudge: nudge}
   }

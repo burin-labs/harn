@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("orchestrator_circuit_breaker_trips")
+  const result = trigger_test_harness("orchestrator_circuit_breaker_trips")
   __io_println(result.ok)
   __io_println(len(result.attempts) == 5)
   __io_println(result.dlq[0].attempts == 5)

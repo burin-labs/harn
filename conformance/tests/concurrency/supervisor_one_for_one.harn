@@ -1,7 +1,7 @@
 pipeline default() {
-  let flaky_starts = atomic(0)
-  let stable_starts = atomic(0)
-  let sup = supervisor_start(
+  const flaky_starts = atomic(0)
+  const stable_starts = atomic(0)
+  const sup = supervisor_start(
     {
       name: "fixture",
       strategy: "one_for_one",
@@ -31,9 +31,9 @@ pipeline default() {
     },
   )
   sleep(25ms)
-  let state = supervisor_state(sup)
-  let events = supervisor_events(sup)
-  let debug = runtime_context().debug
+  const state = supervisor_state(sup)
+  const events = supervisor_events(sup)
+  const debug = runtime_context().debug
   __io_println(atomic_get(flaky_starts))
   __io_println(atomic_get(stable_starts))
   __io_println(state.status)

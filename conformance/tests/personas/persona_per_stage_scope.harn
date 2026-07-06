@@ -8,7 +8,7 @@
  * frame unwinds.
  */
 fn stage_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read",
@@ -36,30 +36,30 @@ fn stage_tools() {
 
 @persona(name: "scoped_persona", stages: [{name: "research", allowed_tools: ["read"]}, {name: "edit_phase", allowed_tools: ["edit"]}])
 fn scoped_persona(ctx) {
-  let r = research_step(ctx)
-  let e = edit_phase_step(ctx)
+  const r = research_step(ctx)
+  const e = edit_phase_step(ctx)
   return {research: r, edit: e}
 }
 
 @step(name: "research")
 fn research_step(ctx) {
-  let tools = ctx.tools
-  let in_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
-  let out_of_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  const tools = ctx.tools
+  const in_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
+  const out_of_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 
 @step(name: "edit_phase")
 fn edit_phase_step(ctx) {
-  let tools = ctx.tools
-  let in_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
-  let out_of_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
+  const tools = ctx.tools
+  const in_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  const out_of_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 
 pipeline main() {
-  let tools = stage_tools()
-  let outcome = scoped_persona({tools: tools})
+  const tools = stage_tools()
+  const outcome = scoped_persona({tools: tools})
   __io_println(outcome.research.in_scope.ok)
   __io_println(outcome.research.in_scope.rendered_result)
   __io_println(outcome.research.out_of_scope.ok)
@@ -70,7 +70,7 @@ pipeline main() {
   __io_println(outcome.edit.out_of_scope.error_category)
   // After every stage unwinds the per-stage policy is gone, so an ambient
   // dispatch should pass.
-  let ambient = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  const ambient = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
   __io_println(ambient.ok)
   __io_println(ambient.rendered_result)
 }

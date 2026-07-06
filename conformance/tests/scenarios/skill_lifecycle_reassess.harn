@@ -13,7 +13,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *     scores the pivot, activates `review`, deactivates `draft`.
  */
 pipeline test(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "noop",
@@ -28,7 +28,7 @@ pipeline test(task) {
     description "Review existing code for correctness"
     when_to_use "User asks to review/audit"
   }
-  let registry = skill_define(draft, "review_skill", skill_find(review_skill, "review_skill") ?? {})
+  const registry = skill_define(draft, "review_skill", skill_find(review_skill, "review_skill") ?? {})
   // Turn 0: a tool call forces post_turn_callback to fire, giving
   // us a hook to inject a runtime user message that pivots intent.
   with_llm_script(
@@ -39,7 +39,7 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("Reviewing now.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Please draft the launch memo",
         nil,
         {
@@ -58,10 +58,10 @@ pipeline test(task) {
           },
         },
       )
-      let events = transcript_events(result?.transcript)
-      var draft_activate = false
-      var review_activate = false
-      var draft_deactivate = false
+      const events = transcript_events(result?.transcript)
+      let draft_activate = false
+      let review_activate = false
+      let draft_deactivate = false
       for ev in events {
         if ev.kind == "skill_activated" && ev.metadata?.name == "draft" {
           draft_activate = true

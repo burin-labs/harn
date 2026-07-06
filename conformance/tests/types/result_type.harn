@@ -1,7 +1,7 @@
 pipeline test(task) {
   // Ok and Err constructors
-  let ok_val = Ok(42)
-  let err_val = Err("something failed")
+  const ok_val = Ok(42)
+  const err_val = Err("something failed")
   log(ok_val)
   log(err_val)
   // is_ok / is_err
@@ -15,9 +15,9 @@ pipeline test(task) {
   // unwrap_err
   log(unwrap_err(err_val))
   // Result.Ok and Result.Err enum construction
-  let r = Result.Ok("hello")
+  const r = Result.Ok("hello")
   log(r)
-  let e = Result.Err("oops")
+  const e = Result.Err("oops")
   log(e)
   // Pattern matching on Result
   match r {

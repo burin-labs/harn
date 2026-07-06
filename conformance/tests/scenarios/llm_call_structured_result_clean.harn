@@ -6,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * repair / extraction flags.
  */
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["name", "age"],
     properties: {name: {type: "string"}, age: {type: "integer"}},
@@ -14,7 +14,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
     { ->
-      let r = llm_call_structured_result("Summarize", schema, {provider: "mock"})
+      const r = llm_call_structured_result("Summarize", schema, {provider: "mock"})
       __io_println(r.ok)
       __io_println(r.data.name)
       __io_println(r.data.age)

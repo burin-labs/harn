@@ -5,6 +5,6 @@ pipeline test(task) {
   fn double(x) {
     return x * 2
   }
-  let result = 3 |> add1 |> double
+  const result = 3 |> add1 |> double
   log(result)
 }

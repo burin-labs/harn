@@ -14,10 +14,10 @@ import "std/triggers"
  * layer (via agent_loop, which pushes onto the current-session stack).
  */
 pipeline test(task) {
-  let _ = lifecycle_audit_log_take()
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const _ = lifecycle_audit_log_take()
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-channel-reminder-current-" + unique,
       kind: "channel.emit",
@@ -41,7 +41,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let dispatch = trigger_fire(
+  const dispatch = trigger_fire(
     handle,
     {
       provider: "channel",
@@ -56,11 +56,11 @@ pipeline test(task) {
   __io_println(dispatch.result?.status == "dropped")
   __io_println(dispatch.result?.reason == "target_missing")
   __io_println(dispatch.result?.target_kind == "current")
-  let audits = lifecycle_audit_log_take()
-  var inject_audit_count = 0
-  var outcome = ""
-  var reason = ""
-  var target_kind = ""
+  const audits = lifecycle_audit_log_take()
+  let inject_audit_count = 0
+  let outcome = ""
+  let reason = ""
+  let target_kind = ""
   for audit in audits {
     if audit.kind == "triggers.reminder_inject.audit" {
       inject_audit_count = inject_audit_count + 1

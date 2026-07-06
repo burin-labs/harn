@@ -4,7 +4,7 @@ import { with_temp_dir } from "std/testing"
 import { qmode_inspect_task_dir } from "../qmode_inspect"
 
 fn first_group(pattern: string, text: string) {
-  let matches = regex_captures(pattern, text)
+  const matches = regex_captures(pattern, text)
   if len(matches) == 0 {
     return nil
   }
@@ -12,14 +12,14 @@ fn first_group(pattern: string, text: string) {
 }
 
 fn repo_root() -> string {
-  var dir = cwd()
-  var depth = 0
+  let dir = cwd()
+  let depth = 0
   while depth < 8 {
     if harness.fs.exists(path_join(dir, "Cargo.toml"))
       && harness.fs.exists(path_join(dir, "experiments")) {
       return dir
     }
-    let parent = dirname(dir) ?? dir
+    const parent = dirname(dir) ?? dir
     if parent == dir {
       break
     }
@@ -30,26 +30,26 @@ fn repo_root() -> string {
 }
 
 fn resolve_harn_bin(root: string) -> string {
-  let explicit = harness.env.get("HARN_BIN")
+  const explicit = harness.env.get("HARN_BIN")
   if explicit {
     return explicit
   }
-  let env_target_dir = harness.env.get("CARGO_TARGET_DIR")
+  const env_target_dir = harness.env.get("CARGO_TARGET_DIR")
   if env_target_dir {
     return path_join(env_target_dir, "debug/harn")
   }
-  let cargo_config = path_join(root, ".cargo/config.toml")
+  const cargo_config = path_join(root, ".cargo/config.toml")
   if harness.fs.exists(cargo_config) {
-    let config = harness.fs.read_text(cargo_config) ?? ""
-    let configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
+    const config = harness.fs.read_text(cargo_config) ?? ""
+    const configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
     if configured {
-      let configured_bin = path_join(configured, "debug/harn")
+      const configured_bin = path_join(configured, "debug/harn")
       if harness.fs.exists(configured_bin) {
         return configured_bin
       }
     }
   }
-  let default_bin = path_join(root, "target/debug/harn")
+  const default_bin = path_join(root, "target/debug/harn")
   if harness.fs.exists(default_bin) {
     return default_bin
   }
@@ -120,7 +120,7 @@ fn write_valid_fixture(task_dir: string) -> nil {
 }
 
 fn finding_messages(result: dict) -> string {
-  var lines: list<string> = []
+  let lines: list<string> = []
   for finding in result.findings {
     lines = lines + [to_string(finding?.level ?? "") + ": " + to_string(finding?.message ?? "")]
   }
@@ -131,8 +131,8 @@ pipeline test_qmode_inspect_valid_fixture_passes(_task) {
   with_temp_dir(
     { task_dir ->
       write_valid_fixture(task_dir)
-      let result = qmode_inspect_task_dir(task_dir)
-      let output = finding_messages(result)
+      const result = qmode_inspect_task_dir(task_dir)
+      const output = finding_messages(result)
       assert(result.exit_code == 0, "valid fixture should pass: " + output)
       assert(output.contains("OK: task.json has task text"), "task text finding should be emitted")
       assert(!output.contains("FAIL:"), "valid fixture should not fail: " + output)
@@ -154,8 +154,8 @@ pipeline test_qmode_inspect_terminal_double_call_fails(_task) {
         )
           + "\n",
       )
-      let result = qmode_inspect_task_dir(task_dir)
-      let output = finding_messages(result)
+      const result = qmode_inspect_task_dir(task_dir)
+      const output = finding_messages(result)
       assert(result.exit_code == 1, "double terminal tool call must fail")
       assert(
         output.contains("multiple terminal tools"),
@@ -169,9 +169,9 @@ pipeline test_qmode_inspect_cli_exit_code_and_output(_task) {
   with_temp_dir(
     { task_dir ->
       write_valid_fixture(task_dir)
-      let root = repo_root()
-      let harn_bin = resolve_harn_bin(root)
-      let child = command_run(
+      const root = repo_root()
+      const harn_bin = resolve_harn_bin(root)
+      const child = command_run(
         [harn_bin, "run", "--no-sandbox", "experiments/burin-mini/qmode_inspect.harn", "--", task_dir],
         {cwd: root, capture: {max_inline_bytes: 200000}},
       )

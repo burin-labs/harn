@@ -1,6 +1,6 @@
 pipeline test(task) {
-  let items = [1, 2, 3]
-  let outcome = parallel settle items { item ->
+  const items = [1, 2, 3]
+  const outcome = parallel settle items { item ->
     if item == 2 {
       throw "boom"
     }

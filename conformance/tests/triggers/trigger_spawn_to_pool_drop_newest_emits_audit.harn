@@ -10,22 +10,22 @@ import "std/triggers"
  * composing triggers with pools shouldn't introduce a parallel audit path.
  */
 pipeline test(task) {
-  let bp = Backpressure()
-  let gate = channel(nil, 1)
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const bp = Backpressure()
+  const gate = channel(nil, 1)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let pool_name = "spawn-to-pool-drop-newest-demo-" + unique
-  let _ = pool_create({name: pool_name, max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
+  const pool_name = "spawn-to-pool-drop-newest-demo-" + unique
+  const _ = pool_create({name: pool_name, max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
   // Filter to drop receipts so the assertion ignores the `pool_submit`
   // and `pool_dequeue` receipts emitted on the same topic by PL-06.
-  let stream = event_log
+  const stream = event_log
     .subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
-  let task_factory = { _event -> return { ->
+  const task_factory = { _event -> return { ->
     receive(gate)
     return "ok"
   } }
-  let trigger_id = "trigger-spawn-to-pool-dropnew-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const trigger_id = "trigger-spawn-to-pool-dropnew-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -44,15 +44,15 @@ pipeline test(task) {
   )
   // First fire occupies the single active slot. Second occupies the queue.
   // Third should be evicted by drop_newest, leaving the result as rejected.
-  let warmup = trigger_fire(
+  const warmup = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "warmup-" + unique}},
   )
-  let queued = trigger_fire(
+  const queued = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "queued-" + unique}},
   )
-  let newest = trigger_fire(
+  const newest = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "newest-" + unique}},
   )
@@ -63,13 +63,13 @@ pipeline test(task) {
   __io_println(newest.result?.rejection_reason)
   // The pool emits its standard audit so trigger dispatch and direct
   // `pool.submit` callers see the same drop event.
-  let audit = stream.next().value
+  const audit = stream.next().value
   __io_println(audit.payload.policy)
   __io_println(audit.headers.schema)
   // Drain the gate so the two surviving tasks finish.
   send(gate, "go")
   send(gate, "go")
-  let results = pool_wait([warmup.result, queued.result])
+  const results = pool_wait([warmup.result, queued.result])
   __io_println(results[0].status)
   __io_println(results[1].status)
 }

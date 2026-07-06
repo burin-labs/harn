@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn child_tools(grandchild_session) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate_grandchild",
@@ -19,7 +19,7 @@ fn child_tools(grandchild_session) {
 }
 
 fn parent_tools(child_session, grandchild_session) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate_child",
@@ -44,9 +44,9 @@ fn parent_tools(child_session, grandchild_session) {
 }
 
 pipeline main() {
-  let parent = agent_session_open("reminder-propagate-session-parent")
-  let child = "reminder-propagate-session-child"
-  let grandchild = "reminder-propagate-session-grandchild"
+  const parent = agent_session_open("reminder-propagate-session-parent")
+  const child = "reminder-propagate-session-child"
+  const grandchild = "reminder-propagate-session-grandchild"
   agent_session_open(child)
   agent_session_open(grandchild)
   agent_session_reset(parent)
@@ -79,8 +79,8 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
-      let grandchild_reminders = transcript_events_by_kind(agent_session_snapshot(grandchild), "system_reminder")
+      const child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+      const grandchild_reminders = transcript_events_by_kind(agent_session_snapshot(grandchild), "system_reminder")
       __io_println(len(child_reminders))
       __io_println(child_reminders[0].reminder.body)
       __io_println(child_reminders[0].reminder.source)

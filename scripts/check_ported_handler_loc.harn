@@ -13,7 +13,7 @@
 // the budgets in ported_handlers.toml were measured against.
 //
 // Tracks epic #2293 (subticket #2314 = C1).
-let CONFIG_PATH = "scripts/ported_handlers.toml"
+const CONFIG_PATH = "scripts/ported_handlers.toml"
 
 /**
  * Count lines in `text`, matching `wc -l` semantics: the number of
@@ -64,16 +64,16 @@ pub fn evaluate_handler(path, max_loc, actual) {
  * gate instead of silently passing.
  */
 pub fn collect_violations(handlers) -> list {
-  var violations = []
+  let violations = []
   for handler in handlers {
-    let path = handler?.path
-    let max_loc = handler?.max_loc
-    let actual = if path == nil || path == "" {
+    const path = handler?.path
+    const max_loc = handler?.max_loc
+    const actual = if path == nil || path == "" {
       nil
     } else {
       loc_for(path)
     }
-    let v = evaluate_handler(path, max_loc, actual)
+    const v = evaluate_handler(path, max_loc, actual)
     if v != nil {
       violations = violations + [v]
     }
@@ -86,18 +86,18 @@ pipeline main(task) {
     __io_eprintln("error: missing ${CONFIG_PATH}")
     return 1
   }
-  let parsed = try {
+  const parsed = try {
     toml_parse(harness.fs.read_text(CONFIG_PATH))
   } catch (err) {
     __io_eprintln("error: failed to parse ${CONFIG_PATH}: ${err}")
     return 1
   }
-  let handlers = parsed?.handler ?? []
+  const handlers = parsed?.handler ?? []
   if handlers.count == 0 {
     __io_eprintln("error: ${CONFIG_PATH} has no [[handler]] entries")
     return 1
   }
-  let violations = collect_violations(handlers)
+  const violations = collect_violations(handlers)
   if violations.count == 0 {
     __io_println("ported-handler LOC ratchet OK (${handlers.count} handler(s) within budget)")
     return 0

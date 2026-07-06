@@ -18,7 +18,7 @@ fn _bundle(approval_required) {
 }
 
 pipeline test_defaults_disabled(task) {
-  let d = defaults()
+  const d = defaults()
   assert_eq(d.enabled, false)
   // require_human_for is the full action-kinds list by default.
   assert_eq(len(d.require_human_for), 5)
@@ -34,13 +34,13 @@ pipeline test_handles_kind_respects_enabled(task) {
 }
 
 pipeline test_requires_human_pre_approved_short_circuits(task) {
-  let policy = {enabled: true, pre_approved: true}
+  const policy = {enabled: true, pre_approved: true}
   assert(!requires_human_for(policy, "semantic_repair"))
   assert(!requires_human_for(policy, "force_push"))
 }
 
 pipeline test_requires_human_autopilot_overrides_human_list(task) {
-  let policy = {
+  const policy = {
     enabled: true,
     require_human_for: ["semantic_repair", "force_push"],
     autopilot_action_kinds: ["semantic_repair"],
@@ -52,43 +52,43 @@ pipeline test_requires_human_autopilot_overrides_human_list(task) {
 }
 
 pipeline test_requires_human_unknown_action_fails_closed(task) {
-  let policy = {enabled: true}
+  const policy = {enabled: true}
   assert(requires_human_for(policy, "drop_table"))
 }
 
 pipeline test_gate_dry_run_short_circuits(task) {
-  let policy = {enabled: false}
-  let bundle = _bundle(["semantic_repair"])
-  let decision = gate(policy, bundle, true)
+  const policy = {enabled: false}
+  const bundle = _bundle(["semantic_repair"])
+  const decision = gate(policy, bundle, true)
   assert(decision.allowed)
   assert_eq(decision.approval_state, "dry_run")
 }
 
 pipeline test_gate_disabled_blocks_with_human(task) {
-  let bundle = _bundle(["semantic_repair", "force_push"])
-  let decision = gate(nil, bundle, false)
+  const bundle = _bundle(["semantic_repair", "force_push"])
+  const decision = gate(nil, bundle, false)
   assert(!decision.allowed)
   assert_eq(decision.approval_state, "needs_human")
   assert_eq(len(decision.blocking_actions), 2)
 }
 
 pipeline test_gate_pre_approved_allows(task) {
-  let policy = {enabled: true, pre_approved: true}
-  let bundle = _bundle(["semantic_repair", "force_push"])
-  let decision = gate(policy, bundle, false)
+  const policy = {enabled: true, pre_approved: true}
+  const bundle = _bundle(["semantic_repair", "force_push"])
+  const decision = gate(policy, bundle, false)
   assert(decision.allowed)
   assert_eq(decision.approval_state, "pre_approved")
   assert_eq(len(decision.blocking_actions), 0)
 }
 
 pipeline test_gate_autopilot_partial_blocks(task) {
-  let policy = {
+  const policy = {
     enabled: true,
     require_human_for: ["semantic_repair", "force_push"],
     autopilot_action_kinds: ["semantic_repair"],
   }
-  let bundle = _bundle(["semantic_repair", "force_push"])
-  let decision = gate(policy, bundle, false)
+  const bundle = _bundle(["semantic_repair", "force_push"])
+  const decision = gate(policy, bundle, false)
   // semantic_repair is autopilot but force_push still blocks.
   assert(!decision.allowed)
   assert_eq(decision.approval_state, "needs_human")
@@ -97,21 +97,21 @@ pipeline test_gate_autopilot_partial_blocks(task) {
 }
 
 pipeline test_gate_autopilot_full_passes(task) {
-  let policy = {enabled: true, require_human_for: ["force_push"], autopilot_action_kinds: ["semantic_repair"]}
-  let bundle = _bundle(["semantic_repair"])
-  let decision = gate(policy, bundle, false)
+  const policy = {enabled: true, require_human_for: ["force_push"], autopilot_action_kinds: ["semantic_repair"]}
+  const bundle = _bundle(["semantic_repair"])
+  const decision = gate(policy, bundle, false)
   assert(decision.allowed)
   assert_eq(decision.approval_state, "autopilot")
 }
 
 pipeline test_validate_rejects_unknown_action_kind(task) {
-  let err = validate_repair_policy({enabled: true, require_human_for: ["force_push", "drop_db"]})
+  const err = validate_repair_policy({enabled: true, require_human_for: ["force_push", "drop_db"]})
   assert(err != nil)
   assert(err.contains("require_human_for"))
 }
 
 pipeline test_validate_rejects_unknown_handles_kind(task) {
-  let err = validate_repair_policy({enabled: true, handles_kinds: ["wat"]})
+  const err = validate_repair_policy({enabled: true, handles_kinds: ["wat"]})
   assert(err != nil)
   assert(err.contains("handles_kinds"))
 }
@@ -121,7 +121,7 @@ pipeline test_validate_accepts_nil(task) {
 }
 
 pipeline test_with_defaults_preserves_fields(task) {
-  let merged = with_defaults({enabled: true, pre_approved: true, model: "gpt-4o"})
+  const merged = with_defaults({enabled: true, pre_approved: true, model: "gpt-4o"})
   assert_eq(merged.enabled, true)
   assert_eq(merged.pre_approved, true)
   assert_eq(merged.model, "gpt-4o")

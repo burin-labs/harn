@@ -8,7 +8,7 @@ pipeline test(task) {
       return self.x + self.y
     }
   }
-  let point = Point {x: 3, y: 4}
+  const point = Point {x: 3, y: 4}
   __io_println(point.x)
   __io_println(point.y)
   __io_println(point.total())

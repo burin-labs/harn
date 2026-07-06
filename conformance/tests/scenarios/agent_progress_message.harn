@@ -7,8 +7,8 @@ fn progress_events(events) {
 }
 
 pipeline default() {
-  let session_id = "agent-progress-message-" + uuid()
-  let captured = agent_capture_events(
+  const session_id = "agent-progress-message-" + uuid()
+  const captured = agent_capture_events(
     session_id,
     fn() {
       let session = agent_session_init("progress message", nil, {session_id: session_id})
@@ -17,15 +17,15 @@ pipeline default() {
       return nil
     },
   )
-  let events = progress_events(captured.events)
+  const events = progress_events(captured.events)
   require len(events) == 1, "message-only progress emits one event"
-  let event = events[0]
+  const event = events[0]
   __io_println("message=" + event.message)
   __io_println("entries=" + to_string(len(event.entries)))
   __io_println("replace=" + to_string(event.replace))
   __io_println("metadata.source=" + event.metadata.source)
-  let invalid_session = agent_session_init("invalid progress", nil, {session_id: session_id + "-invalid"})
-  let invalid = try {
+  const invalid_session = agent_session_init("invalid progress", nil, {session_id: session_id + "-invalid"})
+  const invalid = try {
     agent_progress({})
   }
   agent_session_finalize(invalid_session.session_id, "done")

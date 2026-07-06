@@ -3,7 +3,7 @@
  * reflect on the policy they built before piping it through llm_call.
  */
 pipeline test(task) {
-  let policy = routing_policy(
+  const policy = routing_policy(
     {
       chain: [
         {provider: "anthropic", model: "claude-opus-4-20250514"},

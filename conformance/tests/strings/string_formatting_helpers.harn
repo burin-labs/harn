@@ -4,15 +4,15 @@ pipeline test(task) {
   assert_eq(repeat("x", 0), "", "repeat with zero gives empty")
   assert_eq(repeat("", 5), "", "empty input stays empty")
   // indent
-  let multi = "first\nsecond\n\nfourth"
-  let bumped = indent(multi, "  ")
+  const multi = "first\nsecond\n\nfourth"
+  const bumped = indent(multi, "  ")
   assert_eq(bumped, "  first\n  second\n\n  fourth", "indent preserves blank lines")
   // dedent: strip the longest common prefix
-  let heredoc = "    line one\n      line two\n    line three"
-  let flush = dedent(heredoc)
+  const heredoc = "    line one\n      line two\n    line three"
+  const flush = dedent(heredoc)
   assert_eq(flush, "line one\n  line two\nline three", "dedent strips minimum common prefix")
   // word_wrap
-  let wrapped = word_wrap("the quick brown fox jumps over the lazy dog", 15)
+  const wrapped = word_wrap("the quick brown fox jumps over the lazy dog", 15)
   assert_eq(
     wrapped,
     "the quick brown\nfox jumps over\nthe lazy dog",

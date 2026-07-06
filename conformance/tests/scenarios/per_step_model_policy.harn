@@ -9,40 +9,40 @@ import { with_llm_script } from "std/testing"
 // handoff (`escalate`).
 @persona(name: "triage_captain", tools: [github], autonomy: suggest, receipts: optional)
 fn triage_captain(ctx) -> string {
-  let cheap = classify_step(ctx)
-  let mid = judge_step(cheap)
-  let expensive = decide_step(mid)
-  let skipped = budget_exhausted_continue_step(expensive)
+  const cheap = classify_step(ctx)
+  const mid = judge_step(cheap)
+  const expensive = decide_step(mid)
+  const skipped = budget_exhausted_continue_step(expensive)
   return "${cheap}|${mid}|${expensive}|${skipped}"
 }
 
 @step(name: "classify", model: "claude-haiku-4-5", receipt: audit, error_boundary: fail)
 fn classify_step(ctx) -> string {
-  let r = llm_call("classify ${ctx}", nil, {provider: "mock"})
+  const r = llm_call("classify ${ctx}", nil, {provider: "mock"})
   return "classify:${r.text}"
 }
 
 @step(name: "judge", model: "claude-sonnet-4-6", receipt: audit, error_boundary: fail)
 fn judge_step(ctx) -> string {
-  let r = llm_call("judge ${ctx}", nil, {provider: "mock"})
+  const r = llm_call("judge ${ctx}", nil, {provider: "mock"})
   return "judge:${r.text}"
 }
 
 @step(name: "decide", model: "claude-opus-4-7", receipt: audit, error_boundary: fail)
 fn decide_step(ctx) -> string {
-  let r = llm_call("decide ${ctx}", nil, {provider: "mock"})
+  const r = llm_call("decide ${ctx}", nil, {provider: "mock"})
   return "decide:${r.text}"
 }
 
 @step(name: "expensive_skipped", model: "claude-opus-4-7", budget: {max_tokens: 5}, error_boundary: continue)
 fn budget_exhausted_continue_step(ctx) -> string {
-  let r = llm_call("explode ${ctx}", nil, {provider: "mock"})
+  const r = llm_call("explode ${ctx}", nil, {provider: "mock"})
   return "should_not_reach:${r.text}"
 }
 
 @step(name: "expensive_escalate", model: "claude-opus-4-7", budget: {max_tokens: 5}, error_boundary: escalate)
 fn budget_exhausted_escalate_step(ctx) -> string {
-  let r = llm_call("escalate ${ctx}", nil, {provider: "mock"})
+  const r = llm_call("escalate ${ctx}", nil, {provider: "mock"})
   return "should_not_reach:${r.text}"
 }
 
@@ -91,13 +91,13 @@ pipeline default() {
       },
     ],
     { ->
-      let result = triage_captain("PR-42")
+      const result = triage_captain("PR-42")
       __io_println(result)
       __io_println(len(llm_mock_calls()))
-      let escalation_caught = try {
+      const escalation_caught = try {
         budget_exhausted_escalate_step("PR-42")
       }
-      let err = unwrap_err(escalation_caught)
+      const err = unwrap_err(escalation_caught)
       __io_println(err.category)
       __io_println(err.escalated)
       __io_println(err.step)

@@ -13,6 +13,6 @@ pipeline test(task) {
   fn show(item: Stringable) -> string {
     return item.to_str()
   }
-  let n = Name({value: "hello"})
+  const n = Name({value: "hello"})
   log(show(n))
 }

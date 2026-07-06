@@ -22,7 +22,7 @@
 import "../_common"
 
 fn first_snapshot_line(text) {
-  let matches = regex_captures("snapshot=(.+)", text)
+  const matches = regex_captures("snapshot=(.+)", text)
   if len(matches) == 0 {
     return nil
   }
@@ -30,11 +30,11 @@ fn first_snapshot_line(text) {
 }
 
 pipeline main() {
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  let root = path_join(harness.fs.temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
   harness.fs.mkdir(root)
-  let script = path_join(root, "cold_restart_suspend.harn")
+  const script = path_join(root, "cold_restart_suspend.harn")
   harness.fs
     .write_text(
     script,
@@ -45,23 +45,23 @@ pipeline main() {
       + "  __io_println(\"snapshot=\" + result.handle.snapshot_path)\n"
       + "}\n",
   )
-  let first = exec_at(root, harn_bin, "run", script)
+  const first = exec_at(root, harn_bin, "run", script)
   __io_println("first_ok=" + to_string(first.success))
   __io_println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
-  let snapshot = first_snapshot_line(first.stdout)
+  const snapshot = first_snapshot_line(first.stdout)
   require snapshot != nil, "cold restart suspend did not print a snapshot path"
-  let snapshot_path = if path_is_absolute(snapshot) {
+  const snapshot_path = if path_is_absolute(snapshot) {
     snapshot
   } else {
     path_join(root, snapshot)
   }
   __io_println("snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
-  let snapshot_text = harness.fs.read_text(snapshot_path)
+  const snapshot_text = harness.fs.read_text(snapshot_path)
   __io_println("snapshot_nonempty=" + to_string(len(snapshot_text) > 0))
-  let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
+  const second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
   __io_println("second_ok=" + to_string(second.success))
-  let lines = second.stdout.trim().split("\n")
-  let final = json_parse(lines[len(lines) - 1])
+  const lines = second.stdout.trim().split("\n")
+  const final = json_parse(lines[len(lines) - 1])
   __io_println("event_type=" + to_string(final.data.event_type))
   __io_println("resumed_status=" + to_string(final.data.value.status))
   __io_println("has_transcript=" + to_string(final.data.value.has_transcript))

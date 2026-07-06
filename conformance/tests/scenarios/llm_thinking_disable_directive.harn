@@ -16,7 +16,7 @@ pipeline test(task) {
         "you are an agent.",
         {provider: "ollama", model: "qwen3:30b", thinking: {mode: "disabled"}},
       )
-      let qwen_disabled = llm_mock_calls()[0]
+      const qwen_disabled = llm_mock_calls()[0]
       assert(
         qwen_disabled.system == "/no_think\nyou are an agent.",
         "Qwen3-on-Ollama with thinking:false should prepend /no_think to system",
@@ -31,7 +31,7 @@ pipeline test(task) {
         "you are an agent.",
         {provider: "ollama", model: "qwen3:30b", thinking: {mode: "enabled"}},
       )
-      let qwen_enabled = llm_mock_calls()[0]
+      const qwen_enabled = llm_mock_calls()[0]
       assert(
         qwen_enabled.system == "you are an agent.",
         "thinking: enabled should leave system untouched",
@@ -46,7 +46,7 @@ pipeline test(task) {
         "/no_think\nyou are an agent.",
         {provider: "ollama", model: "qwen3:30b", thinking: {mode: "disabled"}},
       )
-      let qwen_idempotent = llm_mock_calls()[0]
+      const qwen_idempotent = llm_mock_calls()[0]
       assert(
         qwen_idempotent.system == "/no_think\nyou are an agent.",
         "directive injection should be idempotent when already at head of system",
@@ -61,7 +61,7 @@ pipeline test(task) {
         "you are an agent.",
         {provider: "anthropic", model: "claude-haiku-4-7", thinking: {mode: "disabled"}},
       )
-      let anthropic_call = llm_mock_calls()[0]
+      const anthropic_call = llm_mock_calls()[0]
       assert(
         anthropic_call.system == "you are an agent.",
         "providers without a directive capability should leave system untouched",

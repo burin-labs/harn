@@ -1,23 +1,23 @@
 import "std/context"
 
 pipeline default() {
-  let ctx = context(
+  const ctx = context(
     [
       section("repo", "Use Rust.", nil),
       context_attach("file", "src/lib.rs", "fn " + "main() {}", {max_chars: 12}),
     ],
     {separator: "\n--\n"},
   )
-  let rendered = context_render(ctx)
+  const rendered = context_render(ctx)
   __io_println(rendered)
-  let prompt = prompt_compose("Fix it", ctx, {system: "You are helpful", task_label: "Work"})
+  const prompt = prompt_compose("Fix it", ctx, {system: "You are helpful", task_label: "Work"})
   __io_println(prompt?.system)
   __io_println(contains(prompt?.prompt, "[repo]"))
   // The prompt wraps the task in a <workflow_task> / <label> /
   // <instructions> block. Assert both pieces are present.
   __io_println(contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"))
-  let raw = context_render({sections: [{name: "raw", content: "Visible"}]})
+  const raw = context_render({sections: [{name: "raw", content: "Visible"}]})
   __io_println(raw)
-  let added = context_add(context([section("one", "1")]), section("two", "2"))
+  const added = context_add(context([section("one", "1")]), section("two", "2"))
   __io_println(len(added?.sections))
 }

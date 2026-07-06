@@ -7,7 +7,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("You are an expert.\nDIFF: shortened from 200 to 80 tokens.")],
     { ->
-      let result = refine_prompt(
+      const result = refine_prompt(
         {
           user_prompt: "Please please please be careful and verbose and ramble about this topic at length",
           style: "concise",

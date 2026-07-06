@@ -8,7 +8,7 @@
 pipeline test(task) {
   // Baseline: unknown proxied provider has no capabilities.
   provider_capabilities_clear()
-  let baseline = provider_capabilities("my-proxy", "opaque-id-v2")
+  const baseline = provider_capabilities("my-proxy", "opaque-id-v2")
   assert(!baseline.native_tools, "baseline: unknown provider gets no native_tools")
   assert(!baseline.defer_loading, "baseline: unknown provider gets no defer_loading")
   assert(len(baseline.tool_search) == 0, "baseline: empty tool_search")
@@ -16,7 +16,7 @@ pipeline test(task) {
   provider_capabilities_install(
     "[[provider.my-proxy]]\nmodel_match = \"*\"\nnative_tools = true\ndefer_loading = true\ntool_search = [\"hosted\"]\nprompt_caching = true\nprefers_markdown_scaffolding = true\nstructured_output_mode = \"native_json\"\nprefers_role_developer = true\nthinking_block_style = \"reasoning_summary\"\n",
   )
-  let proxied = provider_capabilities("my-proxy", "opaque-id-v2")
+  const proxied = provider_capabilities("my-proxy", "opaque-id-v2")
   assert(proxied.native_tools, "override: native_tools on")
   assert(proxied.defer_loading, "override: defer_loading on")
   assert(len(proxied.tool_search) == 1, "override: hosted variant only")
@@ -32,13 +32,13 @@ pipeline test(task) {
   provider_capabilities_install(
     "[[provider.anthropic]]\nmodel_match = \"claude-opus-*\"\nnative_tools = true\ndefer_loading = false\ntool_search = []\n",
   )
-  let down = provider_capabilities("anthropic", "claude-opus-4-7")
+  const down = provider_capabilities("anthropic", "claude-opus-4-7")
   assert(down.native_tools, "shadowed: native_tools still on")
   assert(!down.defer_loading, "shadowed: defer_loading off")
   assert(len(down.tool_search) == 0, "shadowed: empty tool_search")
   // Clear reverts to the shipped table.
   provider_capabilities_clear()
-  let restored = provider_capabilities("anthropic", "claude-opus-4-7")
+  const restored = provider_capabilities("anthropic", "claude-opus-4-7")
   assert(restored.defer_loading, "clear: shipped defaults restored")
   log("provider_capabilities_override tests passed")
 }

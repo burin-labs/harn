@@ -270,7 +270,7 @@ fn nodes_use_provider_llm(nodes: &[SNode], inherited_shadows: &HashSet<String>) 
 
     for node in nodes {
         match &node.node {
-            Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
+            Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. } => {
                 if pattern_uses_provider_llm(pattern, &shadows)
                     || node_uses_provider_llm(value, &shadows)
                 {
@@ -304,7 +304,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
         | Node::Block(body)
         | Node::Closure { body, .. } => nodes_use_provider_llm(body, shadows),
         Node::ImplBlock { methods, .. } => nodes_use_provider_llm(methods, shadows),
-        Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
+        Node::LetBinding { pattern, value, .. } => {
             pattern_uses_provider_llm(pattern, shadows) || node_uses_provider_llm(value, shadows)
         }
         Node::ConstBinding { value, .. } => node_uses_provider_llm(value, shadows),

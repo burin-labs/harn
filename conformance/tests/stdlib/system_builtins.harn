@@ -1,10 +1,10 @@
 /** Test system attribute builtins */
 pipeline default(task) {
   // username should return a non-empty string
-  let user = username()
+  const user = username()
   __io_println(len(user) > 0)
   // platform should be one of the known values
-  let plat = platform()
+  const plat = platform()
   __io_println(plat == "darwin" || plat == "linux" || plat == "windows")
   // arch should be non-empty
   __io_println(len(arch()) > 0)
@@ -15,7 +15,7 @@ pipeline default(task) {
   // cwd should be non-empty
   __io_println(len(cwd()) > 0)
   // date_iso should return ISO 8601 format
-  let iso = date_iso()
+  const iso = date_iso()
   __io_println(len(iso) > 20)
   __io_println(contains(iso, "T"))
   __io_println(ends_with(iso, "Z"))

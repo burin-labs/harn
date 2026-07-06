@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let selected = select_artifacts_adaptive(
+  const selected = select_artifacts_adaptive(
     [
       artifact({id: "a1", kind: "summary", text: "same content", relevance: 0.9}),
       artifact({id: "a2", kind: "summary", text: "same content", relevance: 0.2}),

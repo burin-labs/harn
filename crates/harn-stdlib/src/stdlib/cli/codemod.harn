@@ -29,14 +29,14 @@ fn summary_line(changed: int, applied: int, apply: bool) -> string {
 }
 
 fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
-  var file_results = []
-  var changed = 0
-  var applied = 0
+  let file_results = []
+  let changed = 0
+  let applied = 0
   for entry in plan {
     if len(entry.files) == 0 {
       continue
     }
-    let res = rules_apply({rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe})
+    const res = rules_apply({rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe})
     for f in res.files ?? [] {
       if f.changed {
         changed = changed + 1
@@ -52,10 +52,10 @@ fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
 
 fn run_builtin_recipe(name: string, files: list, apply: bool) -> dict {
   if name == "destructure-defaults" {
-    let res = rules_fold({paths: files, dry_run: !apply})
-    var file_results = []
-    var changed = 0
-    var applied = 0
+    const res = rules_fold({paths: files, dry_run: !apply})
+    let file_results = []
+    let changed = 0
+    let applied = 0
     for f in res.files ?? [] {
       if f.changed {
         changed = changed + 1
@@ -71,16 +71,16 @@ fn run_builtin_recipe(name: string, files: list, apply: bool) -> dict {
 }
 
 fn main(harness: Harness) {
-  let apply = harness.env.get_or("HARN_CODEMOD_APPLY", "0") == "1"
-  let allow_unsafe = harness.env.get_or("HARN_CODEMOD_ALLOW_UNSAFE", "0") == "1"
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const apply = harness.env.get_or("HARN_CODEMOD_APPLY", "0") == "1"
+  const allow_unsafe = harness.env.get_or("HARN_CODEMOD_ALLOW_UNSAFE", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   // `rules_apply` is a gated deterministic tool, so the capability is required
   // even for a dry run (which still never writes — the engine's own
   // `dry_run`/safety checks protect the files). `harn codemod` is a first-party
   // command the user invoked directly, so enabling it here is the intended use.
   hostlib_enable("tools:deterministic")
-  let recipe = harness.env.get_or("HARN_CODEMOD_RECIPE", "")
-  let out = if recipe {
+  const recipe = harness.env.get_or("HARN_CODEMOD_RECIPE", "")
+  const out = if recipe {
     let files = json_parse(harness.env.get_or("HARN_CODEMOD_RECIPE_FILES_JSON", "[]"))
     run_builtin_recipe(recipe, files, apply)
   } else {
@@ -92,7 +92,7 @@ fn main(harness: Harness) {
     run_codemod(json_parse(raw), apply, allow_unsafe)
   }
   if json_mode {
-    let envelope = {
+    const envelope = {
       schemaVersion: 1,
       mode: "codemod",
       apply: apply,

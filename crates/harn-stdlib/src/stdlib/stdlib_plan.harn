@@ -114,7 +114,7 @@ pub fn update_plan_tool(registry) {
  * @errors: []
  */
 pub fn plan_tools(registry = nil) {
-  var tools = registry ?? tool_registry()
+  let tools = registry ?? tool_registry()
   tools = emit_plan_tool(tools)
   tools = update_plan_tool(tools)
   return tools
@@ -127,8 +127,8 @@ pub fn plan_tools(registry = nil) {
  * @errors: []
  */
 pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
-  let artifact = plan_from(plan)
-  let state = if approval.approved {
+  const artifact = plan_from(plan)
+  const state = if approval.approved {
     "approved"
   } else {
     "rejected"
@@ -151,14 +151,14 @@ pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
  * @errors: []
  */
 pub fn request_plan_approval(plan, options = nil) -> PlanArtifact {
-  let artifact = plan_from(plan)
-  let action = options?.action ?? "Approve plan"
-  var approval_options = if options {
+  const artifact = plan_from(plan)
+  const action = options?.action ?? "Approve plan"
+  let approval_options = if options {
     options
   } else {
     {}
   }
   approval_options = approval_options + {detail: artifact}
-  let record: ApprovalRecord = request_approval(action, approval_options)
+  const record: ApprovalRecord = request_approval(action, approval_options)
   return plan_approved(artifact, record)
 }

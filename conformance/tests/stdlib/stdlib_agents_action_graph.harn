@@ -2,7 +2,7 @@ import "std/agents"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  let normalized = action_graph(
+  const normalized = action_graph(
     {
       task: "Fix parser diagnostics",
       summary: "Inspect first, then patch, then verify.",
@@ -19,14 +19,14 @@ pipeline default() {
   __io_println(normalized.actions[1].phase == "execute")
   __io_println(normalized.actions[1].depends_on[0] == "action-1")
   __io_println(normalized.actions[3].depends_on[0] == "action-2")
-  let batches = action_graph_batches(normalized)
+  const batches = action_graph_batches(normalized)
   __io_println(len(batches) == 3)
   __io_println(batches[1].count == 2)
   __io_println(batches[1].tool_class == "write")
-  let rendered = action_graph_render(normalized)
+  const rendered = action_graph_render(normalized)
   __io_println(contains(rendered, "## RESEARCH"))
   __io_println(contains(rendered, "depends on: action-1"))
-  let execution_plan = action_graph(
+  const execution_plan = action_graph(
     {
       task: "Fix parser diagnostics",
       steps: [
@@ -36,15 +36,15 @@ pipeline default() {
       ],
     },
   )
-  let config = {
+  const config = {
     name: "action_graph_runtime",
     research: {mode: "llm", model_policy: {provider: "mock"}},
     execute: {mode: "llm", model_policy: {provider: "mock"}},
     verify: {command: "printf verified", assert_text: "verified"},
     evaluate: {mode: "llm", model_policy: {provider: "mock"}},
   }
-  let flow = action_graph_flow(execution_plan, config)
-  let report = workflow_validate(flow)
+  const flow = action_graph_flow(execution_plan, config)
+  const report = workflow_validate(flow)
   __io_println(report.valid)
   with_llm_script(
     [
@@ -53,7 +53,7 @@ pipeline default() {
       llm_text("Evaluation complete."),
     ],
     { ->
-      let result = action_graph_run(
+      const result = action_graph_run(
         "Fix parser diagnostics",
         execution_plan,
         config,

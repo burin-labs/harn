@@ -12,7 +12,7 @@ import {
 // write-axis cut (edit lands every turn but the verifier never advances).
 // A verify-state callback that reads this turn's scalar out of the payload;
 // nil when there is no verify evidence (a FLAT turn).
-let PROGRESS_SIGNAL = { p ->
+const PROGRESS_SIGNAL = { p ->
   if contains(keys(p ?? {}), "verify_score") {
     to_float(p.verify_score)
   } else {
@@ -21,7 +21,7 @@ let PROGRESS_SIGNAL = { p ->
 }
 
 fn observe(config, state, score, wrote) {
-  let payload = if score == nil {
+  const payload = if score == nil {
     {}
   } else {
     {verify_score: score}
@@ -65,30 +65,30 @@ fn observe_fail(config, state, error_text) {
 
 pipeline default() {
   // ---- PARITY: no progress_signal => signature axis, unchanged ----
-  let base_state = agent_stall_initial_state()
+  const base_state = agent_stall_initial_state()
   // Guard OFF => always false (today's default).
   assert(!agent_stall_no_net_progress({enabled: true}, base_state), "parity: guard off => false")
   // Guard ON + a failing same-diagnostic streak past the extend-after => true.
-  let failing = base_state
+  const failing = base_state
     + {last_diagnostic_class: "fail", same_diagnostic_streak: 3, failing_verify_turns: 3}
-  let sig_cfg = {enabled: true, no_net_progress_extend_guard: true, no_net_progress_extend_after: 3}
+  const sig_cfg = {enabled: true, no_net_progress_extend_guard: true, no_net_progress_extend_after: 3}
   assert(agent_stall_no_net_progress(sig_cfg, failing), "parity: signature axis still fires")
   // The SAME stalled-write state, with NO progress_signal and the guard off, does
   // NOT cut — proving the verify-state cut is what the seam adds, not preexisting.
-  let stalled_writes = base_state + {verify_turns_since_advance: 9, verify_wrote_since_advance: true}
+  const stalled_writes = base_state + {verify_turns_since_advance: 9, verify_wrote_since_advance: true}
   assert(
     !agent_stall_no_net_progress({enabled: true}, stalled_writes),
     "parity: no verify-state cut without callback",
   )
   // ---- LIVE-SHAPE: progress_signal supplied => verify-state axis fires ----
-  let cfg = {
+  const cfg = {
     enabled: true,
     post_edit_reverify: false,
     repair_aware: false,
     exempt_tools: ["edit"],
     progress_signal: PROGRESS_SIGNAL,
   }
-  var s = agent_stall_initial_state()
+  let s = agent_stall_initial_state()
   // Turn 1: first verify evidence (score 1) => the high-water is set, advance.
   s = observe(cfg, s, 1, true).state
   assert(!agent_stall_no_net_progress(cfg, s), "turn1: first advance is not a stall")
@@ -119,7 +119,7 @@ pipeline default() {
   // resetting to 1 and never reaches the hard threshold — but the per-signature
   // TOTAL counter climbs to 3 and trips the hard-recurrence cut. This is the class
   // a consecutive-streak-only predicate misses.
-  let churn_cfg = {
+  const churn_cfg = {
     enabled: true,
     post_edit_reverify: true,
     repair_aware: false,
@@ -133,7 +133,7 @@ pipeline default() {
     ping_pong_cycles: 99,
     no_progress_messages: 99,
   }
-  var c = agent_stall_initial_state()
+  let c = agent_stall_initial_state()
   c = observe_fail(churn_cfg, c, "error A").state
   c = observe_fail(churn_cfg, c, "error B").state
   c = observe_fail(churn_cfg, c, "error A").state

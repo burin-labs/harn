@@ -39,8 +39,8 @@ pipeline test_infer_effects(task) {
 
 @test
 pipeline test_parse_existing_metadata(task) {
-  let block = ["/**", " * Prose.", " * @effects: [fs.read]", " */"]
-  let m = parse_existing_metadata(block)
+  const block = ["/**", " * Prose.", " * @effects: [fs.read]", " */"]
+  const m = parse_existing_metadata(block)
   assert_eq(m["effects"], "[fs.read]")
   assert_eq(m.keys().contains("errors"), false)
 }
@@ -48,16 +48,16 @@ pipeline test_parse_existing_metadata(task) {
 @test
 pipeline test_find_doc_block_start(task) {
   // Multi-line block directly above (no blank separator).
-  let out_a = ["/**", " * doc", " */"]
+  const out_a = ["/**", " * doc", " */"]
   assert_eq(find_doc_block_start(out_a), 0)
   // One tolerated trailing blank line between block and decl.
-  let out_b = ["/**", " * doc", " */", ""]
+  const out_b = ["/**", " * doc", " */", ""]
   assert_eq(find_doc_block_start(out_b), 0)
   // Single-line block form.
-  let out_c = ["/** doc */"]
+  const out_c = ["/** doc */"]
   assert_eq(find_doc_block_start(out_c), 0)
   // No canonical block adjacent.
-  let out_d = ["let x = 1"]
+  const out_d = ["let x = 1"]
   assert_eq(find_doc_block_start(out_d), -1)
   // Empty output.
   assert_eq(find_doc_block_start([]), -1)
@@ -76,11 +76,11 @@ pipeline test_pct(task) {
 
 @test
 pipeline test_process_file_backfills_required_fields_only(task) {
-  let input = "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
-  let expected = "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n *\n * @errors: []\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/**\n * Single-line prose.\n *\n * @effects: [llm.call]\n * @errors: []\n */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
-  let result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
+  const input = "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+  const expected = "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n *\n * @errors: []\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/**\n * Single-line prose.\n *\n * @effects: [llm.call]\n * @errors: []\n */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+  const result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
   assert_eq(result["text"], expected)
-  let st = result["stats"]
+  const st = result["stats"]
   assert_eq(st["total"], 2)
   assert_eq(st["backfilled"], 2)
   assert_eq(st["already_complete"], 0)
@@ -94,10 +94,10 @@ pipeline test_process_file_backfills_required_fields_only(task) {
 @test
 pipeline test_process_file_skip_no_block(task) {
   // A pub fn with no doc block is counted but left untouched.
-  let input = "pub fn naked(z) {\n  return z\n}\n"
-  let result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
+  const input = "pub fn naked(z) {\n  return z\n}\n"
+  const result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
   assert_eq(result["text"], input)
-  let st = result["stats"]
+  const st = result["stats"]
   assert_eq(st["total"], 1)
   assert_eq(st["skipped_no_block"], 1)
   assert_eq(st["backfilled"], 0)
@@ -107,10 +107,10 @@ pipeline test_process_file_skip_no_block(task) {
 pipeline test_process_file_already_complete(task) {
   // A fn carrying both required fields is a no-op, even when the
   // optional tags are present too.
-  let input = "/**\n * Done.\n *\n * @effects: []\n * @errors: []\n * @api_stability: experimental\n * @example: done(1) + done(2)\n */\npub fn done(x) {\n  return x\n}\n"
-  let result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
+  const input = "/**\n * Done.\n *\n * @effects: []\n * @errors: []\n * @api_stability: experimental\n * @example: done(1) + done(2)\n */\npub fn done(x) {\n  return x\n}\n"
+  const result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
   assert_eq(result["text"], input)
-  let st = result["stats"]
+  const st = result["stats"]
   assert_eq(st["already_complete"], 1)
   assert_eq(st["backfilled"], 0)
 }
@@ -118,8 +118,8 @@ pipeline test_process_file_already_complete(task) {
 @test
 pipeline test_process_file_idempotent(task) {
   // Running the transform twice yields the same text the second time.
-  let input = "/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
-  let once = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
-  let twice = process_file(once, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
+  const input = "/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+  const once = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
+  const twice = process_file(once, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
   assert_eq(twice, once)
 }

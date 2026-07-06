@@ -8,7 +8,7 @@ import {
 import { merge } from "std/json"
 import { wait_for } from "std/monitors"
 
-var linear_connector_config = {}
+let linear_connector_config = {}
 
 pub fn configure(config) {
   linear_connector_config = filter_nil(config ?? {})
@@ -28,18 +28,18 @@ pub fn operation(name, document, options = nil) {
 }
 
 pub fn execute(operation, variables = nil, options = nil) {
-  let raw = graphql(
+  const raw = graphql(
     operation.document,
     variables,
     merge(options ?? {}, {operation_name: operation.operation_name ?? operation.name}),
   )
-  let envelope = graphql_assert_ok(raw)
-  let result = if operation.root_field != nil {
+  const envelope = graphql_assert_ok(raw)
+  const result = if operation.root_field != nil {
     graphql_extract(envelope, operation.root_field, operation.result_schema)
   } else {
     envelope.data
   }
-  let shaped_result = if type_of(result) == "dict" {
+  const shaped_result = if type_of(result) == "dict" {
     merge(result, {meta: envelope.meta})
   } else {
     result
@@ -80,7 +80,7 @@ fn __search_issues_operation() {
 }
 
 pub fn list_issues(filter = nil, options = nil) {
-  let variables = filter_nil(
+  const variables = filter_nil(
     {
       filter: filter,
       first: options?.first,
@@ -88,7 +88,7 @@ pub fn list_issues(filter = nil, options = nil) {
       includeArchived: options?.include_archived ?? options?.includeArchived,
     },
   )
-  let connection = execute(__list_issues_operation(), variables, options).result
+  const connection = execute(__list_issues_operation(), variables, options).result
   return merge(connection, {page: graphql_page_info(connection)})
 }
 
@@ -141,7 +141,7 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
     label: "linear.issue_state:" + to_string(issue_id) + ":" + to_string(target_state ?? "*"),
     prefers_push: true,
     poll: { ctx ->
-      let payload = __linear_payload(ctx?.last_push_event)
+      const payload = __linear_payload(ctx?.last_push_event)
       if payload != nil && __linear_issue_matches(payload, issue_id) {
         return {
           matched: __linear_state_matches(payload.issue, target_state),
@@ -150,12 +150,12 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
           event: payload,
         }
       }
-      let response = graphql(
+      const response = graphql(
         "query HarnMonitorIssue($id: String!) { issue(id: $id) { id identifier title state { id name type } } }",
         {id: issue_id},
         options,
       )
-      let issue = response?.data?.issue
+      const issue = response?.data?.issue
       return {
         matched: __linear_state_matches(issue, target_state),
         issue: issue,
@@ -164,8 +164,8 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
       }
     },
     push_filter: { log_event ->
-      let event = __linear_event(log_event)
-      let payload = __linear_payload(log_event)
+      const event = __linear_event(log_event)
+      const payload = __linear_payload(log_event)
       return event?.provider == "linear"
         && event?.kind == "issue"
         && __linear_issue_matches(payload, issue_id)

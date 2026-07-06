@@ -46,8 +46,8 @@ const __SITREP_DEFAULT_MAX_TOKENS = 400
 const __SITREP_DEFAULT_TEMPERATURE = 0.2
 
 fn __sitrep_available_providers() {
-  let status = llm_provider_status()
-  var available = {}
+  const status = llm_provider_status()
+  let available = {}
   for entry in status {
     if entry?.available {
       available[entry.name] = true
@@ -80,9 +80,9 @@ fn __sitrep_message_text(value) {
     return value
   }
   if type_of(value) == "list" {
-    var parts = []
+    let parts = []
     for chunk in value {
-      let chunk_text = if type_of(chunk) == "string" {
+      const chunk_text = if type_of(chunk) == "string" {
         chunk
       } else {
         to_string(chunk?.text ?? chunk?.content ?? "")
@@ -104,10 +104,10 @@ fn __sitrep_truncate(text, max_chars) {
   // output is usually where the error lives. Preserve a head + tail with an
   // explicit elision marker so the cut is visible and the failing detail
   // survives.
-  let total = len(text)
-  let tail_chars = max_chars / 3
-  let head_chars = max_chars - tail_chars
-  let omitted = total - head_chars - tail_chars
+  const total = len(text)
+  const tail_chars = max_chars / 3
+  const head_chars = max_chars - tail_chars
+  const omitted = total - head_chars - tail_chars
   return substring(text, 0, head_chars)
     + " …["
     + to_string(omitted)
@@ -116,10 +116,10 @@ fn __sitrep_truncate(text, max_chars) {
 }
 
 fn __sitrep_format_messages(messages, max_chars_per_message) {
-  var rendered = []
+  let rendered = []
   for message in messages {
-    let role = uppercase(to_string(message?.role ?? "user"))
-    let body = __sitrep_truncate(__sitrep_message_text(message?.content), max_chars_per_message)
+    const role = uppercase(to_string(message?.role ?? "user"))
+    const body = __sitrep_truncate(__sitrep_message_text(message?.content), max_chars_per_message)
     if trim(body) == "" {
       continue
     }
@@ -129,7 +129,7 @@ fn __sitrep_format_messages(messages, max_chars_per_message) {
 }
 
 fn __sitrep_route_is_available(route, available) {
-  let provider = route?.provider
+  const provider = route?.provider
   if provider == nil || provider == "" {
     return false
   }
@@ -137,7 +137,7 @@ fn __sitrep_route_is_available(route, available) {
 }
 
 fn __sitrep_resolved_routes(opts) {
-  let explicit = opts?.routes
+  const explicit = opts?.routes
   if type_of(explicit) == "list" && len(explicit) > 0 {
     return explicit
   }
@@ -148,10 +148,10 @@ fn __sitrep_pick_route(opts) -> {provider: string, model: string}? {
   if opts?.provider != nil && opts?.model != nil {
     return {provider: to_string(opts.provider), model: to_string(opts.model)}
   }
-  let available = __sitrep_available_providers()
+  const available = __sitrep_available_providers()
   for candidate in __sitrep_resolved_routes(opts) {
     if __sitrep_route_is_available(candidate, available) {
-      let resolved_model = candidate?.model ?? llm_qc_default_model(candidate.provider)
+      const resolved_model = candidate?.model ?? llm_qc_default_model(candidate.provider)
       if resolved_model != nil && resolved_model != "" {
         return {provider: to_string(candidate.provider), model: to_string(resolved_model)}
       }
@@ -161,8 +161,8 @@ fn __sitrep_pick_route(opts) -> {provider: string, model: string}? {
 }
 
 fn __sitrep_user_prompt(messages, opts) {
-  let max_chars_per_message = opts?.max_chars_per_message ?? 1200
-  let formatted = __sitrep_format_messages(messages, max_chars_per_message)
+  const max_chars_per_message = opts?.max_chars_per_message ?? 1200
+  const formatted = __sitrep_format_messages(messages, max_chars_per_message)
   return render_prompt(
     "std/llm/prompts/sitrep_user.harn.prompt",
     {
@@ -177,9 +177,9 @@ fn __sitrep_normalize_lines(text) {
   if text == nil || trim(text) == "" {
     return []
   }
-  var lines = []
+  let lines = []
   for raw in split(text, "\n") {
-    let cleaned = trim(raw)
+    const cleaned = trim(raw)
     if cleaned != "" {
       lines = lines + [cleaned]
     }
@@ -212,25 +212,25 @@ fn __sitrep_empty_result(reason) {
  * @api_stability: experimental
  */
 pub fn agent_sitrep(input, opts = nil) {
-  let messages = __sitrep_messages_from(input)
+  const messages = __sitrep_messages_from(input)
   if len(messages) == 0 {
     return __sitrep_empty_result("empty_transcript")
   }
-  let route = __sitrep_pick_route(opts)
+  const route = __sitrep_pick_route(opts)
   if route == nil {
     return __sitrep_empty_result("no_available_provider")
   }
-  let user_prompt = __sitrep_user_prompt(messages, opts)
-  let llm_opts = {
+  const user_prompt = __sitrep_user_prompt(messages, opts)
+  const llm_opts = {
     provider: route.provider,
     model: route.model,
     temperature: opts?.temperature ?? __SITREP_DEFAULT_TEMPERATURE,
     max_tokens: opts?.max_tokens ?? __SITREP_DEFAULT_MAX_TOKENS,
     stream: false,
   }
-  let system = opts?.system ?? __SITREP_SYSTEM_PROMPT
-  let response = llm_call(user_prompt, system, llm_opts)
-  let text = trim(response.text ?? "")
+  const system = opts?.system ?? __SITREP_SYSTEM_PROMPT
+  const response = llm_call(user_prompt, system, llm_opts)
+  const text = trim(response.text ?? "")
   return {
     summary: text,
     lines: __sitrep_normalize_lines(text),
@@ -256,12 +256,12 @@ pub fn agent_sitrep(input, opts = nil) {
  * @api_stability: experimental
  */
 pub fn agent_sitrep_append(input, opts = nil) {
-  let result = agent_sitrep(input, opts)
+  const result = agent_sitrep(input, opts)
   if result.skipped || result.summary == "" {
     return input
   }
-  let tag = opts?.tag ?? "sitrep"
-  let payload = "<" + tag + ">\n" + result.summary + "\n</" + tag + ">"
+  const tag = opts?.tag ?? "sitrep"
+  const payload = "<" + tag + ">\n" + result.summary + "\n</" + tag + ">"
   if type_of(input) == "list" {
     return input + [{role: "system", content: payload}]
   }

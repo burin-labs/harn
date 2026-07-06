@@ -1,18 +1,18 @@
 pipeline default() {
-  let server = http_server({max_body_bytes: 16, retain_raw_body: true})
+  const server = http_server({max_body_bytes: 16, retain_raw_body: true})
   http_server_before(server, { req -> req + {order: "before-a"} })
   http_server_before(server, { req -> req + {order: req.order + ",before-b"} })
   http_server_after(
     server,
     { response, _req ->
-      let prior = response.headers["x-order"] ?? ""
+      const prior = response.headers["x-order"] ?? ""
       response + {headers: response.headers + {"x-order": prior + ",after-a"}}
     },
   )
   http_server_after(
     server,
     { response, _req ->
-      let prior = response.headers["x-order"] ?? ""
+      const prior = response.headers["x-order"] ?? ""
       response
         + {headers: response.headers + {"x-order": prior + ",after-b", "x-after": "after-b"}}
     },
@@ -35,7 +35,7 @@ pipeline default() {
     },
     {max_body_bytes: 64},
   )
-  let response = http_server_test(
+  const response = http_server_test(
     server,
     {
       method: "post",
@@ -56,7 +56,7 @@ pipeline default() {
     { _req -> http_response_text("unreachable") },
     {max_body_bytes: 4},
   )
-  let rejected = http_server_request(server, {method: "POST", path: "/limited", body: "12345"})
+  const rejected = http_server_request(server, {method: "POST", path: "/limited", body: "12345"})
   __io_println(rejected.status)
   __io_println(http_header(rejected, "x-harn-body-limit"))
   http_server_route(
@@ -66,7 +66,7 @@ pipeline default() {
     { req -> http_response_text(to_string(req.raw_body == nil) + ":" + req.body) },
     {retain_raw_body: false},
   )
-  let discarded = http_server_test(server, {method: "POST", path: "/discard", body: "kept-text"})
+  const discarded = http_server_test(server, {method: "POST", path: "/discard", body: "kept-text"})
   __io_println(discarded.body)
   http_server_set_ready(server, false)
   __io_println(http_server_test(server, {method: "POST", path: "/discard"}).status)

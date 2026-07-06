@@ -1,13 +1,13 @@
 pipeline test(task) {
-  let name = "world"
-  let single = "\${VAR}"
+  const name = "world"
+  const single = "\${VAR}"
   log("single=${single}")
-  let multi = """
+  const multi = """
     shell \${VAR:-default}
     harn ${name}
     """
   log(multi)
-  let escaped_only = """
+  const escaped_only = """
     only \${VAR}
     """
   log(escaped_only)

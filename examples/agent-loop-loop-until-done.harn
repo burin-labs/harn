@@ -1,5 +1,5 @@
 pipeline default(task) {
-  let result = agent_loop(
+  const result = agent_loop(
     "Count from 1 to 5, one number per line. Then output ##DONE##.",
     "You are a helpful assistant.",
     {loop_until_done: true, max_nudges: 2},

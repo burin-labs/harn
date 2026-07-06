@@ -18,11 +18,11 @@ import {
 } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-let audit_records = atomic(0)
+const audit_records = atomic(0)
 
-let telemetry_records = atomic(0)
+const telemetry_records = atomic(0)
 
-let handoff_records = atomic(0)
+const handoff_records = atomic(0)
 
 /**
  * Tool schemas omit `reason` deliberately. with_required_reason adds it
@@ -32,7 +32,7 @@ let handoff_records = atomic(0)
  * `agent_loop_tool_caller_observes` test).
  */
 fn tools() {
-  var r = tool_registry()
+  let r = tool_registry()
   r = tool_define(
     r,
     "read",
@@ -86,8 +86,8 @@ pipeline default() {
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      let reason_mw = with_required_reason()
-      let stack = compose_tool_callers(
+      const reason_mw = with_required_reason()
+      const stack = compose_tool_callers(
         [
           with_audit_log(
             { _record ->
@@ -112,8 +112,8 @@ pipeline default() {
           with_dry_run({only: ["edit"], message: "preview"}),
         ],
       )
-      let registry = tools()
-      let result = agent_loop(
+      const registry = tools()
+      const result = agent_loop(
         "polish + handoff",
         nil,
         {

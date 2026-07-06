@@ -6,7 +6,7 @@ pipeline test(task) {
       {text: "should not be consumed", input_tokens: 1, output_tokens: 1, model: "claude-opus-4-20250514"},
     ],
     { ->
-      let expensive = try {
+      const expensive = try {
         llm_call(
           "budget preflight",
           nil,
@@ -18,20 +18,20 @@ pipeline test(task) {
           },
         )
       }
-      let expensive_err = unwrap_err(expensive)
+      const expensive_err = unwrap_err(expensive)
       __io_println(expensive_err.kind)
       __io_println(expensive_err.reason)
       __io_println(expensive_err.category)
       __io_println(expensive_err.projected_cost_usd > 0.0001)
       __io_println(len(llm_mock_calls()) == 0)
-      let input_limited = try {
+      const input_limited = try {
         llm_call(
           "this prompt is longer than one estimated token",
           nil,
           {provider: "mock", model: "gpt-4o-mini", max_tokens: 16, budget: {max_input_tokens: 1}},
         )
       }
-      let input_err = unwrap_err(input_limited)
+      const input_err = unwrap_err(input_limited)
       __io_println(input_err.limit)
       __io_println(input_err.projected_input_tokens > 1)
     },
@@ -46,7 +46,7 @@ pipeline test(task) {
       },
     ],
     { ->
-      let loop_result = agent_loop(
+      const loop_result = agent_loop(
         "agent budget preflight",
         nil,
         {

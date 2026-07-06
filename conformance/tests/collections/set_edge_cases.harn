@@ -1,37 +1,37 @@
 pipeline test(task) {
   // Sets with nested lists
-  let l1 = [1, 2]
-  let l2 = [3, 4]
-  let l3 = [1, 2]
-  let s1 = set([l1, l2, l3])
+  const l1 = [1, 2]
+  const l2 = [3, 4]
+  const l3 = [1, 2]
+  const s1 = set([l1, l2, l3])
   assert_eq(len(s1), 2)
   // Sets with dicts via list
-  let d1 = {a: 1}
-  let d2 = {b: 2}
-  let d3 = {a: 1}
-  let s2 = set([d1, d2, d3])
+  const d1 = {a: 1}
+  const d2 = {b: 2}
+  const d3 = {a: 1}
+  const s2 = set([d1, d2, d3])
   assert_eq(len(s2), 2)
   // Mixed types remain distinct
-  let s3 = set(1, "1", true)
+  const s3 = set(1, "1", true)
   assert_eq(len(s3), 3)
   // set_union with list values
-  let a = set([l1, l2])
-  let b = set([l2, [5, 6]])
-  let u = set_union(a, b)
+  const a = set([l1, l2])
+  const b = set([l2, [5, 6]])
+  const u = set_union(a, b)
   assert_eq(len(u), 3)
   // set_intersect with list values
-  let i = set_intersect(a, b)
+  const i = set_intersect(a, b)
   assert_eq(len(i), 1)
   // set_difference with list values
-  let d = set_difference(a, b)
+  const d = set_difference(a, b)
   assert_eq(len(d), 1)
   // Strings containing separator-like chars (hash collision regression)
-  let s4 = set("a,b", "a", "b")
+  const s4 = set("a,b", "a", "b")
   assert_eq(len(s4), 3)
   assert(set_contains(s4, "a,b"))
   assert(set_contains(s4, "a"))
   // Nil in sets
-  let s5 = set(nil, 1, nil)
+  const s5 = set(nil, 1, nil)
   assert_eq(len(s5), 2)
   log("set edge cases ok")
 }

@@ -22,7 +22,7 @@ import { agent_capture_events } from "std/agent/events"
 fn first_provider_error_event(events) {
   for event in events {
     if event.type == "iteration_end" {
-      let reason = to_string(event?.iteration_info?.skip_reason ?? "")
+      const reason = to_string(event?.iteration_info?.skip_reason ?? "")
       if reason == "provider_failure"
         || reason == "escalation_provider_failure"
         || reason == "escalation_aborted_provider_transport" {
@@ -34,7 +34,7 @@ fn first_provider_error_event(events) {
 }
 
 fn count_events(events, event_type) {
-  var n = 0
+  let n = 0
   for event in events {
     if event.type == event_type {
       n = n + 1
@@ -52,10 +52,10 @@ fn escalation_fallback_case() {
   // so we can prove the escalated call fired then the loop retried the PRIMARY
   // route. The tool_format clause prevents native escalations from leaking
   // back into text-only primaries after an escalation provider error.
-  let seen = shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
-  let formats = shared_cell({scope: "task_group", key: "esc-formats", initial: ""})
-  let turn = shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
-  let caller = { call ->
+  const seen = shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
+  const formats = shared_cell({scope: "task_group", key: "esc-formats", initial: ""})
+  const turn = shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
+  const caller = { call ->
     let provider = to_string(call?.opts?.provider ?? "")
     let tool_format = to_string(call?.opts?.tool_format ?? "")
     let snap = shared_snapshot(seen)
@@ -79,7 +79,7 @@ fn escalation_fallback_case() {
   // Escalate exactly once: after the FIRST turn, switch the provider to the
   // escalation target. Subsequent turns leave the provider as-is, so the
   // primary-retry fallback is not re-escalated.
-  let post_turn = { _payload ->
+  const post_turn = { _payload ->
     let count = shared_snapshot(turn)
     shared_set(turn, count.value + 1)
     if count.value == 0 {
@@ -87,8 +87,8 @@ fn escalation_fallback_case() {
     }
     return nil
   }
-  let session = "esc-fallback-" + uuid()
-  let captured = agent_capture_events(
+  const session = "esc-fallback-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "do the task",
@@ -108,7 +108,7 @@ fn escalation_fallback_case() {
   )
   // (a) An observable provider_error iteration_end event was emitted carrying
   //     the failed escalated provider/model/status — not a silent break.
-  let perr = first_provider_error_event(captured.events)
+  const perr = first_provider_error_event(captured.events)
   __io_println("esc_event_present=" + to_string(perr != nil))
   __io_println("esc_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
   __io_println("esc_event_provider=" + to_string(perr?.iteration_info?.provider ?? ""))
@@ -138,14 +138,14 @@ fn escalation_fallback_case() {
 // -------------------------------------------------------------------------------------------------
 
 fn primary_provider_error_case() {
-  let caller = { _call -> return {
+  const caller = { _call -> return {
     ok: false,
     status: "provider_error",
     stop_reason: "provider_error",
     error: {status: 500, message: "primary down", provider: "mock", model: "cheap"},
   } }
-  let session = "esc-primary-err-" + uuid()
-  let captured = agent_capture_events(
+  const session = "esc-primary-err-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "do the task",
@@ -161,7 +161,7 @@ fn primary_provider_error_case() {
       },
     ) },
   )
-  let perr = first_provider_error_event(captured.events)
+  const perr = first_provider_error_event(captured.events)
   __io_println("primary_event_present=" + to_string(perr != nil))
   __io_println("primary_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
   __io_println(
@@ -177,9 +177,9 @@ fn primary_provider_error_case() {
 // -------------------------------------------------------------------------------------------------
 
 fn escalation_transient_transport_abort_case() {
-  let seen = shared_cell({scope: "task_group", key: "esc-transport-providers", initial: ""})
-  let turn = shared_cell({scope: "task_group", key: "esc-transport-turn", initial: 0})
-  let caller = { call ->
+  const seen = shared_cell({scope: "task_group", key: "esc-transport-providers", initial: ""})
+  const turn = shared_cell({scope: "task_group", key: "esc-transport-turn", initial: 0})
+  const caller = { call ->
     let provider = to_string(call?.opts?.provider ?? "")
     let snap = shared_snapshot(seen)
     shared_set(seen, snap.value + provider + ",")
@@ -200,7 +200,7 @@ fn escalation_transient_transport_abort_case() {
     }
     return {ok: true, value: {text: "still working", tool_calls: [], provider: "mock", model: "cheap"}}
   }
-  let post_turn = { _payload ->
+  const post_turn = { _payload ->
     let count = shared_snapshot(turn)
     shared_set(turn, count.value + 1)
     if count.value == 0 {
@@ -208,8 +208,8 @@ fn escalation_transient_transport_abort_case() {
     }
     return nil
   }
-  let session = "esc-transport-" + uuid()
-  let captured = agent_capture_events(
+  const session = "esc-transport-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "do the task",
@@ -227,7 +227,7 @@ fn escalation_transient_transport_abort_case() {
       },
     ) },
   )
-  let perr = first_provider_error_event(captured.events)
+  const perr = first_provider_error_event(captured.events)
   __io_println("transport_event_present=" + to_string(perr != nil))
   __io_println("transport_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
   __io_println("transport_status=" + captured.result.status)

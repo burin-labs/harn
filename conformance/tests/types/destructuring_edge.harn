@@ -1,28 +1,28 @@
 pipeline default() {
   // Empty dict pattern — just discards the value
-  let {} = {a: 1, b: 2}
+  const {} = {a: 1, b: 2}
   __io_println("empty_dict_ok")
   // Empty list pattern — just discards the value
-  let [] = [1, 2, 3]
+  const [] = [1, 2, 3]
   __io_println("empty_list_ok")
   // Dict destructure: missing key gives nil
-  let {missing} = {other: 1}
+  const {missing} = {other: 1}
   __io_println(missing)
   // List destructure: more bindings than elements gives nil
-  let [x, y, z] = [10, 20]
+  const [x, y, z] = [10, 20]
   __io_println(x)
   __io_println(y)
   __io_println(z)
   // List rest with no remaining items
-  let [head, ...tail] = [99]
+  const [head, ...tail] = [99]
   __io_println(head)
   __io_println(tail)
   // Dict rest with no remaining fields
-  let {only, ...extras} = {only: "yes"}
+  const {only, ...extras} = {only: "yes"}
   __io_println(only)
   __io_println(extras)
   // List rest with zero-length rest
-  let [a, b, ...rest] = [1, 2]
+  const [a, b, ...rest] = [1, 2]
   __io_println(a)
   __io_println(b)
   __io_println(rest)
@@ -32,7 +32,7 @@ pipeline default() {
   n = 200
   __io_println(m)
   // For-in with list destructuring
-  let pairs = [[1, 2], [3, 4]]
+  const pairs = [[1, 2], [3, 4]]
   for [first, second] in pairs {
     __io_println("${first}+${second}")
   }

@@ -1,4 +1,4 @@
 pipeline square(task) {
-  let x = 7
+  const x = 7
   log(x * x)
 }

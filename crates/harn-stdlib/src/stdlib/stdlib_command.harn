@@ -8,7 +8,7 @@ fn __command_options(options) {
 }
 
 fn __command_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -27,7 +27,7 @@ fn __command_copy_common(req, source) {
   if source == nil {
     return req
   }
-  var out = req
+  let out = req
   for key in [
     "cwd",
     "env",
@@ -44,9 +44,9 @@ fn __command_copy_common(req, source) {
       out = out + {[key]: source[key]}
     }
   }
-  var capture = source?.capture
+  let capture = source?.capture
   if source?.max_inline_bytes != nil {
-    let base_capture = capture ?? {}
+    const base_capture = capture ?? {}
     capture = base_capture + {max_inline_bytes: source.max_inline_bytes}
   }
   if capture != nil {
@@ -56,8 +56,8 @@ fn __command_copy_common(req, source) {
 }
 
 fn __command_apply_option_defaults(req, options) {
-  let opts = __command_options(options)
-  var out = req
+  const opts = __command_options(options)
+  let out = req
   for key in [
     "cwd",
     "env",
@@ -81,9 +81,9 @@ fn __command_apply_option_defaults(req, options) {
       }
     }
   }
-  var capture = out?.capture ?? opts?.capture
+  let capture = out?.capture ?? opts?.capture
   if opts?.max_inline_bytes != nil && capture?.max_inline_bytes == nil {
-    let base_capture = capture ?? {}
+    const base_capture = capture ?? {}
     capture = base_capture + {max_inline_bytes: opts.max_inline_bytes}
   }
   if capture != nil {
@@ -99,8 +99,8 @@ fn __command_request(spec, options) {
   if type_of(spec) != "dict" {
     throw "command_run: spec must be an argv list or command spec dict"
   }
-  let mode = spec?.mode ?? "argv"
-  var req = {}
+  const mode = spec?.mode ?? "argv"
+  let req = {}
   if mode == "argv" {
     if spec?.command != nil && spec?.argv == nil {
       throw "command_run: shell mode requires mode: \"shell\""
@@ -126,7 +126,7 @@ fn __command_success(result) -> bool {
   if result?.success != nil {
     return result.success ? true : false
   }
-  let {status = "completed", exit_code = -1} = result ?? {}
+  const {status = "completed", exit_code = -1} = result ?? {}
   return status == "completed" && exit_code == 0 && !(result?.timed_out ?? false)
 }
 
@@ -137,14 +137,14 @@ fn __command_combined(result) -> string {
   if result?.inline_output != nil {
     return result.inline_output
   }
-  let {stdout = "", stderr = ""} = result ?? {}
+  const {stdout = "", stderr = ""} = result ?? {}
   return stdout + stderr
 }
 
 fn __command_normalize_result(result) {
-  let raw = result ?? {}
-  let success = __command_success(raw)
-  let status = if raw?.status != nil {
+  const raw = result ?? {}
+  const success = __command_success(raw)
+  const status = if raw?.status != nil {
     raw.status
   } else if success {
     "completed"
@@ -182,7 +182,7 @@ fn __command_normalize_result(result) {
  * @errors: []
  */
 pub fn command_run(spec, options = nil) -> dict {
-  let _ = hostlib_enable("tools:deterministic")
+  const _ = hostlib_enable("tools:deterministic")
   return __command_normalize_result(hostlib_tools_run_command(__command_request(spec, options)))
 }
 
@@ -197,8 +197,8 @@ fn __command_handle_id(locator, builtin: string) -> string {
 }
 
 fn __command_wait_request(locator, options) {
-  let opts = __command_options(options)
-  var req = {handle_id: __command_handle_id(locator, "command_wait")}
+  const opts = __command_options(options)
+  let req = {handle_id: __command_handle_id(locator, "command_wait")}
   if opts?.timeout_ms != nil {
     req = req + {timeout_ms: opts.timeout_ms}
   }
@@ -216,7 +216,7 @@ fn __command_wait_request(locator, options) {
  * @example: command_wait(result, {timeout_ms: 1000})
  */
 pub fn command_wait(locator, options = nil) -> dict {
-  let _ = hostlib_enable("tools:deterministic")
+  const _ = hostlib_enable("tools:deterministic")
   return __command_normalize_result(hostlib_tools_wait_command(__command_wait_request(locator, options)))
 }
 
@@ -227,9 +227,9 @@ pub fn command_wait(locator, options = nil) -> dict {
  * @errors: []
  */
 pub fn command_cancel(locator, options = nil) -> dict {
-  let opts = __command_options(options)
-  let _ = hostlib_enable("tools:deterministic")
-  var req = {handle_id: __command_handle_id(locator, "command_cancel")}
+  const opts = __command_options(options)
+  const _ = hostlib_enable("tools:deterministic")
+  let req = {handle_id: __command_handle_id(locator, "command_cancel")}
   if opts?.wait_result_ms != nil {
     req = req + {wait_result_ms: opts.wait_result_ms}
   }
@@ -240,7 +240,7 @@ pub fn command_cancel(locator, options = nil) -> dict {
 }
 
 fn __command_positive_int(value, fallback: int) -> int {
-  let resolved = to_int(value) ?? fallback
+  const resolved = to_int(value) ?? fallback
   if resolved > 0 {
     return resolved
   }
@@ -248,7 +248,7 @@ fn __command_positive_int(value, fallback: int) -> int {
 }
 
 fn __command_stream_target(source: string, options) -> string {
-  let opts = __command_options(options)
+  const opts = __command_options(options)
   if opts.tee != nil && !opts.tee {
     return "none"
   }
@@ -265,7 +265,7 @@ fn __command_stream_write(source: string, content: string, options) {
   if content == "" {
     return nil
   }
-  let target = __command_stream_target(source, options)
+  const target = __command_stream_target(source, options)
   if target == "none" {
     return nil
   }
@@ -281,7 +281,7 @@ fn __command_stream_write(source: string, content: string, options) {
 }
 
 fn __command_stream_drain_once(locator, source: string, offset: int, length: int, options) {
-  let read = try {
+  const read = try {
     command_output_range(locator, {source: source, offset: offset, length: length})
   } catch (_e) {
     nil
@@ -296,9 +296,9 @@ fn __command_stream_drain_once(locator, source: string, offset: int, length: int
 }
 
 fn __command_stream_flush(locator, source: string, offset: int, length: int, options) -> int {
-  var current = offset
+  let current = offset
   while true {
-    let drained = __command_stream_drain_once(locator, source, current, length, options)
+    const drained = __command_stream_drain_once(locator, source, current, length, options)
     current = drained.offset
     if drained.bytes_read == 0 || drained.eof {
       return current
@@ -307,9 +307,9 @@ fn __command_stream_flush(locator, source: string, offset: int, length: int, opt
 }
 
 fn __command_stream_read_inline(locator, source: string, options) -> string {
-  let opts = __command_options(options)
-  let length = __command_positive_int(opts?.max_inline_bytes ?? opts?.capture?.max_inline_bytes, 50000)
-  let read = try {
+  const opts = __command_options(options)
+  const length = __command_positive_int(opts?.max_inline_bytes ?? opts?.capture?.max_inline_bytes, 50000)
+  const read = try {
     command_output_range(locator, {source: source, offset: 0, length: length})
   } catch (_e) {
     nil
@@ -333,9 +333,9 @@ fn __command_stream_timeout_result(start, elapsed_ms: int, options) -> dict {
 }
 
 fn __command_stream_cancel_timeout(start, options) {
-  let opts = __command_options(options)
-  let wait_ms = __command_positive_int(opts?.cancel_wait_ms ?? opts?.wait_result_ms, 1000)
-  let cancelled = command_cancel(start, {wait_result_ms: wait_ms, timed_out: true})
+  const opts = __command_options(options)
+  const wait_ms = __command_positive_int(opts?.cancel_wait_ms ?? opts?.wait_result_ms, 1000)
+  const cancelled = command_cancel(start, {wait_result_ms: wait_ms, timed_out: true})
   return cancelled?.result
 }
 
@@ -347,20 +347,20 @@ fn __command_stream_cancel_timeout(start, options) {
  * @example: command_run_streaming(spec, {timeout_ms: 30000})
  */
 pub fn command_run_streaming(spec, options = nil) -> dict {
-  let opts = __command_options(options)
-  let poll_interval_ms = __command_positive_int(opts?.poll_interval_ms, 100)
-  let read_bytes = __command_positive_int(opts?.read_bytes ?? opts?.read_length, 65536)
-  let timeout_ms = to_int(opts?.timeout_ms) ?? 0
-  let start = command_run(spec, __command_run_options(opts) + {background: true})
-  var stdout_offset = 0
-  var stderr_offset = 0
-  let started_ms = harness.clock.monotonic_ms()
+  const opts = __command_options(options)
+  const poll_interval_ms = __command_positive_int(opts?.poll_interval_ms, 100)
+  const read_bytes = __command_positive_int(opts?.read_bytes ?? opts?.read_length, 65536)
+  const timeout_ms = to_int(opts?.timeout_ms) ?? 0
+  const start = command_run(spec, __command_run_options(opts) + {background: true})
+  let stdout_offset = 0
+  let stderr_offset = 0
+  const started_ms = harness.clock.monotonic_ms()
   while true {
     stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
     stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
-    let elapsed_before_wait = harness.clock.monotonic_ms() - started_ms
+    const elapsed_before_wait = harness.clock.monotonic_ms() - started_ms
     if timeout_ms > 0 && elapsed_before_wait >= timeout_ms {
-      let timed_result = __command_stream_cancel_timeout(start, opts)
+      const timed_result = __command_stream_cancel_timeout(start, opts)
       stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
       stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
       if timed_result != nil {
@@ -368,15 +368,15 @@ pub fn command_run_streaming(spec, options = nil) -> dict {
       }
       return __command_stream_timeout_result(start, elapsed_before_wait, opts)
     }
-    let result = command_wait(start, {timeout_ms: poll_interval_ms})
+    const result = command_wait(start, {timeout_ms: poll_interval_ms})
     stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
     stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
     if result.status != "running" {
       return result
     }
-    let elapsed_after_wait = harness.clock.monotonic_ms() - started_ms
+    const elapsed_after_wait = harness.clock.monotonic_ms() - started_ms
     if timeout_ms > 0 && elapsed_after_wait >= timeout_ms {
-      let timed_result = __command_stream_cancel_timeout(start, opts)
+      const timed_result = __command_stream_cancel_timeout(start, opts)
       stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
       stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
       if timed_result != nil {
@@ -388,14 +388,14 @@ pub fn command_run_streaming(spec, options = nil) -> dict {
 }
 
 fn __command_locator(locator, options) {
-  let opts = __command_options(options)
+  const opts = __command_options(options)
   if type_of(locator) == "string" {
     return {path: locator}
   }
   if type_of(locator) != "dict" {
     throw "command_output_range: locator must be a dict or path string"
   }
-  let source = opts?.source ?? opts?.stream ?? "combined"
+  const source = opts?.source ?? opts?.stream ?? "combined"
   if source == "stdout" && locator?.stdout_path != nil {
     return {path: locator.stdout_path}
   }
@@ -427,11 +427,11 @@ fn __command_locator(locator, options) {
  * @errors: []
  */
 pub fn command_output_range(locator, options = nil) -> dict {
-  let opts = __command_options(options)
-  let _ = hostlib_enable("tools:deterministic")
-  let req = __command_locator(locator, opts)
+  const opts = __command_options(options)
+  const _ = hostlib_enable("tools:deterministic")
+  const req = __command_locator(locator, opts)
     + {offset: opts?.offset ?? 0, length: opts?.length ?? 65536}
-  let result = hostlib_tools_read_command_output(req)
+  const result = hostlib_tools_read_command_output(req)
   return {
     content: result?.content ?? "",
     total_bytes: result?.total_bytes ?? 0,
@@ -449,11 +449,11 @@ pub fn command_output_range(locator, options = nil) -> dict {
  * @errors: []
  */
 pub fn command_output_tail(locator, options = nil) -> dict {
-  let opts = __command_options(options)
-  let length = opts?.length ?? opts?.tail_bytes ?? 12000
-  let base = __command_locator(locator, opts)
-  let meta = command_output_range(base, {offset: 0, length: 0})
-  let offset = if meta.total_bytes > length {
+  const opts = __command_options(options)
+  const length = opts?.length ?? opts?.tail_bytes ?? 12000
+  const base = __command_locator(locator, opts)
+  const meta = command_output_range(base, {offset: 0, length: 0})
+  const offset = if meta.total_bytes > length {
     meta.total_bytes - length
   } else {
     0
@@ -462,7 +462,7 @@ pub fn command_output_tail(locator, options = nil) -> dict {
 }
 
 fn __command_tail_inline(result, length) -> string {
-  let content = __command_combined(result)
+  const content = __command_combined(result)
   if length == nil || len(content) <= length {
     return content
   }
@@ -470,13 +470,13 @@ fn __command_tail_inline(result, length) -> string {
 }
 
 fn __command_tail(result, options) {
-  let opts = __command_options(options)
-  let length = opts?.tail_bytes ?? 12000
+  const opts = __command_options(options)
+  const length = opts?.tail_bytes ?? 12000
   if length == 0 {
     return ""
   }
   if result?.output_path != nil {
-    let read = try {
+    const read = try {
       command_output_tail(result, {length: length, source: opts?.tail_source ?? "combined"})
     } catch (_e) {
       nil
@@ -510,13 +510,13 @@ fn __command_spec_field(spec, key) {
 }
 
 fn __command_apply_advice(step, options) {
-  let opts = __command_options(options)
-  var out = step
+  const opts = __command_options(options)
+  let out = step
   if opts?.classify != nil {
     if !__command_is_callable(opts.classify) {
       throw "command_step: classify must be callable"
     }
-    let classification = opts.classify(out)
+    const classification = opts.classify(out)
     if classification != nil {
       out = out + {classification: classification}
     }
@@ -525,7 +525,7 @@ fn __command_apply_advice(step, options) {
     if !__command_is_callable(opts.recovery_hint) {
       throw "command_step: recovery_hint must be callable"
     }
-    let hint = opts.recovery_hint(out)
+    const hint = opts.recovery_hint(out)
     if hint != nil {
       out = out + {recovery_hint: hint}
     }
@@ -534,9 +534,9 @@ fn __command_apply_advice(step, options) {
 }
 
 fn __command_step_from_result(name, spec, result, options, attempts) {
-  let normalized = __command_normalize_result(result)
-  let tail = __command_tail(normalized, options)
-  var step = {
+  const normalized = __command_normalize_result(result)
+  const tail = __command_tail(normalized, options)
+  let step = {
     name: name,
     argv: __command_spec_field(spec, "argv"),
     command: __command_spec_field(spec, "command") ?? normalized?.command,
@@ -610,8 +610,8 @@ fn __command_attempt_record(number, spec, step) {
 }
 
 fn __command_run_options(options) {
-  let opts = __command_options(options)
-  var out = {}
+  const opts = __command_options(options)
+  let out = {}
   for key in [
     "cwd",
     "env",
@@ -638,7 +638,7 @@ fn __command_run_options(options) {
 }
 
 fn __command_invoke_runner(spec, options) {
-  let opts = __command_options(options)
+  const opts = __command_options(options)
   if opts?.runner != nil {
     if !__command_is_callable(opts.runner) {
       throw "command_step: runner must be callable"
@@ -649,20 +649,20 @@ fn __command_invoke_runner(spec, options) {
 }
 
 fn __command_retry_delay_ms(policy, attempt_number) -> int {
-  let base = policy?.delay_ms ?? 0
+  const base = policy?.delay_ms ?? 0
   if base <= 0 {
     return 0
   }
   if policy?.jitter ?? false {
     throw "command_step: retry.jitter is not supported by the deterministic stdlib runner"
   }
-  let backoff = policy?.backoff
+  const backoff = policy?.backoff
   if backoff == "linear" {
     return base * attempt_number
   }
   if backoff == "exponential" {
-    var multiplier = 1
-    var index = 1
+    let multiplier = 1
+    let index = 1
     while index < attempt_number {
       multiplier = multiplier * 2
       index += 1
@@ -702,17 +702,17 @@ fn __command_before_retry(policy, step, attempt_number) {
  * @errors: []
  */
 pub fn command_step(name: string, spec, options = nil) -> dict {
-  let opts = __command_options(options)
-  let policy = opts?.retry ?? {}
-  let configured_max_attempts = policy?.max_attempts ?? 1
-  let max_attempts = configured_max_attempts < 1 ? 1 : configured_max_attempts
-  var attempts = []
-  var attempt_number = 1
-  var final_step = {}
+  const opts = __command_options(options)
+  const policy = opts?.retry ?? {}
+  const configured_max_attempts = policy?.max_attempts ?? 1
+  const max_attempts = configured_max_attempts < 1 ? 1 : configured_max_attempts
+  let attempts = []
+  let attempt_number = 1
+  let final_step = {}
   while attempt_number <= max_attempts {
-    let result = __command_invoke_runner(spec, opts)
-    var step = __command_step_from_result(name, spec, result, opts, attempts)
-    let attempt = __command_attempt_record(attempt_number, spec, step)
+    const result = __command_invoke_runner(spec, opts)
+    let step = __command_step_from_result(name, spec, result, opts, attempts)
+    const attempt = __command_attempt_record(attempt_number, spec, step)
     attempts = attempts + [attempt]
     step = step + {attempts: attempts}
     final_step = step
@@ -721,7 +721,7 @@ pub fn command_step(name: string, spec, options = nil) -> dict {
       return final_step
     }
     __command_before_retry(policy, step, attempt_number)
-    let delay = __command_retry_delay_ms(policy, attempt_number)
+    const delay = __command_retry_delay_ms(policy, attempt_number)
     if delay > 0 {
       harness.clock.sleep_ms(delay)
     }
@@ -747,9 +747,9 @@ pub fn command_step_with_retry(name: string, spec, options = nil) -> dict {
  * @errors: []
  */
 pub fn command_steps_append(steps, name: string, spec, options = nil) -> dict {
-  let current = steps ?? []
-  let step = command_step(name, spec, options)
-  let out = current + [step]
+  const current = steps ?? []
+  const step = command_step(name, spec, options)
+  const out = current + [step]
   return {
     steps: out,
     step: step,
@@ -761,12 +761,12 @@ pub fn command_steps_append(steps, name: string, spec, options = nil) -> dict {
 }
 
 fn __command_step_success(step) -> bool {
-  let success = step?.success ?? step?.ok ?? false
+  const success = step?.success ?? step?.ok ?? false
   return success ? true : false
 }
 
 fn __command_is_recovered(step, options) -> bool {
-  let opts = __command_options(options)
+  const opts = __command_options(options)
   if opts?.is_recovered == nil {
     return false
   }
@@ -798,7 +798,7 @@ pub fn command_steps_failed(steps, options = nil) -> bool {
  * @errors: []
  */
 pub fn command_last_failed_step(steps, options = nil) {
-  var failed = nil
+  let failed = nil
   for step in steps ?? [] {
     if !__command_step_success(step) && !__command_is_recovered(step, options) {
       failed = step
@@ -811,7 +811,7 @@ fn __command_suffix(value, limit) {
   if value == nil {
     return nil
   }
-  let text = to_string(value)
+  const text = to_string(value)
   if limit == nil || len(text) <= limit {
     return text
   }
@@ -825,8 +825,8 @@ fn __command_suffix(value, limit) {
  * @errors: []
  */
 pub fn command_step_ref(step, options = nil) -> dict {
-  let opts = __command_options(options)
-  let tail_bytes = opts?.tail_bytes ?? 4000
+  const opts = __command_options(options)
+  const tail_bytes = opts?.tail_bytes ?? 4000
   return {
     name: step?.name,
     argv: step?.argv,
@@ -879,10 +879,10 @@ fn __command_shell_accepts_script_flag(shell: string) -> bool {
  * @errors: []
  */
 pub fn shell_command_from_argv(argv: list) -> string {
-  let values = argv ?? []
+  const values = argv ?? []
   if len(values) >= 3 {
-    let shell = to_string(values[0] ?? "").trim()
-    let flag = to_string(values[1] ?? "").trim()
+    const shell = to_string(values[0] ?? "").trim()
+    const flag = to_string(values[1] ?? "").trim()
     if __command_shell_accepts_script_flag(shell) && __command_shell_flag_invokes_script(flag) {
       return to_string(values[2] ?? "").trim()
     }
@@ -909,7 +909,7 @@ fn __command_shell_command_from_field(value) {
  * @errors: []
  */
 pub fn shell_command_from_value(value) -> string {
-  let direct = __command_shell_command_from_field(value)
+  const direct = __command_shell_command_from_field(value)
   if direct != nil {
     return direct
   }
@@ -929,7 +929,7 @@ pub fn shell_command_from_value(value) -> string {
  * @errors: []
  */
 pub fn command_output_text(result, stream: string = "combined") -> string {
-  let mode = stream ?? "combined"
+  const mode = stream ?? "combined"
   if mode == "stdout" {
     return result?.stdout ?? ""
   }
@@ -952,11 +952,11 @@ pub fn command_output_text(result, stream: string = "combined") -> string {
  * @errors: []
  */
 pub fn command_failure_text(result, options = nil) -> string {
-  let opts = __command_options(options)
-  let max_stdout = opts?.max_stdout_chars ?? 8000
-  let max_stderr = opts?.max_stderr_chars ?? 4000
-  let {status = "failed", exit_code = result?.status} = result ?? {}
-  var lines = ["status=" + to_string(status) + " exit=" + to_string(exit_code)]
+  const opts = __command_options(options)
+  const max_stdout = opts?.max_stdout_chars ?? 8000
+  const max_stderr = opts?.max_stderr_chars ?? 4000
+  const {status = "failed", exit_code = result?.status} = result ?? {}
+  let lines = ["status=" + to_string(status) + " exit=" + to_string(exit_code)]
   if trim(result?.stdout ?? "") != "" {
     lines = lines + ["stdout:", truncate_text(result.stdout, max_stdout)]
   }
@@ -970,11 +970,11 @@ pub fn command_failure_text(result, options = nil) -> string {
 }
 
 fn __command_label(spec, fallback = "command") -> string {
-  let argv = __command_spec_field(spec, "argv")
+  const argv = __command_spec_field(spec, "argv")
   if argv != nil {
     return argv_label(argv)
   }
-  let command = __command_spec_field(spec, "command")
+  const command = __command_spec_field(spec, "command")
   if command != nil {
     return to_string(command)
   }
@@ -982,8 +982,8 @@ fn __command_label(spec, fallback = "command") -> string {
 }
 
 fn __command_json_stream(options) -> string {
-  let opts = __command_options(options)
-  let stream = opts?.stream ?? opts?.source ?? opts?.output ?? "stdout"
+  const opts = __command_options(options)
+  const stream = opts?.stream ?? opts?.source ?? opts?.output ?? "stdout"
   if stream == "stdout" || stream == "stderr" || stream == "combined"
     || stream == "tail"
     || stream == "failure_tail" {
@@ -993,7 +993,7 @@ fn __command_json_stream(options) -> string {
 }
 
 fn __command_json_error(category, label, message, step, extra = nil) {
-  let base = extra ?? {}
+  const base = extra ?? {}
   return base
     + {
     category: category,
@@ -1007,13 +1007,13 @@ fn __command_json_error(category, label, message, step, extra = nil) {
 }
 
 fn __command_json_failure_error(label, step) {
-  var message = label
+  let message = label
     + " failed (status="
     + to_string(step?.status ?? "failed")
     + " exit="
     + to_string(step?.exit_code ?? "unknown")
     + ")"
-  let detail = trim(step?.stderr ?? step?.failure_tail ?? step?.tail ?? "")
+  const detail = trim(step?.stderr ?? step?.failure_tail ?? step?.tail ?? "")
   if detail != "" {
     message = message + ": " + detail
   }
@@ -1031,8 +1031,8 @@ fn __command_json_empty_error(label, stream, step) {
 }
 
 fn __command_json_parse_error(label, stream, text, parsed, step, options) {
-  let opts = __command_options(options)
-  let reason = to_string(unwrap_err(parsed))
+  const opts = __command_options(options)
+  const reason = to_string(unwrap_err(parsed))
   return __command_json_error(
     "invalid_json",
     label,
@@ -1043,28 +1043,28 @@ fn __command_json_parse_error(label, stream, text, parsed, step, options) {
 }
 
 fn __command_json_annotate_step(step, spec, options) {
-  let opts = __command_options(options)
-  let label = to_string(opts?.label ?? step?.name ?? __command_label(spec))
+  const opts = __command_options(options)
+  const label = to_string(opts?.label ?? step?.name ?? __command_label(spec))
   if !(step?.success ?? step?.ok ?? false) {
-    let error = __command_json_failure_error(label, step)
+    const error = __command_json_failure_error(label, step)
     return step + {json: nil, error: error}
   }
-  let stream = __command_json_stream(opts)
-  let text = trim(command_output_text(step, stream))
+  const stream = __command_json_stream(opts)
+  const text = trim(command_output_text(step, stream))
   if text == "" {
     if opts?.allow_empty ?? false {
       return step + {json: nil}
     }
-    let error = __command_json_empty_error(label, stream, step)
+    const error = __command_json_empty_error(label, stream, step)
     return step + {success: false, ok: false, status: "empty_output", json: nil, error: error}
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(text)
   }
   if is_ok(parsed) {
     return step + {json: unwrap(parsed)}
   }
-  let error = __command_json_parse_error(label, stream, text, parsed, step, opts)
+  const error = __command_json_parse_error(label, stream, text, parsed, step, opts)
   return step
     + {success: false, ok: false, status: "invalid_json", json: nil, parse_error: error, error: error}
 }
@@ -1081,12 +1081,12 @@ fn __command_json_record(step) {
 }
 
 fn __command_json_throw(step) {
-  let error = step?.error ?? step?.parse_error
+  const error = step?.error ?? step?.parse_error
   throw error?.message ?? to_string(error ?? "command_json failed")
 }
 
 fn __command_json_uses_step(options) -> bool {
-  let opts = __command_options(options)
+  const opts = __command_options(options)
   return opts?.step_name != nil
     || opts?.name != nil
     || opts?.retry != nil
@@ -1103,7 +1103,7 @@ fn __command_json_uses_step(options) -> bool {
  * @example: command_json_step("gh repo", ["gh", "api", "repos/owner/repo"])
  */
 pub fn command_json_step(name: string, spec, options = nil) -> dict {
-  let step = command_step(name, spec, options)
+  const step = command_step(name, spec, options)
   return __command_json_annotate_step(step, spec, options)
 }
 
@@ -1115,17 +1115,17 @@ pub fn command_json_step(name: string, spec, options = nil) -> dict {
  * @example: command_json(["gh", "api", "repos/owner/repo"])
  */
 pub fn command_json(spec, options = nil) {
-  let opts = __command_options(options)
-  let result_mode = opts?.result ?? "throw"
+  const opts = __command_options(options)
+  const result_mode = opts?.result ?? "throw"
   if result_mode != "throw" && result_mode != "record" {
     throw "command_json: result must be \"throw\" or \"record\""
   }
-  var step = nil
+  let step = nil
   if __command_json_uses_step(opts) {
-    let name = to_string(opts?.step_name ?? opts?.name ?? __command_label(spec))
+    const name = to_string(opts?.step_name ?? opts?.name ?? __command_label(spec))
     step = command_json_step(name, spec, opts)
   } else {
-    let result = command_run(spec, __command_run_options(opts))
+    const result = command_run(spec, __command_run_options(opts))
     step = __command_json_annotate_step(
       __command_step_from_result(__command_label(spec), spec, result, opts, []),
       spec,
@@ -1161,10 +1161,10 @@ fn __command_try_source(attempt, index) -> string {
 }
 
 fn __command_try_command_options(attempt, options) {
-  let opts = __command_options(options)
-  let base = opts?.command_options ?? {}
+  const opts = __command_options(options)
+  const base = opts?.command_options ?? {}
   if type_of(attempt) == "dict" {
-    let extra = attempt?.options ?? {}
+    const extra = attempt?.options ?? {}
     return base + extra
   }
   return base
@@ -1219,8 +1219,8 @@ fn __command_try_value(raw, source) {
 }
 
 fn __command_try_normalize(value, source, attempt, options) {
-  let opts = __command_options(options)
-  let normalizer = if type_of(attempt) == "dict" && attempt?.normalize != nil {
+  const opts = __command_options(options)
+  const normalizer = if type_of(attempt) == "dict" && attempt?.normalize != nil {
     attempt.normalize
   } else {
     opts?.normalize
@@ -1235,12 +1235,12 @@ fn __command_try_normalize(value, source, attempt, options) {
 }
 
 fn __command_try_attempt(attempt, index, total, options) {
-  let source = __command_try_source(attempt, index)
-  let raw_result = try {
+  const source = __command_try_source(attempt, index)
+  const raw_result = try {
     __command_try_raw(attempt, options)
   }
   if is_err(raw_result) {
-    let reason = to_string(unwrap_err(raw_result))
+    const reason = to_string(unwrap_err(raw_result))
     return {
       ok: false,
       source: source,
@@ -1250,7 +1250,7 @@ fn __command_try_attempt(attempt, index, total, options) {
       error: {category: "exception", source: source, message: reason},
     }
   }
-  let envelope = __command_try_value(unwrap(raw_result), source)
+  const envelope = __command_try_value(unwrap(raw_result), source)
   if !(envelope.ok ?? false) {
     return {
       ok: false,
@@ -1261,11 +1261,11 @@ fn __command_try_attempt(attempt, index, total, options) {
       error: envelope?.error,
     }
   }
-  let normalized = try {
+  const normalized = try {
     __command_try_normalize(envelope?.value, source, attempt, options)
   }
   if is_err(normalized) {
-    let reason = to_string(unwrap_err(normalized))
+    const reason = to_string(unwrap_err(normalized))
     return {
       ok: false,
       source: source,
@@ -1300,12 +1300,12 @@ pub fn command_try(attempts, options = nil) -> dict {
   if type_of(attempts) != "list" {
     throw "command_try: attempts must be a list"
   }
-  let total = len(attempts)
-  var records = []
-  var last = nil
-  var index = 0
+  const total = len(attempts)
+  let records = []
+  let last = nil
+  let index = 0
   while index < total {
-    let attempt = __command_try_attempt(attempts[index], index, total, options)
+    const attempt = __command_try_attempt(attempts[index], index, total, options)
     records = records + [__command_try_attempt_record(attempt)]
     last = attempt
     if attempt.ok {
@@ -1336,7 +1336,7 @@ pub fn command_try(attempts, options = nil) -> dict {
  * @errors: []
  */
 pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
-  let base = extra ?? {}
+  const base = extra ?? {}
   return base + {success: true, ok: true, status: "completed", exit_code: 0, stdout: stdout, stderr: ""}
 }
 
@@ -1347,7 +1347,7 @@ pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
  * @errors: []
  */
 pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> dict {
-  let base = extra ?? {}
+  const base = extra ?? {}
   return base
     + {
     success: false,

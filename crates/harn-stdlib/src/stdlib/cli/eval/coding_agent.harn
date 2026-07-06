@@ -75,21 +75,21 @@ fn __safe_dict(value) -> dict {
  * markdown/summary lines stay byte-identical with the host formatter.
  */
 fn __format_float_6(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  let scaled = to_int(round(abs_f * 1000000.0)) ?? 0
-  let whole = scaled / 1000000
-  let frac = scaled - whole * 1000000
-  var frac_str = to_string(frac)
+  const scaled = to_int(round(abs_f * 1000000.0)) ?? 0
+  const whole = scaled / 1000000
+  const frac = scaled - whole * 1000000
+  let frac_str = to_string(frac)
   while len(frac_str) < 6 {
     frac_str = "0" + frac_str
   }
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     ""
@@ -103,20 +103,20 @@ fn __format_float_6(value) -> string {
  * baseline-comparison `net lift: **{:+.1}pp**` line.
  */
 fn __format_float_signed_1(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  let scaled = to_int(round(abs_f * 10.0)) ?? 0
-  let whole = scaled / 10
-  let frac = scaled - whole * 10
-  let frac_str = to_string(frac)
+  const scaled = to_int(round(abs_f * 10.0)) ?? 0
+  const whole = scaled / 10
+  const frac = scaled - whole * 10
+  const frac_str = to_string(frac)
   // Rust's `{:+.1}` prints a `+` for zero (and positive values), `-` for
   // negative — match that even when the rounded value is 0.0.
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     "+"
@@ -129,18 +129,18 @@ fn __format_float_signed_1(value) -> string {
  * parity summary percentages to mirror Rust's `"{:.1}%"`.
  */
 fn __format_float_1(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  let scaled = to_int(round(abs_f * 10.0)) ?? 0
-  let whole = scaled / 10
-  let frac = scaled - whole * 10
-  let frac_str = to_string(frac)
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const scaled = to_int(round(abs_f * 10.0)) ?? 0
+  const whole = scaled / 10
+  const frac = scaled - whole * 10
+  const frac_str = to_string(frac)
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     ""
@@ -163,7 +163,7 @@ fn __md_escape(s: string) -> string {
  * when present and fall back to `"provider:model"`.
  */
 fn __selector_label(selector: dict) -> string {
-  let raw = selector["selector"]
+  const raw = selector["selector"]
   if type_of(raw) == "string" {
     return raw
   }
@@ -208,7 +208,7 @@ fn __optional_bool_mark(value) -> string {
  * The label gets its `|` characters escaped for the table cell.
  */
 fn __markdown_link(label: string, target: string) -> string {
-  let target_encoded = target
+  const target_encoded = target
     .replace(" ", "%20")
     .replace("(", "%28")
     .replace(")", "%29")
@@ -216,12 +216,12 @@ fn __markdown_link(label: string, target: string) -> string {
 }
 
 fn __comparison_evidence_links(comparison: dict) -> string {
-  var links = []
-  let native = comparison["native_evidence_path"]
+  let links = []
+  const native = comparison["native_evidence_path"]
   if type_of(native) == "string" {
     links = links + [__markdown_link("native", native)]
   }
-  let text = comparison["text_evidence_path"]
+  const text = comparison["text_evidence_path"]
   if type_of(text) == "string" {
     links = links + [__markdown_link("text", text)]
   }
@@ -232,11 +232,11 @@ fn __comparison_evidence_links(comparison: dict) -> string {
 }
 
 fn __render_rollup_table(title: string, rollups) -> string {
-  var out = "## " + title + "\n\n"
+  let out = "## " + title + "\n\n"
   out = out + "| key | passed | failed | skipped | total | cost |\n"
   out = out + "|---|---:|---:|---:|---:|---:|\n"
   for rollup in __safe_list(rollups) {
-    let rd = __safe_dict(rollup)
+    const rd = __safe_dict(rollup)
     out = out + "| `"
       + __md_escape(__safe_string(rd["key"], ""))
       + "` | "
@@ -256,21 +256,21 @@ fn __render_rollup_table(title: string, rollups) -> string {
 }
 
 fn __render_runs_table(runs) -> string {
-  var out = "\n## Runs\n\n"
+  let out = "\n## Runs\n\n"
   out = out
     + "| fixture | run | provider | model | tool format | fixture sequence | tool calls | status | iterations | tokens | cost | transcript | output |\n"
   out = out + "|---|---|---|---|---|---|---|---|---:|---:|---:|---|---|\n"
   for run in __safe_list(runs) {
-    let rd = __safe_dict(run)
-    let selector = __safe_dict(rd["selector"])
-    let sequence = __safe_list(rd["tool_sequence"])
-    let tool_sequence = if len(sequence) == 0 {
+    const rd = __safe_dict(run)
+    const selector = __safe_dict(rd["selector"])
+    const sequence = __safe_list(rd["tool_sequence"])
+    const tool_sequence = if len(sequence) == 0 {
       "-"
     } else {
       __md_escape(join(sequence, ", "))
     }
-    let input_tokens = rd["input_tokens"] ?? 0
-    let output_tokens = rd["output_tokens"] ?? 0
+    const input_tokens = rd["input_tokens"] ?? 0
+    const output_tokens = rd["output_tokens"] ?? 0
     out = out + "| `"
       + __safe_string(rd["fixture_id"], "")
       + "` | `"
@@ -306,9 +306,9 @@ fn __render_runs_table(runs) -> string {
 }
 
 fn __render_baseline_comparison(comparison: dict) -> string {
-  var out = "\n## Baseline Comparison\n\n"
-  let label = __safe_string(comparison["baseline_label"], "")
-  let label_suffix = if label == "" {
+  let out = "\n## Baseline Comparison\n\n"
+  const label = __safe_string(comparison["baseline_label"], "")
+  const label_suffix = if label == "" {
     ""
   } else {
     " (label: `" + label + "`)"
@@ -327,11 +327,11 @@ fn __render_baseline_comparison(comparison: dict) -> string {
     + "- net lift: **"
     + __format_float_signed_1(comparison["net_lift_pp"] ?? 0.0)
     + "pp**\n\n"
-  let regressions = __safe_list(comparison["regressions"])
+  const regressions = __safe_list(comparison["regressions"])
   if len(regressions) > 0 {
     out = out + "### Regressions\n\n"
     for delta in regressions {
-      let dd = __safe_dict(delta)
+      const dd = __safe_dict(delta)
       out = out + "- `"
         + __safe_string(dd["fixture_id"], "")
         + "`: `"
@@ -342,11 +342,11 @@ fn __render_baseline_comparison(comparison: dict) -> string {
     }
     out = out + "\n"
   }
-  let recoveries = __safe_list(comparison["recoveries"])
+  const recoveries = __safe_list(comparison["recoveries"])
   if len(recoveries) > 0 {
     out = out + "### Recoveries\n\n"
     for delta in recoveries {
-      let dd = __safe_dict(delta)
+      const dd = __safe_dict(delta)
       out = out + "- `"
         + __safe_string(dd["fixture_id"], "")
         + "`: `"
@@ -361,19 +361,19 @@ fn __render_baseline_comparison(comparison: dict) -> string {
 }
 
 fn __render_comparison_table(comparisons) -> string {
-  var out = "\n## Native/Text Comparison\n\n"
+  let out = "\n## Native/Text Comparison\n\n"
   out = out
     + "| fixture | selector | native | text | equivalent | verifier | tools | rejected delta | token delta | iteration delta | evidence |\n"
   out = out + "|---|---|---|---|---|---|---|---:|---:|---:|---|\n"
   for comparison in __safe_list(comparisons) {
-    let cd = __safe_dict(comparison)
-    let selector = __safe_dict(cd["selector"])
-    let native_status = if type_of(cd["native_status"]) == "string" {
+    const cd = __safe_dict(comparison)
+    const selector = __safe_dict(cd["selector"])
+    const native_status = if type_of(cd["native_status"]) == "string" {
       cd["native_status"]
     } else {
       "-"
     }
-    let text_status = if type_of(cd["text_status"]) == "string" {
+    const text_status = if type_of(cd["text_status"]) == "string" {
       cd["text_status"]
     } else {
       "-"
@@ -406,9 +406,9 @@ fn __render_comparison_table(comparisons) -> string {
 }
 
 fn __render_divergence_evidence(comparisons) -> string {
-  var diverged = []
+  let diverged = []
   for comparison in __safe_list(comparisons) {
-    let cd = __safe_dict(comparison)
+    const cd = __safe_dict(comparison)
     if len(__safe_list(cd["divergence_reasons"])) > 0 {
       diverged = diverged + [cd]
     }
@@ -416,9 +416,9 @@ fn __render_divergence_evidence(comparisons) -> string {
   if len(diverged) == 0 {
     return ""
   }
-  var out = "\n## Native/Text Divergence Evidence\n\n"
+  let out = "\n## Native/Text Divergence Evidence\n\n"
   for comparison in diverged {
-    let selector = __safe_dict(comparison["selector"])
+    const selector = __safe_dict(comparison["selector"])
     out = out + "- `"
       + __safe_string(comparison["fixture_id"], "")
       + "` `"
@@ -436,20 +436,20 @@ fn __render_divergence_evidence(comparisons) -> string {
 }
 
 fn __render_parity_report(parity_by_pair) -> string {
-  var out = "\n## Parity report — native vs text\n\n"
+  let out = "\n## Parity report — native vs text\n\n"
   out = out
     + "| selector | sample | native pass | text pass | agreement | verifier divergence | native_only | text_only | both_pass | both_fail |\n"
   out = out + "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n"
   for pair in __safe_list(parity_by_pair) {
-    let pd = __safe_dict(pair)
-    let selector = {
+    const pd = __safe_dict(pair)
+    const selector = {
       selector: __safe_string(pd["provider"], "") + ":" + __safe_string(pd["model"], ""),
       provider: __safe_string(pd["provider"], ""),
       model: __safe_string(pd["model"], ""),
     }
-    let divergence_counts = __safe_dict(pd["divergence_counts"])
-    let native = __safe_dict(pd["native"])
-    let text = __safe_dict(pd["text"])
+    const divergence_counts = __safe_dict(pd["divergence_counts"])
+    const native = __safe_dict(pd["native"])
+    const text = __safe_dict(pd["text"])
     out = out + "| `"
       + __selector_label(selector)
       + "` | "
@@ -476,8 +476,8 @@ fn __render_parity_report(parity_by_pair) -> string {
 }
 
 fn __render_markdown(summary: dict) -> string {
-  let fixture_ids = __safe_list(summary["fixture_ids"])
-  var out = "# Coding Agent Harness Quality Suite\n\n"
+  const fixture_ids = __safe_list(summary["fixture_ids"])
+  let out = "# Coding Agent Harness Quality Suite\n\n"
   out = out + "- fixtures: `"
     + join(fixture_ids, "`, `")
     + "`\n- passed: "
@@ -489,22 +489,22 @@ fn __render_markdown(summary: dict) -> string {
     + "\n- total_cost_usd: "
     + __format_float_6(summary["total_cost_usd"] ?? 0.0)
     + "\n\n"
-  let rollups = __safe_dict(summary["rollups"])
+  const rollups = __safe_dict(summary["rollups"])
   out = out + __render_rollup_table("By Fixture", rollups["by_fixture"])
   out = out + __render_rollup_table("By Provider", rollups["by_provider"])
   out = out + __render_rollup_table("By Model", rollups["by_model"])
   out = out + __render_rollup_table("By Tool Format", rollups["by_tool_format"])
   out = out + __render_rollup_table("By Tool Sequence", rollups["by_tool_sequence"])
   out = out + __render_runs_table(summary["runs"])
-  let baseline = summary["baseline_comparison"]
+  const baseline = summary["baseline_comparison"]
   if type_of(baseline) == "dict" {
     out = out + __render_baseline_comparison(baseline)
   }
-  let comparisons = __safe_list(summary["comparisons"])
+  const comparisons = __safe_list(summary["comparisons"])
   if len(comparisons) > 0 {
     out = out + __render_comparison_table(comparisons)
   }
-  let parity_by_pair = __safe_list(summary["parity_by_pair"])
+  const parity_by_pair = __safe_list(summary["parity_by_pair"])
   if len(parity_by_pair) > 0 {
     out = out + __render_parity_report(parity_by_pair)
   }
@@ -513,24 +513,24 @@ fn __render_markdown(summary: dict) -> string {
 }
 
 fn __render_followups(summary: dict) -> string {
-  var out = "# Follow-up Issue Candidates\n\n"
-  let followups = __safe_list(summary["followups"])
+  let out = "# Follow-up Issue Candidates\n\n"
+  const followups = __safe_list(summary["followups"])
   if len(followups) == 0 {
     out = out + "No follow-up issue candidates were generated from this run.\n"
     return out
   }
   for followup in followups {
-    let fd = __safe_dict(followup)
+    const fd = __safe_dict(followup)
     out = out + "## "
       + __safe_string(fd["title"], "")
       + "\n\n"
       + __safe_string(fd["body"], "")
       + "\n\n"
-    let run_ids = __safe_list(fd["run_ids"])
+    const run_ids = __safe_list(fd["run_ids"])
     if len(run_ids) > 0 {
       out = out + "- run_ids: `" + join(run_ids, "`, `") + "`\n"
     }
-    let labels = __safe_list(fd["labels"])
+    const labels = __safe_list(fd["labels"])
     if len(labels) > 0 {
       out = out + "- labels: `" + join(labels, "`, `") + "`\n"
     }
@@ -558,20 +558,20 @@ fn __render_summary_line(summary: dict) -> string {
  * binary mid-render and drops the captured streams.
  */
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_EVAL_CODING_AGENT_SUMMARY_JSON", "")
+  const raw = harness.env.get_or("HARN_EVAL_CODING_AGENT_SUMMARY_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_EVAL_CODING_AGENT_SUMMARY_JSON not set by dispatch shim")
     return 70
   }
-  let summary = try {
+  const summary = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse EvalSummary: " + to_string(e))
     return 70
   }
-  let mode = harness.env.get_or("HARN_EVAL_CODING_AGENT_MODE", "summary")
-  let payload = if mode == "markdown" {
+  const mode = harness.env.get_or("HARN_EVAL_CODING_AGENT_MODE", "summary")
+  const payload = if mode == "markdown" {
     __render_markdown(summary)
   } else if mode == "followups" {
     __render_followups(summary)

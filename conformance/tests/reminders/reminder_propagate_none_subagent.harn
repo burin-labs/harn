@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn parent_tools(child_session) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate_child",
@@ -19,8 +19,8 @@ fn parent_tools(child_session) {
 }
 
 pipeline main() {
-  let parent = agent_session_open("reminder-propagate-none-parent")
-  let child = "reminder-propagate-none-child"
+  const parent = agent_session_open("reminder-propagate-none-parent")
+  const child = "reminder-propagate-none-child"
   agent_session_open(child)
   agent_session_reset(parent)
   agent_session_reset(child)
@@ -49,7 +49,7 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+      const child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
       __io_println(len(child_reminders))
     },
   )

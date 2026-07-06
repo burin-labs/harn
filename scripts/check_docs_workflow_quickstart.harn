@@ -17,15 +17,15 @@
 //
 // Usage:
 //   harn run scripts/check_docs_workflow_quickstart.harn
-let MIN_BUNDLE = "docs/fixtures/workflow-bundles/quickstart-minimal.bundle.json"
+const MIN_BUNDLE = "docs/fixtures/workflow-bundles/quickstart-minimal.bundle.json"
 
-let AGENT_BUNDLE = "docs/fixtures/workflow-bundles/quickstart-agentic.bundle.json"
+const AGENT_BUNDLE = "docs/fixtures/workflow-bundles/quickstart-agentic.bundle.json"
 
-let DEMO_DIR = "docs/fixtures/connect-demo"
+const DEMO_DIR = "docs/fixtures/connect-demo"
 
 // Pinned digest in the docs page — bump both together if the canonical
 // graph encoding intentionally changes.
-let EXPECTED_MIN_DIGEST = "sha256:d89f161d9fe0739394db76ee48c4e0887b2bc2abba43060cb22826c388b90c2e"
+const EXPECTED_MIN_DIGEST = "sha256:d89f161d9fe0739394db76ee48c4e0887b2bc2abba43060cb22826c388b90c2e"
 
 /**
  * Navigate a dotted JSON path with optional `[idx]` suffixes (the shape
@@ -34,15 +34,15 @@ let EXPECTED_MIN_DIGEST = "sha256:d89f161d9fe0739394db76ee48c4e0887b2bc2abba4306
  * caller can surface the failure. Pure for tests.
  */
 pub fn json_path_get(doc, path: string) {
-  var node = doc
+  let node = doc
   if path == "" {
     return node
   }
   for part in path.split(".") {
     if part.ends_with("]") {
-      let open = part.index_of("[")
-      let name = part.substring(0, open)
-      let idx = to_int(part.substring(open + 1, part.len() - 1))
+      const open = part.index_of("[")
+      const name = part.substring(0, open)
+      const idx = to_int(part.substring(open + 1, part.len() - 1))
       if name != "" {
         node = node[name]
       }
@@ -60,18 +60,18 @@ pub fn json_path_get(doc, path: string) {
  * encoding (or an error note when the path is missing).
  */
 pub fn json_path_check(doc, path: string, expected: string) {
-  let value = try {
+  const value = try {
     json_path_get(doc, path)
   } catch (err) {
     return {ok: false, actual: "<missing path: ${err}>"}
   }
-  let actual = json_stringify(value)
+  const actual = json_stringify(value)
   return {ok: actual == expected, actual: actual}
 }
 
 /** Assert one JSON-path expectation, exiting 1 with the FAIL block on mismatch. */
 fn expect_json_path(label: string, doc, path: string, expected: string) {
-  let res = json_path_check(doc, path, expected)
+  const res = json_path_check(doc, path, expected)
   if !res.ok {
     __io_eprintln("FAIL: ${label}")
     __io_eprintln("  path:     ${path}")
@@ -87,15 +87,15 @@ fn expect_json_path(label: string, doc, path: string, expected: string) {
  * ladder as the bash original.
  */
 fn resolve_harn_bin() -> string {
-  let env_bin = harness.env.get("HARN_BIN")
+  const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
   }
-  var target_dir = ""
-  let meta = harness.process
+  let target_dir = ""
+  const meta = harness.process
     .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
   if meta.success {
-    let parsed = try {
+    const parsed = try {
       json_parse(meta.stdout)
     } catch (err) {
       nil
@@ -108,10 +108,10 @@ fn resolve_harn_bin() -> string {
   if target_dir == "" {
     target_dir = "target"
   }
-  let bin = "${target_dir}/debug/harn"
+  const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    let build = harness.process
+    const build = harness.process
       .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       __io_eprint(build.stderr)
@@ -127,11 +127,11 @@ fn resolve_harn_bin() -> string {
  * (the bash `set -e` behavior).
  */
 fn harn_json(harn_bin: string, args: list<string>, cwd: string?) {
-  var spec = {cmd: harn_bin, args: args}
+  let spec = {cmd: harn_bin, args: args}
   if cwd != nil {
     spec = {...spec, cwd: cwd}
   }
-  let res = harness.process.spawn_captured(spec)
+  const res = harness.process.spawn_captured(spec)
   __io_eprint(res.stderr)
   if !res.success {
     __io_eprintln("error: ${harn_bin} ${args.join(" ")} failed (exit ${res.exit_code})")
@@ -141,10 +141,10 @@ fn harn_json(harn_bin: string, args: list<string>, cwd: string?) {
 }
 
 pipeline main(task) {
-  let harn_bin = resolve_harn_bin()
+  const harn_bin = resolve_harn_bin()
   __io_println("=== Checking workflow quickstart fixtures ===")
   // --- 1. Minimal bundle ---
-  var validate = harn_json(harn_bin, ["workflow", "validate", "--bundle", MIN_BUNDLE, "--json"], nil)
+  let validate = harn_json(harn_bin, ["workflow", "validate", "--bundle", MIN_BUNDLE, "--json"], nil)
   expect_json_path("minimal validate.valid", validate, "valid", "true")
   expect_json_path("minimal validate.bundle_id", validate, "bundle_id", "\"quickstart-minimal\"")
   expect_json_path(
@@ -154,8 +154,8 @@ pipeline main(task) {
     "\"quickstart_minimal_workflow\"",
   )
   expect_json_path("minimal validate.errors empty", validate, "errors", "[]")
-  let min_digest: string = validate.graph_digest
-  var run = harn_json(harn_bin, ["workflow", "run", "--bundle", MIN_BUNDLE, "--json"], nil)
+  const min_digest: string = validate.graph_digest
+  let run = harn_json(harn_bin, ["workflow", "run", "--bundle", MIN_BUNDLE, "--json"], nil)
   expect_json_path("minimal run.status", run, "status", "\"completed\"")
   expect_json_path(
     "minimal run.run_id (pinned)",
@@ -195,7 +195,7 @@ pipeline main(task) {
   // requirement; the docs walkthrough relies on this.
   expect_json_path("agentic run.connectors[0]", run, "connectors[0].id", "\"github\"")
   // --- 3. Connect demo manifest ---
-  let status = harn_json(harn_bin, ["connect", "status", "--json"], DEMO_DIR)
+  const status = harn_json(harn_bin, ["connect", "status", "--json"], DEMO_DIR)
   expect_json_path("demo status.connectors[0].id", status, "connectors[0].id", "\"demo\"")
   expect_json_path("demo status.connectors[0].installed", status, "connectors[0].installed", "true")
   expect_json_path("demo status.connectors[0].usable", status, "connectors[0].usable", "false")
@@ -211,7 +211,7 @@ pipeline main(task) {
     "connectors[0].auth_type",
     "\"api-key\"",
   )
-  let plan = harn_json(harn_bin, ["connect", "setup-plan", "--connector", "demo", "--json"], DEMO_DIR)
+  const plan = harn_json(harn_bin, ["connect", "setup-plan", "--connector", "demo", "--json"], DEMO_DIR)
   expect_json_path("demo setup-plan.connector", plan, "connector", "\"demo\"")
   expect_json_path("demo setup-plan.auth_type", plan, "auth_type", "\"api-key\"")
   expect_json_path("demo setup-plan.steps[0].id", plan, "steps[0].id", "\"authorize\"")

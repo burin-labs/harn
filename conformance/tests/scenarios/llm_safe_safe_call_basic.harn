@@ -7,7 +7,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("ok")],
     { ->
-      let r = safe_call("hi", nil, {provider: "mock", model: "mock-model"})
+      const r = safe_call("hi", nil, {provider: "mock", model: "mock-model"})
       __io_println(r.ok)
       __io_println(r.value.text)
     },

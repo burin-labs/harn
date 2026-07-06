@@ -2,7 +2,7 @@ import { coord_post, coord_read } from "std/coordination"
 
 pipeline default() {
   mock_time(2000)
-  let receipt = coord_post(
+  const receipt = coord_post(
     "session",
     "release",
     {
@@ -15,7 +15,7 @@ pipeline default() {
     },
     {id: "coord-release-1", session_id: "coord-session"},
   )
-  let messages = coord_read("session", "release", {session_id: "coord-session"})
+  const messages = coord_read("session", "release", {session_id: "coord-session"})
   __io_println(receipt.schema)
   __io_println(receipt.id)
   __io_println(receipt.kind)
@@ -29,7 +29,7 @@ pipeline default() {
   __io_println(messages[0].from.agent)
   __io_println(messages[0].data.repo)
   __io_println(messages[0].refs[0].ref)
-  let duplicate = coord_post(
+  const duplicate = coord_post(
     "session",
     "release",
     {kind: "claim", subject: "ignored duplicate"},

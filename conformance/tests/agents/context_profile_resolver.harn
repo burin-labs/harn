@@ -20,11 +20,11 @@ fn trace_by_id(traces, id) {
 }
 
 pipeline test(task) {
-  let root = path_join(harness.fs.temp_dir(), "harn-context-profile-" + uuid_v7())
+  const root = path_join(harness.fs.temp_dir(), "harn-context-profile-" + uuid_v7())
   harness.fs.mkdir(root)
   harness.fs
     .write_text(path_join(root, "Cargo.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n")
-  let opts = agent_loop_options(
+  const opts = agent_loop_options(
     {
       provider: "mock",
       system: "Base.",
@@ -38,11 +38,11 @@ pipeline test(task) {
     opts.context_profile.token_delta.saved_tokens > 0,
     "single-match profile saves prompt tokens",
   )
-  let fragments = agent_build_turn_system_fragments({session_id: "context-profile-resolver"}, opts, 0)
-  let fragment_ids = fragments.map(fn(fragment) { return fragment.id })
+  const fragments = agent_build_turn_system_fragments({session_id: "context-profile-resolver"}, opts, 0)
+  const fragment_ids = fragments.map(fn(fragment) { return fragment.id })
   assert(contains_id(fragment_ids, "profile:rust"), "profile fragment enters agent preflight")
-  let explained = prompt_explain({_system_fragments: fragments, context_profile: opts.context_profile})
-  let trace = trace_by_id(explained.fragments, "profile:rust")
+  const explained = prompt_explain({_system_fragments: fragments, context_profile: opts.context_profile})
+  const trace = trace_by_id(explained.fragments, "profile:rust")
   assert(trace != nil, "prompt_explain traces profile fragment")
   assert(trace.included, "profile fragment is included")
   assert(contains(trace.reason, "language.rust"), "profile provenance names the matched capability")

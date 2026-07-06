@@ -1,16 +1,16 @@
 pipeline default() {
-  let fallback = nil
+  const fallback = nil
     ?? "fallback"
   __io_println(fallback)
-  let same = true
+  const same = true
   __io_println(same)
-  let different = 1
+  const different = 1
     != 2
   __io_println(different)
-  let smaller = 1
+  const smaller = 1
     < 2
   __io_println(smaller)
-  let larger_or_equal = 2
+  const larger_or_equal = 2
     >= 2
   __io_println(larger_or_equal)
 }

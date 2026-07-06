@@ -1,8 +1,8 @@
 // `@step` declares statically discoverable persona step metadata.
 @persona(name: "merge_captain", tools: [github], autonomy: suggest, receipts: optional)
 fn merge_captain(ctx) -> string {
-  let planned = plan_step(ctx)
-  let implemented = implement_step(planned)
+  const planned = plan_step(ctx)
+  const implemented = implement_step(planned)
   return verify_step(implemented)
 }
 

@@ -22,7 +22,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *     "model engaged the tool channel").
  */
 fn evidence_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -38,7 +38,7 @@ fn evidence_tools() {
 }
 
 fn failing_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "always_fails",
@@ -56,7 +56,7 @@ fn failing_tools() {
 }
 
 fn nudge_text_in(calls, idx) {
-  let msgs = calls[idx].messages
+  const msgs = calls[idx].messages
   return contains(json_stringify(msgs), "completion_confirmation")
     || contains(json_stringify(msgs), "If you intended to call a tool, call it now")
 }
@@ -70,7 +70,7 @@ pipeline main() {
       llm_text("Found it: release notes are ready."),
     ],
     { ->
-      let recover = agent_loop(
+      const recover = agent_loop(
         "Look up the release notes.",
         nil,
         {
@@ -85,14 +85,14 @@ pipeline main() {
       __io_println("recover.status=" + recover.status)
       __io_println("recover.iterations=" + to_string(recover.llm.iterations))
       __io_println("recover.successful=" + json_stringify(recover.tools.successful))
-      let recover_calls = llm_mock_calls()
+      const recover_calls = llm_mock_calls()
       __io_println("recover.nudge_on_turn2=" + to_string(nudge_text_in(recover_calls, 1)))
     },
   )
   with_llm_script(
     [llm_text("Direct answer: 42."), llm_text("Confirmed: 42.")],
     { ->
-      let confirm = agent_loop(
+      const confirm = agent_loop(
         "What is the answer?",
         nil,
         {
@@ -107,7 +107,7 @@ pipeline main() {
       __io_println("confirm.status=" + confirm.status)
       __io_println("confirm.iterations=" + to_string(confirm.llm.iterations))
       __io_println("confirm.text=" + confirm.text)
-      let confirm_calls = llm_mock_calls()
+      const confirm_calls = llm_mock_calls()
       __io_println("confirm.nudge_on_turn2=" + to_string(nudge_text_in(confirm_calls, 1)))
     },
   )
@@ -117,7 +117,7 @@ pipeline main() {
       llm_text("Tool blew up, here is what I can say from prior knowledge."),
     ],
     { ->
-      let skip = agent_loop(
+      const skip = agent_loop(
         "Try the tool and report.",
         nil,
         {
@@ -134,7 +134,7 @@ pipeline main() {
       __io_println(
         "skip.rejected_has_failure=" + to_string(contains(skip.tools.rejected, "always_fails")),
       )
-      let skip_calls = llm_mock_calls()
+      const skip_calls = llm_mock_calls()
       __io_println("skip.nudge_on_turn2=" + to_string(nudge_text_in(skip_calls, 1)))
     },
   )

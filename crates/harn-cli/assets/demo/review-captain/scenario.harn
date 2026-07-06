@@ -28,7 +28,7 @@ fn diff_summary() {
 }
 
 fn total_added(files) {
-  var total = 0
+  let total = 0
   for f in files {
     total = total + f.loc_added
   }
@@ -52,17 +52,17 @@ fn render_clarification_prompt(pr, answer) {
 }
 
 pipeline default(_task) {
-  let diff = diff_summary()
-  let system = "You are review_captain, a thorough code reviewer."
-  let review_prompt = render_review_prompt(diff)
-  let initial_envelope = llm_call(review_prompt, system)
+  const diff = diff_summary()
+  const system = "You are review_captain, a thorough code reviewer."
+  const review_prompt = render_review_prompt(diff)
+  const initial_envelope = llm_call(review_prompt, system)
   __io_println("=== review_captain · stage 1 (initial scan) ===")
   __io_println(initial_envelope.text)
   __io_println("")
-  let author_answer = "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
-  let clarification_prompt = render_clarification_prompt(diff.pr_number, author_answer)
-  let final_envelope = llm_call(clarification_prompt, system)
-  let receipt = {
+  const author_answer = "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
+  const clarification_prompt = render_clarification_prompt(diff.pr_number, author_answer)
+  const final_envelope = llm_call(clarification_prompt, system)
+  const receipt = {
     persona: "review_captain",
     execution_mode: "advisory",
     approval_required: false,

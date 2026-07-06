@@ -36,14 +36,14 @@ pub fn default_agent_options() {
  * repairs only the summary text, never the worker actions.
  */
 pub fn default_executor(bundle, options) {
-  let supplied = options ?? {}
-  let merged = default_agent_options() + supplied
-  let schema = output_schema()
-  let agent_options = merged
+  const supplied = options ?? {}
+  const merged = default_agent_options() + supplied
+  const schema = output_schema()
+  const agent_options = merged
     + {output_schema: schema, output_format: {kind: "json_schema", schema: schema, strict: true}}
-  let result = agent_loop(bundle.prompt, supplied?.system, agent_options)
-  let raw = result?.text ?? ""
-  let checkpoint = typed_output_checkpoint_from_text(
+  const result = agent_loop(bundle.prompt, supplied?.system, agent_options)
+  const raw = result?.text ?? ""
+  const checkpoint = typed_output_checkpoint_from_text(
     "merge_captain.repair_worker.summary",
     raw,
     schema,
@@ -55,7 +55,7 @@ pub fn default_executor(bundle, options) {
     },
     fn(output) { return validate_all(bundle, output) },
   )
-  let agent_meta = {
+  const agent_meta = {
     status: result?.status,
     iterations: result?.llm?.iterations,
     input_tokens: result?.llm?.input_tokens,
@@ -120,11 +120,11 @@ fn _empty_output_run(args) {
  *   harness              — optional {enabled, cwd, timeout_ms} for git status check
  */
 pub fn invoke(args) {
-  let bundle = args.bundle
-  let parent_receipt_ref = args.parent_receipt_ref
+  const bundle = args.bundle
+  const parent_receipt_ref = args.parent_receipt_ref
     ?? {sweep_id: "", repo: bundle.repo, pr_number: bundle.pr_number, prior_state: "discovered"}
-  let started_at = _started()
-  let bundle_err = validate_bundle(bundle)
+  const started_at = _started()
+  const bundle_err = validate_bundle(bundle)
   if bundle_err != nil {
     return _empty_output_run(
       {
@@ -137,9 +137,9 @@ pub fn invoke(args) {
       },
     )
   }
-  let dry_run = args.dry_run ?? true
-  let repair_policy = args.policy?.repair_worker
-  let policy_err = validate_repair_policy(repair_policy)
+  const dry_run = args.dry_run ?? true
+  const repair_policy = args.policy?.repair_worker
+  const policy_err = validate_repair_policy(repair_policy)
   if policy_err != nil {
     return _empty_output_run(
       {
@@ -152,7 +152,7 @@ pub fn invoke(args) {
       },
     )
   }
-  let decision = gate(repair_policy, bundle, dry_run)
+  const decision = gate(repair_policy, bundle, dry_run)
   if !decision.allowed && !dry_run {
     return _empty_output_run(
       {
@@ -177,8 +177,8 @@ pub fn invoke(args) {
       },
     )
   }
-  let executor = args.executor ?? default_executor
-  let exec_result = executor(bundle, args.agent_options ?? {})
+  const executor = args.executor ?? default_executor
+  const exec_result = executor(bundle, args.agent_options ?? {})
   if !exec_result.ok {
     return _empty_output_run(
       {
@@ -194,8 +194,8 @@ pub fn invoke(args) {
       },
     )
   }
-  let output = exec_result.output
-  let v = validate_all(bundle, output)
+  const output = exec_result.output
+  const v = validate_all(bundle, output)
   if !v.ok {
     return {
       _type: "merge_captain.repair_run",
@@ -214,8 +214,8 @@ pub fn invoke(args) {
       finished_at: now_ms(),
     }
   }
-  let harness_options = args.harness ?? {enabled: false}
-  let h = harness_validate(bundle, output, harness_options)
+  const harness_options = args.harness ?? {enabled: false}
+  const h = harness_validate(bundle, output, harness_options)
   if !h.ok {
     return {
       _type: "merge_captain.repair_run",
@@ -261,9 +261,9 @@ pub fn invoke(args) {
  * (not a force push, admin merge, release tag, or branch delete).
  */
 pub fn invoke_for_ci_failure(args) {
-  let observation = args.observation
-  let policy = args.policy
-  let parent = args.parent_receipt_ref
+  const observation = args.observation
+  const policy = args.policy
+  const parent = args.parent_receipt_ref
     ?? {
     sweep_id: args.sweep_id ?? "",
     repo: observation.repo,
@@ -271,9 +271,9 @@ pub fn invoke_for_ci_failure(args) {
     prior_state: args.prior_state ?? "discovered",
     classification_reason: args.classification_reason ?? "",
   }
-  let failing = (observation.failed_required_checks ?? [])
+  const failing = (observation.failed_required_checks ?? [])
     .map({ name -> {name: name, conclusion: "failure"} })
-  let bundle = build(
+  const bundle = build(
     {
       kind: "ci_failure",
       parent: parent,
@@ -313,9 +313,9 @@ pub fn invoke_for_ci_failure(args) {
  * push for a rewritten conflict).
  */
 pub fn invoke_for_merge_conflict(args) {
-  let observation = args.observation
-  let policy = args.policy
-  let parent = args.parent_receipt_ref
+  const observation = args.observation
+  const policy = args.policy
+  const parent = args.parent_receipt_ref
     ?? {
     sweep_id: args.sweep_id ?? "",
     repo: observation.repo,
@@ -323,7 +323,7 @@ pub fn invoke_for_merge_conflict(args) {
     prior_state: args.prior_state ?? "discovered",
     classification_reason: args.classification_reason ?? "",
   }
-  let bundle = build(
+  const bundle = build(
     {
       kind: "merge_conflict",
       parent: parent,
@@ -362,9 +362,9 @@ pub fn invoke_for_merge_conflict(args) {
  * because the audit can both edit release notes and request a tag.
  */
 pub fn invoke_for_release_audit(args) {
-  let release_facts = args.release_facts
-  let policy = args.policy
-  let bundle = build(
+  const release_facts = args.release_facts
+  const policy = args.policy
+  const bundle = build(
     {
       kind: "release_audit",
       parent: args.parent_receipt_ref

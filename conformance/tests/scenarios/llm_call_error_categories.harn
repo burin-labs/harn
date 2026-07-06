@@ -7,7 +7,7 @@ import { with_llm_script } from "std/testing"
  * `r.error`.
  */
 pipeline default(task) {
-  let categories = [
+  const categories = [
     "rate_limit",
     "timeout",
     "server_error",
@@ -24,7 +24,7 @@ pipeline default(task) {
     "overloaded",
   ]
   for category in categories {
-    let model = "mock-" + category
+    const model = "mock-" + category
     with_llm_script(
       [{error: {category: category, message: "synthetic-" + category}}],
       { ->
@@ -42,7 +42,7 @@ pipeline default(task) {
     with_llm_script(
       [{error: {category: category, message: "safe-" + category}}],
       { ->
-        let r = llm_call_safe("probe", nil, {provider: "mock", model: model})
+        const r = llm_call_safe("probe", nil, {provider: "mock", model: model})
         __io_println(
           category + " safe=" + r.error.category + " msg=" + r.error.message + " ok="
             + to_string(r.ok),

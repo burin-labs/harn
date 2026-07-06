@@ -9,7 +9,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * the parse-tolerance / reasoning-leak domain).
  */
 fn note_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -44,7 +44,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write a.txt.",
         nil,
         {
@@ -56,7 +56,7 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(result.tools.successful[0])
       __io_println(len(calls))
@@ -75,7 +75,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write a.txt.",
         nil,
         {
@@ -87,7 +87,7 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(contains(json_stringify(calls[3].messages), "parse_guidance"))
     },
@@ -102,7 +102,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write a.txt.",
         nil,
         {
@@ -114,7 +114,7 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(len(calls))
       __io_println(contains(json_stringify(calls[1].messages), "parse_guidance"))
@@ -126,7 +126,7 @@ pipeline default() {
   with_llm_script(
     [{text: "", output_tokens: 342, stop_reason: "length"}, llm_text("<done>##DONE##</done>")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Think briefly, then finish.",
         nil,
         {
@@ -139,7 +139,7 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(len(calls))
       __io_println(!contains(json_stringify(calls[1].messages), "parse_guidance"))

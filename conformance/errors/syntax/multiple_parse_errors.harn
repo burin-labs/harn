@@ -1,6 +1,6 @@
 pipeline test(task) {
   let x = )
-  let y = 42
-  let z = )
+  const y = 42
+  const z = )
   log(y)
 }

@@ -51,7 +51,7 @@ import {
 // `pin_policy` carries a preset's default compaction-pin policy (see
 // std/agent/pins) — e.g. `{kinds: [...], preserve_on_compact: true}` — filled
 // into `opts.pin_policy` for pin-aware harnesses.
-let __PRESET_PACK_KEYS = [
+const __PRESET_PACK_KEYS = [
   "budget",
   "completion_gate",
   "fallback_chain",
@@ -82,12 +82,12 @@ fn __validate_preset_spec(kind, spec) {
   if type_of(spec) != "dict" {
     throw "agent_preset_register(\"" + kind + "\"): spec must be a dict; got " + type_of(spec)
   }
-  let family = spec?.family ?? "generic"
+  const family = spec?.family ?? "generic"
   if family != "generic" && family != "captain" {
     throw "agent_preset_register(\"" + kind + "\"): spec.family must be \"generic\" or \"captain\"; got "
       + to_string(family)
   }
-  let pack = spec?.pack ?? {}
+  const pack = spec?.pack ?? {}
   if type_of(pack) != "dict" {
     throw "agent_preset_register(\"" + kind + "\"): spec.pack must be a dict; got " + type_of(pack)
   }
@@ -147,11 +147,11 @@ fn __validate_pin_policy(kind, pin_policy) {
  * preemptively kill legitimate calls.
  */
 fn __builtin_preset_specs() {
-  let frontier_ladder = ["claude-opus-4-8", "claude-sonnet-4-5"]
-  let cheap_ladder = ["gpt-4o-mini"]
+  const frontier_ladder = ["claude-opus-4-8", "claude-sonnet-4-5"]
+  const cheap_ladder = ["gpt-4o-mini"]
   // Long-running captains pin their binding context (goal, constraints, key
   // decisions) so it survives compaction by construction (see std/agent/pins).
-  let captain_pins = {kinds: ["constraint", "decision", "goal"], preserve_on_compact: true}
+  const captain_pins = {kinds: ["constraint", "decision", "goal"], preserve_on_compact: true}
   return {
     audit: {
       family: "generic",
@@ -263,14 +263,14 @@ fn __builtin_preset_specs() {
 
 // Built-in registration is lazy (module-level initializers cannot call local
 // fns) but dogfoods the same validation path user kinds go through.
-var __BUILTIN_PRESETS = {}
+let __BUILTIN_PRESETS = {}
 
-var __USER_PRESETS = {}
+let __USER_PRESETS = {}
 
 fn __preset_registry() {
   if len(__BUILTIN_PRESETS.keys()) == 0 {
-    let specs = __builtin_preset_specs()
-    var reg = {}
+    const specs = __builtin_preset_specs()
+    let reg = {}
     for kind in specs.keys() {
       reg = reg + {[kind]: __validate_preset_spec(kind, specs[kind])}
     }
@@ -294,7 +294,7 @@ fn __preset_registry() {
  * @errors: []
  */
 pub fn agent_preset_register(kind, spec) {
-  let normalized = __preset_kind_string(kind)
+  const normalized = __preset_kind_string(kind)
   if normalized == "" {
     throw "agent_preset_register: kind must be a non-empty string"
   }
@@ -332,13 +332,13 @@ fn __has_non_nil_key(opts, key) {
 }
 
 fn __is_captain(kind) {
-  let registry = __preset_registry()
+  const registry = __preset_registry()
   return registry[kind]?.family == "captain"
 }
 
 fn __preset_kind(value) {
-  let kind = __preset_kind_string(value)
-  let registry = __preset_registry()
+  const kind = __preset_kind_string(value)
+  const registry = __preset_registry()
   if !contains(registry.keys(), kind) {
     throw "agent_preset: kind must be one of "
       + join(registry.keys().sort(), ", ")
@@ -352,7 +352,7 @@ fn __caller_set_low_level_reasoning(opts) {
   if __has_key(opts, "thinking") || __has_key(opts, "reasoning_effort") {
     return true
   }
-  let llm_overrides = opts?.llm_options
+  const llm_overrides = opts?.llm_options
   if type_of(llm_overrides) == "dict"
     && (contains(llm_overrides.keys(), "thinking")
     || contains(llm_overrides.keys(), "reasoning_effort")) {
@@ -418,11 +418,11 @@ fn __default_iteration_budget_for_kind(kind) {
 
 fn __resolve_iteration_budget(kind, opts) {
   if __has_key(opts, "iteration_budget") {
-    let raw = opts.iteration_budget
+    const raw = opts.iteration_budget
     if type_of(raw) == "string" {
       // Sugar: `iteration_budget: "adaptive"` keeps the kind's defaults
       // but forces adaptive mode.
-      let defaults = __default_iteration_budget_for_kind(kind)
+      const defaults = __default_iteration_budget_for_kind(kind)
       return defaults + {mode: raw}
     }
     return raw
@@ -460,12 +460,12 @@ fn __verify_defaults() {
 }
 
 fn __tool_using_defaults(kind) {
-  let profile = if kind == "audit" {
+  const profile = if kind == "audit" {
     "verifier"
   } else {
     "tool_using"
   }
-  let max_nudges = if kind == "audit" {
+  const max_nudges = if kind == "audit" {
     1
   } else if __is_captain(kind) {
     3
@@ -514,7 +514,7 @@ fn __apply_tool_format(opts, kind) {
   if kind == "summary" || kind == "verify" {
     return opts
   }
-  let resolved = agent_tool_format_resolution(opts)
+  const resolved = agent_tool_format_resolution(opts)
   if resolved?.tool_format == nil {
     return opts
   }
@@ -538,7 +538,7 @@ fn __apply_reasoning_defaults(opts, kind) {
   if __caller_set_low_level_reasoning(opts) {
     return opts
   }
-  var resolved = opts
+  let resolved = opts
   if !__caller_set_reasoning_policy(opts) {
     resolved = resolved + {reasoning_policy: "auto"}
   }
@@ -552,7 +552,7 @@ fn __apply_reasoning_defaults(opts, kind) {
 }
 
 fn __apply_iteration_budget(opts, kind) {
-  let budget = __resolve_iteration_budget(kind, opts)
+  const budget = __resolve_iteration_budget(kind, opts)
   if budget == nil {
     return opts
   }
@@ -564,7 +564,7 @@ fn __apply_turn_policy(opts, kind) {
 }
 
 fn __apply_kind_defaults(kind, raw_opts) {
-  let defaults = __kind_defaults(kind, raw_opts)
+  const defaults = __kind_defaults(kind, raw_opts)
   return defaults + raw_opts
 }
 
@@ -584,8 +584,8 @@ fn __captain_consent_default(kind) {
     // Approve read-only annotated tools without prompting; require an
     // explicit consent callable for everything that mutates state.
     return { call ->
-      let hints = call?.annotations ?? {}
-      let kind_label = to_string(hints?.kind ?? "")
+      const hints = call?.annotations ?? {}
+      const kind_label = to_string(hints?.kind ?? "")
       if kind_label == "read" || kind_label == "search" || kind_label == "fetch"
         || kind_label == "think" {
         return {decision: "approved", decided_by: "merge_captain.read_default"}
@@ -617,7 +617,7 @@ fn __captain_layer_value(opts, key, default_value) {
   if !__has_key(opts, key) {
     return default_value
   }
-  let supplied = opts[key]
+  const supplied = opts[key]
   if supplied == nil || (type_of(supplied) == "bool" && !supplied) {
     return nil
   }
@@ -625,31 +625,31 @@ fn __captain_layer_value(opts, key, default_value) {
 }
 
 fn __captain_tool_layers(kind, opts) {
-  var layers = []
-  let audit_sink = __captain_layer_value(opts, "audit_sink", nil)
+  let layers = []
+  const audit_sink = __captain_layer_value(opts, "audit_sink", nil)
   if audit_sink != nil {
     layers = layers.push(with_audit_log(audit_sink))
   }
-  let telemetry = __captain_layer_value(opts, "telemetry", nil)
+  const telemetry = __captain_layer_value(opts, "telemetry", nil)
   if telemetry != nil {
     layers = layers.push(with_telemetry(telemetry))
   }
   if kind == "merge_captain" {
-    let consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
+    const consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
     if consent_fn != nil {
       layers = layers.push(with_consent(consent_fn))
     }
   }
   if kind == "oncall_captain" {
-    let rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
+    const rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
     if rate_limit != nil {
       layers = layers.push(with_rate_limit(rate_limit))
     }
   }
   if kind == "release_captain" {
-    let dry_value = __captain_layer_value(opts, "dry_run", nil)
+    const dry_value = __captain_layer_value(opts, "dry_run", nil)
     if dry_value != nil {
-      let dry = if type_of(dry_value) == "dict" {
+      const dry = if type_of(dry_value) == "dict" {
         dry_value
       } else {
         {message: "release_captain preview"}
@@ -657,7 +657,7 @@ fn __captain_tool_layers(kind, opts) {
       layers = layers.push(with_dry_run(dry))
     }
   }
-  let handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
+  const handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
   if handoff_sink != nil {
     layers = layers
       .push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
@@ -672,7 +672,7 @@ fn __apply_captain_tool_caller(opts, kind) {
   if __has_key(opts, "tool_caller") {
     return opts
   }
-  let layers = __captain_tool_layers(kind, opts)
+  const layers = __captain_tool_layers(kind, opts)
   if len(layers) == 0 {
     return opts
   }
@@ -680,10 +680,10 @@ fn __apply_captain_tool_caller(opts, kind) {
 }
 
 fn __captain_handler_layers(opts) {
-  var layers = []
-  let logging_sink = opts?.logging_sink
+  let layers = []
+  const logging_sink = opts?.logging_sink
   if logging_sink != nil {
-    let logging_opts = if type_of(opts?.logging_options) == "dict" {
+    const logging_opts = if type_of(opts?.logging_options) == "dict" {
       opts.logging_options + {sink: logging_sink}
     } else {
       {sink: logging_sink}
@@ -700,14 +700,14 @@ fn __apply_captain_llm_caller(opts, kind) {
   if __has_key(opts, "llm_caller") {
     return opts
   }
-  let cheap = opts?.cheap_caller
-  let frontier = opts?.frontier_caller
-  let escalate = opts?.escalate_predicate
-  let logging_layers = __captain_handler_layers(opts)
+  const cheap = opts?.cheap_caller
+  const frontier = opts?.frontier_caller
+  const escalate = opts?.escalate_predicate
+  const logging_layers = __captain_handler_layers(opts)
   if cheap == nil && len(logging_layers) == 0 {
     return opts
   }
-  let base = if cheap != nil {
+  const base = if cheap != nil {
     let routes = if frontier != nil && escalate != nil {
       [{name: "frontier", when: escalate, caller: frontier}]
     } else {
@@ -717,7 +717,7 @@ fn __apply_captain_llm_caller(opts, kind) {
   } else {
     default_llm_caller()
   }
-  let composed = if len(logging_layers) > 0 {
+  const composed = if len(logging_layers) > 0 {
     let wrap = compose(logging_layers)
     wrap(base)
   } else {
@@ -759,7 +759,7 @@ fn __preset_has_route_owner(opts) {
       return true
     }
   }
-  let llm_options = opts?.llm_options
+  const llm_options = opts?.llm_options
   if type_of(llm_options) != "dict" {
     return false
   }
@@ -792,13 +792,13 @@ fn __apply_preset_route_pack(opts, pack) {
     if __preset_has_ladder_owner(opts) {
       return opts
     }
-    let single = __preset_single_model_ladder(opts)
+    const single = __preset_single_model_ladder(opts)
     if single != nil {
       return opts + {model_ladder: single}
     }
     return opts
   }
-  var resolved = opts
+  let resolved = opts
   if resolved?.fallback_chain == nil && pack?.fallback_chain != nil {
     resolved = resolved + {fallback_chain: pack.fallback_chain}
   }
@@ -818,9 +818,9 @@ fn __apply_preset_route_pack(opts, pack) {
  * preset does not splice in a different built-in provider or ladder.
  */
 fn __apply_preset_pack(opts, kind) {
-  let spec = __preset_registry()[kind]
-  let pack = spec?.pack ?? {}
-  var resolved = opts
+  const spec = __preset_registry()[kind]
+  const pack = spec?.pack ?? {}
+  let resolved = opts
   for key in pack.keys() {
     if contains(__preset_pack_route_keys(), key) {
       continue
@@ -845,16 +845,16 @@ fn __apply_preset_pack(opts, kind) {
  * fail-fast) or `retry: {max_attempts, base_ms, ...}` to tune it.
  */
 fn __apply_default_retry(opts) {
-  let requested = opts?.retry
+  const requested = opts?.retry
   if type_of(requested) == "bool" && !requested {
     return opts
   }
-  let retry_cfg = if type_of(requested) == "dict" {
+  const retry_cfg = if type_of(requested) == "dict" {
     requested
   } else {
     {max_attempts: 3}
   }
-  let base = opts?.llm_caller ?? default_llm_caller()
+  const base = opts?.llm_caller ?? default_llm_caller()
   return opts + {llm_caller: with_retry(base, retry_cfg)}
 }
 
@@ -907,8 +907,8 @@ fn __apply_default_retry(opts) {
  * @errors: []
  */
 pub fn agent_preset(kind, options = nil) {
-  let resolved_kind = __preset_kind(kind)
-  var opts = __dict_or_empty(options)
+  const resolved_kind = __preset_kind(kind)
+  let opts = __dict_or_empty(options)
   opts = __apply_kind_defaults(resolved_kind, opts)
   opts = __apply_iteration_budget(opts, resolved_kind)
   opts = __apply_turn_policy(opts, resolved_kind)

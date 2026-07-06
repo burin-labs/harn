@@ -18,11 +18,11 @@ fn __estimate_tokens_text(text) {
 }
 
 fn __fragment_id_from_path(path) {
-  let base = basename(path)
+  const base = basename(path)
   if ends_with(base, ".harn.prompt") {
     return substring(base, 0, len(base) - len(".harn.prompt"))
   }
-  let ext = extname(base)
+  const ext = extname(base)
   if ext != "" {
     return substring(base, 0, len(base) - len(ext))
   }
@@ -30,12 +30,12 @@ fn __fragment_id_from_path(path) {
 }
 
 fn __normalize_words(text) {
-  let normalized = regex_replace("[^A-Za-z0-9_./:-]+", " ", lowercase(text))
+  const normalized = regex_replace("[^A-Za-z0-9_./:-]+", " ", lowercase(text))
   return split(trim(normalized), " ").filter({ word -> word != "" })
 }
 
 fn __token_prefix(text, max_tokens) {
-  let words = __normalize_words(text)
+  const words = __normalize_words(text)
   if max_tokens == nil || max_tokens <= 0 || len(words) <= max_tokens {
     return join(words, " ")
   }
@@ -43,10 +43,10 @@ fn __token_prefix(text, max_tokens) {
 }
 
 fn __fragment_from_config(harness: Harness, config, base_dir = nil) {
-  var body = config?.body ?? config?.prompt ?? config?.text
-  var path = config?.path
+  let body = config?.body ?? config?.prompt ?? config?.text
+  let path = config?.path
   if body == nil && path != nil {
-    let full_path = if base_dir != nil && !starts_with(path, "/") {
+    const full_path = if base_dir != nil && !starts_with(path, "/") {
       path_join(base_dir, path)
     } else {
       path
@@ -55,7 +55,7 @@ fn __fragment_from_config(harness: Harness, config, base_dir = nil) {
     path = full_path
   }
   require body != nil, "prompt_fragment: fragment requires body, prompt, text, or path"
-  let id = config?.id ?? if path != nil {
+  const id = config?.id ?? if path != nil {
     __fragment_id_from_path(path)
   } else {
     nil
@@ -68,27 +68,27 @@ fn __front_matter_fragment(harness: Harness, path, text) {
   if !starts_with(text, "---\n") {
     return prompt_fragment(__fragment_id_from_path(path), text, {path: path, source_path: path})
   }
-  let rest = substring(text, 4)
-  let marker = rest.index_of("\n---\n")
+  const rest = substring(text, 4)
+  const marker = rest.index_of("\n---\n")
   if marker < 0 {
     return prompt_fragment(__fragment_id_from_path(path), text, {path: path, source_path: path})
   }
-  let meta_text = substring(rest, 0, marker)
-  let body = substring(rest, marker + len("\n---\n"))
-  let meta = toml_parse(meta_text)
+  const meta_text = substring(rest, 0, marker)
+  const body = substring(rest, marker + len("\n---\n"))
+  const meta = toml_parse(meta_text)
   return __fragment_from_config(harness, meta + {body: body, path: path, source_path: path}, dirname(path))
 }
 
 fn __load_one(harness: Harness, path) {
-  let text = harness.fs.read_text(path)
-  let parsed = try {
+  const text = harness.fs.read_text(path)
+  const parsed = try {
     toml_parse(text)
   }
   if is_ok(parsed) {
-    let data = unwrap(parsed)
+    const data = unwrap(parsed)
     if data?.prompt_fragments != nil {
-      let base_dir = dirname(path)
-      var library = __empty_library()
+      const base_dir = dirname(path)
+      let library = __empty_library()
       for fragment_config in data.prompt_fragments {
         library = prompt_library_define(library, __fragment_from_config(harness, fragment_config, base_dir))
       }
@@ -99,9 +99,9 @@ fn __load_one(harness: Harness, path) {
 }
 
 fn __render_fragment(fragment, bindings = nil) {
-  let body = fragment?.body ?? fragment?.prompt ?? fragment?.text
+  const body = fragment?.body ?? fragment?.prompt ?? fragment?.text
   require body != nil, "prompt_library_inject: fragment has no body"
-  let source_path = fragment?.source_path ?? fragment?.path
+  const source_path = fragment?.source_path ?? fragment?.path
   if source_path != nil && starts_with(source_path, "std/") {
     return render_prompt(source_path, bindings ?? {})
   }
@@ -138,19 +138,19 @@ fn __matches_filters(fragment, filters) {
 }
 
 fn __score_fragment(fragment, ctx) {
-  var score = 0
-  let tags = fragment?.tags ?? []
+  let score = 0
+  const tags = fragment?.tags ?? []
   for tag in ctx?.tags ?? [] {
     if tags.contains(tag) {
       score = score + 10
     }
   }
-  let query = trim(lowercase(ctx?.query ?? ctx?.text ?? ""))
+  const query = trim(lowercase(ctx?.query ?? ctx?.text ?? ""))
   if query != "" {
-    let fragment_id = fragment?.id ?? ""
-    let fragment_title = fragment?.title ?? ""
-    let fragment_body = fragment?.body ?? ""
-    let haystack = lowercase(fragment_id + " " + fragment_title + " " + fragment_body)
+    const fragment_id = fragment?.id ?? ""
+    const fragment_title = fragment?.title ?? ""
+    const fragment_body = fragment?.body ?? ""
+    const haystack = lowercase(fragment_id + " " + fragment_title + " " + fragment_body)
     for word in __normalize_words(query) {
       if contains(haystack, word) {
         score = score + 1
@@ -161,12 +161,12 @@ fn __score_fragment(fragment, ctx) {
 }
 
 fn __top_scored(scored, limit) {
-  var remaining = scored
-  var out = []
+  let remaining = scored
+  let out = []
   while len(remaining) > 0 && (limit == nil || len(out) < limit) {
-    var best_index = 0
-    var best_score = remaining[0].score
-    var idx = 1
+    let best_index = 0
+    let best_score = remaining[0].score
+    let idx = 1
     while idx < len(remaining) {
       if remaining[idx].score > best_score {
         best_index = idx
@@ -203,8 +203,8 @@ fn __conversation_embedding(conversation, text) {
   if type_of(conversation) == "dict" && conversation?.embedding != nil {
     return conversation.embedding
   }
-  let words = __normalize_words(text)
-  let vocab = [
+  const words = __normalize_words(text)
+  const vocab = [
     "system",
     "developer",
     "tool",
@@ -222,9 +222,9 @@ fn __conversation_embedding(conversation, text) {
     "api",
     "prompt",
   ]
-  var vector = []
+  let vector = []
   for term in vocab {
-    var count = 0
+    let count = 0
     for word in words {
       if word == term {
         count = count + 1
@@ -240,7 +240,7 @@ fn __avg_distance(point, points) {
   if len(points) == 0 {
     return 0.0
   }
-  var total = 0.0
+  let total = 0.0
   for other in points {
     total = total + euclidean_distance(point, other)
   }
@@ -251,41 +251,41 @@ fn __silhouette(points, assignments, k) {
   if k <= 1 || len(points) <= 1 {
     return 0.0
   }
-  var total = 0.0
-  var idx = 0
+  let total = 0.0
+  let idx = 0
   while idx < len(points) {
-    let cluster = assignments[idx]
-    var same = []
-    var other_clusters = []
-    var c = 0
+    const cluster = assignments[idx]
+    let same = []
+    let other_clusters = []
+    let c = 0
     while c < k {
       other_clusters = other_clusters.push([])
       c = c + 1
     }
-    var j = 0
+    let j = 0
     while j < len(points) {
       if j != idx {
         if assignments[j] == cluster {
           same = same.push(points[j])
         } else {
-          let other = assignments[j]
+          const other = assignments[j]
           other_clusters[other] = other_clusters[other].push(points[j])
         }
       }
       j = j + 1
     }
-    let a = __avg_distance(points[idx], same)
-    var b = nil
+    const a = __avg_distance(points[idx], same)
+    let b = nil
     for group in other_clusters {
       if len(group) > 0 {
-        let d = __avg_distance(points[idx], group)
+        const d = __avg_distance(points[idx], group)
         if b == nil || d < b {
           b = d
         }
       }
     }
     if b != nil {
-      let denom = if a > b {
+      const denom = if a > b {
         a
       } else {
         b
@@ -300,26 +300,26 @@ fn __silhouette(points, assignments, k) {
 }
 
 fn __choose_kmeans(points, options) {
-  let n = len(points)
-  let requested = options?.k
+  const n = len(points)
+  const requested = options?.k
   if requested != nil {
-    let result = kmeans(points, requested, {max_iterations: options?.max_iterations ?? 100})
+    const result = kmeans(points, requested, {max_iterations: options?.max_iterations ?? 100})
     return {k: requested, result: result, silhouette: __silhouette(points, result.assignments, requested)}
   }
   if n < 4 {
-    let result = kmeans(points, 1, {max_iterations: options?.max_iterations ?? 100})
+    const result = kmeans(points, 1, {max_iterations: options?.max_iterations ?? 100})
     return {k: 1, result: result, silhouette: 0.0}
   }
-  let max_k = if options?.max_k != nil && options.max_k < n {
+  const max_k = if options?.max_k != nil && options.max_k < n {
     options.max_k
   } else {
     n
   }
-  var k = 2
-  var best = nil
+  let k = 2
+  let best = nil
   while k <= max_k && k <= 6 {
-    let result = kmeans(points, k, {max_iterations: options?.max_iterations ?? 100})
-    let score = __silhouette(points, result.assignments, k)
+    const result = kmeans(points, k, {max_iterations: options?.max_iterations ?? 100})
+    const score = __silhouette(points, result.assignments, k)
     if best == nil || score > best.silhouette {
       best = {k: k, result: result, silhouette: score}
     }
@@ -329,7 +329,7 @@ fn __choose_kmeans(points, options) {
 }
 
 fn __prefix_count(snippets, prefix) {
-  var count = 0
+  let count = 0
   for snippet in snippets {
     if starts_with(snippet, prefix) {
       count = count + 1
@@ -339,13 +339,13 @@ fn __prefix_count(snippets, prefix) {
 }
 
 fn __shared_prefix(snippets, min_fraction, min_tokens) {
-  var best = {text: "", tokens: 0, support: 0}
+  let best = {text: "", tokens: 0, support: 0}
   for snippet in snippets {
-    let words = split(snippet, " ").filter({ word -> word != "" })
-    var n = len(words)
+    const words = split(snippet, " ").filter({ word -> word != "" })
+    let n = len(words)
     while n >= min_tokens {
-      let prefix = join(words[:n], " ")
-      let support = __prefix_count(snippets, prefix)
+      const prefix = join(words[:n], " ")
+      const support = __prefix_count(snippets, prefix)
       if support / (len(snippets) * 1.0) >= min_fraction && n > best.tokens {
         best = {text: prefix, tokens: n, support: support}
         break
@@ -363,7 +363,7 @@ fn __shared_prefix(snippets, min_fraction, min_tokens) {
  * @errors: []
  */
 pub fn prompt_library(fragments = nil) {
-  var library = __empty_library()
+  let library = __empty_library()
   for fragment in fragments ?? [] {
     library = prompt_library_define(library, fragment)
   }
@@ -379,7 +379,7 @@ pub fn prompt_library(fragments = nil) {
 pub fn prompt_fragment(id, body, config = nil) {
   require id != nil && id != "", "prompt_fragment: id must be a non-empty string"
   require body != nil, "prompt_fragment: body must not be nil"
-  let {provenance = "manual", status = if provenance == "kmeans" {
+  const {provenance = "manual", status = if provenance == "kmeans" {
   "pending_review"
 } else {
   "accepted"
@@ -414,10 +414,10 @@ pub fn prompt_fragment(id, body, config = nil) {
  * @errors: []
  */
 pub fn prompt_library_define(library, fragment) {
-  let fragments = __require_library(library, "prompt_library_define")
+  const fragments = __require_library(library, "prompt_library_define")
   require fragment?.id != nil && fragment.id != "", "prompt_library_define: fragment requires id"
-  var out = []
-  var replaced = false
+  let out = []
+  let replaced = false
   for existing in fragments {
     if existing.id == fragment.id {
       out = out.push(fragment)
@@ -440,9 +440,9 @@ pub fn prompt_library_define(library, fragment) {
  */
 pub fn prompt_library_load(path_or_paths) {
   if type_of(path_or_paths) == "list" {
-    var library = __empty_library()
+    let library = __empty_library()
     for path in path_or_paths {
-      let loaded = prompt_library_load(path)
+      const loaded = prompt_library_load(path)
       for fragment in loaded.fragments {
         library = prompt_library_define(library, fragment)
       }
@@ -459,7 +459,7 @@ pub fn prompt_library_load(path_or_paths) {
  * @errors: []
  */
 pub fn prompt_library_list(library, filters = nil) {
-  let fragments = __require_library(library, "prompt_library_list")
+  const fragments = __require_library(library, "prompt_library_list")
   return fragments.filter({ fragment -> __matches_filters(fragment, filters) })
 }
 
@@ -485,7 +485,7 @@ pub fn prompt_library_find(library, id) {
  * @errors: []
  */
 pub fn prompt_library_inject(library, id, bindings = nil) {
-  let fragment = prompt_library_find(library, id)
+  const fragment = prompt_library_find(library, id)
   require fragment != nil, "prompt_library_inject: unknown fragment '" + id + "'"
   return __render_fragment(fragment, bindings)
 }
@@ -497,7 +497,7 @@ pub fn prompt_library_inject(library, id, bindings = nil) {
  * @errors: []
  */
 pub fn prompt_library_payload(library, id, bindings = nil) {
-  let fragment = prompt_library_find(library, id)
+  const fragment = prompt_library_find(library, id)
   require fragment != nil, "prompt_library_payload: unknown fragment '" + id + "'"
   return {
     fragment_id: fragment.id,
@@ -516,11 +516,11 @@ pub fn prompt_library_payload(library, id, bindings = nil) {
  * @errors: []
  */
 pub fn prompt_library_inject_cluster(library, filters = nil, bindings = nil) {
-  let max_tokens = filters?.max_tokens
-  var used = 0
-  var blocks = []
+  const max_tokens = filters?.max_tokens
+  let used = 0
+  let blocks = []
   for fragment in prompt_library_list(library, filters) {
-    let budget = fragment?.token_budget ?? __estimate_tokens_text(fragment?.body ?? "")
+    const budget = fragment?.token_budget ?? __estimate_tokens_text(fragment?.body ?? "")
     if max_tokens != nil && used + budget > max_tokens {
       continue
     }
@@ -537,9 +537,9 @@ pub fn prompt_library_inject_cluster(library, filters = nil, bindings = nil) {
  * @errors: []
  */
 pub fn prompt_library_suggest(library, ctx = nil) {
-  var scored = []
+  let scored = []
   for fragment in __require_library(library, "prompt_library_suggest") {
-    let score = __score_fragment(fragment, ctx ?? {})
+    const score = __score_fragment(fragment, ctx ?? {})
     if score > 0 || (ctx?.query == nil && ctx?.tags == nil) {
       scored = scored.push({score: score, fragment: fragment})
     }
@@ -571,18 +571,18 @@ pub fn prompt_library_api(library) {
  * @errors: []
  */
 pub fn prompt_library_hotspots(conversations, options = nil) {
-  let tenant = options?.tenant_id
-  let {max_prefix_tokens = 1200, min_fraction = 0.8, min_shared_tokens = 8} = options ?? {}
-  let daily_invocations = options?.daily_invocation_count ?? 1
-  let dollars_per_token = options?.dollars_per_token ?? 0.0
-  let min_monthly_savings = options?.min_monthly_savings_usd ?? 0.0
-  var records = []
-  var points = []
-  var index = 0
+  const tenant = options?.tenant_id
+  const {max_prefix_tokens = 1200, min_fraction = 0.8, min_shared_tokens = 8} = options ?? {}
+  const daily_invocations = options?.daily_invocation_count ?? 1
+  const dollars_per_token = options?.dollars_per_token ?? 0.0
+  const min_monthly_savings = options?.min_monthly_savings_usd ?? 0.0
+  let records = []
+  let points = []
+  let index = 0
   for conversation in conversations {
     if tenant == nil || type_of(conversation) != "dict" || conversation?.tenant_id == tenant {
-      let text = __conversation_text(conversation)
-      let snippet = __token_prefix(text, max_prefix_tokens)
+      const text = __conversation_text(conversation)
+      const snippet = __token_prefix(text, max_prefix_tokens)
       records = records
         .push(
         {
@@ -603,34 +603,34 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
   if len(records) == 0 {
     return []
   }
-  let chosen = __choose_kmeans(points, options ?? {})
-  var snippets_by_cluster = []
-  var members_by_cluster = []
-  var k = 0
+  const chosen = __choose_kmeans(points, options ?? {})
+  let snippets_by_cluster = []
+  let members_by_cluster = []
+  let k = 0
   while k < chosen.k {
     snippets_by_cluster = snippets_by_cluster.push([])
     members_by_cluster = members_by_cluster.push([])
     k = k + 1
   }
-  var idx = 0
+  let idx = 0
   while idx < len(records) {
-    let cluster = chosen.result.assignments[idx]
+    const cluster = chosen.result.assignments[idx]
     snippets_by_cluster[cluster] = snippets_by_cluster[cluster].push(records[idx].snippet)
     members_by_cluster[cluster] = members_by_cluster[cluster].push(records[idx].id)
     idx = idx + 1
   }
-  var proposals = []
-  var cluster_id = 0
+  let proposals = []
+  let cluster_id = 0
   while cluster_id < len(snippets_by_cluster) {
-    let snippets = snippets_by_cluster[cluster_id]
+    const snippets = snippets_by_cluster[cluster_id]
     if len(snippets) > 0 {
-      let prefix = __shared_prefix(snippets, min_fraction, min_shared_tokens)
+      const prefix = __shared_prefix(snippets, min_fraction, min_shared_tokens)
       if prefix.tokens >= min_shared_tokens {
-        let tokens_saved = prefix.tokens * (prefix.support - 1)
-        let monthly = tokens_saved * daily_invocations * 30.0 * dollars_per_token
+        const tokens_saved = prefix.tokens * (prefix.support - 1)
+        const monthly = tokens_saved * daily_invocations * 30.0 * dollars_per_token
         if monthly >= min_monthly_savings {
-          let scope = tenant ?? "default"
-          let id = "kmeans-" + scope + "-" + substring(sha256(prefix.text), 0, 12)
+          const scope = tenant ?? "default"
+          const id = "kmeans-" + scope + "-" + substring(sha256(prefix.text), 0, 12)
           proposals = proposals
             .push(
             prompt_fragment(
@@ -666,10 +666,10 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
  * @errors: []
  */
 pub fn prompt_library_review_queue(library, filters = nil) {
-  var queue = []
-  let base_filters = filters ?? {}
-  let review_status = filters?.status ?? "pending_review"
-  let review_filters = base_filters + {provenance: "kmeans", status: review_status}
+  let queue = []
+  const base_filters = filters ?? {}
+  const review_status = filters?.status ?? "pending_review"
+  const review_filters = base_filters + {provenance: "kmeans", status: review_status}
   for fragment in prompt_library_list(library, review_filters) {
     queue = queue
       .push(

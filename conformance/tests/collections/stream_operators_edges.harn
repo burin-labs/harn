@@ -22,19 +22,19 @@ pipeline test(task) {
   log(stream.collect(stream.interleave([], [1])))
   log(stream.collect(stream.zip([], [1])))
   log(stream.collect(stream.race([], [2])))
-  let copies = stream.broadcast([], 1)
+  const copies = stream.broadcast([], 1)
   log(stream.collect(copies[0]))
   log(stream.collect(stream.throttle([], 1000)))
   log(stream.collect(stream.debounce([], 0)))
-  let empty_channel = channel("empty", 1)
-  let ready_channel = channel("ready", 1)
+  const empty_channel = channel("empty", 1)
+  const ready_channel = channel("ready", 1)
   send(ready_channel, "ready")
   log(stream.first(stream.merge(empty_channel, ready_channel)))
-  let slow_channel = channel("slow", 1)
-  let winner_channel = channel("winner", 1)
+  const slow_channel = channel("slow", 1)
+  const winner_channel = channel("winner", 1)
   send(winner_channel, "winner")
   log(stream.first(stream.race(slow_channel, winner_channel)))
-  let source_error = stream
+  const source_error = stream
     .map(
     [1, 2],
     { x ->
@@ -44,7 +44,7 @@ pipeline test(task) {
       return x
     },
   )
-  let propagated = try {
+  const propagated = try {
     stream.collect(stream.merge(source_error, [3]))
     "missing"
   } catch (e) {

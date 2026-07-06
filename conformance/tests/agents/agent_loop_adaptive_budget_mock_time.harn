@@ -10,7 +10,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * extend-on-progress path that captain presets rely on.
  */
 fn lookup_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -27,7 +27,7 @@ fn lookup_tools() {
 
 pipeline default() {
   mock_time(1700000000000)
-  let start_ms = harness.clock.now_ms()
+  const start_ms = harness.clock.now_ms()
   with_llm_script(
     [
       {tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]},
@@ -36,7 +36,7 @@ pipeline default() {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Inspect everything.",
         nil,
         {

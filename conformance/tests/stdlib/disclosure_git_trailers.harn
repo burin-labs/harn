@@ -1,9 +1,9 @@
 import { append_git_trailers, git_trailers } from "std/disclosure"
 
 pipeline default() {
-  let chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
-  let nested_chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}}}
-  let config = {
+  const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
+  const nested_chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}}}
+  const config = {
     identities: {
       "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com"},
       "agent:merge-captain": {name: "Merge Captain", email: "merge-captain@bots.example"},
@@ -16,11 +16,11 @@ pipeline default() {
       },
     },
   }
-  let options = {project: false, env: false, config: config}
-  let trailers = git_trailers(chain, options)
+  const options = {project: false, env: false, config: config}
+  const trailers = git_trailers(chain, options)
   require !contains(trailers, "Signed-off-by: Merge Captain"), "agent actor must not receive DCO sign-off"
   require contains(trailers, "Signed-off-by: Human Merge Captain"), "human sign-off must not be filtered by name substring"
-  let suppressed_message = "Fix identity trailers\n"
+  const suppressed_message = "Fix identity trailers\n"
   require append_git_trailers(suppressed_message, chain, options + {enabled: false}) == suppressed_message, "suppressed append must preserve the original message"
   __io_println(trailers)
   __io_println("--- default ---")

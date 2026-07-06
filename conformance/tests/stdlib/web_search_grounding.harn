@@ -19,7 +19,7 @@ fn has_import_status(items, package, symbol, status) {
 }
 
 pipeline test(task) {
-  let curated = web_search(
+  const curated = web_search(
     "fastapi dependency injection",
     {
       limit: 1,
@@ -61,7 +61,7 @@ pipeline test(task) {
       ),
     },
   )
-  let api = web_search(
+  const api = web_search(
     "harn web",
     {
       api: {
@@ -77,10 +77,10 @@ pipeline test(task) {
   assert_eq(api.results[0].url, "https://harnlang.com/docs/builtins.html#web")
   assert(api.backend.api == nil, "web_search does not expose backend request config")
   assert(!contains(json_stringify(api), "SECRET_SEARCH_TOKEN"), "web_search redacts API credentials")
-  let calls = http_mock_calls({redact_sensitive: false})
+  const calls = http_mock_calls({redact_sensitive: false})
   assert(contains(calls[0].url, "https://search.example/api?"), "web_search used web_fetch/http mock")
   assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
-  let root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + uuid_v7())
+  const root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + uuid_v7())
   harness.fs.mkdir(root)
   harness.fs
     .write_text(
@@ -92,9 +92,9 @@ pipeline test(task) {
     path_join(root, "Cargo.toml"),
     "[package]\nname=\"grounding-demo\"\nversion=\"0.1.0\"\n[dependencies]\nserde=\"1\"\n",
   )
-  let app_py = path_join(root, "app.py")
-  let ui_ts = path_join(root, "ui.ts")
-  let lib_rs = path_join(root, "lib.rs")
+  const app_py = path_join(root, "app.py")
+  const ui_ts = path_join(root, "ui.ts")
+  const lib_rs = path_join(root, "lib.rs")
   harness.fs
     .write_text(
     app_py,
@@ -106,7 +106,7 @@ pipeline test(task) {
     "import React from 'react'\nimport { createRoot } from 'react-dom/client'\nimport nope from 'fresh-slop'\n",
   )
   harness.fs.write_text(lib_rs, "use serde::Serialize;\nuse hallucinate_crate::Thing;\n")
-  let verified = verify_imports(
+  const verified = verify_imports(
     [app_py, ui_ts, lib_rs],
     {
       project_root: root,
@@ -165,7 +165,7 @@ pipeline test(task) {
     "low-trust package warning",
   )
   assert(has_finding(verified.warnings, "fresh_package", "fresh-slop"), "fresh package warning")
-  let explained = prompt_explain({tools: web_grounding_tools()})
+  const explained = prompt_explain({tools: web_grounding_tools()})
   assert(contains(explained.system, "call web_search"), "search guidance is gated with the tool")
   assert(contains(explained.system, "call verify_imports"), "verify guidance is gated with the tool")
   harness.fs.delete(root)

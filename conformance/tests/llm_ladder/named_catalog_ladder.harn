@@ -17,10 +17,10 @@ pipeline test(task) {
       {text: "escalated answer", model: "mid", provider: "anthropic"},
     ],
     { ->
-      let result = llm_call("hi", nil, {ladder: "frugal"})
+      const result = llm_call("hi", nil, {ladder: "frugal"})
       __io_println(result.text)
       __io_println(result.routing.policy)
-      let attempts = result.routing.attempts
+      const attempts = result.routing.attempts
       __io_println(len(attempts))
       __io_println(attempts[0].status)
       __io_println(attempts[1].status)

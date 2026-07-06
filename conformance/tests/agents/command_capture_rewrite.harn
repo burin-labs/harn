@@ -2,7 +2,7 @@ import { command_capture_rewrite } from "std/agent/command_capture"
 import { agent_command_tools } from "std/agent/host_tools"
 
 pipeline main() {
-  let cap = "/tmp/cap.out"
+  const cap = "/tmp/cap.out"
   // --- pure rewrite cases (deterministic capture path) --------------------
   // 1. plain producer | tail
   __io_println(command_capture_rewrite("seq 100 | tail -3", cap))
@@ -24,10 +24,10 @@ pipeline main() {
   __io_println(command_capture_rewrite("echo hi & wc -l", cap) == nil)  // background job
   __io_println(command_capture_rewrite("a | b && c", cap) == nil)  // last statement has no pipe
   // --- end-to-end through the run_command tool ----------------------------
-  let root = path_join(harness.fs.temp_dir(), "harn-cap-int-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-cap-int-" + uuid())
   harness.fs.mkdir(root, true)
-  let tools = agent_command_tools(nil, {root: root, cwd: root, allow_argv_prefixes: [["sh", "-c"]]})
-  let run = agent_dispatch_tool_call(
+  const tools = agent_command_tools(nil, {root: root, cwd: root, allow_argv_prefixes: [["sh", "-c"]]})
+  const run = agent_dispatch_tool_call(
     {
       id: "c1",
       name: "run_command",
@@ -35,11 +35,11 @@ pipeline main() {
     },
     tools,
   )
-  let data = json_parse(run.rendered_result)
+  const data = json_parse(run.rendered_result)
   __io_println(run.ok)  // true
   __io_println(data.output_capture.producer)  // seq 100
   __io_println(data.output_capture.filter)  // tail -n 3
-  let captured = read_file(data.output_capture.full_output_path)
+  const captured = read_file(data.output_capture.full_output_path)
   __io_println(len(captured.trim().split("\n")))  // 100 (full producer output preserved)
   __io_println(len(data.stdout.trim().split("\n")))  // 3  (agent still sees only the filtered tail)
   __io_println(data.stdout.trim().ends_with("100"))  // true

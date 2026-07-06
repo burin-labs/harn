@@ -1,17 +1,17 @@
 pipeline test(task) {
   // Success wraps in Ok
-  let r1 = try {
+  const r1 = try {
     42
   }
   log(r1)
   // Success preserves an existing Result instead of nesting Ok(Ok(...))
-  let r1_flat = try {
+  const r1_flat = try {
     Ok(7)
   }
   log(r1_flat)
   log(unwrap(r1_flat))
   // Error wraps in Err
-  let r2 = try {
+  const r2 = try {
     throw "boom"
   }
   log(r2)
@@ -19,7 +19,7 @@ pipeline test(task) {
   fn risky() {
     throw "failed"
   }
-  let r3 = try {
+  const r3 = try {
     risky()
   }
   log(is_err(r3))

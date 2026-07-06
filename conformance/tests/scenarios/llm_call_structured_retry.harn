@@ -6,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * recovers; the caller gets the parsed data directly.
  */
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["verdict"],
     properties: {verdict: {type: "string"}, improvement: {type: "string"}},
@@ -17,7 +17,7 @@ pipeline default() {
       llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
     ],
     { ->
-      let result = llm_call_structured("Grade this", schema, {provider: "mock"})
+      const result = llm_call_structured("Grade this", schema, {provider: "mock"})
       __io_println(result.verdict)
       __io_println(len(llm_mock_calls()))
     },
@@ -25,7 +25,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"improvement\": \"still broken\"}")],
     { ->
-      let err = try {
+      const err = try {
         llm_call_structured("Grade again", schema, {provider: "mock", retries: 0})
       }
       __io_println(is_err(err))

@@ -1,7 +1,7 @@
 pipeline default() {
   // Wildcard pattern
-  let x = 42
-  var result = ""
+  const x = 42
+  let result = ""
   match x {
     1 -> { result = "one" }
     2 -> { result = "two" }
@@ -9,8 +9,8 @@ pipeline default() {
   }
   __io_println(result)
   // Wildcard with strings
-  let s = "hello"
-  var r2 = ""
+  const s = "hello"
+  let r2 = ""
   match s {
     "bye" -> { r2 = "farewell" }
     _ -> { r2 = "catch-all" }

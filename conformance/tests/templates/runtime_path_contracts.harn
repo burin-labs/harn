@@ -1,6 +1,6 @@
 pipeline default() {
-  let prompt = render_prompt("fixtures/greeting.prompt", {name: "Casey", place: "Harn"})
-  let paths = runtime_paths()
+  const prompt = render_prompt("fixtures/greeting.prompt", {name: "Casey", place: "Harn"})
+  const paths = runtime_paths()
   __io_println(prompt.contains("Casey"))
   __io_println(paths.execution_root == execution_root())
   __io_println(paths.asset_root == asset_root())

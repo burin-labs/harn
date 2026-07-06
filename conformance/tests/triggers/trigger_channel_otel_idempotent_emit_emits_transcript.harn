@@ -11,15 +11,15 @@ import "std/triggers"
  */
 fn handle_event(event) {
   // no-op — the test asserts on the transcript stream, not handler effects
-  let _ = event
+  const _ = event
 }
 
 pipeline default() {
   enable_tracing(true)
-  let stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-otel-idem-" + unique,
       kind: "channel.emit",
@@ -37,12 +37,12 @@ pipeline default() {
       package_name: "conformance",
     },
   )
-  let event_id = "fixed-event-id-" + unique
-  let _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
-  let _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
-  let first = stream.next().value
-  let second = stream.next().value
-  let third = stream.next().value
+  const event_id = "fixed-event-id-" + unique
+  const _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  const _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  const first = stream.next().value
+  const second = stream.next().value
+  const third = stream.next().value
   __io_println(first.kind)
   __io_println(first.payload.inserted)
   __io_println(first.payload.duplicate)

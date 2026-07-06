@@ -1,5 +1,5 @@
 pipeline main() {
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "graph_runtime",
       entry: "gate",
@@ -29,12 +29,12 @@ pipeline main() {
       ],
     },
   )
-  let artifacts = [
+  const artifacts = [
     artifact({kind: "plan", text: "go build the report"}),
     artifact({kind: "workspace_file", text: "alpha"}),
     artifact({kind: "workspace_file", text: "beta"}),
   ]
-  let result = workflow_execute(
+  const result = workflow_execute(
     "Assemble the report",
     flow,
     artifacts,

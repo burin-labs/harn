@@ -14,7 +14,7 @@ pipeline default() {
       text: "Summarize the article in 3 bullet points, each under 12 words.\nDIFF: tightened length, added bullet structure",
     },
   )
-  let result = refine_prompt(
+  const result = refine_prompt(
     {
       user_prompt: "please summarize this article briefly with bullets",
       provider: "mock",

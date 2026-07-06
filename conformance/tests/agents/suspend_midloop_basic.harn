@@ -27,23 +27,23 @@ pipeline main() {
       llm_text("child finished after parent resume"),
     ],
     { ->
-      let handle = sub_agent_run(
+      const handle = sub_agent_run(
         "Park until parent resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 4},
       )
-      let suspended = wait_agent(handle)
-      let lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
-      let pause_tool = tool_find(lifecycle, "subagent_pause")
-      let resume_tool = tool_find(lifecycle, "subagent_resume")
-      let pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
-      let resumed = resume_tool.handler({handle: handle.id})
-      let done = wait_agent(handle)
+      const suspended = wait_agent(handle)
+      const lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
+      const pause_tool = tool_find(lifecycle, "subagent_pause")
+      const resume_tool = tool_find(lifecycle, "subagent_resume")
+      const pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
+      const resumed = resume_tool.handler({handle: handle.id})
+      const done = wait_agent(handle)
       __io_println("suspended_status=" + suspended.status)
       __io_println("pause_again_status=" + pause_again.status)
       __io_println("resume_status=" + resumed.status)
       __io_println("final_status=" + done.status)
       __io_println("has_transcript=" + to_string(done.has_transcript))
-      let continuity = transcript_events_by_kind(done.transcript, "system_reminder")
+      const continuity = transcript_events_by_kind(done.transcript, "system_reminder")
         .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
       __io_println("continuity_left=" + to_string(len(continuity)))
     },

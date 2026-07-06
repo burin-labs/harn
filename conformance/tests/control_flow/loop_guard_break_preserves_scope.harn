@@ -13,25 +13,25 @@ fn parse_env_assignment(token: string) {
 }
 
 pipeline test(_task) {
-  let tokens = ["abc"]
-  var index = 0
+  const tokens = ["abc"]
+  let index = 0
   while index < len(tokens) {
-    let token = tokens[index]
-    let name = maybe_name(token) ?? ""
+    const token = tokens[index]
+    const name = maybe_name(token) ?? ""
     if name == "" {
       break
     }
-    let value = token[len(name):]
+    const value = token[len(name):]
     assert(value == "", "name binding should remain visible after non-taken break branch")
     break
   }
   index = 0
   while index < len(tokens) {
-    let parsed = parse_env_assignment(tokens[index])
+    const parsed = parse_env_assignment(tokens[index])
     if parsed == nil {
       break
     }
-    let name = parsed.name
+    const name = parsed.name
     assert(name == "abc", "parsed binding should remain visible after non-taken break branch")
     break
   }

@@ -674,7 +674,7 @@ impl Formatter<'_> {
                 let val = self.format_expr(value, indent);
                 format!("let {pat}{type_str} = {val}")
             }
-            Node::VarBinding {
+            Node::ConstBinding {
                 pattern,
                 type_ann,
                 value,
@@ -682,16 +682,7 @@ impl Formatter<'_> {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value, indent);
-                format!("var {pat}{type_str} = {val}")
-            }
-            Node::ConstBinding {
-                name,
-                type_ann,
-                value,
-            } => {
-                let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value, indent);
-                format!("const {name}{type_str} = {val}")
+                format!("const {pat}{type_str} = {val}")
             }
             Node::ImportDecl { path, is_pub } => {
                 let prefix = if *is_pub { "pub " } else { "" };

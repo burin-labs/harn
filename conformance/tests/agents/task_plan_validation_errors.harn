@@ -1,7 +1,7 @@
 import { task_plan_validate } from "std/agent/task_plan"
 
 fn codes_of(report) {
-  var out = []
+  let out = []
   for err in report.errors {
     out = out + [err.code]
   }
@@ -10,13 +10,13 @@ fn codes_of(report) {
 
 pipeline main() {
   // Wrong schema version triggers a structured error rather than a throw.
-  let bad_version = task_plan_validate(
+  const bad_version = task_plan_validate(
     {schema_version: "0", objective: "x", entry: "a", nodes: {a: {kind: "agent_loop", prompt: "go"}}},
   )
   __io_println(bad_version.valid)
   __io_println(contains(codes_of(bad_version), "schema_version_mismatch"))
   // Missing entry and dangling edge surface together; no throws.
-  let dangling = task_plan_validate(
+  const dangling = task_plan_validate(
     {
       schema_version: "1",
       objective: "x",
@@ -25,13 +25,13 @@ pipeline main() {
     },
   )
   __io_println(dangling.valid)
-  let dangling_codes = codes_of(dangling)
+  const dangling_codes = codes_of(dangling)
   __io_println(contains(dangling_codes, "entry_missing"))
   __io_println(contains(dangling_codes, "edge_to_unknown"))
   // Kind-specific contracts: agent_loop without prompt, sub_agent without
   // worker_name, deterministic_command without tool, human_gate without
   // approval_id, workflow_map without map.items, verify without contract.
-  let kinds = task_plan_validate(
+  const kinds = task_plan_validate(
     {
       schema_version: "1",
       objective: "x",
@@ -47,14 +47,14 @@ pipeline main() {
     },
   )
   __io_println(kinds.valid)
-  let kind_codes = codes_of(kinds)
+  const kind_codes = codes_of(kinds)
   __io_println(contains(kind_codes, "agent_loop_missing_prompt"))
   __io_println(contains(kind_codes, "sub_agent_missing_worker"))
   __io_println(contains(kind_codes, "command_missing_tool"))
   __io_println(contains(kind_codes, "human_gate_missing_approval"))
   __io_println(contains(kind_codes, "map_missing_inputs"))
   // verify-without-contract is a warning, not an error.
-  var saw_verify_warning = false
+  let saw_verify_warning = false
   for warn in kinds.warnings {
     if warn.code == "verify_no_contract" {
       saw_verify_warning = true
@@ -62,7 +62,7 @@ pipeline main() {
   }
   __io_println(saw_verify_warning)
   // Budget overflow and promotion policy out of range.
-  let bad_policy = task_plan_validate(
+  const bad_policy = task_plan_validate(
     {
       schema_version: "1",
       objective: "x",
@@ -72,12 +72,12 @@ pipeline main() {
       promotion_policy: {min_pass_rate: 1.5, shadow_runs_required: -1},
     },
   )
-  let bad_codes = codes_of(bad_policy)
+  const bad_codes = codes_of(bad_policy)
   __io_println(contains(bad_codes, "budget_max_nodes"))
   __io_println(contains(bad_codes, "promotion_invalid_pass_rate"))
   __io_println(contains(bad_codes, "promotion_negative_shadow_runs"))
   // Unreachable nodes are warnings, not errors.
-  let unreached = task_plan_validate(
+  const unreached = task_plan_validate(
     {
       schema_version: "1",
       objective: "x",
@@ -86,7 +86,7 @@ pipeline main() {
     },
   )
   __io_println(unreached.valid)
-  var orphan_warned = false
+  let orphan_warned = false
   for warn in unreached.warnings {
     if warn.code == "node_unreachable" && warn.path == "nodes.orphan" {
       orphan_warned = true
@@ -94,7 +94,7 @@ pipeline main() {
   }
   __io_println(orphan_warned)
   // Non-dict input never throws.
-  let weird = task_plan_validate("oops")
+  const weird = task_plan_validate("oops")
   __io_println(weird.valid)
   __io_println(codes_of(weird)[0])
 }

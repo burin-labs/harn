@@ -7,7 +7,7 @@ fn ops(a: number, b: number) -> number {
 }
 
 pipeline test(task) {
-  let n: number = 3
+  const n: number = 3
   log(n)
   log(add_one(3))
   log(add_one(7.5))

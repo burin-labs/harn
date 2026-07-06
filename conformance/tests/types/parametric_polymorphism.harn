@@ -1,13 +1,13 @@
 pipeline default() {
   fn map<T, U>(xs: list<T>, f: fn(T) -> U) -> list<U> {
-    var out: list<U> = []
+    let out: list<U> = []
     for x in xs {
       out = out.push(f(x))
     }
     return out
   }
   fn filter<T>(xs: list<T>, pred: fn(T) -> bool) -> list<T> {
-    var out: list<T> = []
+    let out: list<T> = []
     for x in xs {
       if pred(x) {
         out = out.push(x)
@@ -16,7 +16,7 @@ pipeline default() {
     return out
   }
   fn fold<T, U>(xs: list<T>, init: U, step: fn(U, T) -> U) -> U {
-    var acc: U = init
+    let acc: U = init
     for x in xs {
       acc = step(acc, x)
     }
@@ -50,12 +50,12 @@ pipeline default() {
   fn label(x: int) -> string {
     return "value=${x}"
   }
-  let mapped: list<int> = map<int, int>([1, 2, 3], double)
-  let filtered: list<int> = filter<int>(mapped, keep_even)
-  let total: int = fold<int, int>(filtered, 0, add)
-  let labeled: Result<string, string> = result_map<int, string, string>(Result.Ok(total), label)
-  let fallback: string = result_unwrap_or<string, string>(Result.Err("missing"), "fallback")
-  let pair: Pair<int, string> = Pair {first: total, second: result_unwrap_or(labeled, "none")}
+  const mapped: list<int> = map<int, int>([1, 2, 3], double)
+  const filtered: list<int> = filter<int>(mapped, keep_even)
+  const total: int = fold<int, int>(filtered, 0, add)
+  const labeled: Result<string, string> = result_map<int, string, string>(Result.Ok(total), label)
+  const fallback: string = result_unwrap_or<string, string>(Result.Err("missing"), "fallback")
+  const pair: Pair<int, string> = Pair {first: total, second: result_unwrap_or(labeled, "none")}
   __io_println(mapped[2])
   __io_println(filtered[1])
   __io_println(total)

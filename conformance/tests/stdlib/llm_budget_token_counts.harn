@@ -5,11 +5,11 @@ import {
 } from "std/llm/budget"
 
 pipeline test(task) {
-  let prose = "Harn turns agent orchestration into typed, replayable programs with deterministic host boundaries."
-  let official_gpt4_tokens = 17
-  let counted = tiktoken_count_tokens(prose, "gpt-4")
-  let lower = floor(official_gpt4_tokens * 0.95)
-  let upper = ceil(official_gpt4_tokens * 1.05)
+  const prose = "Harn turns agent orchestration into typed, replayable programs with deterministic host boundaries."
+  const official_gpt4_tokens = 17
+  const counted = tiktoken_count_tokens(prose, "gpt-4")
+  const lower = floor(official_gpt4_tokens * 0.95)
+  const upper = ceil(official_gpt4_tokens * 1.05)
   assert(
     counted >= lower && counted <= upper,
     "gpt-4 count stays within official tokenizer tolerance",
@@ -17,20 +17,20 @@ pipeline test(task) {
   assert_eq(estimate_text_tokens(prose, "gpt-4"), counted)
   assert_eq(token_count_encoder("gpt-4").encoder, "cl100k_base")
   assert_eq(token_count_encoder("gpt-4o").encoder, "o200k_base")
-  let openai = estimate_text_tokens_detail(prose, "gpt-4")
+  const openai = estimate_text_tokens_detail(prose, "gpt-4")
   assert_eq(openai.tokens, 17)
   assert_eq(openai.encoder, "cl100k_base")
   assert_eq(openai.source, "tiktoken")
   assert(openai.exact, "OpenAI tiktoken counts are exact for known models")
-  let claude = estimate_text_tokens_detail(prose, "claude-sonnet-4-20250514")
+  const claude = estimate_text_tokens_detail(prose, "claude-sonnet-4-20250514")
   assert_eq(claude.tokens, 17)
   assert_eq(claude.encoder, "cl100k_base")
   assert_eq(claude.source, "tiktoken_approximation")
   assert(!claude.exact, "Claude uses a labeled approximation")
-  let gemini = estimate_text_tokens_detail(prose, "gemini-2.5-pro")
+  const gemini = estimate_text_tokens_detail(prose, "gemini-2.5-pro")
   assert_eq(gemini.source, "tiktoken_approximation")
   assert_eq(gemini.encoder, "cl100k_base")
-  let unknown = estimate_text_tokens_detail(prose, "unknown-local-model")
+  const unknown = estimate_text_tokens_detail(prose, "unknown-local-model")
   assert_eq(unknown.tokens, 25)
   assert_eq(unknown.encoder, nil)
   assert_eq(unknown.source, "heuristic")

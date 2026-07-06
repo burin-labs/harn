@@ -41,23 +41,23 @@ fn __safe_dict(value) -> dict {
  * accounting keeps full precision; this renderer owns user-facing readability.
  */
 fn __round_sig(value, digits: int) -> float {
-  let f = to_float(value) ?? 0.0
+  const f = to_float(value) ?? 0.0
   if f == 0.0 {
     return 0.0
   }
-  let scale = pow(10, digits - 1 - floor(log10(abs(f))))
+  const scale = pow(10, digits - 1 - floor(log10(abs(f))))
   return round(f * scale) / scale
 }
 
 fn __format_cost(value) -> string {
-  let f = __round_sig(value, 4)
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = __round_sig(value, 4)
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  let sign = if negative && abs_f != 0.0 {
+  const sign = if negative && abs_f != 0.0 {
     "-"
   } else {
     ""
@@ -73,7 +73,7 @@ fn __format_cost(value) -> string {
  * delta in time.
  */
 fn __render_success_line(result: dict) -> string {
-  let first_token = if result["first_token_ms"] == nil {
+  const first_token = if result["first_token_ms"] == nil {
     "-"
   } else {
     to_string(result["first_token_ms"])
@@ -100,7 +100,7 @@ fn __render_success_line(result: dict) -> string {
  * `first_token_ms` is absent when nil.
  */
 fn __render_success_envelope(result: dict) -> string {
-  var envelope = {
+  let envelope = {
     model_id: __safe_string(result["model_id"], ""),
     provider: __safe_string(result["provider"], ""),
     latency_ms: result["latency_ms"] ?? 0,
@@ -123,22 +123,22 @@ fn __render_failure_envelope(error: string) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_MODELS_TEST_RESULT_JSON", "")
+  const raw = harness.env.get_or("HARN_MODELS_TEST_RESULT_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_MODELS_TEST_RESULT_JSON not set by dispatch shim")
     return 70
   }
-  let envelope = try {
+  const envelope = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse models-test result: " + to_string(e))
     return 70
   }
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
-  let ok = envelope["ok"] ?? false
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const ok = envelope["ok"] ?? false
   if ok {
-    let result = __safe_dict(envelope["result"])
+    const result = __safe_dict(envelope["result"])
     if json_mode {
       harness.stdio.println(__render_success_envelope(result))
     } else {
@@ -146,7 +146,7 @@ fn main(harness: Harness) -> int {
     }
     return 0
   }
-  let error = __safe_string(envelope["error"], "unknown error")
+  const error = __safe_string(envelope["error"], "unknown error")
   if json_mode {
     // JSON failures go to STDOUT, not stderr; the channel split matters
     // for shells piping `--json`.

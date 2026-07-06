@@ -1,7 +1,7 @@
 import { parse_args } from "std/cli"
 import { find_files } from "std/fs"
 
-let SKIP_SEGMENTS = [
+const SKIP_SEGMENTS = [
   "/.burin/",
   "/.claude/",
   "/.git/",
@@ -13,7 +13,7 @@ let SKIP_SEGMENTS = [
   "/target/",
 ]
 
-let PYTHON_ALLOWLIST = [
+const PYTHON_ALLOWLIST = [
   {
     kind: "exact",
     pattern: "tests/bridge_mock_host.py",
@@ -57,9 +57,9 @@ fn repo_root() -> string {
 }
 
 fn rel_path(path: string, root: string) -> string {
-  let normalized = replace(path_normalize(path), "\\", "/")
-  let normalized_root = replace(path_normalize(root), "\\", "/")
-  let prefix = normalized_root + "/"
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
   if normalized == normalized_root {
     return "."
   }
@@ -70,7 +70,7 @@ fn rel_path(path: string, root: string) -> string {
 }
 
 fn is_skipped(path: string) -> bool {
-  let wrapped = "/" + replace(path, "\\", "/")
+  const wrapped = "/" + replace(path, "\\", "/")
   for segment in SKIP_SEGMENTS {
     if wrapped.contains(segment) {
       return true
@@ -80,9 +80,9 @@ fn is_skipped(path: string) -> bool {
 }
 
 pub fn python_boundary_rule_for(path: string) -> dict {
-  let normalized = replace(path_normalize(path), "\\", "/")
+  const normalized = replace(path_normalize(path), "\\", "/")
   for rule in PYTHON_ALLOWLIST {
-    let pattern = to_string(rule.pattern)
+    const pattern = to_string(rule.pattern)
     if rule.kind == "exact" && normalized == pattern {
       return rule + {allowed: true}
     }
@@ -98,14 +98,14 @@ pub fn python_boundary_rule_for(path: string) -> dict {
 }
 
 pub fn python_files(root: string = "") -> list<string> {
-  let resolved_root = if root == "" {
+  const resolved_root = if root == "" {
     repo_root()
   } else {
     path_normalize(root)
   }
-  var out: list<string> = []
+  let out: list<string> = []
   for path in find_files(resolved_root, "**/*.py") {
-    let rel = rel_path(path, resolved_root)
+    const rel = rel_path(path, resolved_root)
     if is_skipped(rel) {
       continue
     }
@@ -115,16 +115,16 @@ pub fn python_files(root: string = "") -> list<string> {
 }
 
 pub fn check_python_boundary(root: string = "") -> dict {
-  let resolved_root = if root == "" {
+  const resolved_root = if root == "" {
     repo_root()
   } else {
     path_normalize(root)
   }
-  var allowed = []
-  var violations = []
+  let allowed = []
+  let violations = []
   for path in python_files(resolved_root) {
-    let rule = python_boundary_rule_for(path)
-    let row = {path: path, category: rule.category, reason: rule.reason}
+    const rule = python_boundary_rule_for(path)
+    const row = {path: path, category: rule.category, reason: rule.reason}
     if rule.allowed ?? false {
       allowed = allowed + [row]
     } else {
@@ -146,7 +146,7 @@ fn render_report(report: dict) -> string {
       + to_string(report.allowed_count)
       + " allowlisted Python file(s); no unclassified Python scripts remain."
   }
-  var lines = [
+  let lines = [
     "python boundary check failed: " + to_string(report.violation_count)
       + " unclassified Python file(s)",
     "",
@@ -166,22 +166,22 @@ fn arg_spec() -> list {
 }
 
 fn main(harness: Harness) {
-  let parsed = parse_args(argv, arg_spec())
+  const parsed = parse_args(argv, arg_spec())
   if parsed?._help ?? false {
     harness.stdio
       .println("usage: harn run scripts/check_python_boundary.harn -- [--json] [--root PATH]")
     return nil
   }
   if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    let errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
     harness.stdio.eprintln(join(errors, "\n"))
     exit(2)
   }
-  let report = check_python_boundary(to_string(parsed?.root ?? ""))
+  const report = check_python_boundary(to_string(parsed?.root ?? ""))
   if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
-    let out = render_report(report)
+    const out = render_report(report)
     if report.violation_count == 0 {
       harness.stdio.println(out)
     } else {

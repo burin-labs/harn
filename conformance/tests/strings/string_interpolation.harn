@@ -1,9 +1,9 @@
 pipeline test(task) {
-  let _name = "world"
+  const _name = "world"
   log("hello ${_name}!")
-  let _x = 5
+  const _x = 5
   log("result: ${_x + 1}")
-  let _a = "foo"
-  let _b = "bar"
+  const _a = "foo"
+  const _b = "bar"
   log("${_a}-${_b}")
 }

@@ -31,23 +31,23 @@ pipeline default() {
       ),
     ],
     { ->
-      let inner = { args -> {ok: true, ran: args.command} }
-      let wrapper = preset_run_command(
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
         {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
       )
-      let above = wrapper({command: "echo above"})
+      const above = wrapper({command: "echo above"})
       __io_println(above.action)
       __io_println(above.command)
       __io_println(above.result.ran)
-      let below = wrapper({command: "echo below"})
+      const below = wrapper({command: "echo below"})
       __io_println(below.ok)
       __io_println(below.ran)
-      let log = pipeline_lifecycle_audit_log_take()
+      const log = pipeline_lifecycle_audit_log_take()
       __io_println(log[0].kind)
       __io_println(log[0].payload.kind)
       __io_println(log[0].payload.action)
       __io_println(len(log))
-      let last = log[len(log) - 1]
+      const last = log[len(log) - 1]
       __io_println(last.kind)
       __io_println(last.payload.action)
       __io_println(last.payload.kind)

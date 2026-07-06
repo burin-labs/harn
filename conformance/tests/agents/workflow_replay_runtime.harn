@@ -1,5 +1,5 @@
 pipeline main() {
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "replay_demo",
       entry: "act",
@@ -10,13 +10,13 @@ pipeline main() {
       edges: [{from: "act", to: "verify"}],
     },
   )
-  let first = workflow_execute(
+  const first = workflow_execute(
     "Write a note",
     flow,
     [],
     {max_steps: 4, persist_path: "/tmp/harn-workflow-replay-source.json"},
   )
-  let replayed = workflow_execute(
+  const replayed = workflow_execute(
     "Write a note",
     flow,
     [],

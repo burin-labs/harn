@@ -20,8 +20,8 @@ pipeline main() {
       },
     ],
     { ->
-      let session_id = "await-integrity-" + uuid()
-      let handle = sub_agent_run(
+      const session_id = "await-integrity-" + uuid()
+      const handle = sub_agent_run(
         "Park until a reviewer responds.",
         {
           provider: "mock",
@@ -31,13 +31,13 @@ pipeline main() {
           max_iterations: 3,
         },
       )
-      let suspended = wait_agent(handle)
+      const suspended = wait_agent(handle)
       __io_println(suspended?.status)
-      let messages = agent_session_messages(session_id)
-      var park_result = nil
-      var side_result = nil
-      var pending_ids = []
-      var closed_ids = []
+      const messages = agent_session_messages(session_id)
+      let park_result = nil
+      let side_result = nil
+      let pending_ids = []
+      let closed_ids = []
       for message in messages {
         if (message?.role ?? "") == "assistant" {
           for call in message?.tool_calls ?? [] {
@@ -45,9 +45,9 @@ pipeline main() {
           }
         }
         if (message?.role ?? "") == "tool" {
-          let call_id = to_string(message?.tool_call_id ?? "")
+          const call_id = to_string(message?.tool_call_id ?? "")
           closed_ids = closed_ids.push(call_id)
-          let content = to_string(message?.content ?? "")
+          const content = to_string(message?.content ?? "")
           if contains(content, "was not dispatched: awaiting_resumption") {
             park_result = message
           }
@@ -63,7 +63,7 @@ pipeline main() {
       __io_println(contains(to_string(park_result?.content ?? ""), "waiting on review"))
       __io_println(side_result != nil)
       __io_println(contains(to_string(side_result?.content ?? ""), "was not dispatched: skipped"))
-      var orphaned = 0
+      let orphaned = 0
       for id in pending_ids {
         if !contains(closed_ids, id) {
           orphaned = orphaned + 1

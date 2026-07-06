@@ -3,10 +3,10 @@
  * The test catches it with try {} and asserts the unwrapped reason matches.
  */
 pipeline default() {
-  let throwing_caller = { _call ->
+  const throwing_caller = { _call ->
     throw "caller boom"
   }
-  let result = try {
+  const result = try {
     agent_loop("hi", nil, {provider: "mock", llm_caller: throwing_caller})
   }
   __io_println(is_err(result))

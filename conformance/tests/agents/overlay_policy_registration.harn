@@ -20,13 +20,13 @@ pipeline default() {
   with_llm_script(
     [llm_text("done ##DONE##")],
     { ->
-      let opts = overlay_policy(
+      const opts = overlay_policy(
         default_overlay_rows(),
         "agent",
         {done_sentinel: "##DONE##", loop_until_done: true, max_iterations: 2, provider: "mock"},
       )
-      let result = agent_loop("Do the task.", nil, opts)
-      let system = llm_mock_calls()[0].system
+      const result = agent_loop("Do the task.", nil, opts)
+      const system = llm_mock_calls()[0].system
       __io_println("A.status=" + result.status)
       __io_println("A.has_overlay=" + to_string(contains(system, "Batch related read-only tool calls")))
     },
@@ -35,7 +35,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("done ##DONE##")],
     { ->
-      let opts = overlay_policy(
+      const opts = overlay_policy(
         default_overlay_rows(),
         "architect",
         {
@@ -46,8 +46,8 @@ pipeline default() {
           system: "base system prompt",
         },
       )
-      let result = agent_loop("Do the task.", nil, opts)
-      let system = llm_mock_calls()[0].system
+      const result = agent_loop("Do the task.", nil, opts)
+      const system = llm_mock_calls()[0].system
       __io_println("B.status=" + result.status)
       __io_println("B.has_caller_system=" + to_string(contains(system, "base system prompt")))
       __io_println("B.no_overlay_added=" + to_string(!contains(system, "Batch related read-only")))
@@ -57,7 +57,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("done ##DONE##")],
     { ->
-      let opts = overlay_policy(
+      const opts = overlay_policy(
         default_overlay_rows(),
         "plan",
         {
@@ -68,8 +68,8 @@ pipeline default() {
           system: "This session's explicit caller-supplied system prompt.",
         },
       )
-      let result = agent_loop("Do the task.", nil, opts)
-      let system = llm_mock_calls()[0].system
+      const result = agent_loop("Do the task.", nil, opts)
+      const system = llm_mock_calls()[0].system
       __io_println("C.status=" + result.status)
       __io_println(
         "C.has_caller_system="
@@ -82,14 +82,14 @@ pipeline default() {
   with_llm_script(
     [llm_text("done ##DONE##")],
     { ->
-      let opts = overlay_policy(
+      const opts = overlay_policy(
         default_overlay_rows(),
         "agent",
         {done_sentinel: "##DONE##", loop_until_done: true, max_iterations: 2, provider: "mock"},
         {overrides: {agent: ["A fully custom nudge line."]}},
       )
-      let result = agent_loop("Do the task.", nil, opts)
-      let system = llm_mock_calls()[0].system
+      const result = agent_loop("Do the task.", nil, opts)
+      const system = llm_mock_calls()[0].system
       __io_println("D.status=" + result.status)
       __io_println("D.has_custom_override=" + to_string(contains(system, "A fully custom nudge line.")))
       __io_println(

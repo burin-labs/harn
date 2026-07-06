@@ -11,7 +11,7 @@ import { workflow_evaluate_verification } from "std/workflow/stage"
 pipeline default() {
   // --- Unit: verdict normalization in workflow_evaluate_verification. ---
   // 1. Dict verdict with an explicit findings list.
-  let v1 = workflow_evaluate_verification(
+  const v1 = workflow_evaluate_verification(
     {
       verify: { r -> return {ok: false, findings: ["needs a summary section"]} },
       result: {visible_text: "draft"},
@@ -21,16 +21,16 @@ pipeline default() {
   __io_println(v1.ok)
   __io_println(join(v1.findings, "|"))
   // 2. Bare bool verdict.
-  let v2 = workflow_evaluate_verification({verify: { r -> return true }, result: {}})
+  const v2 = workflow_evaluate_verification({verify: { r -> return true }, result: {}})
   __io_println(v2.ok)
   __io_println(len(v2.findings))
   // 3. Findings as a single string are normalized to a one-element list.
-  let v3 = workflow_evaluate_verification(
+  const v3 = workflow_evaluate_verification(
     {verify: { r -> return {ok: false, findings: "one problem"} }, result: {}},
   )
   __io_println(join(v3.findings, "|"))
   // 4. The verifier actually inspects the attempt result.
-  let inspector = { r -> return {ok: contains(to_string(r?.visible_text), "GOOD"), findings: ["missing GOOD marker"]} }
+  const inspector = { r -> return {ok: contains(to_string(r?.visible_text), "GOOD"), findings: ["missing GOOD marker"]} }
   __io_println(
     workflow_evaluate_verification({verify: inspector, result: {visible_text: "all GOOD"}}).ok,
   )
@@ -41,9 +41,9 @@ pipeline default() {
   //     only when that echo contains the token that IS the finding — so a pass
   //     on attempt 2 PROVES the finding was threaded into attempt 2's prompt. A
   //     findings-less (blind) repair would loop to exhaustion and fail here. ---
-  let token = "GOTOKEN"
-  let verifier = { r -> return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]} }
-  let flow = workflow_graph(
+  const token = "GOTOKEN"
+  const verifier = { r -> return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]} }
+  const flow = workflow_graph(
     {
       name: "fn-verify-live",
       entry: "goal",
@@ -60,9 +60,9 @@ pipeline default() {
       edges: [],
     },
   )
-  let run = workflow_execute("Z", flow, [], {max_steps: 2})
-  let stage = run?.run?.stages[0]
-  let attempts = stage?.attempts
+  const run = workflow_execute("Z", flow, [], {max_steps: 2})
+  const stage = run?.run?.stages[0]
+  const attempts = stage?.attempts
   __io_println(run.status)
   // Exactly two attempts: fn-verify failed attempt 1, passed attempt 2.
   __io_println(len(attempts))
@@ -83,10 +83,10 @@ pipeline default() {
   //     (with the throw message in findings), NOT an aborted run. A user
   //     verifier doing `r.output` on a nil field must not nuke the workflow —
   //     the attempt loop stays intact and records every attempt. ---
-  let throwing_verifier = { r ->
+  const throwing_verifier = { r ->
     throw "verifier boom: " + to_string(r?.nonexistent?.field)
   }
-  let throw_flow = workflow_graph(
+  const throw_flow = workflow_graph(
     {
       name: "fn-verify-throw",
       entry: "goal",
@@ -103,9 +103,9 @@ pipeline default() {
       edges: [],
     },
   )
-  let throw_run = workflow_execute("go", throw_flow, [], {max_steps: 2})
-  let throw_stage = throw_run?.run?.stages[0]
-  let throw_attempts = throw_stage?.attempts
+  const throw_run = workflow_execute("go", throw_flow, [], {max_steps: 2})
+  const throw_stage = throw_run?.run?.stages[0]
+  const throw_attempts = throw_stage?.attempts
   // The run did NOT abort — both attempts were still recorded and settled.
   __io_println(len(throw_attempts))
   __io_println(throw_attempts[0].status)

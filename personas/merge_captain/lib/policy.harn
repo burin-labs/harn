@@ -25,7 +25,7 @@ pub fn defaults() {
 
 /** Merge a parsed policy on top of the defaults. */
 pub fn with_defaults(policy) {
-  let base = defaults()
+  const base = defaults()
   return {
     repo: policy.repo,
     default_branch: policy.default_branch ?? "main",
@@ -50,7 +50,7 @@ pub fn validate(policy) {
   if policy.repo == nil || len(to_string(policy.repo)) == 0 {
     return "policy.repo is required"
   }
-  let valid_methods = ["merge", "squash", "rebase"]
+  const valid_methods = ["merge", "squash", "rebase"]
   if !valid_methods.contains(policy.merge_method) {
     return "policy.merge_method must be one of merge|squash|rebase"
   }
@@ -65,7 +65,7 @@ pub fn validate(policy) {
       return "policy.local_verification[].command is required"
     }
   }
-  let repair_err = validate_repair_policy(policy.repair_worker)
+  const repair_err = validate_repair_policy(policy.repair_worker)
   if repair_err != nil {
     return "policy.${repair_err}"
   }
@@ -74,15 +74,15 @@ pub fn validate(policy) {
 
 /** Parse + default + validate. Returns {ok: true, policy} or {ok: false, error}. */
 pub fn load_policy(json_text) {
-  let parsed_result = try {
+  const parsed_result = try {
     json_parse(json_text)
   }
   if !is_ok(parsed_result) {
     return {ok: false, error: "policy json parse failed: ${unwrap_err(parsed_result)}"}
   }
-  let parsed = unwrap(parsed_result)
-  let policy = with_defaults(parsed)
-  let err = validate(policy)
+  const parsed = unwrap(parsed_result)
+  const policy = with_defaults(parsed)
+  const err = validate(policy)
   if err != nil {
     return {ok: false, error: err}
   }

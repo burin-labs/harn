@@ -78,7 +78,7 @@ fn semantic_eval_prompt(report, run, reference, heuristic, task_root) {
 }
 
 fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
-  let response = llm_call(
+  const response = llm_call(
     semantic_eval_prompt(report, run, reference, heuristic, task_root),
     semantic_eval_system(),
     {
@@ -91,8 +91,8 @@ fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
       temperature: 0,
     },
   )
-  let data = response.data ?? {}
-  let gated_verdict = if len(heuristic?.gating_failures ?? []) > 0 {
+  const data = response.data ?? {}
+  const gated_verdict = if len(heuristic?.gating_failures ?? []) > 0 {
     "fail"
   } else {
     data?.overall_verdict ?? "unknown"
@@ -107,9 +107,9 @@ fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
 }
 
 fn load_run_record(report, task_root) {
-  let reported = report?.run_path ?? ""
+  const reported = report?.run_path ?? ""
   if reported != "" {
-    let loaded = try {
+    const loaded = try {
       load_json_file(reported)
     } catch (e) {
       nil
@@ -119,8 +119,8 @@ fn load_run_record(report, task_root) {
     }
   }
   if task_root != "" {
-    let fallback = path_join(task_root, "run_record.json")
-    let loaded = try {
+    const fallback = path_join(task_root, "run_record.json")
+    const loaded = try {
       load_json_file(fallback)
     } catch (e) {
       nil
@@ -143,22 +143,22 @@ pipeline default() {
   guard len(argv) > 0 else {
     throw "Usage: harn run experiments/burin-mini/evaluator.harn -- <report.json> [output.json] [task-root]"
   }
-  let report_path = argv[0]
-  let report = load_json_file(report_path)
-  let task_root = if len(argv) > 2 {
+  const report_path = argv[0]
+  const report = load_json_file(report_path)
+  const task_root = if len(argv) > 2 {
     argv[2]
   } else {
     ""
   }
-  let run = load_run_record(report, task_root)
-  let reference = task_reference(report?.task_id ?? "")
-  let heuristic = heuristic_semantic_eval(report, run, reference)
-  let result = if semantic_eval_mode() == "heuristic" {
+  const run = load_run_record(report, task_root)
+  const reference = task_reference(report?.task_id ?? "")
+  const heuristic = heuristic_semantic_eval(report, run, reference)
+  const result = if semantic_eval_mode() == "heuristic" {
     heuristic
   } else {
     semantic_eval_with_llm(report, run, reference, heuristic, task_root)
   }
-  let destination = output_path(report_path)
+  const destination = output_path(report_path)
   harness.fs.write_text(destination, json_stringify(result))
   __io_println("task_id=${report?.task_id ?? ""}")
   __io_println("semantic_eval_mode=${semantic_eval_mode()}")

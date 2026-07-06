@@ -158,10 +158,9 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                 .map(|expr| node_complexity(expr))
                 .unwrap_or(0),
             Node::EmitExpr { value } => node_complexity(value),
-            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+            Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
                 node_complexity(value)
             }
-            Node::ConstBinding { value, .. } => node_complexity(value),
             Node::EnumConstruct { args, .. } => args.iter().map(node_complexity).sum(),
             Node::Closure { body, .. } => body_complexity(body),
             Node::ReturnStmt { value: None }

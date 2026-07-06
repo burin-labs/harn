@@ -15,7 +15,7 @@ import { write_jsonl } from "std/jsonl"
 import { with_temp_dir } from "std/testing"
 
 pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
-  let records = [
+  const records = [
     {type: "message", role: "user", content: [{type: "text", text: "write tests"}]},
     {
       type: "message",
@@ -42,7 +42,7 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
       content: "[result of look]\nsource text",
     },
   ]
-  let rows = agent_transcript_normalize(records)
+  const rows = agent_transcript_normalize(records)
   assert(len(rows) == 3, "all rows preserved")
   assert(rows[0].kind == "user", "user row")
   assert(rows[1].kind == "assistant", "assistant row")
@@ -57,7 +57,7 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
 }
 
 pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(_task) {
-  let records = [
+  const records = [
     {
       type: "response",
       iteration: 0,
@@ -87,9 +87,9 @@ pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request
       ],
     },
   ]
-  let rows = agent_transcript_normalize(records)
-  let calls = agent_transcript_tool_events(records)
-  let results = agent_transcript_tool_results(records)
+  const rows = agent_transcript_normalize(records)
+  const calls = agent_transcript_tool_events(records)
+  const results = agent_transcript_tool_results(records)
   assert(len(rows) == 4, "two assistant rows plus two deduped result rows")
   assert(len(calls) == 2, "tool calls extracted")
   assert(calls[0].name == "edit", "first legacy call")
@@ -107,17 +107,17 @@ pipeline test_agent_transcript_helpers_cover_provider_variants(_task) {
       == "hello\nworld",
     "content parts join",
   )
-  let openai = agent_transcript_tool_call(
+  const openai = agent_transcript_tool_call(
     {id: "call-1", type: "function", function: {name: "search", arguments: "{\"query\":\"needle\"}"}},
   )
   assert(openai.name == "search", "OpenAI function name")
   assert(openai.args.query == "needle", "OpenAI JSON args")
-  let legacy = agent_transcript_tool_call({name: "look", arguments: {file: "a.py"}})
+  const legacy = agent_transcript_tool_call({name: "look", arguments: {file: "a.py"}})
   assert(legacy.name == "look", "legacy call name")
   assert(legacy.args.file == "a.py", "object arguments retained")
-  let raw = agent_transcript_tool_call({name: "bad", arguments: "{not-json"})
+  const raw = agent_transcript_tool_call({name: "bad", arguments: "{not-json"})
   assert(raw.args._raw == "{not-json", "bad JSON args preserved")
-  let blocks = agent_transcript_tool_result_blocks(
+  const blocks = agent_transcript_tool_result_blocks(
     "<tool_result name=\"run\" id=\"c1\">failed</tool_result><tool_result name=\"edit\">ok</tool_result>",
   )
   assert(len(blocks) == 2, "tool-result blocks parsed")
@@ -126,7 +126,7 @@ pipeline test_agent_transcript_helpers_cover_provider_variants(_task) {
 }
 
 pipeline test_agent_transcript_normalize_is_composable(_task) {
-  let raw = [
+  const raw = [
     {
       type: "message",
       role: "assistant",
@@ -138,10 +138,10 @@ pipeline test_agent_transcript_normalize_is_composable(_task) {
     },
     {type: "message", role: "tool", name: "look", tool_call_id: "c1", content: "ok"},
   ]
-  let once = agent_transcript_normalize(raw)
-  let twice = agent_transcript_normalize(once)
-  let calls = agent_transcript_tool_events(once)
-  let results = agent_transcript_tool_results(once)
+  const once = agent_transcript_normalize(raw)
+  const twice = agent_transcript_normalize(once)
+  const calls = agent_transcript_tool_events(once)
+  const results = agent_transcript_tool_results(once)
   assert(len(twice) == len(once), "normalization is idempotent")
   assert(twice[0].tool_calls[0].name == "look", "normalized calls survive re-normalization")
   assert(twice[1].kind == "tool_result", "normalized result survives re-normalization")
@@ -158,7 +158,7 @@ pipeline test_agent_transcript_normalize_is_composable(_task) {
 pipeline test_agent_transcript_read_jsonl(_task) {
   with_temp_dir(
     { dir ->
-      let path = path_join(dir, "llm_transcript.jsonl")
+      const path = path_join(dir, "llm_transcript.jsonl")
       write_jsonl(
         path,
         [
@@ -173,7 +173,7 @@ pipeline test_agent_transcript_read_jsonl(_task) {
           },
         ],
       )
-      let rows = agent_transcript_read(path)
+      const rows = agent_transcript_read(path)
       assert(len(rows) == 1, "read one row")
       assert(rows[0].tool_calls[0].args.path == "a", "read JSONL normalizes calls")
     },

@@ -16,15 +16,15 @@
  * Cost is computed from per-call tokens against a hard-coded OpenRouter
  * rate table (Devstral $0.10/$0.30 per M, Opus $5/$25 per M).
  */
-let CHEAP_MODEL = {provider: "openrouter", model: "mistralai/devstral-small"}
+const CHEAP_MODEL = {provider: "openrouter", model: "mistralai/devstral-small"}
 
-let FRONTIER_MODEL = {provider: "openrouter", model: "anthropic/claude-opus-4.7"}
+const FRONTIER_MODEL = {provider: "openrouter", model: "anthropic/claude-opus-4.7"}
 
-let MAX_TOKENS = 500
+const MAX_TOKENS = 500
 
-let SKILL_BODY_PATH = "evals/routing_v2/harn_language_skill.md"
+const SKILL_BODY_PATH = "evals/routing_v2/harn_language_skill.md"
 
-let TASKS = [
+const TASKS = [
   {
     id: "fib",
     prompt: "Write a Harn function `fib(n: int) -> int` that returns the n-th Fibonacci number. "
@@ -75,18 +75,18 @@ fn or_pricing_usd_per_m(model: string) -> dict {
 }
 
 fn cost_for_tokens(model: string, input_tokens: int, output_tokens: int) -> float {
-  let p = or_pricing_usd_per_m(model)
+  const p = or_pricing_usd_per_m(model)
   return to_float(input_tokens) / 1000000.0 * to_float(p.input)
     + to_float(output_tokens) / 1000000.0 * to_float(p.output)
 }
 
 fn extract_first_fenced_harn(text: string) -> string {
-  let after_open = split(text, "```harn")
+  const after_open = split(text, "```harn")
   if len(after_open) < 2 {
     return ""
   }
-  let body_and_after = after_open[1]
-  let before_close = split(body_and_after, "```")
+  const body_and_after = after_open[1]
+  const before_close = split(body_and_after, "```")
   if len(before_close) < 1 {
     return ""
   }
@@ -109,14 +109,14 @@ fn extract_first_fenced_harn(text: string) -> string {
 fn grade_outcome(code: string) -> string {
   llm_mock_push_scope()
   llm_mock({text: code, model: "mock", provider: "mock"})
-  let policy = routing_policy(
+  const policy = routing_policy(
     {
       chain: [{provider: "mock", model: "mock"}],
       escalate_on: [{kind: "typecheck", extract_fenced: false, on_fail: "escalate"}],
       label: "typecheck-grader",
     },
   )
-  let outcome = try {
+  const outcome = try {
     let validation = llm_call("validate", nil, {routing: policy, max_tokens: 1})
     let attempts = validation.routing.attempts
     if len(attempts) > 0 {
@@ -152,13 +152,13 @@ fn typechecks(code: string) -> bool {
 }
 
 fn attempt_cost(attempt: dict) -> float {
-  let input = to_int(attempt?.input_tokens ?? 0)
-  let output = to_int(attempt?.output_tokens ?? 0)
+  const input = to_int(attempt?.input_tokens ?? 0)
+  const output = to_int(attempt?.output_tokens ?? 0)
   return cost_for_tokens(attempt.model, input, output)
 }
 
 fn run_one_baseline(task: dict, system: dict) -> dict {
-  let result = llm_call(
+  const result = llm_call(
     task.prompt,
     system.body,
     {
@@ -168,7 +168,7 @@ fn run_one_baseline(task: dict, system: dict) -> dict {
       budget: {max_cost_usd: 0.2},
     },
   )
-  let code = extract_first_fenced_harn(result.text)
+  const code = extract_first_fenced_harn(result.text)
   return {
     task_id: task.id,
     strategy: "baseline",
@@ -182,7 +182,7 @@ fn run_one_baseline(task: dict, system: dict) -> dict {
 }
 
 fn run_one_routed(task: dict, system: dict) -> dict {
-  let policy = routing_policy(
+  const policy = routing_policy(
     {
       chain: [
         {provider: CHEAP_MODEL.provider, model: CHEAP_MODEL.model, label: "cheap"},
@@ -194,13 +194,13 @@ fn run_one_routed(task: dict, system: dict) -> dict {
       label: "routing-v2",
     },
   )
-  let result = llm_call(task.prompt, system.body, {routing: policy, max_tokens: MAX_TOKENS})
-  let code = extract_first_fenced_harn(result.text)
-  let attempts = result.routing.attempts
-  let selected = result.routing.selected ?? 0
-  let final_model = attempts[selected].model
-  let total_cost = attempts.map({ a -> attempt_cost(a) }).reduce(0.0, { acc, x -> acc + x })
-  let escalated = len(attempts) > 1
+  const result = llm_call(task.prompt, system.body, {routing: policy, max_tokens: MAX_TOKENS})
+  const code = extract_first_fenced_harn(result.text)
+  const attempts = result.routing.attempts
+  const selected = result.routing.selected ?? 0
+  const final_model = attempts[selected].model
+  const total_cost = attempts.map({ a -> attempt_cost(a) }).reduce(0.0, { acc, x -> acc + x })
+  const escalated = len(attempts) > 1
   return {
     task_id: task.id,
     strategy: "routed",
@@ -217,12 +217,12 @@ fn run_one_routed(task: dict, system: dict) -> dict {
 
 fn run_task_quartet(task: dict, skill_body: string) -> dict {
   __io_println("=== task " + task.id + " ===")
-  let bare = {label: "bare", body: nil}
-  let with_skill = {label: "skill", body: skill_body}
-  let baseline_bare = run_one_baseline(task, bare)
-  let baseline_skill = run_one_baseline(task, with_skill)
-  let routed_bare = run_one_routed(task, bare)
-  let routed_skill = run_one_routed(task, with_skill)
+  const bare = {label: "bare", body: nil}
+  const with_skill = {label: "skill", body: skill_body}
+  const baseline_bare = run_one_baseline(task, bare)
+  const baseline_skill = run_one_baseline(task, with_skill)
+  const routed_bare = run_one_routed(task, bare)
+  const routed_skill = run_one_routed(task, with_skill)
   __io_println(
     "  baseline_bare  cost=" + to_string(baseline_bare.cost_usd)
       + " valid="
@@ -256,8 +256,8 @@ fn run_task_quartet(task: dict, skill_body: string) -> dict {
 }
 
 fn col_totals(rows: list, key: string) -> dict {
-  let cost = rows.map({ row -> to_float(row[key].cost_usd) }).reduce(0.0, { acc, x -> acc + x })
-  let valid = rows
+  const cost = rows.map({ row -> to_float(row[key].cost_usd) }).reduce(0.0, { acc, x -> acc + x })
+  const valid = rows
     .map(
     { row ->
       if row[key].looks_valid {
@@ -278,7 +278,7 @@ fn col_totals(rows: list, key: string) -> dict {
  * "escalate" — which would make the eval results meaningless.
  */
 fn smoke_check_grade_outcome() {
-  let outcome = grade_outcome("let answer: int = 42\n")
+  const outcome = grade_outcome("let answer: int = 42\n")
   if outcome != "accept" {
     throw "grade_outcome regression: known-good snippet returned `" + outcome
       + "` instead of `accept`"
@@ -287,13 +287,13 @@ fn smoke_check_grade_outcome() {
 
 fn main(harness: Harness) {
   smoke_check_grade_outcome()
-  let skill_body = harness.fs.read_text(SKILL_BODY_PATH)
-  let rows = TASKS.map({ task -> run_task_quartet(task, skill_body) })
-  let bb = col_totals(rows, "baseline_bare")
-  let bs = col_totals(rows, "baseline_skill")
-  let rb = col_totals(rows, "routed_bare")
-  let rs = col_totals(rows, "routed_skill")
-  let n = len(TASKS)
+  const skill_body = harness.fs.read_text(SKILL_BODY_PATH)
+  const rows = TASKS.map({ task -> run_task_quartet(task, skill_body) })
+  const bb = col_totals(rows, "baseline_bare")
+  const bs = col_totals(rows, "baseline_skill")
+  const rb = col_totals(rows, "routed_bare")
+  const rs = col_totals(rows, "routed_skill")
+  const n = len(TASKS)
   __io_println("=========================================")
   __io_println(
     "baseline_bare  : valid=" + to_string(bb.valid) + "/" + to_string(n)

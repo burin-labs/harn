@@ -1,6 +1,6 @@
 pipeline default() {
   // `x` has the gradual `any` type; `string + any` is compatible (the real
   // check is deferred to runtime), not a static "can't add" error.
-  let x: any = "5"
+  const x: any = "5"
   __io_println("v=" + x)
 }

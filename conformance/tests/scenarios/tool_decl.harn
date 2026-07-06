@@ -5,7 +5,7 @@ pipeline test(task) {
   }
   // greet is bound as a tool registry dict
   assert(tool_count(greet) == 1, "tool decl should create a registry with 1 tool")
-  let t = tool_find(greet, "greet")
+  const t = tool_find(greet, "greet")
   assert(t != nil, "tool_find should find the tool")
   assert(t.name == "greet", "tool name should match")
   assert(t.parameters.name.type == "string", "param type should be string")
@@ -14,46 +14,46 @@ pipeline test(task) {
     description "Read a file from the filesystem"
     "content of " + path
   }
-  let rf = tool_find(read_file, "read_file")
+  const rf = tool_find(read_file, "read_file")
   assert(rf != nil, "tool_find should find read_file")
   assert(rf.description == "Read a file from the filesystem", "description should match")
   assert(rf.parameters.path.type == "string", "path param type should be string")
   assert(rf.parameters._encoding.type == "string", "encoding param type should be string")
   // Test 3: tool handler is callable (takes individual params, not a dict)
-  let handler = rf.handler
-  let result = handler("test.txt", "utf-8")
+  const handler = rf.handler
+  const result = handler("test.txt", "utf-8")
   assert(result == "content of test.txt", "handler should execute tool body")
   // Test 4: tool with int parameter type
   tool add(a: int, b: int) -> int {
     a + b
   }
-  let add_tool = tool_find(add, "add")
+  const add_tool = tool_find(add, "add")
   assert(add_tool.parameters.a.type == "integer", "int maps to integer in JSON schema")
   assert(add_tool.parameters.b.type == "integer", "int maps to integer in JSON schema")
   // Test 5: tool with bool parameter
   tool toggle(flag: bool) -> bool {
     !flag
   }
-  let toggle_tool = tool_find(toggle, "toggle")
+  const toggle_tool = tool_find(toggle, "toggle")
   assert(toggle_tool.parameters.flag.type == "boolean", "bool maps to boolean in JSON schema")
   // Test 6: tool with float parameter
   tool scale(factor: float) -> float {
     factor * 2.0
   }
-  let scale_tool = tool_find(scale, "scale")
+  const scale_tool = tool_find(scale, "scale")
   assert(scale_tool.parameters.factor.type == "number", "float maps to number in JSON schema")
   // Test 7: defaulted tool params become optional schema fields
   tool search(query: string, file_glob: string = "*.py", max_results: int = 20) -> string {
     query + ":" + file_glob + ":" + to_string(max_results)
   }
-  let search_tool = tool_find(search, "search")
+  const search_tool = tool_find(search, "search")
   assert(search_tool.parameters.query.type == "string", "required param should keep its type")
   assert(!search_tool.parameters.file_glob.required, "defaulted params should be optional")
   assert(!search_tool.parameters.max_results.required, "later defaulted params should be optional")
   assert(search_tool.parameters.file_glob.default == "*.py", "string defaults should be preserved")
   assert(search_tool.parameters.max_results.default == 20, "int defaults should be preserved")
-  let search_handler = search_tool.handler
-  let default_result = search_handler("needle")
+  const search_handler = search_tool.handler
+  const default_result = search_handler("needle")
   assert(default_result == "needle:*.py:20", "handler should still honor defaulted params")
   log("tool_decl tests passed")
 }

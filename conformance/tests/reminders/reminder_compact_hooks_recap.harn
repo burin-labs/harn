@@ -1,10 +1,10 @@
-let pre_seen = atomic(0)
+const pre_seen = atomic(0)
 
-let post_seen = atomic(0)
+const post_seen = atomic(0)
 
 pipeline main() {
   clear_session_hooks()
-  let session = agent_session_open("reminder-compact-hooks-recap")
+  const session = agent_session_open("reminder-compact-hooks-recap")
   agent_session_reset(session)
   agent_session_inject(session, {role: "user", content: "one"})
   agent_session_inject(session, {role: "assistant", content: "two"})
@@ -31,11 +31,11 @@ pipeline main() {
       return nil
     },
   )
-  let opts = {strategy: "truncate", keep_last: 1, target_tokens: 1}
-  let snapshot = agent_session_snapshot(session) ?? {}
-  let blocked = transcript_compact(snapshot, opts)
-  let compacted = transcript_compact(snapshot, opts)
-  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const opts = {strategy: "truncate", keep_last: 1, target_tokens: 1}
+  const snapshot = agent_session_snapshot(session) ?? {}
+  const blocked = transcript_compact(snapshot, opts)
+  const compacted = transcript_compact(snapshot, opts)
+  const reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
   __io_println(len(transcript_events_by_kind(blocked, "compaction")))
   __io_println(atomic_get(pre_seen))
   __io_println(atomic_get(post_seen))

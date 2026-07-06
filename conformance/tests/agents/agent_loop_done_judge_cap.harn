@@ -23,8 +23,8 @@ fn run_capped() {
       llm_text("Round three. ##DONE##"),
     ],
     { ->
-      let session_id = "done-judge-cap-" + uuid()
-      let captured = agent_capture_events(
+      const session_id = "done-judge-cap-" + uuid()
+      const captured = agent_capture_events(
         session_id,
         fn() { return agent_loop(
           "Done judge keeps vetoing.",
@@ -40,7 +40,7 @@ fn run_capped() {
           },
         ) },
       )
-      let result = captured.result
+      const result = captured.result
       __io_println("capped.status=${result.status}")
       __io_println("capped.stop_reason=${result.stop_reason}")
       __io_println("capped.invocations=${result.done_judge.invocations}")
@@ -60,8 +60,8 @@ fn run_approved() {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"looks complete\"}"),
     ],
     { ->
-      let session_id = "done-judge-approve-" + uuid()
-      let result = agent_loop(
+      const session_id = "done-judge-approve-" + uuid()
+      const result = agent_loop(
         "Done judge approves on the first proposal.",
         nil,
         {
@@ -94,8 +94,8 @@ fn run_cap_disabled() {
       llm_text("Try three. ##DONE##"),
     ],
     { ->
-      let session_id = "done-judge-disabled-" + uuid()
-      let captured = agent_capture_events(
+      const session_id = "done-judge-disabled-" + uuid()
+      const captured = agent_capture_events(
         session_id,
         fn() { return agent_loop(
           "Cap disabled; rely on max_verify_attempts.",
@@ -112,7 +112,7 @@ fn run_cap_disabled() {
           },
         ) },
       )
-      let result = captured.result
+      const result = captured.result
       __io_println("disabled.status=${result.status}")
       __io_println("disabled.stop_reason=${result.stop_reason}")
       __io_println("disabled.invocations=${result.done_judge.invocations}")

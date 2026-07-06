@@ -3,13 +3,13 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   // Default route list is non-empty and contains anthropic+haiku at the head.
-  let routes = agent_sitrep_preferred_routes()
+  const routes = agent_sitrep_preferred_routes()
   __io_println(len(routes) > 0)
   __io_println(routes[0].provider == "anthropic")
   __io_println(routes[0].model == "claude-haiku-4-5-20251001")
   // Mock provider is always available — pin opts.routes to it so the
   // test does not depend on which env keys are present in CI.
-  let messages = [
+  const messages = [
     {role: "user", content: "Investigate parser drift."},
     {role: "assistant", content: "Inspected the lexer entrypoint."},
     {role: "user", content: "Focus on diagnostics next."},
@@ -21,14 +21,14 @@ pipeline test(task) {
       ),
     ],
     { ->
-      let result = agent_sitrep(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
+      const result = agent_sitrep(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
       __io_println(!result.skipped)
       __io_println(result.provider_used == "mock")
       __io_println(len(result.lines) == 3)
       __io_println(result.lines[0].starts_with("CURRENT STATE"))
       __io_println(result.lines[1].starts_with("WORK DONE"))
       __io_println(result.lines[2].starts_with("NEXT ACTION"))
-      let prompt = llm_mock_calls()[0].messages[0].content
+      const prompt = llm_mock_calls()[0].messages[0].content
       __io_println(prompt.contains("[USER] Investigate parser drift."))
       __io_println(prompt.contains("3 short sentences"))
     },
@@ -36,13 +36,13 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("should not be reached")],
     { ->
-      let empty_result = agent_sitrep([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
+      const empty_result = agent_sitrep([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
       __io_println(empty_result.skipped)
       __io_println(empty_result.reason == "empty_transcript")
       __io_println(len(llm_mock_calls()) == 0)
     },
   )
-  let unavailable_result = agent_sitrep(messages, {routes: [{provider: "definitely-not-a-real-provider"}]})
+  const unavailable_result = agent_sitrep(messages, {routes: [{provider: "definitely-not-a-real-provider"}]})
   __io_println(unavailable_result.skipped)
   __io_println(unavailable_result.reason == "no_available_provider")
   // agent_sitrep_append wraps the summary in <sitrep>...</sitrep> and
@@ -50,13 +50,13 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("STATE — A.\nWORK — B.\nNEXT — C.")],
     { ->
-      let appended = agent_sitrep_append(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
+      const appended = agent_sitrep_append(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
       __io_println(len(appended) == len(messages) + 1)
       __io_println(appended[len(appended) - 1].role == "system")
       __io_println(appended[len(appended) - 1].content.contains("<sitrep>"))
       __io_println(appended[len(appended) - 1].content.contains("STATE — A."))
     },
   )
-  let appended_skipped = agent_sitrep_append([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
+  const appended_skipped = agent_sitrep_append([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
   __io_println(len(appended_skipped) == 0)
 }

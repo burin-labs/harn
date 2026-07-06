@@ -86,8 +86,8 @@ fn __truncate(value: string, width: int) -> string {
     return value
   }
   if width <= 3 {
-    var dots = ""
-    var i = 0
+    let dots = ""
+    let i = 0
     while i < width {
       dots = dots + "."
       i = i + 1
@@ -104,12 +104,12 @@ fn __truncate(value: string, width: int) -> string {
  * fields, so the byte/char-count equivalence holds).
  */
 fn __pad_right(value: string, width: int) -> string {
-  let count = len(value)
+  const count = len(value)
   if count >= width {
     return value
   }
-  var pad = ""
-  var i = 0
+  let pad = ""
+  let i = 0
   while i < width - count {
     pad = pad + " "
     i = i + 1
@@ -122,12 +122,12 @@ fn __pad_right(value: string, width: int) -> string {
  * `width`. Matches Rust's `{:>width}` formatter.
  */
 fn __pad_left(value: string, width: int) -> string {
-  let count = len(value)
+  const count = len(value)
   if count >= width {
     return value
   }
-  var pad = ""
-  var i = 0
+  let pad = ""
+  let i = 0
   while i < width - count {
     pad = pad + " "
     i = i + 1
@@ -141,10 +141,10 @@ fn __pad_left(value: string, width: int) -> string {
  * `to_string`.
  */
 fn __join(items: list, sep: string) -> string {
-  var out = ""
-  var first = true
+  let out = ""
+  let first = true
   for item in items {
-    let part = if type_of(item) == "string" {
+    const part = if type_of(item) == "string" {
       item
     } else {
       to_string(item)
@@ -165,7 +165,7 @@ fn __join(items: list, sep: string) -> string {
  * widths and ordering).
  */
 fn __render_text(report: dict) -> string {
-  var out = __pad_right("id", 28)
+  let out = __pad_right("id", 28)
     + " "
     + __pad_right("kind", 10)
     + " "
@@ -181,27 +181,27 @@ fn __render_text(report: dict) -> string {
     + " "
     + __pad_left("fw_tokens", 8)
     + "  capabilities\n"
-  let triggers = __safe_list(report["triggers"])
+  const triggers = __safe_list(report["triggers"])
   for trigger in triggers {
-    let t = __safe_dict(trigger)
-    let caps = __safe_list(t["requires_capabilities"])
-    let capabilities = if len(caps) == 0 {
+    const t = __safe_dict(trigger)
+    const caps = __safe_list(t["requires_capabilities"])
+    const capabilities = if len(caps) == 0 {
       "-"
     } else {
       __join(caps, ",")
     }
-    let path_value = if type_of(t["path"]) == "string" {
+    const path_value = if type_of(t["path"]) == "string" {
       t["path"]
     } else {
       "-"
     }
-    let vendor_locked = __safe_bool(t["vendor_locked"], false)
-    let vendor = if vendor_locked {
+    const vendor_locked = __safe_bool(t["vendor_locked"], false)
+    const vendor = if vendor_locked {
       "yes"
     } else {
       "no"
     }
-    let fw_tokens = __safe_int(t["framework_overhead_tokens"], 0)
+    const fw_tokens = __safe_int(t["framework_overhead_tokens"], 0)
     out = out
       + __pad_right(__truncate(__safe_string(t["id"], ""), 28), 28)
       + " "
@@ -238,11 +238,11 @@ fn __render_text(report: dict) -> string {
  * envelope contract.
  */
 fn __strip_absent(report: dict) -> dict {
-  let triggers = __safe_list(report["triggers"])
-  var cleaned = []
+  const triggers = __safe_list(report["triggers"])
+  let cleaned = []
   for trigger in triggers {
-    let t = __safe_dict(trigger)
-    var entry = {
+    const t = __safe_dict(trigger)
+    let entry = {
       id: __safe_string(t["id"], ""),
       kind: __safe_string(t["kind"], ""),
       provider: __safe_string(t["provider"], ""),
@@ -256,7 +256,7 @@ fn __strip_absent(report: dict) -> dict {
     if type_of(t["path"]) == "string" {
       entry = entry + {path: t["path"]}
     }
-    let events = __safe_list(t["events"])
+    const events = __safe_list(t["events"])
     if len(events) > 0 {
       entry = entry + {events: events}
     }
@@ -266,9 +266,9 @@ fn __strip_absent(report: dict) -> dict {
 }
 
 fn __strip_budgets(budgets: dict) -> dict {
-  var out = {}
+  let out = {}
   for key in keys(budgets) {
-    let value = budgets[key]
+    const value = budgets[key]
     if value != nil {
       out = out + {[key]: value}
     }
@@ -277,19 +277,19 @@ fn __strip_budgets(budgets: dict) -> dict {
 }
 
 fn __render_envelope(report: dict) -> string {
-  let cleaned = __strip_absent(report)
-  let envelope = {schemaVersion: 1, ok: true, data: cleaned, error: nil, warnings: []}
+  const cleaned = __strip_absent(report)
+  const envelope = {schemaVersion: 1, ok: true, data: cleaned, error: nil, warnings: []}
   return json_stringify_pretty(envelope)
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_ROUTES_VIEW_JSON", "")
+  const raw = harness.env.get_or("HARN_ROUTES_VIEW_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_ROUTES_VIEW_JSON not set by dispatch shim")
     return 70
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio
@@ -300,14 +300,14 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("internal error: HARN_ROUTES_VIEW_JSON must be a JSON object")
     return 70
   }
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     harness.stdio.println(__render_envelope(report))
     return 0
   }
   // Strip the trailing newline so `println` re-adds exactly one.
-  let text = __render_text(report)
-  let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+  const text = __render_text(report)
+  const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
     text[0:len(text) - 1]
   } else {
     text

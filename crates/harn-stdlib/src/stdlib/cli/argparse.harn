@@ -75,11 +75,11 @@ type ParseResult = {ok?: dict, err?: ParseError}
  */
 pub fn parser(spec: ParserSpec) -> ParserSpec {
   for arg in spec.args {
-    let name = arg.name
+    const name = arg.name
     if name == nil || name == "" {
       throw "std/cli/argparse: every arg must have a non-empty name"
     }
-    let kind = arg.kind ?? ""
+    const kind = arg.kind ?? ""
     if kind != "positional" && kind != "flag" && kind != "switch" {
       throw "std/cli/argparse: arg " + name + " has invalid kind '" + kind
         + "'; expected positional|flag|switch"
@@ -108,7 +108,7 @@ fn __find_short(args, key) {
 }
 
 fn __positionals(args) {
-  var out = []
+  let out = []
   for arg in args {
     if arg?.kind == "positional" {
       out = out.push(arg)
@@ -118,7 +118,7 @@ fn __positionals(args) {
 }
 
 fn __flags_only(args) {
-  var out = []
+  let out = []
   for arg in args {
     if arg?.kind == "flag" || arg?.kind == "switch" {
       out = out.push(arg)
@@ -130,14 +130,14 @@ fn __flags_only(args) {
 /** --- Parse ------------------------------------------------------------ */
 fn __record_value(collected, arg, value) {
   if arg?.multi {
-    let prior = collected[arg.name] ?? []
+    const prior = collected[arg.name] ?? []
     return collected.merge({[arg.name]: prior.push(value)})
   }
   return collected.merge({[arg.name]: value})
 }
 
 fn __apply_defaults(collected, args) {
-  var out = collected
+  let out = collected
   for arg in args {
     if out[arg.name] != nil {
       continue
@@ -167,8 +167,8 @@ fn __first_missing_required(args, collected) -> string {
     // since the linter rewrites bare `arg?.required` to a truthy
     // check (which treats nil as false and breaks the positional
     // default).
-    let default_req = arg?.kind == "positional"
-    let is_required = arg?.required ?? default_req
+    const default_req = arg?.kind == "positional"
+    const is_required = arg?.required ?? default_req
     if is_required {
       return arg.name
     }
@@ -182,11 +182,11 @@ fn __long_split(body) {
   if !contains(body, "=") {
     return {key: "--" + body, value: nil}
   }
-  let parts = split(body, "=")
-  let key = parts[0]
+  const parts = split(body, "=")
+  const key = parts[0]
   // Re-join everything after the first "=" so a value containing
   // further `=` survives intact.
-  let value = join(parts.slice(1, len(parts)), "=")
+  const value = join(parts.slice(1, len(parts)), "=")
   return {key: "--" + key, value: value}
 }
 
@@ -199,12 +199,12 @@ fn __long_split(body) {
  * @errors: []
  */
 pub fn parse(spec: ParserSpec, argv: list<string>) -> ParseResult {
-  var collected = {}
-  var rest = []
-  var pending: any = nil
-  var seen_dash_dash = false
-  var positional_idx = 0
-  let positionals = __positionals(spec.args)
+  let collected = {}
+  let rest = []
+  let pending: any = nil
+  let seen_dash_dash = false
+  let positional_idx = 0
+  const positionals = __positionals(spec.args)
   for arg_str in argv {
     if seen_dash_dash {
       rest = rest.push(arg_str)
@@ -221,9 +221,9 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> ParseResult {
     }
     // Long flag: --key, --key=value
     if starts_with(arg_str, "--") && len(arg_str) > 2 {
-      let body = substring(arg_str, 2, len(arg_str))
-      let {key, value: value_opt} = __long_split(body)
-      let arg = __find_long(spec.args, key)
+      const body = substring(arg_str, 2, len(arg_str))
+      const {key, value: value_opt} = __long_split(body)
+      const arg = __find_long(spec.args, key)
       if arg == nil {
         return {err: {kind: "unknown_flag", arg: arg_str, hint: "no flag named ${key}"}}
       }
@@ -243,8 +243,8 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> ParseResult {
     }
     // Short flag: -x, -xVALUE
     if starts_with(arg_str, "-") && len(arg_str) > 1 {
-      let short = substring(arg_str, 0, 2)
-      let arg = __find_short(spec.args, short)
+      const short = substring(arg_str, 0, 2)
+      const arg = __find_short(spec.args, short)
       if arg == nil {
         return {err: {kind: "unknown_flag", arg: arg_str, hint: "no flag named ${short}"}}
       }
@@ -257,7 +257,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> ParseResult {
       }
       // Flag: either inline -xVALUE or split -x VALUE
       if len(arg_str) > 2 {
-        let v = substring(arg_str, 2, len(arg_str))
+        const v = substring(arg_str, 2, len(arg_str))
         collected = __record_value(collected, arg, v)
       } else {
         pending = arg
@@ -268,10 +268,10 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> ParseResult {
     if positional_idx >= len(positionals) {
       return {err: {kind: "unknown_arg", arg: arg_str, hint: "unexpected positional"}}
     }
-    let pos = positionals[positional_idx]
+    const pos = positionals[positional_idx]
     if pos?.variadic {
       // Don't advance positional_idx — variadics swallow the rest.
-      let prior = collected[pos.name] ?? []
+      const prior = collected[pos.name] ?? []
       collected = collected.merge({[pos.name]: prior.push(arg_str)})
     } else {
       collected = collected.merge({[pos.name]: arg_str})
@@ -279,11 +279,11 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> ParseResult {
     }
   }
   if pending != nil {
-    let label = pending?.long ?? pending?.short ?? pending.name
+    const label = pending?.long ?? pending?.short ?? pending.name
     return {err: {kind: "value_required", arg: label, hint: "flag requires a value"}}
   }
   collected = __apply_defaults(collected, spec.args)
-  let missing = __first_missing_required(spec.args, collected)
+  const missing = __first_missing_required(spec.args, collected)
   if missing != "" {
     return {
       err: {kind: "missing_required", arg: missing, hint: "required argument '${missing}' was not provided"},
@@ -303,7 +303,7 @@ fn __value_name(arg) -> string {
 fn __usage_token(arg) -> string {
   if arg.kind == "positional" {
     // Positionals default to required when `required` is unset.
-    let is_required = arg?.required ?? true
+    const is_required = arg?.required ?? true
     if !is_required {
       return "[${arg.name}]"
     }
@@ -312,7 +312,7 @@ fn __usage_token(arg) -> string {
     }
     return "<${arg.name}>"
   }
-  let flag_marker = arg?.long ?? arg?.short ?? ("--" + arg.name)
+  const flag_marker = arg?.long ?? arg?.short ?? ("--" + arg.name)
   if arg.kind == "switch" {
     return "[${flag_marker}]"
   }
@@ -320,8 +320,8 @@ fn __usage_token(arg) -> string {
 }
 
 fn __option_lhs(arg) -> string {
-  let {short = "", long = ""} = arg ?? {}
-  let combined = if short != "" && long != "" {
+  const {short = "", long = ""} = arg ?? {}
+  const combined = if short != "" && long != "" {
     "${short}, ${long}"
   } else if long != "" {
     "    ${long}"
@@ -338,8 +338,8 @@ fn __option_lhs(arg) -> string {
 
 fn __positional_lhs(arg) -> string {
   // Positionals default to required when `required` is unset.
-  let is_required = arg?.required ?? true
-  let token = if arg?.variadic {
+  const is_required = arg?.required ?? true
+  const token = if arg?.variadic {
     "<${arg.name}>..."
   } else if !is_required {
     "[${arg.name}]"
@@ -350,12 +350,12 @@ fn __positional_lhs(arg) -> string {
 }
 
 fn __help_arg_line(arg) -> string {
-  let lhs = if arg.kind == "positional" {
+  const lhs = if arg.kind == "positional" {
     __positional_lhs(arg)
   } else {
     __option_lhs(arg)
   }
-  let help = arg?.help ?? ""
+  const help = arg?.help ?? ""
   if help == "" {
     return lhs
   }
@@ -371,14 +371,14 @@ fn __help_arg_line(arg) -> string {
  * @errors: []
  */
 pub fn render_help(spec: ParserSpec) -> string {
-  var lines = []
+  let lines = []
   if spec.about != nil && spec.about != "" {
     lines = lines.push(spec.about)
     lines = lines.push("")
   }
-  let flags = __flags_only(spec.args)
-  let positionals = __positionals(spec.args)
-  var usage_tokens = ["  " + spec.name]
+  const flags = __flags_only(spec.args)
+  const positionals = __positionals(spec.args)
+  let usage_tokens = ["  " + spec.name]
   if len(flags) > 0 {
     usage_tokens = usage_tokens.push("[OPTIONS]")
   }

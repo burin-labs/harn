@@ -5,8 +5,8 @@
 import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
 pipeline default() {
-  let dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-pipeline-" + uuid())
-  let pool = pool_create(
+  const dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-pipeline-" + uuid())
+  const pool = pool_create(
     {name: "pipeline-demo", scope: "pipeline", pipeline_id: "pipe_001", max_concurrent: 1, dir: dir},
   )
   log(pool.scope)
@@ -14,8 +14,8 @@ pipeline default() {
   log(pool.durable)
   // Submit and wait so the task reaches a terminal state and the
   // durable log records it as completed.
-  let h1 = pool.submit({ -> 42 }, {idempotency_key: "submit-001"})
-  let r1 = pool_wait(h1)
+  const h1 = pool.submit({ -> 42 }, {idempotency_key: "submit-001"})
+  const r1 = pool_wait(h1)
   log(r1.status)
   log(r1.result)
   // "Kill the process": clear the in-process registry. The .harn/pools/
@@ -23,7 +23,7 @@ pipeline default() {
   pool_simulate_restart()
   // Re-create the pool with the same name + pipeline_id. The store
   // re-hydrates terminal tasks and surfaces them via snapshot.
-  let resumed = pool_create(
+  const resumed = pool_create(
     {name: "pipeline-demo", scope: "pipeline", pipeline_id: "pipe_001", max_concurrent: 1, dir: dir},
   )
   log(resumed.scope)
@@ -32,8 +32,8 @@ pipeline default() {
   log(resumed.total)
   // Idempotent re-submission of the same key returns the persisted
   // outcome (now stringified) instead of re-running the closure.
-  let h2 = resumed.submit({ -> 999 }, {idempotency_key: "submit-001"})
-  let r2 = pool_wait(h2)
+  const h2 = resumed.submit({ -> 999 }, {idempotency_key: "submit-001"})
+  const r2 = pool_wait(h2)
   log(r2.status)
   log(r2.result)
 }

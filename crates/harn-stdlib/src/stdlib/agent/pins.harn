@@ -23,9 +23,9 @@ import { agent_session_inject_reminder } from "std/agent/state"
 
 // -------------------------------------------------------------------------------------------------
 
-let __PIN_KINDS = ["artifact_ref", "constraint", "decision", "goal", "no_compact"]
+const __PIN_KINDS = ["artifact_ref", "constraint", "decision", "goal", "no_compact"]
 
-let __NO_COMPACT_MARKER = "[no-compact]"
+const __NO_COMPACT_MARKER = "[no-compact]"
 
 /**
  * PinSpec is the normalized shape returned by `pin(...)`: a typed pin the
@@ -59,7 +59,7 @@ pub fn pin_kinds() {
 // rides the "system" lane so the model treats it as governing; live evidence
 // (artifact_ref/decision) rides the "developer" lane. Mirrors Burin's
 // structural working-set role_hints.
-let __PIN_ROLE_HINTS = {
+const __PIN_ROLE_HINTS = {
   artifact_ref: "developer",
   constraint: "system",
   decision: "developer",
@@ -91,12 +91,12 @@ pub fn pin(kind, content, opts = nil) {
   if type_of(content) != "string" || content == "" {
     throw "pin(\"" + kind + "\", content): content must be a non-empty string"
   }
-  let options = if type_of(opts) == "dict" {
+  const options = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  let id = options?.id ?? ("pin_" + uuid_v7())
+  const id = options?.id ?? ("pin_" + uuid_v7())
   return {
     content: content,
     dedupe_key: options?.dedupe_key ?? ("pin/" + kind + "/" + id),
@@ -116,7 +116,7 @@ pub fn pin(kind, content, opts = nil) {
  * @api_stability: experimental
  */
 pub fn unpin(pins, pin_id) {
-  var out = []
+  let out = []
   for p in pins ?? [] {
     if p?.id != pin_id {
       out = out.push(p)
@@ -137,7 +137,7 @@ pub fn unpin(pins, pin_id) {
  * @api_stability: experimental
  */
 pub fn pin_reachability_roots(pins) {
-  var roots = []
+  let roots = []
   for p in pins ?? [] {
     if type_of(p?.content) == "string" && p.content != "" {
       roots = roots.push(p.content)
@@ -157,12 +157,12 @@ pub fn pin_reachability_roots(pins) {
  * @example: transcript_project(t, with_pin_roots({policy: "reachability_gc"}, pins))
  */
 pub fn with_pin_roots(project_options, pins) {
-  let opts = if type_of(project_options) == "dict" {
+  const opts = if type_of(project_options) == "dict" {
     project_options
   } else {
     {}
   }
-  var existing = []
+  let existing = []
   if type_of(opts?.roots) == "list" {
     existing = opts.roots
   } else if type_of(opts?.roots) == "string" {
@@ -182,12 +182,12 @@ pub fn with_pin_roots(project_options, pins) {
  * @api_stability: experimental
  */
 pub fn pin_compaction_policy(pins, opts = nil) {
-  let base = if type_of(opts) == "dict" {
+  const base = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  var preserve = []
+  let preserve = []
   for p in pins ?? [] {
     if type_of(p?.content) == "string" && p.content != "" {
       preserve = preserve.push("Preserve the pinned " + to_string(p?.kind ?? "note") + ": " + p.content)

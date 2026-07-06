@@ -19,7 +19,7 @@ pipeline test_string_operations(task) {
 }
 
 pipeline test_list_operations(task) {
-  let nums = [3, 1, 4, 1, 5]
+  const nums = [3, 1, 4, 1, 5]
   assert_eq(nums.count, 5)
   assert_eq(nums.first, 3)
   assert_eq(nums.last, 5)
@@ -28,14 +28,14 @@ pipeline test_list_operations(task) {
 }
 
 pipeline test_dict_operations(task) {
-  let user = {name: "Alice", age: 30}
+  const user = {name: "Alice", age: 30}
   assert_eq(user.name, "Alice")
   assert(user.has("name"))
   assert(!user.has("email"))
 }
 
 pipeline test_control_flow(task) {
-  var sum = 0
+  let sum = 0
   for i in [1, 2, 3, 4, 5] {
     sum = sum + i
   }
@@ -43,7 +43,7 @@ pipeline test_control_flow(task) {
 }
 
 pipeline test_error_handling(task) {
-  var caught = false
+  let caught = false
   try {
     throw "test error"
   } catch (e) {
@@ -54,8 +54,8 @@ pipeline test_error_handling(task) {
 }
 
 pipeline test_closures(task) {
-  let double = { x -> x * 2 }
-  let add_fn = { a, b -> a + b }
+  const double = { x -> x * 2 }
+  const add_fn = { a, b -> a + b }
   assert_eq(double(5), 10)
   assert_eq(add_fn(3, 4), 7)
 }

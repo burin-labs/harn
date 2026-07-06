@@ -5,8 +5,8 @@ pipeline default() {
   with_llm_script(
     [llm_stream_text(["Hello ", "wor", "ld"])],
     { ->
-      let opts: AgentLoopOptions = {provider: "mock", max_iterations: 1, on_delta: { delta -> __io_print(delta) }}
-      let result = agent_loop("greet", nil, opts)
+      const opts: AgentLoopOptions = {provider: "mock", max_iterations: 1, on_delta: { delta -> __io_print(delta) }}
+      const result = agent_loop("greet", nil, opts)
       __io_println("")
       __io_println(result.status)
       __io_println(result.visible_text)

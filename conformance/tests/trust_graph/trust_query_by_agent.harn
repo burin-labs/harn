@@ -1,17 +1,17 @@
 import "std/triggers"
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let agent_a = "trust-alpha-" + unique
-  let agent_b = "trust-beta-" + unique
-  let first = trust_record(agent_a, "issue.label", "reviewer-1", "success", "suggest")
-  let second = trust_record(agent_a, "deploy.prod", nil, "failure", "act_with_approval")
-  let third = trust_record(agent_b, "pr.merge", "reviewer-2", "denied", "shadow")
-  let alpha_records: list<TrustRecord> = trust_query({agent: agent_a})
-  let failures: list<TrustRecord> = trust_query({agent: agent_a, outcome: "failure"})
-  let denied: list<TrustRecord> = trust_query({agent: agent_b, outcome: "denied"})
-  let suggest_records: list<TrustRecord> = trust_query({agent: agent_a, tier: "suggest"})
+  const agent_a = "trust-alpha-" + unique
+  const agent_b = "trust-beta-" + unique
+  const first = trust_record(agent_a, "issue.label", "reviewer-1", "success", "suggest")
+  const second = trust_record(agent_a, "deploy.prod", nil, "failure", "act_with_approval")
+  const third = trust_record(agent_b, "pr.merge", "reviewer-2", "denied", "shadow")
+  const alpha_records: list<TrustRecord> = trust_query({agent: agent_a})
+  const failures: list<TrustRecord> = trust_query({agent: agent_a, outcome: "failure"})
+  const denied: list<TrustRecord> = trust_query({agent: agent_b, outcome: "denied"})
+  const suggest_records: list<TrustRecord> = trust_query({agent: agent_a, tier: "suggest"})
   __io_println(first.schema == "opentrustgraph/v0.1")
   __io_println(second.outcome == "failure")
   __io_println(third.autonomy_tier == "shadow")

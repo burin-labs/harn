@@ -1,8 +1,8 @@
 import { retry_predicate_with_backoff } from "std/async"
 
 pipeline default() {
-  let ok = retry_predicate_with_backoff(1, 0, fn() { return "ready" })
-  let exhausted = retry_predicate_with_backoff(2, 0, fn() { return false })
+  const ok = retry_predicate_with_backoff(1, 0, fn() { return "ready" })
+  const exhausted = retry_predicate_with_backoff(2, 0, fn() { return false })
   __io_println(is_ok(ok))
   __io_println(unwrap(ok))
   __io_println(is_ok(exhausted))

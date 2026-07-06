@@ -23,22 +23,22 @@ pipeline default(_task) {
   // The AST edit primitives read and (would) write host files, so they
   // share the deterministic-tools gate.
   hostlib_enable("tools:deterministic")
-  let assets = asset_root()
-  let rs = assets + "/seed/lib.rs"
-  let py = assets + "/seed/calc.py"
-  let extract = edit_extract_function(
+  const assets = asset_root()
+  const rs = assets + "/seed/lib.rs"
+  const py = assets + "/seed/calc.py"
+  const extract = edit_extract_function(
     {path: py, range: {start_line: 1, end_line: 2}, new_name: "compute_subtotal", dry_run: true},
   )
-  let add_param = edit_add_parameter(
+  const add_param = edit_add_parameter(
     {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
   )
-  let ret = edit_change_return_type({path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true})
+  const ret = edit_change_return_type({path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true})
   __io_println("=== edit-refactor demo ===")
   __io_println("extract_function   -> " + extract.result)
   __io_println("add_parameter      -> " + add_param.result)
   __io_println("change_return_type -> " + ret.result)
   __io_println("")
-  let receipt = {
+  const receipt = {
     receipt_kind: "edit_refactor_receipt",
     extract_result: extract.result,
     extract_signature: contains(extract.unified_diff[0].diff, "def compute_subtotal(base, qty):"),

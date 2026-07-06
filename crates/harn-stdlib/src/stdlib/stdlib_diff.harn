@@ -24,19 +24,19 @@ fn __diff_key(i, j) -> string {
 }
 
 fn __diff_matrix(a, b) {
-  let n = len(a)
-  let m = len(b)
-  var dp = {}
-  var i = n - 1
+  const n = len(a)
+  const m = len(b)
+  let dp = {}
+  let i = n - 1
   while i >= 0 {
-    var j = m - 1
+    let j = m - 1
     while j >= 0 {
       if a[i] == b[j] {
-        let next = dp[__diff_key(i + 1, j + 1)] ?? 0
+        const next = dp[__diff_key(i + 1, j + 1)] ?? 0
         dp = dp + {[__diff_key(i, j)]: next + 1}
       } else {
-        let down = dp[__diff_key(i + 1, j)] ?? 0
-        let right = dp[__diff_key(i, j + 1)] ?? 0
+        const down = dp[__diff_key(i + 1, j)] ?? 0
+        const right = dp[__diff_key(i, j + 1)] ?? 0
         dp = dp + {[__diff_key(i, j)]: max(down, right)}
       }
       j -= 1
@@ -47,18 +47,18 @@ fn __diff_matrix(a, b) {
 }
 
 fn __diff_ops(a, b) {
-  let dp = __diff_matrix(a, b)
-  var ops = []
-  var i = 0
-  var j = 0
+  const dp = __diff_matrix(a, b)
+  let ops = []
+  let i = 0
+  let j = 0
   while i < len(a) && j < len(b) {
     if a[i] == b[j] {
       ops = ops.push(__diff_op("equal", a[i], i + 1, j + 1))
       i += 1
       j += 1
     } else {
-      let delete_score = dp[__diff_key(i + 1, j)] ?? 0
-      let insert_score = dp[__diff_key(i, j + 1)] ?? 0
+      const delete_score = dp[__diff_key(i + 1, j)] ?? 0
+      const insert_score = dp[__diff_key(i, j + 1)] ?? 0
       if delete_score >= insert_score {
         ops = ops.push(__diff_op("delete", a[i], i + 1, j + 1))
         i += 1
@@ -80,8 +80,8 @@ fn __diff_ops(a, b) {
 }
 
 fn __diff_stats(ops) {
-  var insertions = 0
-  var deletions = 0
+  let insertions = 0
+  let deletions = 0
   for op in ops {
     if op.kind == "insert" {
       insertions += 1
@@ -96,13 +96,13 @@ fn __diff_compact_ops(ops, context) {
   if context == nil || context < 0 {
     return ops
   }
-  var keep = {}
-  var idx = 0
+  let keep = {}
+  let idx = 0
   while idx < len(ops) {
     if ops[idx].kind != "equal" {
-      let start = max(0, idx - context)
-      let end = min(len(ops), idx + context + 1)
-      var cursor = start
+      const start = max(0, idx - context)
+      const end = min(len(ops), idx + context + 1)
+      let cursor = start
       while cursor < end {
         keep = keep + {[to_string(cursor)]: true}
         cursor += 1
@@ -110,8 +110,8 @@ fn __diff_compact_ops(ops, context) {
     }
     idx += 1
   }
-  var out = []
-  var skipped = false
+  let out = []
+  let skipped = false
   idx = 0
   while idx < len(ops) {
     if keep[to_string(idx)] {
@@ -139,7 +139,7 @@ fn __diff_color_line(line, options) {
   if !(options?.color ?? false) {
     return line
   }
-  let color_opts = {mode: options?.color_mode ?? "always"}
+  const color_opts = {mode: options?.color_mode ?? "always"}
   if starts_with(line, "@@") {
     return ansi_info(line, color_opts)
   }
@@ -163,9 +163,9 @@ fn __diff_color_line(line, options) {
  * @errors: []
  */
 pub fn diff_lines(before: string, after: string) -> dict {
-  let old_lines = __diff_lines_of(before)
-  let new_lines = __diff_lines_of(after)
-  let ops = __diff_ops(old_lines, new_lines)
+  const old_lines = __diff_lines_of(before)
+  const new_lines = __diff_lines_of(after)
+  const ops = __diff_ops(old_lines, new_lines)
   return __diff_stats(ops)
     + {ops: ops, old_lines: len(old_lines), new_lines: len(new_lines)}
 }
@@ -177,17 +177,17 @@ pub fn diff_lines(before: string, after: string) -> dict {
  * @errors: []
  */
 pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) -> string {
-  let opts = options ?? {}
-  let path = opts.path
-  let old_label = opts.from_label ?? __diff_label("a/", path, "before")
-  let new_label = opts.to_label ?? __diff_label("b/", path, "after")
-  let result = diff_lines(before, after)
+  const opts = options ?? {}
+  const path = opts.path
+  const old_label = opts.from_label ?? __diff_label("a/", path, "before")
+  const new_label = opts.to_label ?? __diff_label("b/", path, "after")
+  const result = diff_lines(before, after)
   if !result.changed {
     return ""
   }
-  let context = opts.context
-  let ops = __diff_compact_ops(result.ops, context)
-  var lines = [
+  const context = opts.context
+  const ops = __diff_compact_ops(result.ops, context)
+  let lines = [
     "--- " + old_label,
     "+++ " + new_label,
     "@@ -1," + to_string(result.old_lines) + " +1," + to_string(result.new_lines) + " @@",
@@ -213,8 +213,8 @@ pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) ->
  * @errors: []
  */
 pub fn colorize_diff(diff_text: string, options: DiffOptions = {}) -> string {
-  let base = options ?? {}
-  let opts = base + {color: true}
+  const base = options ?? {}
+  const opts = base + {color: true}
   return join(split(diff_text ?? "", "\n").map({ line -> __diff_color_line(line, opts) }), "\n")
 }
 
@@ -225,7 +225,7 @@ pub fn colorize_diff(diff_text: string, options: DiffOptions = {}) -> string {
  * @errors: []
  */
 pub fn diff_summary(before: string, after: string) -> dict {
-  let result = diff_lines(before, after)
+  const result = diff_lines(before, after)
   return {
     changed: result.changed,
     insertions: result.insertions,
@@ -251,12 +251,12 @@ pub fn diff_summary(before: string, after: string) -> dict {
  * @example: structural_diff("before.rs", "after.rs", "rust")
  */
 pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
-  let opts = if type_of(options) == "string" {
+  const opts = if type_of(options) == "string" {
     {language: options}
   } else {
     options ?? {}
   }
-  let payload = hostlib_ast_structural_diff((opts ?? {}).merge({path_a: path_a, path_b: path_b})) ?? {}
+  const payload = hostlib_ast_structural_diff((opts ?? {}).merge({path_a: path_a, path_b: path_b})) ?? {}
   return payload
     .merge(
     {
@@ -274,9 +274,9 @@ pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
  * @errors: []
  */
 pub fn render_diff_stat(entries: list, options = {}) -> string {
-  var rows = []
+  let rows = []
   for entry in entries ?? [] {
-    let stat = if entry?.before != nil || entry?.after != nil {
+    const stat = if entry?.before != nil || entry?.after != nil {
       diff_summary(entry?.before ?? "", entry?.after ?? "")
     } else {
       entry

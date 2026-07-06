@@ -6,11 +6,11 @@ import { llm_text, with_llm_script } from "std/testing"
  * answer in prose / fences.
  */
 pipeline default() {
-  let schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
+  const schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
   with_llm_script(
     [llm_text("Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone.")],
     { ->
-      let r = llm_call_structured_result("Q?", schema, {provider: "mock"})
+      const r = llm_call_structured_result("Q?", schema, {provider: "mock"})
       __io_println(r.ok)
       __io_println(r.data.k)
       __io_println(r.extracted_json)

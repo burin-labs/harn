@@ -14,17 +14,17 @@ import { classify_risky_paths, infer_missing_tests } from "risk"
  * the LLM hook so smoke runs and unit tests stay hermetic.
  */
 pub fn review_pr(request, policy, opts) {
-  let normalized = _normalize_request(request)
-  let active_policy = _active_policy(policy)
-  let resolved_opts = opts ?? {}
-  let llm_hook = resolved_opts.llm_hook
-  let secret_findings = _scan_secrets(normalized.diff)
-  let risky = classify_risky_paths(normalized.changed_files, active_policy.risky_paths)
-  let missing_tests = infer_missing_tests(normalized.changed_files, active_policy.test_globs)
+  const normalized = _normalize_request(request)
+  const active_policy = _active_policy(policy)
+  const resolved_opts = opts ?? {}
+  const llm_hook = resolved_opts.llm_hook
+  const secret_findings = _scan_secrets(normalized.diff)
+  const risky = classify_risky_paths(normalized.changed_files, active_policy.risky_paths)
+  const missing_tests = infer_missing_tests(normalized.changed_files, active_policy.test_globs)
   if normalized.dry_run || normalized.diff == "" {
     return envelope_for_dry_run(normalized, secret_findings, missing_tests, risky.hits)
   }
-  let llm_result = _run_llm(llm_hook, normalized)
+  const llm_result = _run_llm(llm_hook, normalized)
   return build_review_receipt(
     {
       request: normalized,
@@ -40,7 +40,7 @@ pub fn review_pr(request, policy, opts) {
 }
 
 fn _normalize_request(raw) {
-  let request = raw ?? {}
+  const request = raw ?? {}
   return {
     repo: request.repo ?? "",
     pr_number: request.pr_number ?? 0,
@@ -55,7 +55,7 @@ fn _normalize_request(raw) {
 }
 
 fn _active_policy(policy) {
-  let policy_or_default = policy ?? {}
+  const policy_or_default = policy ?? {}
   return {risky_paths: policy_or_default.risky_paths ?? [], test_globs: policy_or_default.test_globs ?? []}
 }
 
@@ -70,7 +70,7 @@ fn _run_llm(hook, request) {
   if hook != nil {
     return hook(request)
   }
-  let llm = self_review(request.diff, request.rubric_preset, request.max_rounds)
+  const llm = self_review(request.diff, request.rubric_preset, request.max_rounds)
   return {
     findings: llm.findings ?? [],
     summary: llm.summary ?? "",

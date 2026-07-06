@@ -1,4 +1,4 @@
 pipeline test(task) {
-  let ch = channel("events")
+  const ch = channel("events")
   log(type_of(ch))
 }

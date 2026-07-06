@@ -6,7 +6,7 @@ fn handler(event: TriggerEvent) -> dict {
 }
 
 fn classify(event: TriggerEvent) -> bool {
-  let result = llm_call("predicate breaker " + event.kind, nil, {provider: "mock", model: "gpt-4o-mini"})
+  const result = llm_call("predicate breaker " + event.kind, nil, {provider: "mock", model: "gpt-4o-mini"})
   return contains(result.text, "yes")
 }
 
@@ -18,9 +18,9 @@ pipeline test(task) {
       {error: {category: "server_error", message: "503 upstream"}, model: "gpt-4o-mini"},
     ],
     { ->
-      let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+      const unique = to_string(to_int(harness.clock.timestamp())) + "-"
         + to_string(harness.random.gen_range(100000, 999999))
-      let handle: TriggerHandle = trigger_register(
+      const handle: TriggerHandle = trigger_register(
         {
           id: "llm-predicate-breaker-" + unique,
           kind: "issue.opened",
@@ -38,25 +38,25 @@ pipeline test(task) {
           package_name: nil,
         },
       )
-      let first: DispatchHandle = trigger_fire(
+      const first: DispatchHandle = trigger_fire(
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-1-" + unique}},
       )
-      let second: DispatchHandle = trigger_fire(
+      const second: DispatchHandle = trigger_fire(
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-2-" + unique}},
       )
-      let third: DispatchHandle = trigger_fire(
+      const third: DispatchHandle = trigger_fire(
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-3-" + unique}},
       )
-      let fourth: DispatchHandle = trigger_fire(
+      const fourth: DispatchHandle = trigger_fire(
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-4-" + unique}},
       )
-      let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
+      const evaluated = trigger_inspect_lifecycle("predicate.evaluated")
         .filter({ entry -> entry?.headers?.trigger_id == handle.id })
-      let last = evaluated[len(evaluated) - 1]
+      const last = evaluated[len(evaluated) - 1]
       __io_println(len(llm_mock_calls()) == 3)
       __io_println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))
       __io_println(contains(json_stringify(second.result ?? {}), "\"skipped\":true"))

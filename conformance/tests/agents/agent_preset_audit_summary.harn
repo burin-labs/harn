@@ -2,12 +2,12 @@ import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn preset_agent(kind, prompt, options = nil) {
-  let opts = agent_preset(kind, options)
+  const opts = agent_preset(kind, options)
   return agent_loop(prompt, opts?.system, opts)
 }
 
 fn audit_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "inspect",
@@ -31,7 +31,7 @@ pipeline default() {
       llm_text("<user_response>Audit complete.</user_response>"),
     ],
     { ->
-      let audit = preset_agent(
+      const audit = preset_agent(
         "audit",
         "Audit the release",
         {provider: "mock", tools: audit_tools(), tool_format: "native"},
@@ -39,14 +39,14 @@ pipeline default() {
       __io_println(audit.status)
       __io_println(audit.text)
       __io_println(audit.adaptive_budget.mode)
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(!contains(calls[0].system, "##DONE##"))
     },
   )
   with_llm_script(
     [llm_text("Just a summary.")],
     { ->
-      let summary = preset_agent("summary", "Summarize.", {provider: "mock"})
+      const summary = preset_agent("summary", "Summarize.", {provider: "mock"})
       __io_println(summary.status)
       __io_println(summary.text)
       __io_println(summary.llm.iterations)
@@ -55,10 +55,10 @@ pipeline default() {
   with_llm_script(
     [llm_text("Local summary.")],
     { ->
-      let local_summary = preset_agent("summary", "Summarize locally.", {provider: "mock", model: "mystery-model-7b"})
+      const local_summary = preset_agent("summary", "Summarize locally.", {provider: "mock", model: "mystery-model-7b"})
       __io_println(local_summary.status)
       __io_println(local_summary.text)
-      let summary_calls = llm_mock_calls()
+      const summary_calls = llm_mock_calls()
       __io_println(summary_calls[0]?.tool_choice == nil)
     },
   )
@@ -68,7 +68,7 @@ pipeline default() {
       llm_text("<user_response>Fixed.</user_response>"),
     ],
     { ->
-      let repair = preset_agent(
+      const repair = preset_agent(
         "repair",
         "Repair the regression",
         {provider: "mock", tools: audit_tools(), tool_format: "native"},

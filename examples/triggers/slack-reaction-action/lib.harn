@@ -2,7 +2,7 @@ import "std/triggers"
 
 /** Convert a Slack reaction event into a follow-up action plan. */
 pub fn on_reaction(event: TriggerEvent) -> dict {
-  let raw = event.provider_payload.raw
+  const raw = event.provider_payload.raw
   return {
     action: "reaction_followup",
     reaction: raw.reaction ?? raw.event?.reaction,

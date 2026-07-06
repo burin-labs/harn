@@ -137,17 +137,17 @@ fn __governor_proceed(reason: string, signal: string, fraction: float) -> dict {
  * @api_stability: experimental
  */
 pub fn governor_decision(policy: GovernorPolicy, obs: dict) -> dict {
-  let signal = to_string(obs?.signal ?? policy.signal ?? "iterations")
-  let ceiling = to_float(obs?.ceiling ?? 0.0)
+  const signal = to_string(obs?.signal ?? policy.signal ?? "iterations")
+  const ceiling = to_float(obs?.ceiling ?? 0.0)
   if ceiling <= 0.0 {
     return __governor_proceed("no_budget", signal, 0.0)
   }
-  let consumed = to_float(obs?.consumed ?? 0.0)
-  let fraction = consumed / ceiling
-  let checkpoint = to_float(policy.checkpoint ?? GOVERNOR_DEFAULT_CHECKPOINT)
-  let over_estimate = to_float(policy.over_estimate ?? GOVERNOR_DEFAULT_OVER_ESTIMATE)
-  let hard = to_float(policy.hard ?? GOVERNOR_DEFAULT_HARD)
-  let made_progress = obs?.made_progress ?? false
+  const consumed = to_float(obs?.consumed ?? 0.0)
+  const fraction = consumed / ceiling
+  const checkpoint = to_float(policy.checkpoint ?? GOVERNOR_DEFAULT_CHECKPOINT)
+  const over_estimate = to_float(policy.over_estimate ?? GOVERNOR_DEFAULT_OVER_ESTIMATE)
+  const hard = to_float(policy.hard ?? GOVERNOR_DEFAULT_HARD)
+  const made_progress = obs?.made_progress ?? false
   if fraction >= hard {
     return __governor_abort("budget_hard_stop", signal, fraction)
   }
@@ -162,7 +162,7 @@ pub fn governor_decision(policy: GovernorPolicy, obs: dict) -> dict {
 
 /** The checkpoint cadence in ms (one budget window). Defaults to the armed budget. */
 fn __governor_pace_checkpoint_ms(obs: dict, armed: int) -> int {
-  let raw = to_int(obs?.checkpoint_ms ?? 0) ?? 0
+  const raw = to_int(obs?.checkpoint_ms ?? 0) ?? 0
   if raw > 0 {
     return raw
   }
@@ -171,7 +171,7 @@ fn __governor_pace_checkpoint_ms(obs: dict, armed: int) -> int {
 
 /** The estimated total wall in ms. Defaults to the armed budget. */
 fn __governor_pace_expected_total_ms(obs: dict, armed: int) -> int {
-  let raw = to_int(obs?.expected_total_ms ?? 0) ?? 0
+  const raw = to_int(obs?.expected_total_ms ?? 0) ?? 0
   if raw > 0 {
     return raw
   }
@@ -235,7 +235,7 @@ fn __governor_pace_expected_total_ms(obs: dict, armed: int) -> int {
  * @api_stability: experimental
  */
 pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
-  let armed = to_int(obs?.armed_budget_ms ?? 0) ?? 0
+  const armed = to_int(obs?.armed_budget_ms ?? 0) ?? 0
   // No budget armed (flag OFF, or a live surface that did not arm one) => the
   // governor is inert. This is the byte-identical no-op the caller relies on.
   if armed <= 0 {
@@ -246,15 +246,15 @@ pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
   if obs?.done ?? false {
     return {action: "proceed"}
   }
-  let elapsed = to_int(obs?.elapsed_ms ?? 0) ?? 0
-  let checkpoint = __governor_pace_checkpoint_ms(obs, armed)
+  const elapsed = to_int(obs?.elapsed_ms ?? 0) ?? 0
+  const checkpoint = __governor_pace_checkpoint_ms(obs, armed)
   // Time-based outer gate: only decide once we have crossed the checkpoint. Below
   // it the run is inside budget and continues unchanged.
   if elapsed < checkpoint {
     return {action: "proceed"}
   }
-  let made_progress = obs?.made_progress ?? false
-  let env_blame_without_infra = obs?.env_blame_without_infra ?? false
+  const made_progress = obs?.made_progress ?? false
+  const env_blame_without_infra = obs?.env_blame_without_infra ?? false
   // NO PROGRESS, or env-blaming with no real infra marker => CUT.
   if !made_progress {
     return {action: "cut", reason: "no_progress_at_checkpoint"}
@@ -269,12 +269,12 @@ pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
   }
   // PROGRESS. Decide extend vs pace_check by whether we have blown past the
   // expected total by at least one checkpoint.
-  let expected_total = __governor_pace_expected_total_ms(obs, armed)
-  let over_estimate = elapsed >= expected_total + checkpoint
-  let extends_used = to_int(obs?.extends_used ?? 0) ?? 0
-  let pace_checks_used = to_int(obs?.pace_checks_used ?? 0) ?? 0
-  let extend_max = to_int(policy.extend_max ?? GOVERNOR_PACE_EXTEND_MAX) ?? GOVERNOR_PACE_EXTEND_MAX
-  let pace_check_max = to_int(policy.pace_check_max ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS)
+  const expected_total = __governor_pace_expected_total_ms(obs, armed)
+  const over_estimate = elapsed >= expected_total + checkpoint
+  const extends_used = to_int(obs?.extends_used ?? 0) ?? 0
+  const pace_checks_used = to_int(obs?.pace_checks_used ?? 0) ?? 0
+  const extend_max = to_int(policy.extend_max ?? GOVERNOR_PACE_EXTEND_MAX) ?? GOVERNOR_PACE_EXTEND_MAX
+  const pace_check_max = to_int(policy.pace_check_max ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS)
     ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS
   if !over_estimate {
     // Within the estimate and progressing: silently extend the wall to the next
@@ -308,18 +308,18 @@ fn __any_in(values: list, allowlist: list) -> bool {
  * the host-tracked cumulative via `agent_session_totals`.
  */
 fn __governor_observe(policy: GovernorPolicy, payload: dict) -> dict {
-  let signal = to_string(policy.signal ?? "iterations")
-  let session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
-  let consumed = if signal == "tokens" {
+  const signal = to_string(policy.signal ?? "iterations")
+  const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
+  const consumed = if signal == "tokens" {
     to_float(agent_session_totals(session_id)?.tokens_used ?? 0)
   } else if signal == "cost" {
     to_float(agent_session_totals(session_id)?.cost_usd ?? 0.0)
   } else {
     to_float((to_int(payload?.iteration ?? 0) ?? 0) + 1)
   }
-  let progress_tools = policy.progress_tools
-  let successful = payload?.successful_tool_names ?? []
-  let made_progress = if progress_tools == nil {
+  const progress_tools = policy.progress_tools
+  const successful = payload?.successful_tool_names ?? []
+  const made_progress = if progress_tools == nil {
     len(successful) > 0
   } else {
     __any_in(successful, progress_tools)
@@ -339,7 +339,7 @@ fn __governor_observe(policy: GovernorPolicy, payload: dict) -> dict {
 const GOVERNOR_REQUIRED_PAYLOAD_KEYS = ["iteration", "session_id", "successful_tool_names"]
 
 fn __governor_shape_ok(payload) -> bool {
-  let present = keys(payload)
+  const present = keys(payload)
   for key in GOVERNOR_REQUIRED_PAYLOAD_KEYS {
     if !contains(present, key) {
       return false
@@ -349,8 +349,8 @@ fn __governor_shape_ok(payload) -> bool {
 }
 
 fn __governor_verdict(decision: dict) {
-  let signal = to_string(decision?.signal ?? "budget")
-  let fraction = to_string(decision?.fraction ?? 0.0)
+  const signal = to_string(decision?.signal ?? "budget")
+  const fraction = to_string(decision?.fraction ?? 0.0)
   if decision.action == "abort" {
     return {
       message: "Budget governor: stopping this run (" + to_string(decision?.reason ?? "")
@@ -442,15 +442,15 @@ fn __normalize_verdict(verdict) -> dict {
  */
 pub fn compose_post_turn(callbacks: list) {
   return { payload ->
-    var messages = []
-    var result = nil
+    let messages = []
+    let result = nil
     for callback in callbacks {
       if callback == nil {
         continue
       }
-      let norm = __normalize_verdict(callback(payload))
+      const norm = __normalize_verdict(callback(payload))
       if norm.stop {
-        let prior = if len(messages) > 0 {
+        const prior = if len(messages) > 0 {
           join(messages, "\n") + "\n"
         } else {
           ""
@@ -487,24 +487,24 @@ pub fn compose_post_turn(callbacks: list) {
  * @api_stability: experimental
  */
 pub fn with_governance(opts: dict, config: dict) -> dict {
-  var callbacks = []
-  let existing = opts?.post_turn_callback
+  let callbacks = []
+  const existing = opts?.post_turn_callback
   if existing != nil {
     callbacks = callbacks.push(existing)
   }
   if config?.governor != nil {
     callbacks = callbacks.push(governor_post_turn(config.governor))
   }
-  var result = opts
-  let detectors = config?.detectors
+  let result = opts
+  const detectors = config?.detectors
   if detectors != nil {
-    let existing_stall = if type_of(opts?.stall_diagnostics) == "dict" {
+    const existing_stall = if type_of(opts?.stall_diagnostics) == "dict" {
       opts.stall_diagnostics
     } else {
       {}
     }
     result = result + {stall_diagnostics: existing_stall + detector_spec_to_stall(detectors)}
-    let overlay = unified_detectors_post_turn(detectors)
+    const overlay = unified_detectors_post_turn(detectors)
     if overlay != nil {
       callbacks = callbacks.push(overlay)
     }
@@ -543,7 +543,7 @@ pub fn agent_governed_preset(kind, options = nil, governance = {}) -> dict {
  * @api_stability: experimental
  */
 pub fn governors_selftest() -> dict {
-  let live_payload = {
+  const live_payload = {
     dispatch: {results: []},
     has_tool_calls: true,
     iteration: 4,
@@ -558,8 +558,8 @@ pub fn governors_selftest() -> dict {
     tool_results: [],
     visible_text: "",
   }
-  let required = ["iteration", "session_id", "successful_tool_names"]
-  var missing = []
+  const required = ["iteration", "session_id", "successful_tool_names"]
+  let missing = []
   for key in required {
     if !contains(keys(live_payload), key) {
       missing = missing.push(key)
@@ -572,9 +572,9 @@ pub fn governors_selftest() -> dict {
   // session). budget 5 turns, iteration 4 -> 5 turns consumed -> fraction 1.0
   // at hard=1.0 -> abort. If `iteration` ever drifts, consumed collapses to 1
   // and `ok` flips false.
-  let policy = {budget: 5.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"}
-  let obs = __governor_observe(policy, live_payload)
-  let decision = governor_decision(policy, obs)
+  const policy = {budget: 5.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"}
+  const obs = __governor_observe(policy, live_payload)
+  const decision = governor_decision(policy, obs)
   return {
     decision: decision,
     observed_keys: keys(live_payload).sort(),

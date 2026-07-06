@@ -1,35 +1,35 @@
 pipeline default() {
   // Close channel then iterate — should produce no items
-  let ch1 = channel("test1", 5)
+  const ch1 = channel("test1", 5)
   close_channel(ch1)
-  var count = 0
+  let count = 0
   for item in ch1 {
     count = count + 1
   }
   __io_println(count)
   // Send items, close, then iterate — should drain all items
-  let ch2 = channel("test2", 5)
+  const ch2 = channel("test2", 5)
   send(ch2, "a")
   send(ch2, "b")
   send(ch2, "c")
   close_channel(ch2)
-  var items = []
+  let items = []
   for item in ch2 {
     items = items + [item]
   }
   __io_println(items)
   // try_receive on empty channel returns nil
-  let ch3 = channel("test3", 5)
-  let result = try_receive(ch3)
+  const ch3 = channel("test3", 5)
+  const result = try_receive(ch3)
   __io_println(result)
   // send after close raises a structured ChannelClosed error
-  let ch4 = channel("test4", 5)
+  const ch4 = channel("test4", 5)
   close_channel(ch4)
-  let sent = try {
+  const sent = try {
     send(ch4, "too_late")
   }
   __io_println(is_err(sent))
-  let err = unwrap_err(sent)
+  const err = unwrap_err(sent)
   __io_println(err.type)
   __io_println(error_category(err))
 }

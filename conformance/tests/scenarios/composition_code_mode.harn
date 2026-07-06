@@ -1,5 +1,5 @@
 pipeline main() {
-  let tools = [
+  const tools = [
     {
       name: "read_file",
       description: "Read a file",
@@ -14,11 +14,11 @@ pipeline main() {
       metadata: {mock_output: {text: "hello"}},
     },
   ]
-  let manifest = composition_binding_manifest(tools)
+  const manifest = composition_binding_manifest(tools)
   __io_println(manifest.schema_version)
   __io_println(manifest.bindings[0].binding)
   __io_println(manifest.bindings[0].policy.disposition)
-  let report = composition_execute(
+  const report = composition_execute(
     "let file = read_file({path: \"README.md\"})\nreturn file.text",
     manifest,
     {run_id: "conformance-composition"},
@@ -26,7 +26,7 @@ pipeline main() {
   __io_println(report.ok)
   __io_println(report.child_calls[0].tool_name)
   __io_println(report.run.result)
-  let denied_manifest = composition_binding_manifest(
+  const denied_manifest = composition_binding_manifest(
     [
       {
         name: "write_file",
@@ -35,7 +35,7 @@ pipeline main() {
       },
     ],
   )
-  let denied = composition_execute(
+  const denied = composition_execute(
     "return write_file({path: \"x\", content: \"bad\"})",
     denied_manifest,
     {run_id: "conformance-denied"},

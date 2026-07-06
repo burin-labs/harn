@@ -6,7 +6,7 @@ import "std/triggers"
  * with the buffered list of channel events.
  */
 fn handle_batch(event) {
-  let batch_len = if event.batch == nil {
+  const batch_len = if event.batch == nil {
     0
   } else {
     len(event.batch)
@@ -15,9 +15,9 @@ fn handle_batch(event) {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "batch-count-" + unique,
       kind: "channel.emit",
@@ -36,14 +36,14 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("batch.count.input", {seq: 1})
-  let _ = emit_channel("batch.count.input", {seq: 2})
-  let _ = emit_channel("batch.count.input", {seq: 3})
-  let _ = emit_channel("batch.count.input", {seq: 4})
-  let before = channel_events("batch.count.fired")
+  const _ = emit_channel("batch.count.input", {seq: 1})
+  const _ = emit_channel("batch.count.input", {seq: 2})
+  const _ = emit_channel("batch.count.input", {seq: 3})
+  const _ = emit_channel("batch.count.input", {seq: 4})
+  const before = channel_events("batch.count.fired")
   __io_println("before-threshold:" + to_string(len(before)))
-  let _ = emit_channel("batch.count.input", {seq: 5})
-  let after = channel_events("batch.count.fired")
+  const _ = emit_channel("batch.count.input", {seq: 5})
+  const after = channel_events("batch.count.fired")
   __io_println("after-threshold:" + to_string(len(after)))
   __io_println("batch_size:" + to_string(after[0].payload.batch_size))
 }

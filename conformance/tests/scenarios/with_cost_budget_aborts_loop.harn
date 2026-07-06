@@ -8,7 +8,7 @@
 import { with_budget } from "std/llm/handlers"
 
 pipeline default() {
-  let synthetic = { _call -> return {
+  const synthetic = { _call -> return {
     ok: true,
     value: {
       text: "tick",
@@ -19,8 +19,8 @@ pipeline default() {
       usage: {input_tokens: 100, output_tokens: 100},
     },
   } }
-  let caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
-  let result = agent_loop(
+  const caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
+  const result = agent_loop(
     "hi",
     nil,
     {

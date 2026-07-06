@@ -57,8 +57,8 @@ type PathScopeMatcherOptions = {
  * @example: path_scope({mount_modes: ["extend"]})
  */
 pub fn path_scope(options: PathScopeMatcherOptions = nil) -> dict {
-  let opts = options ?? {}
-  var matcher = {
+  const opts = options ?? {}
+  let matcher = {
     type: "path_scope",
     scope: opts?.scope ?? "anchor_plus_mounted",
     arg_keys: opts?.arg_keys ?? ["path", "destination", "source", "file"],
@@ -77,7 +77,7 @@ fn __tool_spec_config(spec: ToolDefinitionSpec) -> ToolDefinitionConfig {
   if type_of(spec) != "dict" {
     throw "tool_define_many: each spec must be a dict"
   }
-  var config = spec.config ?? {}
+  let config = spec.config ?? {}
   for key in spec.keys() {
     if !contains(["name", "description", "desc", "config"], key) {
       config = config + {[key]: spec[key]}
@@ -93,8 +93,8 @@ fn __tool_spec_config(spec: ToolDefinitionSpec) -> ToolDefinitionConfig {
  * @errors: []
  */
 pub fn tool_define_many(registry, specs: list<ToolDefinitionSpec>? = nil) -> ToolRegistry {
-  var target = registry
-  var items = specs
+  let target = registry
+  let items = specs
   if items == nil {
     target = tool_registry()
     items = registry
@@ -102,10 +102,10 @@ pub fn tool_define_many(registry, specs: list<ToolDefinitionSpec>? = nil) -> Too
   if type_of(items) != "list" {
     throw "tool_define_many: specs must be a list"
   }
-  var tools = target ?? tool_registry()
+  let tools = target ?? tool_registry()
   for spec in items {
-    let name = spec.name
-    let description = spec.description ?? spec.desc
+    const name = spec.name
+    const description = spec.description ?? spec.desc
     if name == nil || name == "" {
       throw "tool_define_many: each spec needs a non-empty name"
     }

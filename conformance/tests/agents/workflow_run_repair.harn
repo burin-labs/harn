@@ -8,11 +8,11 @@ import { workflow_run_repair } from "std/workflow/repair"
  * terminates on the first passing attempt.
  */
 pipeline default() {
-  let token = "GOTOKEN"
+  const token = "GOTOKEN"
   // The finding IS the token the mock must echo back to pass — so a pass on
   // attempt 2 proves the finding reached attempt 2's (feedback-threaded) prompt.
-  let verifier = { r -> return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]} }
-  let out = workflow_run_repair(
+  const verifier = { r -> return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]} }
+  const out = workflow_run_repair(
     {task: "Z", model_policy: {provider: "mock"}, verify: verifier, max_attempts: 2},
   )
   __io_println(out.ok)
@@ -22,7 +22,7 @@ pipeline default() {
   __io_println(contains(out.text, token))
   // Attempt count is honored: a never-satisfiable verifier with max_attempts: 1
   // stops after exactly one attempt (no runaway loop) and surfaces findings.
-  let capped = workflow_run_repair(
+  const capped = workflow_run_repair(
     {
       task: "unsatisfiable",
       model_policy: {provider: "mock"},

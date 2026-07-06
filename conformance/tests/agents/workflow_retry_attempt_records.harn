@@ -7,7 +7,7 @@
  * uuid-v7 timestamps.
  */
 pipeline default() {
-  let graph = workflow_graph(
+  const graph = workflow_graph(
     {
       entry: "verify",
       nodes: {
@@ -21,8 +21,8 @@ pipeline default() {
       edges: [],
     },
   )
-  let run = workflow_execute("verify", graph, [], {max_steps: 1})
-  let attempts = run.run.stages[0].attempts
+  const run = workflow_execute("verify", graph, [], {max_steps: 1})
+  const attempts = run.run.stages[0].attempts
   __io_println(len(attempts))
   for attempt in attempts {
     __io_println(

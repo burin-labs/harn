@@ -11,9 +11,9 @@ pipeline default() {
   pipeline_lifecycle_audit_log_take()
   /* `inner` records whether it ran into a closure-captured ref via the
    * result envelope; on deny the envelope must omit `result` entirely. */
-  let inner = { args -> {ok: true, ran: args.command} }
-  let wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
-  let result = wrapper({command: "cargo test"})
+  const inner = { args -> {ok: true, ran: args.command} }
+  const wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const result = wrapper({command: "cargo test"})
   __io_println(result.action)
   __io_println(result.rule_id)
   __io_println(result.catalogue_id)
@@ -23,7 +23,7 @@ pipeline default() {
   __io_println(result?.result == nil)
   /* Deny mode emits one audit entry: tool_denied with the rule, the
    * command we refused, and the severity. */
-  let log = pipeline_lifecycle_audit_log_take()
+  const log = pipeline_lifecycle_audit_log_take()
   __io_println(len(log))
   __io_println(log[0].kind)
   __io_println(log[0].payload.rule_id)

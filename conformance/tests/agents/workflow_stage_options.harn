@@ -1,7 +1,7 @@
 import { workflow_stage_agent_options } from "std/workflow/options"
 
 pipeline default() {
-  let explicit = workflow_stage_agent_options(
+  const explicit = workflow_stage_agent_options(
     {
       mode: "agent",
       has_tools: true,
@@ -33,7 +33,7 @@ pipeline default() {
   __io_println(explicit.agent_loop_options.done_sentinel)
   __io_println(explicit.agent_loop_options.exit_when_verified)
   __io_println(explicit.agent_loop_options.stop_after_successful_tools[0])
-  let env = workflow_stage_agent_options(
+  const env = workflow_stage_agent_options(
     {
       has_tools: true,
       model_policy: {tool_format: "   "},
@@ -41,7 +41,7 @@ pipeline default() {
     },
   )
   __io_println(env.tool_format)
-  let defaulted = workflow_stage_agent_options(
+  const defaulted = workflow_stage_agent_options(
     {has_tools: false, model_policy: {}, host: {env_tool_format: "", default_tool_format: "native"}},
   )
   __io_println(defaulted.tool_format)

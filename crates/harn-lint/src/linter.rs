@@ -1359,7 +1359,7 @@ impl<'a> Linter<'a> {
 
     fn analyze_secret_scan_node(&mut self, node: &SNode, scanned: bool) -> bool {
         match &node.node {
-            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+            Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
                 self.analyze_secret_scan_expr(value, scanned)
             }
             Node::Assignment { target, value, .. } => {
@@ -1657,7 +1657,7 @@ impl<'a> Linter<'a> {
                 }
             }
             Node::LetBinding { value, .. }
-            | Node::VarBinding { value, .. }
+            | Node::ConstBinding { value, .. }
             | Node::ReturnStmt { value: Some(value) }
             | Node::YieldExpr { value: Some(value) }
             | Node::EmitExpr { value }

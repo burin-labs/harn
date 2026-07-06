@@ -10,16 +10,16 @@ import { preset_run_command } from "std/tool_hooks"
  */
 pipeline default() {
   pipeline_lifecycle_audit_log_take()
-  let inner = { args -> {ok: true, ran: args.command} }
-  let wrapper = preset_run_command({stacks: ["rust"], inner: inner})
-  let result = wrapper({command: "echo hello world"})
+  const inner = { args -> {ok: true, ran: args.command} }
+  const wrapper = preset_run_command({stacks: ["rust"], inner: inner})
+  const result = wrapper({command: "echo hello world"})
   /* `inner` ran with the command unchanged. */
   __io_println(result.ok)
   __io_println(result.ran)
   /* When `inner` is omitted the wrapper still returns a no-match
    * passthrough envelope so callers can drive the executor themselves. */
-  let preview_wrapper = preset_run_command({stacks: ["rust"]})
-  let preview = preview_wrapper({command: "echo hello world"})
+  const preview_wrapper = preset_run_command({stacks: ["rust"]})
+  const preview = preview_wrapper({command: "echo hello world"})
   __io_println(preview.action)
   __io_println(preview.command)
   /* Either way, no rule matched so the lifecycle audit log stays empty. */

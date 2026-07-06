@@ -5,16 +5,16 @@
  * succeeds). Booleans accept "yes"/"no" tokens.
  */
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["name", "age", "active"],
     properties: {name: {type: "string"}, age: {type: "integer"}, active: {type: "boolean"}},
   }
-  let raw = "name: \"Grace Hopper\", age: 85, active: yes"
-  let r = schema_recover(raw, schema, {llm_repair: false})
+  const raw = "name: \"Grace Hopper\", age: 85, active: yes"
+  const r = schema_recover(raw, schema, {llm_repair: false})
   __io_println(r.ok)
   __io_println(r.stage)
-  let data = r.data
+  const data = r.data
   if data != nil {
     __io_println(data.name)
     __io_println(data.age)

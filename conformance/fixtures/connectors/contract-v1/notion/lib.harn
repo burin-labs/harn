@@ -21,7 +21,7 @@ pub fn activate(bindings) {
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
+  const body = raw.body_json ?? json_parse(raw.body_text)
   return {
     type: "event",
     event: {

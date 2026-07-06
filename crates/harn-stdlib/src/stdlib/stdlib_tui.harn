@@ -63,12 +63,12 @@ pub fn terminal_width(default_width = 80) -> int {
  * @errors: []
  */
 pub fn rule(char = "─", width = nil) -> string {
-  let mark = if type_of(char) == "string" && len(char) > 0 {
+  const mark = if type_of(char) == "string" && len(char) > 0 {
     substring(char, 0, 1)
   } else {
     "─"
   }
-  let resolved_width = width ?? terminal_width()
+  const resolved_width = width ?? terminal_width()
   if resolved_width <= 0 {
     return ""
   }
@@ -85,12 +85,12 @@ pub fn clear() {
   __tui_clear()
 }
 
-let __TUI_CANCEL_TOKENS = ["q", "quit", "/quit", "exit", "/exit", "/cancel"]
+const __TUI_CANCEL_TOKENS = ["q", "quit", "/quit", "exit", "/exit", "/cancel"]
 
-let __TUI_LINE_SEP = "\t"
+const __TUI_LINE_SEP = "\t"
 
 fn __tui_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -115,13 +115,13 @@ fn __tui_default_display(item) -> string {
 fn __tui_sanitize(text: string) -> string {
   // Backends are line-and-tab-delimited; collapse embedded \r/\n/\t so
   // each item maps to exactly one row with no field-separator surprises.
-  let no_cr = replace(text, "\r", " ")
-  let no_lf = replace(no_cr, "\n", " ")
+  const no_cr = replace(text, "\r", " ")
+  const no_lf = replace(no_cr, "\n", " ")
   return replace(no_lf, __TUI_LINE_SEP, " ")
 }
 
 fn __tui_render_label(item, display_fn) -> string {
-  let raw = if display_fn != nil && __tui_is_callable(display_fn) {
+  const raw = if display_fn != nil && __tui_is_callable(display_fn) {
     display_fn(item)
   } else {
     __tui_default_display(item)
@@ -133,7 +133,7 @@ fn __tui_render_preview(item, preview_fn) -> string {
   if preview_fn == nil || !__tui_is_callable(preview_fn) {
     return ""
   }
-  let raw = preview_fn(item)
+  const raw = preview_fn(item)
   if raw == nil {
     return ""
   }
@@ -157,13 +157,13 @@ fn __tui_error(opts, message: string) -> dict {
 }
 
 fn __tui_probe(binary: string) -> bool {
-  let probed = try {
+  const probed = try {
     command_run({argv: [binary, "--version"]}, {capture: {max_inline_bytes: 256}})
   }
   if !is_ok(probed) {
     return false
   }
-  let result = unwrap(probed)
+  const result = unwrap(probed)
   return result?.exit_code == 0
 }
 
@@ -187,16 +187,16 @@ fn __tui_pick_backend(prefer: string) -> string {
 }
 
 fn __tui_parse_index(token: string, len_items: int) -> any {
-  let trimmed = trim(token)
+  const trimmed = trim(token)
   if trimmed == "" {
     return nil
   }
-  let parsed = to_int(trimmed)
+  const parsed = to_int(trimmed)
   if parsed == nil {
     return nil
   }
   // Numbered display is 1-based to humans; map back to a 0-based index.
-  let zero_based = parsed - 1
+  const zero_based = parsed - 1
   if zero_based < 0 || zero_based >= len_items {
     return nil
   }
@@ -204,10 +204,10 @@ fn __tui_parse_index(token: string, len_items: int) -> any {
 }
 
 fn __tui_parse_multi(line: string, len_items: int) -> any {
-  var selected = []
-  var seen = {}
+  let selected = []
+  let seen = {}
   for piece in split(line, ",") {
-    let idx = __tui_parse_index(piece, len_items)
+    const idx = __tui_parse_index(piece, len_items)
     if idx == nil {
       return nil
     }
@@ -223,15 +223,15 @@ fn __tui_parse_multi(line: string, len_items: int) -> any {
 }
 
 fn __tui_print_menu(items, labels: list<string>, opts) {
-  let prompt = opts?.prompt ?? "Select"
-  let header = opts?.header
+  const prompt = opts?.prompt ?? "Select"
+  const header = opts?.header
   if header != nil && trim(__tui_to_string(header)) != "" {
     __io_write_stdout(__tui_to_string(header) + "\n")
   }
-  var idx = 0
+  let idx = 0
   for label in labels {
-    let human = idx + 1
-    let marker = if opts?.default_index == idx {
+    const human = idx + 1
+    const marker = if opts?.default_index == idx {
       " *"
     } else {
       "  "
@@ -239,8 +239,8 @@ fn __tui_print_menu(items, labels: list<string>, opts) {
     __io_write_stdout(to_string(human) + ")" + marker + label + "\n")
     idx = idx + 1
   }
-  let multi = opts?.multi ?? false
-  let hint = if multi {
+  const multi = opts?.multi ?? false
+  const hint = if multi {
     " (comma-separated; blank=cancel; q to exit)"
   } else {
     " (1-" + to_string(len(items)) + "; q to exit)"
@@ -250,19 +250,19 @@ fn __tui_print_menu(items, labels: list<string>, opts) {
 
 fn __tui_numbered_pick(items, labels, opts) -> dict {
   __tui_print_menu(items, labels, opts)
-  let line_result = __io_read_line({})
+  const line_result = __io_read_line({})
   if !line_result.ok {
     return __tui_eof(opts)
   }
-  let line = trim(line_result.value)
+  const line = trim(line_result.value)
   if contains(__TUI_CANCEL_TOKENS, lowercase(line)) {
     return __tui_cancelled(opts)
   }
-  let multi = opts?.multi ?? false
+  const multi = opts?.multi ?? false
   if line == "" {
     if opts?.default_index != nil && opts.default_index >= 0 && opts.default_index < len(items) {
-      let chosen = items[opts.default_index]
-      let value = if multi {
+      const chosen = items[opts.default_index]
+      const value = if multi {
         [chosen]
       } else {
         chosen
@@ -272,17 +272,17 @@ fn __tui_numbered_pick(items, labels, opts) -> dict {
     return __tui_cancelled(opts)
   }
   if multi {
-    let indices = __tui_parse_multi(line, len(items))
+    const indices = __tui_parse_multi(line, len(items))
     if indices == nil {
       return __tui_error(opts, "invalid selection: " + line)
     }
-    var picked = []
+    let picked = []
     for i in indices {
       picked = picked + [items[i]]
     }
     return __tui_result(true, picked, "selected")
   }
-  let idx = __tui_parse_index(line, len(items))
+  const idx = __tui_parse_index(line, len(items))
   if idx == nil {
     return __tui_error(opts, "invalid selection: " + line)
   }
@@ -290,8 +290,8 @@ fn __tui_numbered_pick(items, labels, opts) -> dict {
 }
 
 fn __tui_join_stdin(labels: list<string>) -> string {
-  var lines = []
-  var idx = 0
+  let lines = []
+  let idx = 0
   for label in labels {
     // Encode rows as "<idx>\t<label>" so we can recover the original
     // item after fzf prints the chosen line back. fzf treats this as a
@@ -306,16 +306,16 @@ fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   if preview_fn == nil || !__tui_is_callable(preview_fn) {
     return {dir: nil, args: []}
   }
-  let dir = harness.fs.temp_dir() + "/harn-tui-" + uuid_v7()
+  const dir = harness.fs.temp_dir() + "/harn-tui-" + uuid_v7()
   harness.fs.mkdir(dir)
-  var idx = 0
+  let idx = 0
   for item in items {
     harness.fs.write_text(dir + "/" + to_string(idx) + ".txt", __tui_render_preview(item, preview_fn))
     idx = idx + 1
   }
   // fzf evaluates `--preview` through the host shell — `cmd.exe` on
   // Windows, `sh` elsewhere — so the read command has to match.
-  let reader = if platform() == "windows" {
+  const reader = if platform() == "windows" {
     "type"
   } else {
     "cat"
@@ -327,17 +327,17 @@ fn __tui_preview_cleanup(harness: Harness, dir) {
   if dir == nil {
     return
   }
-  let _ = try {
+  const _ = try {
     harness.fs.delete(dir)
   }
 }
 
 fn __tui_lookup_by_index(items, label_line: string) -> any {
-  let parts = split(label_line, __TUI_LINE_SEP)
+  const parts = split(label_line, __TUI_LINE_SEP)
   if len(parts) < 1 {
     return nil
   }
-  let idx = to_int(trim(parts[0]))
+  const idx = to_int(trim(parts[0]))
   if idx == nil || idx < 0 || idx >= len(items) {
     return nil
   }
@@ -345,11 +345,11 @@ fn __tui_lookup_by_index(items, label_line: string) -> any {
 }
 
 fn __tui_fzf_decode(items, body: string, multi: bool, opts) -> dict {
-  let lines = split(body, "\n")
+  const lines = split(body, "\n")
   if multi {
-    var picked = []
+    let picked = []
     for raw in lines {
-      let item = __tui_lookup_by_index(items, raw)
+      const item = __tui_lookup_by_index(items, raw)
       if item != nil {
         picked = picked + [item]
       }
@@ -359,7 +359,7 @@ fn __tui_fzf_decode(items, body: string, multi: bool, opts) -> dict {
     }
     return __tui_result(true, picked, "selected")
   }
-  let chosen = __tui_lookup_by_index(items, lines[0])
+  const chosen = __tui_lookup_by_index(items, lines[0])
   if chosen == nil {
     return __tui_error(opts, "fzf returned unparseable selection: " + lines[0])
   }
@@ -367,11 +367,11 @@ fn __tui_fzf_decode(items, body: string, multi: bool, opts) -> dict {
 }
 
 fn __tui_fzf_pick(items, labels, opts) -> dict {
-  let stdin = __tui_join_stdin(labels)
-  let prompt = __tui_to_string(opts?.prompt ?? "Select> ")
-  let header = opts?.header
-  let multi = opts?.multi ?? false
-  var argv = [
+  const stdin = __tui_join_stdin(labels)
+  const prompt = __tui_to_string(opts?.prompt ?? "Select> ")
+  const header = opts?.header
+  const multi = opts?.multi ?? false
+  let argv = [
     "fzf",
     "--ansi",
     "--no-sort",
@@ -385,9 +385,9 @@ fn __tui_fzf_pick(items, labels, opts) -> dict {
   if multi {
     argv = argv + ["-m"]
   }
-  let preview = __tui_preview_setup(harness, items, opts?.preview)
+  const preview = __tui_preview_setup(harness, items, opts?.preview)
   argv = argv + preview.args
-  let result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
+  const result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
   __tui_preview_cleanup(harness, preview.dir)
   if result.exit_code == 130 {
     return __tui_cancelled(opts)
@@ -395,7 +395,7 @@ fn __tui_fzf_pick(items, labels, opts) -> dict {
   if !result.success {
     return __tui_error(opts, "fzf exited with code " + to_string(result.exit_code))
   }
-  let body = trim(result.stdout ?? "")
+  const body = trim(result.stdout ?? "")
   if body == "" {
     return __tui_cancelled(opts)
   }
@@ -403,25 +403,25 @@ fn __tui_fzf_pick(items, labels, opts) -> dict {
 }
 
 fn __tui_gum_pick(items, labels, opts) -> dict {
-  let stdin = join(labels, "\n") + "\n"
-  let header = __tui_to_string(opts?.header ?? opts?.prompt ?? "Select")
-  var argv = ["gum", "choose", "--header", header]
+  const stdin = join(labels, "\n") + "\n"
+  const header = __tui_to_string(opts?.header ?? opts?.prompt ?? "Select")
+  let argv = ["gum", "choose", "--header", header]
   if opts?.multi ?? false {
     argv = argv + ["--no-limit"]
   }
-  let result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
+  const result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
   if !result.success {
     return __tui_cancelled(opts)
   }
-  let body = trim(result.stdout ?? "")
+  const body = trim(result.stdout ?? "")
   if body == "" {
     return __tui_cancelled(opts)
   }
-  let chosen_labels = split(body, "\n")
+  const chosen_labels = split(body, "\n")
   // gum echoes the label back unchanged; map labels → items by position
   // so duplicate labels still resolve deterministically (first match).
-  var label_index = {}
-  var i = 0
+  let label_index = {}
+  let i = 0
   for label in labels {
     if label_index[label] == nil {
       label_index = label_index + {[label]: i}
@@ -429,9 +429,9 @@ fn __tui_gum_pick(items, labels, opts) -> dict {
     i = i + 1
   }
   if opts?.multi ?? false {
-    var picked = []
+    let picked = []
     for raw in chosen_labels {
-      let idx = label_index[raw]
+      const idx = label_index[raw]
       if idx != nil {
         picked = picked + [items[idx]]
       }
@@ -441,7 +441,7 @@ fn __tui_gum_pick(items, labels, opts) -> dict {
     }
     return __tui_result(true, picked, "selected")
   }
-  let idx = label_index[chosen_labels[0]]
+  const idx = label_index[chosen_labels[0]]
   if idx == nil {
     return __tui_error(opts, "gum returned unknown label: " + chosen_labels[0])
   }
@@ -469,26 +469,26 @@ fn __tui_gum_pick(items, labels, opts) -> dict {
  * @errors: []
  */
 pub fn select_from(items: list, opts: SelectFromOptions = {}) -> dict {
-  let options = opts ?? {}
+  const options = opts ?? {}
   if type_of(items) != "list" || len(items) == 0 {
     return __tui_error(options, "select_from: items must be a non-empty list")
   }
-  let prefer = __tui_to_string(options.prefer_external ?? "auto")
+  const prefer = __tui_to_string(options.prefer_external ?? "auto")
   if prefer != "auto" && prefer != "fzf" && prefer != "gum" && prefer != "none" {
     return __tui_error(options, "select_from: prefer_external must be auto/fzf/gum/none (got " + prefer + ")")
   }
-  let display_fn = options.display
+  const display_fn = options.display
   if display_fn != nil && !__tui_is_callable(display_fn) {
     return __tui_error(options, "select_from: display must be a function")
   }
   if options.preview != nil && !__tui_is_callable(options.preview) {
     return __tui_error(options, "select_from: preview must be a function")
   }
-  var labels = []
+  let labels = []
   for item in items {
     labels = labels + [__tui_render_label(item, display_fn)]
   }
-  let backend = if prefer == "none" {
+  const backend = if prefer == "none" {
     "numbered"
   } else {
     __tui_pick_backend(prefer)

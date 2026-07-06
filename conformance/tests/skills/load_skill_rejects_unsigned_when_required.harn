@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+  const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   with_llm_script(
     [
       {
@@ -11,7 +11,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Use the unsigned skill",
         catalog,
         {
@@ -25,8 +25,8 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop finishes")
-      let calls = llm_mock_calls()
-      let second_messages = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const second_messages = json_stringify(calls[1].messages)
       assert(
         contains(second_messages, "UnsignedSkillError"),
         "unsigned skill load fails with a typed error",
@@ -35,8 +35,8 @@ pipeline test(task) {
         !contains(second_messages, "Unsigned skill body should never load."),
         "unsigned skill body is not leaked",
       )
-      let events = transcript_events(result?.transcript)
-      var saw_record = false
+      const events = transcript_events(result?.transcript)
+      let saw_record = false
       for ev in events {
         if ev?.kind == "skill.loaded" && ev?.metadata?.skill_id == "unsigned-review" {
           assert(!ev?.metadata?.signed, "trust record marks skill as unsigned")

@@ -11,7 +11,7 @@ fn events_of(events, kind) {
 }
 
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_test",
@@ -51,8 +51,8 @@ pipeline default() {
       llm_text("Tests green. ##DONE##"),
     ],
     { ->
-      let session = "repair-pass-clears-" + uuid()
-      let captured = agent_capture_events(
+      const session = "repair-pass-clears-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the tests pass, then finish.",
@@ -69,7 +69,7 @@ pipeline default() {
           },
         ) },
       )
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
       __io_println(len(stalls))
       __io_println(captured.result.status)
       __io_println(captured.result?.current_failure == nil)

@@ -11,20 +11,20 @@
 // Pure logic lives in `pub fn`s that take source text directly so the paired
 // test can drive them with no filesystem. `main` does the globbing / reads and
 // argv / env handling.
-let DEFAULT_THRESHOLD = 200
+const DEFAULT_THRESHOLD = 200
 
-let DEFAULT_ALLOWLIST = "scripts/allowed_long_strings.txt"
+const DEFAULT_ALLOWLIST = "scripts/allowed_long_strings.txt"
 
-let MAX_ALLOWLIST_ENTRIES = 10
+const MAX_ALLOWLIST_ENTRIES = 10
 
-let PROTECTED_PATHS = [
+const PROTECTED_PATHS = [
   "crates/harn-vm/src/llm",
   "crates/harn-vm/src/orchestration/workflow.rs",
   "crates/harn-vm/src/orchestration/artifacts.rs",
   "crates/harn-vm/src/orchestration/compaction.rs",
 ]
 
-let EXCLUDED_PROTECTED_FILES = ["crates/harn-vm/src/llm/api/transport.rs", "crates/harn-vm/src/llm/api/options.rs"]
+const EXCLUDED_PROTECTED_FILES = ["crates/harn-vm/src/llm/api/transport.rs", "crates/harn-vm/src/llm/api/options.rs"]
 
 /**
  * 1-based line number of char offset `offset` in `text` — mirrors Python's
@@ -61,14 +61,14 @@ pub fn digest(text: string) -> string {
 
 /** Decode a hex digit (0-9a-fA-F) to its value, or -1 for a non-hex char. */
 pub fn hex_val(ch: string) -> int {
-  let lower = ch.lower()
-  let digits = "0123456789"
-  let di = digits.index_of(lower)
+  const lower = ch.lower()
+  const digits = "0123456789"
+  const di = digits.index_of(lower)
   if di >= 0 {
     return di
   }
-  let hexd = "abcdef"
-  let hi = hexd.index_of(lower)
+  const hexd = "abcdef"
+  const hi = hexd.index_of(lower)
   if hi >= 0 {
     return 10 + hi
   }
@@ -91,23 +91,23 @@ pub fn is_octal(ch: string) -> bool {
  * `raw` is the full literal including the surrounding double quotes.
  */
 pub fn decode_normal_literal(raw: string) -> string {
-  let body = raw.substring(1, raw.len() - 1)
+  const body = raw.substring(1, raw.len() - 1)
   // Fast path: a body with no backslash decodes to itself (the vast majority of
   // literals), avoiding the O(n) per-char rebuild.
   if !body.contains("\\") {
     return body
   }
-  let n = body.len()
-  var out = ""
-  var i = 0
+  const n = body.len()
+  let out = ""
+  let i = 0
   while i < n {
-    let ch = body.char_at(i)
+    const ch = body.char_at(i)
     if ch != "\\" || i + 1 >= n {
       out = out + ch
       i = i + 1
       continue
     }
-    let next = body.char_at(i + 1)
+    const next = body.char_at(i + 1)
     if next == "n" {
       out = out + "\n"
       i = i + 2
@@ -133,18 +133,18 @@ pub fn decode_normal_literal(raw: string) -> string {
       out = out + control_placeholder()
       i = i + 2
     } else if is_octal(next) {
-      var digits = next
-      var j = i + 2
+      let digits = next
+      let j = i + 2
       while j < n && digits.len() < 3 && is_octal(body.char_at(j)) {
         digits = digits + body.char_at(j)
         j = j + 1
       }
       // One code point per octal escape (parse_octal kept for completeness).
-      let _ = parse_octal(digits)
+      const _ = parse_octal(digits)
       out = out + control_placeholder()
       i = j
     } else if next == "x" {
-      let res = decode_hex_run(body, i + 2, 2)
+      const res = decode_hex_run(body, i + 2, 2)
       if res.ok {
         out = out + control_placeholder()
         i = res.next
@@ -153,7 +153,7 @@ pub fn decode_normal_literal(raw: string) -> string {
         i = i + 1
       }
     } else if next == "u" {
-      let res = decode_hex_run(body, i + 2, 4)
+      const res = decode_hex_run(body, i + 2, 4)
       if res.ok {
         out = out + control_placeholder()
         i = res.next
@@ -162,7 +162,7 @@ pub fn decode_normal_literal(raw: string) -> string {
         i = i + 1
       }
     } else if next == "U" {
-      let res = decode_hex_run(body, i + 2, 8)
+      const res = decode_hex_run(body, i + 2, 8)
       if res.ok {
         out = out + control_placeholder()
         i = res.next
@@ -191,7 +191,7 @@ pub fn control_placeholder() -> string {
 
 /** Parse an octal digit string (1-3 chars) into its integer value. */
 pub fn parse_octal(digits: string) -> int {
-  var value = 0
+  let value = 0
   for d in digits.split("") {
     if d != "" {
       value = value * 8 + "01234567".index_of(d)
@@ -207,14 +207,14 @@ pub fn parse_octal(digits: string) -> int {
  * caller emitting the literal backslash.
  */
 pub fn decode_hex_run(body: string, start: int, width: int) -> any {
-  let n = body.len()
+  const n = body.len()
   if start + width > n {
     return {ok: false, value: 0, next: start}
   }
-  var value = 0
-  var i = start
+  let value = 0
+  let i = start
   while i < start + width {
-    let v = hex_val(body.char_at(i))
+    const v = hex_val(body.char_at(i))
     if v < 0 {
       return {ok: false, value: 0, next: start}
     }
@@ -232,7 +232,7 @@ pub fn is_ident_char(ch: string) -> bool {
   if ch == "_" {
     return true
   }
-  let lower = ch.lower()
+  const lower = ch.lower()
   if "0123456789".index_of(lower) >= 0 {
     return true
   }
@@ -248,10 +248,10 @@ pub fn is_ident_char(ch: string) -> bool {
  * scan and same-count backreference. The lookbehind is applied by the caller.
  */
 pub fn raw_string_pattern() -> string {
-  let q = "\""
-  let h = "#"
-  let b = "(?:.|\n)*?"
-  let alts = "r" + q + b + q
+  const q = "\""
+  const h = "#"
+  const b = "(?:.|\n)*?"
+  const alts = "r" + q + b + q
     + "|r"
     + h
     + q
@@ -294,13 +294,13 @@ pub fn raw_string_pattern() -> string {
  * string, exactly as the Python codec does.
  */
 pub fn find_raw_literals(source: string) -> list {
-  var out: list = []
+  let out: list = []
   for m in regex_captures(raw_string_pattern(), source, "") {
-    let raw = m.groups[0]
-    let start = m.end - raw.len()
-    let first = raw.index_of("\"")
-    let last = raw.last_index_of("\"")
-    let body = raw.substring(first + 1, last)
+    const raw = m.groups[0]
+    const start = m.end - raw.len()
+    const first = raw.index_of("\"")
+    const last = raw.last_index_of("\"")
+    const body = raw.substring(first + 1, last)
     out = out + [{start: start, end: m.end, body: body, line: line_of(source, start)}]
   }
   return out
@@ -313,14 +313,14 @@ pub fn find_raw_literals(source: string) -> list {
  * Mirrors `iter_literals`.
  */
 pub fn iter_literals_text(source: string) -> list {
-  var out: list = []
-  let raws = find_raw_literals(source)
+  let out: list = []
+  const raws = find_raw_literals(source)
   for r in raws {
     out = out + [{line: r.line, text: r.body}]
   }
   for m in regex_captures(r#""(?:\\.|[^"\\\n])*""#, source, "") {
-    let start = m.start
-    var inside = false
+    const start = m.start
+    let inside = false
     for r in raws {
       if r.start <= start && start < r.end {
         inside = true
@@ -339,7 +339,7 @@ pub fn iter_literals_text(source: string) -> list {
  * with a `...` suffix (137 + "..."), matching `print_findings`.
  */
 pub fn make_preview(text: string) -> string {
-  let preview = normalize(text)
+  const preview = normalize(text)
   if preview.len() > 140 {
     return preview.substring(0, 137) + "..."
   }
@@ -367,22 +367,22 @@ pub fn format_finding(location: string, length: int, dgst: string, preview: stri
  * `file` is the display path used in the malformed-line message.
  */
 pub fn parse_allowlist(text: string, file: string) -> any {
-  var locations: list<string> = []
-  var line_number = 0
+  let locations: list<string> = []
+  let line_number = 0
   for raw_line in text.split("\n") {
     line_number = line_number + 1
-    let line = raw_line.trim()
+    const line = raw_line.trim()
     if line == "" || line.starts_with("#") {
       continue
     }
-    let m = regex_captures(r"^([^#\s].*?:\d+)\s+#\s+(\S.*)$", line, "")
+    const m = regex_captures(r"^([^#\s].*?:\d+)\s+#\s+(\S.*)$", line, "")
     if m.count == 0 {
       return {
         locations: locations,
         error: "${file}:${line_number}: expected '<path>:<line> # one-line justification'",
       }
     }
-    let loc = m[0].groups[0]
+    const loc = m[0].groups[0]
     if !locations.contains(loc) {
       locations = locations + [loc]
     }
@@ -400,13 +400,13 @@ pub fn parse_allowlist(text: string, file: string) -> any {
  * unique, so the appended original is a never-triggered tiebreak.
  */
 pub fn sort_by_path_parts(paths: list<string>) -> list<string> {
-  var decorated: list<string> = []
+  let decorated: list<string> = []
   for p in paths {
     decorated = decorated + [regex_replace(r"/", "\t", p) + "|" + p]
   }
-  var out: list<string> = []
+  let out: list<string> = []
   for d in decorated.sort() {
-    let bar = d.index_of("|")
+    const bar = d.index_of("|")
     out = out + [d.substring(bar + 1, d.len())]
   }
   return out
@@ -418,13 +418,13 @@ pipeline main(task) {
   }
   // Parse flags: --root, --allowlist, --threshold (each takes the next arg),
   // and the remaining positionals as path overrides.
-  var root = "."
-  var allowlist = DEFAULT_ALLOWLIST
-  var threshold = DEFAULT_THRESHOLD
-  var paths: list<string> = []
-  var i = 0
+  let root = "."
+  let allowlist = DEFAULT_ALLOWLIST
+  let threshold = DEFAULT_THRESHOLD
+  let paths: list<string> = []
+  let i = 0
   while i < argv.count {
-    let a = argv[i]
+    const a = argv[i]
     if a == "--root" {
       root = argv[i + 1]
       i = i + 2
@@ -447,12 +447,12 @@ pipeline main(task) {
     __io_eprintln("allowlist not found: ${allowlist}")
     return 1
   }
-  let alw = parse_allowlist(harness.fs.read_text(join_root(root, allowlist)), allowlist)
+  const alw = parse_allowlist(harness.fs.read_text(join_root(root, allowlist)), allowlist)
   if alw.error != nil {
     __io_eprintln(alw.error)
     return 1
   }
-  let allowed: list<string> = alw.locations
+  const allowed: list<string> = alw.locations
   if allowed.count > MAX_ALLOWLIST_ENTRIES {
     __io_eprintln(
       "${allowlist}: allowlist has ${allowed.count} entries; keep it at <= ${MAX_ALLOWLIST_ENTRIES}",
@@ -460,16 +460,16 @@ pipeline main(task) {
     return 1
   }
   // Scan.
-  var findings: list = []
-  var observed: list<string> = []
+  let findings: list = []
+  let observed: list<string> = []
   for rel in collect_files(root, paths) {
-    let source = harness.fs.read_text(join_root(root, rel))
+    const source = harness.fs.read_text(join_root(root, rel))
     for lit in iter_literals_text(source) {
-      let length = normalized_length(lit.text)
+      const length = normalized_length(lit.text)
       if length < threshold {
         continue
       }
-      let location = "${rel}:${lit.line}"
+      const location = "${rel}:${lit.line}"
       if !observed.contains(location) {
         observed = observed + [location]
       }
@@ -481,7 +481,7 @@ pipeline main(task) {
     }
   }
   // Stale allowlist entries (sorted), then SystemExit(1).
-  var stale: list<string> = []
+  let stale: list<string> = []
   for loc in allowed {
     if !observed.contains(loc) {
       stale = stale + [loc]
@@ -497,7 +497,7 @@ pipeline main(task) {
     for f in findings {
       __io_eprintln(format_finding(f.location, f.length, digest(f.text), make_preview(f.text)))
     }
-    let first = findings[0].location
+    const first = findings[0].location
     __io_eprintln(
       "\nMove model-facing wording to stdlib .harn.prompt assets, or add "
         + "a reviewed '${first} # justification' entry "
@@ -515,18 +515,18 @@ pipeline main(task) {
  * "ok" source must yield none.
  */
 fn run_self_test() -> int {
-  let bad_source = "fn bad() { let _ = \"You are an assistant. You must respond with a "
+  const bad_source = "fn bad() { let _ = \"You are an assistant. You must respond with a "
     + "careful tool call, then explain the result to the user in detail "
     + "without skipping any required schema fields. Include enough "
     + "model-facing procedural prose here to cross the protected-path "
     + "threshold and prove the ratchet catches new Rust-owned prompts.\"; }\n"
-  let ok_source = "const TAG: &str = \"<tool_call>\";\n"
+  const ok_source = "const TAG: &str = \"<tool_call>\";\n"
     + "fn err() { let _ = \"tool_dispatch: missing tool name\"; }\n"
-  let bad_findings = scan_source("bad.rs", bad_source, DEFAULT_THRESHOLD)
-  let ok_findings = scan_source("ok.rs", ok_source, DEFAULT_THRESHOLD)
+  const bad_findings = scan_source("bad.rs", bad_source, DEFAULT_THRESHOLD)
+  const ok_findings = scan_source("ok.rs", ok_source, DEFAULT_THRESHOLD)
   if bad_findings.count != 1 || ok_findings.count > 0 {
     __io_eprintln("self-test failed")
-    var all: list = []
+    let all: list = []
     all = all + bad_findings
     all = all + ok_findings
     for f in all {
@@ -543,9 +543,9 @@ fn run_self_test() -> int {
  * `{location, length, text}` findings at or above `threshold`.
  */
 fn scan_source(rel: string, source: string, threshold: int) -> list {
-  var findings: list = []
+  let findings: list = []
   for lit in iter_literals_text(source) {
-    let length = normalized_length(lit.text)
+    const length = normalized_length(lit.text)
     if length >= threshold {
       findings = findings
         + [{location: "${rel}:${lit.line}", length: length, text: lit.text}]
@@ -573,13 +573,13 @@ fn join_root(root: string, path: string) -> string {
  * recover the repo-relative path the Python `relative_to(root)` produces.
  */
 fn rel_from_glob(path: string, root: string) -> string {
-  var rel = path
-  let idx = path.index_of("/./")
+  let rel = path
+  const idx = path.index_of("/./")
   if idx >= 0 {
     rel = path.substring(idx + 3, path.len())
   }
   if root != "." && root != "" {
-    var prefix = root
+    let prefix = root
     if !prefix.ends_with("/") {
       prefix = prefix + "/"
     }
@@ -597,16 +597,16 @@ fn rel_from_glob(path: string, root: string) -> string {
  * present and not excluded. Path order follows the input `paths` list.
  */
 fn collect_files(root: string, paths: list<string>) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for path in paths {
     if path.ends_with(".rs") {
       if harness.fs.exists(join_root(root, path)) && !EXCLUDED_PROTECTED_FILES.contains(path) {
         out = out + [path]
       }
     } else {
-      var matched: list<string> = []
+      let matched: list<string> = []
       for g in harness.fs.glob(join_root(root, path) + "/**/*.rs") {
-        let rel = rel_from_glob(g, root)
+        const rel = rel_from_glob(g, root)
         if EXCLUDED_PROTECTED_FILES.contains(rel) {
           continue
         }

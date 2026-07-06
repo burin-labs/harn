@@ -2,8 +2,8 @@ import "std/triggers"
 import { triage_issue_payload } from "lib"
 
 fn local_triage(event: TriggerEvent) -> dict {
-  let raw = event.provider_payload.raw ?? {}
-  let context = handler_context()
+  const raw = event.provider_payload.raw ?? {}
+  const context = handler_context()
   return triage_issue_payload(raw, context?.trace_id ?? event.trace_id, context?.replay_of_event_id)
 }
 
@@ -49,9 +49,9 @@ fn fire(handle, suffix) {
 }
 
 pipeline default() {
-  let port = harness.env.get_or("HARN_DEMO_REMOTE_PORT", "8787")
-  let local = fire(register_local(), "local")
-  let remote = fire(register_remote(port), "a2a")
+  const port = harness.env.get_or("HARN_DEMO_REMOTE_PORT", "8787")
+  const local = fire(register_local(), "local")
+  const remote = fire(register_remote(port), "a2a")
   __io_println(
     json_stringify(
       {

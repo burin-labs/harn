@@ -15,7 +15,7 @@ pipeline test(task) {
     log(e)
   }
   // require with expression
-  let x = 5
+  const x = 5
   require x > 0, "x must be positive"
   log("x is positive")
 }

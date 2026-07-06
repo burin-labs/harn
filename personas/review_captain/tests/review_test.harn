@@ -38,14 +38,14 @@ fn _llm_blocking(_request) {
 }
 
 pipeline test_dry_run_skips_llm(task) {
-  let receipt = review_pr(_request("", [], true), default_policy(), nil)
+  const receipt = review_pr(_request("", [], true), default_policy(), nil)
   assert_eq(receipt.self_review_skipped_reason, "dry_run")
   assert_eq(receipt.rounds, 0)
 }
 
 pipeline test_secret_in_diff_returns_blocking(task) {
-  let diff = "+let key = \"AKIAIOSFODNN7EXAMPLE\""
-  let receipt = review_pr(_request(diff, ["src/secret.swift"], true), default_policy(), nil)
+  const diff = "+let key = \"AKIAIOSFODNN7EXAMPLE\""
+  const receipt = review_pr(_request(diff, ["src/secret.swift"], true), default_policy(), nil)
   assert_eq(receipt.blocking, true)
   assert_eq(receipt.verdict, "blocking")
   assert(len(receipt.secret_scan_findings) > 0)
@@ -53,8 +53,8 @@ pipeline test_secret_in_diff_returns_blocking(task) {
 }
 
 pipeline test_clean_diff_returns_approve(task) {
-  let diff = "+let answer = 42"
-  let receipt = review_pr(
+  const diff = "+let answer = 42"
+  const receipt = review_pr(
     _request(diff, ["Tests/AnswerTests.swift"], false),
     default_policy(),
     {llm_hook: _llm_no_findings},
@@ -66,8 +66,8 @@ pipeline test_clean_diff_returns_approve(task) {
 }
 
 pipeline test_llm_blocking_finding_is_propagated(task) {
-  let diff = "+let answer = 42"
-  let receipt = review_pr(
+  const diff = "+let answer = 42"
+  const receipt = review_pr(
     _request(diff, ["Tests/AnswerTests.swift"], false),
     default_policy(),
     {llm_hook: _llm_blocking},
@@ -79,8 +79,8 @@ pipeline test_llm_blocking_finding_is_propagated(task) {
 }
 
 pipeline test_risky_paths_surface_in_receipt(task) {
-  let diff = "+# changed workflow"
-  let receipt = review_pr(
+  const diff = "+# changed workflow"
+  const receipt = review_pr(
     _request(diff, [".github/workflows/deploy.yml"], false),
     default_policy(),
     {llm_hook: _llm_no_findings},

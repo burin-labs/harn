@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn search_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "search",
@@ -25,7 +25,7 @@ pipeline main() {
       },
     ],
     { ->
-      let budgeted = sub_agent_run(
+      const budgeted = sub_agent_run(
         "Investigate under a tiny budget.",
         {
           provider: "mock",
@@ -43,9 +43,9 @@ pipeline main() {
   with_llm_script(
     [llm_text("background summary")],
     { ->
-      let handle = sub_agent_run("Summarize in the background.", {provider: "mock", background: true})
+      const handle = sub_agent_run("Summarize in the background.", {provider: "mock", background: true})
       __io_println(handle?.mode == "sub_agent")
-      let done = wait_agent(handle)
+      const done = wait_agent(handle)
       __io_println(done?.status == "completed")
       __io_println(done?.result?.ok)
       __io_println(contains(done?.result?.summary ?? "", "background summary"))
@@ -57,7 +57,7 @@ pipeline main() {
       llm_text("background tool summary"),
     ],
     { ->
-      let tool_handle = sub_agent_run(
+      const tool_handle = sub_agent_run(
         "Search in the background with a Harn-owned tool.",
         {
           provider: "mock",
@@ -69,7 +69,7 @@ pipeline main() {
         },
       )
       __io_println(tool_handle?.mode == "sub_agent")
-      let tool_done = wait_agent(tool_handle)
+      const tool_done = wait_agent(tool_handle)
       __io_println(tool_done?.status == "completed")
       __io_println(tool_done?.result?.ok)
       __io_println(contains(tool_done?.result?.summary ?? "", "background tool summary"))

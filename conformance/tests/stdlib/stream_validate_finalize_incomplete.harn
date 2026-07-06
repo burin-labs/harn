@@ -1,10 +1,10 @@
 import { stream_validate_chunk, stream_validate_create, stream_validate_finalize } from "std/json"
 
 pipeline default(task) {
-  let validator = stream_validate_create({type: "dict"})
-  let r1 = stream_validate_chunk(validator, "{\"a\":")
+  const validator = stream_validate_create({type: "dict"})
+  const r1 = stream_validate_chunk(validator, "{\"a\":")
   __io_println(r1.verdict)
-  let r2 = stream_validate_finalize(validator)
+  const r2 = stream_validate_finalize(validator)
   __io_println(r2.verdict)
   __io_println(r2.reason)
   __io_println(r2.path)

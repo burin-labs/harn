@@ -7,7 +7,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("A"), llm_text("B"), llm_text("A"), llm_text("C"), llm_text("A")],
     { ->
-      let result = self_consistency(
+      const result = self_consistency(
         "Pick a letter",
         "",
         {

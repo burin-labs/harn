@@ -9,7 +9,7 @@ type GhaAnnotationOptions = {
 }
 
 fn __gha_escape_data(value) -> string {
-  let text = to_string(value ?? "")
+  const text = to_string(value ?? "")
   return replace(replace(replace(text, "%", "%25"), "\r", "%0D"), "\n", "%0A")
 }
 
@@ -25,7 +25,7 @@ fn __gha_kv(key, value) {
 }
 
 fn __gha_file_path(path, fallback) {
-  let explicit = path ?? fallback
+  const explicit = path ?? fallback
   if explicit != nil && explicit != "" {
     return explicit
   }
@@ -59,8 +59,8 @@ pub fn gha_escape_property(value) -> string {
  * @errors: []
  */
 pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptions = {}) -> string {
-  let opts = options ?? {}
-  var props = []
+  const opts = options ?? {}
+  let props = []
   for pair in [
     __gha_kv("file", opts.file),
     __gha_kv("line", opts.line),
@@ -73,12 +73,12 @@ pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptio
       props = props.push(pair)
     }
   }
-  let suffix = if len(props) > 0 {
+  const suffix = if len(props) > 0 {
     " " + join(props, ",")
   } else {
     ""
   }
-  let annotation_kind = kind ?? "notice"
+  const annotation_kind = kind ?? "notice"
   return "::" + annotation_kind + suffix + "::" + __gha_escape_data(message)
 }
 
@@ -119,7 +119,7 @@ pub fn gha_error(message: string, options: GhaAnnotationOptions = {}) {
  * @errors: []
  */
 pub fn gha_env_block(name: string, value, delimiter: string? = nil) -> string {
-  let delim = delimiter ?? ("harn_" + uuid_v7())
+  const delim = delimiter ?? ("harn_" + uuid_v7())
   return name + "<<" + delim + "\n" + to_string(value ?? "") + "\n" + delim + "\n"
 }
 
@@ -130,7 +130,7 @@ pub fn gha_env_block(name: string, value, delimiter: string? = nil) -> string {
  * @errors: []
  */
 pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
-  let target = __gha_file_path(path, harness.env.get("GITHUB_OUTPUT"))
+  const target = __gha_file_path(path, harness.env.get("GITHUB_OUTPUT"))
   if target == nil {
     return false
   }
@@ -145,7 +145,7 @@ pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
  * @errors: []
  */
 pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
-  let target = __gha_file_path(path, harness.env.get("GITHUB_ENV"))
+  const target = __gha_file_path(path, harness.env.get("GITHUB_ENV"))
   if target == nil {
     return false
   }
@@ -160,7 +160,7 @@ pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
  * @errors: []
  */
 pub fn gha_append_summary(markdown: string, path: string? = nil) -> bool {
-  let target = __gha_file_path(path, harness.env.get("GITHUB_STEP_SUMMARY"))
+  const target = __gha_file_path(path, harness.env.get("GITHUB_STEP_SUMMARY"))
   if target == nil {
     return false
   }

@@ -1,7 +1,7 @@
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 
 fn __scope_classifier_label(value) {
-  let label = lowercase(trim(to_string(value ?? "")))
+  const label = lowercase(trim(to_string(value ?? "")))
   if label == "in_scope" || label == "inscope" || label == "in-scope" {
     return "in_scope"
   }
@@ -15,7 +15,7 @@ fn __scope_classifier_label(value) {
 }
 
 fn __scope_classifier_confidence(value, fallback) {
-  let parsed = to_float(value ?? fallback)
+  const parsed = to_float(value ?? fallback)
   if parsed == nil {
     return fallback
   }
@@ -29,7 +29,7 @@ fn __scope_classifier_confidence(value, fallback) {
 }
 
 fn __scope_classifier_threshold(value) {
-  let threshold = to_float(value ?? 0.65)
+  const threshold = to_float(value ?? 0.65)
   if threshold == nil || threshold < 0.0 || threshold > 1.0 {
     throw "pre_turn_scope_classifier: confidence_threshold must be between 0.0 and 1.0"
   }
@@ -53,15 +53,15 @@ fn __scope_classifier_recent_context(messages, limit) {
   if limit == 0 {
     return []
   }
-  let total = len(messages)
-  var start = total - limit
+  const total = len(messages)
+  let start = total - limit
   if start < 0 {
     start = 0
   }
-  var out = []
-  var i = start
+  let out = []
+  let i = start
   while i < total {
-    let msg = messages[i]
+    const msg = messages[i]
     out = out
       .push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
     i = i + 1
@@ -85,9 +85,9 @@ fn __scope_classifier_anchor_summary(anchor) {
   if anchor == nil {
     return "Current session has no workspace anchor."
   }
-  let primary = to_string(anchor?.primary ?? "(none)")
-  let roots = anchor?.additional_roots ?? []
-  var out = "Current workspace anchor: " + primary + "\nMounted additional roots:"
+  const primary = to_string(anchor?.primary ?? "(none)")
+  const roots = anchor?.additional_roots ?? []
+  let out = "Current workspace anchor: " + primary + "\nMounted additional roots:"
   if type_of(roots) != "list" || len(roots) == 0 {
     return out + "\n  (none)"
   }
@@ -127,14 +127,14 @@ fn __scope_classifier_normalize(raw, threshold, skip_main_turn) {
       skip_main_turn: false,
     }
   }
-  let original_label = __scope_classifier_label(raw?.label)
-  let confidence = __scope_classifier_confidence(raw?.confidence, 0.0)
-  let label = if original_label != "escalate" && confidence < threshold {
+  const original_label = __scope_classifier_label(raw?.label)
+  const confidence = __scope_classifier_confidence(raw?.confidence, 0.0)
+  const label = if original_label != "escalate" && confidence < threshold {
     "escalate"
   } else {
     original_label
   }
-  let evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
+  const evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
   return raw
     + {
     label: label,
@@ -176,22 +176,22 @@ fn __scope_classifier_fail_open(error, threshold) {
  * @example: pre_turn_scope_classifier({enabled: true})
  */
 pub fn pre_turn_scope_classifier(opts = nil) {
-  let cfg = opts ?? {}
+  const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
     throw "pre_turn_scope_classifier: opts must be a dict or nil; got " + type_of(cfg)
   }
-  let enabled = cfg?.enabled ?? false
+  const enabled = cfg?.enabled ?? false
   if type_of(enabled) != "bool" {
     throw "pre_turn_scope_classifier: enabled must be a bool"
   }
-  let model = trim(to_string(cfg?.model ?? "ollama:qwen3:1.7b"))
-  let threshold = __scope_classifier_threshold(cfg?.confidence_threshold)
-  let context_window = __scope_classifier_context_window(cfg?.context_window)
-  let skip_main_turn = cfg?.skip_main_turn ?? true
+  const model = trim(to_string(cfg?.model ?? "ollama:qwen3:1.7b"))
+  const threshold = __scope_classifier_threshold(cfg?.confidence_threshold)
+  const context_window = __scope_classifier_context_window(cfg?.context_window)
+  const skip_main_turn = cfg?.skip_main_turn ?? true
   if type_of(skip_main_turn) != "bool" {
     throw "pre_turn_scope_classifier: skip_main_turn must be a bool"
   }
-  let classifier = cfg?.classifier ?? cfg?.classify
+  const classifier = cfg?.classifier ?? cfg?.classify
   if classifier != nil && type_of(classifier) != "closure" {
     throw "pre_turn_scope_classifier: classifier must be a closure or nil; got " + type_of(classifier)
   }
@@ -199,20 +199,20 @@ pub fn pre_turn_scope_classifier(opts = nil) {
     if !enabled {
       return nil
     }
-    let source_messages = if type_of(payload?.messages) == "list" {
+    const source_messages = if type_of(payload?.messages) == "list" {
       payload.messages
     } else {
       payload?.recent_context ?? []
     }
-    let recent_context = __scope_classifier_recent_context(source_messages, context_window)
-    let classifier_payload = payload
+    const recent_context = __scope_classifier_recent_context(source_messages, context_window)
+    const classifier_payload = payload
       + {recent_context: recent_context, context_window: context_window, confidence_threshold: threshold}
     if classifier != nil {
-      let custom = try {
+      const custom = try {
         classifier(classifier_payload)
       }
       if is_err(custom) {
-        let err = unwrap_err(custom)
+        const err = unwrap_err(custom)
         if error_category(err) == "cancelled" {
           throw err
         }
@@ -221,8 +221,8 @@ pub fn pre_turn_scope_classifier(opts = nil) {
       return __scope_classifier_normalize(unwrap(custom), threshold, skip_main_turn)
         + {classifier_kind: "custom"}
     }
-    let schema = __scope_classifier_schema()
-    var llm_opts = {
+    const schema = __scope_classifier_schema()
+    let llm_opts = {
       model: model,
       output_schema: schema,
       max_tokens: cfg?.max_tokens ?? 256,
@@ -237,7 +237,7 @@ pub fn pre_turn_scope_classifier(opts = nil) {
         llm_opts[key] = cfg[key]
       }
     }
-    let checkpoint = agent_typed_output_checkpoint(
+    const checkpoint = agent_typed_output_checkpoint(
       "agent.scope_classifier",
       __scope_classifier_prompt(classifier_payload, recent_context),
       schema,

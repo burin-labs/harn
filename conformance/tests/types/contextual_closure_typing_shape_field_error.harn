@@ -1,4 +1,4 @@
 pipeline default() {
-  let h: {callback: fn(int) -> int} = {callback: { x -> x + "oops" }}
+  const h: {callback: fn(int) -> int} = {callback: { x -> x + "oops" }}
   __io_println(0)
 }

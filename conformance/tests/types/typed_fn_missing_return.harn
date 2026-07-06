@@ -1,6 +1,6 @@
 pipeline test(task) {
   fn bad() -> int {
-    let x = 1
+    const x = 1
   }
   bad()
 }

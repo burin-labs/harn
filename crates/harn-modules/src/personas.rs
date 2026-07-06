@@ -629,7 +629,7 @@ fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
             collect_many(args, calls);
         }
         Node::LetBinding { value, .. }
-        | Node::VarBinding { value, .. }
+        | Node::ConstBinding { value, .. }
         | Node::ReturnStmt { value: Some(value) }
         | Node::YieldExpr { value: Some(value) }
         | Node::EmitExpr { value }

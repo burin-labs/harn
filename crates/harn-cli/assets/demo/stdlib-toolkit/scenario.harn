@@ -54,47 +54,47 @@ pipeline default(_task) {
   //    multi-task scheduler can run several `default` pipelines in
   //    parallel against the same defaults binding without
   //    cross-contaminating them.
-  let isolated = deep_clone(defaults())
+  const isolated = deep_clone(defaults())
   // 2. Layer task-specific overrides. `deep_merge` recurses into
   //    `config` instead of clobbering it, so `retries: 5` lands but
   //    `backoff: 100` and `retry_on` stick around.
-  let merged = deep_merge(isolated, task_overrides())
+  const merged = deep_merge(isolated, task_overrides())
   // 3. Operator-attached chat references frequently contain
   //    duplicates because the picker dedupes on display order, not
   //    on identity. `unique` collapses them in first-seen order;
   //    `dict_from_pairs` indexes the result for the renderer.
-  let chats = unique(merged.previous_chats ?? [])
-  var pairs = []
+  const chats = unique(merged.previous_chats ?? [])
+  let pairs = []
   for c in chats {
     pairs = pairs + [[c, c]]
   }
-  let chat_index = dict_from_pairs(pairs)
+  const chat_index = dict_from_pairs(pairs)
   // 4. Render an XML context block the LLM is meant to absorb. The
   //    `<previous_chats>` element gets repeated `<item>` children
   //    automatically — the canonical shape for "list of strings"
   //    fields in system prompts.
-  let context = {config: merged.config, goal: merged.goal, persona: merged.persona, previous_chats: chats}
-  let xml = to_xml(context, {pretty: true, root: "context"})
+  const context = {config: merged.config, goal: merged.goal, persona: merged.persona, previous_chats: chats}
+  const xml = to_xml(context, {pretty: true, root: "context"})
   // 5. Round-trip through the parser so the demo asserts to_xml +
   //    from_xml are inverses on real data. The runner just verifies
   //    the parsed shape; the receipt below carries the comparison.
-  let parsed = from_xml(xml)
+  const parsed = from_xml(xml)
   // 5b. Demonstrate the lossless-parse option. For general-purpose
   //     XML where the inner tag matters (e.g. payloads of the form
   //     `<addresses><a>...</a><a>...</a></addresses>` where `a` is
   //     meaningful), `preserve_repeated_tag` keeps the tag instead
   //     of collapsing the children to a bare list.
-  let lossless = from_xml("<addresses><a>1</a><a>2</a></addresses>", {preserve_repeated_tag: true})
-  let lossless_count = len(lossless.addresses.a)
+  const lossless = from_xml("<addresses><a>1</a><a>2</a></addresses>", {preserve_repeated_tag: true})
+  const lossless_count = len(lossless.addresses.a)
   // 6. Frame the rendered context inside a 60-column margin with a
   //    visible divider so it's easy to diff against future renders.
-  let divider = repeat("-", 60)
-  let wrapped = word_wrap(xml, 60)
-  let framed = "${divider}\n${indent(wrapped, "  ")}\n${divider}"
+  const divider = repeat("-", 60)
+  const wrapped = word_wrap(xml, 60)
+  const framed = "${divider}\n${indent(wrapped, "  ")}\n${divider}"
   __io_println("=== stdlib-toolkit demo ===")
   __io_println(framed)
   __io_println("")
-  let receipt = {
+  const receipt = {
     receipt_kind: "stdlib_toolkit_receipt",
     chat_index_keys: len(chat_index),
     config_keys: len(merged.config),

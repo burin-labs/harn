@@ -5,8 +5,8 @@ pipeline main() {
   with_llm_script(
     [llm_text("Which test runner should I use?"), llm_text("Done. ##DONE##")],
     { ->
-      let answerer = scripted_user(["Use Vitest."])
-      let result = agent_loop(
+      const answerer = scripted_user(["Use Vitest."])
+      const result = agent_loop(
         "Create index.test.ts with full edge coverage.",
         nil,
         {
@@ -17,8 +17,8 @@ pipeline main() {
           post_turn_callback: simulated_user_post_turn(answerer),
         },
       )
-      let calls = llm_mock_calls()
-      let status = simulated_user_status(answerer)
+      const calls = llm_mock_calls()
+      const status = simulated_user_status(answerer)
       __io_println(result.status)
       __io_println(result.stop_reason)
       __io_println(result.llm.iterations)

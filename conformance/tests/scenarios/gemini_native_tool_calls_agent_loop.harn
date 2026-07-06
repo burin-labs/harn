@@ -7,10 +7,10 @@ import { llm_text, with_llm_script } from "std/testing"
  * `provider: "mock"` plus a Gemini model exercises Gemini-shaped conversation
  * history while staying deterministic.
  */
-let lookups = atomic(0)
+const lookups = atomic(0)
 
 fn lookup_tools() {
-  let registry = tool_registry()
+  const registry = tool_registry()
   return tool_define(
     registry,
     "lookup",
@@ -56,7 +56,7 @@ pipeline test(task) {
       llm_text("##DONE##"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Use the lookup tool.",
         nil,
         {
@@ -71,9 +71,9 @@ pipeline test(task) {
       )
       assert(result.status == "done", "Gemini mock agent loop finishes")
       assert(atomic_get(lookups) == 1, "Gemini mock tool call dispatches once")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(len(calls) == 2, "agent loop makes a follow-up model turn")
-      let followup = json_stringify(calls[1].messages)
+      const followup = json_stringify(calls[1].messages)
       assert(contains(followup, "functionCall"), "assistant history preserves Gemini functionCall")
       assert(
         contains(followup, "tool_call_id"),

@@ -17,12 +17,12 @@ pipeline test_archive_exactly_one_reports_archived(task) {
   // keep_first 1 + keep_last 1 over 3 messages drains exactly the single
   // middle message and inserts one summary -> len(before) == len(after) == 3,
   // the precise case the length-delta heuristic got wrong.
-  let messages = [
+  const messages = [
     {role: "user", content: "u0 ".repeat(10)},
     {role: "user", content: "u1 ".repeat(10)},
     {role: "user", content: "u2 ".repeat(10)},
   ]
-  let result = transcript_auto_compact(
+  const result = transcript_auto_compact(
     messages,
     {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
   )
@@ -38,16 +38,16 @@ pipeline test_archive_exactly_one_reports_archived(task) {
 pipeline test_archived_count_is_not_inferred_from_length(task) {
   // The bug was specifically `archived = if len(before) == len(after) { 0 }`.
   // Prove archived is reported even though the lengths match.
-  let messages = [
+  const messages = [
     {role: "user", content: "u0 ".repeat(10)},
     {role: "user", content: "u1 ".repeat(10)},
     {role: "user", content: "u2 ".repeat(10)},
   ]
-  let result = transcript_auto_compact(
+  const result = transcript_auto_compact(
     messages,
     {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
   )
-  let length_unchanged = len(result.messages) == len(messages)
+  const length_unchanged = len(result.messages) == len(messages)
   // Length is unchanged but archived > 0 -> a length-delta inference would be
   // wrong here, which is the whole point of this fix.
   assert_eq(length_unchanged, true)
@@ -57,13 +57,13 @@ pipeline test_archived_count_is_not_inferred_from_length(task) {
 pipeline test_summary_index_follows_keep_first(task) {
   // The engine inserts the summary at index `keep_first`, not index 0. The
   // consumer must read the summary from the engine, not from messages[0].
-  let messages = [
+  const messages = [
     {role: "user", content: "preserved-head ".repeat(8)},
     {role: "user", content: "u1 ".repeat(10)},
     {role: "user", content: "u2 ".repeat(10)},
     {role: "user", content: "u3 ".repeat(10)},
   ]
-  let result = transcript_auto_compact(
+  const result = transcript_auto_compact(
     messages,
     {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
   )
@@ -78,8 +78,8 @@ pipeline test_summary_index_follows_keep_first(task) {
 pipeline test_no_compaction_reports_zero_archived(task) {
   // Under threshold: nothing to do. archived is 0, messages unchanged, and the
   // summary is empty -- the genuine terminal/irreducible signal.
-  let messages = [{role: "user", content: "small"}, {role: "assistant", content: "ok"}]
-  let result = transcript_auto_compact(
+  const messages = [{role: "user", content: "small"}, {role: "assistant", content: "ok"}]
+  const result = transcript_auto_compact(
     messages,
     {compact_strategy: "truncate", keep_last: 1, token_threshold: 1000000},
   )

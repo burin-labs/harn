@@ -6,8 +6,8 @@
  * returned true for `NaN <= x` / `NaN >= x`.
  */
 pipeline default(task) {
-  let nan = sqrt(-1.0)
-  let nan2 = sqrt(-2.0)
+  const nan = sqrt(-1.0)
+  const nan2 = sqrt(-2.0)
   // Ordered comparisons against a plain float: all false.
   __io_println(nan < 5.0)
   __io_println(nan > 5.0)

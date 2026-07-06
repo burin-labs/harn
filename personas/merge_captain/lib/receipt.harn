@@ -10,16 +10,16 @@ import { action_is_mutating } from "states"
 
 /** Build the per-PR merge receipt. */
 pub fn build_receipt(args) {
-  let policy = args.policy
-  let observation = args.observation
-  let classification = args.classification
-  let prior_state = args.prior_state ?? "discovered"
-  let commands = args.commands_run ?? []
-  let outcome = args.outcome ?? "wait"
-  let dry_run = args.dry_run ?? true
-  let approval = approval_state(policy, classification, dry_run)
-  let evidence = evidence_payload(observation, classification)
-  let repair_run_summary = if args.repair_run != nil {
+  const policy = args.policy
+  const observation = args.observation
+  const classification = args.classification
+  const prior_state = args.prior_state ?? "discovered"
+  const commands = args.commands_run ?? []
+  const outcome = args.outcome ?? "wait"
+  const dry_run = args.dry_run ?? true
+  const approval = approval_state(policy, classification, dry_run)
+  const evidence = evidence_payload(observation, classification)
+  const repair_run_summary = if args.repair_run != nil {
     summarize_repair_run(args.repair_run)
   } else {
     nil
@@ -62,7 +62,7 @@ pub fn summarize_repair_run(run) {
   if run == nil {
     return nil
   }
-  let output = run.output
+  const output = run.output
   return {
     _type: "merge_captain.repair_run_link",
     version: 1,
@@ -111,7 +111,7 @@ pub fn approval_state(policy, classification, dry_run) {
 
 /** Evidence payload mixed into the receipt. */
 pub fn evidence_payload(observation, classification) {
-  let extras = classification.evidence ?? {}
+  const extras = classification.evidence ?? {}
   return {
     classifier: extras,
     snapshot: {
@@ -133,16 +133,16 @@ pub fn evidence_payload(observation, classification) {
 
 /** Roll up per-PR receipts into a sweep-level summary. */
 pub fn summarize_sweep(receipts, sweep_id, started_at, finished_at) {
-  var by_state = {}
-  var by_action = {}
-  var by_repo = {}
+  let by_state = {}
+  let by_action = {}
+  let by_repo = {}
   for receipt in receipts {
-    let state = receipt.classification.state
-    let action = receipt.classification.action
-    let repo = receipt.repo
-    let prior_state_count = by_state[state] ?? 0
-    let prior_action_count = by_action[action] ?? 0
-    let prior_repo_count = by_repo[repo] ?? 0
+    const state = receipt.classification.state
+    const action = receipt.classification.action
+    const repo = receipt.repo
+    const prior_state_count = by_state[state] ?? 0
+    const prior_action_count = by_action[action] ?? 0
+    const prior_repo_count = by_repo[repo] ?? 0
     by_state[state] = prior_state_count + 1
     by_action[action] = prior_action_count + 1
     by_repo[repo] = prior_repo_count + 1

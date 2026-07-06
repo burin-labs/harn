@@ -8,7 +8,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("all done")],
     { ->
-      let result = agent_loop("hi", nil, {provider: "mock"})
+      const result = agent_loop("hi", nil, {provider: "mock"})
       __io_println(result.status)
       __io_println(result.visible_text)
       __io_println(len(llm_mock_calls()))

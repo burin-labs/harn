@@ -19,7 +19,7 @@ fn __stream_string(value) -> string {
 }
 
 fn __stream_non_empty(value, fallback) -> string {
-  let text = trim(__stream_string(value))
+  const text = trim(__stream_string(value))
   if text == "" {
     return fallback
   }
@@ -27,7 +27,7 @@ fn __stream_non_empty(value, fallback) -> string {
 }
 
 fn __stream_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -36,7 +36,7 @@ fn __stream_has_key(d, key) -> bool {
 }
 
 fn __stream_drop_keys(d, keys) {
-  var out = __stream_dict(d)
+  let out = __stream_dict(d)
   for key in keys {
     if __stream_has_key(out, key) {
       out = out.remove(key)
@@ -46,9 +46,9 @@ fn __stream_drop_keys(d, keys) {
 }
 
 fn __stream_private_config(config) {
-  let cfg = __stream_dict(config)
-  let nested = __stream_dict(cfg?.private)
-  let merged = cfg + nested
+  const cfg = __stream_dict(config)
+  const nested = __stream_dict(cfg?.private)
+  const merged = cfg + nested
   return {
     open_tag: __stream_non_empty(merged?.open_tag, "<secret>"),
     close_tag: __stream_non_empty(merged?.close_tag, "</secret>"),
@@ -63,10 +63,10 @@ fn __stream_tail(text: string, keep: int) -> string {
 }
 
 fn __stream_open_prefix_suffix_len(text: string, open_tag: string) -> int {
-  let limit = min(len(text), max(len(open_tag) - 1, 0))
-  var size = limit
+  const limit = min(len(text), max(len(open_tag) - 1, 0))
+  let size = limit
   while size > 0 {
-    let suffix = text[len(text) - size:len(text)]
+    const suffix = text[len(text) - size:len(text)]
     if starts_with(open_tag, suffix) {
       return size
     }
@@ -86,19 +86,19 @@ fn __stream_open_prefix_suffix_len(text: string, open_tag: string) -> int {
  * @api_stability: experimental
  */
 pub fn agent_private_text_filter(text, config = nil) -> string {
-  let cfg = __stream_private_config(config)
-  let open_tag = cfg.open_tag
-  let close_tag = cfg.close_tag
-  var rest = __stream_string(text)
-  var out = ""
+  const cfg = __stream_private_config(config)
+  const open_tag = cfg.open_tag
+  const close_tag = cfg.close_tag
+  let rest = __stream_string(text)
+  let out = ""
   for _ in range(1000) {
-    let start = rest.index_of(open_tag)
+    const start = rest.index_of(open_tag)
     if start < 0 {
       return out + rest
     }
     out = out + rest[0:start]
-    let after_open = rest[start + len(open_tag):len(rest)]
-    let end = after_open.index_of(close_tag)
+    const after_open = rest[start + len(open_tag):len(rest)]
+    const end = after_open.index_of(close_tag)
     if end < 0 {
       return out
     }
@@ -119,7 +119,7 @@ pub fn agent_private_text_filter(text, config = nil) -> string {
  * @api_stability: experimental
  */
 pub fn agent_private_stream_state(config = nil) {
-  let cfg = __stream_private_config(config)
+  const cfg = __stream_private_config(config)
   return {
     config: cfg,
     pending: "",
@@ -144,19 +144,19 @@ pub fn agent_private_stream_state(config = nil) {
  * @api_stability: experimental
  */
 pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
-  let existing = __stream_dict(state)
-  let cfg = __stream_private_config(config ?? existing?.config)
-  let open_tag = cfg.open_tag
-  let close_tag = cfg.close_tag
-  let close_hold = max(len(close_tag) - 1, 0)
-  let raw_delta = __stream_string(delta)
-  var pending = __stream_string(existing?.pending) + raw_delta
-  var private_open = existing?.private_open ?? false
-  var visible_delta = ""
-  var loop_count = 0
+  const existing = __stream_dict(state)
+  const cfg = __stream_private_config(config ?? existing?.config)
+  const open_tag = cfg.open_tag
+  const close_tag = cfg.close_tag
+  const close_hold = max(len(close_tag) - 1, 0)
+  const raw_delta = __stream_string(delta)
+  let pending = __stream_string(existing?.pending) + raw_delta
+  let private_open = existing?.private_open ?? false
+  let visible_delta = ""
+  let loop_count = 0
   while loop_count < 1000 && len(pending) > 0 {
     if private_open {
-      let close_at = pending.index_of(close_tag)
+      const close_at = pending.index_of(close_tag)
       if close_at < 0 {
         pending = __stream_tail(pending, close_hold)
         break
@@ -164,14 +164,14 @@ pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
       pending = pending[close_at + len(close_tag):len(pending)]
       private_open = false
     } else {
-      let open_at = pending.index_of(open_tag)
+      const open_at = pending.index_of(open_tag)
       if open_at >= 0 {
         visible_delta = visible_delta + pending[0:open_at]
         pending = pending[open_at + len(open_tag):len(pending)]
         private_open = true
       } else {
-        let keep = __stream_open_prefix_suffix_len(pending, open_tag)
-        let emit_len = max(len(pending) - keep, 0)
+        const keep = __stream_open_prefix_suffix_len(pending, open_tag)
+        const emit_len = max(len(pending) - keep, 0)
         if emit_len > 0 {
           visible_delta = visible_delta + pending[0:emit_len]
           pending = pending[emit_len:len(pending)]
@@ -181,7 +181,7 @@ pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
     }
     loop_count = loop_count + 1
   }
-  let next = existing
+  const next = existing
     + {
     config: cfg,
     pending: pending,
@@ -206,18 +206,18 @@ pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
  * @api_stability: experimental
  */
 pub fn agent_private_stream_finish(state = nil, config = nil) {
-  let existing = __stream_dict(state)
-  let cfg = __stream_private_config(config ?? existing?.config)
-  let open_tag = cfg.open_tag
-  var pending = __stream_string(existing?.pending)
-  var final_delta = ""
-  let private_open = existing?.private_open ?? false
+  const existing = __stream_dict(state)
+  const cfg = __stream_private_config(config ?? existing?.config)
+  const open_tag = cfg.open_tag
+  let pending = __stream_string(existing?.pending)
+  let final_delta = ""
+  const private_open = existing?.private_open ?? false
   if !private_open && pending != "" && !starts_with(open_tag, pending) {
     final_delta = pending
     pending = ""
   }
-  let visible = __stream_string(existing?.visible_text) + final_delta
-  let next = existing
+  const visible = __stream_string(existing?.visible_text) + final_delta
+  const next = existing
     + {
     config: cfg,
     pending: pending,
@@ -262,11 +262,11 @@ fn __stream_llm_options(options) {
  * @api_stability: experimental
  */
 pub fn agent_stream_call(prompt, system = nil, options = nil) {
-  let cfg = __stream_dict(options)
-  let llm_options = __stream_llm_options(cfg)
-  var state = agent_private_stream_state(cfg)
-  var finish_reason = nil
-  let consumed = try {
+  const cfg = __stream_dict(options)
+  const llm_options = __stream_llm_options(cfg)
+  let state = agent_private_stream_state(cfg)
+  let finish_reason = nil
+  const consumed = try {
     for chunk in llm_stream_call(prompt, system, llm_options) {
       let delta = chunk?.delta ?? chunk?.visible_delta ?? ""
       let event = agent_private_stream_delta(state, delta, cfg)
@@ -284,7 +284,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
     true
   }
   if is_err(consumed) {
-    var result = {
+    let result = {
       ok: false,
       status: "stream_interrupt",
       error: unwrap_err(consumed),
@@ -295,7 +295,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
       state: state,
     }
     if __stream_is_callable(cfg?.on_error) {
-      let notified = try {
+      const notified = try {
         cfg.on_error(result)
         true
       }
@@ -305,16 +305,16 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
     }
     return result
   }
-  let finished = agent_private_stream_finish(state, cfg)
+  const finished = agent_private_stream_finish(state, cfg)
   state = finished.state
   if finished.visible_delta != "" && __stream_is_callable(cfg?.on_delta) {
-    let event = {state: state, visible_delta: finished.visible_delta, raw_delta: "", private_open: false}
-    let notified = try {
+    const event = {state: state, visible_delta: finished.visible_delta, raw_delta: "", private_open: false}
+    const notified = try {
       cfg.on_delta(finished.visible_delta, event, state)
       true
     }
     if is_err(notified) {
-      var result = {
+      let result = {
         ok: false,
         status: "stream_interrupt",
         error: unwrap_err(notified),
@@ -325,7 +325,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
         state: state,
       }
       if __stream_is_callable(cfg?.on_error) {
-        let error_notified = try {
+        const error_notified = try {
           cfg.on_error(result)
           true
         }
@@ -336,7 +336,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
       return result
     }
   }
-  var result = {
+  let result = {
     ok: true,
     status: "done",
     text: finished.text,
@@ -349,14 +349,14 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
     state: state,
   }
   if __stream_is_callable(cfg?.on_done) {
-    let notified = try {
+    const notified = try {
       cfg.on_done(result)
       true
     }
     if is_err(notified) {
       result = result + {ok: false, status: "stream_interrupt", error: unwrap_err(notified)}
       if __stream_is_callable(cfg?.on_error) {
-        let error_notified = try {
+        const error_notified = try {
           cfg.on_error(result)
           true
         }

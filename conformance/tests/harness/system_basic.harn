@@ -1,7 +1,7 @@
 fn main(harness: Harness) {
-  let cpu = harness.system.cpu()
-  let mem = harness.system.memory()
-  let plat = harness.system.platform()
+  const cpu = harness.system.cpu()
+  const mem = harness.system.memory()
+  const plat = harness.system.platform()
   harness.stdio.println(type_of(cpu))
   harness.stdio.println(cpu["count"])
   harness.stdio.println(cpu["model"])

@@ -12,23 +12,23 @@ import { warn_and_continue } from "std/lifecycle/on_budget"
 pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
-      let state = {
+      const state = {
         kind: "tokens",
         limit: "max_output_tokens",
         limit_value: 4096.0,
         consumed_tokens: 4500,
         threshold_pct: 1.1,
       }
-      let passthrough = warn_and_continue(harness, state)
+      const passthrough = warn_and_continue(harness, state)
       harness.stdio.println("passthrough_kind=" + passthrough.kind)
       harness.stdio.println("passthrough_consumed=" + to_string(passthrough.consumed_tokens))
       harness.stdio.println("same_keys=" + to_string(len(keys(passthrough)) == len(keys(state))))
-      let audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind_0=" + audits[0].kind)
       harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)
       harness.stdio.println("audit_kind_1=" + audits[1].kind)
-      let tags = audits[1].payload.tags
+      const tags = audits[1].payload.tags
       harness.stdio.println("reminder_has_tag_0=" + tags[0])
       harness.stdio.println("reminder_has_tag_1=" + tags[1])
       harness.stdio.println("reminder_dedupe_key=" + audits[1].payload.dedupe_key)

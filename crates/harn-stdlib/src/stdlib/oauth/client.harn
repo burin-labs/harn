@@ -61,30 +61,30 @@ import {
   token_type,
 } from "std/oauth/token_exchange"
 
-let __DEFAULT_PKCE_VERIFIER_BYTES = 64
+const __DEFAULT_PKCE_VERIFIER_BYTES = 64
 
-let __DEFAULT_STATE_BYTES = 16
+const __DEFAULT_STATE_BYTES = 16
 
-let __TTL_PREREFRESH_NUMERATOR = 3
+const __TTL_PREREFRESH_NUMERATOR = 3
 
-let __TTL_PREREFRESH_DENOMINATOR = 4
+const __TTL_PREREFRESH_DENOMINATOR = 4
 
-let __DEFAULT_TOKEN_KEY = "access-token"
+const __DEFAULT_TOKEN_KEY = "access-token"
 
-let __AUDIT_TOPIC = "oauth.client.audit"
+const __AUDIT_TOPIC = "oauth.client.audit"
 
-let __AUDIT_KIND_REFRESH = "token_refreshed"
+const __AUDIT_KIND_REFRESH = "token_refreshed"
 
-let __AUDIT_KIND_EXCHANGE = "token_exchanged"
+const __AUDIT_KIND_EXCHANGE = "token_exchanged"
 
-let __AUDIT_KIND_REVOKED = "token_revoked"
+const __AUDIT_KIND_REVOKED = "token_revoked"
 
-let __DIAGNOSTIC_REFRESH_EXPIRED = "HARN-OAU-002"
+const __DIAGNOSTIC_REFRESH_EXPIRED = "HARN-OAU-002"
 
 type OAuthClient = dict
 
 fn __require_string(value, field) {
-  let text = to_string(value ?? "")
+  const text = to_string(value ?? "")
   if text == "" {
     throw "std/oauth/client: " + field + " is required"
   }
@@ -99,8 +99,8 @@ fn __require_provider(provider) {
   if type_of(provider) != "dict" {
     throw "std/oauth/client: provider must be a dict (use std/oauth/providers)"
   }
-  let _ = __require_url(provider?.auth_url, "provider.auth_url")
-  let _ = __require_url(provider?.token_url, "provider.token_url")
+  const _ = __require_url(provider?.auth_url, "provider.auth_url")
+  const _ = __require_url(provider?.token_url, "provider.token_url")
   return provider
 }
 
@@ -108,10 +108,10 @@ fn __require_storage(storage) {
   if type_of(storage) != "dict" {
     throw "std/oauth/client: opts.storage is required (use std/oauth/storage)"
   }
-  let g = storage?.get
-  let s = storage?.set
-  let d = storage?.delete
-  let w = storage?.with_refresh_lock
+  const g = storage?.get
+  const s = storage?.set
+  const d = storage?.delete
+  const w = storage?.with_refresh_lock
   if type_of(g) != "closure" && type_of(g) != "builtin" {
     throw "std/oauth/client: opts.storage.get must be a function"
   }
@@ -145,7 +145,7 @@ fn __random_state(n_bytes) {
 }
 
 fn __scope_separator(provider) {
-  let id = lowercase(to_string(provider?.id ?? ""))
+  const id = lowercase(to_string(provider?.id ?? ""))
   if id == "linear" {
     return ","
   }
@@ -153,10 +153,10 @@ fn __scope_separator(provider) {
 }
 
 fn __join_scopes(scopes, separator) {
-  var parts = []
+  let parts = []
   if scopes != nil {
     for raw in scopes {
-      let text = trim(to_string(raw ?? ""))
+      const text = trim(to_string(raw ?? ""))
       if text != "" {
         parts = parts + [text]
       }
@@ -173,7 +173,7 @@ fn __url_encode_value(value) {
 }
 
 fn __form_body(params) {
-  var parts = []
+  let parts = []
   for entry in params {
     parts = parts + [url_encode(entry.key) + "=" + __url_encode_value(entry.value)]
   }
@@ -181,18 +181,18 @@ fn __form_body(params) {
 }
 
 fn __append_query(url, pairs) {
-  var sep = "?"
+  let sep = "?"
   if contains(url, "?") {
     sep = "&"
   }
-  var built = url
-  var first = true
+  let built = url
+  let first = true
   for entry in pairs {
-    let value = entry.value
+    const value = entry.value
     if value == nil {
       continue
     }
-    let prefix = first ? sep : "&"
+    const prefix = first ? sep : "&"
     built = built + prefix + url_encode(entry.key) + "=" + __url_encode_value(value)
     first = false
   }
@@ -200,7 +200,7 @@ fn __append_query(url, pairs) {
 }
 
 fn __token_auth_method(opts, has_secret) {
-  let explicit = opts?.token_auth_method
+  const explicit = opts?.token_auth_method
   if explicit != nil && to_string(explicit) != "" {
     return to_string(explicit)
   }
@@ -222,11 +222,11 @@ fn __now_seconds(harness: Harness) {
 }
 
 fn __token_expires_at(token, now_s) {
-  let stored = token?.expires_at_unix
+  const stored = token?.expires_at_unix
   if stored != nil {
     return to_int(stored)
   }
-  let ttl = token?.expires_in
+  const ttl = token?.expires_in
   if ttl != nil {
     return now_s + to_int(ttl)
   }
@@ -237,12 +237,12 @@ fn __token_is_stale(token, now_s) {
   if token == nil {
     return true
   }
-  let access = to_string(token?.access_token ?? "")
+  const access = to_string(token?.access_token ?? "")
   if access == "" {
     return true
   }
-  let issued = token?.issued_at_unix
-  let expires = __token_expires_at(token, now_s)
+  const issued = token?.issued_at_unix
+  const expires = __token_expires_at(token, now_s)
   if expires == nil {
     return false
   }
@@ -252,11 +252,11 @@ fn __token_is_stale(token, now_s) {
   if issued == nil {
     return false
   }
-  let lifetime = expires - to_int(issued)
+  const lifetime = expires - to_int(issued)
   if lifetime <= 0 {
     return false
   }
-  let threshold = to_int(issued) + lifetime * __TTL_PREREFRESH_NUMERATOR / __TTL_PREREFRESH_DENOMINATOR
+  const threshold = to_int(issued) + lifetime * __TTL_PREREFRESH_NUMERATOR / __TTL_PREREFRESH_DENOMINATOR
   return now_s >= threshold
 }
 
@@ -280,7 +280,7 @@ fn __redact_endpoint(url) {
   if url == nil {
     return nil
   }
-  let text = to_string(url)
+  const text = to_string(url)
   if !contains(text, "?") {
     return text
   }
@@ -295,14 +295,14 @@ fn __post_token_request(
   auth_method,
   form_pairs,
 ) {
-  let method = __validate_auth_method(auth_method)
-  var headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  var pairs = form_pairs + [{key: "client_id", value: client_id}]
+  const method = __validate_auth_method(auth_method)
+  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  let pairs = form_pairs + [{key: "client_id", value: client_id}]
   if method == "client_secret_basic" {
     if client_secret == nil {
       throw "std/oauth/client: client_secret_basic requires client_secret"
     }
-    let blob = to_string(client_id) + ":" + to_string(client_secret)
+    const blob = to_string(client_id) + ":" + to_string(client_secret)
     headers = merge(headers, {Authorization: "Basic " + base64_encode(blob)})
   } else if method == "client_secret_post" {
     if client_secret == nil {
@@ -310,28 +310,28 @@ fn __post_token_request(
     }
     pairs = pairs + [{key: "client_secret", value: client_secret}]
   }
-  let body = __form_body(pairs)
-  let response = harness.net.post(token_url, body, {headers: headers})
+  const body = __form_body(pairs)
+  const response = harness.net.post(token_url, body, {headers: headers})
   if !(response?.ok ?? false) {
-    let parsed = __safe_json_parse(response?.body ?? "")
-    let detail = (parsed?.error_description ?? parsed?.error ?? "token endpoint returned status ")
+    const parsed = __safe_json_parse(response?.body ?? "")
+    const detail = (parsed?.error_description ?? parsed?.error ?? "token endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/client: token request failed: " + to_string(detail)
   }
-  let parsed = __safe_json_parse(response?.body ?? "")
+  const parsed = __safe_json_parse(response?.body ?? "")
   if parsed == nil {
     throw "std/oauth/client: token endpoint did not return JSON"
   }
-  let access = parsed?.access_token
+  const access = parsed?.access_token
   if access == nil || to_string(access) == "" {
-    let err_msg = parsed?.error_description ?? parsed?.error ?? "missing access_token"
+    const err_msg = parsed?.error_description ?? parsed?.error ?? "missing access_token"
     throw "std/oauth/client: token response invalid: " + to_string(err_msg)
   }
   return parsed
 }
 
 fn __safe_json_parse(text) {
-  let s = to_string(text ?? "")
+  const s = to_string(text ?? "")
   if s == "" {
     return nil
   }
@@ -343,30 +343,30 @@ fn __safe_json_parse(text) {
 }
 
 fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
-  var token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
-  let issued_token_type = parsed?.issued_token_type
+  let token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
+  const issued_token_type = parsed?.issued_token_type
   if issued_token_type != nil && to_string(issued_token_type) != "" {
     token_set = token_set + {issued_token_type: to_string(issued_token_type)}
   }
-  let token_type = parsed?.token_type
+  const token_type = parsed?.token_type
   if token_type != nil {
     token_set = token_set + {token_type: to_string(token_type)}
   }
-  let expires_in = parsed?.expires_in
+  const expires_in = parsed?.expires_in
   if expires_in != nil {
-    let ttl_s = to_int(expires_in)
+    const ttl_s = to_int(expires_in)
     token_set = token_set + {expires_in: ttl_s, expires_at_unix: issued_at + ttl_s}
   } else if parsed?.expires_at_unix != nil {
     token_set = token_set + {expires_at_unix: to_int(parsed.expires_at_unix)}
   }
-  let new_refresh = parsed?.refresh_token
+  const new_refresh = parsed?.refresh_token
   if new_refresh != nil && to_string(new_refresh) != "" {
     token_set = token_set + {refresh_token: to_string(new_refresh)}
   } else if prev_refresh != nil && to_string(prev_refresh) != "" {
     // Preserve the prior refresh token on grants that don't rotate.
     token_set = token_set + {refresh_token: to_string(prev_refresh)}
   }
-  let returned_scope = parsed?.scope
+  const returned_scope = parsed?.scope
   if returned_scope != nil && to_string(returned_scope) != "" {
     token_set = token_set + {scopes: split(to_string(returned_scope), " ")}
   } else if scopes != nil && len(scopes) > 0 {
@@ -377,23 +377,23 @@ fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
 
 fn __audit_refresh(provider_id, storage_key, prev, next, reason) {
   // Audit MUST NOT include the access token. Only timing and presence.
-  let payload = {
+  const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
     reason: to_string(reason),
     prev: __redact_token(prev),
     next: __redact_token(next),
   }
-  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REFRESH, payload, {provider: to_string(provider_id)})
+  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REFRESH, payload, {provider: to_string(provider_id)})
 }
 
 fn __audit_exchange(provider_id, storage_key, next) {
-  let payload = {provider: to_string(provider_id), storage_key: to_string(storage_key), next: __redact_token(next)}
-  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
+  const payload = {provider: to_string(provider_id), storage_key: to_string(storage_key), next: __redact_token(next)}
+  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
 }
 
 fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_type) {
-  let payload = {
+  const payload = {
     provider: to_string(provider_id),
     storage_key: storage_key,
     grant_type: token_exchange_grant_type(),
@@ -402,20 +402,20 @@ fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_
     issued_token_type: next?.issued_token_type,
     next: __redact_token(next),
   }
-  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
+  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
 }
 
 fn __audit_revoked(provider_id, storage_key, prev, revoke_url_used) {
   // Audit MUST NOT include the access token. Records presence + the
   // (sanitised) endpoint that was contacted so compliance reviewers
   // can confirm the RFC 7009 hint was used.
-  let payload = {
+  const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
     revoke_endpoint: __redact_endpoint(revoke_url_used),
     prev: __redact_token(prev),
   }
-  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REVOKED, payload, {provider: to_string(provider_id)})
+  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REVOKED, payload, {provider: to_string(provider_id)})
 }
 
 fn __try_revoke_remote(harness: Harness, cfg, token_value) {
@@ -426,42 +426,42 @@ fn __try_revoke_remote(harness: Harness, cfg, token_value) {
   if cfg.revoke_url == nil {
     return nil
   }
-  let url_text = to_string(cfg.revoke_url)
+  const url_text = to_string(cfg.revoke_url)
   if url_text == "" {
     return nil
   }
-  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  let body = __form_body([{key: "token", value: token_value}, {key: "client_id", value: cfg.client_id}])
+  const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  const body = __form_body([{key: "token", value: token_value}, {key: "client_id", value: cfg.client_id}])
   try {
-    let _ = harness.net.post(url_text, body, {headers: headers})
+    const _ = harness.net.post(url_text, body, {headers: headers})
   } catch (_err) {
-    let _ = nil
+    const _ = nil
   }
   return url_text
 }
 
 fn __revoke_locked(harness: Harness, cfg) {
-  let prev = cfg.storage.get(cfg.storage_key)
-  let access = prev?.access_token
-  let remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(harness, cfg, to_string(access))
+  const prev = cfg.storage.get(cfg.storage_key)
+  const access = prev?.access_token
+  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(harness, cfg, to_string(access))
   cfg.storage.delete(cfg.storage_key)
   __audit_revoked(cfg.provider_id, cfg.storage_key, prev, remote_url)
   return nil
 }
 
 fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
-  let refresh = prev_token?.refresh_token
+  const refresh = prev_token?.refresh_token
   if refresh == nil || to_string(refresh) == "" {
     throw __DIAGNOSTIC_REFRESH_EXPIRED
       + ": std/oauth/client: no refresh_token available; re-run authorization"
   }
-  var form = [{key: "grant_type", value: "refresh_token"}, {key: "refresh_token", value: refresh}]
-  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  let form = [{key: "grant_type", value: "refresh_token"}, {key: "refresh_token", value: refresh}]
+  const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   if scopes_str != nil {
     form = form + [{key: "scope", value: scopes_str}]
   }
-  let issued_at = __now_seconds(harness)
-  var parsed = nil
+  const issued_at = __now_seconds(harness)
+  let parsed = nil
   try {
     parsed = __post_token_request(
       harness,
@@ -478,7 +478,7 @@ fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
     // match on it and re-run authorization rather than retrying.
     throw __DIAGNOSTIC_REFRESH_EXPIRED + ": std/oauth/client: refresh failed (" + to_string(err) + ")"
   }
-  let next_token = __build_token_set(parsed, cfg.scopes, issued_at, refresh)
+  const next_token = __build_token_set(parsed, cfg.scopes, issued_at, refresh)
   cfg.storage.set(cfg.storage_key, next_token)
   __audit_refresh(cfg.provider_id, cfg.storage_key, prev_token, next_token, reason)
   return next_token
@@ -516,12 +516,12 @@ fn __refresh_needed(stored, now_s, reason, observed_token = nil) -> bool {
 }
 
 fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
-  let observed = cfg.storage.get(cfg.storage_key)
+  const observed = cfg.storage.get(cfg.storage_key)
   if observed == nil {
     throw __DIAGNOSTIC_REFRESH_EXPIRED
       + ": std/oauth/client: no token in storage; run authorization first"
   }
-  let now_s = __now_seconds(harness)
+  const now_s = __now_seconds(harness)
   if !__refresh_needed(observed, now_s, reason, observed_token) {
     return observed
   }
@@ -529,12 +529,12 @@ fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
     .with_refresh_lock(
     cfg.storage_key,
     { ->
-      let stored = cfg.storage.get(cfg.storage_key)
+      const stored = cfg.storage.get(cfg.storage_key)
       if stored == nil {
         throw __DIAGNOSTIC_REFRESH_EXPIRED
           + ": std/oauth/client: no token in storage; run authorization first"
       }
-      let locked_now_s = __now_seconds(harness)
+      const locked_now_s = __now_seconds(harness)
       if !__refresh_needed(stored, locked_now_s, reason, observed_token) {
         return stored
       }
@@ -544,8 +544,8 @@ fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
 }
 
 fn __get_valid_token(harness: Harness, cfg) {
-  let stored = cfg.storage.get(cfg.storage_key)
-  let now_s = __now_seconds(harness)
+  const stored = cfg.storage.get(cfg.storage_key)
+  const now_s = __now_seconds(harness)
   if stored != nil && !__token_is_stale(stored, now_s) {
     return stored
   }
@@ -553,11 +553,11 @@ fn __get_valid_token(harness: Harness, cfg) {
 }
 
 fn __start_authorization(cfg) {
-  let verifier = __pkce_verifier_string(__DEFAULT_PKCE_VERIFIER_BYTES)
-  let challenge = __pkce_challenge(verifier)
-  let state = __random_state(__DEFAULT_STATE_BYTES)
-  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
-  var pairs = [
+  const verifier = __pkce_verifier_string(__DEFAULT_PKCE_VERIFIER_BYTES)
+  const challenge = __pkce_challenge(verifier)
+  const state = __random_state(__DEFAULT_STATE_BYTES)
+  const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  let pairs = [
     {key: "response_type", value: "code"},
     {key: "client_id", value: cfg.client_id},
     {key: "redirect_uri", value: cfg.redirect_uri},
@@ -576,7 +576,7 @@ fn __start_authorization(cfg) {
       pairs = pairs + [{key: k, value: cfg.extra_auth_params[k]}]
     }
   }
-  let url = __append_query(cfg.auth_url, pairs)
+  const url = __append_query(cfg.auth_url, pairs)
   return {
     url: url,
     state: state,
@@ -591,31 +591,31 @@ fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
   if pkce == nil || type_of(pkce) != "dict" {
     throw "std/oauth/client: exchange_code requires the pkce dict from start_authorization"
   }
-  let expected_state = to_string(pkce?.state ?? "")
-  let supplied_state = to_string(state ?? "")
+  const expected_state = to_string(pkce?.state ?? "")
+  const supplied_state = to_string(state ?? "")
   if expected_state == "" || supplied_state == "" || expected_state != supplied_state {
     throw "std/oauth/client: OAuth state mismatch; aborting exchange"
   }
-  let verifier = to_string(pkce?.code_verifier ?? "")
+  const verifier = to_string(pkce?.code_verifier ?? "")
   if verifier == "" {
     throw "std/oauth/client: missing PKCE code_verifier in pkce dict"
   }
-  let code_str = to_string(code ?? "")
+  const code_str = to_string(code ?? "")
   if code_str == "" {
     throw "std/oauth/client: authorization code is required"
   }
-  var form = [
+  let form = [
     {key: "grant_type", value: "authorization_code"},
     {key: "code", value: code_str},
     {key: "redirect_uri", value: cfg.redirect_uri},
     {key: "code_verifier", value: verifier},
   ]
-  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   if scopes_str != nil {
     form = form + [{key: "scope", value: scopes_str}]
   }
-  let issued_at = __now_seconds(harness)
-  let parsed = __post_token_request(
+  const issued_at = __now_seconds(harness)
+  const parsed = __post_token_request(
     harness,
     cfg.token_url,
     cfg.client_id,
@@ -623,7 +623,7 @@ fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
     cfg.token_auth_method,
     form,
   )
-  let token_set = __build_token_set(parsed, cfg.scopes, issued_at, nil)
+  const token_set = __build_token_set(parsed, cfg.scopes, issued_at, nil)
   cfg.storage.set(cfg.storage_key, token_set)
   __audit_exchange(cfg.provider_id, cfg.storage_key, token_set)
   return token_set
@@ -634,7 +634,7 @@ fn __append_repeated_form_values(form, key, values) {
     return form
   }
   if type_of(values) == "list" {
-    var out = form
+    let out = form
     for value in values {
       if value != nil && to_string(value) != "" {
         out = out + [{key: key, value: value}]
@@ -655,7 +655,7 @@ fn __scope_string(scope) {
   if type_of(scope) == "list" {
     return __join_scopes(scope, " ")
   }
-  let text = trim(to_string(scope))
+  const text = trim(to_string(scope))
   return text == "" ? nil : text
 }
 
@@ -664,22 +664,22 @@ fn __scope_list(scope) {
     return nil
   }
   if type_of(scope) == "list" {
-    var out = []
+    let out = []
     for raw in scope {
-      let text = trim(to_string(raw ?? ""))
+      const text = trim(to_string(raw ?? ""))
       if text != "" {
         out = out + [text]
       }
     }
     return out
   }
-  let text = trim(to_string(scope))
+  const text = trim(to_string(scope))
   if text == "" {
     return nil
   }
-  var out = []
+  let out = []
   for raw in split(text, " ") {
-    let part = trim(to_string(raw ?? ""))
+    const part = trim(to_string(raw ?? ""))
     if part != "" {
       out = out + [part]
     }
@@ -698,7 +698,7 @@ fn __list_allows(values, value) {
 }
 
 fn __require_token_exchange_capability(cfg) {
-  let capability = token_exchange_capability({id: cfg.provider_id, token_exchange: cfg.token_exchange})
+  const capability = token_exchange_capability({id: cfg.provider_id, token_exchange: cfg.token_exchange})
   if capability == nil || !capability.supported {
     throw "std/oauth/client: token exchange is not supported for provider `" + cfg.provider_id + "`"
   }
@@ -731,12 +731,12 @@ fn __token_exchange(harness: Harness, cfg, opts) {
   if type_of(opts) != "dict" {
     throw "std/oauth/client: token_exchange opts must be a dict"
   }
-  let capability = __require_token_exchange_capability(cfg)
-  let subject_token = __require_string(opts?.subject_token, "opts.subject_token")
-  let subject_token_type = token_type(__require_string(opts?.subject_token_type, "opts.subject_token_type"))
-  let actor_token = opts?.actor_token
-  let has_actor = actor_token != nil && to_string(actor_token) != ""
-  let actor_token_type = if has_actor {
+  const capability = __require_token_exchange_capability(cfg)
+  const subject_token = __require_string(opts?.subject_token, "opts.subject_token")
+  const subject_token_type = token_type(__require_string(opts?.subject_token_type, "opts.subject_token_type"))
+  const actor_token = opts?.actor_token
+  const has_actor = actor_token != nil && to_string(actor_token) != ""
+  const actor_token_type = if has_actor {
     token_type(__require_string(opts?.actor_token_type, "opts.actor_token_type"))
   } else {
     nil
@@ -744,20 +744,20 @@ fn __token_exchange(harness: Harness, cfg, opts) {
   if !has_actor && opts?.actor_token_type != nil {
     throw "std/oauth/client: actor_token_type must not be sent without actor_token"
   }
-  let requested_token_type = if opts?.requested_token_type == nil {
+  const requested_token_type = if opts?.requested_token_type == nil {
     nil
   } else {
     token_type(opts.requested_token_type)
   }
   __validate_token_exchange(capability, subject_token_type, actor_token_type, requested_token_type)
-  var form = [
+  let form = [
     {key: "grant_type", value: token_exchange_grant_type()},
     {key: "subject_token", value: subject_token},
     {key: "subject_token_type", value: subject_token_type},
   ]
   form = __append_repeated_form_values(form, "resource", opts?.resource)
   form = __append_repeated_form_values(form, "audience", opts?.audience)
-  let scope = __scope_string(opts?.scope)
+  const scope = __scope_string(opts?.scope)
   if scope != nil {
     form = form + [{key: "scope", value: scope}]
   }
@@ -773,8 +773,8 @@ fn __token_exchange(harness: Harness, cfg, opts) {
       form = __append_repeated_form_values(form, key, opts.extra_params[key])
     }
   }
-  let issued_at = __now_seconds(harness)
-  let parsed = __post_token_request(
+  const issued_at = __now_seconds(harness)
+  const parsed = __post_token_request(
     harness,
     capability?.token_url ?? cfg.token_url,
     cfg.client_id,
@@ -782,13 +782,13 @@ fn __token_exchange(harness: Harness, cfg, opts) {
     cfg.token_auth_method,
     form,
   )
-  let issued_token_type = token_type(__require_string(parsed?.issued_token_type, "token response issued_token_type"))
+  const issued_token_type = token_type(__require_string(parsed?.issued_token_type, "token response issued_token_type"))
   if !__list_allows(capability?.issued_token_types, issued_token_type) {
     throw "std/oauth/client: issued_token_type `" + issued_token_type + "` is not supported by "
       + capability.id
   }
-  var token_set = __build_token_set(parsed, __scope_list(opts?.scope), issued_at, nil)
-  let mode = has_actor ? "delegation" : "impersonation"
+  let token_set = __build_token_set(parsed, __scope_list(opts?.scope), issued_at, nil)
+  const mode = has_actor ? "delegation" : "impersonation"
   token_set = token_set
     + {
     issued_token_type: issued_token_type,
@@ -797,7 +797,7 @@ fn __token_exchange(harness: Harness, cfg, opts) {
     actor_token_type: actor_token_type,
     requested_token_type: requested_token_type,
   }
-  var storage_key = nil
+  let storage_key = nil
   if opts?.store ?? false {
     storage_key = trim(to_string(opts?.storage_key ?? ""))
     if storage_key == "" {
@@ -810,24 +810,24 @@ fn __token_exchange(harness: Harness, cfg, opts) {
 }
 
 fn __with_bearer(headers, access_token) {
-  let base = headers ?? {}
+  const base = headers ?? {}
   return merge(base, {Authorization: "Bearer " + to_string(access_token)})
 }
 
 fn __token_request(harness: Harness, cfg, method, url, opts) {
-  let opts_dict = opts ?? {}
-  let access = __get_valid_token(harness, cfg)
-  let headers = __with_bearer(opts_dict?.headers ?? {}, access.access_token)
-  let body = opts_dict?.body
-  let http_opts = merge(opts_dict, {headers: headers})
-  let response = harness.net.request(method, url, http_opts)
+  const opts_dict = opts ?? {}
+  const access = __get_valid_token(harness, cfg)
+  const headers = __with_bearer(opts_dict?.headers ?? {}, access.access_token)
+  const body = opts_dict?.body
+  const http_opts = merge(opts_dict, {headers: headers})
+  const response = harness.net.request(method, url, http_opts)
   if to_int(response?.status ?? 0) != 401 {
     return response
   }
   // 401 on a token-bearing call -> refresh + retry once.
-  let refreshed = __maybe_refresh(harness, cfg, "post_401", access)
-  let retried_headers = __with_bearer(opts_dict?.headers ?? {}, refreshed.access_token)
-  let retried_opts = merge(opts_dict, {headers: retried_headers})
+  const refreshed = __maybe_refresh(harness, cfg, "post_401", access)
+  const retried_headers = __with_bearer(opts_dict?.headers ?? {}, refreshed.access_token)
+  const retried_opts = merge(opts_dict, {headers: retried_headers})
   return harness.net.request(method, url, retried_opts)
 }
 
@@ -859,17 +859,17 @@ pub fn client(provider, opts) -> OAuthClient {
   if type_of(opts) != "dict" {
     throw "std/oauth/client: opts must be a dict"
   }
-  let provider_record = __require_provider(provider)
-  let storage = __require_storage(opts?.storage)
-  let client_id = __require_string(opts?.client_id, "opts.client_id")
-  let client_secret = opts?.client_secret
-  let secret_str = client_secret == nil ? nil : to_string(client_secret)
-  let has_secret = secret_str != nil && secret_str != ""
-  let token_auth_method = __validate_auth_method(__token_auth_method(opts, has_secret))
-  let scopes = opts?.scopes ?? provider_record?.default_scopes ?? []
-  let scope_separator = __scope_separator(provider_record)
-  let storage_key = to_string(opts?.storage_key ?? provider_record?.id ?? __DEFAULT_TOKEN_KEY)
-  let cfg = {
+  const provider_record = __require_provider(provider)
+  const storage = __require_storage(opts?.storage)
+  const client_id = __require_string(opts?.client_id, "opts.client_id")
+  const client_secret = opts?.client_secret
+  const secret_str = client_secret == nil ? nil : to_string(client_secret)
+  const has_secret = secret_str != nil && secret_str != ""
+  const token_auth_method = __validate_auth_method(__token_auth_method(opts, has_secret))
+  const scopes = opts?.scopes ?? provider_record?.default_scopes ?? []
+  const scope_separator = __scope_separator(provider_record)
+  const storage_key = to_string(opts?.storage_key ?? provider_record?.id ?? __DEFAULT_TOKEN_KEY)
+  const cfg = {
     provider_id: to_string(provider_record?.id ?? "custom"),
     auth_url: to_string(provider_record.auth_url),
     token_url: to_string(provider_record.token_url),
@@ -920,7 +920,7 @@ pub fn token(cli) -> string {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: token() requires an OAuth client handle"
   }
-  let getter = cli.token
+  const getter = cli.token
   return to_string(getter())
 }
 

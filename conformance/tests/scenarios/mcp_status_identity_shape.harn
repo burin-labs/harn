@@ -1,11 +1,11 @@
 pipeline default() {
-  let name = harn.mcp
+  const name = harn.mcp
     .spawn(
     {name: "identity-shape", transport: "http", url: "https://identity.example.invalid/mcp"},
     {lazy: true},
   )
-  let status = harn.mcp.status()
-  var entry = nil
+  const status = harn.mcp.status()
+  let entry = nil
   for item in status {
     if item.name == name {
       entry = item
@@ -18,7 +18,7 @@ pipeline default() {
   __io_println(entry.display_identity == nil)
   __io_println(entry.active)
   __io_println(entry.lazy)
-  var registry_entry = nil
+  let registry_entry = nil
   for item in mcp_registry_status() {
     if item.name == name {
       registry_entry = item

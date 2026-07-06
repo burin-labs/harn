@@ -1,7 +1,7 @@
 import { task_plan_compile } from "std/agent/task_plan"
 
 pipeline main() {
-  let plan = {
+  const plan = {
     schema_version: "1",
     objective: "Exercise every IR node kind once",
     entry: "discover",
@@ -43,9 +43,9 @@ pipeline main() {
     ],
     capabilities: {tools: ["read", "edit", "grep", "run"], side_effect_level: "runs_commands"},
   }
-  let compiled = task_plan_compile(plan)
+  const compiled = task_plan_compile(plan)
   __io_println(compiled.ok)
-  let g = compiled.workflow
+  const g = compiled.workflow
   __io_println(g.nodes.discover.kind)
   __io_println(g.nodes.search.kind)
   __io_println(g.nodes.pack.kind)
@@ -78,6 +78,6 @@ pipeline main() {
   __io_println(g.nodes.fan.metadata.task_plan_kind)
   __io_println(g.nodes.check.metadata.task_plan_kind)
   // The lowered graph still passes workflow_validate.
-  let validation = workflow_validate(g)
+  const validation = workflow_validate(g)
   __io_println(validation.valid)
 }

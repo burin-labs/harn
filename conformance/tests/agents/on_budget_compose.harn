@@ -13,7 +13,7 @@ import { warn_and_continue } from "std/lifecycle/on_budget"
 pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
-      let custom = { h, state ->
+      const custom = { h, state ->
         h
           .emit_audit(
           "custom_after_warn",
@@ -21,19 +21,19 @@ pipeline default() {
         )
         return state + {custom_observed: true}
       }
-      let chained = compose([warn_and_continue, custom])
-      let state = {
+      const chained = compose([warn_and_continue, custom])
+      const state = {
         kind: "thinking_tokens",
         limit: "max_thinking_tokens",
         limit_value: 8000.0,
         consumed_tokens: 9000,
         threshold_pct: 1.125,
       }
-      let result = chained(harness, state)
+      const result = chained(harness, state)
       harness.stdio.println("result_kind=" + result.kind)
       harness.stdio.println("result_consumed=" + to_string(result.consumed_tokens))
       harness.stdio.println("result_custom_observed=" + to_string(result.custom_observed))
-      let audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_0=" + audits[0].kind)
       harness.stdio.println("audit_0_strategy=" + audits[0].payload.strategy)

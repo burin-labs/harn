@@ -19,7 +19,7 @@ fn render_json(name: string, version: string, description: string) -> string {
   // Mirrors json_envelope::JsonEnvelope::ok(VERSION_SCHEMA_VERSION, payload)
   // from harn-cli — schemaVersion 1, ok: true, data: {name, version, description},
   // error: null, warnings: [].
-  let env = {
+  const env = {
     schemaVersion: 1,
     ok: true,
     data: {name: name, version: version, description: description},
@@ -30,11 +30,11 @@ fn render_json(name: string, version: string, description: string) -> string {
 }
 
 fn main(harness: Harness) {
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
-  let version = harness.env.get_or("HARN_BUILD_VERSION", "unknown")
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const version = harness.env.get_or("HARN_BUILD_VERSION", "unknown")
   if json_mode {
-    let name = harness.env.get_or("HARN_BUILD_NAME", "harn-cli")
-    let description = harness.env.get_or("HARN_BUILD_DESCRIPTION", "")
+    const name = harness.env.get_or("HARN_BUILD_NAME", "harn-cli")
+    const description = harness.env.get_or("HARN_BUILD_DESCRIPTION", "")
     harness.stdio.println(render_json(name, version, description))
   } else {
     harness.stdio.println(render_banner(version))

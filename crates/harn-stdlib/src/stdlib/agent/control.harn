@@ -49,14 +49,14 @@ type AgentLoopState = {
 }
 
 fn __agent_loop_state(args) -> AgentLoopState {
-  let current_limit = args.current_limit
-  let iteration = args.iteration
-  let remaining = if iteration >= current_limit {
+  const current_limit = args.current_limit
+  const iteration = args.iteration
+  const remaining = if iteration >= current_limit {
     0
   } else {
     current_limit - iteration
   }
-  let missing = args.missing_required_tools
+  const missing = args.missing_required_tools
   return {
     iteration: iteration,
     budget: {
@@ -171,16 +171,16 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
   if type_of(command) != "dict" {
     throw "agent_loop: loop_control must return nil or a dict; got " + type_of(command)
   }
-  let action = command?.action ?? "none"
+  const action = command?.action ?? "none"
   if action != "none" && action != "extend" && action != "stop" {
     throw "agent_loop: loop_control action must be \"none\", \"extend\", or \"stop\"; got "
       + to_string(action)
   }
-  let by = command?.by ?? 0
+  const by = command?.by ?? 0
   if type_of(by) != "int" {
     throw "agent_loop: loop_control `by` must be an integer; got " + type_of(by)
   }
-  let until = command?.until ?? 0
+  const until = command?.until ?? 0
   if type_of(until) != "int" {
     throw "agent_loop: loop_control `until` must be an integer; got " + type_of(until)
   }
@@ -195,7 +195,7 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
  * @api_stability: experimental
  */
 pub fn agent_loop_control_invoke(opts, budget: AgentLoopBudget, state: AgentLoopState) -> AgentLoopCommand {
-  let policy = opts?.loop_control
+  const policy = opts?.loop_control
   if policy != nil {
     return __agent_interpret_loop_command(policy(state))
   }
@@ -206,8 +206,8 @@ pub fn agent_loop_control_invoke(opts, budget: AgentLoopBudget, state: AgentLoop
 }
 
 fn __agent_apply_extension(command: AgentLoopCommand, budget: AgentLoopBudget, current_max: int) {
-  let cap = budget.max
-  let target = if command.until > 0 {
+  const cap = budget.max
+  const target = if command.until > 0 {
     command.until
   } else {
     let by = if command.by > 0 {
@@ -217,7 +217,7 @@ fn __agent_apply_extension(command: AgentLoopCommand, budget: AgentLoopBudget, c
     }
     current_max + by
   }
-  let bounded = if target > cap {
+  const bounded = if target > cap {
     cap
   } else {
     target
@@ -281,30 +281,30 @@ fn __agent_progress_summary_text(
  * @api_stability: experimental
  */
 pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
-  let verdict = args.verdict
-  let completion_vetoed = verdict != nil && verdict?.vetoed
-  let completion_verdict = if verdict == nil {
+  const verdict = args.verdict
+  const completion_vetoed = verdict != nil && verdict?.vetoed
+  const completion_verdict = if verdict == nil {
     nil
   } else {
     verdict?.verdict
   }
-  let completion_feedback = if verdict == nil {
+  const completion_feedback = if verdict == nil {
     nil
   } else {
     verdict?.feedback
   }
-  let visible_text = args.visible_text
-  let tool_count = args.tool_count
-  let turn_successful = args.turn_successful
-  let progress_changed = tool_count > 0 || len(turn_successful) > 0
+  const visible_text = args.visible_text
+  const tool_count = args.tool_count
+  const turn_successful = args.turn_successful
+  const progress_changed = tool_count > 0 || len(turn_successful) > 0
     || trim(visible_text) != ""
   // Outcome-aware override: the caller (the loop) passes `progress_no_net_advance`
   // when this turn is on the verify-bearing failing path AND the verification
   // outcome is not advancing (same-diagnostic streak past threshold). It only
   // suppresses the extension when there WAS activity to begin with — a thrash —
   // never when there is genuinely no activity (that case is already "no progress").
-  let no_net_advance = progress_changed && (args.progress_no_net_advance ?? false)
-  let progress_summary = __agent_progress_summary_text(completion_vetoed, tool_count, visible_text, no_net_advance)
+  const no_net_advance = progress_changed && (args.progress_no_net_advance ?? false)
+  const progress_summary = __agent_progress_summary_text(completion_vetoed, tool_count, visible_text, no_net_advance)
   return __agent_loop_state(
     {
       iteration: args.iteration,
@@ -344,23 +344,23 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
  * @api_stability: experimental
  */
 pub fn agent_loop_apply_command(state) -> AgentLoopCommandApplication {
-  let command = state.command
-  let session_id = state.session_id
-  let iteration = state.iteration
-  let current_max = state.current_max
-  let budget = state.budget
+  const command = state.command
+  const session_id = state.session_id
+  const iteration = state.iteration
+  const current_max = state.current_max
+  const budget = state.budget
   if command.action == "stop" {
-    let stop_status = if command.status != "" {
+    const stop_status = if command.status != "" {
       command.status
     } else {
       "stopped"
     }
-    let stop_reason = if command.reason != "" {
+    const stop_reason = if command.reason != "" {
       command.reason
     } else {
       "loop_control"
     }
-    let decisions = __agent_record_budget_decision(
+    const decisions = __agent_record_budget_decision(
       state.decisions,
       iteration,
       "stop",
@@ -391,12 +391,12 @@ pub fn agent_loop_apply_command(state) -> AgentLoopCommandApplication {
     }
   }
   if command.action == "extend" {
-    let applied = __agent_apply_extension(command, budget, current_max)
+    const applied = __agent_apply_extension(command, budget, current_max)
     if applied.extended {
-      let old_limit = current_max
-      let new_limit = applied.new_limit
-      let extensions_used = state.extensions_used + 1
-      let decisions = __agent_record_budget_decision(
+      const old_limit = current_max
+      const new_limit = applied.new_limit
+      const extensions_used = state.extensions_used + 1
+      const decisions = __agent_record_budget_decision(
         state.decisions,
         iteration,
         "extend",

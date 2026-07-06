@@ -6,11 +6,11 @@
  */
 import { filter_nil } from "std/collections"
 
-let CONTEXT_EVAL_MANIFEST_SCHEMA = "harn.context_eval.manifest.v1"
+const CONTEXT_EVAL_MANIFEST_SCHEMA = "harn.context_eval.manifest.v1"
 
-let CONTEXT_EVAL_REPORT_SCHEMA = "harn.context_eval.report.v1"
+const CONTEXT_EVAL_REPORT_SCHEMA = "harn.context_eval.report.v1"
 
-let CONTEXT_EVAL_VERSION = 1
+const CONTEXT_EVAL_VERSION = 1
 
 fn __context_eval_text(value) {
   if value == nil {
@@ -20,7 +20,7 @@ fn __context_eval_text(value) {
 }
 
 fn __context_eval_required_text(value, field) {
-  let text = __context_eval_text(value)
+  const text = __context_eval_text(value)
   if text == "" {
     throw "std/context/eval: " + field + " is required"
   }
@@ -38,9 +38,9 @@ fn __context_eval_list(value, field) {
 }
 
 fn __context_eval_string_list(value, field) {
-  var out = []
+  let out = []
   for item in __context_eval_list(value, field) {
-    let text = __context_eval_text(item)
+    const text = __context_eval_text(item)
     if text != "" && !out.contains(text) {
       out = out.push(text)
     }
@@ -56,9 +56,9 @@ fn __context_eval_string_list(value, field) {
  * @example: context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
  */
 pub fn context_eval_mode(id: string, kind = nil, options = nil) {
-  let opts = options ?? {}
-  let mode_id = __context_eval_required_text(id, "mode id")
-  let mode_kind = __context_eval_text(kind ?? opts?.kind ?? mode_id)
+  const opts = options ?? {}
+  const mode_id = __context_eval_required_text(id, "mode id")
+  const mode_kind = __context_eval_text(kind ?? opts?.kind ?? mode_id)
   return filter_nil(
     opts
       + {
@@ -103,10 +103,10 @@ pub fn context_eval_mode(id: string, kind = nil, options = nil) {
  * @example: context_eval_task("incident", "Find the failing service", {artifacts: []})
  */
 pub fn context_eval_task(id: string, objective: string, options = nil) {
-  let opts = options ?? {}
-  let task_id = __context_eval_required_text(id, "task id")
-  let task_objective = __context_eval_required_text(objective, "objective")
-  let expected = opts?.expected ?? {}
+  const opts = options ?? {}
+  const task_id = __context_eval_required_text(id, "task id")
+  const task_objective = __context_eval_required_text(objective, "objective")
+  const expected = opts?.expected ?? {}
   return filter_nil(
     opts
       + {
@@ -143,7 +143,7 @@ pub fn context_eval_task(id: string, objective: string, options = nil) {
  * @example: context_eval_manifest(tasks, modes, {id: "repo-context-smoke"})
  */
 pub fn context_eval_manifest(tasks = [], modes = [], options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return filter_nil(
     {
       _type: CONTEXT_EVAL_MANIFEST_SCHEMA,

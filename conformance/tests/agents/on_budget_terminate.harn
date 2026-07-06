@@ -11,7 +11,7 @@ import { OnBudget, terminate } from "std/lifecycle/on_budget"
 pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
-      let state = {
+      const state = {
         kind: "tokens",
         limit: "max_input_tokens",
         limit_value: 1000.0,
@@ -20,7 +20,7 @@ pipeline default() {
         threshold_pct: 1.5,
         message: "tokens budget tripped at 150% (1500 of 1000)",
       }
-      var caught = nil
+      let caught = nil
       try {
         terminate(harness, state)
       } catch (e) {
@@ -34,7 +34,7 @@ pipeline default() {
       harness.stdio.println("state_kind=" + caught.budget_state.kind)
       harness.stdio.println("state_limit_value=" + to_string(caught.budget_state.limit_value))
       harness.stdio.println("message_passthrough=" + caught.message)
-      let audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)
       harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)
@@ -42,7 +42,7 @@ pipeline default() {
         .println(
         "audit_consumed_tokens=" + to_string(audits[0].payload.budget_state.consumed_tokens),
       )
-      let ns = OnBudget()
+      const ns = OnBudget()
       harness.stdio.println("ns_has_terminate=" + to_string(type_of(ns.terminate) == "closure"))
       harness.stdio.println("ns_has_graceful_exit=" + to_string(type_of(ns.graceful_exit) == "closure"))
       harness.stdio

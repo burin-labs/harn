@@ -11,15 +11,15 @@ fn first_event(events, event_type) {
 
 fn wall_clock_case() {
   mock_time(0)
-  let caller = { _call ->
+  const caller = { _call ->
     advance_time(1500)
     return {
       ok: true,
       value: {text: "still working", provider: "mock", model: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  let session = "budget-wall-" + uuid()
-  let captured = agent_capture_events(
+  const session = "budget-wall-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "work",
@@ -35,8 +35,8 @@ fn wall_clock_case() {
       },
     ) },
   )
-  let budget_event = first_event(captured.events, "budget_exhausted")
-  let iteration_event = first_event(captured.events, "iteration_end")
+  const budget_event = first_event(captured.events, "budget_exhausted")
+  const iteration_event = first_event(captured.events, "iteration_end")
   __io_println("wall_status=" + captured.result.status)
   __io_println("wall_reason=" + captured.result.stop_reason)
   __io_println("wall_kind=" + budget_event.kind)
@@ -48,7 +48,7 @@ fn wall_clock_case() {
 }
 
 fn total_cost_case() {
-  let caller = { _call -> return {
+  const caller = { _call -> return {
     ok: true,
     value: {
       text: "still working",
@@ -58,8 +58,8 @@ fn total_cost_case() {
       output_tokens: 100000,
     },
   } }
-  let session = "budget-cost-" + uuid()
-  let captured = agent_capture_events(
+  const session = "budget-cost-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "work",
@@ -75,8 +75,8 @@ fn total_cost_case() {
       },
     ) },
   )
-  let budget_event = first_event(captured.events, "budget_exhausted")
-  let iteration_event = first_event(captured.events, "iteration_end")
+  const budget_event = first_event(captured.events, "budget_exhausted")
+  const iteration_event = first_event(captured.events, "iteration_end")
   __io_println("cost_status=" + captured.result.status)
   __io_println("cost_reason=" + captured.result.stop_reason)
   __io_println("cost_kind=" + budget_event.kind)
@@ -86,14 +86,14 @@ fn total_cost_case() {
 
 fn circuit_case() {
   mock_time(0)
-  let caller = { _call -> return {
+  const caller = { _call -> return {
     ok: false,
     status: "provider_error",
     stop_reason: "provider_error",
     error: {status: 503, message: "provider unavailable"},
   } }
-  let session = "budget-circuit-" + uuid()
-  let captured = agent_capture_events(
+  const session = "budget-circuit-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "retry",
@@ -106,8 +106,8 @@ fn circuit_case() {
       },
     ) },
   )
-  let breaker = first_event(captured.events, "budget_circuit_breaker")
-  let budget_event = first_event(captured.events, "budget_exhausted")
+  const breaker = first_event(captured.events, "budget_circuit_breaker")
+  const budget_event = first_event(captured.events, "budget_exhausted")
   __io_println("circuit_status=" + captured.result.status)
   __io_println("circuit_reason=" + captured.result.stop_reason)
   __io_println("circuit_count=" + to_string(breaker.consecutive_count))

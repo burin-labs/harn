@@ -2,6 +2,6 @@
 // `let` (not a literal) so this exercises the runtime path rather than the
 // compile-time const-fold path (see tests/language/const_eval_division_by_zero).
 pipeline default() {
-  let d = 0
-  let _ = 1 / d
+  const d = 0
+  const _ = 1 / d
 }

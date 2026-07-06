@@ -3,15 +3,15 @@ import "../check_crate_sibling_versions.harn"
 
 @test
 pipeline test_workspace_version_from_text(task) {
-  let text = "[workspace]\n\n[workspace.package]\nversion = \"0.9.18\"\n"
+  const text = "[workspace]\n\n[workspace.package]\nversion = \"0.9.18\"\n"
   assert_eq(workspace_version_from_text(text), "0.9.18")
   assert_eq(expected_dependency_version("0.9.18"), "=0.9.18")
 }
 
 @test
 pipeline test_manifest_metadata_helpers(task) {
-  let published = "[package]\nname = \"harn-vm\"\n"
-  let private = "[package]\nname = \"harn-mcp-rc-compat\"\npublish = false\n"
+  const published = "[package]\nname = \"harn-vm\"\n"
+  const private = "[package]\nname = \"harn-mcp-rc-compat\"\npublish = false\n"
   assert_eq(manifest_package_name_from_text(published), "harn-vm")
   assert_eq(manifest_is_publishable_from_text(published), true)
   assert_eq(manifest_package_name_from_text(private), "harn-mcp-rc-compat")
@@ -20,44 +20,44 @@ pipeline test_manifest_metadata_helpers(task) {
 
 @test
 pipeline test_accepts_exact_path_dependency(task) {
-  let text = "harn-vm = { path = \"../harn-vm\", version = \"=0.9.18\" }\n"
+  const text = "harn-vm = { path = \"../harn-vm\", version = \"=0.9.18\" }\n"
   assert_eq(sibling_dep_errors_from_text("Cargo.toml", text, "0.9.18"), [])
 }
 
 @test
 pipeline test_rejects_loose_path_dependency(task) {
-  let text = "harn-modules = { path = \"../harn-modules\", version = \"0.9\" }\n"
-  let errors = sibling_dep_errors_from_text("crates/harn-vm/Cargo.toml", text, "0.9.18")
+  const text = "harn-modules = { path = \"../harn-modules\", version = \"0.9\" }\n"
+  const errors = sibling_dep_errors_from_text("crates/harn-vm/Cargo.toml", text, "0.9.18")
   assert_eq(errors.count, 1)
   assert_eq(errors[0].contains("harn-modules path dependency version is \"0.9\""), true)
 }
 
 @test
 pipeline test_rejects_missing_version(task) {
-  let text = "harn-parser = { path = \"../harn-parser\" }\n"
-  let errors = sibling_dep_errors_from_text("crates/harn-fmt/Cargo.toml", text, "0.9.18")
+  const text = "harn-parser = { path = \"../harn-parser\" }\n"
+  const errors = sibling_dep_errors_from_text("crates/harn-fmt/Cargo.toml", text, "0.9.18")
   assert_eq(errors.count, 1)
   assert_eq(errors[0].contains("must set version = \"=0.9.18\""), true)
 }
 
 @test
 pipeline test_checks_tree_sitter_workspace_sibling(task) {
-  let text = "tree-sitter-harn = { path = \"../../tree-sitter-harn\", version = \"0.9\" }\n"
-  let errors = sibling_dep_errors_from_text("crates/harn-hostlib/Cargo.toml", text, "0.9.18")
+  const text = "tree-sitter-harn = { path = \"../../tree-sitter-harn\", version = \"0.9\" }\n"
+  const errors = sibling_dep_errors_from_text("crates/harn-hostlib/Cargo.toml", text, "0.9.18")
   assert_eq(errors.count, 1)
   assert_eq(errors[0].contains("tree-sitter-harn"), true)
 }
 
 @test
 pipeline test_ignores_registry_and_third_party_dependencies(task) {
-  let text = "harn-vm = { version = \"0.9\" }\nsqlx-core = { version = \"0.9\" }\n"
+  const text = "harn-vm = { version = \"0.9\" }\nsqlx-core = { version = \"0.9\" }\n"
   assert_eq(sibling_dep_errors_from_text("Cargo.toml", text, "0.9.18"), [])
 }
 
 @test
 pipeline test_allows_private_harness_crate_as_dev_dependency(task) {
-  let text = "[dev-dependencies]\nharn-mcp-rc-compat = { path = \"../harn-mcp-rc-compat\" }\n"
-  let errors = sibling_dep_errors_from_text_with_context(
+  const text = "[dev-dependencies]\nharn-mcp-rc-compat = { path = \"../harn-mcp-rc-compat\" }\n"
+  const errors = sibling_dep_errors_from_text_with_context(
     "crates/harn-cli/Cargo.toml",
     text,
     "0.9.18",
@@ -69,8 +69,8 @@ pipeline test_allows_private_harness_crate_as_dev_dependency(task) {
 
 @test
 pipeline test_rejects_private_harness_crate_as_publish_dependency(task) {
-  let text = "[dependencies]\nharn-mcp-rc-compat = { path = \"../harn-mcp-rc-compat\" }\n"
-  let errors = sibling_dep_errors_from_text_with_context(
+  const text = "[dependencies]\nharn-mcp-rc-compat = { path = \"../harn-mcp-rc-compat\" }\n"
+  const errors = sibling_dep_errors_from_text_with_context(
     "crates/harn-cli/Cargo.toml",
     text,
     "0.9.18",

@@ -9,7 +9,7 @@
  */
 pipeline test(task) {
   // --- try/catch/finally on caught-throw path: one run ---
-  var counter_a = 0
+  let counter_a = 0
   try {
     throw "x"
   } catch (e) {
@@ -19,7 +19,7 @@ pipeline test(task) {
   }
   log("catch_finally_count: ${counter_a}")
   // --- try/finally on throw-escape path (caught by outer): one run ---
-  var counter_b = 0
+  let counter_b = 0
   try {
     try {
       throw "y"
@@ -31,7 +31,7 @@ pipeline test(task) {
   }
   log("finally_only_count: ${counter_b}")
   // --- try/catch/finally where catch body re-throws: one run ---
-  var counter_c = 0
+  let counter_c = 0
   try {
     try {
       throw "first"
@@ -45,7 +45,7 @@ pipeline test(task) {
   }
   log("catch_rethrow_count: ${counter_c}")
   // --- try/finally on body-success path: one run ---
-  var counter_d = 0
+  let counter_d = 0
   try {
     log("body-ok")
   } finally {
@@ -58,7 +58,7 @@ pipeline test(task) {
   // compiler emitted the outer finally twice because the inner throw's
   // lowering pre-ran every pending finally regardless of whether a
   // local catch would intercept the throw. ---
-  var counter_e = 0
+  let counter_e = 0
   try {
     try {
       throw "inner-throw"
@@ -90,6 +90,6 @@ pipeline test(task) {
       log("outer-finally")
     }
   }
-  let resolved = helper()
+  const resolved = helper()
   log("resolved: ${resolved}")
 }

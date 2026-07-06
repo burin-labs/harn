@@ -18,7 +18,7 @@ import {
 } from "std/cli/render"
 
 fn __load_plan(harness: Harness) -> dict {
-  let raw = harness.env.get_or("HARN_CANON_CHECK_PLAN_JSON", "")
+  const raw = harness.env.get_or("HARN_CANON_CHECK_PLAN_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("canon: internal error - HARN_CANON_CHECK_PLAN_JSON not set")
     exit(70)
@@ -32,7 +32,7 @@ fn __load_plan(harness: Harness) -> dict {
 }
 
 fn __options(plan: dict, slice: dict) -> dict {
-  var options = {
+  let options = {
     root: safe_string(plan["workspace_root"], ""),
     workspace_root: safe_string(plan["workspace_root"], ""),
     project_root: safe_string(plan["workspace_root"], ""),
@@ -41,11 +41,11 @@ fn __options(plan: dict, slice: dict) -> dict {
     include_semantic: safe_bool(plan["include_semantic"], false),
     budget_ms: plan["budget_ms"] ?? 50,
   }
-  let canon_root = safe_string(plan["canon_root"], "")
+  const canon_root = safe_string(plan["canon_root"], "")
   if canon_root != "" {
     options = options + {canon_root: canon_root}
   }
-  let packs = safe_list(plan["pack_ids"])
+  const packs = safe_list(plan["pack_ids"])
   if len(packs) > 0 {
     options = options + {packs: packs}
   }
@@ -53,10 +53,10 @@ fn __options(plan: dict, slice: dict) -> dict {
 }
 
 fn __join_text(items: list, sep: string) -> string {
-  var out = ""
-  var first = true
+  let out = ""
+  let first = true
   for item in items {
-    let text = safe_string(item, "")
+    const text = safe_string(item, "")
     if text == "" {
       continue
     }
@@ -70,9 +70,9 @@ fn __join_text(items: list, sep: string) -> string {
 }
 
 fn __pack_summary(result: dict) -> list {
-  var summaries = []
+  let summaries = []
   for pack in safe_list(result["packs"]) {
-    let report = safe_dict(pack["report"])
+    const report = safe_dict(pack["report"])
     summaries = summaries
       .push(
       {
@@ -90,8 +90,8 @@ fn __pack_summary(result: dict) -> list {
 }
 
 fn __report(plan: dict, result: dict, feedback: string) -> dict {
-  let paths = safe_list(plan["paths"])
-  let selected = safe_list(result["selected_pack_ids"])
+  const paths = safe_list(plan["paths"])
+  const selected = safe_list(result["selected_pack_ids"])
   return {
     schema_version: 1,
     ok: safe_bool(result["ok"], false),
@@ -110,7 +110,7 @@ fn __report(plan: dict, result: dict, feedback: string) -> dict {
 }
 
 fn __render_json(harness: Harness, report: dict) {
-  let ok = safe_bool(report["ok"], false) || safe_bool(report["advisory"], false)
+  const ok = safe_bool(report["ok"], false) || safe_bool(report["advisory"], false)
   if ok {
     harness.stdio
       .println(
@@ -139,13 +139,13 @@ fn __render_json(harness: Harness, report: dict) {
 fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("harn-canon check: " + safe_string(report["status"], "unknown"))
   harness.stdio.println("  paths: " + safe_int_string(report["path_count"], "0"))
-  let selected = __join_text(safe_list(report["selected_pack_ids"]), ", ")
+  const selected = __join_text(safe_list(report["selected_pack_ids"]), ", ")
   if selected == "" {
     harness.stdio.println("  packs: none")
   } else {
     harness.stdio.println("  packs: " + selected)
   }
-  let feedback = safe_string(report["feedback_text"], "")
+  const feedback = safe_string(report["feedback_text"], "")
   if feedback != "" {
     harness.stdio.println("")
     harness.stdio.println(feedback)
@@ -160,8 +160,8 @@ fn __render_human(harness: Harness, report: dict) {
 }
 
 fn main(harness: Harness) -> int {
-  let plan = __load_plan(harness)
-  let slice = canon_slice_from_paths(
+  const plan = __load_plan(harness)
+  const slice = canon_slice_from_paths(
     safe_list(plan["paths"]),
     {
       root: safe_string(plan["workspace_root"], ""),
@@ -169,10 +169,10 @@ fn main(harness: Harness) -> int {
       include_missing: safe_bool(plan["include_missing"], false),
     },
   )
-  let result = canon_evaluate_slice(slice, __options(plan, slice))
-  let feedback = canon_feedback_text(result, {header: safe_string(plan["feedback_header"], "harn-canon feedback")})
-  let report = __report(plan, result, feedback)
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const result = canon_evaluate_slice(slice, __options(plan, slice))
+  const feedback = canon_feedback_text(result, {header: safe_string(plan["feedback_header"], "harn-canon feedback")})
+  const report = __report(plan, result, feedback)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     __render_json(harness, report)
   } else {

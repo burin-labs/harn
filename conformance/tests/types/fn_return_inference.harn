@@ -2,12 +2,12 @@ pipeline default() {
   fn area(w: int, h: int) {
     return w * h
   }
-  let a: int = area(3, 4)
+  const a: int = area(3, 4)
   __io_println(a)
   fn label() {
     return "hi"
   }
-  let s: string = label()
+  const s: string = label()
   __io_println(s)
   // Recursive fn: inference must not loop — the self-call resolves to the
   // hoisted placeholder (unknown), so `fact` stays dynamic but still runs.
@@ -23,6 +23,6 @@ pipeline default() {
   fn idish(x) {
     return x
   }
-  let d: string = idish("ok")
+  const d: string = idish("ok")
   __io_println(d)
 }

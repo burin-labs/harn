@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("cost_guard_short_circuits")
+  const result = trigger_test_harness("cost_guard_short_circuits")
   __io_println(result.ok)
   __io_println(result.attempts[0].status == "cost_guard_blocked")
   __io_println(result.details.limit_usd == 1.0)

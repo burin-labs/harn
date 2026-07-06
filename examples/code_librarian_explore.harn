@@ -13,32 +13,32 @@
 import "std/code_librarian"
 
 pipeline default() {
-  let root = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
-  let _ = hostlib_code_index_rebuild({root: root})
+  const root = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
+  const _ = hostlib_code_index_rebuild({root: root})
   // 1. Direct Cypher pass-through.
-  let alpha: LibrarianCypherResult = code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
+  const alpha: LibrarianCypherResult = code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
   __io_println("functions named `main`: " + to_string(len(alpha.rows)))
   // 2. Who calls a hot function?
-  let callers: list<LibrarianCallSite> = code_librarian_who_calls("fetchUser")
+  const callers: list<LibrarianCallSite> = code_librarian_who_calls("fetchUser")
   __io_println("fetchUser callers: " + to_string(len(callers)))
   for c in callers {
     __io_println("  " + c.path)
   }
   // 3. What imports `src/util.ts`?
-  let imps: list<LibrarianImport> = code_librarian_what_imports("src/util.ts")
+  const imps: list<LibrarianImport> = code_librarian_what_imports("src/util.ts")
   __io_println("importers of src/util.ts: " + to_string(len(imps)))
   // 4. Outline a file and read its symbol kinds.
-  let outline: LibrarianOutline = code_librarian_outline("src/util.ts")
+  const outline: LibrarianOutline = code_librarian_outline("src/util.ts")
   __io_println("src/util.ts known? " + to_string(outline.known))
   // 5. Freshness — pristine after rebuild.
-  let fresh: LibrarianFreshness = code_librarian_freshness("src/util.ts")
+  const fresh: LibrarianFreshness = code_librarian_freshness("src/util.ts")
   __io_println("src/util.ts stale? " + to_string(fresh.stale))
   // 6. Change log from the start.
-  let changes: list<LibrarianFileChange> = code_librarian_recent_changes(0)
+  const changes: list<LibrarianFileChange> = code_librarian_recent_changes(0)
   __io_println("recorded changes: " + to_string(len(changes)))
   // 7. Activate a per-branch overlay, then deactivate.
-  let on: LibrarianOverlay = code_librarian_branch_overlay("topic/explore")
+  const on: LibrarianOverlay = code_librarian_branch_overlay("topic/explore")
   __io_println("overlay active: " + (on.active ?? "<base>"))
-  let off: LibrarianOverlay = code_librarian_branch_overlay(nil)
+  const off: LibrarianOverlay = code_librarian_branch_overlay(nil)
   __io_println("overlay active: " + (off.active ?? "<base>"))
 }

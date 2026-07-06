@@ -71,12 +71,12 @@ fn _human_required_policy() {
 }
 
 pipeline test_dry_run_skips_executor(task) {
-  var calls = 0
-  let executor = { _b, _o ->
+  let calls = 0
+  const executor = { _b, _o ->
     calls = calls + 1
     {ok: true, output: _ok_output(), raw: "should_not_run"}
   }
-  let run = invoke(
+  const run = invoke(
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -92,7 +92,7 @@ pipeline test_dry_run_skips_executor(task) {
 }
 
 pipeline test_blocked_when_human_approval_required(task) {
-  let run = invoke(
+  const run = invoke(
     {
       bundle: _ci_bundle(),
       policy: _human_required_policy(),
@@ -109,7 +109,7 @@ pipeline test_blocked_when_human_approval_required(task) {
 }
 
 pipeline test_completed_run_attaches_output(task) {
-  let run = invoke(
+  const run = invoke(
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -134,7 +134,7 @@ pipeline test_default_executor_repairs_validator_failures(task) {
     },
   )
   llm_mock({text: json_stringify(_ok_output())})
-  let result = default_executor(_ci_bundle(), {provider: "mock", validator_retries: 1, repair: {enabled: false}})
+  const result = default_executor(_ci_bundle(), {provider: "mock", validator_retries: 1, repair: {enabled: false}})
   assert(result.ok)
   assert_eq(result.output.diagnosis, "fixed")
   assert_eq(result.typed_checkpoint.checkpoint_attempts, 2)
@@ -142,7 +142,7 @@ pipeline test_default_executor_repairs_validator_failures(task) {
 }
 
 pipeline test_schema_invalid_when_executor_fails(task) {
-  let run = invoke(
+  const run = invoke(
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -158,8 +158,8 @@ pipeline test_schema_invalid_when_executor_fails(task) {
 }
 
 pipeline test_validators_failed_when_output_violates_contract(task) {
-  let bad_output = _ok_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
-  let run = invoke(
+  const bad_output = _ok_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
+  const run = invoke(
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -175,7 +175,7 @@ pipeline test_validators_failed_when_output_violates_contract(task) {
 }
 
 pipeline test_bundle_invalid_short_circuits(task) {
-  let bad_bundle = build(
+  const bad_bundle = build(
     {
       kind: "ci_failure",
       repo: "",
@@ -183,7 +183,7 @@ pipeline test_bundle_invalid_short_circuits(task) {
       allowed_write_scope: ["src/**"],
     },
   )
-  let run = invoke(
+  const run = invoke(
     {
       bundle: bad_bundle,
       policy: _autopilot_policy(),
@@ -196,7 +196,7 @@ pipeline test_bundle_invalid_short_circuits(task) {
 }
 
 pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
-  let observation = {
+  const observation = {
     repo: "x/y",
     number: 7,
     head_sha: "head",
@@ -204,8 +204,8 @@ pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
     base_ref: "main",
     failed_required_checks: ["ci / rust", "ci / portal"],
   }
-  let policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
-  let run = invoke_for_ci_failure(
+  const policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
+  const run = invoke_for_ci_failure(
     {
       observation: observation,
       policy: policy,
@@ -215,7 +215,7 @@ pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
     },
   )
   assert_eq(run.status, "skipped_dry_run")
-  let b = run.bundle
+  const b = run.bundle
   assert_eq(b.kind, "ci_failure")
   assert_eq(b.repo, "x/y")
   assert_eq(b.pr_number, 7)
@@ -227,7 +227,7 @@ pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
 }
 
 pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
-  let observation = {
+  const observation = {
     repo: "x/y",
     number: 8,
     head_sha: "h",
@@ -235,8 +235,8 @@ pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
     base_ref: "main",
     failed_required_checks: [],
   }
-  let policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
-  let run = invoke_for_merge_conflict(
+  const policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
+  const run = invoke_for_merge_conflict(
     {
       observation: observation,
       policy: policy,
@@ -247,7 +247,7 @@ pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
     },
   )
   assert_eq(run.status, "skipped_dry_run")
-  let b = run.bundle
+  const b = run.bundle
   assert_eq(b.kind, "merge_conflict")
   assert(b.conflict_paths.contains("src/lib.rs"))
   assert(b.approval_required_for.contains("semantic_repair"))
@@ -255,13 +255,13 @@ pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
 }
 
 pipeline test_invoke_for_release_audit_builds_bundle(task) {
-  let release_facts = {
+  const release_facts = {
     tag: "v0.7.54",
     commits_in_range: [{sha: "abc", subject: "feat: foo", author: "x"}],
     changelog_path: "CHANGELOG.md",
     changelog_excerpt: "## Unreleased",
   }
-  let run = invoke_for_release_audit(
+  const run = invoke_for_release_audit(
     {
       repo: "burin-labs/harn",
       head_ref: "main",
@@ -272,7 +272,7 @@ pipeline test_invoke_for_release_audit_builds_bundle(task) {
     },
   )
   assert_eq(run.status, "skipped_dry_run")
-  let b = run.bundle
+  const b = run.bundle
   assert_eq(b.kind, "release_audit")
   assert_eq(b.release_facts.tag, "v0.7.54")
   assert(b.approval_required_for.contains("release_tag"))
@@ -281,7 +281,7 @@ pipeline test_invoke_for_release_audit_builds_bundle(task) {
 }
 
 pipeline test_run_record_is_versioned(task) {
-  let run = invoke(
+  const run = invoke(
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),

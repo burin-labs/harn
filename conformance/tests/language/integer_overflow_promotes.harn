@@ -6,8 +6,8 @@
  * bindings so the runtime arithmetic path is exercised, not just folding.
  */
 pipeline test(task) {
-  let big = 9223372036854775807
-  let one = 1
+  const big = 9223372036854775807
+  const one = 1
   log(type_of(big + one))
   log(big + one > 9000000000000000000.0)
   log(type_of(2 + 3))

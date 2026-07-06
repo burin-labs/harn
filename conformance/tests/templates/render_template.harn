@@ -1,8 +1,8 @@
 pipeline default() {
   // Render with bindings
-  let result = render("fixtures/greeting.prompt", {name: "Alice", place: "Harn"})
+  const result = render("fixtures/greeting.prompt", {name: "Alice", place: "Harn"})
   __io_println(result)
   // Render without bindings (just reads file)
-  let raw = render("fixtures/greeting.prompt")
+  const raw = render("fixtures/greeting.prompt")
   __io_println(raw)
 }

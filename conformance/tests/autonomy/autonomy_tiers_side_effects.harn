@@ -2,8 +2,8 @@ import { clear_host_mocks, mock_host_response } from "std/testing"
 import "std/triggers"
 
 fn tier_handler(event: TriggerEvent) -> dict {
-  let context = handler_context()
-  let file_path = path_join(".harn", "autonomy_tier_" + event.headers?.x_delivery + ".txt")
+  const context = handler_context()
+  const file_path = path_join(".harn", "autonomy_tier_" + event.headers?.x_delivery + ".txt")
   harness.fs.write_text(file_path, "tier:" + context?.autonomy_tier)
   return {tier: context?.autonomy_tier, file_path: file_path, file_exists: harness.fs.exists(file_path)}
 }
@@ -36,43 +36,43 @@ fn fire_tier(handle: TriggerHandle, unique: string) -> DispatchHandle {
 pipeline test(task) {
   clear_host_mocks()
   harness.fs.mkdir(".harn")
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let shadow_agent = "autonomy-shadow-" + unique
-  let shadow = fire_tier(register_tier_agent(shadow_agent, "shadow"), "shadow-" + unique)
-  let shadow_records: list<TrustRecord> = trust_query({agent: shadow_agent, action: "fs.write", tier: "shadow"})
+  const shadow_agent = "autonomy-shadow-" + unique
+  const shadow = fire_tier(register_tier_agent(shadow_agent, "shadow"), "shadow-" + unique)
+  const shadow_records: list<TrustRecord> = trust_query({agent: shadow_agent, action: "fs.write", tier: "shadow"})
   __io_println(shadow.status == "dispatched" && shadow.result?.tier == "shadow")
   __io_println(
     !shadow.result?.file_exists && len(shadow_records) == 1 && shadow_records[0].outcome == "denied",
   )
-  let suggest_agent = "autonomy-suggest-" + unique
-  let suggest = fire_tier(register_tier_agent(suggest_agent, "suggest"), "suggest-" + unique)
-  let suggest_pending = hitl_pending({}).filter({ row -> row.agent == suggest_agent })
-  let suggest_records: list<TrustRecord> = trust_query({agent: suggest_agent, action: "fs.write", tier: "suggest"})
+  const suggest_agent = "autonomy-suggest-" + unique
+  const suggest = fire_tier(register_tier_agent(suggest_agent, "suggest"), "suggest-" + unique)
+  const suggest_pending = hitl_pending({}).filter({ row -> row.agent == suggest_agent })
+  const suggest_records: list<TrustRecord> = trust_query({agent: suggest_agent, action: "fs.write", tier: "suggest"})
   __io_println(suggest.status == "dispatched" && suggest.result?.tier == "suggest")
   __io_println(!suggest.result?.file_exists && len(suggest_pending) == 1 && len(suggest_records) == 1)
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ok"})
-  let approval_agent = "autonomy-approval-" + unique
-  let approved = fire_tier(register_tier_agent(approval_agent, "act_with_approval"), "approval-" + unique)
-  let approved_records: list<TrustRecord> = trust_query({agent: approval_agent, action: "fs.write", tier: "act_with_approval"})
+  const approval_agent = "autonomy-approval-" + unique
+  const approved = fire_tier(register_tier_agent(approval_agent, "act_with_approval"), "approval-" + unique)
+  const approved_records: list<TrustRecord> = trust_query({agent: approval_agent, action: "fs.write", tier: "act_with_approval"})
   __io_println(approved.status == "dispatched" && approved.result?.tier == "act_with_approval")
   __io_println(
     approved.result?.file_exists && len(approved_records) == 1
       && approved_records[0].outcome == "success",
   )
   clear_host_mocks()
-  let auto_agent = "autonomy-auto-" + unique
-  let auto = fire_tier(register_tier_agent(auto_agent, "act_auto"), "auto-" + unique)
-  let auto_records: list<TrustRecord> = trust_query({agent: auto_agent, action: "fs.write"})
+  const auto_agent = "autonomy-auto-" + unique
+  const auto = fire_tier(register_tier_agent(auto_agent, "act_auto"), "auto-" + unique)
+  const auto_records: list<TrustRecord> = trust_query({agent: auto_agent, action: "fs.write"})
   __io_println(auto.status == "dispatched" && auto.result?.tier == "act_auto")
   __io_println(auto.result?.file_exists && len(auto_records) == 0)
-  let scoped_agent = "autonomy-scoped-" + unique
-  let scoped_path = path_join(".harn", "autonomy_tier_scoped_" + unique + ".txt")
+  const scoped_agent = "autonomy-scoped-" + unique
+  const scoped_path = path_join(".harn", "autonomy_tier_scoped_" + unique + ".txt")
   with_autonomy_policy(
     {agent_id: scoped_agent, autonomy_tier: "act_auto", action_tiers: {"fs.write": "shadow"}},
     fn() { harness.fs.write_text(scoped_path, "scoped") },
   )
-  let scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write", tier: "shadow"})
+  const scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write", tier: "shadow"})
   __io_println(
     !harness.fs.exists(scoped_path) && len(scoped_records) == 1
       && scoped_records[0].outcome == "denied",

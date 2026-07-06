@@ -19,12 +19,12 @@ pub fn to_string_lossy(value: any, separator: string = " ") -> string {
   if value == nil {
     return ""
   }
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "string" {
     return value
   }
   if kind == "list" {
-    var parts = []
+    let parts = []
     for item in value {
       parts = parts + [to_string_lossy(item, separator)]
     }
@@ -49,8 +49,8 @@ pub fn to_string_list(value: any, max_items: int = 256) -> list<string> {
   if value == nil {
     return []
   }
-  let kind = type_of(value)
-  var raw = []
+  const kind = type_of(value)
+  let raw = []
   if kind == "list" {
     raw = value
   } else if kind == "string" {
@@ -62,8 +62,8 @@ pub fn to_string_list(value: any, max_items: int = 256) -> list<string> {
   } else {
     raw = [to_string(value)]
   }
-  var out = []
-  var count = 0
+  let out = []
+  let count = 0
   for item in raw {
     if count >= max_items {
       break
@@ -106,7 +106,7 @@ pub fn to_bool_or(value: any, fallback: bool) -> bool {
   if value == nil {
     return fallback
   }
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "bool" {
     return value
   }
@@ -114,7 +114,7 @@ pub fn to_bool_or(value: any, fallback: bool) -> bool {
     return value != 0
   }
   if kind == "string" {
-    let normalized = lowercase(trim(value))
+    const normalized = lowercase(trim(value))
     if normalized == "" {
       return fallback
     }
@@ -144,14 +144,14 @@ pub fn to_bool_or(value: any, fallback: bool) -> bool {
  * @errors: []
  */
 pub fn dict_path_ci(d: any, path: list<string>) -> any {
-  var current = d
+  let current = d
   for segment in path {
     if type_of(current) != "dict" {
       return nil
     }
-    let target = lowercase(to_string(segment))
-    var hit = nil
-    var found = false
+    const target = lowercase(to_string(segment))
+    let hit = nil
+    let found = false
     for k in current.keys() {
       if lowercase(to_string(k)) == target {
         hit = current[k]
@@ -196,7 +196,7 @@ pub fn first_present(values: list, default: any = nil) -> any {
     if v == nil {
       continue
     }
-    let kind = type_of(v)
+    const kind = type_of(v)
     if kind == "string" {
       if v != "" {
         return v

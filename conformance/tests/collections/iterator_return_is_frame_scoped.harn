@@ -5,7 +5,7 @@ pipeline test(task) {
     }
     return ""
   }
-  var seen = []
+  let seen = []
   for path in ["outer"] {
     seen = seen + [path + ":" + first_match()]
   }

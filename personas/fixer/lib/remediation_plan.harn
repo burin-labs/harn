@@ -27,11 +27,11 @@
  * to a structural op (and the reason why).
  */
 pub fn plan_for_atoms(atoms) {
-  let input = atoms ?? []
-  var plan = []
-  var fallbacks = []
+  const input = atoms ?? []
+  let plan = []
+  let fallbacks = []
   for atom in input {
-    let entry = _op_for_atom(atom)
+    const entry = _op_for_atom(atom)
     if entry?.op != nil {
       plan = plan + [entry.op]
     } else {
@@ -42,8 +42,8 @@ pub fn plan_for_atoms(atoms) {
 }
 
 fn _op_for_atom(atom) {
-  let kind = atom?.kind ?? ""
-  let supports_ast = atom?.language_supports_ast ?? true
+  const kind = atom?.kind ?? ""
+  const supports_ast = atom?.language_supports_ast ?? true
   if kind == "rewrite_node" && supports_ast {
     return {
       op: {

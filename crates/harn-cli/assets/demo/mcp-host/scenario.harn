@@ -35,14 +35,14 @@ pipeline default(_task) {
   // 1. Register both servers lazily — no eager connect, so the demo
   //    runs even without a network or a bundled MCP fixture.
   for spec in server_specs() {
-    let id = harn.mcp.spawn(spec, {lazy: true})
+    const id = harn.mcp.spawn(spec, {lazy: true})
     __io_println("spawned ${id} (lazy)")
   }
   // 2. Snapshot the host's view of every registered server. Each entry
   //    carries supervision counters (restart_count, consecutive_failures,
   //    circuit), transport/URL/identity metadata, plus the lazy/active/ref_count
   //    registry triple.
-  let after_spawn = harn.mcp.status()
+  const after_spawn = harn.mcp.status()
   __io_println("=== status after spawn ===")
   for entry in after_spawn {
     __io_println(json_stringify(entry))
@@ -53,12 +53,12 @@ pipeline default(_task) {
   //    immediately re-finds it. The supervision counters reset
   //    regardless, which is the bit `status()` reflects.
   harn.mcp.stop("alpha")
-  let after_stop = harn.mcp.status()
+  const after_stop = harn.mcp.status()
   __io_println("=== status after stop alpha ===")
   for entry in after_stop {
     __io_println(json_stringify(entry))
   }
-  let receipt = {
+  const receipt = {
     receipt_kind: "mcp_host_receipt",
     registered_after_spawn: len(after_spawn),
     registered_after_stop: len(after_stop),
@@ -75,7 +75,7 @@ pipeline default(_task) {
  * shape is documented in `crates/harn-vm/src/mcp_host.rs::McpHostStatus`.
  */
 fn all_lazy(entries) {
-  var ok = true
+  let ok = true
   for entry in entries {
     if !entry.lazy {
       ok = false
@@ -85,7 +85,7 @@ fn all_lazy(entries) {
 }
 
 fn all_closed(entries) {
-  var ok = true
+  let ok = true
   for entry in entries {
     if entry.circuit != "closed" {
       ok = false

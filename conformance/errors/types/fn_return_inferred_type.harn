@@ -3,7 +3,9 @@
 // Sound by construction: inference only assigns a return type when every
 // return path is concretely known.
 pipeline default() {
-  fn area(w: int, h: int) { return w * h }
-  let bad: string = area(2, 3)
+  fn area(w: int, h: int) {
+    return w * h
+  }
+  const bad: string = area(2, 3)
   __io_println(bad)
 }

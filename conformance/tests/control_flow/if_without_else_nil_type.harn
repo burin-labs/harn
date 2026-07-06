@@ -5,18 +5,18 @@
  * Adding `?? default` collapses the union back to `T`.
  */
 pipeline default() {
-  let cond = true
-  let maybe: int? = if cond {
+  const cond = true
+  const maybe: int? = if cond {
     42
   }
   __io_println(maybe)
-  let with_default: int = if cond {
+  const with_default: int = if cond {
     7
   }
     ?? 0
   __io_println(with_default + 1)
-  let cond2 = false
-  let none: int? = if cond2 {
+  const cond2 = false
+  const none: int? = if cond2 {
     9
   }
   __io_println(none)

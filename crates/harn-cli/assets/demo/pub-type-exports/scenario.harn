@@ -31,24 +31,24 @@ pipeline default(_task) {
   __io_println("=== pub-type-exports demo ===")
   __io_println("")
   // 1. The imported alias as a plain annotation.
-  let manual: GradeReport = {verdict: "pass", score: 92, summary: "hand-written report bound against the imported alias"}
+  const manual: GradeReport = {verdict: "pass", score: 92, summary: "hand-written report bound against the imported alias"}
   __io_println("annotation:  [" + verdict_label(manual.verdict) + "] " + describe(manual))
   __io_println("")
   // 2. The imported alias as `output_schema`: the compiler lowers
   //    GradeReport to JSON Schema, the validator enforces it, and the
   //    parsed result narrows to the alias' shape.
-  let graded = llm_call(
+  const graded = llm_call(
     "[pub_type_exports] Grade this patch: adds regression tests for module exports.",
     "You are a strict grader. Reply with JSON only.",
     {output_schema: GradeReport, output_validation: "error"},
   )
-  let report: GradeReport = graded.data
+  const report: GradeReport = graded.data
   __io_println(
     "llm_call(output_schema: GradeReport):  [" + verdict_label(report.verdict) + "] "
       + describe(report),
   )
   __io_println("")
-  let receipt = {
+  const receipt = {
     kind: "pub_type_exports_receipt",
     annotation_verdict: manual.verdict,
     llm_verdict: report.verdict,

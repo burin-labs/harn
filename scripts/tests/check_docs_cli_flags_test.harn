@@ -6,8 +6,8 @@ import "../check_docs_cli_flags.harn"
 // --- bash_blocks ------------------------------------------------------------
 @test
 pipeline test_bash_blocks_basic(task) {
-  let md = "intro\n```bash\nharn run x\n```\n```sh\nharn lint y\n```\n```python\nnope\n```\n"
-  let blocks = bash_blocks(md)
+  const md = "intro\n```bash\nharn run x\n```\n```sh\nharn lint y\n```\n```python\nnope\n```\n"
+  const blocks = bash_blocks(md)
   assert_eq(blocks.count, 2)
   assert_eq(blocks[0].first_line, 3)
   assert_eq(blocks[0].lines, ["harn run x"])
@@ -23,7 +23,7 @@ pipeline test_bash_blocks_info_string_exact(task) {
 // --- logical_lines ----------------------------------------------------------
 @test
 pipeline test_logical_lines_plain(task) {
-  let out = logical_lines(["harn run a", "harn run b"], 10)
+  const out = logical_lines(["harn run a", "harn run b"], 10)
   assert_eq(out.count, 2)
   assert_eq(out[0].line_no, 10)
   assert_eq(out[0].command, "harn run a")
@@ -32,7 +32,7 @@ pipeline test_logical_lines_plain(task) {
 
 @test
 pipeline test_logical_lines_continuation(task) {
-  let out = logical_lines(["harn run x \\", "  --flag value"], 5)
+  const out = logical_lines(["harn run x \\", "  --flag value"], 5)
   assert_eq(out.count, 1)
   assert_eq(out[0].line_no, 5)
   assert_eq(out[0].command, "harn run x    --flag value")
@@ -40,14 +40,14 @@ pipeline test_logical_lines_continuation(task) {
 
 @test
 pipeline test_logical_lines_allow_stale_any_physical_line(task) {
-  let out = logical_lines(["harn run x \\", "  --old # harn-doc-cli: allow-stale"], 1)
+  const out = logical_lines(["harn run x \\", "  --old # harn-doc-cli: allow-stale"], 1)
   assert_eq(out.count, 1)
   assert_eq(out[0].allow_stale, true)
 }
 
 @test
 pipeline test_logical_lines_trailing_continuation_flushes(task) {
-  let out = logical_lines(["harn run x \\"], 1)
+  const out = logical_lines(["harn run x \\"], 1)
   assert_eq(out.count, 1)
   // The pre-backslash spacing survives, like Python's rstrip()[:-1].
   assert_eq(out[0].command, "harn run x ")
@@ -99,7 +99,7 @@ pipeline test_tokens_empty_quoted_token(task) {
 // --- command_segments / find_harn_segment -----------------------------------
 @test
 pipeline test_segments_split(task) {
-  let segs = command_segments(["a", "&&", "b", "c", ";", ";", "d"])
+  const segs = command_segments(["a", "&&", "b", "c", ";", ";", "d"])
   assert_eq(segs, [["a"], ["b", "c"], ["d"]])
 }
 
@@ -113,7 +113,7 @@ pipeline test_find_harn_segment_forms(task) {
 }
 
 // --- help parsing -----------------------------------------------------------
-let HELP_ROOT = """
+const HELP_ROOT = """
 Harn CLI
 
 Usage: harn [OPTIONS] <COMMAND>
@@ -128,7 +128,7 @@ Options:
   -h, --help           Print help
 """
 
-let HELP_RUN = """
+const HELP_RUN = """
 Run a script
 
 Usage: harn run [OPTIONS] <SCRIPT>
@@ -151,7 +151,7 @@ pipeline test_parse_command_names_requires_heading(task) {
 
 @test
 pipeline test_parse_help_flags(task) {
-  let parsed = parse_help_flags(HELP_ROOT)
+  const parsed = parse_help_flags(HELP_ROOT)
   assert_eq(parsed.flags.contains("--json"), true)
   assert_eq(parsed.flags.contains("--config"), true)
   assert_eq(parsed.takes["--json"], false)
@@ -160,7 +160,7 @@ pipeline test_parse_help_flags(task) {
 
 @test
 pipeline test_parse_help_flags_optional_value(task) {
-  let parsed = parse_help_flags(HELP_RUN)
+  const parsed = parse_help_flags(HELP_RUN)
   assert_eq(parsed.takes["--as-job"], true)
   assert_eq(parsed.takes["--timeout"], true)
 }
@@ -169,7 +169,7 @@ pipeline test_parse_help_flags_optional_value(task) {
 pipeline test_parse_help_flags_lookbehind_equivalent(task) {
   // `--` runs embedded in a word or after a hyphen do not count as flags
   // (the Python `(?<![\w-])` look-behind).
-  let parsed = parse_help_flags("see foo--bar and legit --baz\n")
+  const parsed = parse_help_flags("see foo--bar and legit --baz\n")
   assert_eq(parsed.flags.contains("--bar"), false)
   assert_eq(parsed.flags.contains("--baz"), true)
 }
@@ -195,7 +195,7 @@ fn fresh_state() {
 
 @test
 pipeline test_analyze_known_flags_ok(task) {
-  let res = analyze_harn_args(fresh_state(), ["run", "--timeout", "5", "x.harn"], fake_fetch)
+  const res = analyze_harn_args(fresh_state(), ["run", "--timeout", "5", "x.harn"], fake_fetch)
   assert_eq(res.path, ["run"])
   assert_eq(res.missing, [])
 }
@@ -203,19 +203,19 @@ pipeline test_analyze_known_flags_ok(task) {
 @test
 pipeline test_analyze_parent_flags_accepted_in_subcommand(task) {
   // Root-level flags stay accepted below (union over path prefixes).
-  let res = analyze_harn_args(fresh_state(), ["run", "--json", "x.harn"], fake_fetch)
+  const res = analyze_harn_args(fresh_state(), ["run", "--json", "x.harn"], fake_fetch)
   assert_eq(res.missing, [])
 }
 
 @test
 pipeline test_analyze_missing_flag_reported(task) {
-  let res = analyze_harn_args(fresh_state(), ["run", "--bogus", "x.harn"], fake_fetch)
+  const res = analyze_harn_args(fresh_state(), ["run", "--bogus", "x.harn"], fake_fetch)
   assert_eq(res.missing, ["--bogus"])
 }
 
 @test
 pipeline test_analyze_stops_at_double_dash(task) {
-  let res = analyze_harn_args(fresh_state(), ["run", "x.harn", "--", "--not-checked"], fake_fetch)
+  const res = analyze_harn_args(fresh_state(), ["run", "x.harn", "--", "--not-checked"], fake_fetch)
   assert_eq(res.missing, [])
 }
 
@@ -223,14 +223,14 @@ pipeline test_analyze_stops_at_double_dash(task) {
 pipeline test_analyze_value_skip_does_not_eat_subcommand(task) {
   // `--json` takes no value, so the next token still counts as a
   // subcommand path element.
-  let res = analyze_harn_args(fresh_state(), ["--json", "run", "--timeout", "5"], fake_fetch)
+  const res = analyze_harn_args(fresh_state(), ["--json", "run", "--timeout", "5"], fake_fetch)
   assert_eq(res.path, ["run"])
   assert_eq(res.missing, [])
 }
 
 @test
 pipeline test_analyze_flag_with_equals_value(task) {
-  let res = analyze_harn_args(fresh_state(), ["run", "--timeout=5", "x.harn"], fake_fetch)
+  const res = analyze_harn_args(fresh_state(), ["run", "--timeout=5", "x.harn"], fake_fetch)
   assert_eq(res.missing, [])
 }
 

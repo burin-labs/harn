@@ -29,7 +29,7 @@ import { with_llm_script } from "std/testing"
  *     behavior is byte-identical to today.
  */
 fn build_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "apply_fix",
@@ -45,7 +45,7 @@ fn build_tools() {
 }
 
 fn count_events(events, kind) {
-  var n = 0
+  let n = 0
   for event in events {
     if event.type == kind {
       n = n + 1
@@ -80,8 +80,8 @@ fn run_scenario(reserved_on, reserve_iterations, green_at_iteration) {
       {text: "", tool_calls: [{id: "e5", name: "apply_fix", arguments: {}}]},
     ],
     { ->
-      let session = "reserved-verify-" + uuid()
-      let captured = agent_capture_events(
+      const session = "reserved-verify-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the build green.",
@@ -132,7 +132,7 @@ pipeline default() {
   // Case 1: ON, repair lands green. First terminal verify (iter 2) is red and
   // grants a repair turn; the re-verify at iter 3 is green -> the run completes
   // `done` instead of a silent `budget_exhausted`.
-  let case1 = run_scenario(true, 2, 3)
+  const case1 = run_scenario(true, 2, 3)
   __io_println("case1.status=" + case1.status)
   __io_println("case1.grant=" + to_string(has_phase(case1.events, "grant")))
   __io_println("case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")))
@@ -151,7 +151,7 @@ pipeline default() {
   // Case 2: ON, repair never lands (verifier never green) — the reserve is spent
   // and the FINAL state is a verify that RAN and surfaced the red build, never a
   // blind exhaust. Bounded: the reserve cannot loop forever (one grant here).
-  let case2 = run_scenario(true, 1, 999)
+  const case2 = run_scenario(true, 1, 999)
   __io_println("case2.status=" + case2.status)
   __io_println("case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")))
   __io_println("case2.grants=" + to_string(count_events(case2.events, "reserved_terminal_verify")))
@@ -166,7 +166,7 @@ pipeline default() {
   assert(case2.status != "done", "case2: an unrepaired red build must not terminate done")
   // Case 3: OFF control — byte-identical to today. No reserved-verify events,
   // no terminal verify, plain budget_exhausted.
-  let case3 = run_scenario(false, 2, 3)
+  const case3 = run_scenario(false, 2, 3)
   __io_println("case3.status=" + case3.status)
   __io_println(
     "case3.reserved_events=" + to_string(count_events(case3.events, "reserved_terminal_verify")),

@@ -37,8 +37,8 @@ pipeline test(task) {
         """,
     },
   )
-  let store = mem_cache({namespace: "web-fetch-parse"})
-  let fetched = web_fetch("https://example.com/article", {store: store, fetched_at: "fixture-time"})
+  const store = mem_cache({namespace: "web-fetch-parse"})
+  const fetched = web_fetch("https://example.com/article", {store: store, fetched_at: "fixture-time"})
   assert_eq(fetched.status, 200)
   assert_eq(fetched.cache_status, "miss")
   assert_eq(fetched.final_url, "https://example.com/article")
@@ -46,7 +46,7 @@ pipeline test(task) {
   assert_eq(fetched.etag, "\"v1\"")
   assert_eq(fetched.last_modified, "Mon, 11 May 2026 00:00:00 GMT")
   assert_eq(fetched.fetched_at, "fixture-time")
-  let parsed = web_parse_html(fetched.body, fetched.final_url)
+  const parsed = web_parse_html(fetched.body, fetched.final_url)
   assert_eq(parsed.title, "Example & Research")
   assert_eq(parsed.meta.description, "Deterministic source ingest")
   assert_eq(parsed.meta["og:type"], "article")

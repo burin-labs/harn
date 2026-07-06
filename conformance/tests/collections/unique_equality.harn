@@ -11,7 +11,7 @@ pipeline test(task) {
   log([0.0, 0.0 - 0.0].unique())
   // NaN is never equal to anything, including another NaN, so unique() keeps
   // every NaN rather than collapsing them.
-  let nan = sqrt(-1.0)
+  const nan = sqrt(-1.0)
   log([nan, nan].unique().count)
   // Plain de-duplication still works and preserves order.
   log([3, 1, 3, 2, 1].unique())

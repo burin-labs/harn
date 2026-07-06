@@ -73,7 +73,7 @@ fn __has_string(items: list, needle: string) -> bool {
 }
 
 fn __normalize_workload(value: string) -> string {
-  let workload = trim(value)
+  const workload = trim(value)
   if __has_string(SUPPORTED_WORKLOADS, workload) {
     return workload
   }
@@ -81,7 +81,7 @@ fn __normalize_workload(value: string) -> string {
 }
 
 fn __filter_int(value: string) -> int? {
-  let text = trim(value)
+  const text = trim(value)
   if text == "" {
     return nil
   }
@@ -89,19 +89,19 @@ fn __filter_int(value: string) -> int? {
 }
 
 fn __model_matches(entry: dict, filter: string) -> bool {
-  let model_filter = trim(filter)
+  const model_filter = trim(filter)
   if model_filter == "" {
     return true
   }
-  let provider = safe_string(entry["provider"], "")
-  let id = safe_string(entry["id"], "")
-  let name = safe_string(entry["name"], "")
+  const provider = safe_string(entry["provider"], "")
+  const id = safe_string(entry["id"], "")
+  const name = safe_string(entry["name"], "")
   if model_filter == id || model_filter == name || model_filter == provider + "/" + id {
     return true
   }
-  let provider_prefix = provider + "/"
+  const provider_prefix = provider + "/"
   if len(id) >= len(provider_prefix) && id[0:len(provider_prefix)] == provider_prefix {
-    let unprefixed = id[len(provider_prefix):len(id)]
+    const unprefixed = id[len(provider_prefix):len(id)]
     if model_filter == unprefixed || model_filter == provider + "/" + unprefixed {
       return true
     }
@@ -110,12 +110,12 @@ fn __model_matches(entry: dict, filter: string) -> bool {
 }
 
 fn __sorted_strings(items: list) -> list {
-  var out = []
+  let out = []
   for item in items {
     if type_of(item) != "string" {
       continue
     }
-    var idx = 0
+    let idx = 0
     while idx < len(out) && out[idx] < item {
       idx = idx + 1
     }
@@ -125,14 +125,14 @@ fn __sorted_strings(items: list) -> list {
 }
 
 fn __sort_models_by_provider_id(models: list) -> list {
-  var out = []
+  let out = []
   for model in models {
-    let m = safe_dict(model)
-    let key = safe_string(m["provider"], "") + "/" + safe_string(m["id"], "")
-    var idx = 0
+    const m = safe_dict(model)
+    const key = safe_string(m["provider"], "") + "/" + safe_string(m["id"], "")
+    let idx = 0
     while idx < len(out) {
-      let other = safe_dict(out[idx])
-      let other_key = safe_string(other["provider"], "") + "/" + safe_string(other["id"], "")
+      const other = safe_dict(out[idx])
+      const other_key = safe_string(other["provider"], "") + "/" + safe_string(other["id"], "")
       if other_key >= key {
         break
       }
@@ -188,8 +188,8 @@ fn __live_batch_adapter_key(provider: string, wire: string) -> string {
 }
 
 fn __live_batch_adapter(provider: string, wire: string) -> dict {
-  let adapter = __live_batch_adapter_key(provider, wire)
-  let supported = adapter != ""
+  const adapter = __live_batch_adapter_key(provider, wire)
+  const supported = adapter != ""
   return {
     submit: supported,
     status: supported,
@@ -223,14 +223,14 @@ fn __constraints(workload: string) -> list {
 }
 
 fn __provider_group(models: list) -> dict {
-  var groups = {}
+  let groups = {}
   for model in models {
-    let m = safe_dict(model)
-    let provider = safe_string(m["provider"], "")
+    const m = safe_dict(model)
+    const provider = safe_string(m["provider"], "")
     if provider == "" {
       continue
     }
-    let prior = if groups[provider] == nil {
+    const prior = if groups[provider] == nil {
       []
     } else {
       groups[provider]
@@ -241,26 +241,26 @@ fn __provider_group(models: list) -> dict {
 }
 
 fn __candidate(entry: dict, workload: string) -> dict {
-  let provider = safe_string(entry["provider"], "")
-  let id = safe_string(entry["id"], "")
-  let batch_entry = safe_dict(entry["batch"])
-  let typed_discount = __safe_int(batch_entry["discount_percent"])
-  let typed_turnaround = __safe_int(batch_entry["turnaround_hours"])
-  let discount = if typed_discount == nil {
+  const provider = safe_string(entry["provider"], "")
+  const id = safe_string(entry["id"], "")
+  const batch_entry = safe_dict(entry["batch"])
+  const typed_discount = __safe_int(batch_entry["discount_percent"])
+  const typed_turnaround = __safe_int(batch_entry["turnaround_hours"])
+  const discount = if typed_discount == nil {
     __safe_int(entry["batch_discount_percent"])
   } else {
     typed_discount
   }
-  let turnaround = if typed_turnaround == nil {
+  const turnaround = if typed_turnaround == nil {
     __safe_int(entry["batch_turnaround_hours"])
   } else {
     typed_turnaround
   }
-  let wire_format = safe_string(batch_entry["wire_format"], safe_string(entry["batch_wire_format"], ""))
-  let input_mode = safe_string(batch_entry["input_mode"], safe_string(entry["batch_input_mode"], ""))
-  let live_adapter = __live_batch_adapter(provider, wire_format)
-  let recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
-  var constraints = []
+  const wire_format = safe_string(batch_entry["wire_format"], safe_string(entry["batch_wire_format"], ""))
+  const input_mode = safe_string(batch_entry["input_mode"], safe_string(entry["batch_input_mode"], ""))
+  const live_adapter = __live_batch_adapter(provider, wire_format)
+  const recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
+  let constraints = []
   if wire_format == "" {
     constraints = constraints.push("Provider catalog omits batch wire format; submission must probe before enqueue.")
   }
@@ -332,11 +332,11 @@ fn __collect(
   min_discount: int?,
   max_turnaround: int?,
 ) -> list {
-  var out = []
+  let out = []
   for raw_entry in catalog {
-    let entry = safe_dict(raw_entry)
-    let provider = safe_string(entry["provider"], "")
-    let id = safe_string(entry["id"], "")
+    const entry = safe_dict(raw_entry)
+    const provider = safe_string(entry["provider"], "")
+    const id = safe_string(entry["id"], "")
     if provider == "" || id == "" {
       continue
     }
@@ -346,15 +346,15 @@ fn __collect(
     if !__model_matches(entry, model_filter) {
       continue
     }
-    let capabilities = safe_list(entry["capabilities"])
+    const capabilities = safe_list(entry["capabilities"])
     if !safe_bool(entry["batch_api"], false) && !__has_string(capabilities, "batch") {
       continue
     }
-    let discount = __safe_int(entry["batch_discount_percent"])
+    const discount = __safe_int(entry["batch_discount_percent"])
     if min_discount != nil && (discount == nil || discount < min_discount) {
       continue
     }
-    let turnaround = __safe_int(entry["batch_turnaround_hours"])
+    const turnaround = __safe_int(entry["batch_turnaround_hours"])
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
       continue
     }
@@ -364,7 +364,7 @@ fn __collect(
 }
 
 fn __render_batch_value(value, suffix: string, fallback: string) -> string {
-  let parsed = __safe_int(value)
+  const parsed = __safe_int(value)
   if parsed == nil {
     return fallback
   }
@@ -372,12 +372,12 @@ fn __render_batch_value(value, suffix: string, fallback: string) -> string {
 }
 
 fn __render_model_line(model: dict) -> string {
-  let batch = safe_dict(model["batch"])
-  let wire = safe_string(batch["wire_format"], "unknown_wire")
-  let input = safe_string(batch["input_mode"], "unknown_input")
-  let discount = __render_batch_value(batch["discount_percent"], "%", "unknown discount")
-  let turnaround = __render_batch_value(batch["turnaround_hours"], "h", "unknown turnaround")
-  let live = if safe_bool(safe_dict(batch["harn_live_adapter"])["submit"], false) {
+  const batch = safe_dict(model["batch"])
+  const wire = safe_string(batch["wire_format"], "unknown_wire")
+  const input = safe_string(batch["input_mode"], "unknown_input")
+  const discount = __render_batch_value(batch["discount_percent"], "%", "unknown discount")
+  const turnaround = __render_batch_value(batch["turnaround_hours"], "h", "unknown turnaround")
+  const live = if safe_bool(safe_dict(batch["harn_live_adapter"])["submit"], false) {
     "live submit"
   } else {
     "dry-run only"
@@ -397,13 +397,13 @@ fn __render_model_line(model: dict) -> string {
 }
 
 fn __render_human(harness: Harness, report: dict) {
-  let workload = safe_string(report["workload"], "generic")
-  let models = safe_list(report["models"])
+  const workload = safe_string(report["workload"], "generic")
+  const models = safe_list(report["models"])
   if len(models) == 0 {
     harness.stdio.println("(no batch-capable models match)")
   } else {
     harness.stdio.println("Batch-capable models for " + workload)
-    let groups = __provider_group(models)
+    const groups = __provider_group(models)
     for provider in __sorted_strings(keys(groups)) {
       harness.stdio.println(provider)
       for model in groups[provider] {
@@ -427,7 +427,7 @@ fn __resolve_candidate(
   model_filter: string,
   workload: string,
 ) -> dict {
-  let matches = __collect(catalog, provider_filter, model_filter, workload, nil, nil)
+  const matches = __collect(catalog, provider_filter, model_filter, workload, nil, nil)
   if len(matches) == 0 {
     return {
       ok: false,
@@ -445,7 +445,7 @@ fn __resolve_candidate(
 }
 
 fn __row_string(row: dict, key: string, fallback: string) -> string {
-  let value = safe_string(row[key], "")
+  const value = safe_string(row[key], "")
   if trim(value) == "" {
     return fallback
   }
@@ -453,7 +453,7 @@ fn __row_string(row: dict, key: string, fallback: string) -> string {
 }
 
 fn __custom_id(row: dict, line_no: int, id_prefix: string) -> string {
-  let explicit = __row_string(row, "custom_id", __row_string(row, "id", ""))
+  const explicit = __row_string(row, "custom_id", __row_string(row, "id", ""))
   if explicit != "" {
     return explicit
   }
@@ -461,7 +461,7 @@ fn __custom_id(row: dict, line_no: int, id_prefix: string) -> string {
 }
 
 fn __request_entry(row: dict, line_no: int, id_prefix: string) -> dict {
-  let custom_id = __custom_id(row, line_no, id_prefix)
+  const custom_id = __custom_id(row, line_no, id_prefix)
   return {
     custom_id: custom_id,
     source_line: line_no,
@@ -497,23 +497,23 @@ fn __group_summary(group: dict) -> dict {
 }
 
 fn __read_request_rows(harness: Harness, requests_path: string) -> dict {
-  var rows = []
-  var errors = []
+  let rows = []
+  let errors = []
   if requests_path == "" {
     return {rows: rows, errors: ["--requests is required"]}
   }
   if !harness.fs.exists(requests_path) {
     return {rows: rows, errors: ["request JSONL not found: " + requests_path]}
   }
-  let source = harness.fs.read_text(requests_path)
-  var line_no = 0
+  const source = harness.fs.read_text(requests_path)
+  let line_no = 0
   for line in source.split("\n") {
     line_no = line_no + 1
-    let trimmed = trim(line)
+    const trimmed = trim(line)
     if trimmed == "" {
       continue
     }
-    let parsed = try {
+    const parsed = try {
       json_parse(trimmed)
     } catch (e) {
       errors = errors.push("line " + to_string(line_no) + ": invalid JSON: " + to_string(e))
@@ -529,15 +529,15 @@ fn __read_request_rows(harness: Harness, requests_path: string) -> dict {
 }
 
 fn __read_manifest(harness: Harness, manifest_path: string) -> dict {
-  var errors = []
+  let errors = []
   if manifest_path == "" {
     return {manifest: {}, source_sha256: "", errors: ["--manifest is required"]}
   }
   if !harness.fs.exists(manifest_path) {
     return {manifest: {}, source_sha256: "", errors: ["batch manifest not found: " + manifest_path]}
   }
-  let source = harness.fs.read_text(manifest_path)
-  let parsed = try {
+  const source = harness.fs.read_text(manifest_path)
+  const parsed = try {
     json_parse(source)
   } catch (e) {
     return {
@@ -550,7 +550,7 @@ fn __read_manifest(harness: Harness, manifest_path: string) -> dict {
     errors = errors.push("batch manifest must be a JSON object")
     return {manifest: {}, source_sha256: sha256(source), errors: errors}
   }
-  let manifest = safe_dict(parsed)
+  const manifest = safe_dict(parsed)
   if safe_string(manifest["kind"], "") != "harn.model_batch_manifest" {
     errors = errors.push("unsupported batch manifest kind: " + safe_string(manifest["kind"], ""))
   }
@@ -561,15 +561,15 @@ fn __read_manifest(harness: Harness, manifest_path: string) -> dict {
 }
 
 fn __read_prepare_receipt(harness: Harness, receipt_path: string) -> dict {
-  var errors = []
+  let errors = []
   if receipt_path == "" {
     return {receipt: {}, source_sha256: "", errors: ["--receipt is required"]}
   }
   if !harness.fs.exists(receipt_path) {
     return {receipt: {}, source_sha256: "", errors: ["batch prepare receipt not found: " + receipt_path]}
   }
-  let source = harness.fs.read_text(receipt_path)
-  let parsed = try {
+  const source = harness.fs.read_text(receipt_path)
+  const parsed = try {
     json_parse(source)
   } catch (e) {
     return {
@@ -582,7 +582,7 @@ fn __read_prepare_receipt(harness: Harness, receipt_path: string) -> dict {
     errors = errors.push("batch prepare receipt must be a JSON object")
     return {receipt: {}, source_sha256: sha256(source), errors: errors}
   }
-  let receipt = safe_dict(parsed)
+  const receipt = safe_dict(parsed)
   if safe_string(receipt["kind"], "") != "harn.model_batch_prepare_receipt" {
     errors = errors.push("unsupported batch prepare receipt kind: " + safe_string(receipt["kind"], ""))
   }
@@ -593,15 +593,15 @@ fn __read_prepare_receipt(harness: Harness, receipt_path: string) -> dict {
 }
 
 fn __read_submission_receipt(harness: Harness, receipt_path: string) -> dict {
-  var errors = []
+  let errors = []
   if receipt_path == "" {
     return {receipt: {}, source_sha256: "", errors: ["--submission is required"]}
   }
   if !harness.fs.exists(receipt_path) {
     return {receipt: {}, source_sha256: "", errors: ["batch submission receipt not found: " + receipt_path]}
   }
-  let source = harness.fs.read_text(receipt_path)
-  let parsed = try {
+  const source = harness.fs.read_text(receipt_path)
+  const parsed = try {
     json_parse(source)
   } catch (e) {
     return {
@@ -614,7 +614,7 @@ fn __read_submission_receipt(harness: Harness, receipt_path: string) -> dict {
     errors = errors.push("batch submission receipt must be a JSON object")
     return {receipt: {}, source_sha256: sha256(source), errors: errors}
   }
-  let receipt = safe_dict(parsed)
+  const receipt = safe_dict(parsed)
   if safe_string(receipt["kind"], "") != "harn.model_batch_submission_receipt" {
     errors = errors.push("unsupported batch submission receipt kind: " + safe_string(receipt["kind"], ""))
   }
@@ -625,15 +625,15 @@ fn __read_submission_receipt(harness: Harness, receipt_path: string) -> dict {
 }
 
 fn __read_status_receipt(harness: Harness, receipt_path: string) -> dict {
-  var errors = []
+  let errors = []
   if receipt_path == "" {
     return {receipt: {}, source_sha256: "", errors: ["--status is required"]}
   }
   if !harness.fs.exists(receipt_path) {
     return {receipt: {}, source_sha256: "", errors: ["batch status receipt not found: " + receipt_path]}
   }
-  let source = harness.fs.read_text(receipt_path)
-  let parsed = try {
+  const source = harness.fs.read_text(receipt_path)
+  const parsed = try {
     json_parse(source)
   } catch (e) {
     return {
@@ -646,7 +646,7 @@ fn __read_status_receipt(harness: Harness, receipt_path: string) -> dict {
     errors = errors.push("batch status receipt must be a JSON object")
     return {receipt: {}, source_sha256: sha256(source), errors: errors}
   }
-  let receipt = safe_dict(parsed)
+  const receipt = safe_dict(parsed)
   if safe_string(receipt["kind"], "") != "harn.model_batch_status_receipt" {
     errors = errors.push("unsupported batch status receipt kind: " + safe_string(receipt["kind"], ""))
   }
@@ -657,15 +657,15 @@ fn __read_status_receipt(harness: Harness, receipt_path: string) -> dict {
 }
 
 fn __read_cancel_receipt(harness: Harness, receipt_path: string) -> dict {
-  var errors = []
+  let errors = []
   if receipt_path == "" {
     return {receipt: {}, source_sha256: "", errors: ["--receipt is required"]}
   }
   if !harness.fs.exists(receipt_path) {
     return {receipt: {}, source_sha256: "", errors: ["batch receipt not found: " + receipt_path]}
   }
-  let source = harness.fs.read_text(receipt_path)
-  let parsed = try {
+  const source = harness.fs.read_text(receipt_path)
+  const parsed = try {
     json_parse(source)
   } catch (e) {
     return {
@@ -678,8 +678,8 @@ fn __read_cancel_receipt(harness: Harness, receipt_path: string) -> dict {
     errors = errors.push("batch receipt must be a JSON object")
     return {receipt: {}, source_sha256: sha256(source), errors: errors}
   }
-  let receipt = safe_dict(parsed)
-  let kind = safe_string(receipt["kind"], "")
+  const receipt = safe_dict(parsed)
+  const kind = safe_string(receipt["kind"], "")
   if kind != "harn.model_batch_submission_receipt" && kind != "harn.model_batch_status_receipt" {
     errors = errors.push("unsupported batch cancel receipt kind: " + kind)
   }
@@ -693,8 +693,8 @@ fn __mkdirp(harness: Harness, path: string) {
   if trim(path) == "" {
     return
   }
-  let absolute = starts_with(path, "/")
-  var current = if absolute {
+  const absolute = starts_with(path, "/")
+  let current = if absolute {
     "/"
   } else {
     ""
@@ -717,7 +717,7 @@ fn __mkdirp(harness: Harness, path: string) {
 }
 
 fn __dict_without_batch_fields(row: dict) -> dict {
-  var out = {}
+  let out = {}
   for key in row.keys().sort() {
     if !__has_string(BATCH_ROW_META_FIELDS, key) {
       out = out + {[key]: row[key]}
@@ -727,7 +727,7 @@ fn __dict_without_batch_fields(row: dict) -> dict {
 }
 
 fn __body_from_row(row: dict, model: string, include_model: bool) -> dict {
-  var body = safe_dict(row["params"])
+  let body = safe_dict(row["params"])
   if body == {} {
     body = safe_dict(row["body"])
   }
@@ -744,11 +744,11 @@ fn __body_from_row(row: dict, model: string, include_model: bool) -> dict {
 }
 
 fn __batch_endpoint(group: dict) -> string {
-  let endpoint = trim(safe_string(group["endpoint"], ""))
+  const endpoint = trim(safe_string(group["endpoint"], ""))
   if starts_with(endpoint, "/") {
     return endpoint
   }
-  let wire = safe_string(safe_dict(group["batch"])["wire_format"], "")
+  const wire = safe_string(safe_dict(group["batch"])["wire_format"], "")
   if wire == "anthropic_messages" {
     return "/v1/messages/batches"
   }
@@ -765,16 +765,16 @@ fn __batch_endpoint(group: dict) -> string {
 }
 
 fn __prepare_file_stem(group: dict) -> string {
-  let seed = safe_string(group["id"], "") + ":" + safe_string(group["provider"], "") + ":"
+  const seed = safe_string(group["id"], "") + ":" + safe_string(group["provider"], "") + ":"
     + safe_string(group["model"], "")
   return "batch_group_" + substring(sha256(seed), 0, 16)
 }
 
 fn __provider_request_record(group: dict, request: dict, endpoint: string) -> dict {
-  let wire = safe_string(safe_dict(group["batch"])["wire_format"], "")
-  let raw_row = safe_dict(request["request"])
-  let model = safe_string(group["model"], "")
-  let custom_id = safe_string(request["custom_id"], "")
+  const wire = safe_string(safe_dict(group["batch"])["wire_format"], "")
+  const raw_row = safe_dict(request["request"])
+  const model = safe_string(group["model"], "")
+  const custom_id = safe_string(request["custom_id"], "")
   if wire == "anthropic_messages" {
     return {custom_id: custom_id, params: __body_from_row(raw_row, model, true)}
   }
@@ -800,7 +800,7 @@ fn __request_file_text(wire: string, records: list) -> string {
   if wire == "anthropic_messages" {
     return json_stringify_pretty({requests: records}) + "\n"
   }
-  var lines = []
+  let lines = []
   for record in records {
     lines = lines.push(json_stringify(record))
   }
@@ -808,10 +808,10 @@ fn __request_file_text(wire: string, records: list) -> string {
 }
 
 fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dict {
-  let provider = safe_string(group["provider"], "")
-  let model = safe_string(group["model"], "")
-  let batch = safe_dict(group["batch"])
-  let wire = safe_string(batch["wire_format"], "")
+  const provider = safe_string(group["provider"], "")
+  const model = safe_string(group["model"], "")
+  const batch = safe_dict(group["batch"])
+  const wire = safe_string(batch["wire_format"], "")
   if wire == "anthropic_messages" {
     return {
       provider: provider,
@@ -879,31 +879,31 @@ fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dic
 }
 
 fn __prepare_artifact(out_dir: string, group: dict) -> dict {
-  let batch = safe_dict(group["batch"])
-  let wire = safe_string(batch["wire_format"], "")
-  var errors = []
+  const batch = safe_dict(group["batch"])
+  const wire = safe_string(batch["wire_format"], "")
+  let errors = []
   if !__supported_prepare_wire(wire) {
     errors = errors.push("unsupported batch wire format for prepare: " + wire)
     return {ok: false, errors: errors}
   }
-  let requests = safe_list(group["requests"])
+  const requests = safe_list(group["requests"])
   if len(requests) == 0 {
     errors = errors.push("group " + safe_string(group["id"], "") + " contains no requests")
     return {ok: false, errors: errors}
   }
-  let endpoint = __batch_endpoint(group)
-  var records = []
+  const endpoint = __batch_endpoint(group)
+  let records = []
   for request in requests {
     records = records.push(__provider_request_record(group, safe_dict(request), endpoint))
   }
-  let ext = if wire == "anthropic_messages" {
+  const ext = if wire == "anthropic_messages" {
     ".json"
   } else {
     ".jsonl"
   }
-  let request_path = path_join(out_dir, __prepare_file_stem(group) + ext)
-  let text = __request_file_text(wire, records)
-  let job = {
+  const request_path = path_join(out_dir, __prepare_file_stem(group) + ext)
+  const text = __request_file_text(wire, records)
+  const job = {
     id: safe_string(group["id"], ""),
     provider: safe_string(group["provider"], ""),
     model: safe_string(group["model"], ""),
@@ -940,17 +940,17 @@ fn __build_manifest(
   min_discount: int?,
   max_turnaround: int?,
 ) -> dict {
-  var errors = []
-  var warnings = []
-  var groups = {}
-  var group_keys = []
-  var request_count = 0
+  let errors = []
+  let warnings = []
+  let groups = {}
+  let group_keys = []
+  let request_count = 0
   for item in request_rows {
-    let entry = safe_dict(item)
-    let line_no = __safe_int(entry["line_no"]) ?? 0
-    let row = safe_dict(entry["row"])
-    let provider = __row_string(row, "provider", provider_filter)
-    let model = __row_string(row, "model", model_filter)
+    const entry = safe_dict(item)
+    const line_no = __safe_int(entry["line_no"]) ?? 0
+    const row = safe_dict(entry["row"])
+    const provider = __row_string(row, "provider", provider_filter)
+    const model = __row_string(row, "model", model_filter)
     if provider == "" && model == "" {
       errors = errors.push("line " + to_string(line_no) + ": provider/model missing")
       continue
@@ -959,7 +959,7 @@ fn __build_manifest(
       errors = errors.push("line " + to_string(line_no) + ": model missing")
       continue
     }
-    let resolved = __resolve_candidate(catalog, provider, model, workload)
+    const resolved = __resolve_candidate(catalog, provider, model, workload)
     if !safe_bool(resolved["ok"], false) {
       errors = errors
         .push(
@@ -967,9 +967,9 @@ fn __build_manifest(
       )
       continue
     }
-    let candidate = safe_dict(resolved["candidate"])
-    let batch = safe_dict(candidate["batch"])
-    let discount = __safe_int(batch["discount_percent"])
+    const candidate = safe_dict(resolved["candidate"])
+    const batch = safe_dict(candidate["batch"])
+    const discount = __safe_int(batch["discount_percent"])
     if min_discount != nil && (discount == nil || discount < min_discount) {
       errors = errors
         .push(
@@ -982,7 +982,7 @@ fn __build_manifest(
       )
       continue
     }
-    let turnaround = __safe_int(batch["turnaround_hours"])
+    const turnaround = __safe_int(batch["turnaround_hours"])
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
       errors = errors
         .push(
@@ -995,20 +995,20 @@ fn __build_manifest(
       )
       continue
     }
-    let tool_format = __row_string(row, "tool_format", default_tool_format)
-    let endpoint = __row_string(row, "endpoint", safe_string(batch["wire_format"], "provider_default"))
-    let key = __group_key(
+    const tool_format = __row_string(row, "tool_format", default_tool_format)
+    const endpoint = __row_string(row, "endpoint", safe_string(batch["wire_format"], "provider_default"))
+    const key = __group_key(
       safe_string(candidate["provider"], ""),
       safe_string(candidate["id"], ""),
       batch,
       tool_format,
       endpoint,
     )
-    let request = __request_entry(row, line_no, id_prefix)
-    let current = safe_dict(groups[key])
+    const request = __request_entry(row, line_no, id_prefix)
+    const current = safe_dict(groups[key])
     if current == {} {
-      let group_id = "batch_group_" + sha256(key).substring(0, 16)
-      let group = {
+      const group_id = "batch_group_" + sha256(key).substring(0, 16)
+      const group = {
         id: group_id,
         provider: safe_string(candidate["provider"], ""),
         model: safe_string(candidate["id"], ""),
@@ -1022,14 +1022,14 @@ fn __build_manifest(
       groups = groups + {[key]: group}
       group_keys = group_keys.push(key)
     } else {
-      let updated = current + {requests: safe_list(current["requests"]).push(request)}
+      const updated = current + {requests: safe_list(current["requests"]).push(request)}
       groups = groups + {[key]: updated}
     }
     request_count = request_count + 1
   }
-  var group_list = []
+  let group_list = []
   for key in group_keys {
-    let group = safe_dict(groups[key])
+    const group = safe_dict(groups[key])
     group_list = group_list.push(group + {request_count: len(safe_list(group["requests"]))})
   }
   if len(request_rows) == 0 {
@@ -1038,7 +1038,7 @@ fn __build_manifest(
   if out_path == "" {
     errors = errors.push("--out is required")
   }
-  let manifest = {
+  const manifest = {
     schemaVersion: 1,
     kind: "harn.model_batch_manifest",
     producer: "harn models batch manifest",
@@ -1065,7 +1065,7 @@ fn __render_manifest_human(harness: Harness, report: dict) {
   harness.stdio.println("  groups: " + safe_int_string(report["group_count"], "0"))
   harness.stdio.println("  manifest sha256: " + safe_string(report["manifest_sha256"], ""))
   for group in safe_list(report["groups"]) {
-    let g = safe_dict(group)
+    const g = safe_dict(group)
     harness.stdio
       .println(
       "  "
@@ -1113,17 +1113,17 @@ fn __run_manifest(
   max_turnaround: int?,
   planner_warnings: list,
 ) -> int {
-  let requests_path = trim(harness.env.get_or("HARN_MODELS_BATCH_REQUESTS", ""))
-  let out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT", ""))
-  let default_tool_format = trim(harness.env.get_or("HARN_MODELS_BATCH_TOOL_FORMAT", "auto"))
-  let id_prefix_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_ID_PREFIX", "harn-batch"))
-  let id_prefix = if id_prefix_raw == "" {
+  const requests_path = trim(harness.env.get_or("HARN_MODELS_BATCH_REQUESTS", ""))
+  const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT", ""))
+  const default_tool_format = trim(harness.env.get_or("HARN_MODELS_BATCH_TOOL_FORMAT", "auto"))
+  const id_prefix_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_ID_PREFIX", "harn-batch"))
+  const id_prefix = if id_prefix_raw == "" {
     "harn-batch"
   } else {
     id_prefix_raw
   }
-  let loaded = __read_request_rows(harness, requests_path)
-  let built = __build_manifest(
+  const loaded = __read_request_rows(harness, requests_path)
+  const built = __build_manifest(
     catalog,
     safe_list(loaded["rows"]),
     requests_path,
@@ -1137,10 +1137,10 @@ fn __run_manifest(
     min_discount,
     max_turnaround,
   )
-  let errors = safe_list(loaded["errors"]) + safe_list(built["errors"])
-  let warnings = safe_list(planner_warnings) + safe_list(built["warnings"])
-  let manifest = safe_dict(built["manifest"]) + {warnings: warnings}
-  var report = {
+  const errors = safe_list(loaded["errors"]) + safe_list(built["errors"])
+  const warnings = safe_list(planner_warnings) + safe_list(built["warnings"])
+  const manifest = safe_dict(built["manifest"]) + {warnings: warnings}
+  let report = {
     schema_version: 1,
     ok: len(errors) == 0,
     out: out_path,
@@ -1153,7 +1153,7 @@ fn __run_manifest(
     warnings: warnings,
   }
   if len(errors) == 0 {
-    let manifest_text = json_stringify_pretty(manifest) + "\n"
+    const manifest_text = json_stringify_pretty(manifest) + "\n"
     harness.fs.write_text(out_path, manifest_text)
     report = report + {manifest_sha256: sha256(manifest_text)}
   }
@@ -1180,7 +1180,7 @@ fn __render_prepare_human(harness: Harness, report: dict) {
   harness.stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
   harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
   for job in safe_list(report["jobs"]) {
-    let j = safe_dict(job)
+    const j = safe_dict(job)
     harness.stdio
       .println(
       "  "
@@ -1221,41 +1221,41 @@ fn __render_prepare_json(report: dict) -> string {
 }
 
 fn __run_prepare(harness: Harness) -> int {
-  let manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
-  let out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT_DIR", ""))
-  let loaded = __read_manifest(harness, manifest_path)
-  var errors = safe_list(loaded["errors"])
-  var warnings = []
+  const manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
+  const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT_DIR", ""))
+  const loaded = __read_manifest(harness, manifest_path)
+  let errors = safe_list(loaded["errors"])
+  let warnings = []
   if out_dir == "" {
     errors = errors.push("--out-dir is required")
   }
-  let manifest = safe_dict(loaded["manifest"])
-  var artifacts = []
-  var jobs = []
-  var request_count = 0
+  const manifest = safe_dict(loaded["manifest"])
+  let artifacts = []
+  let jobs = []
+  let request_count = 0
   if len(errors) == 0 {
     for group in safe_list(manifest["groups"]) {
-      let artifact = __prepare_artifact(out_dir, safe_dict(group))
+      const artifact = __prepare_artifact(out_dir, safe_dict(group))
       errors = errors + safe_list(artifact["errors"])
       if safe_bool(artifact["ok"], false) {
         artifacts = artifacts.push(artifact)
-        let job = safe_dict(artifact["job"])
+        const job = safe_dict(artifact["job"])
         jobs = jobs.push(__with_batch_lifecycle(job, "prepare", false))
         request_count = request_count + (__safe_int(job["request_count"]) ?? 0)
       }
     }
   }
-  let receipt_path = if out_dir == "" {
+  const receipt_path = if out_dir == "" {
     ""
   } else {
     path_join(out_dir, "receipt.json")
   }
-  let status = if len(errors) == 0 {
+  const status = if len(errors) == 0 {
     "prepared"
   } else {
     "failed"
   }
-  var receipt = {
+  let receipt = {
     schemaVersion: 1,
     kind: "harn.model_batch_prepare_receipt",
     producer: "harn models batch prepare",
@@ -1275,7 +1275,7 @@ fn __run_prepare(harness: Harness) -> int {
     warnings: warnings,
     errors: errors,
   }
-  var report = {
+  let report = {
     schema_version: 1,
     ok: len(errors) == 0,
     manifest: receipt["manifest"],
@@ -1293,7 +1293,7 @@ fn __run_prepare(harness: Harness) -> int {
     for artifact in artifacts {
       harness.fs.write_text(safe_string(artifact["path"], ""), safe_string(artifact["text"], ""))
     }
-    let receipt_text = json_stringify_pretty(receipt) + "\n"
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
     harness.fs.write_text(receipt_path, receipt_text)
     receipt = receipt + {receipt_sha256: sha256(receipt_text)}
     report = report + {receipt_sha256: sha256(receipt_text)}
@@ -1310,7 +1310,7 @@ fn __run_prepare(harness: Harness) -> int {
 }
 
 fn __truthy_env(value: string) -> bool {
-  let text = lowercase(trim(value))
+  const text = lowercase(trim(value))
   return text == "1" || text == "true" || text == "yes" || text == "on"
 }
 
@@ -1444,8 +1444,8 @@ fn __provider_base_url(harness: Harness, provider: string) -> string {
 }
 
 fn __join_url(base: string, path: string) -> string {
-  let left = trim(base)
-  let right = trim(path)
+  const left = trim(base)
+  const right = trim(path)
   if right == "" {
     return left
   }
@@ -1459,7 +1459,7 @@ fn __join_url(base: string, path: string) -> string {
 }
 
 fn __parse_response_body(body: string) {
-  let text = trim(body)
+  const text = trim(body)
   if text == "" {
     return nil
   }
@@ -1471,15 +1471,15 @@ fn __parse_response_body(body: string) {
 }
 
 fn __http_result(harness: Harness, method: string, url: string, options: dict) -> dict {
-  let result = try {
+  const result = try {
     harness.net.request(method, url, options)
   }
   if is_err(result) {
     return {ok: false, error: "network error: " + to_string(unwrap_err(result))}
   }
-  let response = unwrap(result)
-  let body_text = to_string(response?.body ?? "")
-  let parsed = __parse_response_body(body_text)
+  const response = unwrap(result)
+  const body_text = to_string(response?.body ?? "")
+  const parsed = __parse_response_body(body_text)
   return {
     ok: response?.ok ?? false,
     status: response?.status ?? nil,
@@ -1491,16 +1491,16 @@ fn __http_result(harness: Harness, method: string, url: string, options: dict) -
 }
 
 fn __request_file_payload(harness: Harness, job: dict) -> dict {
-  let path = safe_string(job["request_file"], "")
+  const path = safe_string(job["request_file"], "")
   if path == "" {
     return {ok: false, error: "job " + safe_string(job["id"], "") + " has no request_file"}
   }
   if !harness.fs.exists(path) {
     return {ok: false, error: "request file not found for job " + safe_string(job["id"], "") + ": " + path}
   }
-  let text = harness.fs.read_text(path)
-  let actual_sha = sha256(text)
-  let expected_sha = safe_string(job["request_file_sha256"], "")
+  const text = harness.fs.read_text(path)
+  const actual_sha = sha256(text)
+  const expected_sha = safe_string(job["request_file_sha256"], "")
   if expected_sha != "" && expected_sha != actual_sha {
     return {
       ok: false,
@@ -1513,7 +1513,7 @@ fn __request_file_payload(harness: Harness, job: dict) -> dict {
 }
 
 fn __redacted_job_operation(job: dict, base_url: string, credential_env: string) -> dict {
-  let submit = safe_dict(job["submit"])
+  const submit = safe_dict(job["submit"])
   return {
     provider: safe_string(job["provider"], ""),
     operation: safe_string(submit["operation"], ""),
@@ -1528,8 +1528,8 @@ fn __redacted_job_operation(job: dict, base_url: string, credential_env: string)
 }
 
 fn __submission_job_base(harness: Harness, job: dict, payload: dict, dry_run: bool) -> dict {
-  let provider = safe_string(job["provider"], "")
-  let credential_env = __provider_auth_env(provider)
+  const provider = safe_string(job["provider"], "")
+  const credential_env = __provider_auth_env(provider)
   return {
     id: safe_string(job["id"], ""),
     provider: provider,
@@ -1557,15 +1557,15 @@ fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __api_key_for_job(harness: Harness, provider: string) -> dict {
-  let candidates = __provider_auth_env_candidates(provider)
+  const candidates = __provider_auth_env_candidates(provider)
   for env_name in candidates {
-    let value = trim(harness.env.get_or(env_name, ""))
+    const value = trim(harness.env.get_or(env_name, ""))
     if value != "" {
       return {ok: true, env: env_name, value: value}
     }
   }
-  let primary = __provider_auth_env(provider)
-  let aliases = join(candidates, ", ")
+  const primary = __provider_auth_env(provider)
+  const aliases = join(candidates, ", ")
   return {
     ok: false,
     env: primary,
@@ -1574,9 +1574,9 @@ fn __api_key_for_job(harness: Harness, provider: string) -> dict {
 }
 
 fn __fireworks_account_id(harness: Harness) -> dict {
-  let candidates = ["HARN_BATCH_FIREWORKS_ACCOUNT_ID", "FIREWORKS_ACCOUNT_ID"]
+  const candidates = ["HARN_BATCH_FIREWORKS_ACCOUNT_ID", "FIREWORKS_ACCOUNT_ID"]
   for env_name in candidates {
-    var value = trim(harness.env.get_or(env_name, ""))
+    let value = trim(harness.env.get_or(env_name, ""))
     if starts_with(value, "accounts/") {
       value = value[9:len(value)]
     }
@@ -1592,7 +1592,7 @@ fn __fireworks_account_id(harness: Harness) -> dict {
 }
 
 fn __fireworks_account_id_or_placeholder(harness: Harness) -> string {
-  let account = __fireworks_account_id(harness)
+  const account = __fireworks_account_id(harness)
   if safe_bool(account["ok"], false) {
     return safe_string(account["value"], "")
   }
@@ -1600,7 +1600,7 @@ fn __fireworks_account_id_or_placeholder(harness: Harness) -> string {
 }
 
 fn __fireworks_dataset_resource(account_id: string, dataset_id: string) -> string {
-  let trimmed = trim(dataset_id)
+  const trimmed = trim(dataset_id)
   if starts_with(trimmed, "accounts/") {
     return trimmed
   }
@@ -1608,7 +1608,7 @@ fn __fireworks_dataset_resource(account_id: string, dataset_id: string) -> strin
 }
 
 fn __fireworks_dataset_id(job: dict, suffix: string) -> string {
-  let seed = safe_string(job["id"], "")
+  const seed = safe_string(job["id"], "")
     + ":"
     + safe_string(job["request_file_sha256"], "")
     + ":"
@@ -1617,7 +1617,7 @@ fn __fireworks_dataset_id(job: dict, suffix: string) -> string {
 }
 
 fn __fireworks_batch_job_id(job: dict) -> string {
-  let seed = safe_string(job["id"], "")
+  const seed = safe_string(job["id"], "")
     + ":"
     + safe_string(job["model"], "")
     + ":"
@@ -1626,13 +1626,13 @@ fn __fireworks_batch_job_id(job: dict) -> string {
 }
 
 fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
-  let auth = __api_key_for_job(harness, "anthropic")
-  let base = __provider_base_url(harness, "anthropic")
-  let base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness, "anthropic")
+  const base = __provider_base_url(harness, "anthropic")
+  const base_job = __submission_job_base(harness, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(base, "/v1/messages/batches"),
@@ -1647,7 +1647,7 @@ fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -1676,7 +1676,7 @@ fn __fireworks_create_dataset(
   dataset_id: string,
   api_key: string,
 ) -> dict {
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(__provider_base_url(harness, "fireworks"), "/accounts/" + account_id + "/datasets"),
@@ -1687,8 +1687,8 @@ fn __fireworks_create_dataset(
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
-  let status_code = __safe_int(response["status"]) ?? 0
+  const body = safe_dict(response["body"])
+  const status_code = __safe_int(response["status"]) ?? 0
   if safe_bool(response["ok"], false) || status_code == 409 {
     return {
       ok: true,
@@ -1714,7 +1714,7 @@ fn __fireworks_upload_dataset(
   api_key: string,
   file_path: string,
 ) -> dict {
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(
@@ -1728,7 +1728,7 @@ fn __fireworks_upload_dataset(
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -1741,19 +1741,19 @@ fn __fireworks_upload_dataset(
 }
 
 fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
-  let auth = __api_key_for_job(harness, "fireworks")
-  let account = __fireworks_account_id(harness)
-  let base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness, "fireworks")
+  const account = __fireworks_account_id(harness)
+  const base_job = __submission_job_base(harness, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   if !safe_bool(account["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(account["error"], "")]}
   }
-  let account_id = safe_string(account["value"], "")
-  let input_dataset_id = __fireworks_dataset_id(job, "input")
-  let output_dataset_id = __fireworks_dataset_id(job, "output")
-  let input_dataset = __fireworks_create_dataset(harness, account_id, input_dataset_id, safe_string(auth["value"], ""))
+  const account_id = safe_string(account["value"], "")
+  const input_dataset_id = __fireworks_dataset_id(job, "input")
+  const output_dataset_id = __fireworks_dataset_id(job, "output")
+  const input_dataset = __fireworks_create_dataset(harness, account_id, input_dataset_id, safe_string(auth["value"], ""))
   if !safe_bool(input_dataset["ok"], false) {
     return {
       ok: false,
@@ -1761,7 +1761,7 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       errors: [safe_string(input_dataset["error"], "")],
     }
   }
-  let upload = __fireworks_upload_dataset(
+  const upload = __fireworks_upload_dataset(
     harness,
     account_id,
     input_dataset_id,
@@ -1775,13 +1775,13 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       errors: [safe_string(upload["error"], "")],
     }
   }
-  let batch_job_id = __fireworks_batch_job_id(job)
-  let create_body = {
+  const batch_job_id = __fireworks_batch_job_id(job)
+  const create_body = {
     model: safe_string(job["model"], ""),
     inputDatasetId: __fireworks_dataset_resource(account_id, input_dataset_id),
     outputDatasetId: __fireworks_dataset_resource(account_id, output_dataset_id),
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(
@@ -1795,7 +1795,7 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -1810,7 +1810,7 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       errors: ["fireworks batch job create failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_batch_id = safe_string(body["name"], batch_job_id)
+  const provider_batch_id = safe_string(body["name"], batch_job_id)
   return {
     ok: true,
     job: base_job
@@ -1840,12 +1840,12 @@ fn __upload_jsonl_file(
   api_key: string,
   file_path: string,
 ) -> dict {
-  let purpose = if provider == "together" {
+  const purpose = if provider == "together" {
     "batch-api"
   } else {
     "batch"
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     url,
@@ -1859,8 +1859,8 @@ fn __upload_jsonl_file(
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
-  let file_id = safe_string(body["id"], "")
+  const body = safe_dict(response["body"])
+  const file_id = safe_string(body["id"], "")
   if !safe_bool(response["ok"], false) || file_id == "" {
     return {
       ok: false,
@@ -1873,7 +1873,7 @@ fn __upload_jsonl_file(
 }
 
 fn __openai_compatible_create_body(provider: string, upload: dict, endpoint: string) -> dict {
-  let body = {input_file_id: safe_string(upload["file_id"], ""), endpoint: endpoint}
+  const body = {input_file_id: safe_string(upload["file_id"], ""), endpoint: endpoint}
   if provider == "together" {
     return body
   }
@@ -1882,7 +1882,7 @@ fn __openai_compatible_create_body(provider: string, upload: dict, endpoint: str
 
 fn __openai_compatible_batch_body(provider: string, body: dict) -> dict {
   if provider == "together" {
-    let wrapped = safe_dict(body["job"])
+    const wrapped = safe_dict(body["job"])
     if wrapped != {} {
       return wrapped
     }
@@ -1891,13 +1891,13 @@ fn __openai_compatible_batch_body(provider: string, body: dict) -> dict {
 }
 
 fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provider: string) -> dict {
-  let auth = __api_key_for_job(harness, provider)
-  let base = __provider_base_url(harness, provider)
-  let base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness, provider)
+  const base = __provider_base_url(harness, provider)
+  const base_job = __submission_job_base(harness, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let upload = __upload_jsonl_file(
+  const upload = __upload_jsonl_file(
     harness,
     provider,
     __join_url(base, "/files"),
@@ -1912,12 +1912,12 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
       errors: [safe_string(upload["error"], "")],
     }
   }
-  let create_body = __openai_compatible_create_body(
+  const create_body = __openai_compatible_create_body(
     provider,
     upload,
     safe_string(job["endpoint"], "/v1/chat/completions"),
   )
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(base, "/batches"),
@@ -1928,8 +1928,8 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
-  let batch_body = __openai_compatible_batch_body(provider, body)
+  const body = safe_dict(response["body"])
+  const batch_body = __openai_compatible_batch_body(provider, body)
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -1957,13 +1957,13 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
 }
 
 fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
-  let auth = __api_key_for_job(harness, "mistral")
-  let base = __provider_base_url(harness, "mistral")
-  let base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness, "mistral")
+  const base = __provider_base_url(harness, "mistral")
+  const base_job = __submission_job_base(harness, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let upload = __upload_jsonl_file(
+  const upload = __upload_jsonl_file(
     harness,
     "mistral",
     __join_url(base, "/files"),
@@ -1978,13 +1978,13 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
       errors: [safe_string(upload["error"], "")],
     }
   }
-  let create_body = {
+  const create_body = {
     input_files: [safe_string(upload["file_id"], "")],
     endpoint: safe_string(job["endpoint"], "/v1/chat/completions"),
     model: safe_string(job["model"], ""),
     timeout_hours: 24,
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(base, "/batch/jobs"),
@@ -1995,7 +1995,7 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2023,7 +2023,7 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: string) -> dict {
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(__provider_base_url(harness, "xai"), "/files"),
@@ -2034,8 +2034,8 @@ fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: string)
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
-  let file_id = safe_string(body["id"], "")
+  const body = safe_dict(response["body"])
+  const file_id = safe_string(body["id"], "")
   if !safe_bool(response["ok"], false) || file_id == "" {
     return {
       ok: false,
@@ -2048,12 +2048,12 @@ fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: string)
 }
 
 fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
-  let auth = __api_key_for_job(harness, "xai")
-  let base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness, "xai")
+  const base_job = __submission_job_base(harness, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let upload = __upload_xai_jsonl_file(harness, safe_string(payload["path"], ""), safe_string(auth["value"], ""))
+  const upload = __upload_xai_jsonl_file(harness, safe_string(payload["path"], ""), safe_string(auth["value"], ""))
   if !safe_bool(upload["ok"], false) {
     return {
       ok: false,
@@ -2061,8 +2061,8 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
       errors: [safe_string(upload["error"], "")],
     }
   }
-  let create_body = {name: safe_string(job["id"], "harn-batch"), input_file_id: safe_string(upload["file_id"], "")}
-  let response = __http_result(
+  const create_body = {name: safe_string(job["id"], "harn-batch"), input_file_id: safe_string(upload["file_id"], "")}
+  const response = __http_result(
     harness,
     "POST",
     __join_url(__provider_base_url(harness, "xai"), "/batches"),
@@ -2073,7 +2073,7 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2100,11 +2100,11 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __header_value(headers: dict, name: string) -> string {
-  let exact = headers[name] ?? headers[lowercase(name)] ?? nil
+  const exact = headers[name] ?? headers[lowercase(name)] ?? nil
   if exact != nil {
     return trim(to_string(exact))
   }
-  let target = lowercase(name)
+  const target = lowercase(name)
   for key in headers.keys() {
     if lowercase(to_string(key)) == target {
       return trim(to_string(headers[key]))
@@ -2114,7 +2114,7 @@ fn __header_value(headers: dict, name: string) -> string {
 }
 
 fn __gemini_model_path(model: string) -> string {
-  let trimmed = trim(model)
+  const trimmed = trim(model)
   if starts_with(trimmed, "models/") {
     return trimmed
   }
@@ -2122,10 +2122,10 @@ fn __gemini_model_path(model: string) -> string {
 }
 
 fn __gemini_provider_status(body: dict) -> string {
-  let metadata = safe_dict(body["metadata"])
-  let response = safe_dict(body["response"])
-  let status = body["state"] ?? metadata["state"] ?? response["state"] ?? nil
-  let text = safe_string(status, "")
+  const metadata = safe_dict(body["metadata"])
+  const response = safe_dict(body["response"])
+  const status = body["state"] ?? metadata["state"] ?? response["state"] ?? nil
+  const text = safe_string(status, "")
   if text != "" {
     return text
   }
@@ -2139,8 +2139,8 @@ fn __gemini_provider_status(body: dict) -> string {
 }
 
 fn __gemini_responses_file(body: dict) -> string {
-  let response = safe_dict(body["response"])
-  let output = safe_dict(body["output"])
+  const response = safe_dict(body["response"])
+  const output = safe_dict(body["output"])
   return safe_string(response["responsesFile"], safe_string(output["responsesFile"], ""))
 }
 
@@ -2151,10 +2151,10 @@ fn __upload_gemini_jsonl_file(
   credential_env: string,
   api_key: string,
 ) -> dict {
-  let base = __provider_base_url(harness, "gemini")
-  let file_path = safe_string(payload["path"], "")
-  let text = safe_string(payload["text"], "")
-  let start = __http_result(
+  const base = __provider_base_url(harness, "gemini")
+  const file_path = safe_string(payload["path"], "")
+  const text = safe_string(payload["text"], "")
+  const start = __http_result(
     harness,
     "POST",
     __join_url(base, "/upload/v1beta/files"),
@@ -2172,7 +2172,7 @@ fn __upload_gemini_jsonl_file(
       max_response_bytes: 1048576,
     },
   )
-  let upload_url = __header_value(safe_dict(start["headers"]), "x-goog-upload-url")
+  const upload_url = __header_value(safe_dict(start["headers"]), "x-goog-upload-url")
   if !safe_bool(start["ok"], false) || upload_url == "" {
     return {
       ok: false,
@@ -2181,7 +2181,7 @@ fn __upload_gemini_jsonl_file(
       response: start["body"] ?? nil,
     }
   }
-  let upload = __http_result(
+  const upload = __http_result(
     harness,
     "POST",
     upload_url,
@@ -2197,9 +2197,9 @@ fn __upload_gemini_jsonl_file(
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(upload["body"])
-  let file = safe_dict(body["file"])
-  let file_name = safe_string(file["name"], "")
+  const body = safe_dict(upload["body"])
+  const file = safe_dict(body["file"])
+  const file_name = safe_string(file["name"], "")
   if !safe_bool(upload["ok"], false) || file_name == "" {
     return {
       ok: false,
@@ -2220,13 +2220,13 @@ fn __upload_gemini_jsonl_file(
 }
 
 fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
-  let auth = __api_key_for_job(harness, "gemini")
-  let base = __provider_base_url(harness, "gemini")
-  let base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness, "gemini")
+  const base = __provider_base_url(harness, "gemini")
+  const base_job = __submission_job_base(harness, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let upload = __upload_gemini_jsonl_file(
+  const upload = __upload_gemini_jsonl_file(
     harness,
     job,
     payload,
@@ -2240,13 +2240,13 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
       errors: [safe_string(upload["error"], "")],
     }
   }
-  let create_body = {
+  const create_body = {
     batch: {
       displayName: safe_string(job["id"], "harn-batch"),
       inputConfig: {fileName: safe_string(upload["file_name"], "")},
     },
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __join_url(
@@ -2260,7 +2260,7 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2287,9 +2287,9 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
-  let provider = safe_string(job["provider"], "")
-  let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
-  let adapter = __live_batch_adapter_key(provider, wire)
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const adapter = __live_batch_adapter_key(provider, wire)
   if adapter == "anthropic" {
     return __submit_anthropic(harness, job, payload)
   }
@@ -2308,7 +2308,7 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   if adapter == "xai" {
     return __submit_xai(harness, job, payload)
   }
-  let base_job = __submission_job_base(harness, job, payload, false)
+  const base_job = __submission_job_base(harness, job, payload, false)
   return {
     ok: false,
     job: base_job + {status: "failed"},
@@ -2317,9 +2317,9 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __submit_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
-  let payload = __request_file_payload(harness, job)
+  const payload = __request_file_payload(harness, job)
   if !safe_bool(payload["ok"], false) {
-    let failed_job = {
+    const failed_job = {
       id: safe_string(job["id"], ""),
       provider: safe_string(job["provider"], ""),
       model: safe_string(job["model"], ""),
@@ -2332,7 +2332,7 @@ fn __submit_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
       errors: [safe_string(payload["error"], "request file validation failed")],
     }
   }
-  let submitted = if dry_run {
+  const submitted = if dry_run {
     __dry_run_submission(harness, job, payload)
   } else {
     __submit_live(harness, job, payload)
@@ -2356,7 +2356,7 @@ fn __submission_status(jobs: list, errors: list, dry_run: bool) -> string {
 }
 
 fn __count_jobs_with_status(jobs: list, status: string) -> int {
-  var count = 0
+  let count = 0
   for job in jobs {
     if safe_string(safe_dict(job)["status"], "") == status {
       count = count + 1
@@ -2405,26 +2405,26 @@ fn __render_submit_json(report: dict) -> string {
 }
 
 fn __run_submit(harness: Harness) -> int {
-  let receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_RECEIPT", ""))
-  let out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMIT_OUT", ""))
-  let dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  let loaded = __read_prepare_receipt(harness, receipt_path)
-  var errors = safe_list(loaded["errors"])
-  var warnings = []
+  const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_RECEIPT", ""))
+  const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMIT_OUT", ""))
+  const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  const loaded = __read_prepare_receipt(harness, receipt_path)
+  let errors = safe_list(loaded["errors"])
+  let warnings = []
   if out_path == "" {
     errors = errors.push("--out is required")
   }
-  let prepare = safe_dict(loaded["receipt"])
-  var jobs = []
+  const prepare = safe_dict(loaded["receipt"])
+  let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(prepare["jobs"]) {
-      let submitted = __submit_one_job(harness, safe_dict(raw_job), dry_run)
+      const submitted = __submit_one_job(harness, safe_dict(raw_job), dry_run)
       jobs = jobs.push(safe_dict(submitted["job"]))
       errors = errors + safe_list(submitted["errors"])
     }
   }
-  let status = __submission_status(jobs, errors, dry_run)
-  var submission = {
+  const status = __submission_status(jobs, errors, dry_run)
+  let submission = {
     schemaVersion: 1,
     kind: "harn.model_batch_submission_receipt",
     producer: "harn models batch submit",
@@ -2446,7 +2446,7 @@ fn __run_submit(harness: Harness) -> int {
     warnings: warnings,
     errors: errors,
   }
-  var report = {
+  let report = {
     schema_version: 1,
     ok: len(errors) == 0,
     dry_run: dry_run,
@@ -2464,7 +2464,7 @@ fn __run_submit(harness: Harness) -> int {
   }
   if out_path != "" {
     __mkdirp(harness, dirname(out_path) ?? ".")
-    let receipt_text = json_stringify_pretty(submission) + "\n"
+    const receipt_text = json_stringify_pretty(submission) + "\n"
     harness.fs.write_text(out_path, receipt_text)
     submission = submission + {receipt_sha256: sha256(receipt_text)}
     report = report + {receipt_sha256: sha256(receipt_text)}
@@ -2481,7 +2481,7 @@ fn __run_submit(harness: Harness) -> int {
 }
 
 fn __provider_batch_status(raw_status) -> string {
-  let status = lowercase(trim(to_string(raw_status ?? "")))
+  const status = lowercase(trim(to_string(raw_status ?? "")))
   if status == "" {
     return "unknown"
   }
@@ -2531,7 +2531,7 @@ fn __provider_batch_status(raw_status) -> string {
 }
 
 fn __batch_lifecycle_state(raw_status) -> string {
-  let status = lowercase(trim(to_string(raw_status ?? "")))
+  const status = lowercase(trim(to_string(raw_status ?? "")))
   if __has_string(
     [
       "prepared",
@@ -2572,7 +2572,7 @@ fn __batch_lifecycle_cancelable(job: dict, state: string, dry_run: bool) -> bool
   if dry_run {
     return false
   }
-  let cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
+  const cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
   if cancellation != "supported" {
     return false
   }
@@ -2584,7 +2584,7 @@ fn __batch_lifecycle_retryable(state: string) -> bool {
 }
 
 fn __batch_job_lifecycle(job: dict, phase: string, dry_run: bool) -> dict {
-  let state = __batch_lifecycle_state(job["status"])
+  const state = __batch_lifecycle_state(job["status"])
   return {
     phase: phase,
     state: state,
@@ -2619,7 +2619,7 @@ fn __batch_lifecycle_counts(jobs: list) -> dict {
 }
 
 fn __batch_receipt_lifecycle(status: string, jobs: list, dry_run: bool, phase: string) -> dict {
-  let state = __batch_lifecycle_state(status)
+  const state = __batch_lifecycle_state(status)
   return {
     phase: phase,
     state: state,
@@ -2649,7 +2649,7 @@ fn __status_job_base(job: dict, dry_run: bool) -> dict {
 }
 
 fn __cached_status_job(job: dict, dry_run: bool) -> dict {
-  let provider_status = job["provider_status"] ?? job["status"] ?? nil
+  const provider_status = job["provider_status"] ?? job["status"] ?? nil
   return __status_job_base(job, dry_run)
     + {
     status: __provider_batch_status(provider_status),
@@ -2671,13 +2671,13 @@ fn __cached_status_job(job: dict, dry_run: bool) -> dict {
 }
 
 fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string) -> dict {
-  let auth = __api_key_for_job(harness, provider)
-  let base_job = __status_job_base(job, false)
+  const auth = __api_key_for_job(harness, provider)
+  const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let batch_id = safe_string(job["provider_batch_id"], "")
-  let response = __http_result(
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
     harness,
     "GET",
     __join_url(__provider_base_url(harness, provider), "/batches/" + batch_id),
@@ -2687,7 +2687,7 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2695,7 +2695,7 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
       errors: [provider + " batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = body["status"] ?? nil
+  const provider_status = body["status"] ?? nil
   return {
     ok: true,
     job: base_job
@@ -2713,13 +2713,13 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
 }
 
 fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "anthropic")
-  let base_job = __status_job_base(job, false)
+  const auth = __api_key_for_job(harness, "anthropic")
+  const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let batch_id = safe_string(job["provider_batch_id"], "")
-  let response = __http_result(
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
     harness,
     "GET",
     __join_url(__provider_base_url(harness, "anthropic"), "/v1/messages/batches/" + batch_id),
@@ -2729,7 +2729,7 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2737,7 +2737,7 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
       errors: ["anthropic batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = body["processing_status"] ?? nil
+  const provider_status = body["processing_status"] ?? nil
   return {
     ok: true,
     job: base_job
@@ -2754,13 +2754,13 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
 }
 
 fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "mistral")
-  let base_job = __status_job_base(job, false)
+  const auth = __api_key_for_job(harness, "mistral")
+  const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let batch_id = safe_string(job["provider_batch_id"], "")
-  let response = __http_result(
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
     harness,
     "GET",
     __join_url(__provider_base_url(harness, "mistral"), "/batch/jobs/" + batch_id),
@@ -2770,7 +2770,7 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2778,7 +2778,7 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
       errors: ["mistral batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = body["status"] ?? nil
+  const provider_status = body["status"] ?? nil
   return {
     ok: true,
     job: base_job
@@ -2796,9 +2796,9 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
 }
 
 fn __fireworks_batch_id_path(provider_batch_id: string) -> string {
-  let trimmed = trim(provider_batch_id)
+  const trimmed = trim(provider_batch_id)
   if starts_with(trimmed, "accounts/") {
-    let parts = split(trimmed, "/batchInferenceJobs/")
+    const parts = split(trimmed, "/batchInferenceJobs/")
     if len(parts) > 1 {
       return safe_string(parts[1], trimmed)
     }
@@ -2807,18 +2807,18 @@ fn __fireworks_batch_id_path(provider_batch_id: string) -> string {
 }
 
 fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "fireworks")
-  let account = __fireworks_account_id(harness)
-  let base_job = __status_job_base(job, false)
+  const auth = __api_key_for_job(harness, "fireworks")
+  const account = __fireworks_account_id(harness)
+  const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   if !safe_bool(account["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(account["error"], "")]}
   }
-  let account_id = safe_string(account["value"], "")
-  let batch_id = __fireworks_batch_id_path(safe_string(job["provider_batch_id"], ""))
-  let response = __http_result(
+  const account_id = safe_string(account["value"], "")
+  const batch_id = __fireworks_batch_id_path(safe_string(job["provider_batch_id"], ""))
+  const response = __http_result(
     harness,
     "GET",
     __join_url(
@@ -2831,7 +2831,7 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2839,8 +2839,8 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
       errors: ["fireworks batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = body["state"] ?? nil
-  let output_dataset = safe_string(
+  const provider_status = body["state"] ?? nil
+  const output_dataset = safe_string(
     body["outputDatasetId"],
     safe_string(job["output_dataset_resource"], safe_string(job["output_dataset_id"], "")),
   )
@@ -2872,11 +2872,11 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
 }
 
 fn __xai_provider_status(body: dict) -> string {
-  let state = safe_dict(body["state"])
-  let pending = __safe_int(state["num_pending"])
-  let requests = __safe_int(state["num_requests"])
-  let errors = __safe_int(state["num_error"]) ?? 0
-  let cancelled = __safe_int(state["num_cancelled"]) ?? 0
+  const state = safe_dict(body["state"])
+  const pending = __safe_int(state["num_pending"])
+  const requests = __safe_int(state["num_requests"])
+  const errors = __safe_int(state["num_error"]) ?? 0
+  const cancelled = __safe_int(state["num_cancelled"]) ?? 0
   if pending != nil {
     if pending > 0 {
       return "running"
@@ -2893,7 +2893,7 @@ fn __xai_provider_status(body: dict) -> string {
 }
 
 fn __xai_results_url(harness: Harness, batch_id: string, pagination_token: string) -> string {
-  var url = __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id + "/results?limit=100")
+  let url = __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id + "/results?limit=100")
   if trim(pagination_token) != "" {
     url = url + "&pagination_token=" + trim(pagination_token)
   }
@@ -2901,13 +2901,13 @@ fn __xai_results_url(harness: Harness, batch_id: string, pagination_token: strin
 }
 
 fn __poll_xai_status(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "xai")
-  let base_job = __status_job_base(job, false)
+  const auth = __api_key_for_job(harness, "xai")
+  const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let batch_id = safe_string(job["provider_batch_id"], "")
-  let response = __http_result(
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
     harness,
     "GET",
     __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id),
@@ -2917,7 +2917,7 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2925,7 +2925,7 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
       errors: ["xai batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = __xai_provider_status(body)
+  const provider_status = __xai_provider_status(body)
   return {
     ok: true,
     job: base_job
@@ -2942,13 +2942,13 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
 }
 
 fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "gemini")
-  let base_job = __status_job_base(job, false)
+  const auth = __api_key_for_job(harness, "gemini")
+  const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let batch_id = safe_string(job["provider_batch_id"], "")
-  let response = __http_result(
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
     harness,
     "GET",
     __join_url(__provider_base_url(harness, "gemini"), "/v1beta/" + batch_id),
@@ -2958,7 +2958,7 @@ fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -2966,7 +2966,7 @@ fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
       errors: ["gemini batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = __gemini_provider_status(body)
+  const provider_status = __gemini_provider_status(body)
   return {
     ok: true,
     job: base_job
@@ -2987,9 +2987,9 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
   if dry_run {
     return {ok: true, job: __cached_status_job(job, true), errors: []}
   }
-  let provider = safe_string(job["provider"], "")
-  let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
-  let provider_batch_id = safe_string(job["provider_batch_id"], "")
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const provider_batch_id = safe_string(job["provider_batch_id"], "")
   if provider_batch_id == "" {
     return {
       ok: false,
@@ -3001,7 +3001,7 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
       ],
     }
   }
-  let adapter = __live_batch_adapter_key(provider, wire)
+  const adapter = __live_batch_adapter_key(provider, wire)
   if __is_openai_compatible_live_adapter(adapter) {
     return __poll_openai_compatible_status(harness, job, adapter)
   }
@@ -3030,7 +3030,7 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
 fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
   if len(errors) > 0 {
     for job in jobs {
-      let status = safe_string(safe_dict(job)["status"], "")
+      const status = safe_string(safe_dict(job)["status"], "")
       if status == "completed" || status == "running" || status == "ready" || status == "unknown"
         || status == "canceling"
         || status == "canceled" {
@@ -3042,13 +3042,13 @@ fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
   if dry_run {
     return "dry_run"
   }
-  let failed = __count_jobs_with_status(jobs, "failed")
-  let running = __count_jobs_with_status(jobs, "running")
-  let ready = __count_jobs_with_status(jobs, "ready")
-  let unknown = __count_jobs_with_status(jobs, "unknown")
-  let canceling = __count_jobs_with_status(jobs, "canceling")
-  let canceled = __count_jobs_with_status(jobs, "canceled")
-  let completed = __count_jobs_with_status(jobs, "completed")
+  const failed = __count_jobs_with_status(jobs, "failed")
+  const running = __count_jobs_with_status(jobs, "running")
+  const ready = __count_jobs_with_status(jobs, "ready")
+  const unknown = __count_jobs_with_status(jobs, "unknown")
+  const canceling = __count_jobs_with_status(jobs, "canceling")
+  const canceled = __count_jobs_with_status(jobs, "canceled")
+  const completed = __count_jobs_with_status(jobs, "completed")
   if failed > 0 {
     return "partial"
   }
@@ -3105,26 +3105,26 @@ fn __render_status_json(report: dict) -> string {
 }
 
 fn __run_status(harness: Harness) -> int {
-  let submission_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMISSION", ""))
-  let out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS_OUT", ""))
-  let dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  let loaded = __read_submission_receipt(harness, submission_path)
-  var errors = safe_list(loaded["errors"])
-  var warnings = []
+  const submission_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMISSION", ""))
+  const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS_OUT", ""))
+  const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  const loaded = __read_submission_receipt(harness, submission_path)
+  let errors = safe_list(loaded["errors"])
+  let warnings = []
   if out_path == "" {
     errors = errors.push("--out is required")
   }
-  let submission = safe_dict(loaded["receipt"])
-  var jobs = []
+  const submission = safe_dict(loaded["receipt"])
+  let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(submission["jobs"]) {
-      let checked = __status_one_job(harness, safe_dict(raw_job), dry_run)
+      const checked = __status_one_job(harness, safe_dict(raw_job), dry_run)
       jobs = jobs.push(__with_batch_lifecycle(safe_dict(checked["job"]), "status", dry_run))
       errors = errors + safe_list(checked["errors"])
     }
   }
-  let status = __aggregate_status(jobs, errors, dry_run)
-  var receipt = {
+  const status = __aggregate_status(jobs, errors, dry_run)
+  let receipt = {
     schemaVersion: 1,
     kind: "harn.model_batch_status_receipt",
     producer: "harn models batch status",
@@ -3148,7 +3148,7 @@ fn __run_status(harness: Harness) -> int {
     warnings: warnings,
     errors: errors,
   }
-  var report = {
+  let report = {
     schema_version: 1,
     ok: len(errors) == 0,
     dry_run: dry_run,
@@ -3168,7 +3168,7 @@ fn __run_status(harness: Harness) -> int {
   }
   if out_path != "" {
     __mkdirp(harness, dirname(out_path) ?? ".")
-    let receipt_text = json_stringify_pretty(receipt) + "\n"
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
     harness.fs.write_text(out_path, receipt_text)
     receipt = receipt + {receipt_sha256: sha256(receipt_text)}
     report = report + {receipt_sha256: sha256(receipt_text)}
@@ -3226,7 +3226,7 @@ fn __cancel_operation(provider: string, method: string, url: string, credential_
 }
 
 fn __cancel_url_for_job(harness: Harness, job: dict, provider: string) -> string {
-  let batch_id = safe_string(job["provider_batch_id"], "")
+  const batch_id = safe_string(job["provider_batch_id"], "")
   if provider == "anthropic" {
     return __join_url(
       __provider_base_url(harness, "anthropic"),
@@ -3249,18 +3249,18 @@ fn __cancel_operation_for_job(harness: Harness, job: dict, provider: string) -> 
 }
 
 fn __batch_cancel_skip_reason(job: dict) -> string {
-  let state = __batch_lifecycle_state(job["status"])
+  const state = __batch_lifecycle_state(job["status"])
   if state == "completed" || state == "downloaded" || state == "canceled" || state == "failed"
     || state == "not_ready" {
     return "job " + safe_string(job["id"], "") + " is terminal (" + state + ")"
   }
-  let cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
+  const cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
   if cancellation != "supported" {
     return "provider catalog marks cancellation as " + cancellation
   }
-  let provider = safe_string(job["provider"], "")
-  let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
-  let adapter = __live_batch_adapter_key(provider, wire)
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const adapter = __live_batch_adapter_key(provider, wire)
   if adapter != "anthropic" && adapter != "openai" && adapter != "gemini" {
     return __live_batch_operation_error("cancel", provider, wire)
   }
@@ -3271,7 +3271,7 @@ fn __batch_cancel_skip_reason(job: dict) -> string {
 }
 
 fn __dry_run_cancel_job(harness: Harness, job: dict, provider: string) -> dict {
-  let base = __cancel_status(job, true)
+  const base = __cancel_status(job, true)
   return {
     ok: true,
     job: base
@@ -3297,12 +3297,12 @@ fn __skipped_cancel_job(job: dict, dry_run: bool, reason: string) -> dict {
 }
 
 fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> dict {
-  let auth = __api_key_for_job(harness, provider)
-  let base_job = __cancel_status(job, false)
+  const auth = __api_key_for_job(harness, provider)
+  const base_job = __cancel_status(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __cancel_url_for_job(harness, job, provider),
@@ -3312,7 +3312,7 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -3320,7 +3320,7 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
       errors: [provider + " batch cancel failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = body["status"] ?? "canceling"
+  const provider_status = body["status"] ?? "canceling"
   return {
     ok: true,
     job: base_job
@@ -3340,12 +3340,12 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
 }
 
 fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "anthropic")
-  let base_job = __cancel_status(job, false)
+  const auth = __api_key_for_job(harness, "anthropic")
+  const base_job = __cancel_status(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __cancel_url_for_job(harness, job, "anthropic"),
@@ -3355,7 +3355,7 @@ fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -3363,7 +3363,7 @@ fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
       errors: ["anthropic batch cancel failed for job " + safe_string(job["id"], "")],
     }
   }
-  let provider_status = body["processing_status"] ?? "canceling"
+  const provider_status = body["processing_status"] ?? "canceling"
   return {
     ok: true,
     job: base_job
@@ -3382,12 +3382,12 @@ fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
 }
 
 fn __cancel_gemini(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "gemini")
-  let base_job = __cancel_status(job, false)
+  const auth = __api_key_for_job(harness, "gemini")
+  const base_job = __cancel_status(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "POST",
     __cancel_url_for_job(harness, job, "gemini"),
@@ -3398,7 +3398,7 @@ fn __cancel_gemini(harness: Harness, job: dict) -> dict {
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -3446,13 +3446,13 @@ fn __cancel_live(harness: Harness, job: dict, provider: string, adapter: string)
 }
 
 fn __cancel_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
-  let reason = __batch_cancel_skip_reason(job)
+  const reason = __batch_cancel_skip_reason(job)
   if reason != "" {
     return __skipped_cancel_job(job, dry_run, reason)
   }
-  let provider = safe_string(job["provider"], "")
-  let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
-  let adapter = __live_batch_adapter_key(provider, wire)
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const adapter = __live_batch_adapter_key(provider, wire)
   if dry_run {
     return __dry_run_cancel_job(harness, job, provider)
   }
@@ -3460,9 +3460,9 @@ fn __cancel_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
 }
 
 fn __count_cancelable_jobs(jobs: list) -> int {
-  var count = 0
+  let count = 0
   for job in jobs {
-    let j = safe_dict(job)
+    const j = safe_dict(job)
     if safe_bool(j["skipped"], false) {
       continue
     }
@@ -3484,9 +3484,9 @@ fn __cancel_status_summary(jobs: list, errors: list, dry_run: bool) -> string {
   if dry_run {
     return "dry_run"
   }
-  let canceled = __count_jobs_with_status(jobs, "canceled")
-  let canceling = __count_jobs_with_status(jobs, "canceling")
-  let skipped = __count_jobs_with_status(jobs, "skipped")
+  const canceled = __count_jobs_with_status(jobs, "canceled")
+  const canceling = __count_jobs_with_status(jobs, "canceling")
+  const skipped = __count_jobs_with_status(jobs, "skipped")
   if canceling > 0 {
     return "canceling"
   }
@@ -3544,26 +3544,26 @@ fn __render_cancel_json(report: dict) -> string {
 }
 
 fn __run_cancel(harness: Harness) -> int {
-  let receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_RECEIPT", ""))
-  let out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_OUT", ""))
-  let dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  let loaded = __read_cancel_receipt(harness, receipt_path)
-  var errors = safe_list(loaded["errors"])
-  var warnings = []
+  const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_RECEIPT", ""))
+  const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_OUT", ""))
+  const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  const loaded = __read_cancel_receipt(harness, receipt_path)
+  let errors = safe_list(loaded["errors"])
+  let warnings = []
   if out_path == "" {
     errors = errors.push("--out is required")
   }
-  let source_receipt = safe_dict(loaded["receipt"])
-  var jobs = []
+  const source_receipt = safe_dict(loaded["receipt"])
+  let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(source_receipt["jobs"]) {
-      let canceled = __cancel_one_job(harness, safe_dict(raw_job), dry_run)
+      const canceled = __cancel_one_job(harness, safe_dict(raw_job), dry_run)
       jobs = jobs.push(__with_batch_lifecycle(safe_dict(canceled["job"]), "cancel", dry_run))
       errors = errors + safe_list(canceled["errors"])
     }
   }
-  let status = __cancel_status_summary(jobs, errors, dry_run)
-  var receipt = {
+  const status = __cancel_status_summary(jobs, errors, dry_run)
+  let receipt = {
     schemaVersion: 1,
     kind: "harn.model_batch_cancel_receipt",
     producer: "harn models batch cancel",
@@ -3588,7 +3588,7 @@ fn __run_cancel(harness: Harness) -> int {
     warnings: warnings,
     errors: errors,
   }
-  var report = {
+  let report = {
     schema_version: 1,
     ok: len(errors) == 0,
     dry_run: dry_run,
@@ -3608,7 +3608,7 @@ fn __run_cancel(harness: Harness) -> int {
   }
   if out_path != "" {
     __mkdirp(harness, dirname(out_path) ?? ".")
-    let receipt_text = json_stringify_pretty(receipt) + "\n"
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
     harness.fs.write_text(out_path, receipt_text)
     receipt = receipt + {receipt_sha256: sha256(receipt_text)}
     report = report + {receipt_sha256: sha256(receipt_text)}
@@ -3647,7 +3647,7 @@ fn __download_status(job: dict, dry_run: bool) -> dict {
 }
 
 fn __download_slug(value: string) -> string {
-  var slug = lowercase(trim(value))
+  let slug = lowercase(trim(value))
   slug = regex_replace("[^A-Za-z0-9_.-]+", "-", slug) ?? slug
   slug = regex_replace("^-+|-+$", "", slug) ?? slug
   if slug == "" {
@@ -3657,7 +3657,7 @@ fn __download_slug(value: string) -> string {
 }
 
 fn __download_artifact_path(out_dir: string, job: dict, label: string) -> string {
-  let job_id = __download_slug(safe_string(job["id"], safe_string(job["provider_batch_id"], "job")))
+  const job_id = __download_slug(safe_string(job["id"], safe_string(job["provider_batch_id"], "job")))
   return path_join(out_dir, job_id + "." + label + ".jsonl")
 }
 
@@ -3693,7 +3693,7 @@ fn __download_artifact_record(
   body_text: string,
   dry_run: bool,
 ) -> dict {
-  var artifact = {label: label, handle: handle, path: path, operation: operation, dry_run: dry_run}
+  let artifact = {label: label, handle: handle, path: path, operation: operation, dry_run: dry_run}
   if !dry_run {
     artifact = artifact + {sha256: sha256(body_text), bytes: len(body_text)}
   }
@@ -3711,14 +3711,14 @@ fn __download_text_file(
   out_path: string,
   max_bytes: int,
 ) -> dict {
-  let operation = __download_operation(provider, "GET", url, credential_env, out_path)
-  let response = __http_result(
+  const operation = __download_operation(provider, "GET", url, credential_env, out_path)
+  const response = __http_result(
     harness,
     "GET",
     url,
     {headers: headers, timeout_ms: 120000, max_response_bytes: max_bytes},
   )
-  let body_text = safe_string(response["body_text"], "")
+  const body_text = safe_string(response["body_text"], "")
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -3771,7 +3771,7 @@ fn __fireworks_download_endpoint_url(
 }
 
 fn __fireworks_artifact_label(filename: string) -> string {
-  let slug = __download_slug(basename(filename))
+  const slug = __download_slug(basename(filename))
   if contains(slug, "error") {
     return "error"
   }
@@ -3788,14 +3788,14 @@ fn __download_fireworks_results(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  var output_dataset_id = safe_string(job["output_dataset_id"], "")
+  let output_dataset_id = safe_string(job["output_dataset_id"], "")
   if output_dataset_id == "" {
     output_dataset_id = safe_string(job["output_dataset_resource"], "")
   }
   if output_dataset_id == "" {
     return {ok: true, artifacts: [], errors: []}
   }
-  let account_id = if dry_run {
+  const account_id = if dry_run {
     __fireworks_account_id_or_placeholder(harness)
   } else {
     let account = __fireworks_account_id(harness)
@@ -3804,11 +3804,11 @@ fn __download_fireworks_results(
     }
     safe_string(account["value"], "")
   }
-  let endpoint_url = __fireworks_download_endpoint_url(harness, account_id, output_dataset_id)
-  let auth_env = __provider_auth_env("fireworks")
+  const endpoint_url = __fireworks_download_endpoint_url(harness, account_id, output_dataset_id)
+  const auth_env = __provider_auth_env("fireworks")
   if dry_run {
-    let out_path = __download_artifact_path(out_dir, job, "download-endpoint")
-    let artifact = __download_artifact_record(
+    const out_path = __download_artifact_path(out_dir, job, "download-endpoint")
+    const artifact = __download_artifact_record(
       "download-endpoint",
       output_dataset_id,
       out_path,
@@ -3818,11 +3818,11 @@ fn __download_fireworks_results(
     )
     return {ok: true, artifacts: [artifact], errors: []}
   }
-  let auth = __api_key_for_job(harness, "fireworks")
+  const auth = __api_key_for_job(harness, "fireworks")
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifacts: [], errors: [safe_string(auth["error"], "")]}
   }
-  let response = __http_result(
+  const response = __http_result(
     harness,
     "GET",
     endpoint_url,
@@ -3833,7 +3833,7 @@ fn __download_fireworks_results(
       max_response_bytes: 1048576,
     },
   )
-  let body = safe_dict(response["body"])
+  const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -3843,19 +3843,19 @@ fn __download_fireworks_results(
       response: body,
     }
   }
-  var artifacts = []
-  var errors = []
-  let signed_urls = safe_dict(body["filenameToSignedUrls"])
+  let artifacts = []
+  let errors = []
+  const signed_urls = safe_dict(body["filenameToSignedUrls"])
   for filename in signed_urls.keys().sort() {
-    let signed_url = safe_string(signed_urls[filename], "")
+    const signed_url = safe_string(signed_urls[filename], "")
     if signed_url == "" {
       continue
     }
-    let label = __fireworks_artifact_label(filename)
-    let out_path = __download_artifact_path(out_dir, job, label)
-    let downloaded = __download_text_file(harness, "fireworks", signed_url, {}, "", label, filename, out_path, max_bytes)
+    const label = __fireworks_artifact_label(filename)
+    const out_path = __download_artifact_path(out_dir, job, label)
+    const downloaded = __download_text_file(harness, "fireworks", signed_url, {}, "", label, filename, out_path, max_bytes)
     errors = errors + safe_list(downloaded["errors"])
-    let artifact = downloaded["artifact"] ?? nil
+    const artifact = downloaded["artifact"] ?? nil
     if artifact != nil {
       artifacts = artifacts.push(artifact)
     }
@@ -3876,17 +3876,17 @@ fn __download_openai_file(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  let handle = safe_string(file_id, "")
+  const handle = safe_string(file_id, "")
   if handle == "" {
     return {ok: true, artifact: nil, errors: []}
   }
-  let auth_env = __provider_auth_env(provider)
-  let out_path = __download_artifact_path(out_dir, job, label)
-  let url = __join_url(__provider_base_url(harness, provider), "/files/" + handle + "/content")
+  const auth_env = __provider_auth_env(provider)
+  const out_path = __download_artifact_path(out_dir, job, label)
+  const url = __join_url(__provider_base_url(harness, provider), "/files/" + handle + "/content")
   if dry_run {
     return __dry_run_download_artifact(provider, url, auth_env, label, handle, out_path)
   }
-  let auth = __api_key_for_job(harness, provider)
+  const auth = __api_key_for_job(harness, provider)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
   }
@@ -3912,17 +3912,17 @@ fn __download_mistral_file(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  let handle = safe_string(file_id, "")
+  const handle = safe_string(file_id, "")
   if handle == "" {
     return {ok: true, artifact: nil, errors: []}
   }
-  let auth_env = __provider_auth_env("mistral")
-  let out_path = __download_artifact_path(out_dir, job, label)
-  let url = __join_url(__provider_base_url(harness, "mistral"), "/files/" + handle + "/content")
+  const auth_env = __provider_auth_env("mistral")
+  const out_path = __download_artifact_path(out_dir, job, label)
+  const url = __join_url(__provider_base_url(harness, "mistral"), "/files/" + handle + "/content")
   if dry_run {
     return __dry_run_download_artifact("mistral", url, auth_env, label, handle, out_path)
   }
-  let auth = __api_key_for_job(harness, "mistral")
+  const auth = __api_key_for_job(harness, "mistral")
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
   }
@@ -3946,17 +3946,17 @@ fn __download_anthropic_results(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  let url = safe_string(job["results_url"], "")
+  const url = safe_string(job["results_url"], "")
   if url == "" {
     return {ok: true, artifact: nil, errors: []}
   }
-  let auth_env = __provider_auth_env("anthropic")
-  let handle = __redact_download_url(url)
-  let out_path = __download_artifact_path(out_dir, job, "results")
+  const auth_env = __provider_auth_env("anthropic")
+  const handle = __redact_download_url(url)
+  const out_path = __download_artifact_path(out_dir, job, "results")
   if dry_run {
     return __dry_run_download_artifact("anthropic", url, auth_env, "results", handle, out_path)
   }
-  let auth = __api_key_for_job(harness, "anthropic")
+  const auth = __api_key_for_job(harness, "anthropic")
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
   }
@@ -3980,27 +3980,27 @@ fn __download_xai_results(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  let batch_id = safe_string(job["provider_batch_id"], "")
+  const batch_id = safe_string(job["provider_batch_id"], "")
   if batch_id == "" {
     return {ok: true, artifact: nil, errors: []}
   }
-  let auth_env = __provider_auth_env("xai")
-  let out_path = __download_artifact_path(out_dir, job, "results")
-  let first_url = __xai_results_url(harness, batch_id, "")
+  const auth_env = __provider_auth_env("xai")
+  const out_path = __download_artifact_path(out_dir, job, "results")
+  const first_url = __xai_results_url(harness, batch_id, "")
   if dry_run {
     return __dry_run_download_artifact("xai", first_url, auth_env, "results", batch_id, out_path)
   }
-  let auth = __api_key_for_job(harness, "xai")
+  const auth = __api_key_for_job(harness, "xai")
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
   }
-  var token = ""
-  var lines = []
-  var byte_count = 0
-  var page_count = 0
+  let token = ""
+  let lines = []
+  let byte_count = 0
+  let page_count = 0
   while true {
-    let url = __xai_results_url(harness, batch_id, token)
-    let response = __http_result(
+    const url = __xai_results_url(harness, batch_id, token)
+    const response = __http_result(
       harness,
       "GET",
       url,
@@ -4010,7 +4010,7 @@ fn __download_xai_results(
         max_response_bytes: max_bytes,
       },
     )
-    let body = safe_dict(response["body"])
+    const body = safe_dict(response["body"])
     if !safe_bool(response["ok"], false) {
       return {
         ok: false,
@@ -4028,7 +4028,7 @@ fn __download_xai_results(
     }
     page_count = page_count + 1
     for result in safe_list(body["results"]) {
-      let line = json_stringify(result)
+      const line = json_stringify(result)
       byte_count = byte_count + len(line) + 1
       if byte_count > max_bytes {
         return {
@@ -4044,7 +4044,7 @@ fn __download_xai_results(
       break
     }
   }
-  let body_text = if len(lines) == 0 {
+  const body_text = if len(lines) == 0 {
     ""
   } else {
     join(lines, "\n") + "\n"
@@ -4073,20 +4073,20 @@ fn __download_gemini_responses(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  let handle = safe_string(job["responses_file"], "")
+  const handle = safe_string(job["responses_file"], "")
   if handle == "" {
     return {ok: true, artifact: nil, errors: []}
   }
-  let auth_env = __provider_auth_env("gemini")
-  let out_path = __download_artifact_path(out_dir, job, "responses")
-  let url = __join_url(
+  const auth_env = __provider_auth_env("gemini")
+  const out_path = __download_artifact_path(out_dir, job, "responses")
+  const url = __join_url(
     __provider_base_url(harness, "gemini"),
     "/download/v1beta/" + handle + ":download?alt=media",
   )
   if dry_run {
     return __dry_run_download_artifact("gemini", url, auth_env, "responses", handle, out_path)
   }
-  let auth = __api_key_for_job(harness, "gemini")
+  const auth = __api_key_for_job(harness, "gemini")
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
   }
@@ -4104,9 +4104,9 @@ fn __download_gemini_responses(
 }
 
 fn __append_download_result(state: dict, result: dict) -> dict {
-  var artifacts = safe_list(state["artifacts"])
-  var errors = safe_list(state["errors"]) + safe_list(result["errors"])
-  let artifact = result["artifact"] ?? nil
+  let artifacts = safe_list(state["artifacts"])
+  let errors = safe_list(state["errors"]) + safe_list(result["errors"])
+  const artifact = result["artifact"] ?? nil
   if artifact != nil {
     artifacts = artifacts.push(artifact)
   }
@@ -4121,7 +4121,7 @@ fn __download_openai_compatible_files(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  var state = {artifacts: [], errors: []}
+  let state = {artifacts: [], errors: []}
   state = __append_download_result(
     state,
     __download_openai_file(
@@ -4152,10 +4152,10 @@ fn __download_openai_compatible_files(
 }
 
 fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: bool, max_bytes: int) -> dict {
-  let provider = safe_string(job["provider"], "")
-  let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
-  let source_status = safe_string(job["status"], "")
-  let job_report = __download_status(job, dry_run)
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const source_status = safe_string(job["status"], "")
+  const job_report = __download_status(job, dry_run)
   if source_status != "completed" && source_status != "canceled" {
     return {
       ok: false,
@@ -4166,8 +4166,8 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
       ],
     }
   }
-  var state = {artifacts: [], errors: []}
-  let adapter = __live_batch_adapter_key(provider, wire)
+  let state = {artifacts: [], errors: []}
+  const adapter = __live_batch_adapter_key(provider, wire)
   if __is_openai_compatible_live_adapter(adapter) {
     state = __download_openai_compatible_files(harness, job, adapter, out_dir, dry_run, max_bytes)
   } else if adapter == "gemini" {
@@ -4176,7 +4176,7 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
       __download_gemini_responses(harness, job, out_dir, dry_run, max_bytes),
     )
   } else if adapter == "fireworks" {
-    let fireworks = __download_fireworks_results(harness, job, out_dir, dry_run, max_bytes)
+    const fireworks = __download_fireworks_results(harness, job, out_dir, dry_run, max_bytes)
     state = {artifacts: safe_list(fireworks["artifacts"]), errors: safe_list(fireworks["errors"])}
   } else if adapter == "anthropic" {
     state = __append_download_result(
@@ -4220,7 +4220,7 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
 }
 
 fn __artifact_count(jobs: list) -> int {
-  var count = 0
+  let count = 0
   for job in jobs {
     count = count + len(safe_list(safe_dict(job)["artifacts"]))
   }
@@ -4281,32 +4281,32 @@ fn __render_download_json(report: dict) -> string {
 }
 
 fn __run_download(harness: Harness) -> int {
-  let status_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS", ""))
-  let out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_RESULTS_OUT_DIR", ""))
-  let dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  let max_bytes = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES", "268435456")) ?? 268435456
-  let loaded = __read_status_receipt(harness, status_path)
-  var errors = safe_list(loaded["errors"])
-  var warnings = []
+  const status_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS", ""))
+  const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_RESULTS_OUT_DIR", ""))
+  const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  const max_bytes = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES", "268435456")) ?? 268435456
+  const loaded = __read_status_receipt(harness, status_path)
+  let errors = safe_list(loaded["errors"])
+  let warnings = []
   if out_dir == "" {
     errors = errors.push("--out-dir is required")
   }
-  let status_receipt = safe_dict(loaded["receipt"])
-  var jobs = []
+  const status_receipt = safe_dict(loaded["receipt"])
+  let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(status_receipt["jobs"]) {
-      let downloaded = __download_one_job(harness, safe_dict(raw_job), out_dir, dry_run, max_bytes)
+      const downloaded = __download_one_job(harness, safe_dict(raw_job), out_dir, dry_run, max_bytes)
       jobs = jobs.push(__with_batch_lifecycle(safe_dict(downloaded["job"]), "download", dry_run))
       errors = errors + safe_list(downloaded["errors"])
     }
   }
-  let receipt_path = if out_dir == "" {
+  const receipt_path = if out_dir == "" {
     ""
   } else {
     path_join(out_dir, "receipt.json")
   }
-  let status = __download_status_summary(jobs, errors, dry_run)
-  var receipt = {
+  const status = __download_status_summary(jobs, errors, dry_run)
+  let receipt = {
     schemaVersion: 1,
     kind: "harn.model_batch_results_receipt",
     producer: "harn models batch download",
@@ -4331,7 +4331,7 @@ fn __run_download(harness: Harness) -> int {
     warnings: warnings,
     errors: errors,
   }
-  var report = {
+  let report = {
     schema_version: 1,
     ok: len(errors) == 0,
     dry_run: dry_run,
@@ -4352,7 +4352,7 @@ fn __run_download(harness: Harness) -> int {
   }
   if receipt_path != "" {
     __mkdirp(harness, out_dir)
-    let receipt_text = json_stringify_pretty(receipt) + "\n"
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
     harness.fs.write_text(receipt_path, receipt_text)
     receipt = receipt + {receipt_sha256: sha256(receipt_text)}
     report = report + {receipt_sha256: sha256(receipt_text)}
@@ -4369,15 +4369,15 @@ fn __run_download(harness: Harness) -> int {
 }
 
 fn main(harness: Harness) -> int {
-  let provider_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_PROVIDER", ""))
-  let model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
-  let workload_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_WORKLOAD", "eval"))
-  let workload = __normalize_workload(workload_raw)
-  let min_discount = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", ""))
-  let max_turnaround = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", ""))
-  let catalog = harness.llm.catalog()
-  let models = __collect(catalog, provider_filter, model_filter, workload, min_discount, max_turnaround)
-  var warnings = []
+  const provider_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_PROVIDER", ""))
+  const model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
+  const workload_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_WORKLOAD", "eval"))
+  const workload = __normalize_workload(workload_raw)
+  const min_discount = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", ""))
+  const max_turnaround = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", ""))
+  const catalog = harness.llm.catalog()
+  const models = __collect(catalog, provider_filter, model_filter, workload, min_discount, max_turnaround)
+  let warnings = []
   if workload != workload_raw && workload_raw != "" {
     warnings = warnings.push("unknown workload '" + workload_raw + "'; using generic policy")
   }
@@ -4387,7 +4387,7 @@ fn main(harness: Harness) -> int {
   if max_turnaround == nil && harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", "") != "" {
     warnings = warnings.push("ignored non-integer --max-turnaround-hours")
   }
-  let mode = harness.env.get_or("HARN_MODELS_BATCH_MODE", "plan")
+  const mode = harness.env.get_or("HARN_MODELS_BATCH_MODE", "plan")
   if mode == "prepare" {
     return __run_prepare(harness)
   }
@@ -4415,7 +4415,7 @@ fn main(harness: Harness) -> int {
       warnings,
     )
   }
-  let report = {
+  const report = {
     schema_version: 1,
     workload: workload,
     filters: {

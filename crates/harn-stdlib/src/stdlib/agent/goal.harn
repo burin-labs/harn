@@ -14,12 +14,12 @@ import { system_prompt_part } from "std/llm/prompts"
 // Bounded re-loop cap: if the goal is not met at loop end, re-enter with
 // findings at most this many times before stopping honestly. Mirrors Burin's
 // GOAL_JUDGE_MAX_RELOOPS.
-let __GOAL_MAX_RELOOPS = 3
+const __GOAL_MAX_RELOOPS = 3
 
 // Default done_sentinel for goal_reloop: the completion signal the agent emits
 // to claim it is finished. Each emission triggers a `verify_completion` check;
 // an unmet goal vetoes it and drives another bounded attempt.
-let __GOAL_DONE_MARKER = "<<GOAL-DONE>>"
+const __GOAL_DONE_MARKER = "<<GOAL-DONE>>"
 
 /**
  * A `check` may be an anonymous closure or a named `fn`; the runtime reports
@@ -27,7 +27,7 @@ let __GOAL_DONE_MARKER = "<<GOAL-DONE>>"
  * detection). Gating on "closure" alone silently skips named-fn criteria.
  */
 fn __goal_callable(value) {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
 }
 
@@ -50,7 +50,7 @@ fn __string_list(value) {
   if type_of(value) != "list" {
     return []
   }
-  var out = []
+  let out = []
   for item in value {
     out = out.push(to_string(item))
   }
@@ -61,15 +61,15 @@ fn __normalize_criteria(value) {
   if type_of(value) != "list" {
     return []
   }
-  var out = []
-  var index = 0
+  let out = []
+  let index = 0
   for raw in value {
-    let entry = if type_of(raw) == "dict" {
+    const entry = if type_of(raw) == "dict" {
       raw
     } else {
       {description: to_string(raw)}
     }
-    let description = to_string(entry?.description ?? "")
+    const description = to_string(entry?.description ?? "")
     if description == "" {
       throw "goal: each success criterion needs a non-empty description"
     }
@@ -96,7 +96,7 @@ pub fn goal(spec) {
   if type_of(spec) != "dict" {
     throw "goal(spec): spec must be a dict"
   }
-  let objective = to_string(spec?.objective ?? "")
+  const objective = to_string(spec?.objective ?? "")
   if objective == "" {
     throw "goal(spec): spec.objective is required and must be non-empty"
   }
@@ -113,7 +113,7 @@ pub fn goal(spec) {
 }
 
 fn __render_goal_text(g) {
-  var lines = ["## Goal", "Objective: " + g.objective]
+  let lines = ["## Goal", "Objective: " + g.objective]
   if len(g.success_criteria) > 0 {
     lines = lines.push("Success criteria:")
     for crit in g.success_criteria {
@@ -212,13 +212,13 @@ pub fn goal_pin(g) {
  * @api_stability: experimental
  */
 pub fn goal_check(g, facts = nil) {
-  let bindings = if type_of(facts) == "dict" {
+  const bindings = if type_of(facts) == "dict" {
     facts
   } else {
     {}
   }
-  var met = []
-  var unmet = []
+  let met = []
+  let unmet = []
   for crit in g.success_criteria {
     if __goal_callable(crit?.check) {
       if crit.check(bindings) {
@@ -232,7 +232,7 @@ pub fn goal_check(g, facts = nil) {
 }
 
 fn __goal_judge_system(g) {
-  var lines = [
+  let lines = [
     "You are the goal completion judge. Decide whether the stated goal is fully met by the work so far.",
     "Reply `done` ONLY if every success criterion is satisfied; otherwise reply `continue` with one concrete next_step.",
     "",
@@ -255,7 +255,7 @@ fn __goal_judge_system(g) {
  * @example: agent_loop(task, nil, {done_judge: goal_judge(g), loop_until_done: true})
  */
 pub fn goal_judge(g, opts = nil) {
-  let o = if type_of(opts) == "dict" {
+  const o = if type_of(opts) == "dict" {
     opts
   } else {
     {}
@@ -275,8 +275,8 @@ pub fn goal_judge(g, opts = nil) {
 // attempt. agent_verify_or_continue injects this into the transcript on a vetoed
 // completion, so the re-run agent sees exactly which criteria remain.
 fn __goal_unmet_feedback(g, unmet_ids) {
-  var lines = ["The goal is not yet met. Address these unmet success criteria before finishing:"]
-  var any = false
+  let lines = ["The goal is not yet met. Address these unmet success criteria before finishing:"]
+  let any = false
   for crit in g.success_criteria {
     if contains(unmet_ids, crit.id) {
       lines = lines.push("- " + crit.description)
@@ -290,10 +290,10 @@ fn __goal_unmet_feedback(g, unmet_ids) {
 }
 
 // Reloop-only control keys that must NOT leak into the agent_loop options.
-let __GOAL_RELOOP_CONTROL_KEYS = ["done_sentinel", "facts_fn", "judge", "max_attempts"]
+const __GOAL_RELOOP_CONTROL_KEYS = ["done_sentinel", "facts_fn", "judge", "max_attempts"]
 
 fn __goal_without_control_keys(o) {
-  var out = {}
+  let out = {}
   for key in o.keys() {
     if !contains(__GOAL_RELOOP_CONTROL_KEYS, key) {
       out = out + {[key]: o[key]}
@@ -328,14 +328,14 @@ fn __goal_without_control_keys(o) {
  * @example: agent_loop(task, nil, goal_reloop(g, {facts_fn: read_facts, max_attempts: 3}))
  */
 pub fn goal_reloop(g, opts = nil) {
-  let o = if type_of(opts) == "dict" {
+  const o = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  let max_attempts = o?.max_attempts ?? __GOAL_MAX_RELOOPS
-  let facts_fn = o?.facts_fn
-  let verify_completion = { payload ->
+  const max_attempts = o?.max_attempts ?? __GOAL_MAX_RELOOPS
+  const facts_fn = o?.facts_fn
+  const verify_completion = { payload ->
     let facts = if __goal_callable(facts_fn) {
       facts_fn(payload)
     } else {
@@ -347,7 +347,7 @@ pub fn goal_reloop(g, opts = nil) {
     }
     return {confirm: false, feedback: __goal_unmet_feedback(g, check.unmet)}
   }
-  var base = {
+  let base = {
     done_sentinel: o?.done_sentinel ?? __GOAL_DONE_MARKER,
     loop_until_done: true,
     max_iterations: max_attempts,

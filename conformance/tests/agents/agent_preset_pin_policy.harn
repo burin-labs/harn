@@ -8,14 +8,14 @@ import { assert_throws } from "std/testing"
 
 pipeline test() {
   // A captain kind fills its default pin_policy pack row.
-  let captain = agent_preset("merge_captain")
+  const captain = agent_preset("merge_captain")
   assert(contains(captain.pin_policy.kinds, "goal"), "captain pin_policy default is present")
   assert(captain.pin_policy.preserve_on_compact, "captain pins preserve_on_compact by default")
   for k in captain.pin_policy.kinds {
     assert(contains(pin_kinds(), k), "default pin_policy kinds are valid taxonomy members")
   }
   // Explicit caller pin_policy wins over the pack row.
-  let overridden = agent_preset("merge_captain", {pin_policy: {kinds: ["decision"], preserve_on_compact: false}})
+  const overridden = agent_preset("merge_captain", {pin_policy: {kinds: ["decision"], preserve_on_compact: false}})
   assert(overridden.pin_policy.kinds == ["decision"], "caller pin_policy kinds win over the pack")
   assert(!overridden.pin_policy.preserve_on_compact, "caller preserve_on_compact wins over the pack")
   // A kind without a pin_policy pack row leaves the option absent.

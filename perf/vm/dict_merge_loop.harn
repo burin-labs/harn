@@ -5,7 +5,7 @@
  * helper pipelines pay on every option-merge call.
  */
 pipeline default(task) {
-  let base = {
+  const base = {
     provider_id: "github",
     repo: "burin-labs/harn",
     branch: "main",
@@ -14,17 +14,17 @@ pipeline default(task) {
     user_agent: "harn",
     accept: "application/json",
   }
-  let overlays = [
+  const overlays = [
     {repo: "burin-labs/burin", branch: "ksinder/feature"},
     {auth: "oauth", user_agent: "harn-bench"},
     {timeout_ms: 5000, accept: "application/vnd.github+json"},
     {repo: "burin-labs/persona-platform"},
     {branch: "main"},
   ]
-  var iteration = 0
-  var total = 0
+  let iteration = 0
+  let total = 0
   while iteration < 4000 {
-    var merged = base
+    let merged = base
     for overlay in overlays {
       for entry in overlay {
         merged = merged + {[entry.key]: entry.value}

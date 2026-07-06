@@ -1186,11 +1186,8 @@ fn callable_bound_names(params: &[TypedParam], body: &[SNode]) -> BTreeSet<Strin
 fn collect_binding_names(nodes: &[SNode], names: &mut BTreeSet<String>) {
     for node in nodes {
         visit::walk_node(node, &mut |child| match &child.node {
-            Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
+            Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
                 collect_pattern_names(pattern, names);
-            }
-            Node::ConstBinding { name, .. } => {
-                names.insert(name.clone());
             }
             Node::ForIn { pattern, .. } => {
                 collect_pattern_names(pattern, names);

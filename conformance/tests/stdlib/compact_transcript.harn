@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  let base = transcript_from_messages(
+  const base = transcript_from_messages(
     [
       {role: "user", content: "Investigate parser drift."},
       {role: "assistant", content: "I inspected the lexer and parser entrypoints."},
@@ -9,17 +9,17 @@ pipeline test(task) {
       {role: "assistant", content: "I found three likely hotspots."},
     ],
   )
-  let truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   __io_println(transcript_summary(truncated)?.contains("auto-compacted"))
   __io_println(transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate")
-  let truncate_assets = transcript_assets(truncated)
+  const truncate_assets = transcript_assets(truncated)
   __io_println(len(truncate_assets) == 1)
   __io_println(len(transcript_messages(truncate_assets[0].data)) == 4)
-  var verbose_lines = ""
+  let verbose_lines = ""
   for i in range(0, 40) {
     verbose_lines = verbose_lines + "verbose line " + to_string(i) + "\n"
   }
-  let masked_base = transcript_from_messages(
+  const masked_base = transcript_from_messages(
     [
       {role: "assistant", content: "I ran the generator."},
       {role: "user", content: "error: compile failed\n" + verbose_lines},
@@ -27,7 +27,7 @@ pipeline test(task) {
       {role: "user", content: "All right."},
     ],
   )
-  let masked = transcript_compact(masked_base, {strategy: "observation_mask", keep_last: 1, target_tokens: 1})
+  const masked = transcript_compact(masked_base, {strategy: "observation_mask", keep_last: 1, target_tokens: 1})
   __io_println(transcript_summary(masked)?.contains("masked"))
   __io_println(
     transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
@@ -39,7 +39,7 @@ pipeline test(task) {
       llm_text("policy replacement summary"),
     ],
     { ->
-      let llm_compacted = transcript_compact(
+      const llm_compacted = transcript_compact(
         base,
         {
           provider: "mock",
@@ -49,11 +49,11 @@ pipeline test(task) {
         },
       )
       __io_println(transcript_summary(llm_compacted)?.contains("LLM compact summary"))
-      let llm_calls = llm_mock_calls()
-      let prompt = llm_calls[0].messages[0].content
+      const llm_calls = llm_mock_calls()
+      const prompt = llm_calls[0].messages[0].content
       __io_println(prompt.contains("Compact prompt from asset."))
       __io_println(prompt.contains("Archived count: 2"))
-      let policy_extended = transcript_compact(
+      const policy_extended = transcript_compact(
         base,
         {
           provider: "mock",
@@ -63,13 +63,13 @@ pipeline test(task) {
           author: "host",
         },
       )
-      let extended_prompt = llm_mock_calls()[1].messages[0].content
-      let extended_event = transcript_events_by_kind(policy_extended, "compaction")[0]
+      const extended_prompt = llm_mock_calls()[1].messages[0].content
+      const extended_event = transcript_events_by_kind(policy_extended, "compaction")[0]
       __io_println(extended_prompt.contains("Additional compaction instructions"))
       __io_println(extended_event.metadata?.instruction_mode == "extend")
       __io_println(extended_event.metadata?.instruction_source == "host")
       __io_println(extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.")
-      let policy_replaced = transcript_compact(
+      const policy_replaced = transcript_compact(
         base,
         {
           provider: "mock",
@@ -79,14 +79,14 @@ pipeline test(task) {
           extend_default_instructions: false,
         },
       )
-      let replacement_prompt = llm_mock_calls()[2].messages[0].content
+      const replacement_prompt = llm_mock_calls()[2].messages[0].content
       __io_println(replacement_prompt.contains("according to these instructions"))
       __io_println(!replacement_prompt.contains("Preserve goals, constraints"))
       __io_println(
         transcript_events_by_kind(policy_replaced, "compaction")[0].metadata?.instruction_mode
           == "replace",
       )
-      let stream_session = agent_session_open("compact-stream-session")
+      const stream_session = agent_session_open("compact-stream-session")
       agent_session_inject(stream_session, {role: "user", content: "one"})
       agent_session_inject(stream_session, {role: "assistant", content: "two"})
       agent_session_inject(stream_session, {role: "user", content: "three"})
@@ -98,13 +98,13 @@ pipeline test(task) {
           }
         },
       )
-      let session_snapshot = agent_session_snapshot(stream_session) ?? {}
-      let _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+      const session_snapshot = agent_session_snapshot(stream_session) ?? {}
+      const _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
       __io_println(
         json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {}))
           .contains("LIVE_COMPACTION_EVENT"),
       )
-      let run = run_record(
+      const run = run_record(
         {
           _type: "run_record",
           id: "compact-run",
@@ -119,9 +119,9 @@ pipeline test(task) {
       )
       __io_println(run.observability?.schema_version == 4)
       __io_println(len(run.observability?.compaction_events) == 3)
-      var saw_truncate = false
-      var saw_mask = false
-      var saw_llm = false
+      let saw_truncate = false
+      let saw_mask = false
+      let saw_llm = false
       for ev in run.observability?.compaction_events {
         if ev.stage_id == "stage-truncate" && ev.strategy == "truncate" && ev.available {
           saw_truncate = true

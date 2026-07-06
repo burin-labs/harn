@@ -167,7 +167,7 @@ impl CostAnalyzer {
                     self.walk_nodes(&arm.body);
                 }
             }
-            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+            Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
                 self.walk_node(value);
             }
             Node::Assignment { target, value, .. } => {

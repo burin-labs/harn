@@ -19,7 +19,7 @@ const DONE_TOKENS = ["done", "complete"]
 pipeline test_clean_verdict_passes_through(task) {
   assert_eq(__judge_verdict_token("done"), "done")
   assert_eq(__judge_verdict_token("  Continue "), "continue")
-  let outcome = __judge_classify_verdict("done", DONE_TOKENS, [], "fallback")
+  const outcome = __judge_classify_verdict("done", DONE_TOKENS, [], "fallback")
   assert_eq(outcome.vetoed, false)
   assert_eq(outcome.verdict, "done")
 }
@@ -27,7 +27,7 @@ pipeline test_clean_verdict_passes_through(task) {
 pipeline test_live_mangled_continue_double_comma(task) {
   // Exact live string: `continue",,`
   assert_eq(__judge_verdict_token("continue\",,"), "continue")
-  let outcome = __judge_classify_verdict("continue\",,", DONE_TOKENS, ["critique"], "fallback")
+  const outcome = __judge_classify_verdict("continue\",,", DONE_TOKENS, ["critique"], "fallback")
   assert_eq(outcome.vetoed, true)
   assert_eq(outcome.verdict, "continue")
 }
@@ -35,14 +35,14 @@ pipeline test_live_mangled_continue_double_comma(task) {
 pipeline test_live_mangled_continue_runon_reasoning_key(task) {
   // Exact live string: `continue",  "reasoning":`
   assert_eq(__judge_verdict_token("continue\",  \"reasoning\":"), "continue")
-  let outcome = __judge_classify_verdict("continue\",  \"reasoning\":", DONE_TOKENS, [], "fallback")
+  const outcome = __judge_classify_verdict("continue\",  \"reasoning\":", DONE_TOKENS, [], "fallback")
   assert_eq(outcome.vetoed, true)
   assert_eq(outcome.verdict, "continue")
 }
 
 pipeline test_mangled_pass_token_still_classifies_as_pass(task) {
   // The same junk on a PASS token must not flip the classification to veto.
-  let outcome = __judge_classify_verdict("done\",,", DONE_TOKENS, [], "fallback")
+  const outcome = __judge_classify_verdict("done\",,", DONE_TOKENS, [], "fallback")
   assert_eq(outcome.vetoed, false)
   assert_eq(outcome.verdict, "done")
 }
@@ -53,7 +53,7 @@ pipeline test_prose_verdict_keys_on_leading_word(task) {
   // the leading word: `"not done yet"` -> `"not"` -> still a veto, and the
   // stored verdict carries the clean leading word.
   assert_eq(__judge_verdict_token("not done yet"), "not done yet")
-  let outcome = __judge_classify_verdict("not done yet", DONE_TOKENS, [], "fallback")
+  const outcome = __judge_classify_verdict("not done yet", DONE_TOKENS, [], "fallback")
   assert_eq(outcome.vetoed, true)
   assert_eq(outcome.verdict, "not")
 }
@@ -72,10 +72,10 @@ pipeline test_leading_word_strips_decoration(task) {
 pipeline test_decorated_done_classifies_as_pass(task) {
   // `"done."` (trailing period) must pass, not spuriously veto a correct
   // completion.
-  let dot = __judge_classify_verdict("done.", DONE_TOKENS, [], "fallback")
+  const dot = __judge_classify_verdict("done.", DONE_TOKENS, [], "fallback")
   assert_eq(dot.vetoed, false)
   assert_eq(dot.verdict, "done")
-  let dash = __judge_classify_verdict("done — all tests pass", DONE_TOKENS, [], "fallback")
+  const dash = __judge_classify_verdict("done — all tests pass", DONE_TOKENS, [], "fallback")
   assert_eq(dash.vetoed, false)
   assert_eq(dash.verdict, "done")
 }
@@ -83,14 +83,14 @@ pipeline test_decorated_done_classifies_as_pass(task) {
 pipeline test_yes_complete_classifies_as_pass(task) {
   // `"yes, complete"` -> JSON-junk cut at the comma -> `"yes"`. With "yes" in
   // the allow-list it passes; the leading-word reduction keeps the token clean.
-  let outcome = __judge_classify_verdict("yes, complete", ["yes", "done"], [], "fallback")
+  const outcome = __judge_classify_verdict("yes, complete", ["yes", "done"], [], "fallback")
   assert_eq(outcome.vetoed, false)
   assert_eq(outcome.verdict, "yes")
 }
 
 pipeline test_leading_not_still_vetoes(task) {
   // A leading negation must always veto regardless of trailing decoration.
-  let outcome = __judge_classify_verdict("not done yet.", DONE_TOKENS, [], "fallback")
+  const outcome = __judge_classify_verdict("not done yet.", DONE_TOKENS, [], "fallback")
   assert_eq(outcome.vetoed, true)
   assert_eq(outcome.verdict, "not")
 }

@@ -50,7 +50,7 @@ impl Formatter<'_> {
                 let val = self.format_expr(value, self.indent);
                 self.writeln(&format!("let {pat}{type_str} = {val}"));
             }
-            Node::VarBinding {
+            Node::ConstBinding {
                 pattern,
                 type_ann,
                 value,
@@ -58,16 +58,7 @@ impl Formatter<'_> {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value, self.indent);
-                self.writeln(&format!("var {pat}{type_str} = {val}"));
-            }
-            Node::ConstBinding {
-                name,
-                type_ann,
-                value,
-            } => {
-                let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value, self.indent);
-                self.writeln(&format!("const {name}{type_str} = {val}"));
+                self.writeln(&format!("const {pat}{type_str} = {val}"));
             }
             Node::FnDecl {
                 name,

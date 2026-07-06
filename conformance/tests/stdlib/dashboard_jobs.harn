@@ -1,23 +1,23 @@
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
 fn fixture(harness: Harness, name) {
-  let root = project_root() ?? cwd()
+  const root = project_root() ?? cwd()
   return json_parse(
     harness.fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
   )
 }
 
 pipeline default() {
-  let local = fixture(harness, "local_job_stream")
-  var events = []
+  const local = fixture(harness, "local_job_stream")
+  let events = []
   for item in local.events {
     events = events.push(dashboard_job_event(item.kind, item))
   }
-  let cloud_event = dashboard_job_event("run.started", fixture(harness, "cloud_managed_run"))
-  let approval_requested = events.find({ event -> event.kind == "approval.requested" })
-  let dlq_created = events.find({ event -> event.kind == "dlq.created" })
-  let receipt_available = events.find({ event -> event.kind == "receipt.available" })
-  let replay_available = events.find({ event -> event.kind == "replay_fixture.available" })
+  const cloud_event = dashboard_job_event("run.started", fixture(harness, "cloud_managed_run"))
+  const approval_requested = events.find({ event -> event.kind == "approval.requested" })
+  const dlq_created = events.find({ event -> event.kind == "dlq.created" })
+  const receipt_available = events.find({ event -> event.kind == "receipt.available" })
+  const replay_available = events.find({ event -> event.kind == "replay_fixture.available" })
   __io_println(events[0].schema)
   __io_println(events[0].source_clock.kind)
   __io_println(cloud_event.source.environment + ":" + cloud_event.source_clock.kind)
@@ -33,15 +33,15 @@ pipeline default() {
   )
   __io_println(receipt_available.receipt_refs[0].url)
   __io_println(replay_available.replay_refs[0].id)
-  let view = dashboard_jobs_view(
+  const view = dashboard_jobs_view(
     events.push(cloud_event),
     {generated_at: "fixture", emit: true, topic: "dashboard.jobs.test"},
   )
   __io_println(view.schema)
   __io_println(len(view.jobs))
-  let digest = view.jobs.find({ job -> job.job_id == "daily-digest" })
-  let stale = view.jobs.find({ job -> job.job_id == "stale-pr-nudger" })
-  let cloud = view.jobs.find({ job -> job.job_id == "cloud-triage-feed" })
+  const digest = view.jobs.find({ job -> job.job_id == "daily-digest" })
+  const stale = view.jobs.find({ job -> job.job_id == "stale-pr-nudger" })
+  const cloud = view.jobs.find({ job -> job.job_id == "cloud-triage-feed" })
   __io_println(digest.status)
   __io_println(digest.queue_depth == 0)
   __io_println(digest.last_result.cards)
@@ -56,12 +56,12 @@ pipeline default() {
   )
   __io_println(cloud.status)
   __io_println(len(view.receipts))
-  let stream = event_log.subscribe({topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1})
-  let logged = stream.next().value
+  const stream = event_log.subscribe({topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1})
+  const logged = stream.next().value
   __io_println(logged.kind)
   __io_println(logged.payload.job_id)
   __io_println(logged.headers.schema)
-  let clock_object = dashboard_job_event(
+  const clock_object = dashboard_job_event(
     "run.started",
     {
       job_id: "clock-shape",
@@ -70,7 +70,7 @@ pipeline default() {
     },
   )
   __io_println(clock_object.source_clock.kind + ":" + clock_object.source_clock.timestamp)
-  let redacted = dashboard_job_event(
+  const redacted = dashboard_job_event(
     "run.started",
     {
       job_id: "privacy",
@@ -81,11 +81,11 @@ pipeline default() {
     {raw_payload_retained: false},
   )
   __io_println(len(redacted.raw_payload.keys()) == 0)
-  let missing_timestamp = try {
+  const missing_timestamp = try {
     dashboard_job_event("run.started", {job_id: "missing-timestamp", run_id: "run-missing"})
   }
   __io_println(is_err(missing_timestamp))
-  let ungated_action = try {
+  const ungated_action = try {
     dashboard_job_event(
       "dlq.created",
       {
@@ -108,7 +108,7 @@ pipeline default() {
     )
   }
   __io_println(is_err(ungated_action))
-  let missing_action_target = try {
+  const missing_action_target = try {
     dashboard_job_event(
       "run.started",
       {
@@ -122,7 +122,7 @@ pipeline default() {
     )
   }
   __io_println(is_err(missing_action_target))
-  let missing_receipt = try {
+  const missing_receipt = try {
     dashboard_job_event(
       "receipt.available",
       {job_id: "missing-receipt", run_id: "run-missing-receipt", source_timestamp: "2026-05-11T14:00:00Z"},

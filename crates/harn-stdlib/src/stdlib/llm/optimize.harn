@@ -11,14 +11,14 @@ fn __require_config(config) {
 }
 
 fn __positive_int(value, fallback, label) {
-  let raw = value ?? fallback
-  let n = to_int(raw)
+  const raw = value ?? fallback
+  const n = to_int(raw)
   require n != nil && n > 0, label + " must be a positive integer"
   return n
 }
 
 fn __demo_sets(config) {
-  let demos = config?.demo_sets ?? config?.demos
+  const demos = config?.demo_sets ?? config?.demos
   if demos == nil {
     return [[]]
   }
@@ -48,9 +48,9 @@ fn __demo_text(demo) {
 }
 
 fn __render_prompt(base_prompt, instruction, demos) {
-  var parts = []
-  let instruction_text = trim(instruction ?? "")
-  let base_text = trim(base_prompt)
+  let parts = []
+  const instruction_text = trim(instruction ?? "")
+  const base_text = trim(base_prompt)
   if instruction_text != "" {
     parts = parts.push(instruction_text)
   }
@@ -58,7 +58,7 @@ fn __render_prompt(base_prompt, instruction, demos) {
     parts = parts.push(base_text)
   }
   if len(demos) > 0 {
-    var rendered = []
+    let rendered = []
     for demo in demos {
       rendered = rendered.push(__demo_text(demo))
     }
@@ -68,10 +68,10 @@ fn __render_prompt(base_prompt, instruction, demos) {
 }
 
 fn __candidate_space(config) {
-  let instructions = propose_instructions(config.base_prompt, config)
-  let demo_sets = __demo_sets(config)
-  var candidates = []
-  var idx = 0
+  const instructions = propose_instructions(config.base_prompt, config)
+  const demo_sets = __demo_sets(config)
+  let candidates = []
+  let idx = 0
   for instruction in instructions {
     for demos in demo_sets {
       candidates = candidates
@@ -90,7 +90,7 @@ fn __candidate_space(config) {
 }
 
 fn __exploration(config) {
-  let value = to_float(config?.acquisition?.exploration ?? config?.exploration ?? 0.25)
+  const value = to_float(config?.acquisition?.exploration ?? config?.exploration ?? 0.25)
   require value != nil, "optimize_prompt: acquisition.exploration must be numeric"
   return value
 }
@@ -100,20 +100,20 @@ fn __judge_options(config) {
 }
 
 fn __trial_limit(config, candidate_count) {
-  var limit = __positive_int(config?.trials, candidate_count, "optimize_prompt: trials")
+  let limit = __positive_int(config?.trials, candidate_count, "optimize_prompt: trials")
   if config?.budget?.max_trials != nil {
-    let max_trials = __positive_int(config.budget.max_trials, limit, "optimize_prompt: budget.max_trials")
+    const max_trials = __positive_int(config.budget.max_trials, limit, "optimize_prompt: budget.max_trials")
     if max_trials < limit {
       limit = max_trials
     }
   }
   if config?.budget?.max_evaluations != nil {
-    let max_evals = __positive_int(
+    const max_evals = __positive_int(
       config.budget.max_evaluations,
       len(config.eval_set),
       "optimize_prompt: budget.max_evaluations",
     )
-    let eval_trials = to_int(floor(max_evals / len(config.eval_set)))
+    const eval_trials = to_int(floor(max_evals / len(config.eval_set)))
     if eval_trials < limit {
       limit = eval_trials
     }
@@ -126,23 +126,23 @@ fn __trial_limit(config, candidate_count) {
 }
 
 fn __words(text) {
-  let normalized = regex_replace("[^A-Za-z0-9_]+", " ", lowercase(to_string(text)))
+  const normalized = regex_replace("[^A-Za-z0-9_]+", " ", lowercase(to_string(text)))
   return split(trim(normalized), " ").filter({ word -> word != "" })
 }
 
 fn __text_similarity(a, b) {
-  let left = __words(a)
-  let right = __words(b)
+  const left = __words(a)
+  const right = __words(b)
   if len(left) == 0 || len(right) == 0 {
     return 0.0
   }
-  var common = 0
+  let common = 0
   for word in left {
     if right.contains(word) {
       common = common + 1
     }
   }
-  let denom = if len(left) > len(right) {
+  const denom = if len(left) > len(right) {
     len(left)
   } else {
     len(right)
@@ -151,7 +151,7 @@ fn __text_similarity(a, b) {
 }
 
 fn __candidate_similarity(candidate, observed) {
-  var similarity = __text_similarity(candidate.instruction, observed.candidate.instruction)
+  let similarity = __text_similarity(candidate.instruction, observed.candidate.instruction)
   if len(candidate.demos) == len(observed.candidate.demos) {
     similarity = similarity + 0.2
   }
@@ -171,16 +171,16 @@ fn __acquisition(candidate, observations, best_score, exploration) {
       value: exploration,
     }
   }
-  var weighted = 0.0
-  var weight_total = 0.0
+  let weighted = 0.0
+  let weight_total = 0.0
   for observed in observations {
-    let weight = 0.05 + __candidate_similarity(candidate, observed)
+    const weight = 0.05 + __candidate_similarity(candidate, observed)
     weighted = weighted + weight * observed.score
     weight_total = weight_total + weight
   }
-  let predicted = weighted / weight_total
-  let uncertainty = 1.0 / (1.0 + weight_total)
-  let expected = predicted - best_score + exploration * uncertainty
+  const predicted = weighted / weight_total
+  const uncertainty = 1.0 / (1.0 + weight_total)
+  const expected = predicted - best_score + exploration * uncertainty
   return {
     kind: "expected_improvement",
     predicted_mean: predicted,
@@ -191,11 +191,11 @@ fn __acquisition(candidate, observations, best_score, exploration) {
 }
 
 fn __next_candidate(candidates, observed_indexes, observations, best_score, exploration) {
-  var selected = nil
-  var selected_acquisition = nil
+  let selected = nil
+  let selected_acquisition = nil
   for candidate in candidates {
     if !observed_indexes.contains(candidate.index) {
-      let acquisition = __acquisition(candidate, observations, best_score, exploration)
+      const acquisition = __acquisition(candidate, observations, best_score, exploration)
       if selected == nil || acquisition.value > selected_acquisition.value {
         selected = candidate
         selected_acquisition = acquisition
@@ -206,8 +206,8 @@ fn __next_candidate(candidates, observed_indexes, observations, best_score, expl
 }
 
 fn __insert_ranked(ranked, entry) {
-  var out = []
-  var inserted = false
+  let out = []
+  let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
       out = out.push(entry)
@@ -222,7 +222,7 @@ fn __insert_ranked(ranked, entry) {
 }
 
 fn __rank_observations(observations) {
-  var ranked = []
+  let ranked = []
   for observation in observations {
     ranked = __insert_ranked(
       ranked,
@@ -245,20 +245,20 @@ fn __rank_observations(observations) {
  * @errors: []
  */
 pub fn optimize_prompt(config) {
-  let cfg = __require_config(config)
-  let candidates = __candidate_space(cfg)
+  const cfg = __require_config(config)
+  const candidates = __candidate_space(cfg)
   require len(candidates) > 0, "optimize_prompt: no candidate prompts generated"
-  let trials = __trial_limit(cfg, len(candidates))
-  let exploration = __exploration(cfg)
-  let judge_options = __judge_options(cfg)
-  var observed_indexes = []
-  var observations = []
-  var trace = []
-  var best = nil
-  var best_score = 0.0
-  var trial = 0
+  const trials = __trial_limit(cfg, len(candidates))
+  const exploration = __exploration(cfg)
+  const judge_options = __judge_options(cfg)
+  let observed_indexes = []
+  let observations = []
+  let trace = []
+  let best = nil
+  let best_score = 0.0
+  let trial = 0
   while trial < trials {
-    let picked = if trial == 0 {
+    const picked = if trial == 0 {
       {
         candidate: candidates[0],
         acquisition: {
@@ -276,9 +276,9 @@ pub fn optimize_prompt(config) {
     if picked.candidate == nil {
       break
     }
-    let judged = parallel_judge([picked.candidate], cfg.eval_set, cfg.metric, judge_options)
-    let score = judged.scores[0].score
-    let observation = {
+    const judged = parallel_judge([picked.candidate], cfg.eval_set, cfg.metric, judge_options)
+    const score = judged.scores[0].score
+    const observation = {
       trial: trial,
       candidate: picked.candidate,
       score: score,
@@ -294,7 +294,7 @@ pub fn optimize_prompt(config) {
     }
     trial = trial + 1
   }
-  let ranked = __rank_observations(observations)
+  const ranked = __rank_observations(observations)
   return {
     best_prompt: best.candidate.prompt,
     best_score: best.score,

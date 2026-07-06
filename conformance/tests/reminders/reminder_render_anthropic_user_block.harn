@@ -10,7 +10,7 @@ pipeline main() {
       evaluate: { _ctx -> return {reminder: {body: "anthropic user block reminder", role_hint: "user_block"}} },
     },
   )
-  let session = agent_session_open("reminder-render-anthropic-user-block")
+  const session = agent_session_open("reminder-render-anthropic-user-block")
   agent_session_reset(session)
   agent_session_inject(session, {role: "user", content: "hello"})
   agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
@@ -27,7 +27,7 @@ pipeline main() {
           session_id: session,
         },
       )
-      let call = llm_mock_calls()[0]
+      const call = llm_mock_calls()[0]
       __io_println(call.messages[0].role)
       __io_println(contains(call.messages[0].content[0].text, "<system-reminder>"))
       __io_println(contains(call.messages[0].content[0].text, "anthropic user block reminder"))

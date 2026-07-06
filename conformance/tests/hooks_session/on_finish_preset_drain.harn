@@ -13,8 +13,8 @@ import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
 pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
-      let result = on_finish_drain(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const result = on_finish_drain(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("drain_result=" + to_string(result))
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)

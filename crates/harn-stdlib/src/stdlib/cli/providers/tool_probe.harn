@@ -87,14 +87,14 @@ fn __classification_debug(value: string) -> string {
 }
 
 fn __render_human(report: dict) -> string {
-  let provider = __safe_string(report["provider"], "")
-  let model = __safe_string(report["model"], "")
-  let tc = __safe_dict(report["tool_calling"])
-  let fallback = __safe_string(tc["fallback_mode"], "")
-  let native = __safe_string(tc["native"], "")
-  let text = __safe_string(tc["text"], "")
-  let streaming_native = __safe_string(tc["streaming_native"], "")
-  var out = provider + " " + model
+  const provider = __safe_string(report["provider"], "")
+  const model = __safe_string(report["model"], "")
+  const tc = __safe_dict(report["tool_calling"])
+  const fallback = __safe_string(tc["fallback_mode"], "")
+  const native = __safe_string(tc["native"], "")
+  const text = __safe_string(tc["text"], "")
+  const streaming_native = __safe_string(tc["streaming_native"], "")
+  let out = provider + " " + model
     + " fallback="
     + fallback
     + " native="
@@ -104,15 +104,15 @@ fn __render_human(report: dict) -> string {
     + " streaming_native="
     + streaming_native
     + "\n"
-  let cases = __safe_list(report["cases"])
+  const cases = __safe_list(report["cases"])
   for c in cases {
     if type_of(c) != "dict" {
       continue
     }
-    let mode = __safe_string(c["mode"], "")
-    let classification = __classification_debug(__safe_string(c["classification"], ""))
-    let ok = __safe_bool(c["ok"], false)
-    let reason = __safe_string(c["failure_reason"], "-")
+    const mode = __safe_string(c["mode"], "")
+    const classification = __classification_debug(__safe_string(c["classification"], ""))
+    const ok = __safe_bool(c["ok"], false)
+    const reason = __safe_string(c["failure_reason"], "-")
     out = out + "  " + mode + ": " + classification
       + " ok="
       + to_string(ok)
@@ -124,29 +124,29 @@ fn __render_human(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     // Forward the pre-formatted bytes so we don't lose serde's float
     // fidelity through Harn's `json_parse`/`json_stringify` round-trip
     // (matters for `elapsed_ms`-style fields that serde keeps typed).
-    let pretty = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_PRETTY", raw)
+    const pretty = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_PRETTY", raw)
     harness.stdio.println(pretty)
   } else {
-    let report = try {
+    const report = try {
       json_parse(raw)
     } catch (e) {
       harness.stdio
         .eprintln("internal error: failed to parse provider-tool-probe payload: " + to_string(e))
       return 70
     }
-    let text = __render_human(report)
-    let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+    const text = __render_human(report)
+    const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
       text[0:len(text) - 1]
     } else {
       text
@@ -156,14 +156,14 @@ fn main(harness: Harness) -> int {
   // Compute exit code from the raw bytes via a quick parse — the
   // float-preservation concern doesn't apply to the `fallback_mode`
   // string field.
-  let probe = try {
+  const probe = try {
     json_parse(raw)
   } catch (_) {
     nil
   }
   if type_of(probe) == "dict" {
-    let tc = __safe_dict(probe["tool_calling"])
-    let fallback = __safe_string(tc["fallback_mode"], "")
+    const tc = __safe_dict(probe["tool_calling"])
+    const fallback = __safe_string(tc["fallback_mode"], "")
     if fallback == "disabled" {
       return 1
     }

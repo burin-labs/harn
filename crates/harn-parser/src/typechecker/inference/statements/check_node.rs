@@ -23,6 +23,76 @@ impl TypeChecker {
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
+            Node::ConstBinding {
+                pattern,
+                type_ann,
+                value,
+            } => {
+                let context_checked =
+                    self.check_node_with_expected(value, type_ann.as_ref(), scope);
+                let inferred = self.infer_type(value, scope);
+                if let BindingPattern::Identifier(name) = pattern {
+                    if let Some(expected) = type_ann {
+                        if !context_checked {
+                            if let Some(actual) = &inferred {
+                                if !self.types_compatible(expected, actual, scope) {
+                                    self.type_mismatch_at(
+                                        Code::VariableTypeMismatch,
+                                        format!("const binding `{name}`"),
+                                        expected,
+                                        actual,
+                                        value.span,
+                                        (
+                                            Some((span, "expected type declared here".to_string())),
+                                            Some(value.span),
+                                        ),
+                                        scope,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    // Collect inlay hint when type is inferred (no annotation)
+                    if type_ann.is_none() && !is_discard_name(name) {
+                        if let Some(ref ty) = inferred {
+                            if !is_obvious_type(value, ty) {
+                                self.hints.push(InlayHintInfo {
+                                    line: span.line,
+                                    column: span.column + "const ".len() + name.len(),
+                                    label: format!(": {}", format_type(ty)),
+                                });
+                            }
+                        }
+                    }
+                    let ty = type_ann.clone().or(inferred);
+                    scope.define_var(name, ty);
+                    if type_ann.is_some() {
+                        scope.mark_annotated(name);
+                    }
+                    scope.clear_nil_widenable(name);
+                    scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
+                    // Strict types: mark variables assigned from boundary APIs
+                    if self.strict_types {
+                        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
+                            let has_concrete_ann =
+                                type_ann.as_ref().is_some_and(Self::is_concrete_type);
+                            if !has_concrete_ann {
+                                scope.mark_untyped_source(name, &boundary);
+                            }
+                        }
+                    }
+                    // Fold when the initializer is in the pure const-eval subset
+                    // (registered for later const initializers in this module).
+                    // An impure initializer is simply not folded — not an error.
+                    if let Ok(folded) = crate::const_eval::const_eval(value, &self.const_env) {
+                        self.const_env.insert(name.clone(), folded);
+                    }
+                } else {
+                    self.check_pattern_defaults(pattern, scope);
+                    self.define_pattern_vars_typed(pattern, &inferred, scope, false);
+                }
+            }
+
             Node::LetBinding {
                 pattern,
                 type_ann,
@@ -52,76 +122,12 @@ impl TypeChecker {
                             }
                         }
                     }
-                    // Collect inlay hint when type is inferred (no annotation)
                     if type_ann.is_none() && !is_discard_name(name) {
                         if let Some(ref ty) = inferred {
                             if !is_obvious_type(value, ty) {
                                 self.hints.push(InlayHintInfo {
                                     line: span.line,
                                     column: span.column + "let ".len() + name.len(),
-                                    label: format!(": {}", format_type(ty)),
-                                });
-                            }
-                        }
-                    }
-                    let ty = type_ann.clone().or(inferred);
-                    scope.define_var(name, ty);
-                    if type_ann.is_some() {
-                        scope.mark_annotated(name);
-                    }
-                    scope.clear_nil_widenable(name);
-                    scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
-                    // Strict types: mark variables assigned from boundary APIs
-                    if self.strict_types {
-                        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
-                            let has_concrete_ann =
-                                type_ann.as_ref().is_some_and(Self::is_concrete_type);
-                            if !has_concrete_ann {
-                                scope.mark_untyped_source(name, &boundary);
-                            }
-                        }
-                    }
-                } else {
-                    self.check_pattern_defaults(pattern, scope);
-                    self.define_pattern_vars_typed(pattern, &inferred, scope, false);
-                }
-            }
-
-            Node::VarBinding {
-                pattern,
-                type_ann,
-                value,
-            } => {
-                let context_checked =
-                    self.check_node_with_expected(value, type_ann.as_ref(), scope);
-                let inferred = self.infer_type(value, scope);
-                if let BindingPattern::Identifier(name) = pattern {
-                    if let Some(expected) = type_ann {
-                        if !context_checked {
-                            if let Some(actual) = &inferred {
-                                if !self.types_compatible(expected, actual, scope) {
-                                    self.type_mismatch_at(
-                                        Code::VariableTypeMismatch,
-                                        format!("var binding `{name}`"),
-                                        expected,
-                                        actual,
-                                        value.span,
-                                        (
-                                            Some((span, "expected type declared here".to_string())),
-                                            Some(value.span),
-                                        ),
-                                        scope,
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    if type_ann.is_none() && !is_discard_name(name) {
-                        if let Some(ref ty) = inferred {
-                            if !is_obvious_type(value, ty) {
-                                self.hints.push(InlayHintInfo {
-                                    line: span.line,
-                                    column: span.column + "var ".len() + name.len(),
                                     label: format!(": {}", format_type(ty)),
                                 });
                             }
@@ -153,82 +159,6 @@ impl TypeChecker {
                 } else {
                     self.check_pattern_defaults(pattern, scope);
                     self.define_pattern_vars_typed(pattern, &inferred, scope, true);
-                }
-            }
-
-            Node::ConstBinding {
-                name,
-                type_ann,
-                value,
-            } => {
-                // Walk and infer the value just like a let-binding so
-                // existing diagnostics (undefined names, type mismatches)
-                // still fire. The bounded const-eval pass below runs on
-                // top of that — its failures land as HARN-MET-* /
-                // HARN-CST-* diagnostics.
-                let context_checked =
-                    self.check_node_with_expected(value, type_ann.as_ref(), scope);
-                let inferred = self.infer_type(value, scope);
-                if let Some(expected) = type_ann {
-                    if !context_checked {
-                        if let Some(actual) = &inferred {
-                            if !self.types_compatible(expected, actual, scope) {
-                                self.type_mismatch_at(
-                                    Code::VariableTypeMismatch,
-                                    format!("const binding `{name}`"),
-                                    expected,
-                                    actual,
-                                    value.span,
-                                    (
-                                        Some((span, "expected type declared here".to_string())),
-                                        Some(value.span),
-                                    ),
-                                    scope,
-                                );
-                            }
-                        }
-                    }
-                }
-                let ty = type_ann.clone().or(inferred);
-                scope.define_var(name, ty);
-                if type_ann.is_some() {
-                    scope.mark_annotated(name);
-                }
-                scope.clear_nil_widenable(name);
-
-                // Run the bounded sandbox interpreter. A successful fold
-                // registers the value for later const initializers in
-                // the same module; a failure emits a diagnostic keyed
-                // off the failure kind so editor/CLI integrations can
-                // dispatch on it.
-                match crate::const_eval::const_eval(value, &self.const_env) {
-                    Ok(folded) => {
-                        self.const_env.insert(name.clone(), folded);
-                    }
-                    Err(err) => {
-                        use crate::const_eval::ConstEvalErrorKind as K;
-                        let message =
-                            format!("const `{name}` initializer rejected: {}", err.detail);
-                        match err.kind {
-                            K::Disallowed => self.error_at(
-                                Code::ConstEvalDisallowedExpression,
-                                message,
-                                err.span,
-                            ),
-                            K::StepLimit => {
-                                self.error_at(Code::ConstEvalStepLimit, message, err.span);
-                            }
-                            K::RecursionLimit => {
-                                self.error_at(Code::ConstEvalRecursionLimit, message, err.span);
-                            }
-                            K::SandboxViolation => {
-                                self.error_at(Code::ConstEvalSandboxViolation, message, err.span);
-                            }
-                            K::RuntimeError => {
-                                self.error_at(Code::ConstEvalRuntimeError, message, err.span);
-                            }
-                        }
-                    }
                 }
             }
 
@@ -565,7 +495,7 @@ impl TypeChecker {
                     if scope.get_var(name).is_some() && !scope.is_mutable(name) {
                         self.warning_at(Code::ImmutableAssignment,
                             format!(
-                                "Cannot assign to '{name}': variable is immutable (declared with 'let')"
+                                "Cannot assign to '{name}': variable is immutable (declared with 'const'); use 'let' for a mutable binding"
                             ),
                             span,
                         );

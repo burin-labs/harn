@@ -7,29 +7,29 @@ import { agent_preset, agent_preset_kinds, agent_preset_register } from "std/age
 
 pipeline default() {
   // Built-in kinds are registered and discoverable.
-  let kinds = agent_preset_kinds()
+  const kinds = agent_preset_kinds()
   __io_println(contains(kinds, "audit"))
   __io_println(contains(kinds, "release_captain"))
   __io_println(len(kinds))
   // Register a user kind through the same path; it becomes first-class.
-  let registered = agent_preset_register("triage", {family: "captain", pack: {provider: "openai", timeout_ms: 90000}})
+  const registered = agent_preset_register("triage", {family: "captain", pack: {provider: "openai", timeout_ms: 90000}})
   __io_println(registered)
   __io_println(contains(agent_preset_kinds(), "triage"))
-  let triage = agent_preset("triage")
+  const triage = agent_preset("triage")
   __io_println(triage._preset_kind)
   __io_println(triage.provider)
   __io_println(triage.timeout_ms)
   __io_println(triage?.llm_caller != nil)
   // Validation: bad family and unknown pack key throw; unknown kind throws.
-  let bad_family = try {
+  const bad_family = try {
     agent_preset_register("bad", {family: "nope"})
   }
   __io_println(is_err(bad_family))
-  let bad_pack = try {
+  const bad_pack = try {
     agent_preset_register("bad", {pack: {frobnicate: 1}})
   }
   __io_println(is_err(bad_pack))
-  let bad_kind = try {
+  const bad_kind = try {
     agent_preset("does_not_exist")
   }
   __io_println(is_err(bad_kind))

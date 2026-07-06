@@ -12,8 +12,8 @@ pipeline test_is_skipped_matches_components(task) {
 
 @test
 pipeline test_strip_comments_removes_line_and_block(task) {
-  let src = "pub a; // trailing\n/* block\nspanning */ pub b;"
-  let out = strip_comments(src)
+  const src = "pub a; // trailing\n/* block\nspanning */ pub b;"
+  const out = strip_comments(src)
   assert_eq(out.contains("trailing"), false)
   assert_eq(out.contains("block"), false)
   assert_eq(out.contains("pub a;"), true)
@@ -23,7 +23,7 @@ pipeline test_strip_comments_removes_line_and_block(task) {
 @test
 pipeline test_brace_body_balances(task) {
   // open brace at index 0; matching close at the final '}'.
-  let text = "{ a { b } c }X"
+  const text = "{ a { b } c }X"
   assert_eq(brace_body(text, 0), "{ a { b } c ")
 }
 
@@ -34,8 +34,8 @@ pipeline test_brace_body_unbalanced_returns_nil(task) {
 
 @test
 pipeline test_find_public_structs_name_and_line(task) {
-  let text = "// header\npub struct Foo {\n  pub x: int,\n}\n"
-  let structs = find_public_structs(text)
+  const text = "// header\npub struct Foo {\n  pub x: int,\n}\n"
+  const structs = find_public_structs(text)
   assert_eq(structs.count, 1)
   assert_eq(structs[0].name, "Foo")
   // `pub struct` is on line 2 (1-based).
@@ -44,31 +44,31 @@ pipeline test_find_public_structs_name_and_line(task) {
 
 @test
 pipeline test_body_has_full_trio(task) {
-  let full = "pub parent_run_id: string, pub trace_id: string, pub cost_usd: float"
+  const full = "pub parent_run_id: string, pub trace_id: string, pub cost_usd: float"
   assert_eq(body_has_full_trio(full), true)
   // Missing cost_usd → not a full envelope copy.
-  let partial = "pub parent_run_id: string, pub trace_id: string"
+  const partial = "pub parent_run_id: string, pub trace_id: string"
   assert_eq(body_has_full_trio(partial), false)
 }
 
 @test
 pipeline test_violations_in_text_flags_envelope_copy(task) {
-  let src = "pub struct Dup {\n  pub parent_run_id: string,\n  pub trace_id: string,\n  pub cost_usd: float,\n}\n"
-  let v = violations_in_text("crates/x/src/dup.rs", src)
+  const src = "pub struct Dup {\n  pub parent_run_id: string,\n  pub trace_id: string,\n  pub cost_usd: float,\n}\n"
+  const v = violations_in_text("crates/x/src/dup.rs", src)
   assert_eq(v.count, 1)
   assert_eq(v[0], "crates/x/src/dup.rs:1: pub struct Dup")
 }
 
 @test
 pipeline test_violations_in_text_ignores_partial_struct(task) {
-  let src = "pub struct Partial {\n  pub parent_run_id: string,\n  pub trace_id: string,\n}\n"
+  const src = "pub struct Partial {\n  pub parent_run_id: string,\n  pub trace_id: string,\n}\n"
   assert_eq(violations_in_text("a.rs", src).count, 0)
 }
 
 @test
 pipeline test_violations_in_text_ignores_commented_fields(task) {
   // The trio appears only inside a block comment → stripped → no violation.
-  let src = "pub struct Looks {\n  /* pub parent_run_id: string, pub trace_id: string, pub cost_usd: f64 */\n  pub other: int,\n}\n"
+  const src = "pub struct Looks {\n  /* pub parent_run_id: string, pub trace_id: string, pub cost_usd: f64 */\n  pub other: int,\n}\n"
   assert_eq(violations_in_text("a.rs", src).count, 0)
 }
 

@@ -39,7 +39,7 @@ pipeline test(task) {
   log(is_v_semver("v1.2.3-rc.1"))
   log(is_v_semver(nil))
   // parse: dict shape and rejection
-  let parsed = parse("v1.2.3")
+  const parsed = parse("v1.2.3")
   log(parsed.major)
   log(parsed.minor)
   log(parsed.patch)

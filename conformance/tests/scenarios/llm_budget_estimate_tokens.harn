@@ -17,13 +17,13 @@ fn in_range(name, actual, low, high) {
 
 pipeline default() {
   // English: ~98 chars → ~25 tokens. Allow 20-30.
-  let english = "the quick brown fox jumps over the lazy dog and then keeps on running through fields and trees end"
+  const english = "the quick brown fox jumps over the lazy dog and then keeps on running through fields and trees end"
   __io_println(in_range("english", estimate_text_tokens(english, "any"), 20, 30))
   // Code: braces and parens push it into the code branch (length/3.5).
-  let code = "fn foo() { let bar = (1 + 2) * 3; if (bar > 0) { return bar } else { return 0 } }"
+  const code = "fn foo() { let bar = (1 + 2) * 3; if (bar > 0) { return bar } else { return 0 } }"
   __io_println(in_range("code", estimate_text_tokens(code, "any"), 20, 30))
   // CJK: 10 chars all in U+4E00..U+9FFF → ~10 tokens (length * 1.0).
-  let cjk = "你好世界一二三四五六"
+  const cjk = "你好世界一二三四五六"
   __io_println(in_range("cjk", estimate_text_tokens(cjk, "any"), 8, 12))
   // empty
   __io_println(estimate_text_tokens("", "any"))

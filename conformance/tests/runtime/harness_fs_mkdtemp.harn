@@ -1,4 +1,4 @@
-let dir = harness.fs.mkdtemp("harn-harness-fs-")
+const dir = harness.fs.mkdtemp("harn-harness-fs-")
 
 __io_println(harness.fs.exists(dir))
 

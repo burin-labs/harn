@@ -5,8 +5,8 @@
 import { goal, with_goal } from "std/agent/goal"
 
 pipeline test() {
-  let g = goal({objective: "Answer with the codeword PIXEL", success_criteria: ["mentions PIXEL"]})
-  let caller = { call -> return {
+  const g = goal({objective: "Answer with the codeword PIXEL", success_criteria: ["mentions PIXEL"]})
+  const caller = { call -> return {
     ok: true,
     value: {
       input_tokens: 0,
@@ -16,11 +16,11 @@ pipeline test() {
       text: "SYS[" + to_string(call.system ?? "") + "]",
     },
   } }
-  let opts = with_goal(
+  const opts = with_goal(
     {llm_caller: caller, max_iterations: 1, provider: "mock", session_id: "goal-fragment-conformance"},
     g,
   )
-  let result = agent_loop("Proceed.", nil, opts)
+  const result = agent_loop("Proceed.", nil, opts)
   assert(
     result.visible_text.contains("## Goal"),
     "goal fragment must reach the outbound system prompt; saw: " + result.visible_text,

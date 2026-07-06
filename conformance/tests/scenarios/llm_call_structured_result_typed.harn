@@ -11,7 +11,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"verdict\": \"pass\", \"note\": \"clean\"}")],
     { ->
-      let r = llm_call_structured_result("Grade", schema_of(Verdict), {provider: "mock"})
+      const r = llm_call_structured_result("Grade", schema_of(Verdict), {provider: "mock"})
       if r.data != nil {
         __io_println(r.data.verdict)
         __io_println(r.data.note)

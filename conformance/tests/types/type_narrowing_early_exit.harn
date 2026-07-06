@@ -12,7 +12,7 @@ pipeline test(task) {
   fn early_throw_else(x: string?) -> string {
     if x != nil {
       // x is string here — use it to prove narrowing
-      let _s: string = x
+      const _s: string = x
     } else {
       throw "missing value"
     }
@@ -26,7 +26,7 @@ pipeline test(task) {
     return {version: version}
   }
   fn early_throw_untyped_shape_return(raw: dict<string, unknown>) -> NarrowDoc {
-    let version = raw.get("version")
+    const version = raw.get("version")
     if version == nil {
       throw "missing version"
     }

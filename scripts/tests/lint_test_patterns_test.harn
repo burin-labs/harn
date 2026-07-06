@@ -82,8 +82,8 @@ pipeline test_e2e_non_member(task) {
 // --- find_hits: one hit per matching line, 1-based numbering ----------------
 @test
 pipeline test_find_hits_basic(task) {
-  let text = "ok line\nstd::thread::sleep(x);\nok\nthread::sleep(Duration::from_millis(1));\n"
-  let hits = find_hits(text, thread_sleep_pattern())
+  const text = "ok line\nstd::thread::sleep(x);\nok\nthread::sleep(Duration::from_millis(1));\n"
+  const hits = find_hits(text, thread_sleep_pattern())
   assert_eq(hits.count, 2)
   assert_eq(hits[0].line_no, 2)
   assert_eq(hits[0].text, "std::thread::sleep(x);")
@@ -93,7 +93,7 @@ pipeline test_find_hits_basic(task) {
 @test
 pipeline test_find_hits_dedupes_same_line(task) {
   // grep -n prints a line once even when it holds two matches.
-  let text = "SystemTime::now(); SystemTime::now();\n"
+  const text = "SystemTime::now(); SystemTime::now();\n"
   assert_eq(find_hits(text, system_time_pattern()).count, 1)
 }
 
@@ -159,7 +159,7 @@ pipeline test_literal_sleep_pattern_rejections(task) {
 pipeline test_literal_sleep_line_attribution(task) {
   // A hit at line start must not be attributed to the previous line via
   // its trailing newline (the multiline-scan pitfall).
-  let hits = find_hits("first line\nsleep(500)\ntime.sleep(3)\n", literal_sleep_pattern())
+  const hits = find_hits("first line\nsleep(500)\ntime.sleep(3)\n", literal_sleep_pattern())
   assert_eq(hits.count, 2)
   assert_eq(hits[0].line_no, 2)
   assert_eq(hits[1].line_no, 3)
@@ -167,7 +167,7 @@ pipeline test_literal_sleep_line_attribution(task) {
 
 @test
 pipeline test_wall_clock_pattern(task) {
-  let text = "a Instant::now() b\nchrono::Utc::now()\nOffsetDateTime::now_utc()\nfine\n"
+  const text = "a Instant::now() b\nchrono::Utc::now()\nOffsetDateTime::now_utc()\nfine\n"
   assert_eq(find_hits(text, wall_clock_pattern()).count, 3)
 }
 

@@ -1,6 +1,6 @@
 pipeline test(task) {
-  let ch = channel("later", 1)
-  let h = spawn {
+  const ch = channel("later", 1)
+  const h = spawn {
     receive(ch)
   }
   yield_now()

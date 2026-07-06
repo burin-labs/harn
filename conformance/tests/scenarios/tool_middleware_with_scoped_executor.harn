@@ -35,23 +35,23 @@ fn envelope(name) {
 }
 
 pipeline default() {
-  let next = synthetic_next()
+  const next = synthetic_next()
   // Allowed tool passes; audit.scope records the stage + allowlist.
-  let research_mw = with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]})
-  let ok = research_mw(envelope("search_files"), next)
+  const research_mw = with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]})
+  const ok = research_mw(envelope("search_files"), next)
   __io_println(ok.ok)
   __io_println(ok.audit.scope.stage)
   __io_println(join(ok.audit.scope.allowed_tools, ","))
   __io_println(ok.audit.layers[0].status)
   // Disallowed tool short-circuits with `scope_violation`.
-  let reject = research_mw(envelope("write_file"), next)
+  const reject = research_mw(envelope("write_file"), next)
   __io_println(reject.ok)
   __io_println(reject.status)
   __io_println(reject.error_category)
   __io_println(reject.error)
   __io_println(reject.audit.layers[0].status)
   // `on_violation: "raise"` throws instead of short-circuiting.
-  let raising_mw = with_scoped_executor({stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"})
+  const raising_mw = with_scoped_executor({stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"})
   try {
     raising_mw(envelope("edit_file"), next)
     __io_println("no-throw")
@@ -61,8 +61,8 @@ pipeline default() {
   }
   // Missing `allowed_tools` skips the preemptive check; the middleware
   // still pushes a side_effect_level for the duration of `next`.
-  let ceiling_mw = with_scoped_executor({stage: "edit", side_effect_level: "workspace_write"})
-  let r3 = ceiling_mw(envelope("anything"), next)
+  const ceiling_mw = with_scoped_executor({stage: "edit", side_effect_level: "workspace_write"})
+  const r3 = ceiling_mw(envelope("anything"), next)
   __io_println(r3.ok)
   __io_println(r3.audit.scope.stage)
   __io_println(contains(r3.audit.scope.keys(), "allowed_tools"))
@@ -77,7 +77,7 @@ pipeline default() {
   // runtime's `enforce_current_policy_for_tool`, so even if a caller
   // bypasses the preemptive check (e.g. by dispatching a different tool
   // from inside `next`), the runtime still rejects it.
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_note",
@@ -98,14 +98,14 @@ pipeline default() {
       returns: {type: "string"},
     },
   )
-  let dispatch_next = { call -> return agent_dispatch_tool_call(
+  const dispatch_next = { call -> return agent_dispatch_tool_call(
     {name: "write_note", id: call.call_id, arguments: {path: "notes.txt"}},
     tools,
   ) }
-  let dispatch_mw = with_scoped_executor({stage: "audit", allowed_tools: ["read_note"]})
+  const dispatch_mw = with_scoped_executor({stage: "audit", allowed_tools: ["read_note"]})
   // Envelope advertises an allowed name; `next` rewrites to the denied
   // name to simulate a misbehaving inner layer.
-  let runtime_deny = dispatch_mw(envelope("read_note"), dispatch_next)
+  const runtime_deny = dispatch_mw(envelope("read_note"), dispatch_next)
   __io_println(runtime_deny.ok)
   __io_println(runtime_deny.error_category)
 }

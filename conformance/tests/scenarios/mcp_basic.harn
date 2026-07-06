@@ -1,25 +1,25 @@
 pipeline default() {
   // Connect to the test MCP echo server
-  let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let server_path = path_join(root, "conformance/helpers/mcp_echo_server.py")
-  let client = mcp_connect("python3", [server_path])
+  const root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const server_path = path_join(root, "conformance/helpers/mcp_echo_server.py")
+  const client = mcp_connect("python3", [server_path])
   // Check type
   __io_println(type_of(client))
   // List tools
-  let tools = mcp_list_tools(client)
+  const tools = mcp_list_tools(client)
   __io_println(tools.count)
   // Get tool names
   for t in tools {
     __io_println(t.name)
   }
   // Call echo tool
-  let result = mcp_call(client, "echo", {message: "hello from harn"})
+  const result = mcp_call(client, "echo", {message: "hello from harn"})
   __io_println(result)
   // Call add tool
-  let sum = mcp_call(client, "add", {a: 3, b: 7})
+  const sum = mcp_call(client, "add", {a: 3, b: 7})
   __io_println(sum)
   // Server info
-  let info = mcp_server_info(client)
+  const info = mcp_server_info(client)
   __io_println(info.connected)
   __io_println(info.instructions.contains("echo server tools"))
   // Disconnect

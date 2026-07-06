@@ -1,22 +1,22 @@
 pipeline default(task) {
   // List membership
-  let items = [1, 2, 3, 4, 5]
+  const items = [1, 2, 3, 4, 5]
   __io_println(3 in items)
   __io_println(6 in items)
   __io_println(6 not in items)
   __io_println(3 not in items)
   // String containment
-  let msg = "hello world"
+  const msg = "hello world"
   __io_println("world" in msg)
   __io_println("xyz" in msg)
   __io_println("xyz" not in msg)
   // Dict key membership
-  let data = {name: "Alice", age: 30}
+  const data = {name: "Alice", age: 30}
   __io_println("name" in data)
   __io_println("email" in data)
   __io_println("email" not in data)
   // Set membership
-  let s = set(1, 2, 3)
+  const s = set(1, 2, 3)
   __io_println(2 in s)
   __io_println(5 in s)
 }

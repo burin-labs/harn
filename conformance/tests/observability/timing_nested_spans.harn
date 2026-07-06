@@ -2,10 +2,10 @@ import { timed } from "std/timing"
 
 pipeline default() {
   enable_tracing(true)
-  let result = timed("outer", {}, { -> return timed("inner", {}, { -> return "done" }) })
+  const result = timed("outer", {}, { -> return timed("inner", {}, { -> return "done" }) })
   __io_println(result.result.result)
   __io_println(result.timing.span_id != result.result.timing.span_id)
   __io_println(result.result.timing.parent_span_id == result.timing.span_id)
-  let user_timing_spans = trace_spans().filter({ s -> s.kind == "user_timing" }).to_list()
+  const user_timing_spans = trace_spans().filter({ s -> s.kind == "user_timing" }).to_list()
   __io_println(len(user_timing_spans))
 }

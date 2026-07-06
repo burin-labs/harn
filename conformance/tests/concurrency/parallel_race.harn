@@ -1,5 +1,5 @@
 pipeline default() {
-  let finished = atomic(0)
+  const finished = atomic(0)
   fn racer(n: int) {
     if n == 5 {
       return Ok("fast")
@@ -8,7 +8,7 @@ pipeline default() {
     atomic_set(finished, 1)
     return Ok("slow")
   }
-  let winner = parallel_race([50, 5], racer)
+  const winner = parallel_race([50, 5], racer)
   __io_println(winner)
   sleep(80)
   __io_println(atomic_get(finished))

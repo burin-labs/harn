@@ -5,36 +5,36 @@
 import { with_routing } from "std/llm/handlers"
 
 pipeline default() {
-  let cheap_calls = atomic(0)
-  let strong_calls = atomic(0)
-  let cheap = { _call ->
+  const cheap_calls = atomic(0)
+  const strong_calls = atomic(0)
+  const cheap = { _call ->
     let _ = atomic_add(cheap_calls, 1)
     return {
       ok: true,
       value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  let strong = { _call ->
+  const strong = { _call ->
     let _ = atomic_add(strong_calls, 1)
     return {
       ok: true,
       value: {text: "strong", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  let router = with_routing(
+  const router = with_routing(
     {
       default: cheap,
       routes: [{name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: strong}],
     },
   )
   // Default route — cheap caller wins.
-  let default_env = router({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const default_env = router({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(default_env.value.text)
   __io_println(default_env.route_index)
   __io_println(default_env.route_name)
   __io_println(default_env.used_default ?? false)
   // Escalation predicate matches — frontier route wins.
-  let escalated_env = router(
+  const escalated_env = router(
     {prompt: "p", system: "", opts: {escalate: true}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
   __io_println(escalated_env.value.text)

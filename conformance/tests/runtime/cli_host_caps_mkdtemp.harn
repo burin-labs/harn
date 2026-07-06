@@ -1,6 +1,6 @@
 // Free-builtin alias coverage for mkdtemp. The canonical capability-aware
 // surface is `harness.fs.mkdtemp`.
-let dir = mkdtemp("harn-cli-host-caps-")
+const dir = mkdtemp("harn-cli-host-caps-")
 
 __io_println(harness.fs.exists(dir))
 

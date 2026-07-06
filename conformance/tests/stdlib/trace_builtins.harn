@@ -3,7 +3,7 @@ pipeline test(task) {
   log_set_level("error")
   // trace_id is nil when no active span
   assert_eq(trace_id(), nil)
-  let span = trace_start("my_op")
+  const span = trace_start("my_op")
   assert_eq(span.name, "my_op")
   assert(span.trace_id != nil)
   assert(span.span_id != nil)

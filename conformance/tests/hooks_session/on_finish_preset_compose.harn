@@ -16,20 +16,20 @@ import {
 } from "std/lifecycle"
 
 pipeline default() {
-  let preset = on_finish_block_until_settled(15s, on_finish_handoff_to("nightly-drain"))
+  const preset = on_finish_block_until_settled(15s, on_finish_handoff_to("nightly-drain"))
   pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("seed-pipeline", {note: "compose test"})
-      let result = preset(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const result = preset(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind_0=" + audits[0].kind)
       harness.stdio.println("result_status=" + result.status)
       harness.stdio.println("envelope_target=" + result.envelope.target_pipeline)
-      let final_state = harness.unsettled_state()
+      const final_state = harness.unsettled_state()
       harness.stdio.println("envelopes=" + to_string(len(final_state.partial_handoffs)))
-      let _abandon = on_finish_abandon(harness, return_value)
-      let trailing = lifecycle_audit_log_take()
+      const _abandon = on_finish_abandon(harness, return_value)
+      const trailing = lifecycle_audit_log_take()
       harness.stdio.println("abandon_kind=" + trailing[0].kind)
       return return_value
     },

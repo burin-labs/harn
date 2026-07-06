@@ -58,15 +58,7 @@ impl<'a, 'd> State<'a, 'd> {
             Node::LetBinding {
                 type_ann, value, ..
             }
-            | Node::VarBinding {
-                type_ann, value, ..
-            } => {
-                if let Some(ty) = type_ann {
-                    self.visit_type(ty, span);
-                }
-                self.visit_node(value);
-            }
-            Node::ConstBinding {
+            | Node::ConstBinding {
                 type_ann, value, ..
             } => {
                 if let Some(ty) = type_ann {

@@ -1,7 +1,7 @@
 pipeline test(task) {
-  let handle = spawn {
+  const handle = spawn {
     log("spawned")
   }
-  let _result = await(handle)
+  const _result = await(handle)
   log("done")
 }

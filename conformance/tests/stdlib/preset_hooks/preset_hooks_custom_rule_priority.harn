@@ -14,8 +14,8 @@ import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/t
  *      surfaces.
  */
 pipeline default() {
-  let inner = { args -> {ok: true, ran: args.command} }
-  let custom_rule = tool_rule(
+  const inner = { args -> {ok: true, ran: args.command} }
+  const custom_rule = tool_rule(
     {
       id: "custom.deny_git_push_force",
       pattern: "git push.* --force",
@@ -23,7 +23,7 @@ pipeline default() {
       explanation: "Use --force-with-lease",
     },
   )
-  let wrapper = preset_run_command(
+  const wrapper = preset_run_command(
     {
       stacks: ["rust"],
       custom_rules: [custom_rule],
@@ -32,7 +32,7 @@ pipeline default() {
     },
   )
   /* (1) Custom rule fires for a non-registered command. */
-  let r1 = wrapper({command: "git push origin main --force"})
+  const r1 = wrapper({command: "git push origin main --force"})
   __io_println(r1.action)
   __io_println(r1.rule_id)
   __io_println(r1.catalogue_id)
@@ -40,7 +40,7 @@ pipeline default() {
   /* (2) Custom rule wins over the registered rust catalogue rule. The
    * `cargo build` command would normally fire `rust.cargo.target_dir_conflict`,
    * but a custom rule with the same pattern jumps the queue. */
-  let cargo_custom = tool_rule(
+  const cargo_custom = tool_rule(
     {
       id: "custom.deny_cargo_build",
       pattern: "^cargo build",
@@ -48,7 +48,7 @@ pipeline default() {
       explanation: "cargo build is forbidden here, use cargo check",
     },
   )
-  let wrapper2 = preset_run_command(
+  const wrapper2 = preset_run_command(
     {
       stacks: ["rust"],
       custom_rules: [cargo_custom],
@@ -56,7 +56,7 @@ pipeline default() {
       inner: inner,
     },
   )
-  let r2 = wrapper2({command: "cargo build --release"})
+  const r2 = wrapper2({command: "cargo build --release"})
   __io_println(r2.action)
   __io_println(r2.rule_id)
   __io_println(r2.catalogue_id)

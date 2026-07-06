@@ -13,7 +13,7 @@ pipeline default() {
       llm_text("{\"best_index\": 2, \"scores\": [0.1, 0.2, 0.9, 0.3], \"reasoning\": \"C is best\"}"),
     ],
     { ->
-      let result = best_of_n(
+      const result = best_of_n(
         "rate these",
         "",
         {

@@ -30,13 +30,13 @@ type ProbeResult = {
   asserted_at: string,
 }
 
-let PROBE_SCHEMA = "harn.probe.v1"
+const PROBE_SCHEMA = "harn.probe.v1"
 
-let PROBE_VALID_KINDS = ["eval", "typecheck", "test", "inspect"]
+const PROBE_VALID_KINDS = ["eval", "typecheck", "test", "inspect"]
 
-let PROBE_VALID_LANGS = ["shell", "harn"]
+const PROBE_VALID_LANGS = ["shell", "harn"]
 
-let PROBE_CAPTURE_LIMIT = 4096
+const PROBE_CAPTURE_LIMIT = 4096
 
 fn __probe_error(code, message) {
   throw code + ": std/agent/probe: " + message
@@ -53,8 +53,8 @@ fn __probe_text(value) -> string {
 }
 
 fn __probe_kind(value) -> ProbeKind {
-  let raw = __probe_text(value)
-  let normalized = lowercase(replace(trim(raw), "-", "_"))
+  const raw = __probe_text(value)
+  const normalized = lowercase(replace(trim(raw), "-", "_"))
   if normalized == "" {
     __probe_error("HARN-PROBE-002", "kind is required")
   }
@@ -71,7 +71,7 @@ fn __probe_lang(value) -> ProbeLang {
   if value == nil {
     return "shell"
   }
-  let normalized = lowercase(trim(__probe_text(value)))
+  const normalized = lowercase(trim(__probe_text(value)))
   if normalized == "" {
     return "shell"
   }
@@ -95,7 +95,7 @@ fn __probe_options(options) -> dict {
 }
 
 fn __probe_body(body) -> string {
-  let text = __probe_text(body)
+  const text = __probe_text(body)
   if trim(text) == "" {
     __probe_error("HARN-PROBE-004", "body must be a non-empty string")
   }
@@ -103,7 +103,7 @@ fn __probe_body(body) -> string {
 }
 
 fn __probe_truncate(value, limit) -> string {
-  let text = __probe_text(value)
+  const text = __probe_text(value)
   if len(text) <= limit {
     return text
   }
@@ -111,7 +111,7 @@ fn __probe_truncate(value, limit) -> string {
 }
 
 fn __probe_command_options(opts) -> dict {
-  var out = {}
+  let out = {}
   for key in ["cwd", "env", "env_mode", "timeout_ms", "stdin", "max_inline_bytes"] {
     if opts?.[key] != nil {
       out = out + {[key]: opts[key]}
@@ -125,7 +125,7 @@ fn __probe_temp_path(suffix) -> string {
 }
 
 fn __probe_harn_binary(opts) -> string {
-  let raw = __probe_text(opts?.harn_binary ?? opts?.harn_bin)
+  const raw = __probe_text(opts?.harn_binary ?? opts?.harn_bin)
   if raw != "" {
     return raw
   }
@@ -133,10 +133,10 @@ fn __probe_harn_binary(opts) -> string {
 }
 
 fn __probe_eval(body, opts) -> dict {
-  let lang = __probe_lang(opts?.lang)
-  let cmd_opts = __probe_command_options(opts)
-  let started = harness.clock.monotonic_ms()
-  let result = if lang == "harn" {
+  const lang = __probe_lang(opts?.lang)
+  const cmd_opts = __probe_command_options(opts)
+  const started = harness.clock.monotonic_ms()
+  const result = if lang == "harn" {
     let path = __probe_temp_path(".harn")
     harness.fs.write_text(path, body)
     let argv = [__probe_harn_binary(opts), "run", path]
@@ -146,32 +146,32 @@ fn __probe_eval(body, opts) -> dict {
   } else {
     command_run({mode: "shell", command: body}, cmd_opts)
   }
-  let duration_ms = harness.clock.monotonic_ms() - started
+  const duration_ms = harness.clock.monotonic_ms() - started
   return {result: result, lang: lang, duration_ms: duration_ms}
 }
 
 fn __probe_typecheck_diagnostics(stdout) -> dict {
-  let parsed = try {
+  const parsed = try {
     json_parse(stdout)
   }
   if is_err(parsed) {
     return {parsed: false, errors: -1, warnings: -1}
   }
-  let envelope = unwrap(parsed)
-  let summary = envelope?.data?.summary ?? envelope?.summary ?? {}
-  let {errors = -1, warnings = -1} = summary ?? {}
+  const envelope = unwrap(parsed)
+  const summary = envelope?.data?.summary ?? envelope?.summary ?? {}
+  const {errors = -1, warnings = -1} = summary ?? {}
   return {parsed: true, errors: errors, warnings: warnings, envelope_ok: envelope?.ok ?? nil}
 }
 
 fn __probe_typecheck(body, opts) -> dict {
-  let path = __probe_temp_path(".harn")
+  const path = __probe_temp_path(".harn")
   harness.fs.write_text(path, body)
-  let argv = [__probe_harn_binary(opts), "check", path, "--json"]
-  let started = harness.clock.monotonic_ms()
-  let result = command_run(argv, __probe_command_options(opts))
-  let duration_ms = harness.clock.monotonic_ms() - started
+  const argv = [__probe_harn_binary(opts), "check", path, "--json"]
+  const started = harness.clock.monotonic_ms()
+  const result = command_run(argv, __probe_command_options(opts))
+  const duration_ms = harness.clock.monotonic_ms() - started
   harness.fs.delete(path)
-  let diagnostics = __probe_typecheck_diagnostics(result?.stdout ?? "")
+  const diagnostics = __probe_typecheck_diagnostics(result?.stdout ?? "")
   return {result: result, diagnostics: diagnostics, duration_ms: duration_ms}
 }
 
@@ -179,7 +179,7 @@ fn __probe_compare_expected(observed, expected, kind) -> ProbeOutcome {
   if expected == nil {
     return "unknown"
   }
-  let exp_kind = type_of(expected)
+  const exp_kind = type_of(expected)
   if exp_kind == "int" || exp_kind == "float" {
     if kind == "typecheck" {
       if type_of(observed) == "dict" && observed?.errors == expected {
@@ -192,7 +192,7 @@ fn __probe_compare_expected(observed, expected, kind) -> ProbeOutcome {
     }
     return "fail"
   }
-  let observed_text = if type_of(observed) == "dict" {
+  const observed_text = if type_of(observed) == "dict" {
     observed?.stdout ?? ""
   } else {
     __probe_text(observed)
@@ -220,7 +220,7 @@ fn __probe_typecheck_outcome(result, diagnostics, expected) -> ProbeOutcome {
   if !diagnostics.parsed && !result?.success {
     return "fail"
   }
-  let errors = diagnostics.errors
+  const errors = diagnostics.errors
   if expected != nil {
     return __probe_compare_expected({errors: errors}, expected, "typecheck")
   }
@@ -231,11 +231,11 @@ fn __probe_typecheck_outcome(result, diagnostics, expected) -> ProbeOutcome {
 }
 
 fn __probe_observed_eval(result, outcome) -> string {
-  let exit = result?.exit_code
-  let exit_str = exit == nil ? "?" : to_string(exit)
-  let stdout = trim(result?.stdout ?? "")
-  let stderr = trim(result?.stderr ?? "")
-  let summary = "eval exit=" + exit_str + " outcome=" + outcome
+  const exit = result?.exit_code
+  const exit_str = exit == nil ? "?" : to_string(exit)
+  const stdout = trim(result?.stdout ?? "")
+  const stderr = trim(result?.stderr ?? "")
+  const summary = "eval exit=" + exit_str + " outcome=" + outcome
   if stdout != "" {
     return summary + " stdout=" + __probe_truncate(stdout, 240)
   }
@@ -257,13 +257,13 @@ fn __probe_observed_typecheck(diagnostics, outcome) -> string {
 }
 
 fn __probe_trace_id(kind, body, observed) -> string {
-  let seed = kind + "\n" + body + "\n" + observed
+  const seed = kind + "\n" + body + "\n" + observed
   return "probe_" + substring(sha256(seed), 0, 16)
 }
 
 fn __probe_evidence(kind, body, command, observed, result, duration_ms) -> ProbeEvidence {
-  let stdout = result == nil ? nil : __probe_truncate(result?.stdout ?? "", PROBE_CAPTURE_LIMIT)
-  let stderr = result == nil ? nil : __probe_truncate(result?.stderr ?? "", PROBE_CAPTURE_LIMIT)
+  const stdout = result == nil ? nil : __probe_truncate(result?.stdout ?? "", PROBE_CAPTURE_LIMIT)
+  const stderr = result == nil ? nil : __probe_truncate(result?.stderr ?? "", PROBE_CAPTURE_LIMIT)
   return filter_nil(
     {
       trace_id: __probe_trace_id(kind, body, observed),
@@ -286,19 +286,19 @@ fn __probe_confidence(outcome) -> float {
 }
 
 fn __probe_claim(kind, outcome, snippet) -> string {
-  let trimmed = __probe_truncate(trim(snippet), 120)
+  const trimmed = __probe_truncate(trim(snippet), 120)
   return "probe " + kind + " `" + replace(trimmed, "\n", " ") + "` → " + outcome
 }
 
 fn __probe_provenance(kind, lang, command, opts) -> dict {
-  var prov = {source: "probe", probe_kind: kind}
+  let prov = {source: "probe", probe_kind: kind}
   if lang != nil {
     prov = prov + {lang: lang}
   }
   if command != nil && command != "" {
     prov = prov + {command: command}
   }
-  let extra = opts?.provenance
+  const extra = opts?.provenance
   if extra != nil && type_of(extra) == "dict" {
     prov = prov + extra
   }
@@ -309,21 +309,21 @@ fn __probe_store_fact(kind, observed, outcome, evidence, opts) {
   if !(opts?.store_fact ?? true) {
     return nil
   }
-  let provenance = __probe_provenance(kind, opts?.lang, evidence?.command, opts)
-  let fact_input = {
+  const provenance = __probe_provenance(kind, opts?.lang, evidence?.command, opts)
+  const fact_input = {
     kind: "observation",
     claim: __probe_claim(kind, outcome, evidence?.snippet ?? ""),
     confidence: __probe_confidence(outcome),
     evidence: [{kind: "tool_output", ref: evidence.trace_id, snippet: __probe_truncate(observed, 1024)}],
     provenance: provenance,
   }
-  var fact_opts = {}
+  let fact_opts = {}
   for key in ["namespace", "scope", "root", "now", "asserted_at", "tags", "embed"] {
     if opts?.[key] != nil {
       fact_opts = fact_opts + {[key]: opts[key]}
     }
   }
-  let stored = try {
+  const stored = try {
     store_fact(fact_input, fact_opts)
   }
   if is_err(stored) {
@@ -333,8 +333,8 @@ fn __probe_store_fact(kind, observed, outcome, evidence, opts) {
 }
 
 fn __probe_envelope(kind, outcome, observed, evidence, opts) -> ProbeResult {
-  let fact_id = __probe_store_fact(kind, observed, outcome, evidence, opts)
-  let asserted_at = __probe_text(opts?.asserted_at ?? opts?.now)
+  const fact_id = __probe_store_fact(kind, observed, outcome, evidence, opts)
+  const asserted_at = __probe_text(opts?.asserted_at ?? opts?.now)
   return filter_nil(
     {
       schema: PROBE_SCHEMA,
@@ -350,33 +350,33 @@ fn __probe_envelope(kind, outcome, observed, evidence, opts) -> ProbeResult {
 }
 
 fn __probe_unsupported(kind, body, opts) -> ProbeResult {
-  let observed = "probe kind `" + kind + "` is not supported (supported kinds: eval, typecheck)"
-  let evidence = __probe_evidence(kind, body, nil, observed, nil, nil)
+  const observed = "probe kind `" + kind + "` is not supported (supported kinds: eval, typecheck)"
+  const evidence = __probe_evidence(kind, body, nil, observed, nil, nil)
   return __probe_envelope(kind, "unknown", observed, evidence, opts)
 }
 
 fn __probe_run_eval(body, opts) -> ProbeResult {
-  let kind = "eval"
-  let ran = __probe_eval(body, opts)
-  let result = ran.result
-  let outcome = __probe_eval_outcome(result, opts?.expected)
-  let observed = __probe_observed_eval(result, outcome)
-  let command = if ran.lang == "harn" {
+  const kind = "eval"
+  const ran = __probe_eval(body, opts)
+  const result = ran.result
+  const outcome = __probe_eval_outcome(result, opts?.expected)
+  const observed = __probe_observed_eval(result, outcome)
+  const command = if ran.lang == "harn" {
     join([__probe_harn_binary(opts), "run", "<snippet>"], " ")
   } else {
     __probe_truncate(body, 240)
   }
-  let evidence = __probe_evidence(kind, body, command, observed, result, ran.duration_ms)
+  const evidence = __probe_evidence(kind, body, command, observed, result, ran.duration_ms)
   return __probe_envelope(kind, outcome, observed, evidence, opts + {lang: ran.lang})
 }
 
 fn __probe_run_typecheck(body, opts) -> ProbeResult {
-  let kind = "typecheck"
-  let ran = __probe_typecheck(body, opts)
-  let outcome = __probe_typecheck_outcome(ran.result, ran.diagnostics, opts?.expected)
-  let observed = __probe_observed_typecheck(ran.diagnostics, outcome)
-  let command = join([__probe_harn_binary(opts), "check", "<snippet>", "--json"], " ")
-  let evidence = __probe_evidence(kind, body, command, observed, ran.result, ran.duration_ms)
+  const kind = "typecheck"
+  const ran = __probe_typecheck(body, opts)
+  const outcome = __probe_typecheck_outcome(ran.result, ran.diagnostics, opts?.expected)
+  const observed = __probe_observed_typecheck(ran.diagnostics, outcome)
+  const command = join([__probe_harn_binary(opts), "check", "<snippet>", "--json"], " ")
+  const evidence = __probe_evidence(kind, body, command, observed, ran.result, ran.duration_ms)
   return __probe_envelope(kind, outcome, observed, evidence, opts)
 }
 
@@ -408,9 +408,9 @@ fn __probe_run_typecheck(body, opts) -> ProbeResult {
  * @example: probe("eval", "echo hi", {expected: "hi"})
  */
 pub fn probe(kind, body, options = nil) -> ProbeResult {
-  let opts = __probe_options(options)
-  let resolved_kind = __probe_kind(kind)
-  let resolved_body = __probe_body(body)
+  const opts = __probe_options(options)
+  const resolved_kind = __probe_kind(kind)
+  const resolved_body = __probe_body(body)
   if resolved_kind == "eval" {
     return __probe_run_eval(resolved_body, opts)
   }

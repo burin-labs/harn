@@ -19,8 +19,8 @@ type SettledPartition = {oks: list, errs: list, ok_count: int, err_count: int}
  * @errors: []
  */
 pub fn partition(results: list) -> SettledPartition {
-  var oks = []
-  var errs = []
+  let oks = []
+  let errs = []
   for r in results {
     if is_ok(r) {
       oks = oks + [unwrap(r)]
@@ -38,7 +38,7 @@ pub fn partition(results: list) -> SettledPartition {
  * @errors: []
  */
 pub fn oks(results: list) -> list {
-  var out = []
+  let out = []
   for r in results {
     if is_ok(r) {
       out = out + [unwrap(r)]
@@ -54,7 +54,7 @@ pub fn oks(results: list) -> list {
  * @errors: []
  */
 pub fn errs(results: list) -> list {
-  var out = []
+  let out = []
   for r in results {
     if is_err(r) {
       out = out + [unwrap_err(r)]
@@ -70,7 +70,7 @@ pub fn errs(results: list) -> list {
  * @errors: []
  */
 pub fn count_oks(results: list) -> int {
-  var n = 0
+  let n = 0
   for r in results {
     if is_ok(r) {
       n = n + 1
@@ -86,7 +86,7 @@ pub fn count_oks(results: list) -> int {
  * @errors: []
  */
 pub fn count_errs(results: list) -> int {
-  var n = 0
+  let n = 0
   for r in results {
     if is_err(r) {
       n = n + 1
@@ -105,8 +105,8 @@ pub fn count_errs(results: list) -> int {
  * @errors: []
  */
 pub fn map_settled(results: list, on_ok, on_err) -> list {
-  var out = []
-  var i = 0
+  let out = []
+  let i = 0
   for r in results {
     if is_ok(r) {
       out = out + [on_ok(unwrap(r), i)]
@@ -127,9 +127,9 @@ pub fn map_settled(results: list, on_ok, on_err) -> list {
  * @errors: []
  */
 pub fn tally_by(results: list, classifier) -> dict<string, int> {
-  var counts = {}
+  let counts = {}
   for r in results {
-    let label = if classifier == nil {
+    const label = if classifier == nil {
       if is_ok(r) {
         "ok"
       } else {
@@ -143,7 +143,7 @@ pub fn tally_by(results: list, classifier) -> dict<string, int> {
       }
       to_string(classifier(payload, is_ok(r)))
     }
-    let prior = counts[label] ?? 0
+    const prior = counts[label] ?? 0
     counts = counts + {[label]: prior + 1}
   }
   return counts
@@ -157,10 +157,10 @@ pub fn tally_by(results: list, classifier) -> dict<string, int> {
  * @errors: []
  */
 pub fn enumerate_settled(results: list) -> list<dict> {
-  var out = []
-  var i = 0
+  let out = []
+  let i = 0
   for r in results {
-    let row = if is_ok(r) {
+    const row = if is_ok(r) {
       {ok: true, value: unwrap(r), error: nil, index: i}
     } else {
       {ok: false, value: nil, error: unwrap_err(r), index: i}
@@ -180,7 +180,7 @@ pub fn enumerate_settled(results: list) -> list<dict> {
  * @errors: []
  */
 pub fn summary(results: list) -> dict {
-  let counts = partition(results)
+  const counts = partition(results)
   return {
     any_failed: counts.err_count > 0,
     all_ok: counts.err_count == 0 && counts.ok_count > 0,

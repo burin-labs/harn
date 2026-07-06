@@ -1,3 +1,3 @@
-let x: int = 1
+const x: int = 1
 
-let y: string = x
+const y: string = x

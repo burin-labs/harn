@@ -1,7 +1,7 @@
 import "std/eval/agreement"
 
 fn near(value, expected: float) -> bool {
-  let actual = to_float(value) ?? 0.0
+  const actual = to_float(value) ?? 0.0
   return abs(actual - expected) < 0.0001
 }
 
@@ -19,19 +19,19 @@ fn weak(id: string, verdict: string) -> dict {
 
 pipeline test(task) {
   // --- agreement_decision: two execution signals concur -> PASS ---
-  let two = agreement_decision([e1(verdict_pass()), e2(verdict_pass())])
+  const two = agreement_decision([e1(verdict_pass()), e2(verdict_pass())])
   assert(two.evaluator_agreement, "2-of-2 execution concurrence -> PASS")
   assert(two.passed, "passed is the trial verdict")
   assert_eq(two.verdicts_aligned_count, 2)
   assert(!two.barred, "a legitimate execution-backed pass is not barred")
   assert(contains(two.execution_pass_ids, "reexec_verify"), "E2 recorded among concurring passes")
   // --- a single concurring vote does not clear the >=2 rule ---
-  let dissent = agreement_decision([e1(verdict_pass()), e2(verdict_fail())])
+  const dissent = agreement_decision([e1(verdict_pass()), e2(verdict_fail())])
   assert(!dissent.evaluator_agreement, "one concurring vote does not pass")
   assert_eq(dissent.verdicts_aligned_count, 1)
   assert(!dissent.barred, "a 1-vote concurrence is short of threshold, not a weak-only bar")
   // --- abstain is neither concur nor dissent; E1+weak only is BARRED ---
-  let abstaining = agreement_decision(
+  const abstaining = agreement_decision(
     [e1(verdict_pass()), e2(verdict_abstain()), weak("output_artifacts", verdict_pass())],
   )
   assert_eq(abstaining.verdicts_aligned_count, 2)
@@ -39,7 +39,7 @@ pipeline test(task) {
   assert(abstaining.barred, "E1 + weak only is BARRED")
   assert(abstaining.bar_reason.contains("no independent re-execution"), "bar reason names the gap")
   // --- two weak signals only -> BARRED (file-exists footgun) ---
-  let weak_only = agreement_decision(
+  const weak_only = agreement_decision(
     [
       e1(verdict_abstain()),
       e2(verdict_abstain()),
@@ -52,46 +52,46 @@ pipeline test(task) {
   assert(weak_only.barred, "file-exists/substring-only pass is BARRED")
   assert(weak_only.bar_reason.contains("artifact/substring"), "bar reason names the weak signals")
   // --- E1 + weak with E2 dissenting -> BARRED ---
-  let e1_weak = agreement_decision(
+  const e1_weak = agreement_decision(
     [e1(verdict_pass()), e2(verdict_fail()), weak("output_artifacts", verdict_pass())],
   )
   assert_eq(e1_weak.verdicts_aligned_count, 2)
   assert(!e1_weak.evaluator_agreement, "E1 + weak without independent execution does not pass")
   assert(e1_weak.barred, "carried solely by in-loop gate + weak -> BARRED")
   // --- a non-re-executing grader (E4) reinforces but cannot substitute for E2 ---
-  let e4 = evaluator_verdict("llm_semantic", verdict_pass(), true, "llm affirming")
-  let with_e2 = agreement_decision([e1(verdict_pass()), e2(verdict_pass()), e4])
+  const e4 = evaluator_verdict("llm_semantic", verdict_pass(), true, "llm affirming")
+  const with_e2 = agreement_decision([e1(verdict_pass()), e2(verdict_pass()), e4])
   assert(with_e2.evaluator_agreement, "E1+E2+E4 all pass -> confirmed (E2 re-ran the code)")
-  let e1_plus_e4 = agreement_decision([e1(verdict_pass()), e2(verdict_abstain()), e4])
+  const e1_plus_e4 = agreement_decision([e1(verdict_pass()), e2(verdict_abstain()), e4])
   assert(!e1_plus_e4.evaluator_agreement, "E1+E4 with E2 abstaining must NOT confirm")
   assert(e1_plus_e4.barred, "an E1+E4 agreement with no independent re-execution is BARRED")
   assert(e1_plus_e4.bar_reason.contains("no independent re-execution"), "bar reason names the gap")
-  let alone = agreement_decision([e1(verdict_abstain()), e2(verdict_abstain()), e4])
+  const alone = agreement_decision([e1(verdict_abstain()), e2(verdict_abstain()), e4])
   assert(!alone.evaluator_agreement, "a lone grader pass does not clear the >=2 rule")
   // --- cohen_kappa: perfect agreement, abstain-excluded, systematic disagreement ---
-  let perfect = [
+  const perfect = [
     [e1(verdict_pass()), e2(verdict_pass())],
     [e1(verdict_fail()), e2(verdict_fail())],
     [e1(verdict_pass()), e2(verdict_pass())],
     [e1(verdict_fail()), e2(verdict_fail())],
   ]
-  let kp = cohen_kappa(perfect)
+  const kp = cohen_kappa(perfect)
   assert_eq(kp.n, 4)
   assert(near(kp.kappa, 1.0), "perfect agreement -> kappa 1.0")
-  let with_abstain = perfect + [[e1(verdict_pass()), e2(verdict_abstain())]]
-  let ka = cohen_kappa(with_abstain)
+  const with_abstain = perfect + [[e1(verdict_pass()), e2(verdict_abstain())]]
+  const ka = cohen_kappa(with_abstain)
   assert_eq(ka.n, 4)
   assert(near(ka.kappa, 1.0), "an abstention does not lower kappa")
-  let disagree = [
+  const disagree = [
     [e1(verdict_pass()), e2(verdict_fail())],
     [e1(verdict_fail()), e2(verdict_pass())],
     [e1(verdict_pass()), e2(verdict_fail())],
     [e1(verdict_fail()), e2(verdict_pass())],
   ]
-  let kd = cohen_kappa(disagree)
+  const kd = cohen_kappa(disagree)
   assert((to_float(kd.kappa) ?? 1.0) < 0.0, "systematic disagreement yields negative kappa")
   // --- fewer than 2 jointly-decided cases -> kappa undefined ---
-  let one = cohen_kappa([[e1(verdict_pass()), e2(verdict_pass())]])
+  const one = cohen_kappa([[e1(verdict_pass()), e2(verdict_pass())]])
   assert(one.kappa == nil, "fewer than 2 jointly-decided cases -> kappa undefined")
   log("stdlib eval agreement ok")
 }

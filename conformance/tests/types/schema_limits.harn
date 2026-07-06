@@ -1,13 +1,13 @@
 pipeline test(task) {
-  let self_ref = {"$ref": "#"}
-  let from_json = try {
+  const self_ref = {"$ref": "#"}
+  const from_json = try {
     schema_from_json_schema(self_ref)
   }
   __io_println(is_err(from_json))
   __io_println(contains(to_string(unwrap_err(from_json)), "cyclic schema reference"))
-  let checked = schema_check("ok", self_ref)
+  const checked = schema_check("ok", self_ref)
   __io_println(is_err(checked))
   __io_println(contains(unwrap_err(checked).message, "cyclic schema reference"))
-  let normal = {type: "dict", properties: {node: {type: "string"}}}
+  const normal = {type: "dict", properties: {node: {type: "string"}}}
   __io_println(schema_is({node: "ok"}, normal))
 }

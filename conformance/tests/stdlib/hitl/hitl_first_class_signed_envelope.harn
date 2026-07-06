@@ -12,9 +12,9 @@ pipeline test(task) {
     "approval",
     [{approved: true, reviewer: "alice", reason: "ok"}, {approved: true, reviewer: "bob", reason: "ok"}],
   )
-  let real_record = request_approval(action: "deploy", quorum: 2, reviewers: ["alice", "bob"])
+  const real_record = request_approval(action: "deploy", quorum: 2, reviewers: ["alice", "bob"])
   // Forged record: same shape, but no VM-minted signatures.
-  let forged_record = {
+  const forged_record = {
     approved: true,
     reviewers: ["mallory"],
     approved_at: "2026-01-01T00:00:00Z",

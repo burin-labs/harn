@@ -10,16 +10,16 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
 pipeline default() {
   enable_tracing(true)
   // Subscribe to the audit topic ahead of submit so both receipts land.
-  let stream = event_log.subscribe({topic: "lifecycle.pool.audit"})
-  let pool = pool_create({name: "otel-demo", max_concurrent: 1})
-  let h = pool.submit({ -> 42 }, {priority: 5, key: "alpha"})
-  let r = pool_wait(h)
+  const stream = event_log.subscribe({topic: "lifecycle.pool.audit"})
+  const pool = pool_create({name: "otel-demo", max_concurrent: 1})
+  const h = pool.submit({ -> 42 }, {priority: 5, key: "alpha"})
+  const r = pool_wait(h)
   __io_println(r.status)
   __io_println(r.result)
   // Walk the audit stream: first event is the submit receipt, second
   // is the dequeue receipt. Both share the same task_id.
-  let first = stream.next().value
-  let second = stream.next().value
+  const first = stream.next().value
+  const second = stream.next().value
   __io_println(first.kind)
   __io_println(first.headers.schema)
   __io_println(first.payload.pool)
@@ -32,12 +32,12 @@ pipeline default() {
   __io_println(second.payload.queued_for_ms >= 0)
   // Spans: at least one PoolSubmit and one PoolDequeue must be present,
   // and the dequeue span must carry a link back to the submit span.
-  let spans = trace_spans()
-  let submits = spans.filter({ s -> s.kind == "pool_submit" })
-  let dequeues = spans.filter({ s -> s.kind == "pool_dequeue" })
+  const spans = trace_spans()
+  const submits = spans.filter({ s -> s.kind == "pool_submit" })
+  const dequeues = spans.filter({ s -> s.kind == "pool_dequeue" })
   __io_println(len(submits) >= 1)
   __io_println(len(dequeues) >= 1)
-  let dequeue = dequeues[0]
+  const dequeue = dequeues[0]
   __io_println(dequeue.links != nil)
   __io_println(len(dequeue.links) >= 1)
   enable_tracing(false)

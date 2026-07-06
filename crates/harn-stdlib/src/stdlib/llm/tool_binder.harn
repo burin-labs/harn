@@ -61,13 +61,13 @@ fn __binder_dict(value) -> dict {
 }
 
 fn __binder_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
 fn __binder_drop_key(args, field) {
-  let source = __binder_dict(args)
-  var cleaned = {}
+  const source = __binder_dict(args)
+  let cleaned = {}
   for key in source.keys() {
     if key != field {
       cleaned = cleaned + {[key]: source[key]}
@@ -80,7 +80,7 @@ fn __binder_positive_int(value, default_value, name) -> int {
   if value == nil {
     return default_value
   }
-  let parsed = to_int(value)
+  const parsed = to_int(value)
   if parsed == nil {
     throw "with_natural_language_executor: `" + name + "` must be an integer; got "
       + type_of(value)
@@ -95,7 +95,7 @@ fn __binder_int(value, default_value, name) -> int {
   if value == nil {
     return default_value
   }
-  let parsed = to_int(value)
+  const parsed = to_int(value)
   if parsed == nil {
     throw "with_natural_language_executor: `" + name + "` must be an integer; got "
       + type_of(value)
@@ -114,7 +114,7 @@ fn __binder_bool(value, default_value, name) -> bool {
 }
 
 fn __binder_intent_field(cfg) -> string {
-  let intent_field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
+  const intent_field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
   if intent_field == "" {
     throw "with_natural_language_executor: `intent_field` must not be empty"
   }
@@ -138,7 +138,7 @@ fn __binder_short_circuit(envelope, reason) {
 }
 
 fn __binder_attach_audit(result, audit) {
-  let existing = if type_of(result?.audit) == "dict" {
+  const existing = if type_of(result?.audit) == "dict" {
     result.audit
   } else {
     {}
@@ -151,7 +151,7 @@ fn __binder_default_system() -> string {
 }
 
 fn __binder_audit(provider, model, status, latency_ms, reason, attempts) {
-  let base = {provider: provider, model: model, status: status, latency_ms: latency_ms, attempts: attempts}
+  const base = {provider: provider, model: model, status: status, latency_ms: latency_ms, attempts: attempts}
   if reason == nil {
     return base
   }
@@ -163,13 +163,13 @@ fn __binder_audit(provider, model, status, latency_ms, reason, attempts) {
 // -------------------------------------------------------------------------------------------------
 
 fn __binder_prompt(envelope, intent, partial_args) -> string {
-  let schema_for_prompt = if envelope.schema != nil {
+  const schema_for_prompt = if envelope.schema != nil {
     envelope.schema
   } else {
     {}
   }
-  let has_partial = type_of(partial_args) == "dict" && len(partial_args.keys()) > 0
-  let partial_json = if has_partial {
+  const has_partial = type_of(partial_args) == "dict" && len(partial_args.keys()) > 0
+  const partial_json = if has_partial {
     json_stringify(partial_args)
   } else {
     "{}"
@@ -193,19 +193,19 @@ fn __binder_prompt(envelope, intent, partial_args) -> string {
 
 fn __binder_extract_json(response) {
   if type_of(response) == "dict" {
-    let data = response?.data
+    const data = response?.data
     if type_of(data) == "dict" {
       return {ok: true, value: data}
     }
-    let text = response?.text
+    const text = response?.text
     if type_of(text) == "string" {
-      let parsed = try {
+      const parsed = try {
         json_parse(text)
       }
       if is_err(parsed) {
         return {ok: false, reason: "binder response is not valid JSON"}
       }
-      let value = unwrap(parsed)
+      const value = unwrap(parsed)
       if type_of(value) == "dict" {
         return {ok: true, value: value}
       }
@@ -216,7 +216,7 @@ fn __binder_extract_json(response) {
 }
 
 fn __binder_invoke(binder_fn, prompt, system, cfg) {
-  let opts = {
+  const opts = {
     provider: cfg.provider,
     model: cfg.model,
     temperature: cfg.temperature,
@@ -243,11 +243,11 @@ fn __binder_handle_failure(envelope, next, ctx, status, reason) {
   if ctx.on_failure == "raise" {
     throw "with_natural_language_executor: " + reason
   }
-  let audit = __binder_audit(ctx.provider, ctx.model, status, ctx.elapsed_ms, reason, 1)
+  const audit = __binder_audit(ctx.provider, ctx.model, status, ctx.elapsed_ms, reason, 1)
   if ctx.on_failure == "reject" {
     return __binder_attach_audit(__binder_short_circuit(envelope, reason), audit)
   }
-  let result = next(envelope + {tool_args: ctx.stripped_args})
+  const result = next(envelope + {tool_args: ctx.stripped_args})
   return __binder_attach_audit(result, audit)
 }
 
@@ -256,26 +256,26 @@ fn __binder_handle_failure(envelope, next, ctx, status, reason) {
 // -------------------------------------------------------------------------------------------------
 
 fn __binder_validate_opts(cfg) {
-  let provider = to_string(cfg?.provider ?? "")
-  let model = to_string(cfg?.model ?? "")
+  const provider = to_string(cfg?.provider ?? "")
+  const model = to_string(cfg?.model ?? "")
   if provider == "" {
     throw "with_natural_language_executor: `provider` is required"
   }
   if model == "" {
     throw "with_natural_language_executor: `model` is required"
   }
-  let timeout_ms = __binder_positive_int(cfg?.timeout_ms, 500, "timeout_ms")
-  let max_retries = __binder_int(cfg?.max_retries, 0, "max_retries")
+  const timeout_ms = __binder_positive_int(cfg?.timeout_ms, 500, "timeout_ms")
+  const max_retries = __binder_int(cfg?.max_retries, 0, "max_retries")
   if max_retries != 0 {
     throw "with_natural_language_executor: `max_retries` must be 0; retries defeat the latency win; got "
       + to_string(max_retries)
   }
-  let on_failure = to_string(cfg?.on_failure ?? "passthrough")
+  const on_failure = to_string(cfg?.on_failure ?? "passthrough")
   if on_failure != "passthrough" && on_failure != "reject" && on_failure != "raise" {
     throw "with_natural_language_executor: `on_failure` must be one of passthrough|reject|raise; got "
       + on_failure
   }
-  let binder_fn = if cfg?.binder_fn != nil {
+  const binder_fn = if cfg?.binder_fn != nil {
     if !__binder_is_callable(cfg.binder_fn) {
       throw "with_natural_language_executor: `binder_fn` must be callable; got " + type_of(cfg.binder_fn)
     }
@@ -283,7 +283,7 @@ fn __binder_validate_opts(cfg) {
   } else {
     { binder_prompt, binder_system, binder_opts -> llm_call(binder_prompt, binder_system, binder_opts) }
   }
-  let intent_field = __binder_intent_field(cfg)
+  const intent_field = __binder_intent_field(cfg)
   return {
     provider: provider,
     model: model,
@@ -316,13 +316,13 @@ fn __binder_validate_opts(cfg) {
  * @example: natural_language_executor_schema_transform({intent_field: "_nl_intent"})
  */
 pub fn natural_language_executor_schema_transform(opts = nil) {
-  let cfg = __binder_dict(opts)
-  let field = __binder_intent_field(cfg)
-  let description = to_string(
+  const cfg = __binder_dict(opts)
+  const field = __binder_intent_field(cfg)
+  const description = to_string(
     cfg?.intent_description
       ?? "Natural-language fallback intent for the tool binder. Use when the intended tool action is clear but structured arguments are uncertain.",
   )
-  let schema_fragment = {type: "string", description: description, required: false}
+  const schema_fragment = {type: "string", description: description, required: false}
   return { entry -> return tool_inject_param(entry, field, schema_fragment, {required: false}) }
 }
 
@@ -361,13 +361,13 @@ fn __binder_skip_reason(intent, schema_provided, already_valid) {
 }
 
 fn __binder_passthrough(envelope, next, original_args, stripped_args, intent, ctx, skip_reason) {
-  let next_args = if intent == "" {
+  const next_args = if intent == "" {
     original_args
   } else {
     stripped_args
   }
-  let result = next(envelope + {tool_args: next_args})
-  let audit = __binder_audit(ctx.provider, ctx.model, "skipped", 0, skip_reason, 0)
+  const result = next(envelope + {tool_args: next_args})
+  const audit = __binder_audit(ctx.provider, ctx.model, "skipped", 0, skip_reason, 0)
   return __binder_attach_audit(result, audit)
 }
 
@@ -398,29 +398,29 @@ fn __binder_passthrough(envelope, next, original_args, stripped_args, intent, ct
  * @errors: []
  */
 pub fn with_natural_language_executor(opts) {
-  let ctx = __binder_validate_opts(__binder_dict(opts))
+  const ctx = __binder_validate_opts(__binder_dict(opts))
   return { envelope, next ->
-    let tool_args = __binder_dict(envelope.tool_args)
-    let raw_intent = tool_args[ctx.intent_field]
-    let intent = if type_of(raw_intent) == "string" {
+    const tool_args = __binder_dict(envelope.tool_args)
+    const raw_intent = tool_args[ctx.intent_field]
+    const intent = if type_of(raw_intent) == "string" {
       trim(raw_intent)
     } else {
       ""
     }
-    let schema = envelope.schema
-    let stripped_args = __binder_drop_key(tool_args, ctx.intent_field)
-    let schema_provided = schema != nil
-    let already_valid = if schema_provided && ctx.passthrough_when_args_valid {
+    const schema = envelope.schema
+    const stripped_args = __binder_drop_key(tool_args, ctx.intent_field)
+    const schema_provided = schema != nil
+    const already_valid = if schema_provided && ctx.passthrough_when_args_valid {
       schema_is(stripped_args, schema)
     } else {
       false
     }
-    let skip = __binder_skip_reason(intent, schema_provided, already_valid)
+    const skip = __binder_skip_reason(intent, schema_provided, already_valid)
     if skip != nil {
       return __binder_passthrough(envelope, next, tool_args, stripped_args, intent, ctx, skip)
     }
-    let prompt = __binder_prompt(envelope, intent, stripped_args)
-    let invoke_cfg = {
+    const prompt = __binder_prompt(envelope, intent, stripped_args)
+    const invoke_cfg = {
       provider: ctx.provider,
       model: ctx.model,
       temperature: ctx.temperature,
@@ -428,12 +428,12 @@ pub fn with_natural_language_executor(opts) {
       schema: schema,
       timeout_ms: ctx.timeout_ms,
     }
-    let started = harness.clock.now_ms()
-    let outcome = try {
+    const started = harness.clock.now_ms()
+    const outcome = try {
       __binder_invoke(ctx.binder_fn, prompt, ctx.system_prompt, invoke_cfg)
     }
-    let elapsed = harness.clock.now_ms() - started
-    let fail_ctx = ctx + {elapsed_ms: elapsed, stripped_args: stripped_args}
+    const elapsed = harness.clock.now_ms() - started
+    const fail_ctx = ctx + {elapsed_ms: elapsed, stripped_args: stripped_args}
     if elapsed > ctx.timeout_ms {
       return __binder_handle_failure(
         envelope,
@@ -454,11 +454,11 @@ pub fn with_natural_language_executor(opts) {
         "binder transport error: " + to_string(unwrap_err(outcome)),
       )
     }
-    let extracted = __binder_extract_json(unwrap(outcome))
+    const extracted = __binder_extract_json(unwrap(outcome))
     if !extracted.ok {
       return __binder_handle_failure(envelope, next, fail_ctx, "schema_error", extracted.reason)
     }
-    let bound_args = extracted.value
+    const bound_args = extracted.value
     if !schema_is(bound_args, schema) {
       return __binder_handle_failure(
         envelope,
@@ -468,7 +468,7 @@ pub fn with_natural_language_executor(opts) {
         "binder output failed schema validation",
       )
     }
-    let result = next(envelope + {tool_args: bound_args})
+    const result = next(envelope + {tool_args: bound_args})
     return __binder_attach_audit(result, __binder_audit(ctx.provider, ctx.model, "ok", elapsed, nil, 1))
   }
 }

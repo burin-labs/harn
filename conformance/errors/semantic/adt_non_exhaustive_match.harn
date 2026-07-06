@@ -7,7 +7,7 @@ enum Action {
 }
 
 pipeline test(task) {
-  let a = Action.Create
+  const a = Action.Create
   match a.variant {
     "Create" -> { log("c") }
     "Delete" -> { log("d") }

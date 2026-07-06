@@ -20,17 +20,17 @@ fn unwrap_int(value: int?) -> int {
 
 pipeline test(task) {
   // Plain optional values.
-  let a: int? = nil
-  let b: int? = 7
+  const a: int? = nil
+  const b: int? = 7
   log(a)
   log(b)
   // Optional generic and dict types format/parse round-trip.
-  let words: list<int>? = [1, 2, 3]
-  let lookup: dict<string, int>? = nil
+  const words: list<int>? = [1, 2, 3]
+  const lookup: dict<string, int>? = nil
   log(words)
   log(lookup)
   // Sugar interoperates with `T | nil` callers.
-  let mixed: string? = first_word("hello")
+  const mixed: string? = first_word("hello")
   log(mixed)
   log(first_word(nil))
   log(unwrap_int(nil))

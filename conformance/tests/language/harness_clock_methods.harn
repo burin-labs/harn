@@ -12,10 +12,10 @@
  */
 fn main(harness: Harness) {
   mock_time(1700000000000)
-  let wall_ms = harness.clock.now_ms()
-  let ts = harness.clock.timestamp()
-  let mono = harness.clock.monotonic_ms()
-  let elapsed = harness.clock.elapsed()
+  const wall_ms = harness.clock.now_ms()
+  const ts = harness.clock.timestamp()
+  const mono = harness.clock.monotonic_ms()
+  const elapsed = harness.clock.elapsed()
   harness.stdio.println(wall_ms == 1700000000000)
   harness.stdio.println(ts == 1700000000.0)
   harness.stdio.println(mono == 0)

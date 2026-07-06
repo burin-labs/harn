@@ -9,15 +9,15 @@ pipeline default() {
   __io_println(runtime_pipeline_input()?.message)
   __io_println(runtime_dry_run())
   __io_println(runtime_approved_plan())
-  let result = process_shell("printf ok")
+  const result = process_shell("printf ok")
   __io_println(result?.success)
   __io_println(result?.combined)
-  let argv = if platform() == "windows" {
+  const argv = if platform() == "windows" {
     ["cmd", "/C", "echo|set /p=argv-ok"]
   } else {
     ["printf", "argv-ok"]
   }
-  let argv_result = process_run(argv, {timeout_ms: 5000})
+  const argv_result = process_run(argv, {timeout_ms: 5000})
   __io_println(argv_result?.success)
   __io_println(process_result_text(argv_result))
 }

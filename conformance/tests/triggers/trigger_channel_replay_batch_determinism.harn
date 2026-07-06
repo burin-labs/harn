@@ -13,7 +13,7 @@ import "std/triggers"
  * sits between the emits and the handler.
  */
 fn handle_batch(event) {
-  let batch_len = if event.batch == nil {
+  const batch_len = if event.batch == nil {
     0
   } else {
     len(event.batch)
@@ -22,11 +22,11 @@ fn handle_batch(event) {
 }
 
 pipeline default() {
-  let audit = event_log
+  const audit = event_log
     .subscribe({topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-replay-batch-" + unique,
       kind: "channel.emit",
@@ -46,23 +46,23 @@ pipeline default() {
     },
   )
   // First "wall" of batched emits — fires the handler once.
-  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
-  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
-  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
-  let first_a = audit.next().value
-  let first_b = audit.next().value
-  let first_c = audit.next().value
+  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
+  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
+  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
+  const first_a = audit.next().value
+  const first_b = audit.next().value
+  const first_c = audit.next().value
   // Drain the nested `ch.replay.batch.fired` receipt the handler emits.
-  let _ = audit.next().value
+  const _ = audit.next().value
   // Replay-equivalent producer wall: identical payloads in identical
   // order. payload_hash must match the first wall byte-for-byte; only
   // event_ids differ because emit_channel mints a fresh id per call.
-  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
-  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
-  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
-  let second_a = audit.next().value
-  let second_b = audit.next().value
-  let second_c = audit.next().value
+  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
+  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
+  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
+  const second_a = audit.next().value
+  const second_b = audit.next().value
+  const second_c = audit.next().value
   // Per-constituent payload_hash equality across runs.
   __io_println(first_a.payload.payload_hash == second_a.payload.payload_hash)
   __io_println(first_b.payload.payload_hash == second_b.payload.payload_hash)

@@ -1,9 +1,9 @@
 import { stream_validator } from "std/json"
 
 pipeline default(task) {
-  let validator = stream_validator({type: "dict"})
+  const validator = stream_validator({type: "dict"})
   __io_println(validator.feed("{}").variant)
-  let status = validator.feed("x")
+  const status = validator.feed("x")
   __io_println(status.variant)
   __io_println(status.fields[0].path)
   __io_println(validator.value() == nil)

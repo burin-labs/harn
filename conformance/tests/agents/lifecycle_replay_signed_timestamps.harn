@@ -16,8 +16,8 @@
  * time off the journal rather than reading it off the live clock.
  */
 pipeline default() {
-  let _ = mock_time(1700000002000)
-  let entry = lifecycle_receipt_record_suspension(
+  const _ = mock_time(1700000002000)
+  const entry = lifecycle_receipt_record_suspension(
     {
       handle: "worker://triage/99",
       session_id: "session-a",
@@ -26,16 +26,16 @@ pipeline default() {
       reason: "waiting",
     },
   )
-  let recorded_at_ms = entry.payload.suspended_at.at_ms
+  const recorded_at_ms = entry.payload.suspended_at.at_ms
   __io_println("recorded_at_ms=" + to_string(recorded_at_ms))
   // Advance the wall clock between "record" and "replay" — the
   // journaled timestamp must stay pinned to the original.
-  let _ = advance_time(5000)
-  let signed_ok = verify_lifecycle_receipt_signature("suspension_receipt", entry.payload)
+  const _ = advance_time(5000)
+  const signed_ok = verify_lifecycle_receipt_signature("suspension_receipt", entry.payload)
   __io_println("signed_verified=" + to_string(signed_ok.verified))
   __io_println("journal_at_ms_stable=" + to_string(entry.payload.suspended_at.at_ms == 1700000002000))
   // Tamper with at_ms — verification fails with HARN-SUS-013.
-  let tampered = {
+  const tampered = {
     handle: entry.payload.handle,
     session_id: entry.payload.session_id,
     initiator: entry.payload.initiator,
@@ -49,11 +49,11 @@ pipeline default() {
       signature: entry.payload.suspended_at.signature,
     },
   }
-  let tampered_check = verify_lifecycle_receipt_signature("suspension_receipt", tampered)
+  const tampered_check = verify_lifecycle_receipt_signature("suspension_receipt", tampered)
   __io_println("tampered_verified=" + to_string(tampered_check.verified))
   __io_println(
     "tampered_error_has_sus_013=" + to_string(contains(tampered_check.error, "HARN-SUS-013")),
   )
-  let _ = unmock_time()
+  const _ = unmock_time()
   return "ok"
 }

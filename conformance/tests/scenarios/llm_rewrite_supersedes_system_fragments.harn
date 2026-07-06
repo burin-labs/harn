@@ -11,7 +11,7 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline test(task) {
   // The shape the agent loop hands a caller: a joined `system` string plus the
   // per-part `_system_fragments` list in opts.
-  let call = {
+  const call = {
     prompt: "hi",
     system: "ORIGINAL JOINED",
     opts: {
@@ -24,19 +24,19 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("ok")],
     { ->
-      let rewriter = with_prompt_rewrite(
+      const rewriter = with_prompt_rewrite(
         default_llm_caller(),
         fn(prompt, system, opts) { return {system: "REWRITTEN PRIMARY"} },
       )
-      let _ = rewriter(call)
+      const _ = rewriter(call)
       assert(llm_mock_calls()[0].system == "REWRITTEN PRIMARY", "system rewrite wins over fragments")
     },
   )
   with_llm_script(
     [llm_text("ok")],
     { ->
-      let passthrough = with_prompt_rewrite(default_llm_caller(), fn(prompt, system, opts) { return {} })
-      let _ = passthrough(call)
+      const passthrough = with_prompt_rewrite(default_llm_caller(), fn(prompt, system, opts) { return {} })
+      const _ = passthrough(call)
       assert(llm_mock_calls()[0].system == "ORIGINAL JOINED", "fragments retained when system untouched")
       log("llm_rewrite_supersedes_system_fragments tests passed")
     },

@@ -16,6 +16,6 @@ pipeline test(task) {
       log(item.label())
     }
   }
-  let items = [Item({name: "alpha"}), Item({name: "beta"})]
+  const items = [Item({name: "alpha"}), Item({name: "beta"})]
   show_all(items)
 }

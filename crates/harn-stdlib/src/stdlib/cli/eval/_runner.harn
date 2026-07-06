@@ -61,27 +61,27 @@ fn __safe_dict(value) -> dict {
  * byte-identical with the host formatter.
  */
 fn __format_float_n(value, decimals: int) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  var multiplier = 1
-  var i = 0
+  let multiplier = 1
+  let i = 0
   while i < decimals {
     multiplier = multiplier * 10
     i = i + 1
   }
-  let scaled = to_int(round(abs_f * to_float(multiplier))) ?? 0
-  let whole = scaled / multiplier
-  let frac = scaled - whole * multiplier
-  var frac_str = to_string(frac)
+  const scaled = to_int(round(abs_f * to_float(multiplier))) ?? 0
+  const whole = scaled / multiplier
+  const frac = scaled - whole * multiplier
+  let frac_str = to_string(frac)
   while len(frac_str) < decimals {
     frac_str = "0" + frac_str
   }
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     ""

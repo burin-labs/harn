@@ -1,4 +1,4 @@
 pipeline test(task) {
-  let a = "hello" + " " + "world"
+  const a = "hello" + " " + "world"
   log(a)
 }

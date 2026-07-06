@@ -93,7 +93,7 @@ fn __agent_is_known_prompt_id(id) {
 }
 
 fn __agent_validate_prompt_entry(id, entry) {
-  let entry_type = type_of(entry)
+  const entry_type = type_of(entry)
   if entry_type == "string" || entry_type == "closure" {
     return entry
   }
@@ -107,8 +107,8 @@ fn __agent_validate_prompt_entry(id, entry) {
         + "'; expected text or path"
     }
   }
-  let has_text = entry?.text != nil
-  let has_path = entry?.path != nil
+  const has_text = entry?.text != nil
+  const has_path = entry?.path != nil
   if has_text && has_path {
     throw "agent_prompt_catalog: prompt override " + id + " must set only one of text or path"
   }
@@ -220,7 +220,7 @@ pub fn agent_prompt_path(path: string) -> AgentPromptEntry {
  * @api_stability: experimental
  */
 pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
-  var out = {}
+  let out = {}
   out = __agent_add_prompt_override(
     out,
     "agent.completion_judge_feedback",
@@ -309,7 +309,7 @@ fn __agent_render_prompt_entry(entry, bindings) {
   if type_of(entry) == "closure" {
     return entry(bindings ?? {})
   }
-  var prompt_entry = entry
+  let prompt_entry = entry
   if type_of(prompt_entry) == "dict" {
     if prompt_entry?.text != nil {
       return render_string(prompt_entry.text, bindings ?? {})
@@ -319,7 +319,7 @@ fn __agent_render_prompt_entry(entry, bindings) {
   if type_of(prompt_entry) != "string" {
     throw "render_agent_prompt_id: prompt entry must be a path string, closure, {path}, or {text}"
   }
-  let path = if starts_with(prompt_entry, "std/") {
+  const path = if starts_with(prompt_entry, "std/") {
     prompt_entry
   } else {
     "std/agent/prompts/" + prompt_entry
@@ -335,8 +335,8 @@ fn __agent_render_prompt_entry(entry, bindings) {
  * @api_stability: experimental
  */
 pub fn render_agent_prompt_id(id, bindings = nil, options = nil) {
-  let catalog = agent_prompt_catalog(options)
-  let entry = catalog[id]
+  const catalog = agent_prompt_catalog(options)
+  const entry = catalog[id]
   if entry == nil {
     throw "render_agent_prompt_id: unknown prompt id " + id
   }
@@ -584,8 +584,8 @@ pub fn verification_gate_feedback_prompt(bindings, options = nil) {
  * @api_stability: experimental
  */
 pub fn step_judge_system_prompt(options = nil) {
-  let rubric = options?.rubric ?? "default"
-  let id = if rubric == "adversarial" {
+  const rubric = options?.rubric ?? "default"
+  const id = if rubric == "adversarial" {
     "agent.step_judge_system_adversarial"
   } else {
     "agent.step_judge_system"

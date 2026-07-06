@@ -1,7 +1,7 @@
 import { with_llm_script } from "std/testing"
 
 fn note_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_note",
@@ -36,7 +36,7 @@ pipeline main() {
       },
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Read then write.",
         "Use tools.",
         {
@@ -50,7 +50,7 @@ pipeline main() {
           },
         },
       )
-      let events = transcript_events(result?.transcript)
+      const events = transcript_events(result?.transcript)
       __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
       __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
       __io_println(result?.tools?.rejected[0] == "write_note")

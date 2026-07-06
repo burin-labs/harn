@@ -8,11 +8,11 @@
 import { create, domain_wildcard } from "std/net_policy"
 
 fn main(harness: Harness) {
-  let policy = create({allow: [domain_wildcard("*.github.com")], default: "deny"})
-  let restricted = harness.with_net_policy(policy)
-  let body = restricted.net.get("https://api.github.com/v1/users")
+  const policy = create({allow: [domain_wildcard("*.github.com")], default: "deny"})
+  const restricted = harness.with_net_policy(policy)
+  const body = restricted.net.get("https://api.github.com/v1/users")
   harness.stdio.println("api=" + body)
-  var apex_err = nil
+  let apex_err = nil
   try {
     restricted.net.get("https://github.com/")
   } catch (e) {

@@ -136,10 +136,10 @@ pub fn custom(handlers) -> Storage {
   if type_of(handlers) != "dict" {
     throw "std/oauth/storage: custom handlers must be a dict"
   }
-  let get_fn = handlers?.get
-  let set_fn = handlers?.set
-  let delete_fn = handlers?.delete
-  let lock_fn = handlers?.with_refresh_lock
+  const get_fn = handlers?.get
+  const set_fn = handlers?.set
+  const delete_fn = handlers?.delete
+  const lock_fn = handlers?.with_refresh_lock
   if type_of(get_fn) != "closure" && type_of(get_fn) != "builtin" {
     throw "std/oauth/storage: custom.get must be a function"
   }
@@ -152,9 +152,9 @@ pub fn custom(handlers) -> Storage {
   if lock_fn != nil && type_of(lock_fn) != "closure" && type_of(lock_fn) != "builtin" {
     throw "std/oauth/storage: custom.with_refresh_lock must be a function"
   }
-  let id = trim(to_string(handlers?.id ?? "custom"))
-  let base = {_namespace: "oauth_storage", kind: "custom", id: id, get: get_fn, set: set_fn, delete: delete_fn}
-  let with_lock = if lock_fn == nil {
+  const id = trim(to_string(handlers?.id ?? "custom"))
+  const base = {_namespace: "oauth_storage", kind: "custom", id: id, get: get_fn, set: set_fn, delete: delete_fn}
+  const with_lock = if lock_fn == nil {
     { key, body -> __oauth_storage_with_refresh_lock(base, key, body) }
   } else {
     { key, body -> __oauth_storage_with_refresh_lock(base, key, { -> lock_fn(key, body) }) }

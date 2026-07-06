@@ -3,14 +3,14 @@
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
 pipeline default() {
-  let pool = pool_create({name: "idem-demo", max_concurrent: 1})
-  let h1 = pool.submit({ -> 100 }, {idempotency_key: "only-once"})
-  let h2 = pool.submit({ -> 200 }, {idempotency_key: "only-once"})
+  const pool = pool_create({name: "idem-demo", max_concurrent: 1})
+  const h1 = pool.submit({ -> 100 }, {idempotency_key: "only-once"})
+  const h2 = pool.submit({ -> 200 }, {idempotency_key: "only-once"})
   log(h1.id == h2.id)
-  let r1 = pool_wait(h1)
-  let r2 = pool_wait(h2)
+  const r1 = pool_wait(h1)
+  const r2 = pool_wait(h2)
   log(r1.result)
   log(r2.result)
-  let snap = pool.snapshot()
+  const snap = pool.snapshot()
   log(snap.total)
 }

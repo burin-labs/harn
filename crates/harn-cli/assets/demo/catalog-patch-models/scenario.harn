@@ -20,14 +20,14 @@
  * offline — no LLM calls, no network.
  */
 pipeline default(_task) {
-  let info = llm_model_info("demo/patch-target")
-  let row = info.catalog
+  const info = llm_model_info("demo/patch-target")
+  const row = info.catalog
   require row.stream_timeout == 1200.0
   require row.pricing.output_per_mtok == 7.5
   require row.name == "Patch Target (demo)"
   require row.context_window == 200000
   require row.pricing.input_per_mtok == 3.0
-  let receipt = {
+  const receipt = {
     receipt_kind: "catalog_patch_models_receipt",
     patched_stream_timeout: row.stream_timeout,
     patched_output_per_mtok: row.pricing.output_per_mtok,

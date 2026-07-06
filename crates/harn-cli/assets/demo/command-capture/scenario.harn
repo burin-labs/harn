@@ -32,9 +32,9 @@ pipeline default(_task) {
   __io_println("")
   // 1. Rewrites: a `tee` is woven in just before the final consume-all
   //    filter, capturing everything the filter would otherwise discard.
-  let cap = "/tmp/full-output.txt"
+  const cap = "/tmp/full-output.txt"
   __io_println("rewritten (full output preserved):")
-  let rewritable = [
+  const rewritable = [
     "cargo build 2>&1 | tail -20",
     "find . -name '*.rs' | xargs wc -l | sort -n | tail -1",
     "cd crates && git log --oneline | grep fix",
@@ -48,15 +48,15 @@ pipeline default(_task) {
   //    early (capturing them would be a partial lie); command substitution
   //    and subshell grouping are refused rather than parsed heuristically.
   __io_println("left untouched (bail-preferring):")
-  let bails = [
+  const bails = [
     "build.sh | head -10",
     "deploy.sh 2>&1 | grep -q DEPLOYED",
     "cat \"$(config-path)\" | tail",
     "(setup && teardown) | wc -l",
   ]
   for cmd in bails {
-    let result = command_capture_rewrite(cmd, cap)
-    let shown = if result == nil {
+    const result = command_capture_rewrite(cmd, cap)
+    const shown = if result == nil {
       "(unchanged)"
     } else {
       result
@@ -71,26 +71,26 @@ pipeline default(_task) {
   //    exists, so a sandbox that blocks the write produces no false promise.
   // Write under the workspace root so the demo stays inside its sandbox
   // (a real run captures to the host temp dir instead).
-  let capture_path = path_join(execution_root(), "harn-demo-capture-" + uuid() + ".out")
-  var full = ""
-  var i = 1
+  const capture_path = path_join(execution_root(), "harn-demo-capture-" + uuid() + ".out")
+  let full = ""
+  let i = 1
   while i <= 200 {
     full = full + to_string(i) + "\n"
     i = i + 1
   }
   harness.fs.write_text(capture_path, full)
-  let plan = command_capture_plan("seq 200 | tail -3", capture_path)
-  let agent_result = {stdout: "198\n199\n200\n", exit_code: 0, success: true}
-  let annotated = command_capture_annotate(agent_result, plan)
+  const plan = command_capture_plan("seq 200 | tail -3", capture_path)
+  const agent_result = {stdout: "198\n199\n200\n", exit_code: 0, success: true}
+  const annotated = command_capture_annotate(agent_result, plan)
   __io_println("agent's run_command result:")
   __io_println("  stdout (filtered): " + json_stringify(annotated.stdout))
   __io_println("  output_capture.producer: " + annotated.output_capture.producer)
   __io_println("  output_capture.hint: " + annotated.output_capture.hint)
   __io_println("")
-  let captured_lines = len(harness.fs.read_text(capture_path).trim().split("\n"))
-  let filtered_lines = len(annotated.stdout.trim().split("\n"))
+  const captured_lines = len(harness.fs.read_text(capture_path).trim().split("\n"))
+  const filtered_lines = len(annotated.stdout.trim().split("\n"))
   harness.fs.delete(capture_path)
-  let receipt = {
+  const receipt = {
     receipt_kind: "command_capture_receipt",
     rewrite_example: command_capture_rewrite("seq 200 | tail -3", "/tmp/full.out"),
     head_left_untouched: command_capture_rewrite("ls | head -5", cap) == nil,

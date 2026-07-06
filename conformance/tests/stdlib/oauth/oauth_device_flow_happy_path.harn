@@ -15,11 +15,11 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(task) {
-  let topic = "oauth.device_flow.audit"
-  let cursor = event_log.latest(topic) ?? 0
-  let _ = mock_time(1700000000000)
-  let store = memory()
-  let provider = custom(
+  const topic = "oauth.device_flow.audit"
+  const cursor = event_log.latest(topic) ?? 0
+  const _ = mock_time(1700000000000)
+  const store = memory()
+  const provider = custom(
     {
       id: "mockDevice",
       auth_url: "https://idp.example/authorize",
@@ -47,9 +47,9 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  let handler_topic = "oauth.device_flow.test.handler"
-  let handler_cursor = event_log.latest(handler_topic) ?? 0
-  let on_user_code = { user_code, verification_uri ->
+  const handler_topic = "oauth.device_flow.test.handler"
+  const handler_cursor = event_log.latest(handler_topic) ?? 0
+  const on_user_code = { user_code, verification_uri ->
     let _ = event_log
       .emit(
       handler_topic,
@@ -59,12 +59,12 @@ pipeline test(task) {
     )
     nil
   }
-  let token_set = device_flow(
+  const token_set = device_flow(
     provider,
     {client_id: "cli-id", scopes: ["repo", "user"], storage: store, on_user_code: on_user_code},
   )
-  let handler_stream = event_log.subscribe({topic: handler_topic, from_cursor: handler_cursor})
-  let handler_event = handler_stream.next().value
+  const handler_stream = event_log.subscribe({topic: handler_topic, from_cursor: handler_cursor})
+  const handler_event = handler_stream.next().value
   assert_eq(handler_event.kind, "called", "on_user_code was invoked")
   assert_eq(handler_event.payload.user_code, "USER-123", "on_user_code receives user_code")
   assert_eq(
@@ -76,10 +76,10 @@ pipeline test(task) {
   assert_eq(token_set.refresh_token, "RRR", "device_flow returns refresh token")
   assert_eq(token_set.token_type, "Bearer", "token_type recorded")
   assert_eq(token_set.expires_in, 3600, "expires_in propagated")
-  let stored = store.get("mockDevice")
+  const stored = store.get("mockDevice")
   assert_eq(stored.access_token, "AAA", "token persisted under provider id")
   assert_eq(stored.refresh_token, "RRR", "refresh token persisted")
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 2, "device + token calls, no polling needed")
   assert_eq(calls[0].method, "POST", "first call hits device endpoint")
   assert(contains(calls[0].url, "/device"), "device endpoint URL")
@@ -92,8 +92,8 @@ pipeline test(task) {
     "device-code grant type in token body",
   )
   assert(contains(calls[1].body, "device_code=DEV-XYZ"), "device_code in token body")
-  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
-  let logged = stream.next().value
+  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const logged = stream.next().value
   assert_eq(logged.kind, "token_obtained", "audit event kind")
   assert_eq(logged.payload.provider, "mockDevice", "audit provider id")
   assert_eq(logged.payload.storage_key, "mockDevice", "audit storage_key")
@@ -103,6 +103,6 @@ pipeline test(task) {
   assert(logged.payload.next?.refresh_token == nil, "audit does NOT leak refresh_token")
   assert(logged.payload?.device_code == nil, "audit does NOT include device_code")
   assert(logged.payload?.user_code == nil, "audit does NOT include user_code")
-  let _ = unmock_time()
+  const _ = unmock_time()
   log("oauth device flow happy path ok")
 }

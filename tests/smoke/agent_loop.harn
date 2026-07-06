@@ -17,7 +17,7 @@
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn smoke_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "add",
@@ -39,7 +39,7 @@ pipeline default() {
   with_llm_script(
     [llm_tool_call("add", {lhs: 2, rhs: 3}), llm_text("The sum is 5.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Add 2 and 3 using the tool, then report the sum.",
         nil,
         {

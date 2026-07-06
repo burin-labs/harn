@@ -8,25 +8,25 @@
 // or remove fields without bumping the persona version.
 /** build_review_receipt assembles the durable receipt for one PR. */
 pub fn build_review_receipt(args) {
-  let request = args.request ?? {}
-  let secret_findings = args.secret_findings ?? []
-  let llm_findings = args.llm_findings ?? []
-  let llm_summary = args.llm_summary ?? ""
-  let llm_rounds = args.llm_rounds ?? 0
-  let risky_hits = args.risky_hits ?? []
-  let missing_tests = args.missing_tests ?? []
-  let llm_skipped_reason = args.llm_skipped_reason
-  let secret_review_findings = _findings_from_secrets(secret_findings)
-  let combined_findings = _dedupe(secret_review_findings + llm_findings)
-  let blocking = _has_blocking(combined_findings)
-  let verdict = if blocking {
+  const request = args.request ?? {}
+  const secret_findings = args.secret_findings ?? []
+  const llm_findings = args.llm_findings ?? []
+  const llm_summary = args.llm_summary ?? ""
+  const llm_rounds = args.llm_rounds ?? 0
+  const risky_hits = args.risky_hits ?? []
+  const missing_tests = args.missing_tests ?? []
+  const llm_skipped_reason = args.llm_skipped_reason
+  const secret_review_findings = _findings_from_secrets(secret_findings)
+  const combined_findings = _dedupe(secret_review_findings + llm_findings)
+  const blocking = _has_blocking(combined_findings)
+  const verdict = if blocking {
     "blocking"
   } else if len(combined_findings) > 0 || len(missing_tests) > 0 || len(risky_hits) > 0 {
     "needs_follow_up"
   } else {
     "approve"
   }
-  let summary = _summary(combined_findings, llm_summary, blocking, missing_tests, risky_hits)
+  const summary = _summary(combined_findings, llm_summary, blocking, missing_tests, risky_hits)
   return {
     persona: "review_captain",
     kind: "review_receipt",
@@ -74,7 +74,7 @@ pub fn envelope_for_dry_run(request, secret_findings, missing_tests, risky_hits)
 }
 
 fn _findings_from_secrets(secret_findings) {
-  var findings = []
+  let findings = []
   for finding in secret_findings {
     findings = findings
       + [
@@ -96,10 +96,10 @@ fn _findings_from_secrets(secret_findings) {
 }
 
 fn _dedupe(findings) {
-  var seen_ids = []
-  var deduped = []
+  let seen_ids = []
+  let deduped = []
   for finding in findings {
-    let id = finding.id ?? ""
+    const id = finding.id ?? ""
     if id != "" && !_contains_string(seen_ids, id) {
       seen_ids = seen_ids + [id]
       deduped = deduped + [finding]
@@ -138,6 +138,6 @@ fn _summary(findings, llm_summary, blocking, missing_tests, risky_hits) {
     }
     return "review_captain found no blocking issues."
   }
-  let warn_count = len(findings)
+  const warn_count = len(findings)
   return "review_captain flagged ${to_string(warn_count)} finding(s); ${to_string(len(risky_hits))} risky path(s); ${to_string(len(missing_tests))} file(s) without companion tests."
 }

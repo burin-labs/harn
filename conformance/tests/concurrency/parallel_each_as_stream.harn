@@ -1,6 +1,6 @@
 pipeline default() {
-  let gate = atomic(0)
-  let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { n ->
+  const gate = atomic(0)
+  const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { n ->
     if n == 30 {
       while atomic_get(gate) < 2 {
         yield_now()

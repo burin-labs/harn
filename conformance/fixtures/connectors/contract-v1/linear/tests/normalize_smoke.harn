@@ -12,14 +12,14 @@ import {
  * connector's clock-trusted replay window (F10) accepts it at test time.
  */
 fn refresh_body(body, fresh_ts_ms) {
-  let parsed = json_parse(body)
-  let updated = parsed + {webhookTimestamp: fresh_ts_ms}
+  const parsed = json_parse(body)
+  const updated = parsed + {webhookTimestamp: fresh_ts_ms}
   return json_stringify(updated)
 }
 
 fn raw(body, secret, configured_secret = nil) {
-  let fresh_ts_ms = to_int(date_now().timestamp * 1000)
-  let refreshed = refresh_body(body, fresh_ts_ms)
+  const fresh_ts_ms = to_int(date_now().timestamp * 1000)
+  const refreshed = refresh_body(body, fresh_ts_ms)
   return {
     kind: "webhook",
     headers: {
@@ -33,8 +33,8 @@ fn raw(body, secret, configured_secret = nil) {
 }
 
 fn cloud_raw(body, secret) {
-  let fresh_ts_ms = to_int(date_now().timestamp * 1000)
-  let refreshed = refresh_body(body, fresh_ts_ms)
+  const fresh_ts_ms = to_int(date_now().timestamp * 1000)
+  const refreshed = refresh_body(body, fresh_ts_ms)
   return {
     kind: "webhook",
     headers: {
@@ -65,45 +65,45 @@ pipeline test(task) {
   assert_eq(provider_id(), "linear")
   assert_eq(kinds(), ["webhook"])
   assert_eq(payload_schema().harn_schema_name, "LinearEventPayload")
-  let issue_body = fixture_text("tests/fixtures/webhooks/issue_update.json")
-  let issue = normalize_inbound(raw(issue_body, "test-secret"))
-  let snapshot = fixture_json("tests/fixtures/normalized/issue_update.json")
+  const issue_body = fixture_text("tests/fixtures/webhooks/issue_update.json")
+  const issue = normalize_inbound(raw(issue_body, "test-secret"))
+  const snapshot = fixture_json("tests/fixtures/normalized/issue_update.json")
   assert_eq(issue.type, "event")
   assert_eq(issue.event.kind, snapshot.event.kind)
   assert_eq(issue.event.dedupe_key, snapshot.event.dedupe_key)
   assert_eq(issue.event.signature_status.state, snapshot.event.signature_status.state)
   assert_eq(issue.event.payload.data.id, snapshot.event.payload_data_id)
-  let slash_secret = normalize_inbound(raw(issue_body, "test/secret"))
+  const slash_secret = normalize_inbound(raw(issue_body, "test/secret"))
   assert_eq(slash_secret.type, "event")
-  let cloud = normalize_inbound(cloud_raw(issue_body, "test-secret"))
+  const cloud = normalize_inbound(cloud_raw(issue_body, "test-secret"))
   assert_eq(cloud.type, "event")
   assert_eq(cloud.event.kind, "linear.issue.update")
   // F3: dedupe key now comes from the signed body's webhookId rather than
   // the linear-delivery header.
   assert_eq(cloud.event.dedupe_key, "linear:wh_1")
   assert_eq(cloud.event.tenant_id, "tenant-acme")
-  let comment_body = fixture_text("tests/fixtures/webhooks/comment_create.json")
-  let comment = normalize_inbound(raw(comment_body, "test-secret"))
+  const comment_body = fixture_text("tests/fixtures/webhooks/comment_create.json")
+  const comment = normalize_inbound(raw(comment_body, "test-secret"))
   assert_eq(comment.event.kind, "linear.comment.create")
   assert_eq(comment.event.payload.data.id, "COM-1")
-  let variant_snapshot = fixture_json("tests/fixtures/normalized/linear_variants.json")
-  let variants = variant_snapshot.variants
+  const variant_snapshot = fixture_json("tests/fixtures/normalized/linear_variants.json")
+  const variants = variant_snapshot.variants
   for variant in variants {
-    let body = fixture_text("tests/fixtures/webhooks/" + variant.fixture + ".json")
-    let normalized = normalize_inbound(raw(body, "test-secret"))
+    const body = fixture_text("tests/fixtures/webhooks/" + variant.fixture + ".json")
+    const normalized = normalize_inbound(raw(body, "test-secret"))
     assert_eq(normalized.type, "event")
     assert_eq(normalized.event.kind, variant.kind)
     assert_eq(normalized.event.signature_status.state, "verified")
     assert_eq(normalized.event.payload.data.id, variant.data_id)
   }
-  let edge_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859140000,\"webhookId\":\"wh_edge\",\"data\":{\"id\":\"ISS-EDGE\"}}"
+  const edge_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859140000,\"webhookId\":\"wh_edge\",\"data\":{\"id\":\"ISS-EDGE\"}}"
   assert_eq(normalize_inbound(raw(edge_body, "test-secret")).type, "event")
   // raw() does NOT refresh string webhookTimestamps; the connector returns
   // invalid_webhook_timestamp before any clock check.
-  let now_ms = to_int(date_now().timestamp * 1000)
-  let bad_timestamp_body_fresh = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":\"not-a-number\",\"webhookId\":\"wh_bad_ts\",\"data\":{\"id\":\"ISS-BAD-TS\"}}"
-  let bad_signed = hmac_sha256("test-secret", bad_timestamp_body_fresh)
-  let bad_timestamp = normalize_inbound(
+  const now_ms = to_int(date_now().timestamp * 1000)
+  const bad_timestamp_body_fresh = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":\"not-a-number\",\"webhookId\":\"wh_bad_ts\",\"data\":{\"id\":\"ISS-BAD-TS\"}}"
+  const bad_signed = hmac_sha256("test-secret", bad_timestamp_body_fresh)
+  const bad_timestamp = normalize_inbound(
     {
       kind: "webhook",
       headers: {
@@ -121,9 +121,9 @@ pipeline test(task) {
   // Stale-timestamp body: synthesize a body whose webhookTimestamp is far
   // outside the 60s window and sign it with the real secret. The connector
   // must still reject as timestamp_out_of_window (F10 / F4 enforcement).
-  let stale_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1,\"webhookId\":\"wh_stale\",\"data\":{\"id\":\"ISS-STALE\"}}"
-  let stale_signed = hmac_sha256("test-secret", stale_body)
-  let stale = normalize_inbound(
+  const stale_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1,\"webhookId\":\"wh_stale\",\"data\":{\"id\":\"ISS-STALE\"}}"
+  const stale_signed = hmac_sha256("test-secret", stale_body)
+  const stale = normalize_inbound(
     {
       kind: "webhook",
       headers: {
@@ -138,18 +138,18 @@ pipeline test(task) {
   assert_eq(stale.type, "reject")
   assert_eq(stale.status, 401)
   assert(contains(stale.body, "timestamp_out_of_window"))
-  let invalid = normalize_inbound(raw(issue_body, "wrong-secret", "test-secret"))
+  const invalid = normalize_inbound(raw(issue_body, "wrong-secret", "test-secret"))
   assert_eq(invalid.type, "reject")
   assert_eq(invalid.status, 401)
   assert(contains(invalid.body, "invalid_signature"))
-  let unsupported_body = fixture_text("tests/fixtures/webhooks/unsupported_action.json")
-  let unsupported = normalize_inbound(raw(unsupported_body, "test-secret"))
+  const unsupported_body = fixture_text("tests/fixtures/webhooks/unsupported_action.json")
+  const unsupported = normalize_inbound(raw(unsupported_body, "test-secret"))
   assert_eq(unsupported.type, "reject")
   assert_eq(unsupported.status, 400)
   assert(contains(unsupported.body, "unsupported_action"))
   // F1: hard-reject when raw.body_text is missing — we cannot HMAC-verify a
   // re-serialized body byte-for-byte against Linear's signed bytes.
-  let missing_body = normalize_inbound(
+  const missing_body = normalize_inbound(
     {
       kind: "webhook",
       headers: {
@@ -173,7 +173,7 @@ pipeline test(task) {
   // F2: hard-reject before HMAC when no signing secret is configured.
   shutdown()
   activate([{id: "linear.test", kind: "webhook", config: {}}])
-  let no_secret_body = json_stringify(
+  const no_secret_body = json_stringify(
     {
       action: "update",
       type: "Issue",
@@ -182,7 +182,7 @@ pipeline test(task) {
       data: {id: "ISS-NOSECRET"},
     },
   )
-  let no_secret = normalize_inbound(
+  const no_secret = normalize_inbound(
     {
       kind: "webhook",
       headers: {
@@ -200,7 +200,7 @@ pipeline test(task) {
   // F3: dedupe uses signed body.webhookId before linear-delivery header so a
   // captured (body, signature) pair cannot be re-played with a rotated header.
   activate([{id: "linear.test", kind: "webhook", config: {signing_secret: "test-secret"}}])
-  let f3_body = json_stringify(
+  const f3_body = json_stringify(
     {
       action: "update",
       type: "Issue",
@@ -209,8 +209,8 @@ pipeline test(task) {
       data: {id: "ISS-DEDUPE"},
     },
   )
-  let f3_signed = hmac_sha256("test-secret", f3_body)
-  let f3_event = normalize_inbound(
+  const f3_signed = hmac_sha256("test-secret", f3_body)
+  const f3_event = normalize_inbound(
     {
       kind: "webhook",
       headers: {
@@ -224,7 +224,7 @@ pipeline test(task) {
   )
   assert_eq(f3_event.event.dedupe_key, "linear:wh_signed")
   // F4: bindings cannot widen the replay window past the cap.
-  let too_large = try {
+  const too_large = try {
     activate(
       [
         {

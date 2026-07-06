@@ -1,7 +1,7 @@
 import { timed } from "std/timing"
 
 pipeline default() {
-  let outcome = timed("work.compute", {phase: "warmup"}, { -> return 42 })
+  const outcome = timed("work.compute", {phase: "warmup"}, { -> return 42 })
   __io_println(outcome.result)
   __io_println(outcome.timing.name)
   __io_println(outcome.timing.kind)

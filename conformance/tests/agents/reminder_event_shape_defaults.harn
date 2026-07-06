@@ -4,7 +4,7 @@
  * resolves to the spec-canonical fallbacks.
  */
 pipeline main() {
-  let evt = transcript_reminder_event({body: "Reload tools before next turn."})
+  const evt = transcript_reminder_event({body: "Reload tools before next turn."})
   __io_println(evt?.kind == "system_reminder")
   // Defaults: propagate=session, role_hint=system, source=in_pipeline,
   // preserve_on_compact=false, tags=[], dedupe_key=nil, ttl_turns=nil,
@@ -23,12 +23,12 @@ pipeline main() {
   __io_println(len(evt?.reminder?.id) > 0)
   // Filter by `kind` so reminders show up alongside other transcript
   // events without breaking existing kind-based consumers.
-  let crafted = {
+  const crafted = {
     _type: "transcript",
     messages: [],
     events: [{kind: "message", visibility: "public", text: "hello"}, evt],
   }
-  let reminders = transcript_events_by_kind(crafted, "system_reminder")
+  const reminders = transcript_events_by_kind(crafted, "system_reminder")
   __io_println(len(reminders) == 1)
   __io_println(reminders[0]?.reminder?.body == "Reload tools before next turn.")
 }

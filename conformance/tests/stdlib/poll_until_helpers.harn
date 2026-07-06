@@ -7,7 +7,7 @@ import { poll_until, retry_with_result, wait_for_status } from "std/poll"
 pipeline default() {
   mock_time(1700000000000)
   store_set("probe_counter", 0)
-  let value = poll_until(
+  const value = poll_until(
     fn() {
       let n = (store_get("probe_counter") ?? 0) + 1
       store_set("probe_counter", n)
@@ -21,7 +21,7 @@ pipeline default() {
   __io_println(value)
   __io_println(store_get("probe_counter"))
   store_set("status_counter", 0)
-  let row = wait_for_status(
+  const row = wait_for_status(
     fn() {
       let n = (store_get("status_counter") ?? 0) + 1
       store_set("status_counter", n)
@@ -40,10 +40,10 @@ pipeline default() {
   __io_println(row.status)
   __io_println(row.url)
   __io_println(store_get("status_counter"))
-  let timed_out = poll_until(fn() { return nil }, {timeout_ms: 200, interval_ms: 50})
+  const timed_out = poll_until(fn() { return nil }, {timeout_ms: 200, interval_ms: 50})
   __io_println(timed_out == nil)
   store_set("retry_counter", 0)
-  let retry_report = retry_with_result(
+  const retry_report = retry_with_result(
     fn(attempt) {
       let n = (store_get("retry_counter") ?? 0) + 1
       store_set("retry_counter", n)
@@ -57,7 +57,7 @@ pipeline default() {
   __io_println(retry_report.ok)
   __io_println(retry_report.attempts)
   __io_println(retry_report.value.attempt)
-  let exhausted = retry_with_result(fn(attempt) { return Err("permanent") }, {max_attempts: 2, base_ms: 5})
+  const exhausted = retry_with_result(fn(attempt) { return Err("permanent") }, {max_attempts: 2, base_ms: 5})
   __io_println(exhausted.ok)
   __io_println(exhausted.attempts)
   __io_println(exhausted.error)

@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * flow.
  */
 fn count_kind(events, kind) {
-  var n = 0
+  let n = 0
   for ev in events {
     if to_string(ev?.kind ?? "") == kind {
       n = n + 1
@@ -22,7 +22,7 @@ pipeline default() {
   register_session_hook(
     "user_prompt_submit",
     { event ->
-      let prompt = to_string(event?.prompt ?? "")
+      const prompt = to_string(event?.prompt ?? "")
       if prompt.contains("vetome") {
         return {block: true, reason: "captured by tape"}
       }
@@ -33,8 +33,8 @@ pipeline default() {
   with_llm_script(
     [llm_text("ok")],
     { ->
-      let result = agent_loop("hello vetome please", nil, {provider: "mock"})
-      let events = transcript_events(result?.transcript)
+      const result = agent_loop("hello vetome please", nil, {provider: "mock"})
+      const events = transcript_events(result?.transcript)
       __io_println(result.status)
       __io_println(count_kind(events, "hook_call") > 0)
       __io_println(count_kind(events, "hook_returned") > 0)

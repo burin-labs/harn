@@ -44,9 +44,9 @@ pub fn first_handled(callbacks) -> ResumeByCallback {
     if type_of(callbacks) != "list" || len(callbacks) == 0 {
       return nil
     }
-    var last = nil
+    let last = nil
     for cb in callbacks {
-      let result = cb(harness, suspension)
+      const result = cb(harness, suspension)
       if result != nil && result?.handled {
         return result
       }
@@ -57,7 +57,7 @@ pub fn first_handled(callbacks) -> ResumeByCallback {
 }
 
 fn __resume_by_payload(suspension, mechanism, extra) {
-  let base = {mechanism: mechanism, handle: suspension?.handle, reason: suspension?.reason}
+  const base = {mechanism: mechanism, handle: suspension?.handle, reason: suspension?.reason}
   if extra == nil {
     return base
   }
@@ -80,7 +80,7 @@ fn __resume_by_emit_declined(harness, suspension, mechanism, reason) {
 }
 
 fn __resume_by_has_conditions(suspension) {
-  let conditions = suspension?.conditions
+  const conditions = suspension?.conditions
   if conditions == nil {
     return false
   }
@@ -94,7 +94,7 @@ fn __resume_by_cloud_session(harness) {
   if harness == nil {
     return nil
   }
-  let session = try {
+  const session = try {
     harness.cloud_session_id()
   }
   if is_err(session) {
@@ -157,7 +157,7 @@ pub fn resume_by_local_runtime(harness, suspension) -> ResumeByDispatchResult {
  * @api_stability: experimental
  */
 pub fn resume_by_cloud_harness(harness, suspension) -> ResumeByDispatchResult {
-  let session = __resume_by_cloud_session(harness)
+  const session = __resume_by_cloud_session(harness)
   if session == nil {
     __resume_by_emit_declined(harness, suspension, "ResumeBy.cloud_harness", "no_cloud_session")
     return {handled: false, mechanism: "ResumeBy.cloud_harness", reason: "no_cloud_session"}
@@ -230,9 +230,9 @@ pub fn ResumeBy() {
  * @example: default_resume_by({conditions: cond, harness: harness})
  */
 pub fn default_resume_by(opts = nil) -> ResumeByCallback {
-  let conditions = opts?.conditions
-  let harness = opts?.harness
-  let has_conditions = if conditions == nil {
+  const conditions = opts?.conditions
+  const harness = opts?.harness
+  const has_conditions = if conditions == nil {
     false
   } else if type_of(conditions) == "dict" {
     len(keys(conditions)) > 0
@@ -242,7 +242,7 @@ pub fn default_resume_by(opts = nil) -> ResumeByCallback {
   if !has_conditions {
     return resume_by_parent_llm
   }
-  let cloud_session = __resume_by_cloud_session(harness)
+  const cloud_session = __resume_by_cloud_session(harness)
   if cloud_session == nil {
     return resume_by_local_runtime
   }
@@ -261,15 +261,15 @@ pub fn default_resume_by(opts = nil) -> ResumeByCallback {
  * @api_stability: experimental
  */
 pub fn invoke_resume_by(callback, harness, suspension) -> ResumeByDispatchResult | dict {
-  let cb = if callback == nil {
+  const cb = if callback == nil {
     resume_by_parent_llm
   } else {
     callback
   }
-  let outcome = try {
+  const outcome = try {
     cb(harness, suspension)
   }
-  let resolved = if is_err(outcome) {
+  const resolved = if is_err(outcome) {
     if harness != nil {
       harness
         .emit_audit(

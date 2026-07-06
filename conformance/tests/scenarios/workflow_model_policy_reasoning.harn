@@ -1,7 +1,7 @@
 import { workflow_stage_agent_options } from "std/workflow/options"
 
 pipeline test(task) {
-  let prepared = workflow_stage_agent_options(
+  const prepared = workflow_stage_agent_options(
     {
       mode: "agent",
       model_policy: {

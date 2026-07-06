@@ -28,7 +28,7 @@ import { default_lane_rows, lane_policy, lane_scope_classifier } from "std/agent
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lane_test_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   for name in [
     "look",
     "search",
@@ -48,7 +48,7 @@ fn lane_test_tools() {
 }
 
 fn tool_names(tools) {
-  var names = []
+  let names = []
   for entry in tools ?? [] {
     names = names.push(entry?.name ?? entry?.function?.name ?? "")
   }
@@ -60,7 +60,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("done ##DONE##")],
     { ->
-      let opts = lane_policy(
+      const opts = lane_policy(
         default_lane_rows(),
         "Fix the off-by-one bug in src/widget.py.",
         {
@@ -71,8 +71,8 @@ pipeline default() {
           tools: lane_test_tools(),
         },
       )
-      let result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
-      let first_tools = tool_names(llm_mock_calls()[0].tools)
+      const result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
+      const first_tools = tool_names(llm_mock_calls()[0].tools)
       __io_println("A.status=" + result.status)
       __io_println("A.lane=" + opts._lane_verdict.lane)
       __io_println("A.has_edit=" + to_string(contains(first_tools, "edit")))
@@ -86,7 +86,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("done ##DONE##")],
     { ->
-      let opts = lane_policy(
+      const opts = lane_policy(
         default_lane_rows(),
         "Explain how the retry policy works.",
         {
@@ -97,8 +97,8 @@ pipeline default() {
           tools: lane_test_tools(),
         },
       )
-      let result = agent_loop("Explain how the retry policy works.", nil, opts)
-      let first_tools = tool_names(llm_mock_calls()[0].tools)
+      const result = agent_loop("Explain how the retry policy works.", nil, opts)
+      const first_tools = tool_names(llm_mock_calls()[0].tools)
       __io_println("B.status=" + result.status)
       __io_println("B.lane=" + opts._lane_verdict.lane)
       __io_println("B.has_git=" + to_string(contains(first_tools, "git")))
@@ -113,8 +113,8 @@ pipeline default() {
       llm_text("done ##DONE##"),
     ],
     { ->
-      let session = "lane-hidden-" + uuid()
-      let opts = lane_policy(
+      const session = "lane-hidden-" + uuid()
+      const opts = lane_policy(
         default_lane_rows(),
         "Fix the off-by-one bug in src/widget.py.",
         {
@@ -127,8 +127,8 @@ pipeline default() {
           tools: lane_test_tools(),
         },
       )
-      let result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
-      let feedback = json_stringify(llm_mock_calls()[1].messages)
+      const result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
+      const feedback = json_stringify(llm_mock_calls()[1].messages)
       __io_println("C.status=" + result.status)
       __io_println("C.feedback_lists_available=" + to_string(contains(feedback, "Available tools")))
       __io_println("C.feedback_offers_edit=" + to_string(contains(feedback, "edit")))
@@ -140,8 +140,8 @@ pipeline default() {
   with_llm_script(
     [llm_text("still working"), llm_text("done ##DONE##")],
     { ->
-      let session = "lane-scope-classifier-" + uuid()
-      let opts = lane_policy(
+      const session = "lane-scope-classifier-" + uuid()
+      const opts = lane_policy(
         default_lane_rows(),
         "Fix the off-by-one bug in src/widget.py.",
         {
@@ -154,11 +154,11 @@ pipeline default() {
         },
       )
         + lane_scope_classifier(default_lane_rows())
-      let captured = agent_capture_events(
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts) },
       )
-      let verdict_events = captured.events.filter({ event -> event.type == "scope_classifier_verdict" })
+      const verdict_events = captured.events.filter({ event -> event.type == "scope_classifier_verdict" })
       __io_println("D.status=" + captured.result.status)
       __io_println("D.verdict_count=" + to_string(len(verdict_events)))
       __io_println(

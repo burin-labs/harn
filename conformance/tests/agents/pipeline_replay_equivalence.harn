@@ -17,8 +17,8 @@
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
 pipeline default() {
-  let topic = "pipeline.lifecycle.audit"
-  let cursor = event_log.latest(topic)
+  const topic = "pipeline.lifecycle.audit"
+  const cursor = event_log.latest(topic)
   pipeline_on_finish(
     { harness, return_value ->
       harness
@@ -37,12 +37,12 @@ pipeline default() {
         {target_pipeline: "nightly-drain", envelope_id: "envelope_replay_1"},
       )
       harness.emit_audit("pipeline_finalized", {reason: "replay_complete"})
-      let recorded = lifecycle_audit_log_take()
-      let stream = event_log
+      const recorded = lifecycle_audit_log_take()
+      const stream = event_log
         .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "lifecycle_audit"})
-      let first = stream.next().value
-      let second = stream.next().value
-      let third = stream.next().value
+      const first = stream.next().value
+      const second = stream.next().value
+      const third = stream.next().value
       harness.stdio.println("recorded_count=" + to_string(len(recorded)))
       harness.stdio
         .println(

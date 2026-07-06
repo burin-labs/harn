@@ -8,8 +8,8 @@ pub fn template_persona(task) {
 
 @step(name: "judge_until_confident", model: "mock", receipt: audit, error_boundary: escalate, retry: {max_attempts: 2}, budget: {max_tokens: 4000})
 fn judge_until_confident(task) {
-  let fixture = task?.fixture ?? {}
-  let schema = {
+  const fixture = task?.fixture ?? {}
+  const schema = {
     type: "object",
     required: ["decision", "confidence", "rationale"],
     properties: {decision: {type: "string"}, confidence: {type: "number"}, rationale: {type: "string"}},
@@ -17,7 +17,7 @@ fn judge_until_confident(task) {
   return bounded_loop(
     {decision: nil, confidence: 0.0, attempts: 0},
     fn(state) {
-      let prompt = render_prompt(
+      const prompt = render_prompt(
         "../prompts/system.harn.prompt",
         {
           persona_name: "template_persona",
@@ -25,7 +25,7 @@ fn judge_until_confident(task) {
           request: fixture?.request ?? "review",
         },
       )
-      let result = llm_call_structured_safe(prompt, schema, {provider: "mock", model: "mock", retries: 0})
+      const result = llm_call_structured_safe(prompt, schema, {provider: "mock", model: "mock", retries: 0})
       return {
         state: result.data + {attempts: state.attempts + 1},
         progress: result.ok,

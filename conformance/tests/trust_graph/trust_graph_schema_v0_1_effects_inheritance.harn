@@ -8,29 +8,29 @@ import "std/triggers"
  * the effect plus actor-chain inheritance invariants hold.
  */
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let parent_grant = [
+  const parent_grant = [
     {kind: {kind: "net"}, scope: "write", resource: "https://api.example"},
     {kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"},
     {kind: {kind: "fs"}, scope: "write", resource: "/workspace/tmp"},
   ]
-  let child_grant = [
+  const child_grant = [
     {kind: {kind: "net"}, scope: "write", resource: "https://api.example"},
     {kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"},
   ]
-  let grandchild_used = [{kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"}]
-  let parent_agent = "trust-graph-v0-1-parent-" + unique
-  let child_agent = "trust-graph-v0-1-child-" + unique
-  let grandchild_agent = "trust-graph-v0-1-grandchild-" + unique
-  let actor_origin = "user:operator-" + unique
-  let parent_actor = "agent:" + parent_agent
-  let child_actor = "agent:" + child_agent
-  let grandchild_actor = "agent:" + grandchild_agent
-  let parent_actor_chain = {sub: actor_origin, act: {sub: parent_actor}}
-  let child_actor_chain = {sub: actor_origin, act: {sub: child_actor, act: {sub: parent_actor}}}
-  let grandchild_actor_chain = {sub: actor_origin, act: {sub: grandchild_actor, act: {sub: child_actor, act: {sub: parent_actor}}}}
-  let parent_id: TrustEntryId = trust_graph_record(
+  const grandchild_used = [{kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"}]
+  const parent_agent = "trust-graph-v0-1-parent-" + unique
+  const child_agent = "trust-graph-v0-1-child-" + unique
+  const grandchild_agent = "trust-graph-v0-1-grandchild-" + unique
+  const actor_origin = "user:operator-" + unique
+  const parent_actor = "agent:" + parent_agent
+  const child_actor = "agent:" + child_agent
+  const grandchild_actor = "agent:" + grandchild_agent
+  const parent_actor_chain = {sub: actor_origin, act: {sub: parent_actor}}
+  const child_actor_chain = {sub: actor_origin, act: {sub: child_actor, act: {sub: parent_actor}}}
+  const grandchild_actor_chain = {sub: actor_origin, act: {sub: grandchild_actor, act: {sub: child_actor, act: {sub: parent_actor}}}}
+  const parent_id: TrustEntryId = trust_graph_record(
     {
       agent: parent_agent,
       action: "agent.spawn",
@@ -41,7 +41,7 @@ pipeline test(task) {
       metadata: {actor_chain: parent_actor_chain, effects_grant: parent_grant},
     },
   )
-  let child_id: TrustEntryId = trust_graph_record(
+  const child_id: TrustEntryId = trust_graph_record(
     {
       agent: child_agent,
       action: "agent.spawn",
@@ -52,7 +52,7 @@ pipeline test(task) {
       metadata: {actor_chain: child_actor_chain, effects_grant: child_grant, parent_record_id: parent_id},
     },
   )
-  let _grandchild_id: TrustEntryId = trust_graph_record(
+  const _grandchild_id: TrustEntryId = trust_graph_record(
     {
       agent: grandchild_agent,
       action: "fs.read",
@@ -63,10 +63,10 @@ pipeline test(task) {
       metadata: {actor_chain: grandchild_actor_chain, effects_used: grandchild_used, parent_record_id: child_id},
     },
   )
-  let parent: list<TrustRecord> = trust_query({agent: parent_agent})
-  let child: list<TrustRecord> = trust_query({agent: child_agent})
-  let grandchild: list<TrustRecord> = trust_query({agent: grandchild_agent})
-  let report: TrustChainReport = trust_graph_verify_chain()
+  const parent: list<TrustRecord> = trust_query({agent: parent_agent})
+  const child: list<TrustRecord> = trust_query({agent: child_agent})
+  const grandchild: list<TrustRecord> = trust_query({agent: grandchild_agent})
+  const report: TrustChainReport = trust_graph_verify_chain()
   __io_println(len(parent) == 1 && len(child) == 1 && len(grandchild) == 1)
   __io_println(parent[0].schema == "opentrustgraph/v0.1")
   __io_println(child[0].metadata?.parent_record_id == parent_id)

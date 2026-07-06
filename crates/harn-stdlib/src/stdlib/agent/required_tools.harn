@@ -35,7 +35,7 @@ fn __agent_required_tool_label(requirement) -> string {
 }
 
 fn __agent_required_tools_from_options(opts) -> list {
-  let required = opts?.require_successful_tools
+  const required = opts?.require_successful_tools
   if required == nil {
     return []
   }
@@ -50,12 +50,12 @@ fn __agent_required_tools_from_options(opts) -> list {
  * @api_stability: experimental
  */
 pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<string> {
-  let required = __agent_required_tools_from_options(opts)
+  const required = __agent_required_tools_from_options(opts)
   if len(required) == 0 {
     return []
   }
-  let successful = result?.tools?.successful ?? []
-  var missing = []
+  const successful = result?.tools?.successful ?? []
+  let missing = []
   for requirement in required {
     if !__agent_required_tool_satisfied(requirement, successful) {
       missing = missing.push(__agent_required_tool_label(requirement))
@@ -72,11 +72,11 @@ pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<stri
  * @api_stability: experimental
  */
 pub fn agent_required_tools_missing_from_session(opts, successful_tools_seen: list) -> list<string> {
-  let required = __agent_required_tools_from_options(opts)
+  const required = __agent_required_tools_from_options(opts)
   if len(required) == 0 {
     return []
   }
-  var missing = []
+  let missing = []
   for requirement in required {
     if __agent_required_tool_missing(requirement, successful_tools_seen) {
       missing = missing.push(__agent_required_tool_label(requirement))
@@ -86,8 +86,8 @@ pub fn agent_required_tools_missing_from_session(opts, successful_tools_seen: li
 }
 
 fn __agent_required_tools_friction_event(result: dict, opts, missing: list<string>) -> dict {
-  let session_id = to_string(result?.session_id ?? "")
-  var recurrence = ["missing_required_tools=" + to_string(len(missing))]
+  const session_id = to_string(result?.session_id ?? "")
+  let recurrence = ["missing_required_tools=" + to_string(len(missing))]
   if opts?.persona != nil {
     recurrence = recurrence.push("persona=" + to_string(opts.persona))
   }
@@ -124,13 +124,13 @@ fn __agent_required_tools_envelope(result: dict, missing: list<string>, iteratio
 }
 
 fn __agent_required_tools_emit_friction(result: dict, opts, missing: list<string>) {
-  let event = __agent_required_tools_friction_event(result, opts, missing)
-  let _ = try {
+  const event = __agent_required_tools_friction_event(result, opts, missing)
+  const _ = try {
     friction_record(event)
   }
-  let session_id = to_string(result?.session_id ?? "")
+  const session_id = to_string(result?.session_id ?? "")
   if session_id != "" {
-    let _ = try {
+    const _ = try {
       agent_emit_event(session_id, "require_successful_tools_violation", event)
     }
   }
@@ -140,9 +140,9 @@ fn __agent_required_tools_preserve_terminal_error(result: dict) -> bool {
   if result?.error != nil {
     return true
   }
-  let status = to_string(result?.status ?? "")
-  let final_status = to_string(result?.final_status ?? "")
-  let terminal_statuses = ["provider_error", "error", "blocked", "suspended", "cancelled", "scope_alert"]
+  const status = to_string(result?.status ?? "")
+  const final_status = to_string(result?.final_status ?? "")
+  const terminal_statuses = ["provider_error", "error", "blocked", "suspended", "cancelled", "scope_alert"]
   return contains(terminal_statuses, status) || contains(terminal_statuses, final_status)
 }
 
@@ -157,12 +157,12 @@ pub fn agent_required_tools_enforce(result: dict, opts) -> dict {
   if __agent_required_tools_preserve_terminal_error(result) {
     return result
   }
-  let missing = agent_required_tools_missing_from_result(result, opts)
+  const missing = agent_required_tools_missing_from_result(result, opts)
   if len(missing) == 0 {
     return result
   }
-  let iterations = result?.llm?.iterations ?? 0
-  let envelope = __agent_required_tools_envelope(result, missing, iterations)
+  const iterations = result?.llm?.iterations ?? 0
+  const envelope = __agent_required_tools_envelope(result, missing, iterations)
   __agent_required_tools_emit_friction(result, opts, missing)
   return result
     + {

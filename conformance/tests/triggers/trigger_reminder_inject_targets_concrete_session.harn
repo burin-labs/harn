@@ -8,13 +8,13 @@ import "std/triggers"
  * entry recording the outcome.
  */
 pipeline test(task) {
-  let _ = lifecycle_audit_log_take()
-  let target_session = agent_session_open("trigger-reminder-inject-concrete")
+  const _ = lifecycle_audit_log_take()
+  const target_session = agent_session_open("trigger-reminder-inject-concrete")
   agent_session_reset(target_session)
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let trigger_id = "trigger-reminder-inject-concrete-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const trigger_id = "trigger-reminder-inject-concrete-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -39,7 +39,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let dispatch = trigger_fire(
+  const dispatch = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
@@ -47,15 +47,15 @@ pipeline test(task) {
   __io_println(dispatch.result?.status == "injected")
   __io_println(dispatch.result?.target_kind == "concrete")
   __io_println(dispatch.result?.target_session_id == target_session)
-  let reminders = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
+  const reminders = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
   __io_println(len(reminders))
   __io_println(reminders[0].reminder.body)
   __io_println(reminders[0].reminder.tags[0])
   __io_println(reminders[0].reminder.ttl_turns)
   __io_println(reminders[0].reminder.dedupe_key)
-  let audits = lifecycle_audit_log_take()
-  var inject_audit_count = 0
-  var injected_outcome = ""
+  const audits = lifecycle_audit_log_take()
+  let inject_audit_count = 0
+  let injected_outcome = ""
   for audit in audits {
     if audit.kind == "triggers.reminder_inject.audit" {
       inject_audit_count = inject_audit_count + 1

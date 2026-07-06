@@ -1,5 +1,5 @@
 fn write_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_file",
@@ -15,7 +15,7 @@ fn write_tools() {
 }
 
 pipeline main() {
-  let denied = agent_loop(
+  const denied = agent_loop(
     "Try to write outside allowlist",
     "You are helpful",
     {

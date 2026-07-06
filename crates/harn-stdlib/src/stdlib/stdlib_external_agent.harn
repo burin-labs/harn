@@ -11,9 +11,9 @@
  * @example: external_agent_delegate("127.0.0.1:8080", "review this change", {budget: {max_usd: 0.25}})
  */
 pub fn external_agent_delegate(target, task, options = nil) {
-  let opts = options ?? {}
-  let key = opts?.idempotency_key ?? ("external-agent-" + uuid_v7())
-  let checkpoint = opts?.checkpoint ?? {}
+  const opts = options ?? {}
+  const key = opts?.idempotency_key ?? ("external-agent-" + uuid_v7())
+  const checkpoint = opts?.checkpoint ?? {}
   return __external_agent_delegate(
     task,
     opts + {target: target, idempotency_key: key, checkpoint: checkpoint},
@@ -32,10 +32,10 @@ pub fn external_agent_delegate(target, task, options = nil) {
  * @example: external_agent_approve(checkpoint, {checkpoint: {approved_by: "operator"}})
  */
 pub fn external_agent_approve(envelope, options = nil) {
-  let opts = options ?? {}
-  let checkpoint_base = opts?.checkpoint ?? {}
-  let checkpoint = checkpoint_base + {approved: true}
-  let allow_cleartext = opts?.allow_cleartext ?? envelope?.allow_cleartext ?? false
+  const opts = options ?? {}
+  const checkpoint_base = opts?.checkpoint ?? {}
+  const checkpoint = checkpoint_base + {approved: true}
+  const allow_cleartext = opts?.allow_cleartext ?? envelope?.allow_cleartext ?? false
   return __external_agent_delegate(
     envelope?.task,
     opts

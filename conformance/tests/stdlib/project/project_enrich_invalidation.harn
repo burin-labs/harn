@@ -1,7 +1,7 @@
 import "std/project"
 
 pipeline test(task) {
-  let base_dir = path_join(harness.fs.temp_dir(), "harn-project-enrich-invalidation-" + uuid())
+  const base_dir = path_join(harness.fs.temp_dir(), "harn-project-enrich-invalidation-" + uuid())
   harness.fs.mkdir(path_join(base_dir, "src"))
   harness.fs
     .write_text(
@@ -14,9 +14,9 @@ pipeline test(task) {
     path_join(base_dir, "src/lib.rs"),
     "pub struct FirstName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
   )
-  let base = project_scan(base_dir, {tiers: ["ambient", "config"]})
-  let prompt = "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
-  let schema = {
+  const base = project_scan(base_dir, {tiers: ["ambient", "config"]})
+  const prompt = "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
+  const schema = {
     type: "object",
     required: ["framework", "indent_style", "naming_conventions", "test_runner"],
     properties: {
@@ -26,7 +26,7 @@ pipeline test(task) {
       test_runner: {type: "string"},
     },
   }
-  let first = project_enrich(
+  const first = project_enrich(
     base_dir,
     {
       base_evidence: base,
@@ -44,7 +44,7 @@ pipeline test(task) {
     path_join(base_dir, "src/lib.rs"),
     "pub struct ChangedName;\npub fn greet_name() -> &'static str { \"hello\" }\n",
   )
-  let second = project_enrich(
+  const second = project_enrich(
     base_dir,
     {
       base_evidence: base,

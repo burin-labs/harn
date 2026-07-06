@@ -16,7 +16,7 @@
  * a safe overlay that degrades to plain single-attempt behavior.
  */
 fn __bon_clamp_int(value, lo, hi) {
-  let n = if type_of(value) == "int" {
+  const n = if type_of(value) == "int" {
     value
   } else {
     lo
@@ -52,50 +52,50 @@ fn __bon_clamp_int(value, lo, hi) {
  * @errors: []
  */
 pub fn best_of_n_candidates(opts) {
-  let o = if type_of(opts) == "dict" {
+  const o = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  let generate = o?.generate
+  const generate = o?.generate
   if generate == nil {
     return {reason: "no_generate", selected_index: nil, candidate: nil, candidates: [], contract_ok: false}
   }
-  let k = __bon_clamp_int(o?.k ?? 1, 1, 64)
-  let select_callback = o?.select_callback
-  let spec_contract_callback = o?.spec_contract_callback
-  let on_candidate = o?.on_candidate
+  const k = __bon_clamp_int(o?.k ?? 1, 1, 64)
+  const select_callback = o?.select_callback
+  const spec_contract_callback = o?.spec_contract_callback
+  const on_candidate = o?.on_candidate
   // Pre-generation spec-contract gate. A non-true or erroring contract aborts
   // best-of-N to a single-candidate run (never a hard failure).
-  var contract_ok = true
+  let contract_ok = true
   if spec_contract_callback != nil {
     contract_ok = false
-    let cr = try {
+    const cr = try {
       spec_contract_callback()
     }
     if is_ok(cr) {
-      let verdict = unwrap(cr)
+      const verdict = unwrap(cr)
       // Only a boolean true proceeds; nil / non-bool / false all abort.
       contract_ok = type_of(verdict) == "bool" && verdict
     }
   }
-  let target = if contract_ok {
+  const target = if contract_ok {
     k
   } else {
     1
   }
   // Host-driven candidate generation; a failing candidate is simply skipped.
-  var candidates = []
-  var idx = 0
+  let candidates = []
+  let idx = 0
   while idx < target {
-    let gr = try {
+    const gr = try {
       generate(idx)
     }
     if is_ok(gr) {
-      let cand = unwrap(gr)
+      const cand = unwrap(gr)
       candidates = candidates.push(cand)
       if on_candidate != nil {
-        let _ = try {
+        const _ = try {
           on_candidate({index: idx, candidate: cand})
         }
       }
@@ -130,20 +130,20 @@ pub fn best_of_n_candidates(opts) {
     }
   }
   // Host selection signal. nil / out-of-range / error -> deterministic fallthrough.
-  var winner = nil
+  let winner = nil
   if select_callback != nil {
-    let sr = try {
+    const sr = try {
       select_callback(candidates)
     }
     if is_ok(sr) {
-      let w = unwrap(sr)
+      const w = unwrap(sr)
       if type_of(w) == "int" && w >= 0 && w < len(candidates) {
         winner = w
       }
     }
   }
   if winner == nil {
-    let fallback_idx = __bon_clamp_int(o?.fallthrough_index ?? (len(candidates) - 1), 0, len(candidates) - 1)
+    const fallback_idx = __bon_clamp_int(o?.fallthrough_index ?? (len(candidates) - 1), 0, len(candidates) - 1)
     return {
       reason: "fallthrough_no_winner",
       selected_index: fallback_idx,

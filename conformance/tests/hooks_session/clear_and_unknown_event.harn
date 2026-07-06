@@ -4,7 +4,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * `clear_session_hooks()` removes all session-level hooks but leaves
  * tool/persona hooks alone. Unknown event names raise.
  */
-let observed = atomic(0)
+const observed = atomic(0)
 
 pipeline default() {
   clear_session_hooks()
@@ -21,7 +21,7 @@ pipeline default() {
     { ->
       agent_loop("hi", nil, {provider: "mock"})
       __io_println(atomic_get(observed))
-      let err = try {
+      const err = try {
         register_session_hook("PreToolUse", { _ev -> return nil })
       }
       __io_println(is_err(err))

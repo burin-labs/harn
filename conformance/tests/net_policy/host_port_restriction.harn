@@ -8,11 +8,11 @@
 import { create, host } from "std/net_policy"
 
 fn main(harness: Harness) {
-  let policy = create({allow: [host("api.anthropic.com", [443])], default: "deny"})
-  let restricted = harness.with_net_policy(policy)
-  let ok = restricted.net.get("https://api.anthropic.com/v1/messages")
+  const policy = create({allow: [host("api.anthropic.com", [443])], default: "deny"})
+  const restricted = harness.with_net_policy(policy)
+  const ok = restricted.net.get("https://api.anthropic.com/v1/messages")
   harness.stdio.println("ok=" + ok)
-  var port_err = nil
+  let port_err = nil
   try {
     restricted.net.get("http://api.anthropic.com/v1/messages")
   } catch (e) {

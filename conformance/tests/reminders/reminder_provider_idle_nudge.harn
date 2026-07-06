@@ -4,24 +4,24 @@ import {
 } from "std/agent/state"
 
 pipeline main() {
-  let session = agent_session_open("reminder-provider-idle-nudge")
+  const session = agent_session_open("reminder-provider-idle-nudge")
   agent_session_reset(session)
-  let opts = {reminders: {config: {idle_nudge: {idle_seconds: 60}}}}
-  let first = agent_reminder_providers_fire(
+  const opts = {reminders: {config: {idle_nudge: {idle_seconds: 60}}}}
+  const first = agent_reminder_providers_fire(
     session,
     "session_idle",
     {session: {id: session}, iteration: 2, wake_interval_ms: 65000},
     opts,
   )
-  let second = agent_reminder_providers_fire(
+  const second = agent_reminder_providers_fire(
     session,
     "session_idle",
     {session: {id: session}, iteration: 3, wake_interval_ms: 65000},
     opts,
   )
-  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  let ttl = agent_session_apply_reminder_post_turn(session, 4)
-  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const ttl = agent_session_apply_reminder_post_turn(session, 4)
+  const after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
   __io_println(first.fired_count)
   __io_println(second.reports[0].deduped_count)
   __io_println(len(before))

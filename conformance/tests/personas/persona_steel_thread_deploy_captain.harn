@@ -10,7 +10,7 @@ import {
 } from "std/testing"
 
 fn deploy_receipt(step, result) {
-  let wrapped = with_audit_receipt(
+  const wrapped = with_audit_receipt(
     fn() { return result },
     {persona: "deploy_captain", step: step, started_at: "2026-01-01T00:00:00Z"},
   )
@@ -19,10 +19,10 @@ fn deploy_receipt(step, result) {
 
 @persona(name: "deploy_captain")
 fn deploy_captain(ctx) {
-  let merged = wait_for_pr_merged(ctx)
-  let staging = deploy_to_staging(merged.result)
-  let smoke = smoke_test(staging.result)
-  let promoted = promote_production(smoke.result)
+  const merged = wait_for_pr_merged(ctx)
+  const staging = deploy_to_staging(merged.result)
+  const smoke = smoke_test(staging.result)
+  const promoted = promote_production(smoke.result)
   return {merged: merged, staging: staging, smoke: smoke, promoted: promoted}
 }
 
@@ -74,7 +74,7 @@ fn promote_production(smoke) {
 
 pipeline test() {
   step_assertions_begin("deploy_captain")
-  let result = deploy_captain({repo: "burin-labs/harn", pr: 1078})
+  const result = deploy_captain({repo: "burin-labs/harn", pr: 1078})
   assert_steps_ran(["wait_for_pr_merged", "deploy_to_staging", "smoke_test", "promote_production"])
   assert_step_received("wait_for_pr_merged", { event -> event.args[0].pr == 1078 })
   assert_step_emitted(

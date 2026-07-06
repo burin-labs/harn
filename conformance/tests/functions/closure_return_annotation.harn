@@ -1,9 +1,9 @@
 pipeline test(task) {
-  let greet = fn(name: string) -> string { return "hello " + name }
+  const greet = fn(name: string) -> string { return "hello " + name }
   assert(greet("world") == "hello world", "annotated fn expression returns string")
-  let no_args = fn() -> int { return 42 }
+  const no_args = fn() -> int { return 42 }
   assert(no_args() == 42, "zero-arg annotated fn expression parses and runs")
-  let implicit_tail = fn(x: int) -> int { x + 1 }
+  const implicit_tail = fn(x: int) -> int { x + 1 }
   assert(implicit_tail(4) == 5, "annotated fn expression checks implicit tail")
   log("closure_return_annotation tests passed")
 }

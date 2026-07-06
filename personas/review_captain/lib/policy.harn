@@ -6,16 +6,16 @@
 // deterministic Harn code.
 /** load_policy_json(raw) -> {ok, policy?, error?}. */
 pub fn load_policy_json(raw) {
-  let text = raw ?? ""
+  const text = raw ?? ""
   if text == "" {
     return _default_policy_result()
   }
-  let parsed = json_parse(text)
+  const parsed = json_parse(text)
   if parsed == nil {
     return {ok: false, error: "policy JSON failed to parse"}
   }
-  let risky_paths = parsed.risky_paths ?? []
-  let test_globs = parsed.test_globs ?? _default_test_globs()
+  const risky_paths = parsed.risky_paths ?? []
+  const test_globs = parsed.test_globs ?? _default_test_globs()
   return {ok: true, policy: {repo: parsed.repo ?? "", risky_paths: risky_paths, test_globs: test_globs}}
 }
 

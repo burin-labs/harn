@@ -8,7 +8,7 @@
  */
 pipeline test(task) {
   // Anthropic Opus 4.7 — full tool-search support.
-  let opus = provider_capabilities("anthropic", "claude-opus-4-7")
+  const opus = provider_capabilities("anthropic", "claude-opus-4-7")
   assert(opus.native_tools, "Opus 4.7 supports native tools")
   assert(opus.defer_loading, "Opus 4.7 supports defer_loading")
   assert(len(opus.tool_search) == 2, "Opus 4.7 advertises two tool_search variants")
@@ -25,7 +25,7 @@ pipeline test(task) {
   assert(opus.prefers_xml_tools, "Opus 4.7 prefers XML-rendered text tools")
   assert(opus.thinking_block_style == "thinking_blocks", "Opus 4.7 uses thinking blocks")
   // Older Claude — no tool search, still cache + thinking.
-  let old = provider_capabilities("anthropic", "claude-opus-3-5")
+  const old = provider_capabilities("anthropic", "claude-opus-3-5")
   assert(old.native_tools, "Claude 3.5 still has native tools")
   assert(!old.defer_loading, "Claude 3.5 has no defer_loading")
   assert(len(old.tool_search) == 0, "Claude 3.5 advertises no tool_search variants")
@@ -33,12 +33,12 @@ pipeline test(task) {
   assert(old.thinking_modes[0] == "enabled", "Claude 3.5 exposes budgeted thinking mode")
   assert(old.supports_assistant_prefill, "Claude 3.5 accepts assistant prefill")
   // Haiku version gate — 4.4 is out, 4.5 is in.
-  let haiku_44 = provider_capabilities("anthropic", "claude-haiku-4-4")
+  const haiku_44 = provider_capabilities("anthropic", "claude-haiku-4-4")
   assert(!haiku_44.defer_loading, "Haiku 4.4 has no tool search")
-  let haiku_45 = provider_capabilities("anthropic", "claude-haiku-4-5")
+  const haiku_45 = provider_capabilities("anthropic", "claude-haiku-4-5")
   assert(haiku_45.defer_loading, "Haiku 4.5 has tool search")
   // OpenAI Responses API — hosted + client variants from 5.4.
-  let gpt = provider_capabilities("openai", "gpt-5.4-preview")
+  const gpt = provider_capabilities("openai", "gpt-5.4-preview")
   assert(gpt.defer_loading, "gpt-5.4 supports defer_loading")
   assert(len(gpt.tool_search) == 2, "gpt-5.4 advertises two tool_search modes")
   assert(gpt.tool_search[0] == "hosted", "hosted ordered first")
@@ -56,37 +56,37 @@ pipeline test(task) {
   assert(gpt.prefers_markdown_scaffolding, "gpt-5.4 prefers Markdown prompt sections")
   assert(gpt.structured_output_mode == "native_json", "gpt-5.4 prefers native JSON output")
   assert(gpt.thinking_block_style == "reasoning_summary", "gpt-5.4 uses reasoning summaries")
-  let gpt50 = provider_capabilities("openai", "gpt-5")
+  const gpt50 = provider_capabilities("openai", "gpt-5")
   assert(gpt50.reasoning_effort_supported, "gpt-5 supports reasoning_effort")
   assert(!gpt50.reasoning_none_supported, "gpt-5 floors reasoning off at minimal")
   // Legacy GPT — native tools only.
-  let gpt4o = provider_capabilities("openai", "gpt-4o")
+  const gpt4o = provider_capabilities("openai", "gpt-4o")
   assert(gpt4o.native_tools, "gpt-4o has native tools")
   assert(gpt4o.vision_supported, "gpt-4o accepts image content")
   assert(!gpt4o.defer_loading, "gpt-4o has no defer_loading")
-  let o3 = provider_capabilities("openai", "o3")
+  const o3 = provider_capabilities("openai", "o3")
   assert(o3.thinking_modes[0] == "effort", "o3 exposes effort thinking mode")
   assert(o3.requires_completion_tokens, "o3 requires max_completion_tokens")
   assert(o3.reasoning_effort_supported, "o3 supports reasoning_effort")
   assert(o3.prefers_role_developer, "o3 prefers developer-role instructions")
   // Ollama Qwen 3.5 advertises native tools on the official model page.
-  let qwen35 = provider_capabilities("ollama", "qwen3.5:35b-a3b-coding-nvfp4")
+  const qwen35 = provider_capabilities("ollama", "qwen3.5:35b-a3b-coding-nvfp4")
   assert(qwen35.native_tools, "qwen3.5 on ollama has native tools")
   assert(!qwen35.vision_supported, "qwen3.5 is not a vision route")
   assert(qwen35.prefers_markdown_scaffolding, "qwen3.5 prefers Markdown prompt sections")
   assert(qwen35.structured_output_mode == "delimited", "qwen3.5 prefers delimited output")
   assert(!qwen35.prefers_xml_tools, "qwen3.5 does not use XML tool wrappers")
   assert(qwen35.thinking_block_style == "inline", "qwen3.5 uses inline thinking blocks")
-  let gemini = provider_capabilities("gemini", "gemini-2.5-flash")
+  const gemini = provider_capabilities("gemini", "gemini-2.5-flash")
   assert(gemini.native_tools, "gemini native route supports function declarations")
   assert(gemini.message_wire_format == "gemini", "gemini native route uses Gemini message parts")
   assert(gemini.vision_supported, "gemini native route accepts image content")
   assert(gemini.thinking_modes[0] == "enabled", "gemini 2.5 native route exposes typed thinking")
   assert(gemini.structured_output_mode == "native_json", "gemini prefers native JSON output")
-  let together_gpt_oss = provider_capabilities("together", "openai/gpt-oss-120b")
+  const together_gpt_oss = provider_capabilities("together", "openai/gpt-oss-120b")
   assert(together_gpt_oss.thinking_modes[0] == "effort", "Together GPT-OSS exposes effort thinking")
   assert(together_gpt_oss.reasoning_effort_supported, "Together GPT-OSS accepts reasoning_effort")
-  let openrouter_gpt_oss = provider_capabilities("openrouter", "openai/gpt-oss-120b")
+  const openrouter_gpt_oss = provider_capabilities("openrouter", "openai/gpt-oss-120b")
   assert(!openrouter_gpt_oss.native_tools, "OpenRouter GPT-OSS disables native tools")
   assert(
     openrouter_gpt_oss.preferred_tool_format == "text",
@@ -96,7 +96,7 @@ pipeline test(task) {
     openrouter_gpt_oss.text_tool_wire_format_supported,
     "OpenRouter GPT-OSS supports text tool formatting",
   )
-  let fireworks_gpt_oss = provider_capabilities("fireworks", "accounts/fireworks/models/gpt-oss-120b")
+  const fireworks_gpt_oss = provider_capabilities("fireworks", "accounts/fireworks/models/gpt-oss-120b")
   assert(!fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS disables native tools")
   assert(
     fireworks_gpt_oss.preferred_tool_format == "text",
@@ -106,10 +106,10 @@ pipeline test(task) {
     fireworks_gpt_oss.text_tool_wire_format_supported,
     "Fireworks GPT-OSS supports text tool formatting",
   )
-  let cerebras_gpt_oss = provider_capabilities("cerebras", "gpt-oss-120b")
+  const cerebras_gpt_oss = provider_capabilities("cerebras", "gpt-oss-120b")
   assert(cerebras_gpt_oss.native_tools, "Cerebras GPT-OSS keeps native tools")
   assert(cerebras_gpt_oss.preferred_tool_format == "native", "Cerebras GPT-OSS defaults native")
-  let deepinfra_gpt_oss = provider_capabilities("deepinfra", "openai/gpt-oss-120b")
+  const deepinfra_gpt_oss = provider_capabilities("deepinfra", "openai/gpt-oss-120b")
   // DeepInfra's gpt-oss native (Harmony) channel drops tool calls into the
   // private reasoning channel — pinned to the TEXT channel as a footgun fix
   // (mirrors the Fireworks/OpenRouter gpt-oss rows above).
@@ -122,16 +122,16 @@ pipeline test(task) {
     deepinfra_gpt_oss.text_tool_wire_format_supported,
     "DeepInfra GPT-OSS supports text tool formatting",
   )
-  let groq_gpt_oss = provider_capabilities("groq", "openai/gpt-oss-120b")
+  const groq_gpt_oss = provider_capabilities("groq", "openai/gpt-oss-120b")
   assert(groq_gpt_oss.native_tools, "Groq GPT-OSS keeps native tools")
   assert(groq_gpt_oss.preferred_tool_format == "native", "Groq GPT-OSS defaults native")
-  let together_kimi = provider_capabilities("together", "moonshotai/Kimi-K2.5")
+  const together_kimi = provider_capabilities("together", "moonshotai/Kimi-K2.5")
   assert(together_kimi.thinking_modes[0] == "enabled", "Together Kimi exposes reasoning.enabled")
   assert(
     !together_kimi.honors_chat_template_kwargs,
     "Together Kimi does not use Qwen chat template kwargs",
   )
-  let kimi27 = provider_capabilities("openrouter", "moonshotai/kimi-k2.7-code")
+  const kimi27 = provider_capabilities("openrouter", "moonshotai/kimi-k2.7-code")
   assert(kimi27.native_tools, "OpenRouter Kimi K2.7 Code exposes native tools")
   assert(kimi27.prompt_caching, "Kimi K2.7 Code exposes prompt cache reads")
   assert(kimi27.vision_supported, "Kimi K2.7 Code accepts image input")
@@ -143,7 +143,7 @@ pipeline test(task) {
   assert(!kimi27.top_p_supported, "Kimi K2.7 Code has fixed top_p")
   assert(!kimi27.frequency_penalty_supported, "Kimi K2.7 Code has fixed penalties")
   assert(!kimi27.presence_penalty_supported, "Kimi K2.7 Code has fixed penalties")
-  let qwen37_plus = provider_capabilities("openrouter", "qwen/qwen3.7-plus")
+  const qwen37_plus = provider_capabilities("openrouter", "qwen/qwen3.7-plus")
   assert(qwen37_plus.native_tools, "OpenRouter Qwen3.7 Plus exposes native tools")
   assert(qwen37_plus.prompt_caching, "OpenRouter Qwen3.7 Plus exposes prompt caching")
   assert(qwen37_plus.vision_supported, "OpenRouter Qwen3.7 Plus accepts image input")
@@ -151,37 +151,37 @@ pipeline test(task) {
     qwen37_plus.auto_reasoning_overrides.agent == "off",
     "Qwen3.7 Plus disables reasoning for agent tool loops",
   )
-  let qwen36_flash = provider_capabilities("openrouter", "qwen/qwen3.6-flash")
+  const qwen36_flash = provider_capabilities("openrouter", "qwen/qwen3.6-flash")
   assert(qwen36_flash.native_tools, "OpenRouter Qwen3.6 Flash exposes native tools")
   assert(qwen36_flash.prompt_caching, "OpenRouter Qwen3.6 Flash exposes prompt caching")
-  let qwen37_max = provider_capabilities("together", "Qwen/Qwen3.7-Max")
+  const qwen37_max = provider_capabilities("together", "Qwen/Qwen3.7-Max")
   assert(qwen37_max.native_tools, "Together Qwen3.7 Max exposes native tools")
   assert(qwen37_max.prompt_caching, "Together Qwen3.7 Max exposes prompt caching")
   assert(qwen37_max.requires_streaming, "Together Qwen3.7 Max requires streaming transport")
-  let kat = provider_capabilities("openrouter", "kwaipilot/kat-coder-pro-v2")
+  const kat = provider_capabilities("openrouter", "kwaipilot/kat-coder-pro-v2")
   assert(kat.native_tools, "OpenRouter KAT-Coder-Pro V2 exposes native tools")
   assert(kat.prompt_caching, "OpenRouter KAT-Coder-Pro V2 exposes prompt caching")
-  let step37 = provider_capabilities("openrouter", "stepfun/step-3.7-flash")
+  const step37 = provider_capabilities("openrouter", "stepfun/step-3.7-flash")
   assert(step37.native_tools, "OpenRouter Step 3.7 Flash exposes native tools")
   assert(step37.prompt_caching, "OpenRouter Step 3.7 Flash exposes prompt caching")
   assert(!step37.reasoning_disable_supported, "OpenRouter Step 3.7 Flash requires reasoning")
-  let glm51 = provider_capabilities("together", "zai-org/GLM-5.1")
+  const glm51 = provider_capabilities("together", "zai-org/GLM-5.1")
   assert(glm51.native_tools, "Together GLM 5.1 exposes native tools")
   assert(
     glm51.auto_reasoning_overrides.agent == "off",
     "Together GLM 5.1 supports reasoning-off tool loops",
   )
-  let minimax27 = provider_capabilities("together", "MiniMaxAI/MiniMax-M2.7")
+  const minimax27 = provider_capabilities("together", "MiniMaxAI/MiniMax-M2.7")
   assert(minimax27.native_tools, "Together MiniMax M2.7 exposes native tools")
   assert(minimax27.prompt_caching, "Together MiniMax M2.7 exposes prompt caching")
   assert(!minimax27.reasoning_text_promotable, "Together MiniMax M2.7 keeps reasoning private")
   // OpenRouter inherits the openai family.
-  let routed = provider_capabilities("openrouter", "gpt-5.4")
+  const routed = provider_capabilities("openrouter", "gpt-5.4")
   assert(routed.defer_loading, "openrouter inherits openai defer_loading")
   assert(routed.tool_search[0] == "hosted", "openrouter inherits hosted/client variants")
   assert(routed.reasoning_none_supported, "openrouter inherits gpt-5.4 reasoning none support")
   assert(!routed.responses_api, "openrouter does not claim Harn's native OpenAI Responses path")
-  let deepseek32 = provider_capabilities("openrouter", "deepseek/deepseek-v3.2")
+  const deepseek32 = provider_capabilities("openrouter", "deepseek/deepseek-v3.2")
   assert(deepseek32.native_tools, "OpenRouter DeepSeek V3.2 exposes native tools")
   assert(deepseek32.text_tool_wire_format_supported, "OpenRouter DeepSeek V3.2 supports text tools")
   assert(
@@ -192,7 +192,7 @@ pipeline test(task) {
     deepseek32.tool_mode_parity == "native_unreliable",
     "OpenRouter DeepSeek V3.2 records native/text non-interchangeability",
   )
-  let deepseek_chat = provider_capabilities("openrouter", "deepseek/deepseek-chat")
+  const deepseek_chat = provider_capabilities("openrouter", "deepseek/deepseek-chat")
   assert(deepseek_chat.native_tools, "OpenRouter DeepSeek chat alias exposes native tools")
   assert(
     deepseek_chat.preferred_tool_format == "native",
@@ -206,14 +206,14 @@ pipeline test(task) {
     len(deepseek_chat.thinking_modes) == 0,
     "OpenRouter DeepSeek chat alias has no reasoning parameter",
   )
-  let deepseek_r1 = provider_capabilities("openrouter", "deepseek/deepseek-r1")
+  const deepseek_r1 = provider_capabilities("openrouter", "deepseek/deepseek-r1")
   assert(deepseek_r1.native_tools, "OpenRouter DeepSeek R1 exposes native tools")
   assert(deepseek_r1.thinking_modes[0] == "enabled", "OpenRouter DeepSeek R1 exposes reasoning")
   assert(
     !provider_capabilities("openrouter", "deepseek/deepseek-r1-distill-qwen-32b").native_tools,
     "OpenRouter DeepSeek R1 distill does not advertise native tools",
   )
-  let qwen_coder = provider_capabilities("openrouter", "qwen/qwen3-coder-flash")
+  const qwen_coder = provider_capabilities("openrouter", "qwen/qwen3-coder-flash")
   assert(qwen_coder.native_tools, "OpenRouter Qwen Coder advertises native tools")
   assert(qwen_coder.text_tool_wire_format_supported, "OpenRouter Qwen Coder supports text tools")
   assert(qwen_coder.preferred_tool_format == "text", "OpenRouter Qwen Coder defaults to text tools")
@@ -223,27 +223,27 @@ pipeline test(task) {
   )
   // Sibling families: together, groq, deepseek, fireworks, huggingface, local.
   for family in ["together", "groq", "deepseek", "fireworks", "huggingface", "local"] {
-    let caps = provider_capabilities(family, "gpt-5.4")
+    const caps = provider_capabilities(family, "gpt-5.4")
     assert(caps.defer_loading, family + " inherits openai defer_loading")
   }
   // Enterprise providers expose native tool schemas without claiming
   // provider-specific tool_search semantics.
-  let azure = provider_capabilities("azure_openai", "gpt-4o-prod")
+  const azure = provider_capabilities("azure_openai", "gpt-4o-prod")
   assert(azure.native_tools, "Azure OpenAI supports native tools")
   assert(!azure.defer_loading, "Azure chat completions has no Harn tool_search gate")
   assert(azure.prefers_markdown_scaffolding, "Azure OpenAI prefers Markdown prompt sections")
   assert(azure.structured_output_mode == "native_json", "Azure OpenAI prefers native JSON output")
-  let bedrock = provider_capabilities("bedrock", "meta.llama3-70b-instruct-v1:0")
+  const bedrock = provider_capabilities("bedrock", "meta.llama3-70b-instruct-v1:0")
   assert(bedrock.native_tools, "Bedrock Converse supports native tools")
   assert(
     bedrock.prefers_markdown_scaffolding,
     "generic Bedrock models prefer Markdown prompt sections",
   )
-  let vertex = provider_capabilities("vertex", "gemini-1.5-pro-002")
+  const vertex = provider_capabilities("vertex", "gemini-1.5-pro-002")
   assert(vertex.native_tools, "Vertex Gemini supports native tools")
   assert(vertex.structured_output_mode == "native_json", "Vertex Gemini prefers native JSON output")
   // Unknown provider + unknown model: all-default dict.
-  let unknown = provider_capabilities("my-custom-proxy", "mystery-7b")
+  const unknown = provider_capabilities("my-custom-proxy", "mystery-7b")
   assert(!unknown.native_tools, "unknown provider has no native_tools")
   assert(!unknown.defer_loading, "unknown provider has no defer_loading")
   assert(len(unknown.tool_search) == 0, "unknown provider has no tool_search")

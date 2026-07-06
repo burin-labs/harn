@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+  const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   with_llm_script(
     [
       {
@@ -15,7 +15,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Use the skills catalog",
         catalog,
         {
@@ -29,14 +29,14 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop completes")
-      let calls = llm_mock_calls()
-      let second_messages = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const second_messages = json_stringify(calls[1].messages)
       assert(
         contains(second_messages, "skill_model_invocation_disabled"),
         "gated skill returns a typed error",
       )
       assert(!contains(second_messages, "top secret"), "gated skill body does not leak")
-      let third_messages = json_stringify(calls[2].messages)
+      const third_messages = json_stringify(calls[2].messages)
       assert(contains(third_messages, "skill_not_found"), "missing skill returns a typed error")
       log("skills_load_skill_errors passed")
     },

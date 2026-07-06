@@ -1,46 +1,46 @@
 pipeline default() {
   // Dict destructuring with defaults — missing keys get default values
-  let {name = "workflow", system = "none"} = {name: "custom"}
+  const {name = "workflow", system = "none"} = {name: "custom"}
   __io_println(name)
   __io_println(system)
   // Default NOT triggered when key exists
-  let {x = 99} = {x: 42}
+  const {x = 99} = {x: 42}
   __io_println(x)
   // Dict default with alias
-  let {name: displayName = "Unknown"} = {}
+  const {name: displayName = "Unknown"} = {}
   __io_println(displayName)
   // Alias NOT triggered when key exists
-  let {name: label = "fallback"} = {name: "real"}
+  const {name: label = "fallback"} = {name: "real"}
   __io_println(label)
   // List destructuring with defaults
-  let [a = 10, b = 20, c = 30] = [1, 2]
+  const [a = 10, b = 20, c = 30] = [1, 2]
   __io_println(a)
   __io_println(b)
   __io_println(c)
   // List default NOT triggered when element exists
-  let [p = 100] = [7]
+  const [p = 100] = [7]
   __io_println(p)
   // For-in with dict destructuring defaults
-  let tasks = [{status: "done"}, {priority: 5}, {status: "active", priority: 1}]
+  const tasks = [{status: "done"}, {priority: 5}, {status: "active", priority: 1}]
   for {status = "pending", priority = 0} in tasks {
     __io_println("${status}:${priority}")
   }
   // Default expressions evaluated fresh per iteration
-  let items = [{id: 10}, {}, {id: 30}]
+  const items = [{id: 10}, {}, {id: 30}]
   for {id = 0} in items {
     __io_println(id)
   }
   // Empty source dict — all defaults apply
-  let {a: alpha = "A", b: beta = "B"} = {}
+  const {a: alpha = "A", b: beta = "B"} = {}
   __io_println(alpha)
   __io_println(beta)
   // Mixed: some with defaults, some without
-  let {present, missing = "default"} = {present: "here"}
+  const {present, missing = "default"} = {present: "here"}
   __io_println(present)
   __io_println(missing)
   // Nested usage in function body
   fn configure(opts = {}) {
-    let {max = 100, min = 0} = opts
+    const {max = 100, min = 0} = opts
     return max - min
   }
   __io_println(configure({}))

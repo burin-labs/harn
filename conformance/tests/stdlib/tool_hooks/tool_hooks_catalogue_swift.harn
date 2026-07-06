@@ -6,7 +6,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * quiet on the targeted forms.
  */
 fn probe(reg, cmd) {
-  let m = tool_hooks_match(reg, cmd, {stacks: ["swift"]})
+  const m = tool_hooks_match(reg, cmd, {stacks: ["swift"]})
   if len(m) > 0 {
     __io_println(m[0].rule_id + " " + m[0].severity)
   } else {
@@ -15,7 +15,7 @@ fn probe(reg, cmd) {
 }
 
 pipeline default() {
-  let reg = tool_hooks_seed_registry(["swift"])
+  const reg = tool_hooks_seed_registry(["swift"])
   probe(reg, "swift build --clean")
   probe(reg, "swift package clean")
   /* Targeted build is allowed. */

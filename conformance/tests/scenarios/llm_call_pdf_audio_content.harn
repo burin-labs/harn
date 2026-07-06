@@ -2,17 +2,17 @@ import { upload } from "std/files"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  let pdf_path = "sample.pdf"
+  const pdf_path = "sample.pdf"
   harness.fs.write_bytes(pdf_path, bytes_from_string("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"))
-  let file_id = upload(pdf_path, "mock")
-  let file_id_again = upload(pdf_path, "mock")
+  const file_id = upload(pdf_path, "mock")
+  const file_id_again = upload(pdf_path, "mock")
   harness.fs.delete(pdf_path)
   assert_eq(file_id, file_id_again)
   assert(contains(file_id, "mock_file_"), "mock upload should return a stable file_id")
   with_llm_script(
     [llm_text("summary")],
     { ->
-      let result = llm_call(
+      const result = llm_call(
         "",
         nil,
         {
@@ -31,9 +31,9 @@ pipeline test(task) {
         },
       )
       assert_eq(result.text, "summary")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert_eq(len(calls), 1)
-      let blocks = calls[0].messages[0].content
+      const blocks = calls[0].messages[0].content
       assert_eq(blocks[0].type, "pdf")
       assert_eq(blocks[0].file_id, file_id)
       assert_eq(blocks[1].type, "audio")

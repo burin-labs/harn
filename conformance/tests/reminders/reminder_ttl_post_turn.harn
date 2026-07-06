@@ -1,16 +1,16 @@
 import { agent_session_apply_reminder_post_turn } from "std/agent/state"
 
 pipeline main() {
-  let topic = "transcript.reminder.lifecycle"
-  let cursor = event_log.latest(topic)
-  let session = agent_session_open("reminder-ttl-post-turn")
+  const topic = "transcript.reminder.lifecycle"
+  const cursor = event_log.latest(topic)
+  const session = agent_session_open("reminder-ttl-post-turn")
   agent_session_reset(session)
   agent_session_inject(session, transcript_reminder_event({body: "expire", ttl_turns: 1}))
   agent_session_inject(session, transcript_reminder_event({body: "stay", ttl_turns: 2}))
-  let report = agent_session_apply_reminder_post_turn(session, 7)
-  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
-  let logged = stream.next().value
+  const report = agent_session_apply_reminder_post_turn(session, 7)
+  const reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const logged = stream.next().value
   __io_println(report.expired_count)
   __io_println(report.decremented_count)
   __io_println(len(reminders))

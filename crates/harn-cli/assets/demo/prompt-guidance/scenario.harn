@@ -26,7 +26,7 @@ fn mk_tool(name, description, guidance) {
 }
 
 fn included_ids(explained) {
-  var ids = []
+  let ids = []
   for frag in explained.fragments {
     if frag.included {
       ids = ids.push(frag.id)
@@ -38,12 +38,12 @@ fn included_ids(explained) {
 pipeline default(_task) {
   __io_println("=== prompt-guidance demo ===")
   __io_println("")
-  let base_system = "You are Ness, a pragmatic engineering partner."
-  let todo_guidance = "Always update the TODO tracker after completing each item when working from a plan."
+  const base_system = "You are Ness, a pragmatic engineering partner."
+  const todo_guidance = "Always update the TODO tracker after completing each item when working from a plan."
   // 1. WITH the todo tracker present: its guidance is injected, gated on the
   //    tool's own presence. The `read` tool carries no guidance, so it adds
   //    nothing — only tools with something to say speak.
-  let with_todo = prompt_explain(
+  const with_todo = prompt_explain(
     {
       system: base_system,
       tools: [
@@ -66,15 +66,15 @@ pipeline default(_task) {
   // 2. WITHOUT the todo tracker: the SAME options minus the tool. The guidance
   //    fragment is never even constructed — there is no orphaned instruction
   //    telling the model to use a tool it does not have.
-  let without_todo = prompt_explain({system: base_system, tools: [mk_tool("read", "Read a file", nil)]})
+  const without_todo = prompt_explain({system: base_system, tools: [mk_tool("read", "Read a file", nil)]})
   __io_println("WITHOUT todo tool — assembled system prompt:")
   __io_println(without_todo.system)
   __io_println("")
   // 3. The audit: the only difference between the two prompts is exactly the
   //    one capability-gated fragment, and the provenance names why.
-  let guidance_present_with = with_todo.system.contains(todo_guidance)
-  let guidance_present_without = without_todo.system.contains(todo_guidance)
-  let receipt = {
+  const guidance_present_with = with_todo.system.contains(todo_guidance)
+  const guidance_present_without = without_todo.system.contains(todo_guidance)
+  const receipt = {
     receipt_kind: "prompt_guidance_receipt",
     guidance_with_tool: guidance_present_with,
     guidance_without_tool: guidance_present_without,

@@ -11,7 +11,7 @@ pipeline default() {
   channel_guardrail_clear()
   /* Closure scanner: blocks payloads with `secret_key`, warns when
    * the channel is `panic`, allows everything else. */
-  let scan = { payload, ctx ->
+  const scan = { payload, ctx ->
     if payload?.secret_key != nil {
       return {verdict: "block", reason: "secret_key field is reserved"}
     }
@@ -20,22 +20,22 @@ pipeline default() {
     }
     return "allow"
   }
-  let id = register_guardrail({id: "policy", scan_fn: scan})
+  const id = register_guardrail({id: "policy", scan_fn: scan})
   __io_println(id)
   /* Block path: dict verdict drops the emit + writes blocked audit. */
-  let denied = emit_channel("ch.guardrail.policy", {ok: false, secret_key: "exfil-payload"})
+  const denied = emit_channel("ch.guardrail.policy", {ok: false, secret_key: "exfil-payload"})
   __io_println(denied?.blocked)
   __io_println(denied?.block_reason)
   /* Warn path: emit proceeds + writes a warning audit. */
-  let warned = emit_channel("ch.guardrail.panic", {reason: "drain timeout"})
+  const warned = emit_channel("ch.guardrail.panic", {reason: "drain timeout"})
   __io_println(warned?.inserted)
   __io_println(warned?.blocked ?? false)
   /* Allow path: emit proceeds silently. */
-  let normal = emit_channel("ch.guardrail.policy", {reason: "normal"})
+  const normal = emit_channel("ch.guardrail.policy", {reason: "normal"})
   __io_println(normal?.inserted)
   __io_println(normal?.blocked ?? false)
   /* Audit log: block then warn (in registration order). */
-  let audit = pipeline_lifecycle_audit_log_take()
+  const audit = pipeline_lifecycle_audit_log_take()
   __io_println(len(audit))
   __io_println(audit[0].kind)
   __io_println(audit[0].payload.fired[0].reason)

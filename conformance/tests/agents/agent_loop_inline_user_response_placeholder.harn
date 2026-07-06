@@ -8,7 +8,7 @@ pipeline default() {
       ),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Finish with a visible answer.",
         nil,
         {provider: "mock", loop_until_done: false, max_iterations: 1},

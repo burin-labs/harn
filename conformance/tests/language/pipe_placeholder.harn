@@ -1,16 +1,16 @@
 pipeline default() {
   // Basic pipe placeholder
-  let result = "hello world" |> split(_, " ")
+  const result = "hello world" |> split(_, " ")
   __io_println(result)
   // Chained with placeholder
-  let n = "hello world"
+  const n = "hello world"
     |> split(_, " ")
     |> len(_)
   __io_println(n)
   // Placeholder in second arg
-  let msg = "world" |> replace("hello _", "_", _)
+  const msg = "world" |> replace("hello _", "_", _)
   __io_println(msg)
   // Placeholder with method call
-  let nums = [3, 1, 2] |> _.sort()
+  const nums = [3, 1, 2] |> _.sort()
   __io_println(nums)
 }

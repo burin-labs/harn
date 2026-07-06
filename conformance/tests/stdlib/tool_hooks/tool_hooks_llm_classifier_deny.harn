@@ -20,11 +20,11 @@ pipeline default() {
       ),
     ],
     { ->
-      let inner = { args -> {ok: true, ran: args.command} }
-      let wrapper = preset_run_command(
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
         {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
       )
-      let result = wrapper({command: "rm -rf /etc/foo"})
+      const result = wrapper({command: "rm -rf /etc/foo"})
       __io_println(result.action)
       __io_println(result.catalogue_id)
       __io_println(result.severity)
@@ -32,7 +32,7 @@ pipeline default() {
       __io_println(result.original_command)
       __io_println(result.command)
       __io_println(result?.result == nil)
-      let log = pipeline_lifecycle_audit_log_take()
+      const log = pipeline_lifecycle_audit_log_take()
       __io_println(len(log))
       __io_println(log[0].kind)
       __io_println(log[0].payload.kind)

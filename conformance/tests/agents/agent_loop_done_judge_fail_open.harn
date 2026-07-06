@@ -7,7 +7,7 @@ pipeline default() {
       {error: {category: "generic", message: "structured output is unavailable"}},
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "What is 2 + 2?",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 2, done_judge: {fail_open_on_error: true}},

@@ -4,6 +4,6 @@
 type User = {name: string, email: string}
 
 pipeline default(_) {
-  let maybe: User? = nil
+  const maybe: User? = nil
   __io_println(maybe.name)
 }

@@ -18,7 +18,7 @@ pipeline test(task) {
   log(iter([1, 2, 3]).find({ x -> x > 99 }))
   iter([1, 2, 3]).for_each({ x -> log("v=${x}") })
   log(iter([1, 1, 2, 2, 3]).to_set())
-  let d = iter([pair("a", 1), pair("b", 2)]).to_dict()
+  const d = iter([pair("a", 1), pair("b", 2)]).to_dict()
   log(d.a)
   log(d.b)
 }

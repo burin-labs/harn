@@ -20,19 +20,19 @@ metadata_set("src", "classification", {owner: "vm"})
 
 metadata_set("src", "facts", {kind: "module"})
 
-let resolved = metadata_resolve("src", "classification")
+const resolved = metadata_resolve("src", "classification")
 
 __io_println(resolved.language == "rust")
 
 __io_println(resolved.owner == "vm")
 
-let all_resolved = metadata_resolve("src")
+const all_resolved = metadata_resolve("src")
 
 __io_println(all_resolved.classification.language == "rust")
 
 __io_println(all_resolved.facts.kind == "module")
 
-let entries = metadata_entries("classification")
+const entries = metadata_entries("classification")
 
 __io_println(entries[0].dir == ".")
 
@@ -42,7 +42,7 @@ __io_println(entries[1].resolved.language == "rust")
 
 __io_println(entries[1].local.owner == "vm")
 
-let status = metadata_status("classification")
+const status = metadata_status("classification")
 
 __io_println(status.directory_count == 2)
 
@@ -58,7 +58,7 @@ __io_println(status.stale.any_stale)
 
 __io_println(status.stale.tier1[0] == ".")
 
-let inventory = project_inventory("classification")
+const inventory = project_inventory("classification")
 
 __io_println(inventory.status.directory_count == 2)
 
@@ -68,11 +68,11 @@ __io_println(metadata_local_namespace("src", "classification").owner == "vm")
 
 __io_println(project_requires_refresh("classification"))
 
-let shallow = scan_directory("meta_scratch", {pattern: ".txt", include_dirs: false, max_depth: 0})
+const shallow = scan_directory("meta_scratch", {pattern: ".txt", include_dirs: false, max_depth: 0})
 
 __io_println(shallow[0].path == "meta_scratch/root.txt")
 
-var saw_hidden = false
+let saw_hidden = false
 
 for entry in shallow {
   if entry.path == "meta_scratch/.hidden.txt" {
@@ -82,12 +82,12 @@ for entry in shallow {
 
 __io_println(!saw_hidden)
 
-let with_hidden = scan_directory(
+const with_hidden = scan_directory(
   "meta_scratch",
   {pattern: ".txt", include_dirs: false, max_depth: 1, include_hidden: true},
 )
 
-var found_hidden = false
+let found_hidden = false
 
 for entry in with_hidden {
   if entry.path == "meta_scratch/.hidden.txt" {

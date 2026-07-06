@@ -8,12 +8,12 @@
  * Run with: cargo run --bin harn -- run examples/session-fork.harn
  */
 pipeline main(task) {
-  let base = agent_session_open()
+  const base = agent_session_open()
   agent_session_inject(base, {role: "user", content: "Plan a weekend in Kyoto."})
   agent_session_inject(base, {role: "assistant", content: "Day 1: Fushimi Inari. Day 2: Arashiyama."})
   // Fork two counterfactual branches from the same starting point.
-  let rainy = agent_session_fork(base)
-  let sunny = agent_session_fork(base)
+  const rainy = agent_session_fork(base)
+  const sunny = agent_session_fork(base)
   agent_session_inject(rainy, {role: "user", content: "What if it rains the whole weekend?"})
   agent_session_inject(sunny, {role: "user", content: "What if the weather is perfect?"})
   log("base len=${agent_session_length(base)}")

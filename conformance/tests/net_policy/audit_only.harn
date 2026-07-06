@@ -8,10 +8,10 @@
 import { create } from "std/net_policy"
 
 fn main(harness: Harness) {
-  let policy = create({allow: [], default: "deny", on_violation: "audit_only"})
-  let observed = harness.with_net_policy(policy)
+  const policy = create({allow: [], default: "deny", on_violation: "audit_only"})
+  const observed = harness.with_net_policy(policy)
   // The URL would otherwise be denied, but audit_only lets it through.
-  let body = observed.net.get("https://shadow.test/x")
+  const body = observed.net.get("https://shadow.test/x")
   harness.stdio.println("body=" + body)
   harness.stdio.println("quarantined=" + to_string(observed.is_quarantined()))
 }

@@ -4,12 +4,12 @@ import { assert_error_contains } from "std/testing"
 import "../_common"
 
 pipeline test_agent_probe(_task) {
-  let root = path_join(harness.fs.temp_dir(), "harn-agent-probe-" + uuid())
-  let opts = {root: root, namespace: "agent/facts"}
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn-agent-probe-" + uuid())
+  const opts = {root: root, namespace: "agent/facts"}
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   // --- eval probe: shell command, no expected → pass derived from exit code
-  let eval_pass = probe_eval("echo probe-eval-ok", opts + {now: "2026-05-23T22:00:00Z"})
+  const eval_pass = probe_eval("echo probe-eval-ok", opts + {now: "2026-05-23T22:00:00Z"})
   assert_eq(eval_pass.schema, "harn.probe.v1")
   assert_eq(eval_pass.kind, "eval")
   assert_eq(eval_pass.outcome, "pass")
@@ -18,19 +18,19 @@ pipeline test_agent_probe(_task) {
   assert(starts_with(eval_pass.evidence.trace_id, "probe_"))
   assert(eval_pass.fact_id != nil && starts_with(eval_pass.fact_id, "fact_"))
   // --- eval probe with explicit expected (mismatch surfaces as fail)
-  let eval_fail = probe("Eval", "echo not-the-expected", opts + {expected: "expected", now: "2026-05-23T22:00:01Z"})
+  const eval_fail = probe("Eval", "echo not-the-expected", opts + {expected: "expected", now: "2026-05-23T22:00:01Z"})
   assert_eq(eval_fail.outcome, "fail")
   assert_eq(eval_fail.expected, "expected")
   // --- eval probe: non-zero exit derives fail without expected
-  let eval_exit_fail = probe_eval("false", opts + {now: "2026-05-23T22:00:02Z"})
+  const eval_exit_fail = probe_eval("false", opts + {now: "2026-05-23T22:00:02Z"})
   assert_eq(eval_exit_fail.outcome, "fail")
   assert_eq(eval_exit_fail.evidence.exit_code, 1)
   // --- store_fact: false skips auto-write but still returns a result
-  let no_fact = probe_eval("echo skipped", opts + {store_fact: false})
+  const no_fact = probe_eval("echo skipped", opts + {store_fact: false})
   assert_eq(no_fact.outcome, "pass")
   assert_eq(no_fact.fact_id, nil)
   // --- typecheck probe: clean fragment → 0 errors → pass
-  let typecheck_pass = probe_typecheck(
+  const typecheck_pass = probe_typecheck(
     "pipeline noop() { __io_println(\"hi\") }\n",
     opts + {harn_binary: harn_bin, now: "2026-05-23T22:00:03Z"},
   )
@@ -38,25 +38,25 @@ pipeline test_agent_probe(_task) {
   assert_eq(typecheck_pass.outcome, "pass")
   assert(contains(typecheck_pass.observed, "errors=0"))
   // --- typecheck probe: type-error fragment → errors > 0 → fail
-  let typecheck_fail = probe_typecheck(
+  const typecheck_fail = probe_typecheck(
     "pipeline broken() { let x: int = \"oops\" __io_println(x) }\n",
     opts + {harn_binary: harn_bin, now: "2026-05-23T22:00:04Z"},
   )
   assert_eq(typecheck_fail.outcome, "fail")
   assert(contains(typecheck_fail.observed, "errors="))
   // --- typecheck probe with expected error count
-  let typecheck_match = probe_typecheck(
+  const typecheck_match = probe_typecheck(
     "pipeline broken() { let x: int = \"oops\" __io_println(x) }\n",
     opts + {harn_binary: harn_bin, expected: 1, now: "2026-05-23T22:00:05Z"},
   )
   assert_eq(typecheck_match.outcome, "pass")
   assert_eq(typecheck_match.expected, 1)
   // --- recall the auto-stored facts (pass+fail+exit_fail+typecheck_pass+typecheck_fail+typecheck_match = 6)
-  let observations = recall_facts("probe", "Observation", 0.0, opts + {limit: 20})
+  const observations = recall_facts("probe", "Observation", 0.0, opts + {limit: 20})
   assert(len(observations) >= 5)
-  var saw_pass = false
-  var saw_fail = false
-  var saw_typecheck = false
+  let saw_pass = false
+  let saw_fail = false
+  let saw_typecheck = false
   for hit in observations {
     if contains(hit.claim, "probe eval") && contains(hit.claim, "→ pass") {
       saw_pass = true
@@ -77,10 +77,10 @@ pipeline test_agent_probe(_task) {
   assert(saw_fail)
   assert(saw_typecheck)
   // --- stub kinds return unknown with confidence 0.4
-  let test_stub = probe("test", "anything", opts + {now: "2026-05-23T22:00:06Z"})
+  const test_stub = probe("test", "anything", opts + {now: "2026-05-23T22:00:06Z"})
   assert_eq(test_stub.outcome, "unknown")
   assert(contains(test_stub.observed, "not supported"))
-  let inspect_stub = probe("Inspect", "anything", opts + {now: "2026-05-23T22:00:07Z"})
+  const inspect_stub = probe("Inspect", "anything", opts + {now: "2026-05-23T22:00:07Z"})
   assert_eq(inspect_stub.outcome, "unknown")
   // --- validation errors
   assert_error_contains({ -> probe("guess", "echo x", opts) }, "HARN-PROBE-002")

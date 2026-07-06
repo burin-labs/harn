@@ -2,11 +2,11 @@ pipeline test(task) {
   fn gen() {
     yield 42
   }
-  let g = gen()
-  let r1 = g.next()
+  const g = gen()
+  const r1 = g.next()
   __io_println(r1.value)
   __io_println(r1.done)
-  let r2 = g.next()
+  const r2 = g.next()
   __io_println(r2.value)
   __io_println(r2.done)
 }

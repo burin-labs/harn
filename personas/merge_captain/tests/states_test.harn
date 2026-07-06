@@ -11,7 +11,7 @@ import {
 } from "../lib/states"
 
 pipeline test_all_states_distinct(task) {
-  let states = all_states()
+  const states = all_states()
   assert_eq(len(states), 12)
   assert(is_state("queued"))
   assert(is_state("merge_group_running"))
@@ -47,9 +47,9 @@ pipeline test_transitions_legality(task) {
 }
 
 pipeline test_allowed_next_lists_are_subsets_of_all_states(task) {
-  let known = all_states()
+  const known = all_states()
   for s in known {
-    let next = allowed_next(s)
+    const next = allowed_next(s)
     for n in next {
       assert(known.contains(n), "${s} -> ${n} references unknown state")
     }
@@ -57,7 +57,7 @@ pipeline test_allowed_next_lists_are_subsets_of_all_states(task) {
 }
 
 pipeline test_actions_catalogue(task) {
-  let actions = all_actions()
+  const actions = all_actions()
   assert(actions.contains("noop"))
   assert(actions.contains("enqueue_merge_queue"))
   assert(actions.contains("escalate_human"))

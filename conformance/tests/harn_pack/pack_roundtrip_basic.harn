@@ -1,12 +1,12 @@
 import "../_common"
 
 pipeline default() {
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  let root = path_join(harness.fs.temp_dir(), "harn_pack_basic_" + uuid_v7())
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn_pack_basic_" + uuid_v7())
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
-  let pack = exec_at(
+  const pack = exec_at(
     root,
     harn_bin,
     "pack",
@@ -17,13 +17,13 @@ pipeline default() {
     "--json",
   )
   __io_println(pack.success)
-  let pack_data = json_parse(pack.stdout)
+  const pack_data = json_parse(pack.stdout)
   __io_println(pack_data.schemaVersion >= 1)
   __io_println(pack_data.ok)
   __io_println(starts_with(pack_data.data.bundle_hash, "blake3:"))
   __io_println(pack_data.data.signature.present)
   __io_println(harness.fs.exists(path_join(root, "hello.harnpack")))
-  let verify = exec_at(
+  const verify = exec_at(
     root,
     harn_bin,
     "pack",
@@ -33,7 +33,7 @@ pipeline default() {
     "--json",
   )
   __io_println(verify.success)
-  let verify_data = json_parse(verify.stdout)
+  const verify_data = json_parse(verify.stdout)
   __io_println(verify_data.ok)
   __io_println(verify_data.data.bundle_hash == pack_data.data.bundle_hash)
   __io_println(verify_data.data.signature_present)

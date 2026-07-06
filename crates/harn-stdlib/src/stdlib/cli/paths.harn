@@ -4,7 +4,7 @@
 import { is_absolute } from "std/path"
 
 fn __app_segment(app_name: string) -> string {
-  let name = trim(app_name ?? "")
+  const name = trim(app_name ?? "")
   if name == "" || name == "." || name == ".." || contains(name, "/") || contains(name, "\\") {
     throw "std/cli/paths: app_name must be a single path segment"
   }
@@ -12,11 +12,11 @@ fn __app_segment(app_name: string) -> string {
 }
 
 fn __absolute_env_dir(name: string) {
-  let raw = harness.env.get(name)
+  const raw = harness.env.get(name)
   if raw == nil {
     return nil
   }
-  let value = to_string(raw)
+  const value = to_string(raw)
   if trim(value) == "" || !is_absolute(value) {
     return nil
   }
@@ -24,11 +24,11 @@ fn __absolute_env_dir(name: string) {
 }
 
 fn __home_dir() -> string {
-  let home = __absolute_env_dir("HOME")
+  const home = __absolute_env_dir("HOME")
   if home != nil {
     return home
   }
-  let user_profile = __absolute_env_dir("USERPROFILE")
+  const user_profile = __absolute_env_dir("USERPROFILE")
   if user_profile != nil {
     return user_profile
   }
@@ -36,7 +36,7 @@ fn __home_dir() -> string {
 }
 
 fn __join_segments(segments: list<string>) -> string {
-  var out = ""
+  let out = ""
   for segment in segments {
     if out == "" {
       out = segment
@@ -53,12 +53,12 @@ fn __resolve_app_home(
   xdg_segments: list<string>,
   macos_segments: list<string>,
 ) -> string {
-  let app = __app_segment(app_name)
-  let env_root = __absolute_env_dir(env_key)
+  const app = __app_segment(app_name)
+  const env_root = __absolute_env_dir(env_key)
   if env_root != nil {
     return path_join(env_root, app)
   }
-  let root_segments = if platform() == "darwin" {
+  const root_segments = if platform() == "darwin" {
     macos_segments
   } else {
     xdg_segments

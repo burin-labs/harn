@@ -7,12 +7,12 @@
  * behavior-level fixtures notice.
  */
 pipeline default() {
-  let backend = sandbox_active_backend()
+  const backend = sandbox_active_backend()
   // Harn `platform()` returns the underlying OS slug (`darwin`,
   // `linux`, `windows`, `openbsd`); the sandbox backend names map
   // 1:1 to those except `darwin` → `macos` to keep the docs and
   // marketing material aligned with how Apple brands the OS.
-  let expected = if platform() == "linux" {
+  const expected = if platform() == "linux" {
     "linux"
   } else if platform() == "darwin" {
     "macos"

@@ -1,13 +1,13 @@
 import "std/memory"
 
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn-memory-vector-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-memory-vector-" + uuid())
   host_mock_clear()
   // Fixed-vector mock so any text → same embedding. Cosine similarity is
   // then 1.0 across all records and order falls through to the
   // newest-first tiebreak, which is enough to verify the wire-up.
   host_mock("memory", "embed", {result: {vector: [0.5, 0.5, 0.5], dim: 3, model: "test"}})
-  let opened = memory_open("agent/vector", {backend: "vector", embed_dim: 3, embed_model_hint: "test", root: root})
+  const opened = memory_open("agent/vector", {backend: "vector", embed_dim: 3, embed_model_hint: "test", root: root})
   __io_println(opened._type)
   __io_println(opened.backend)
   __io_println(opened.embed_dim)
@@ -26,7 +26,7 @@ pipeline default() {
     ["profile"],
     {root: root, now: "2026-05-15T00:00:01Z"},
   )
-  let recalled = memory_recall("agent/vector", "preferences", 5, {root: root})
+  const recalled = memory_recall("agent/vector", "preferences", 5, {root: root})
   __io_println(len(recalled))
   __io_println(recalled[0]._type)
   __io_println(recalled[0].score >= 0.999)
@@ -34,11 +34,11 @@ pipeline default() {
   // Newer record wins on tie.
   __io_println(recalled[0].key)
   // Explicit lexical override should ignore embeddings entirely.
-  let lexical = memory_recall("agent/vector", "rust profile", 5, {root: root, mode: "lexical"})
+  const lexical = memory_recall("agent/vector", "rust profile", 5, {root: root, mode: "lexical"})
   __io_println(lexical[0].key)
   // The embedding cache should now contain both stored records plus the
   // last query. Verify entries exist for the configured model.
-  let cache_entries = harness.fs.list_dir(path_join(root, "agent", "vector", "vectors", "test"))
+  const cache_entries = harness.fs.list_dir(path_join(root, "agent", "vector", "vectors", "test"))
   __io_println(len(cache_entries) >= 3)
   harness.fs.delete(root)
 }

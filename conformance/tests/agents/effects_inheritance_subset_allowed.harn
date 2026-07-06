@@ -6,7 +6,7 @@
  * spawn_agent path runs normally.
  */
 fn parent() {
-  let _worker = spawn_agent(
+  const _worker = spawn_agent(
     {
       name: "subset-child",
       task: "read only",

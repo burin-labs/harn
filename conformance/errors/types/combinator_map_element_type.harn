@@ -2,10 +2,10 @@
 // list<string> here, so binding an element to `int` is a static error. Before
 // combinator element typing this collapsed to an untyped list and slipped by.
 pipeline default() {
-  let xs = [1, 2, 3]
-  let ys = xs.map({ n -> "v" })
+  const xs = [1, 2, 3]
+  const ys = xs.map({ n -> "v" })
   for s in ys {
-    let bad: int = s
+    const bad: int = s
     __io_println(s)
   }
 }

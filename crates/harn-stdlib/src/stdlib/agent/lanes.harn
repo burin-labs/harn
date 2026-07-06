@@ -90,13 +90,13 @@ fn __lane_validate_rows(rows) {
   if type_of(rows) != "list" || len(rows) == 0 {
     throw "lane_policy: rows must be a non-empty list of lane rows"
   }
-  var seen_default = false
-  var names = []
+  let seen_default = false
+  let names = []
   for row in rows {
     if type_of(row) != "dict" {
       throw "lane_policy: each lane row must be a dict"
     }
-    let name = __lane_row_name(row)
+    const name = __lane_row_name(row)
     if name == "" {
       throw "lane_policy: each lane row needs a non-empty `name`"
     }
@@ -126,11 +126,11 @@ fn __lane_validate_rows(rows) {
  * @api_stability: experimental
  */
 pub fn agent_lane_explicit_target_paths(task) {
-  let found = regex_match("[\\w][\\w./-]*\\.[A-Za-z]{1,5}\\b", to_string(task ?? ""))
+  const found = regex_match("[\\w][\\w./-]*\\.[A-Za-z]{1,5}\\b", to_string(task ?? ""))
   if type_of(found) != "list" {
     return []
   }
-  var out = []
+  let out = []
   for token in found {
     if !contains(out, token) {
       out = out.push(token)
@@ -140,11 +140,11 @@ pub fn agent_lane_explicit_target_paths(task) {
 }
 
 fn __lane_row_matches(row, task, task_lower) {
-  let match_spec = row?.match
+  const match_spec = row?.match
   if type_of(match_spec) != "dict" {
     return false
   }
-  let keywords = match_spec?.keywords
+  const keywords = match_spec?.keywords
   if type_of(keywords) == "list" && len(keywords) > 0 {
     for kw in keywords {
       if contains(task_lower, lowercase(to_string(kw))) {
@@ -152,11 +152,11 @@ fn __lane_row_matches(row, task, task_lower) {
       }
     }
   }
-  let target_rule = match_spec?.explicit_target_paths
+  const target_rule = match_spec?.explicit_target_paths
   if type_of(target_rule) == "dict" {
-    let count = len(agent_lane_explicit_target_paths(task))
-    let min_count = target_rule?.min ?? 1
-    let max_count = target_rule?.max ?? 999999999
+    const count = len(agent_lane_explicit_target_paths(task))
+    const min_count = target_rule?.min ?? 1
+    const max_count = target_rule?.max ?? 999999999
     if count >= min_count && count <= max_count {
       return true
     }
@@ -176,8 +176,8 @@ fn __lane_row_matches(row, task, task_lower) {
  * @api_stability: experimental
  */
 pub fn agent_lane_match(rows, task) {
-  let task_lower = lowercase(to_string(task ?? ""))
-  var fallback = nil
+  const task_lower = lowercase(to_string(task ?? ""))
+  let fallback = nil
   for row in rows {
     if row?.default ?? false {
       fallback = row
@@ -205,10 +205,10 @@ fn __lane_normalize_verdict(row, reason) {
  * @api_stability: experimental
  */
 pub fn agent_lane_classify(rows, task, options = nil) {
-  let opts = options ?? {}
-  let classifier = opts?.classifier
+  const opts = options ?? {}
+  const classifier = opts?.classifier
   if classifier != nil {
-    let picked = try {
+    const picked = try {
       classifier(task, rows)
     } catch (e) {
       nil
@@ -221,7 +221,7 @@ pub fn agent_lane_classify(rows, task, options = nil) {
       }
     }
   }
-  let row = agent_lane_match(rows, task)
+  const row = agent_lane_match(rows, task)
   return __lane_normalize_verdict(
     row,
     if row?.default ?? false {
@@ -250,12 +250,12 @@ fn __lane_entry_name(entry) {
 }
 
 fn __lane_entry_kind(entry, policy) {
-  let annotations = agent_tool_annotations(entry, policy, __lane_entry_name(entry))
+  const annotations = agent_tool_annotations(entry, policy, __lane_entry_name(entry))
   return to_string(annotations?.kind ?? annotations?.tool_kind ?? "")
 }
 
 fn __lane_push_unique(names, value) {
-  let n = to_string(value)
+  const n = to_string(value)
   if n != "" && !contains(names, n) {
     return names.push(n)
   }
@@ -271,17 +271,17 @@ fn __lane_push_unique(names, value) {
  * only after confirming the lane actually narrows.
  */
 fn __lane_own_tool_names(row, registry, policy) {
-  var names = []
-  let explicit = row?.tool_names
+  let names = []
+  const explicit = row?.tool_names
   if type_of(explicit) == "list" {
     for raw in explicit {
       names = __lane_push_unique(names, raw)
     }
   }
-  let kinds = row?.tool_kinds
+  const kinds = row?.tool_kinds
   if type_of(kinds) == "list" && len(kinds) > 0 {
     for entry in __lane_registry_entries(registry) {
-      let kind = __lane_entry_kind(entry, policy)
+      const kind = __lane_entry_kind(entry, policy)
       if kind != "" && contains(kinds, kind) {
         names = __lane_push_unique(names, __lane_entry_name(entry))
       }
@@ -316,23 +316,23 @@ fn __lane_own_tool_names(row, registry, policy) {
  * @example: agent_loop(task, nil, lane_policy(default_lane_rows(), task, {provider: "anthropic", tools: my_tools}))
  */
 pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
-  let validated = __lane_validate_rows(rows)
-  let opts = if type_of(agent_options) == "dict" {
+  const validated = __lane_validate_rows(rows)
+  const opts = if type_of(agent_options) == "dict" {
     agent_options
   } else {
     {}
   }
-  let extra = options ?? {}
-  let hard_keep = extra?.hard_keep ?? []
-  let verdict = agent_lane_classify(validated, task, extra)
-  var matched_row = nil
+  const extra = options ?? {}
+  const hard_keep = extra?.hard_keep ?? []
+  const verdict = agent_lane_classify(validated, task, extra)
+  let matched_row = nil
   for row in validated {
     if __lane_row_name(row) == verdict.lane {
       matched_row = row
     }
   }
-  let resolved_row = matched_row ?? validated[0]
-  let lane_names = __lane_own_tool_names(resolved_row, opts?.tools, opts?.policy)
+  const resolved_row = matched_row ?? validated[0]
+  const lane_names = __lane_own_tool_names(resolved_row, opts?.tools, opts?.policy)
   // A lane that contributes no tools of its own performs NO narrowing (the
   // `general`/default case) — leave the surface untouched. hard_keep only
   // augments a lane that IS narrowing; with nothing narrowed there is nothing
@@ -340,7 +340,7 @@ pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
   if len(lane_names) == 0 {
     return opts + {_lane_verdict: verdict}
   }
-  var names = lane_names
+  let names = lane_names
   for raw in hard_keep {
     names = __lane_push_unique(names, raw)
   }
@@ -374,9 +374,9 @@ pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
  * @example: agent_loop(task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
  */
 pub fn lane_scope_classifier(rows, options = nil) {
-  let validated = __lane_validate_rows(rows)
-  let extra = options ?? {}
-  let classifier = { payload ->
+  const validated = __lane_validate_rows(rows)
+  const extra = options ?? {}
+  const classifier = { payload ->
     let observed_task = to_string(payload?.user_message ?? payload?.task ?? "")
     let verdict = agent_lane_classify(validated, observed_task, extra)
     return {

@@ -1,6 +1,6 @@
 pipeline test(task) {
   // Register a static resource
-  let r1 = mcp_resource(
+  const r1 = mcp_resource(
     {
       uri: "docs://readme",
       name: "README",
@@ -11,7 +11,7 @@ pipeline test(task) {
   )
   assert(r1 == nil, "mcp_resource should return nil")
   // Register a resource template
-  let r2 = mcp_resource_template(
+  const r2 = mcp_resource_template(
     {
       uri_template: "file:///{path}",
       name: "Project Files",

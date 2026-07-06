@@ -5,7 +5,7 @@ pipeline main() {
   with_llm_script(
     [llm_text("child done")],
     { ->
-      let child = sub_agent_run(
+      const child = sub_agent_run(
         "do the work",
         {
           provider: "mock",
@@ -16,7 +16,7 @@ pipeline main() {
         },
       )
       assert(child.ok, "sub_agent_run accepts an anchor option")
-      let child_anchor = agent_session_workspace_anchor("sub-agent-anchor-child")
+      const child_anchor = agent_session_workspace_anchor("sub-agent-anchor-child")
       assert(child_anchor?.primary == "/workspace/child", "child session carries the requested anchor")
       __io_println("agent_sub_agent_anchor tests passed")
     },

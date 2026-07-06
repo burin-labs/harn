@@ -5,7 +5,7 @@ fn grandchild_tools() {
 }
 
 fn child_tools(grandchild_session) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate_grandchild",
@@ -30,7 +30,7 @@ fn child_tools(grandchild_session) {
 }
 
 fn parent_tools(child_session, grandchild_session) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate_child",
@@ -55,9 +55,9 @@ fn parent_tools(child_session, grandchild_session) {
 }
 
 pipeline main() {
-  let parent = agent_session_open("reminder-propagate-all-parent")
-  let child = "reminder-propagate-all-child"
-  let grandchild = "reminder-propagate-all-grandchild"
+  const parent = agent_session_open("reminder-propagate-all-parent")
+  const child = "reminder-propagate-all-child"
+  const grandchild = "reminder-propagate-all-grandchild"
   agent_session_open(child)
   agent_session_open(grandchild)
   agent_session_reset(parent)
@@ -90,8 +90,8 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
-      let grandchild_reminders = transcript_events_by_kind(agent_session_snapshot(grandchild), "system_reminder")
+      const child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+      const grandchild_reminders = transcript_events_by_kind(agent_session_snapshot(grandchild), "system_reminder")
       __io_println(len(child_reminders))
       __io_println(child_reminders[0].reminder.body)
       __io_println(child_reminders[0].reminder.source)

@@ -21,11 +21,11 @@ type Fact = {
   asserted_at: string,
 }
 
-let FACT_SCHEMA = "harn.fact.v1"
+const FACT_SCHEMA = "harn.fact.v1"
 
-let FACT_VALID_KINDS = ["observation", "claim", "hypothesis", "decision", "constraint"]
+const FACT_VALID_KINDS = ["observation", "claim", "hypothesis", "decision", "constraint"]
 
-let FACT_VALID_EVIDENCE_KINDS = ["trace_ref", "file_range", "tool_output", "user_input"]
+const FACT_VALID_EVIDENCE_KINDS = ["trace_ref", "file_range", "tool_output", "user_input"]
 
 fn __fact_error(code, message) -> never {
   throw code + ": std/agent/fact: " + message
@@ -51,8 +51,8 @@ fn __fact_in(needle, allowed) -> bool {
 }
 
 fn __fact_kind(value) -> FactKind {
-  let raw = __fact_text(value)
-  let normalized = lowercase(replace(raw, "-", "_"))
+  const raw = __fact_text(value)
+  const normalized = lowercase(replace(raw, "-", "_"))
   if normalized == "" {
     __fact_error("HARN-FACT-002", "kind is required")
   }
@@ -63,8 +63,8 @@ fn __fact_kind(value) -> FactKind {
 }
 
 fn __fact_evidence_kind(value) -> FactEvidenceKind {
-  let raw = __fact_text(value)
-  let normalized = lowercase(replace(raw, "-", "_"))
+  const raw = __fact_text(value)
+  const normalized = lowercase(replace(raw, "-", "_"))
   if normalized == "traceref" {
     return "trace_ref"
   }
@@ -87,11 +87,11 @@ fn __fact_confidence(value) -> float {
   if value == nil {
     __fact_error("HARN-FACT-004", "confidence is required")
   }
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind != "int" && kind != "float" {
     __fact_error("HARN-FACT-004", "confidence must be a number in [0, 1]")
   }
-  let confidence = value + 0.0
+  const confidence = value + 0.0
   if confidence < 0.0 || confidence > 1.0 {
     __fact_error("HARN-FACT-004", "confidence must be in [0, 1]")
   }
@@ -102,14 +102,14 @@ fn __fact_string_list(value) -> list<string> {
   if value == nil {
     return []
   }
-  let raw = if type_of(value) == "list" {
+  const raw = if type_of(value) == "list" {
     value
   } else {
     [value]
   }
-  var out = []
+  let out = []
   for entry in raw {
-    let text = __fact_text(entry)
+    const text = __fact_text(entry)
     if text != "" && !contains(out, text) {
       out = out.push(text)
     }
@@ -118,7 +118,7 @@ fn __fact_string_list(value) -> list<string> {
 }
 
 fn __fact_push_tag(tags, tag) -> list<string> {
-  let text = __fact_text(tag)
+  const text = __fact_text(tag)
   if text == "" || contains(tags, text) {
     return tags
   }
@@ -129,12 +129,12 @@ fn __fact_evidence_entry(entry) -> FactEvidence {
   if type_of(entry) != "dict" {
     __fact_error("HARN-FACT-005", "evidence entries must be dicts")
   }
-  let kind = __fact_evidence_kind(entry?.kind)
-  let ref = __fact_text(entry?.ref)
+  const kind = __fact_evidence_kind(entry?.kind)
+  const ref = __fact_text(entry?.ref)
   if ref == "" {
     __fact_error("HARN-FACT-005", "evidence.ref is required")
   }
-  let snippet = __fact_text(entry?.snippet)
+  const snippet = __fact_text(entry?.snippet)
   return filter_nil({kind: kind, ref: ref, snippet: snippet})
 }
 
@@ -145,7 +145,7 @@ fn __fact_evidence(value) -> list<FactEvidence> {
   if type_of(value) != "list" {
     __fact_error("HARN-FACT-005", "evidence must be a list")
   }
-  var out = []
+  let out = []
   for entry in value {
     out = out.push(__fact_evidence_entry(entry))
   }
@@ -153,7 +153,7 @@ fn __fact_evidence(value) -> list<FactEvidence> {
 }
 
 fn __fact_evidence_tags(fact_kind, evidence) -> list<string> {
-  var out = []
+  let out = []
   for item in evidence {
     out = __fact_push_tag(out, "fact:evidence:" + item.kind)
     out = __fact_push_tag(out, "fact:evidence_ref:" + item.ref)
@@ -185,7 +185,7 @@ fn __fact_valid_until(value) -> FactValidUntil? {
   if value?.event == nil {
     __fact_error("HARN-FACT-007", "valid_until.event is required")
   }
-  let asserted_at = __fact_text(value?.asserted_at)
+  const asserted_at = __fact_text(value?.asserted_at)
   if asserted_at == "" {
     __fact_error("HARN-FACT-007", "valid_until.asserted_at is required")
   }
@@ -213,7 +213,7 @@ fn __fact_options(options, caller) -> dict {
  * @api_stability: experimental
  */
 pub fn fact_namespace(scope = nil) -> string {
-  let raw = lowercase(__fact_text(scope))
+  const raw = lowercase(__fact_text(scope))
   if raw == "" || raw == "project" {
     return "project/facts"
   }
@@ -234,7 +234,7 @@ pub fn fact_namespace(scope = nil) -> string {
  * @api_stability: experimental
  */
 pub fn fact_id(kind, claim, evidence = nil, provenance = nil) -> string {
-  let seed = to_string(__fact_kind(kind))
+  const seed = to_string(__fact_kind(kind))
     + "\n"
     + __fact_text(claim)
     + "\n"
@@ -252,7 +252,7 @@ pub fn fact_id(kind, claim, evidence = nil, provenance = nil) -> string {
  * @api_stability: experimental
  */
 pub fn fact_key(fact_value) -> string {
-  let fact = fact_validate(fact_value)
+  const fact = fact_validate(fact_value)
   return "fact:" + fact.kind + ":" + fact.id
 }
 
@@ -264,8 +264,8 @@ pub fn fact_key(fact_value) -> string {
  * @api_stability: experimental
  */
 pub fn fact_tags(fact_value, tags = nil) -> list<string> {
-  let fact = fact_validate(fact_value)
-  var out = ["fact", "fact:" + fact.kind, "schema:" + FACT_SCHEMA]
+  const fact = fact_validate(fact_value)
+  let out = ["fact", "fact:" + fact.kind, "schema:" + FACT_SCHEMA]
   for tag in __fact_evidence_tags(fact.kind, fact.evidence) {
     out = __fact_push_tag(out, tag)
   }
@@ -292,22 +292,22 @@ pub fn fact(input, options = nil) -> Fact {
   if input?.schema != nil && input.schema != FACT_SCHEMA {
     __fact_error("HARN-FACT-001", "unsupported schema `" + __fact_text(input.schema) + "`")
   }
-  let opts = __fact_options(options, "fact")
-  let kind = __fact_kind(opts?.kind ?? input?.kind)
-  let claim = __fact_text(opts?.claim ?? input?.claim)
+  const opts = __fact_options(options, "fact")
+  const kind = __fact_kind(opts?.kind ?? input?.kind)
+  const claim = __fact_text(opts?.claim ?? input?.claim)
   if claim == "" {
     __fact_error("HARN-FACT-003", "claim is required")
   }
-  let confidence = __fact_confidence(opts?.confidence ?? input?.confidence)
-  let evidence = __fact_evidence(opts?.evidence ?? input?.evidence)
-  let provenance = __fact_provenance(opts?.provenance ?? input?.provenance)
-  let valid_until = __fact_valid_until(opts?.valid_until ?? input?.valid_until)
-  let asserted_at = __fact_text(opts?.asserted_at ?? input?.asserted_at ?? opts?.now)
+  const confidence = __fact_confidence(opts?.confidence ?? input?.confidence)
+  const evidence = __fact_evidence(opts?.evidence ?? input?.evidence)
+  const provenance = __fact_provenance(opts?.provenance ?? input?.provenance)
+  const valid_until = __fact_valid_until(opts?.valid_until ?? input?.valid_until)
+  const asserted_at = __fact_text(opts?.asserted_at ?? input?.asserted_at ?? opts?.now)
   if (opts?.require_asserted_at ?? false) && asserted_at == "" {
     __fact_error("HARN-FACT-009", "asserted_at is required")
   }
-  let raw_id = __fact_text(opts?.id ?? input?.id)
-  let id = raw_id == "" ? fact_id(kind, claim, evidence, provenance) : raw_id
+  const raw_id = __fact_text(opts?.id ?? input?.id)
+  const id = raw_id == "" ? fact_id(kind, claim, evidence, provenance) : raw_id
   return filter_nil(
     {
       schema: FACT_SCHEMA,
@@ -345,10 +345,10 @@ pub fn fact_validate(input) -> Fact {
  * @api_stability: experimental
  */
 pub fn store_fact(input, options = nil) {
-  let opts = __fact_options(options, "store_fact")
-  let fact_value = fact(input, opts)
-  let {namespace = fact_namespace(opts?.scope), key = fact_key(fact_value)} = opts ?? {}
-  let tags = fact_tags(fact_value, opts?.tags)
+  const opts = __fact_options(options, "store_fact")
+  const fact_value = fact(input, opts)
+  const {namespace = fact_namespace(opts?.scope), key = fact_key(fact_value)} = opts ?? {}
+  const tags = fact_tags(fact_value, opts?.tags)
   return memory_store(
     namespace,
     key,
@@ -376,7 +376,7 @@ fn __fact_positive_int(value, fallback) {
 }
 
 fn __fact_recall_hit(record) {
-  let fact_value = fact_validate(record.value)
+  const fact_value = fact_validate(record.value)
   return filter_nil(
     fact_value
       + {
@@ -401,25 +401,25 @@ fn __fact_recall_hit(record) {
  * @api_stability: experimental
  */
 pub fn recall_facts(query, kind = nil, min_confidence = nil, scope = nil) -> list {
-  let opts = __fact_scope_options(scope)
-  let namespace = opts?.namespace ?? fact_namespace(opts?.scope)
-  let resolved_kind = kind == nil ? nil : __fact_kind(kind)
-  let min = min_confidence == nil ? 0.0 : __fact_confidence(min_confidence)
-  let limit = __fact_positive_int(opts?.limit ?? opts?.k, 5)
-  let recall_limit = __fact_positive_int(opts?.recall_limit, limit * 4)
-  let records = memory_recall(namespace, query, recall_limit < limit ? limit : recall_limit, opts)
-  var out = []
+  const opts = __fact_scope_options(scope)
+  const namespace = opts?.namespace ?? fact_namespace(opts?.scope)
+  const resolved_kind = kind == nil ? nil : __fact_kind(kind)
+  const min = min_confidence == nil ? 0.0 : __fact_confidence(min_confidence)
+  const limit = __fact_positive_int(opts?.limit ?? opts?.k, 5)
+  const recall_limit = __fact_positive_int(opts?.recall_limit, limit * 4)
+  const records = memory_recall(namespace, query, recall_limit < limit ? limit : recall_limit, opts)
+  let out = []
   for record in records {
     if record?.value?.schema != FACT_SCHEMA {
       continue
     }
-    let hit_result = try {
+    const hit_result = try {
       __fact_recall_hit(record)
     }
     if is_err(hit_result) {
       continue
     }
-    let hit = unwrap(hit_result)
+    const hit = unwrap(hit_result)
     if resolved_kind != nil && hit.kind != resolved_kind {
       continue
     }
@@ -439,7 +439,7 @@ fn __fact_forget_predicate(predicate) -> dict {
     __fact_error("HARN-FACT-008", "invalidate_facts predicate is required")
   }
   if type_of(predicate) == "string" {
-    let text = __fact_text(predicate)
+    const text = __fact_text(predicate)
     if text == "" {
       __fact_error("HARN-FACT-008", "invalidate_facts predicate must be non-empty")
     }
@@ -451,15 +451,15 @@ fn __fact_forget_predicate(predicate) -> dict {
   if type_of(predicate) != "dict" {
     __fact_error("HARN-FACT-008", "invalidate_facts predicate must be a string or dict")
   }
-  var out = {}
+  let out = {}
   if predicate?.id != nil {
     out.id = predicate.id
   }
   if predicate?.key != nil {
     out.key = predicate.key
   }
-  let fact_kind = predicate?.kind == nil ? nil : __fact_kind(predicate.kind)
-  let evidence_tags = __fact_forget_evidence_tags(predicate, fact_kind)
+  const fact_kind = predicate?.kind == nil ? nil : __fact_kind(predicate.kind)
+  const evidence_tags = __fact_forget_evidence_tags(predicate, fact_kind)
   if len(evidence_tags) > 0 {
     out.tags = evidence_tags
   } else if fact_kind != nil {
@@ -479,14 +479,14 @@ fn __fact_forget_predicate(predicate) -> dict {
 }
 
 fn __fact_forget_evidence_tags(predicate, fact_kind = nil) -> list<string> {
-  var out = []
+  let out = []
   if predicate?.evidence_ref != nil {
     out = __fact_push_tag(out, __fact_evidence_ref_tag(fact_kind, predicate.evidence_ref))
   }
   if predicate?.evidence == nil {
     return out
   }
-  let evidence = predicate.evidence
+  const evidence = predicate.evidence
   if type_of(evidence) == "string" {
     return __fact_push_tag(out, __fact_evidence_ref_tag(fact_kind, evidence))
   }
@@ -509,7 +509,7 @@ fn __fact_forget_evidence_tags(predicate, fact_kind = nil) -> list<string> {
 }
 
 fn __fact_evidence_ref_tag(fact_kind, ref) -> string {
-  let text = __fact_text(ref)
+  const text = __fact_text(ref)
   if fact_kind == nil {
     return "fact:evidence_ref:" + text
   }
@@ -517,7 +517,7 @@ fn __fact_evidence_ref_tag(fact_kind, ref) -> string {
 }
 
 fn __fact_evidence_kind_tag(fact_kind, kind) -> string {
-  let text = to_string(kind)
+  const text = to_string(kind)
   if fact_kind == nil {
     return "fact:evidence:" + text
   }
@@ -525,7 +525,7 @@ fn __fact_evidence_kind_tag(fact_kind, kind) -> string {
 }
 
 fn __fact_evidence_exact_tag(fact_kind, kind, ref) -> string {
-  let text = to_string(kind) + ":" + __fact_text(ref)
+  const text = to_string(kind) + ":" + __fact_text(ref)
   if fact_kind == nil {
     return "fact:evidence:" + text
   }
@@ -533,8 +533,8 @@ fn __fact_evidence_exact_tag(fact_kind, kind, ref) -> string {
 }
 
 fn __fact_forget_evidence_entry(out, fact_kind, entry) -> list<string> {
-  let kind = entry?.kind == nil ? nil : __fact_evidence_kind(entry.kind)
-  let ref = __fact_text(entry?.ref)
+  const kind = entry?.kind == nil ? nil : __fact_evidence_kind(entry.kind)
+  const ref = __fact_text(entry?.ref)
   if kind != nil && ref != "" {
     return __fact_push_tag(out, __fact_evidence_exact_tag(fact_kind, kind, ref))
   }
@@ -560,7 +560,7 @@ fn __fact_forget_evidence_entry(out, fact_kind, entry) -> list<string> {
  * @api_stability: experimental
  */
 pub fn invalidate_facts(predicate, scope = nil) {
-  let opts = __fact_scope_options(scope)
-  let namespace = opts?.namespace ?? fact_namespace(opts?.scope)
+  const opts = __fact_scope_options(scope)
+  const namespace = opts?.namespace ?? fact_namespace(opts?.scope)
   return memory_forget(namespace, __fact_forget_predicate(predicate), opts)
 }

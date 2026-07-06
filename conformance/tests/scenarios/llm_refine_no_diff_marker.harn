@@ -8,7 +8,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("A short rewrite without a diff.")],
     { ->
-      let result = refine_prompt(
+      const result = refine_prompt(
         {user_prompt: "ramble ramble ramble", style: "concise", model: "mock-model", provider: "mock"},
       )
       __io_println(result.ok)

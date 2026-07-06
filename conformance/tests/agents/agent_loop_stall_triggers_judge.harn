@@ -7,7 +7,7 @@ fn events_of(events, kind) {
 }
 
 fn tool_message_count(session_id) {
-  var count = 0
+  let count = 0
   for message in agent_session_messages(session_id) {
     if message?.role == "tool" && message?.name == "noop" {
       count = count + 1
@@ -17,7 +17,7 @@ fn tool_message_count(session_id) {
 }
 
 pipeline default() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "noop",
@@ -37,8 +37,8 @@ pipeline default() {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"the repeated call is enough\"}"),
     ],
     { ->
-      let session = "stall-judge-done-" + uuid()
-      let captured = agent_capture_events(
+      const session = "stall-judge-done-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Stop when the stall judge accepts.",
@@ -55,8 +55,8 @@ pipeline default() {
           },
         ) },
       )
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
-      let judges = events_of(captured.events, "judge_decision")
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const judges = events_of(captured.events, "judge_decision")
       require len(stalls) == 1, "stall warning should fire once"
       require len(judges) == 1, "stalled done_judge should fire once"
       __io_println(captured.result.status)

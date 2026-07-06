@@ -20,8 +20,8 @@ fn __step_judge_schema() {
 }
 
 fn __serialize_response(llm_result) {
-  let {text = "", tool_calls = []} = llm_result ?? {}
-  var parts = []
+  const {text = "", tool_calls = []} = llm_result ?? {}
+  let parts = []
   if text != "" {
     parts = parts.push("text: " + text)
   }
@@ -35,7 +35,7 @@ fn __serialize_response(llm_result) {
 }
 
 fn __payload(session, llm_result, iteration) {
-  let messages = agent_session_messages(session.session_id)
+  const messages = agent_session_messages(session.session_id)
   return {
     session_id: session.session_id,
     iteration: iteration,
@@ -46,21 +46,21 @@ fn __payload(session, llm_result, iteration) {
 }
 
 fn __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations) {
-  let max_attempts = judge_cfg?.max_attempts ?? 3
+  const max_attempts = judge_cfg?.max_attempts ?? 3
   if attempts >= max_attempts {
     return {skip: true, reason: "max_attempts_reached"}
   }
-  let skip_when_iterations_remaining = judge_cfg?.skip_when_iterations_remaining ?? 1
+  const skip_when_iterations_remaining = judge_cfg?.skip_when_iterations_remaining ?? 1
   if remaining_iterations != nil && remaining_iterations <= skip_when_iterations_remaining {
     return {skip: true, reason: "low_iteration_budget"}
   }
-  let skip_empty = judge_cfg?.skip_when_empty ?? true
-  let text = llm_result?.text ?? ""
-  let tools = llm_result?.tool_calls ?? []
+  const skip_empty = judge_cfg?.skip_when_empty ?? true
+  const text = llm_result?.text ?? ""
+  const tools = llm_result?.tool_calls ?? []
   if skip_empty && text == "" && len(tools) == 0 {
     return {skip: true, reason: "empty_response"}
   }
-  let skip_stalled = judge_cfg?.skip_when_stalled ?? true
+  const skip_stalled = judge_cfg?.skip_when_stalled ?? true
   if skip_stalled && stall_warning != nil {
     return {skip: true, reason: "stall_already_detected"}
   }
@@ -68,14 +68,14 @@ fn __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_itera
 }
 
 fn __invoke(harness: Harness, judge_cfg, opts, payload) {
-  let system = step_judge_system_prompt({rubric: judge_cfg?.rubric ?? "default"})
-  let user = step_judge_user_prompt(payload)
-  let schema = __step_judge_schema()
-  let ran = __judge_run_checkpoint(harness, judge_cfg, opts, payload, "agent.step_judge", system, user, schema)
-  let checkpoint = ran.checkpoint
-  let duration_ms = ran.duration_ms
+  const system = step_judge_system_prompt({rubric: judge_cfg?.rubric ?? "default"})
+  const user = step_judge_user_prompt(payload)
+  const schema = __step_judge_schema()
+  const ran = __judge_run_checkpoint(harness, judge_cfg, opts, payload, "agent.step_judge", system, user, schema)
+  const checkpoint = ran.checkpoint
+  const duration_ms = ran.duration_ms
   if !checkpoint.ok {
-    let fail_open = judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? true
+    const fail_open = judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? true
     if fail_open {
       // Fail-open: the turn PROCEEDS (we deliberately do not block on the
       // judge's own flakiness). But the swallow must be OBSERVABLE — a
@@ -107,11 +107,11 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
       typed_checkpoint: checkpoint,
     }
   }
-  let result = checkpoint.data
-  let {reasoning = "", critique = "", confidence = 1.0} = result ?? {}
-  let pass_verdicts = ["pass", "yes", "ok", "advance", "proceed", "approve"]
-  let feedback_default = judge_cfg?.feedback_fallback ?? "The previous response should be revised."
-  let outcome = __judge_classify_verdict(
+  const result = checkpoint.data
+  const {reasoning = "", critique = "", confidence = 1.0} = result ?? {}
+  const pass_verdicts = ["pass", "yes", "ok", "advance", "proceed", "approve"]
+  const feedback_default = judge_cfg?.feedback_fallback ?? "The previous response should be revised."
+  const outcome = __judge_classify_verdict(
     result?.verdict ?? "revise",
     pass_verdicts,
     [critique, reasoning],
@@ -128,8 +128,8 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
 }
 
 fn __emit_decision(session_id, iteration, on_veto, verdict) {
-  let {usage = {}, provider = "", model = ""} = verdict?.typed_checkpoint ?? {}
-  let cost_est = if provider != "" && model != "" {
+  const {usage = {}, provider = "", model = ""} = verdict?.typed_checkpoint ?? {}
+  const cost_est = if provider != "" && model != "" {
     estimate_call_cost(
       {
         provider: provider,
@@ -208,14 +208,14 @@ pub fn agent_step_judge(
   attempts = 0,
   remaining_iterations = nil,
 ) {
-  let judge_cfg = opts?.step_judge
+  const judge_cfg = opts?.step_judge
   if judge_cfg == nil {
     return {vetoed: false, skipped: true, reason: "not_configured"}
   }
-  let on_veto = judge_cfg?.on_veto ?? "replace"
-  let skip = __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)
+  const on_veto = judge_cfg?.on_veto ?? "replace"
+  const skip = __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)
   if skip.skip {
-    let verdict = {
+    const verdict = {
       vetoed: false,
       skipped: true,
       reason: skip.reason,
@@ -228,8 +228,8 @@ pub fn agent_step_judge(
     __emit_decision(session.session_id, iteration, on_veto, verdict)
     return verdict + {on_veto: on_veto, attempts: attempts}
   }
-  let payload = __payload(session, llm_result, iteration)
-  let verdict = __invoke(harness, judge_cfg, opts, payload)
+  const payload = __payload(session, llm_result, iteration)
+  const verdict = __invoke(harness, judge_cfg, opts, payload)
   __emit_decision(session.session_id, iteration, on_veto, verdict)
   return verdict + {on_veto: on_veto, attempts: attempts + 1}
 }

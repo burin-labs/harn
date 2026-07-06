@@ -7,18 +7,18 @@ import {
 } from "std/workflow/stage"
 
 pipeline default() {
-  let verification = workflow_evaluate_verification(
+  const verification = workflow_evaluate_verification(
     {verify: {assert_text: "ok", expect_status: 0}, result: {visible_text: "all ok", exit_status: 0}},
   )
   __io_println(verification.kind)
   __io_println(verification.ok)
   __io_println(len(verification.checks))
-  let failed_verification = workflow_evaluate_verification(
+  const failed_verification = workflow_evaluate_verification(
     {verify: {assert_text: "missing", expect_status: 1}, result: {text: "present", exit_status: 0}},
   )
   __io_println(failed_verification.ok)
   __io_println(failed_verification.checks[1].actual)
-  let condition = workflow_evaluate_condition(
+  const condition = workflow_evaluate_condition(
     {
       metadata: {contains_text: "needle"},
       artifacts: [{id: "a", kind: "summary", text: "hay"}, {id: "b", kind: "summary", text: "needle here"}],
@@ -26,31 +26,31 @@ pipeline default() {
   )
   __io_println(condition.matched)
   __io_println(json_stringify(condition.consumed_artifact_ids))
-  let kind_condition = workflow_evaluate_condition(
+  const kind_condition = workflow_evaluate_condition(
     {metadata: {artifact_kind: "diff"}, artifacts: [{id: "d", kind: "diff"}]},
   )
   __io_println(kind_condition.matched)
-  let verify_outcome = workflow_classify_stage_outcome(
+  const verify_outcome = workflow_classify_stage_outcome(
     {node_kind: "verify", result: {status: "completed"}, verification: {ok: false}},
   )
   __io_println(verify_outcome.outcome)
   __io_println(verify_outcome.branch)
-  let stuck_outcome = workflow_classify_stage_outcome(
+  const stuck_outcome = workflow_classify_stage_outcome(
     {node_kind: "stage", result: {status: "stuck"}, verification: {ok: true}},
   )
   __io_println(stuck_outcome.outcome)
   __io_println(stuck_outcome.branch)
-  let done_outcome = workflow_classify_stage_outcome(
+  const done_outcome = workflow_classify_stage_outcome(
     {node_kind: "stage", result: {status: "done"}, verification: {ok: true}},
   )
   __io_println(done_outcome.outcome)
   __io_println(done_outcome.branch)
-  let subagent_outcome = workflow_classify_stage_outcome(
+  const subagent_outcome = workflow_classify_stage_outcome(
     {node_kind: "subagent", result: {status: "completed"}, verification: {ok: true}},
   )
   __io_println(subagent_outcome.outcome)
   __io_println(subagent_outcome.branch)
-  let static_condition = workflow_prepare_static_stage(
+  const static_condition = workflow_prepare_static_stage(
     {
       node_id: "gate",
       node: {kind: "condition", metadata: {artifact_kind: "summary"}},
@@ -59,7 +59,7 @@ pipeline default() {
   )
   __io_println(static_condition.result.text)
   __io_println(static_condition.outcome)
-  let static_reduce = workflow_prepare_static_stage(
+  const static_reduce = workflow_prepare_static_stage(
     {
       node_id: "reduce",
       node: {kind: "reduce", reduce_policy: {separator: " / "}, output_contract: {output_kinds: ["plan"]}},
@@ -69,7 +69,7 @@ pipeline default() {
   __io_println(static_reduce.result.text)
   __io_println(static_reduce.artifacts[0].kind)
   __io_println(json_stringify(static_reduce.artifacts[0].lineage))
-  let static_escalation = workflow_prepare_static_stage(
+  const static_escalation = workflow_prepare_static_stage(
     {
       node_id: "escalate",
       node: {kind: "escalation", escalation_policy: {queue: "review", level: "high", reason: "needs owner"}},
@@ -81,7 +81,7 @@ pipeline default() {
   __io_println(static_escalation.branch)
   clear_host_mocks()
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
-  let static_gate = workflow_prepare_static_stage(
+  const static_gate = workflow_prepare_static_stage(
     {
       node_id: "gate",
       node: {
@@ -95,12 +95,12 @@ pipeline default() {
   __io_println(static_gate.branch)
   __io_println(static_gate.artifacts[0].data.approval_id)
   __io_println(static_gate.artifacts[0].data.approved)
-  let argv = if platform() == "windows" {
+  const argv = if platform() == "windows" {
     ["cmd", "/C", "echo|set /p=command-ok"]
   } else {
     ["printf", "command-ok"]
   }
-  let static_command = workflow_prepare_static_stage(
+  const static_command = workflow_prepare_static_stage(
     {
       node_id: "cmd",
       node: {kind: "stage", mode: "command", metadata: {command_tool: "run", command_args: argv}},
@@ -111,7 +111,7 @@ pipeline default() {
   __io_println(static_command.result.ok)
   __io_println(contains(static_command.result.text, "command-ok"))
   __io_println(static_command.artifacts[0].kind)
-  let static_compact = workflow_prepare_static_stage(
+  const static_compact = workflow_prepare_static_stage(
     {
       node_id: "compact",
       node: {

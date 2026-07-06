@@ -13,8 +13,8 @@ pipeline main(task) {
     __io_eprintln("usage: compare_generated_text.harn <committed> <generated>")
     return 2
   }
-  let committed = harness.fs.read_text(argv[0])
-  let generated = harness.fs.read_text(argv[1])
+  const committed = harness.fs.read_text(argv[0])
+  const generated = harness.fs.read_text(argv[1])
   return if normalize(committed) == normalize(generated) {
     0
   } else {

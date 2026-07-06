@@ -1,7 +1,7 @@
 // Tests for scripts/affected-crates.harn — exercise pure selection helpers.
 import "../affected-crates.harn"
 
-let WORKSPACE = {
+const WORKSPACE = {
   crate_dirs: {
     "harn-core": "/repo/crates/harn-core",
     "harn-cli": "/repo/crates/harn-cli",
@@ -22,7 +22,7 @@ pipeline test_global_hits_include_harn_selector_script(task) {
 
 @test
 pipeline test_workspace_from_metadata_extracts_workspace_deps(task) {
-  let meta = {
+  const meta = {
     workspace_members: ["id-core", "id-cli"],
     packages: [
       {
@@ -52,7 +52,7 @@ pipeline test_workspace_from_metadata_extracts_workspace_deps(task) {
 
 @test
 pipeline test_owning_crate_prefers_longest_directory(task) {
-  let dirs = {parent: "/repo/crates", child: "/repo/crates/harn-cli"}
+  const dirs = {parent: "/repo/crates", child: "/repo/crates/harn-cli"}
   assert_eq(owning_crate("crates/harn-cli/src/main.rs", dirs, "/repo"), "child")
   assert_eq(owning_crate("docs/index.md", dirs, "/repo"), nil)
 }
@@ -68,7 +68,7 @@ pipeline test_reverse_dep_closure_selects_dependents(task) {
 
 @test
 pipeline test_selected_packages_global_change_forces_full_workspace(task) {
-  let selected = selected_packages(["Cargo.lock"], WORKSPACE, "/repo")
+  const selected = selected_packages(["Cargo.lock"], WORKSPACE, "/repo")
   assert_eq(selected.mode, "full")
   assert_eq(selected.selected, WORKSPACE.all_crates)
   assert_eq(selected.global_hits, ["Cargo.lock"])
@@ -76,7 +76,7 @@ pipeline test_selected_packages_global_change_forces_full_workspace(task) {
 
 @test
 pipeline test_selected_packages_unowned_change_selects_nothing(task) {
-  let selected = selected_packages(["docs/index.md"], WORKSPACE, "/repo")
+  const selected = selected_packages(["docs/index.md"], WORKSPACE, "/repo")
   assert_eq(selected.mode, "empty")
   assert_eq(selected.selected, [])
   assert_eq(selected.unowned, ["docs/index.md"])
@@ -84,7 +84,7 @@ pipeline test_selected_packages_unowned_change_selects_nothing(task) {
 
 @test
 pipeline test_selected_packages_crate_change_expands_reverse_deps(task) {
-  let selected = selected_packages(["crates/harn-core/src/lib.rs"], WORKSPACE, "/repo")
+  const selected = selected_packages(["crates/harn-core/src/lib.rs"], WORKSPACE, "/repo")
   assert_eq(selected.mode, "partial")
   assert_eq(selected.directly_changed, ["harn-core"])
   assert_eq(selected.selected, ["harn-cli", "harn-core", "harn-tools"])

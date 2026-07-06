@@ -2,7 +2,7 @@ import "std/agents"
 import "std/context"
 
 pipeline default() {
-  let flow = workflow(
+  const flow = workflow(
     {
       name: "session-demo",
       model_tier: "mid",
@@ -10,22 +10,22 @@ pipeline default() {
       act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
     },
   )
-  let result = task_run("Write a note", flow, {provider: "mock"})
-  let session = workflow_session(result)
+  const result = task_run("Write a note", flow, {provider: "mock"})
+  const session = workflow_session(result)
   __io_println(session?._type == "workflow_session")
   __io_println(session?.message_count >= 1)
-  let forked = workflow_session_fork(session)
+  const forked = workflow_session_fork(session)
   __io_println(forked?.transcript_state == "forked")
-  let archived = workflow_session_archive(forked)
+  const archived = workflow_session_archive(forked)
   __io_println(archived?.transcript_state == "archived")
-  let resumed = workflow_session_resume(archived)
+  const resumed = workflow_session_resume(archived)
   __io_println(resumed?.transcript_state == "active")
-  let compacted = workflow_session_compact(resumed, {provider: "mock", keep_last: 1})
+  const compacted = workflow_session_compact(resumed, {provider: "mock", keep_last: 1})
   __io_println(compacted?.summary != nil)
-  let persisted = workflow_session_persist(result, ".harn-runs/conformance-session.json")
+  const persisted = workflow_session_persist(result, ".harn-runs/conformance-session.json")
   __io_println(persisted?.run?.persisted_path != nil)
-  let restored = workflow_session_restore(persisted?.run?.persisted_path)
+  const restored = workflow_session_restore(persisted?.run?.persisted_path)
   __io_println(restored?.message_count >= 1)
-  let reset = workflow_session_reset(restored, true)
+  const reset = workflow_session_reset(restored, true)
   __io_println(reset?.message_count == 0)
 }

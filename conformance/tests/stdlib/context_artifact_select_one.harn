@@ -16,42 +16,42 @@ fn mk(id, dir, fresh) {
 }
 
 pipeline default() {
-  let deep = mk("deep", "src/parser", "fresh")
-  let shallow = mk("shallow", "src", "fresh")
+  const deep = mk("deep", "src/parser", "fresh")
+  const shallow = mk("shallow", "src", "fresh")
   // 1. depth/altitude tie-break: both are ancestors of src/parser/lexer and tie
   // on role/language/freshness, so the deeper, more-specific scope wins.
-  let pick = context_artifact_select_one(
+  const pick = context_artifact_select_one(
     [shallow, deep],
     {role: "implementer", language: "rust", dir: "src/parser/lexer"},
   )
   __io_println(pick.reason)
   __io_println(pick.artifact.id)
   // 2. exact scope beats a shallower ancestor.
-  let exact = context_artifact_select_one(
+  const exact = context_artifact_select_one(
     [shallow, deep],
     {role: "implementer", language: "rust", dir: "src/parser"},
   )
   __io_println(exact.artifact.id)
   // 3. ambiguity abstention: two artifacts identical on every signal -> abstain.
-  let a = mk("a", "src", "fresh")
-  let b = mk("b", "src", "fresh")
-  let amb = context_artifact_select_one([a, b], {role: "implementer", language: "rust", dir: "src"})
+  const a = mk("a", "src", "fresh")
+  const b = mk("b", "src", "fresh")
+  const amb = context_artifact_select_one([a, b], {role: "implementer", language: "rust", dir: "src"})
   __io_println(amb.reason)
   __io_println(len(amb.candidates))
   // 4. staleness suppression: a stale, more-specific artifact is suppressed in
   // favor of a fresh, shallower one.
-  let staleDeep = mk("staleDeep", "src/parser", "stale")
-  let freshShallow = mk("freshShallow", "src", "fresh")
-  let sup = context_artifact_select_one(
+  const staleDeep = mk("staleDeep", "src/parser", "stale")
+  const freshShallow = mk("freshShallow", "src", "fresh")
+  const sup = context_artifact_select_one(
     [staleDeep, freshShallow],
     {role: "implementer", language: "rust", dir: "src/parser/lexer"},
   )
   __io_println(sup.reason)
   __io_println(sup.artifact.id)
   // 5. all candidates stale -> staleness reason, inject nothing.
-  let allStale = context_artifact_select_one([staleDeep], {role: "implementer", language: "rust", dir: "src/parser"})
+  const allStale = context_artifact_select_one([staleDeep], {role: "implementer", language: "rust", dir: "src/parser"})
   __io_println(allStale.reason)
   // 6. empty input -> no_context_artifacts.
-  let none = context_artifact_select_one([], {})
+  const none = context_artifact_select_one([], {})
   __io_println(none.reason)
 }

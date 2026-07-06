@@ -1,5 +1,5 @@
 // Test: top-level code executes without a pipeline block
-let x = 1 + 2
+const x = 1 + 2
 
 __io_println(x)
 
@@ -9,7 +9,7 @@ fn double(n) {
 
 __io_println(double(5))
 
-let items = [1, 2, 3]
+const items = [1, 2, 3]
 
 for item in items {
   __io_print("${item} ")

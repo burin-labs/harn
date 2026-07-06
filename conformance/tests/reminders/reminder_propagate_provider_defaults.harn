@@ -1,7 +1,7 @@
 import { agent_reminder_providers_fire } from "std/agent/state"
 
 pipeline main() {
-  let token_session = agent_session_open("reminder-propagate-provider-token")
+  const token_session = agent_session_open("reminder-propagate-provider-token")
   agent_session_reset(token_session)
   agent_reminder_providers_fire(
     token_session,
@@ -9,8 +9,8 @@ pipeline main() {
     {session: {id: token_session}, tokens_used: 80, context_window: 100},
     {},
   )
-  let token = transcript_events_by_kind(agent_session_snapshot(token_session), "system_reminder")[0].reminder
-  let idle_session = agent_session_open("reminder-propagate-provider-idle")
+  const token = transcript_events_by_kind(agent_session_snapshot(token_session), "system_reminder")[0].reminder
+  const idle_session = agent_session_open("reminder-propagate-provider-idle")
   agent_session_reset(idle_session)
   agent_reminder_providers_fire(
     idle_session,
@@ -18,8 +18,8 @@ pipeline main() {
     {session: {id: idle_session}, wake_interval_ms: 60000},
     {},
   )
-  let idle = transcript_events_by_kind(agent_session_snapshot(idle_session), "system_reminder")[0].reminder
-  let tool_session = agent_session_open("reminder-propagate-provider-tool")
+  const idle = transcript_events_by_kind(agent_session_snapshot(idle_session), "system_reminder")[0].reminder
+  const tool_session = agent_session_open("reminder-propagate-provider-tool")
   agent_session_reset(tool_session)
   agent_reminder_providers_fire(
     tool_session,
@@ -27,8 +27,8 @@ pipeline main() {
     {session: {id: tool_session}, tool_name: "read_file", truncated: true, original_size: 4096},
     {},
   )
-  let tool_reminder = transcript_events_by_kind(agent_session_snapshot(tool_session), "system_reminder")[0].reminder
-  let recap_session = agent_session_open("reminder-propagate-provider-recap")
+  const tool_reminder = transcript_events_by_kind(agent_session_snapshot(tool_session), "system_reminder")[0].reminder
+  const recap_session = agent_session_open("reminder-propagate-provider-recap")
   agent_session_reset(recap_session)
   agent_reminder_providers_fire(
     recap_session,
@@ -36,7 +36,7 @@ pipeline main() {
     {session: {id: recap_session}, archived_messages: 3, summary: "recap"},
     {},
   )
-  let recap = transcript_events_by_kind(agent_session_snapshot(recap_session), "system_reminder")[0].reminder
+  const recap = transcript_events_by_kind(agent_session_snapshot(recap_session), "system_reminder")[0].reminder
   __io_println(token.propagate)
   __io_println(idle.propagate)
   __io_println(tool_reminder.propagate)

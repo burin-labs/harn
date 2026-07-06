@@ -2,7 +2,7 @@ import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 fn __composition_registry(value) {
   if value == nil {
-    let current = __host_current_tool_registry()
+    const current = __host_current_tool_registry()
     if current == nil {
       return tool_registry()
     }
@@ -25,7 +25,7 @@ fn __composition_mcp_tool(entry) {
     || entry?._mcp_tool_name != nil {
     return true
   }
-  let function = entry?.function
+  const function = entry?.function
   if type_of(function) == "dict" {
     return function?.executor == "mcp_server" || function?._mcp_server != nil
       || function?.mcp_server != nil
@@ -35,8 +35,8 @@ fn __composition_mcp_tool(entry) {
 }
 
 fn __composition_mcp_registry(value) {
-  let registry = __composition_registry(value)
-  var tools = []
+  const registry = __composition_registry(value)
+  let tools = []
   for entry in registry?.tools ?? [] {
     if __composition_mcp_tool(entry) {
       tools = tools.push(entry)
@@ -46,17 +46,17 @@ fn __composition_mcp_registry(value) {
 }
 
 fn __composition_mcp_ranked_names(registry, query, options) {
-  let text = trim(to_string(query ?? ""))
+  const text = trim(to_string(query ?? ""))
   if text == "" {
     return nil
   }
-  let opts = options ?? {}
-  let ranked = __host_tool_search_score(
+  const opts = options ?? {}
+  const ranked = __host_tool_search_score(
     text,
     registry,
     {strategy: opts?.strategy ?? "bm25", max_results: opts?.limit ?? opts?.max_results ?? 20},
   )
-  var names = []
+  let names = []
   for item in ranked {
     if item?.tool_name != nil {
       names = names.push(item.tool_name)
@@ -66,10 +66,10 @@ fn __composition_mcp_ranked_names(registry, query, options) {
 }
 
 fn __composition_mcp_servers(manifest) {
-  var servers = []
+  let servers = []
   for binding in manifest?.bindings ?? [] {
-    let metadata = binding?.metadata ?? {}
-    let server = metadata?._mcp_server ?? metadata?.mcp_server
+    const metadata = binding?.metadata ?? {}
+    const server = metadata?._mcp_server ?? metadata?.mcp_server
     if server != nil && !contains(servers, server) {
       servers = servers.push(server)
     }
@@ -78,7 +78,7 @@ fn __composition_mcp_servers(manifest) {
 }
 
 fn __composition_execute_options(opts, dispatcher) {
-  var out = {dispatcher: dispatcher}
+  let out = {dispatcher: dispatcher}
   for key in [
     "session_id",
     "run_id",
@@ -114,7 +114,7 @@ fn __composition_mcp_reduced_result(report, opts) {
   if opts?.include_report ?? false {
     return report
   }
-  let run = report?.run ?? {}
+  const run = report?.run ?? {}
   return {
     ok: report?.ok ?? false,
     result: run?.result,
@@ -133,8 +133,8 @@ fn __composition_mcp_reduced_result(report, opts) {
  * @api_stability: experimental
  */
 pub fn composition_mcp_manifest(tools = nil, options = nil) {
-  let opts = options ?? {}
-  let registry = __composition_mcp_registry(tools)
+  const opts = options ?? {}
+  const registry = __composition_mcp_registry(tools)
   return composition_binding_manifest(registry, opts?.manifest_options ?? opts)
 }
 
@@ -147,15 +147,15 @@ pub fn composition_mcp_manifest(tools = nil, options = nil) {
  * @example: composition_mcp_api(tool_registry, {query: "issues"})
  */
 pub fn composition_mcp_api(tools = nil, options = nil) {
-  let opts = options ?? {}
-  let registry = __composition_mcp_registry(tools)
-  let names = __composition_mcp_ranked_names(registry, opts?.query, opts)
-  let selected = if names == nil {
+  const opts = options ?? {}
+  const registry = __composition_mcp_registry(tools)
+  const names = __composition_mcp_ranked_names(registry, opts?.query, opts)
+  const selected = if names == nil {
     registry
   } else {
     tool_select(registry, names)
   }
-  let manifest = composition_binding_manifest(selected, opts?.manifest_options ?? opts)
+  const manifest = composition_binding_manifest(selected, opts?.manifest_options ?? opts)
   return {
     manifest: manifest,
     harn_api: composition_harn_api(manifest),
@@ -173,7 +173,7 @@ pub fn composition_mcp_api(tools = nil, options = nil) {
  * @example: composition_mcp_search(tool_registry, "issues", {limit: 5})
  */
 pub fn composition_mcp_search(tools = nil, query = "", options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return composition_mcp_api(tools, opts + {query: query})
 }
 
@@ -186,16 +186,16 @@ pub fn composition_mcp_search(tools = nil, query = "", options = nil) {
  * @example: composition_mcp_execute("return github_search({query: \"bug\"})", tools)
  */
 pub fn composition_mcp_execute(snippet, tools = nil, options = nil) {
-  let opts = options ?? {}
-  let source_tools = opts?.tools ?? tools
-  let registry = __composition_mcp_registry(source_tools)
-  let manifest = opts?.manifest ?? composition_binding_manifest(registry, opts?.manifest_options ?? opts)
-  let dispatch_opts = opts?.dispatch_options ?? opts
-  let dispatch = { name, input ->
+  const opts = options ?? {}
+  const source_tools = opts?.tools ?? tools
+  const registry = __composition_mcp_registry(source_tools)
+  const manifest = opts?.manifest ?? composition_binding_manifest(registry, opts?.manifest_options ?? opts)
+  const dispatch_opts = opts?.dispatch_options ?? opts
+  const dispatch = { name, input ->
     let result = agent_dispatch_tool_call({name: name, arguments: input}, registry, dispatch_opts)
     return __composition_dispatch_value(result, name)
   }
-  let report = composition_execute(snippet, manifest, __composition_execute_options(opts, dispatch))
+  const report = composition_execute(snippet, manifest, __composition_execute_options(opts, dispatch))
   return __composition_mcp_reduced_result(report, opts)
 }
 
@@ -206,8 +206,8 @@ pub fn composition_mcp_execute(snippet, tools = nil, options = nil) {
  * @errors: []
  */
 pub fn composition_mcp_tools(registry = nil, options = nil) {
-  let opts = options ?? {}
-  var tools = registry ?? tool_registry()
+  const opts = options ?? {}
+  let tools = registry ?? tool_registry()
   tools = tool_define(
     tools,
     "harn.code.search_examples",
@@ -233,8 +233,8 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
       returns: {type: "object"},
       annotations: {kind: "search", side_effect_level: "read_only", inline_result: true},
       handler: { args ->
-        let call_args = args ?? {}
-        let manifest = call_args?.manifest
+        const call_args = args ?? {}
+        const manifest = call_args?.manifest
         if manifest != nil {
           return {
             manifest: manifest,
@@ -271,7 +271,7 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
       returns: {type: "object"},
       annotations: {kind: "think", side_effect_level: "read_only", inline_result: true},
       handler: { args ->
-        let call_args = args ?? {}
+        const call_args = args ?? {}
         if call_args?.tools != nil || opts?.tools != nil {
           return composition_mcp_execute(call_args.snippet, call_args?.tools ?? opts?.tools, opts + call_args)
         }

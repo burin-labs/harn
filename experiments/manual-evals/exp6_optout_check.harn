@@ -1,6 +1,6 @@
 /** EXP6: Verify `done_sentinel: ""` opt-out cleanly omits sentinel guidance. */
 fn build_tools() -> dict {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "calc",
@@ -11,9 +11,9 @@ fn build_tools() -> dict {
 }
 
 pipeline main(task) {
-  let registry = build_tools()
+  const registry = build_tools()
   log("--- with default sentinel ---")
-  let r1 = agent_loop(
+  const r1 = agent_loop(
     "What is 17 * 23 + 5?",
     "/no_think You are a math assistant.",
     {
@@ -27,7 +27,7 @@ pipeline main(task) {
   )
   log("default: status=${r1.status} iters=${r1.llm.iterations}")
   log("\n--- with done_sentinel: \"\" (opt out) ---")
-  let r2 = agent_loop(
+  const r2 = agent_loop(
     "What is 17 * 23 + 5?",
     "/no_think You are a math assistant.",
     {
@@ -42,7 +42,7 @@ pipeline main(task) {
   )
   log("opt-out: status=${r2.status} iters=${r2.llm.iterations}")
   log("\n--- with done_sentinel: \"STOP\" (custom) ---")
-  let r3 = agent_loop(
+  const r3 = agent_loop(
     "What is 17 * 23 + 5?",
     "/no_think You are a math assistant.",
     {

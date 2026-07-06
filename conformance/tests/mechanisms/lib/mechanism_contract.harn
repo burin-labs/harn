@@ -73,7 +73,7 @@ pub fn first_contract_event(events, event_type: string) {
  * @example: count_contract_events(captured.events, "loop_stuck")
  */
 pub fn count_contract_events(events, event_type: string) -> int {
-  var n = 0
+  let n = 0
   for event in events {
     if to_string(event?.type ?? "") == event_type {
       n = n + 1

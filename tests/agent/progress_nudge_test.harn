@@ -13,7 +13,7 @@ import { __progress_nudge_text } from "std/agent/loop"
  * correct (the model is churning pure prose).
  */
 pipeline test_depth4_toolless_keeps_narration_framing(_task) {
-  let msg = __progress_nudge_text(4, true, "text", false)
+  const msg = __progress_nudge_text(4, true, "text", false)
   assert(
     contains(msg, "narration loop") && contains(msg, "Do not restate the plan"),
     "toolless depth>=4 must keep the narration-loop framing; got: ${msg}",
@@ -26,7 +26,7 @@ pipeline test_depth4_toolless_keeps_narration_framing(_task) {
  * toward a DIFFERENT change instead.
  */
 pipeline test_depth4_with_tool_calls_drops_narration_framing(_task) {
-  let msg = __progress_nudge_text(4, true, "text", true)
+  const msg = __progress_nudge_text(4, true, "text", true)
   assert(
     !contains(msg, "narration loop"),
     "depth>=4 WITH real tool calls must NOT accuse the model of a narration loop; got: ${msg}",
@@ -46,9 +46,9 @@ pipeline test_depth4_with_tool_calls_drops_narration_framing(_task) {
  * accusation at depth 2/3 to begin with).
  */
 pipeline test_lower_depths_unchanged(_task) {
-  let d3 = __progress_nudge_text(3, true, "text", true)
+  const d3 = __progress_nudge_text(3, true, "text", true)
   assert(contains(d3, "Still no progress after"), "depth 3 copy unchanged; got: ${d3}")
   assert(!contains(d3, "narration loop"), "depth 3 never asserted a narration loop; got: ${d3}")
-  let d2 = __progress_nudge_text(2, true, "text", false)
+  const d2 = __progress_nudge_text(2, true, "text", false)
   assert(contains(d2, "No progress last turn"), "depth 2 copy unchanged; got: ${d2}")
 }

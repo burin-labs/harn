@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * workflow-level skill wiring is no longer silently dropped.
  */
 pipeline test(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "deploy_service",
@@ -32,8 +32,8 @@ pipeline test(task) {
     when_to_use "User asks to check metrics or dashboards"
     allowed_tools ["query_metrics"]
   }
-  let registry = skill_define(ship, "inspect", skill_find(inspect, "inspect") ?? {})
-  let flow = workflow_graph(
+  const registry = skill_define(ship, "inspect", skill_find(inspect, "inspect") ?? {})
+  const flow = workflow_graph(
     {
       name: "deploy",
       entry: "execute",
@@ -55,16 +55,16 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("Queued up deploy."), llm_text("Verification ok.")],
     { ->
-      let result = workflow_execute(
+      const result = workflow_execute(
         "Ship the new release to production",
         flow,
         [],
         {max_steps: 4, skills: registry, skill_match: {strategy: "metadata"}},
       )
       assert(result?.status == "completed", "workflow completes")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
-      let execute_system = calls[0].system
+      const execute_system = calls[0].system
       assert(
         contains(execute_system, "## Active skills"),
         "skills section surfaces in workflow stage prompt",
@@ -75,9 +75,9 @@ pipeline test(task) {
         contains(execute_system, "Scoped tools: deploy_service"),
         "allowed_tools listed in workflow stage prompt",
       )
-      let execute_tools = calls[0].tools
-      var seen_deploy = false
-      var seen_metrics = false
+      const execute_tools = calls[0].tools
+      let seen_deploy = false
+      let seen_metrics = false
       if execute_tools != nil {
         for t in execute_tools {
           if t?.function?.name == "deploy_service" {

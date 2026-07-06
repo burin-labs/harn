@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let nums = [1, 2, 3]
-  let doubled = nums.map({ x -> x * 2 })
+  const nums = [1, 2, 3]
+  const doubled = nums.map({ x -> x * 2 })
   log(doubled)
 }

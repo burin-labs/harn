@@ -1317,10 +1317,7 @@ impl TypeChecker {
                     }
                 }
             }
-            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
-                self.visit_for_deprecation(value);
-            }
-            Node::ConstBinding { value, .. } => {
+            Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
                 self.visit_for_deprecation(value);
             }
             Node::Assignment { target, value, .. } => {

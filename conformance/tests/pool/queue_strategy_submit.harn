@@ -5,10 +5,10 @@ fn stamp(order) {
 }
 
 pipeline default() {
-  let fifo_pool = pool_create({name: "queue-strategy-fifo", max_concurrent: 1, queue: fifo()})
-  let fifo_order = atomic(0)
-  let fifo_gate = channel(nil, 1)
-  let fifo_warmup = fifo_pool
+  const fifo_pool = pool_create({name: "queue-strategy-fifo", max_concurrent: 1, queue: fifo()})
+  const fifo_order = atomic(0)
+  const fifo_gate = channel(nil, 1)
+  const fifo_warmup = fifo_pool
     .submit(
     { ->
       receive(fifo_gate)
@@ -16,19 +16,19 @@ pipeline default() {
     },
     {tenant_id: "warmup"},
   )
-  let fifo_a1 = fifo_pool.submit(stamp(fifo_order), {tenant_id: "a"})
-  let fifo_b1 = fifo_pool.submit(stamp(fifo_order), {tenant_id: "b"})
-  let fifo_a2 = fifo_pool.submit(stamp(fifo_order), {tenant_id: "a"})
+  const fifo_a1 = fifo_pool.submit(stamp(fifo_order), {tenant_id: "a"})
+  const fifo_b1 = fifo_pool.submit(stamp(fifo_order), {tenant_id: "b"})
+  const fifo_a2 = fifo_pool.submit(stamp(fifo_order), {tenant_id: "a"})
   send(fifo_gate, "go")
-  let fifo_results = pool_wait([fifo_warmup, fifo_a1, fifo_b1, fifo_a2])
+  const fifo_results = pool_wait([fifo_warmup, fifo_a1, fifo_b1, fifo_a2])
   log("fifo")
   log(fifo_results[1].result)
   log(fifo_results[2].result)
   log(fifo_results[3].result)
-  let lifo_pool = pool_create({name: "queue-strategy-lifo", max_concurrent: 1, queue: lifo()})
-  let lifo_order = atomic(0)
-  let lifo_gate = channel(nil, 1)
-  let lifo_warmup = lifo_pool
+  const lifo_pool = pool_create({name: "queue-strategy-lifo", max_concurrent: 1, queue: lifo()})
+  const lifo_order = atomic(0)
+  const lifo_gate = channel(nil, 1)
+  const lifo_warmup = lifo_pool
     .submit(
     { ->
       receive(lifo_gate)
@@ -36,19 +36,19 @@ pipeline default() {
     },
     {tenant_id: "warmup"},
   )
-  let lifo_a1 = lifo_pool.submit(stamp(lifo_order), {tenant_id: "a"})
-  let lifo_b1 = lifo_pool.submit(stamp(lifo_order), {tenant_id: "b"})
-  let lifo_a2 = lifo_pool.submit(stamp(lifo_order), {tenant_id: "a"})
+  const lifo_a1 = lifo_pool.submit(stamp(lifo_order), {tenant_id: "a"})
+  const lifo_b1 = lifo_pool.submit(stamp(lifo_order), {tenant_id: "b"})
+  const lifo_a2 = lifo_pool.submit(stamp(lifo_order), {tenant_id: "a"})
   send(lifo_gate, "go")
-  let lifo_results = pool_wait([lifo_warmup, lifo_a1, lifo_b1, lifo_a2])
+  const lifo_results = pool_wait([lifo_warmup, lifo_a1, lifo_b1, lifo_a2])
   log("lifo")
   log(lifo_results[3].result)
   log(lifo_results[2].result)
   log(lifo_results[1].result)
-  let priority_pool = pool_create({name: "queue-strategy-priority", max_concurrent: 1, queue: priority()})
-  let priority_order = atomic(0)
-  let priority_gate = channel(nil, 1)
-  let priority_warmup = priority_pool
+  const priority_pool = pool_create({name: "queue-strategy-priority", max_concurrent: 1, queue: priority()})
+  const priority_order = atomic(0)
+  const priority_gate = channel(nil, 1)
+  const priority_warmup = priority_pool
     .submit(
     { ->
       receive(priority_gate)
@@ -56,22 +56,22 @@ pipeline default() {
     },
     {tenant_id: "warmup", priority: 0},
   )
-  let priority_a1 = priority_pool.submit(stamp(priority_order), {tenant_id: "a", priority: 0})
-  let priority_b1 = priority_pool.submit(stamp(priority_order), {tenant_id: "b", priority: 10})
-  let priority_a2 = priority_pool.submit(stamp(priority_order), {tenant_id: "a", priority: 5})
+  const priority_a1 = priority_pool.submit(stamp(priority_order), {tenant_id: "a", priority: 0})
+  const priority_b1 = priority_pool.submit(stamp(priority_order), {tenant_id: "b", priority: 10})
+  const priority_a2 = priority_pool.submit(stamp(priority_order), {tenant_id: "a", priority: 5})
   send(priority_gate, "go")
-  let priority_results = pool_wait([priority_warmup, priority_a1, priority_b1, priority_a2])
+  const priority_results = pool_wait([priority_warmup, priority_a1, priority_b1, priority_a2])
   log("priority")
   log(priority_results[2].result)
   log(priority_results[3].result)
   log(priority_results[1].result)
-  let strategy_ns = QueueStrategy()
-  let fair_pool = pool_create(
+  const strategy_ns = QueueStrategy()
+  const fair_pool = pool_create(
     {name: "queue-strategy-fair", max_concurrent: 1, queue: strategy_ns.fair_round_robin("tenant_id")},
   )
-  let fair_order = atomic(0)
-  let fair_gate = channel(nil, 1)
-  let fair_warmup = fair_pool
+  const fair_order = atomic(0)
+  const fair_gate = channel(nil, 1)
+  const fair_warmup = fair_pool
     .submit(
     { ->
       receive(fair_gate)
@@ -79,13 +79,13 @@ pipeline default() {
     },
     {tenant_id: "warmup"},
   )
-  let fair_a1 = fair_pool.submit(stamp(fair_order), {tenant_id: "a"})
-  let fair_a2 = fair_pool.submit(stamp(fair_order), {tenant_id: "a"})
-  let fair_b1 = fair_pool.submit(stamp(fair_order), {tenant_id: "b"})
-  let fair_a3 = fair_pool.submit(stamp(fair_order), {tenant_id: "a"})
-  let fair_b2 = fair_pool.submit(stamp(fair_order), {tenant_id: "b"})
+  const fair_a1 = fair_pool.submit(stamp(fair_order), {tenant_id: "a"})
+  const fair_a2 = fair_pool.submit(stamp(fair_order), {tenant_id: "a"})
+  const fair_b1 = fair_pool.submit(stamp(fair_order), {tenant_id: "b"})
+  const fair_a3 = fair_pool.submit(stamp(fair_order), {tenant_id: "a"})
+  const fair_b2 = fair_pool.submit(stamp(fair_order), {tenant_id: "b"})
   send(fair_gate, "go")
-  let fair_results = pool_wait([fair_warmup, fair_a1, fair_a2, fair_b1, fair_a3, fair_b2])
+  const fair_results = pool_wait([fair_warmup, fair_a1, fair_a2, fair_b1, fair_a3, fair_b2])
   log("fair")
   log(fair_results[1].result)
   log(fair_results[3].result)

@@ -719,7 +719,6 @@ pub(crate) const KEYWORDS: &[&str] = &[
     "override",
     "let",
     "const",
-    "var",
     "if",
     "else",
     "for",
@@ -1118,8 +1117,8 @@ pub(crate) fn keyword_doc(name: &str) -> Option<String> {
     let doc = match name {
         "pipeline" => "**pipeline** — Declare a named pipeline\n\n```harn\npipeline name(params) {\n  // body\n}\n```",
         "fn" => "**fn** — Declare a function\n\n```harn\nfn name(params) -> return_type {\n  // body\n}\n```",
-        "let" => "**let** — Immutable variable binding\n\n```harn\nlet x: type = value\n```",
-        "var" => "**var** — Mutable variable binding\n\n```harn\nvar x: type = value\n```",
+        "const" => "**const** — Immutable variable binding\n\n```harn\nconst x: type = value\n```",
+        "let" => "**let** — Mutable variable binding\n\n```harn\nlet x: type = value\n```",
         "if" => "**if** — Conditional expression\n\n```harn\nif condition {\n  // then\n} else {\n  // else\n}\n```",
         "else" => "**else** — Else branch of an if expression",
         "for" => "**for** — For-in loop\n\n```harn\nfor item in iterable {\n  // body\n}\n```",

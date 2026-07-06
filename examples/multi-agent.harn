@@ -10,7 +10,7 @@
 import "std/agents"
 
 pipeline main(task) {
-  let subtasks = [
+  const subtasks = [
     {name: "researcher", prompt: "List 3 benefits of Rust for CLI tools. Be brief."},
     {name: "critic", prompt: "List 3 downsides of Rust for CLI tools. Be brief."},
     {name: "summarizer", prompt: "Write a one-sentence summary of Rust for CLI tools."},
@@ -19,11 +19,11 @@ pipeline main(task) {
   // Each worker gets its own branched session forked from the parent,
   // so its transcript starts with the parent context but evolves
   // independently.
-  let parent_session = agent_session_open()
-  let workers = []
+  const parent_session = agent_session_open()
+  const workers = []
   for sub in subtasks {
-    let worker_session = agent_session_fork(parent_session)
-    let worker = spawn_agent(
+    const worker_session = agent_session_fork(parent_session)
+    const worker = spawn_agent(
       {
         name: sub.name,
         task: sub.prompt,
@@ -39,9 +39,9 @@ pipeline main(task) {
     workers = workers + [worker]
   }
   // Wait for all workers and collect results
-  let results = []
+  const results = []
   for worker in workers {
-    let done = wait_agent(worker)
+    const done = wait_agent(worker)
     log("Agent ${done?.name} finished (status: ${done?.status})")
     results = results + [done]
   }

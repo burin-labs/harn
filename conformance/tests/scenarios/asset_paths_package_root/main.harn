@@ -7,9 +7,9 @@ import "subdir/deeply/nested/caller"
 
 pipeline test() {
   // Top-level caller — anchor is the project root next to harn.toml.
-  let direct = render_prompt("@/prompts/greeting.harn.prompt", {who: "Alice"})
+  const direct = render_prompt("@/prompts/greeting.harn.prompt", {who: "Alice"})
   __io_println(direct)
-  let aliased = render_prompt("@partials/greeting.harn.prompt", {who: "Alice"})
+  const aliased = render_prompt("@partials/greeting.harn.prompt", {who: "Alice"})
   __io_println(aliased)
   // Deeply nested caller using the same `@/...` string — same output.
   __io_println(render_root("Alice"))
@@ -18,6 +18,6 @@ pipeline test() {
   __io_println(render_wrapper())
   // Inline templates passed to `render_string(...)` honor `@/...` in
   // their `{{ include }}` directives too — same project-root anchor.
-  let inline = "inline -> {{ include \"@/prompts/greeting.harn.prompt\" }}"
+  const inline = "inline -> {{ include \"@/prompts/greeting.harn.prompt\" }}"
   __io_println(render_string(inline, {who: "Carol"}))
 }

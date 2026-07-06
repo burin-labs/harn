@@ -11,25 +11,25 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
 import { with_telemetry } from "std/lifecycle/combinators"
 
 pipeline default() {
-  let happy = { _harness, return_value -> return return_value + "_done" }
-  let sad = { _harness, _return_value ->
+  const happy = { _harness, return_value -> return return_value + "_done" }
+  const sad = { _harness, _return_value ->
     throw "boom"
   }
   pipeline_on_finish(
     { harness, return_value ->
-      let wrapped = with_telemetry(happy, "happy_cb")
-      let result = wrapped(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const wrapped = with_telemetry(happy, "happy_cb")
+      const result = wrapped(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("result=" + result)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("started_kind=" + audits[0].kind)
       harness.stdio.println("completed_kind=" + audits[1].kind)
       harness.stdio.println("completed_summary=" + audits[1].payload.result_summary)
-      let wrapped_err = with_telemetry(sad, "sad_cb")
-      let result_outcome = try {
+      const wrapped_err = with_telemetry(sad, "sad_cb")
+      const result_outcome = try {
         wrapped_err(harness, return_value)
       }
-      let trailing = lifecycle_audit_log_take()
+      const trailing = lifecycle_audit_log_take()
       harness.stdio.println("errored_kind=" + trailing[1].kind)
       harness.stdio.println("errored_message=" + trailing[1].payload.error)
       harness.stdio.println("rethrew=" + to_string(is_err(result_outcome)))

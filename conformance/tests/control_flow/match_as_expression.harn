@@ -1,13 +1,13 @@
 pipeline default() {
-  let input = "b"
-  let label = match input {
+  const input = "b"
+  const label = match input {
     "a" -> { "alpha" }
     "b" -> { "bravo" }
     _ -> { "other" }
   }
   __io_println(label)
-  let n = 7
-  let size = match n {
+  const n = 7
+  const size = match n {
     0 -> { "zero" }
     x if x > 5 -> {
       let prefix = "large"
@@ -16,8 +16,8 @@ pipeline default() {
     _ -> { "small" }
   }
   __io_println(size)
-  let pair = [10, 20]
-  let second = match pair {
+  const pair = [10, 20]
+  const second = match pair {
     [_, value] -> { value }
     _ -> { 0 }
   }

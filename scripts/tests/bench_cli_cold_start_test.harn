@@ -2,7 +2,7 @@ import "../bench_cli_cold_start.harn"
 
 @test
 pipeline test_load_budgets_defaults_and_command_override(task) {
-  let budgets = load_budgets_text(
+  const budgets = load_budgets_text(
     """
 [defaults]
 cold_ms = 300
@@ -28,31 +28,31 @@ pipeline test_load_baseline_blank_is_empty(task) {
 
 @test
 pipeline test_most_recent_baseline_skips_current_sha(task) {
-  let payload = {
+  const payload = {
     current: {captured_at: "2026-01-03T00:00:00Z", commands: {version: {cold_ms: 1.0}}},
     old: {captured_at: "2026-01-01T00:00:00Z", commands: {version: {cold_ms: 10.0}}},
     newest: {captured_at: "2026-01-02T00:00:00Z", commands: {version: {cold_ms: 5.0}}},
   }
-  let found = most_recent_baseline_for(payload, "version", "current")
+  const found = most_recent_baseline_for(payload, "version", "current")
   assert_eq(found.sha, "newest")
   assert_eq(found.cold_ms, 5.0)
 }
 
 @test
 pipeline test_most_recent_baseline_missing(task) {
-  let found = most_recent_baseline_for({}, "version", "sha")
+  const found = most_recent_baseline_for({}, "version", "sha")
   assert_eq(found.sha, nil)
   assert_eq(found.cold_ms, nil)
 }
 
 @test
 pipeline test_build_invocation_expands_trace_paths(task) {
-  let dir = harness.fs.temp_dir() + "/harn-cold-start-test-" + uuid_v7()
+  const dir = harness.fs.temp_dir() + "/harn-cold-start-test-" + uuid_v7()
   harness.fs.mkdir(dir)
   defer {
     harness.fs.delete(dir)
   }
-  let args = build_invocation(["trace", "import", "{trace_input}", "--out", "{trace_output}"], dir)
+  const args = build_invocation(["trace", "import", "{trace_input}", "--out", "{trace_output}"], dir)
   assert_eq(args[2], path_join(dir, "trace_input.jsonl"))
   assert_eq(args[4], path_join(dir, "trace_output.jsonl"))
   assert_eq(harness.fs.exists(path_join(dir, "trace_input.jsonl")), true)
@@ -60,18 +60,18 @@ pipeline test_build_invocation_expands_trace_paths(task) {
 
 @test
 pipeline test_select_commands_filter(task) {
-  let selected = select_commands("version")
+  const selected = select_commands("version")
   assert_eq(selected.ok, true)
   assert_eq(selected.commands.count, 1)
   assert_eq(selected.commands[0].key, "version")
-  let missing = select_commands("version,missing")
+  const missing = select_commands("version,missing")
   assert_eq(missing.ok, false)
   assert_eq(missing.missing, ["missing"])
 }
 
 @test
 pipeline test_failure_reasons_cover_budget_and_baseline(task) {
-  let reasons = failure_reasons(151.0, {cold_ms: 100.0, regression_x: 1.25}, {sha: "abcdef123456", cold_ms: 100.0})
+  const reasons = failure_reasons(151.0, {cold_ms: 100.0, regression_x: 1.25}, {sha: "abcdef123456", cold_ms: 100.0})
   assert_eq(reasons.count, 2)
   assert_eq(reasons[0], "exceeds budget 100.0 ms")
   assert_eq(reasons[1], "exceeds 1.25x baseline (100.0 ms from abcdef12)")
@@ -79,7 +79,7 @@ pipeline test_failure_reasons_cover_budget_and_baseline(task) {
 
 @test
 pipeline test_merge_baseline_append_only_without_update(task) {
-  let merged = merge_baseline(
+  const merged = merge_baseline(
     {
       sha: {
         host: "old-host",
@@ -104,7 +104,7 @@ pipeline test_merge_baseline_append_only_without_update(task) {
 
 @test
 pipeline test_merge_baseline_update_overwrites_current_slot(task) {
-  let merged = merge_baseline(
+  const merged = merge_baseline(
     {sha: {commands: {version: {cold_ms: 10.0}}}},
     "sha",
     {version: {cold_ms: 20.0}},

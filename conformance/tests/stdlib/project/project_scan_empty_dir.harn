@@ -2,8 +2,8 @@ import "std/project"
 
 pipeline test(task) {
   harness.fs.mkdir("project_scan_empty")
-  let ev = project_scan("project_scan_empty", {tiers: ["ambient", "config"]})
-  let tree = project_scan_tree("project_scan_empty", {tiers: ["ambient"], depth: 1})
+  const ev = project_scan("project_scan_empty", {tiers: ["ambient", "config"]})
+  const tree = project_scan_tree("project_scan_empty", {tiers: ["ambient"], depth: 1})
   __io_println(ev.path.ends_with("/project_scan_empty"))
   __io_println(len(ev.languages) == 0)
   __io_println(len(ev.frameworks) == 0)

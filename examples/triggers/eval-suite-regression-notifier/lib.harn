@@ -2,24 +2,24 @@ import "std/eval/stats"
 import "std/triggers"
 import { post_eval_verdict } from "harn-slack-connector/default"
 
-let DEFAULT_NAMESPACE = "eval-suite-regression-notifier"
+const DEFAULT_NAMESPACE = "eval-suite-regression-notifier"
 
-let DEFAULT_SUITE = "eval-suite-regression"
+const DEFAULT_SUITE = "eval-suite-regression"
 
-let DEFAULT_MODEL = "mock-model"
+const DEFAULT_MODEL = "mock-model"
 
-let DEFAULT_SLACK_CHANNEL = "C0123456789"
+const DEFAULT_SLACK_CHANNEL = "C0123456789"
 
 /**
  * Run the scheduled eval, gate it against the prior ledger commit, and notify only on a gate flip.
  */
 pub fn notify_on_eval_gate_flip(event: TriggerEvent) -> dict {
-  let outcome = eval_gate_verdict(event)
+  const outcome = eval_gate_verdict(event)
   if !(outcome.notify ?? false) {
     return outcome
   }
-  let config = outcome.config
-  let posted = post_eval_verdict(outcome.verdict, slack_options(config))
+  const config = outcome.config
+  const posted = post_eval_verdict(outcome.verdict, slack_options(config))
   if is_err(posted) {
     return outcome + {notified: false, notify_error: unwrap_err(posted)}
   }
@@ -28,12 +28,12 @@ pub fn notify_on_eval_gate_flip(event: TriggerEvent) -> dict {
 
 /** Run the eval pack and build the structured verdict without posting to Slack. */
 pub fn eval_gate_verdict(event: TriggerEvent) -> dict {
-  let config = notifier_config(event)
-  let manifest = load_eval_manifest()
-  let options = ledger_options(config)
-  let report = eval_pack_run(manifest, options)
-  let current_rows = rows_for_split(report.stats_rows, config.split)
-  let prior = eval_ledger_prior_commit_rows(options)
+  const config = notifier_config(event)
+  const manifest = load_eval_manifest()
+  const options = ledger_options(config)
+  const report = eval_pack_run(manifest, options)
+  const current_rows = rows_for_split(report.stats_rows, config.split)
+  const prior = eval_ledger_prior_commit_rows(options)
   if len(prior.rows) == 0 {
     return {
       notified: false,
@@ -45,10 +45,10 @@ pub fn eval_gate_verdict(event: TriggerEvent) -> dict {
       current_rows: current_rows,
     }
   }
-  let gate = regression_gate(prior.rows, current_rows, config.k)
-  let paired = paired_delta_report(prior.rows, current_rows, config.resamples, config.seed)
-  let decision = verdict_decision(gate, paired)
-  let verdict = {
+  const gate = regression_gate(prior.rows, current_rows, config.k)
+  const paired = paired_delta_report(prior.rows, current_rows, config.resamples, config.seed)
+  const decision = verdict_decision(gate, paired)
+  const verdict = {
     suite: config.suite,
     model: config.model,
     split: config.split ?? "all",
@@ -62,7 +62,7 @@ pub fn eval_gate_verdict(event: TriggerEvent) -> dict {
     ledger_url: config.ledger_url,
     dashboard_url: config.dashboard_url,
   }
-  let notify = should_notify(decision, config)
+  const notify = should_notify(decision, config)
   return {
     notified: false,
     notify: notify,
@@ -76,13 +76,13 @@ pub fn eval_gate_verdict(event: TriggerEvent) -> dict {
 }
 
 fn load_eval_manifest() -> dict {
-  let path = path_join(source_dir(), "harn.eval.toml")
+  const path = path_join(source_dir(), "harn.eval.toml")
   return eval_pack_manifest(toml_parse(harness.fs.read_text(path)) + {base_dir: source_dir()})
 }
 
 fn notifier_config(event) -> dict {
-  let payload = event?.provider_payload ?? {}
-  let raw = payload?.config ?? payload?.raw?.config ?? payload
+  const payload = event?.provider_payload ?? {}
+  const raw = payload?.config ?? payload?.raw?.config ?? payload
   return compact(
     {
       namespace: raw?.namespace ?? DEFAULT_NAMESPACE,
@@ -135,7 +135,7 @@ fn rows_for_split(rows, split) -> list {
   if split == nil {
     return rows
   }
-  var filtered = []
+  let filtered = []
   for row in rows ?? [] {
     if row?.split == split {
       filtered = filtered + [row]
@@ -155,22 +155,22 @@ fn verdict_decision(gate, paired) -> string {
 }
 
 fn should_notify(decision, config) -> bool {
-  let notify_inconclusive = config.notify_inconclusive ?? false
+  const notify_inconclusive = config.notify_inconclusive ?? false
   return decision == "regression" || decision == "improved"
     || (decision == "inconclusive" && notify_inconclusive)
 }
 
 fn top_regressed_cases(baseline_rows, current_rows) -> list {
-  var baseline = {}
+  let baseline = {}
   for row in baseline_rows ?? [] {
     baseline[row.case_name ?? row.name] = row
   }
-  var cases = []
+  let cases = []
   for row in current_rows ?? [] {
-    let name = row.case_name ?? row.name
-    let base = baseline[name]
+    const name = row.case_name ?? row.name
+    const base = baseline[name]
     if base != nil && fingerprints_match(base, row) {
-      let delta = row_pass_rate(row) - row_pass_rate(base)
+      const delta = row_pass_rate(row) - row_pass_rate(base)
       if delta < 0.0 {
         cases = insert_regressed_case(
           cases,
@@ -189,8 +189,8 @@ fn top_regressed_cases(baseline_rows, current_rows) -> list {
 }
 
 fn insert_regressed_case(cases, candidate) -> list {
-  var out = []
-  var inserted = false
+  let out = []
+  let inserted = false
   for item in cases {
     if !inserted && candidate.delta < item.delta {
       out = out + [candidate]
@@ -205,8 +205,8 @@ fn insert_regressed_case(cases, candidate) -> list {
 }
 
 fn fingerprints_match(left, right) -> bool {
-  let left_harness = left?.harness_config_fingerprint ?? ""
-  let right_harness = right?.harness_config_fingerprint ?? ""
+  const left_harness = left?.harness_config_fingerprint ?? ""
+  const right_harness = right?.harness_config_fingerprint ?? ""
   return left?.case_fingerprint == right?.case_fingerprint
     && left_harness == right_harness
 }
@@ -215,9 +215,9 @@ fn row_pass_rate(row) -> float {
   if row?.pass_rate != nil {
     return row.pass_rate
   }
-  let passes = row?.passes ?? 0
-  let fails = row?.fails ?? 0
-  let decided = passes + fails
+  const passes = row?.passes ?? 0
+  const fails = row?.fails ?? 0
+  const decided = passes + fails
   if decided <= 0 {
     return 0.0
   }
@@ -225,7 +225,7 @@ fn row_pass_rate(row) -> float {
 }
 
 fn compact(input) -> dict {
-  var out = {}
+  let out = {}
   for entry in (input ?? {}).entries() {
     if entry.value != nil {
       out[entry.key] = entry.value

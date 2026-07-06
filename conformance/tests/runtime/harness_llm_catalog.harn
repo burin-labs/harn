@@ -1,7 +1,7 @@
 fn main(harness: Harness) {
-  let entries = harness.llm.catalog()
+  const entries = harness.llm.catalog()
   __io_println(len(entries) > 0)
-  let first = entries[0]
+  const first = entries[0]
   __io_println(first.id != nil)
   __io_println(first.name != nil)
   __io_println(first.provider != nil)

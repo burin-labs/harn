@@ -8,7 +8,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("noise-1"), llm_text("noise-2"), llm_text("noise-3")],
     { ->
-      let result = self_consistency(
+      const result = self_consistency(
         "anything",
         "",
         {

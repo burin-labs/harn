@@ -8,13 +8,13 @@ import "std/triggers"
  * sessions based on payload contents.
  */
 pipeline test(task) {
-  let acme_session = agent_session_open("trigger-reminder-inject-closure-acme")
-  let widget_session = agent_session_open("trigger-reminder-inject-closure-widget")
+  const acme_session = agent_session_open("trigger-reminder-inject-closure-acme")
+  const widget_session = agent_session_open("trigger-reminder-inject-closure-widget")
   agent_session_reset(acme_session)
   agent_session_reset(widget_session)
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-reminder-inject-closure-" + unique,
       kind: "issue.opened",
@@ -41,7 +41,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let to_acme = trigger_fire(
+  const to_acme = trigger_fire(
     handle,
     {
       provider: "github",
@@ -50,7 +50,7 @@ pipeline test(task) {
       headers: {x_delivery: "evt-acme-" + unique},
     },
   )
-  let to_widget = trigger_fire(
+  const to_widget = trigger_fire(
     handle,
     {
       provider: "github",
@@ -61,8 +61,8 @@ pipeline test(task) {
   )
   __io_println(to_acme.result?.target_session_id == acme_session)
   __io_println(to_widget.result?.target_session_id == widget_session)
-  let acme_reminders = transcript_events_by_kind(agent_session_snapshot(acme_session), "system_reminder")
-  let widget_reminders = transcript_events_by_kind(agent_session_snapshot(widget_session), "system_reminder")
+  const acme_reminders = transcript_events_by_kind(agent_session_snapshot(acme_session), "system_reminder")
+  const widget_reminders = transcript_events_by_kind(agent_session_snapshot(widget_session), "system_reminder")
   __io_println(len(acme_reminders))
   __io_println(len(widget_reminders))
   __io_println(acme_reminders[0].reminder.body)

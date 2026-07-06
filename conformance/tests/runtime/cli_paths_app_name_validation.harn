@@ -10,7 +10,7 @@ fn config_error(name: string) -> string {
 }
 
 fn main(_harness: Harness) {
-  let message = "std/cli/paths: app_name must be a single path segment"
+  const message = "std/cli/paths: app_name must be a single path segment"
   __io_println(config_error("") == message)
   __io_println(config_error(".") == message)
   __io_println(config_error("..") == message)

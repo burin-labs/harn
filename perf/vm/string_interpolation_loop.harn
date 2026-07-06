@@ -1,7 +1,7 @@
 pipeline default(task) {
-  var i = 0
-  var text = "x"
-  var total = 0
+  let i = 0
+  let text = "x"
+  let total = 0
   while i < 5000 {
     text = "${text}${i % 10}"
     if len(text) > 64 {

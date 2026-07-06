@@ -1,13 +1,13 @@
 pipeline default() {
   // Dict pattern: match on field value, bind others
-  let response = {status: "ok", data: "hello world"}
+  const response = {status: "ok", data: "hello world"}
   match response {
     {status: "ok", data: d} -> { __io_println("Got: " + d) }
     {status: "error", message: m} -> { __io_println("Error: " + m) }
     _ -> { __io_println("unknown") }
   }
   // Dict pattern: second arm matches
-  let err = {status: "error", message: "not found"}
+  const err = {status: "error", message: "not found"}
   match err {
     {status: "ok", data: d} -> { __io_println("Got: " + d) }
     {status: "error", message: m} -> { __io_println("Error: " + m) }

@@ -10,7 +10,7 @@ pipeline test(task) {
   fn find_missing() {
     throw AppError.NotFound("user")
   }
-  let matched: string = try {
+  const matched: string = try {
     let _ = try* find_missing()
     "unreachable"
   } catch (e: AppError) {

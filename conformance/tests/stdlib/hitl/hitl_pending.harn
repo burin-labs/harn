@@ -1,12 +1,12 @@
 import "std/hitl"
 
 pipeline test(task) {
-  let prompt = "Need a human " + uuid()
-  let handle = spawn {
+  const prompt = "Need a human " + uuid()
+  const handle = spawn {
     ask_user(prompt, {timeout: 5m})
   }
   sleep(10ms)
-  let rows: list<HitlPendingRequest> = hitl_pending({})
+  const rows: list<HitlPendingRequest> = hitl_pending({})
     .filter({ row -> row.prompt == prompt }).to_list()
   __io_println(len(rows))
   __io_println(rows[0].request_kind)

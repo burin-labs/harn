@@ -1,7 +1,7 @@
 import { agent_model_options, agent_sanitize_model_options } from "std/agent/options"
 
 pipeline default() {
-  let env_route = agent_model_options(
+  const env_route = agent_model_options(
     {
       role: "release",
       env_prefixes: ["HARN_RELEASE", "HARN_PLANNER"],
@@ -15,7 +15,7 @@ pipeline default() {
   __io_println(env_route.options.reasoning_effort == nil)
   __io_println(env_route.options.prompt_cache == nil)
   __io_println(join(env_route.stripped, ","))
-  let explicit = agent_model_options(
+  const explicit = agent_model_options(
     {
       role: "release",
       env_prefixes: ["HARN_RELEASE"],
@@ -26,12 +26,12 @@ pipeline default() {
   )
   __io_println(explicit.model)
   __io_println(explicit.options.reasoning_effort)
-  let sanitized = agent_sanitize_model_options(
+  const sanitized = agent_sanitize_model_options(
     {provider: "mock", model: "gpt-4o", reasoning_effort: "high", cache_control: {type: "ephemeral"}},
   )
   __io_println(sanitized.reasoning_effort == nil)
   __io_println(sanitized.cache_control == nil)
-  let direct_thinking = agent_sanitize_model_options(
+  const direct_thinking = agent_sanitize_model_options(
     {
       provider: "anthropic",
       model: "claude-sonnet-4-6",
@@ -39,7 +39,7 @@ pipeline default() {
     },
   )
   __io_println(direct_thinking.thinking.mode)
-  let proxied_thinking = agent_sanitize_model_options(
+  const proxied_thinking = agent_sanitize_model_options(
     {
       provider: "openrouter",
       model: "anthropic/claude-sonnet-4-6",
@@ -47,11 +47,11 @@ pipeline default() {
     },
   )
   __io_println(proxied_thinking.thinking == nil)
-  let disabled_thinking = agent_sanitize_model_options(
+  const disabled_thinking = agent_sanitize_model_options(
     {provider: "openrouter", model: "anthropic/claude-sonnet-4-6", thinking: {mode: "disabled"}},
   )
   __io_println(disabled_thinking.thinking.mode)
-  let healthcheck = agent_sanitize_model_options(
+  const healthcheck = agent_sanitize_model_options(
     {
       provider: "cerebras",
       model: "gpt-oss-120b",

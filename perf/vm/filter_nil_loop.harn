@@ -7,7 +7,7 @@ import { filter_nil, pick_keys } from "std/collections"
  * honest about the path they share.
  */
 pipeline default(task) {
-  let raw = {
+  const raw = {
     repo: "burin-labs/harn",
     branch: "main",
     title: "perf",
@@ -19,12 +19,12 @@ pipeline default(task) {
     timeout_ms: 30000,
     user_agent: "harn",
   }
-  let pickable = ["repo", "branch", "title", "body", "labels", "method"]
-  var iteration = 0
-  var total = 0
+  const pickable = ["repo", "branch", "title", "body", "labels", "method"]
+  let iteration = 0
+  let total = 0
   while iteration < 4000 {
-    let cleaned = filter_nil(raw)
-    let picked = pick_keys(cleaned, pickable)
+    const cleaned = filter_nil(raw)
+    const picked = pick_keys(cleaned, pickable)
     total = total + len(cleaned.keys()) + len(picked.keys())
     iteration = iteration + 1
   }

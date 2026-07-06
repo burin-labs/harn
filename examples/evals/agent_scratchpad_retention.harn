@@ -51,7 +51,7 @@ fn __eval_fact_for_text(text) {
 }
 
 fn __eval_excerpt(text, limit) {
-  let cleaned = replace(trim(text ?? ""), "\n", " ")
+  const cleaned = replace(trim(text ?? ""), "\n", " ")
   if len(cleaned) <= limit {
     return cleaned
   }
@@ -60,21 +60,21 @@ fn __eval_excerpt(text, limit) {
 
 fn __eval_append_callback(arm) {
   return { info ->
-    let text = info?.text ?? ""
-    let fact = __eval_fact_for_text(text)
+    const text = info?.text ?? ""
+    const fact = __eval_fact_for_text(text)
     if fact == "" {
       return nil
     }
-    let pad = agent_session_scratchpad(info.session_id)
+    const pad = agent_session_scratchpad(info.session_id)
     if pad == nil {
       return nil
     }
-    let iteration_index = info?.iteration ?? 0
-    let turn = iteration_index + 1
-    let ref_id = "eval:" + arm + ":" + to_string(turn)
-    let refs = (pad?.refs ?? [])
+    const iteration_index = info?.iteration ?? 0
+    const turn = iteration_index + 1
+    const ref_id = "eval:" + arm + ":" + to_string(turn)
+    const refs = (pad?.refs ?? [])
       .push({id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)})
-    let facts = (pad?.facts ?? []).push({text: fact, source_ref: ref_id})
+    const facts = (pad?.facts ?? []).push({text: fact, source_ref: ref_id})
     agent_session_set_scratchpad(
       info.session_id,
       pad + {facts: facts, refs: refs},
@@ -85,7 +85,7 @@ fn __eval_append_callback(arm) {
 }
 
 fn __eval_reorg_response(arm, fact_text) {
-  let ref_id = "eval:" + arm + ":1"
+  const ref_id = "eval:" + arm + ":1"
   return {
     text: json_stringify(
       {
@@ -118,9 +118,9 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
   for mock in reorg_mocks {
     llm_mock(mock)
   }
-  let call_count = atomic(0)
-  let prompt_chars = atomic(0)
-  let caller = { call ->
+  const call_count = atomic(0)
+  const prompt_chars = atomic(0)
+  const caller = { call ->
     let turn = call?.turn?.iteration ?? 1
     let system = call?.system ?? ""
     atomic_add(call_count, 1)
@@ -130,7 +130,7 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
       value: __eval_llm_value(__eval_worker_text(turn, contains(system, "fact: account key AURORA-17"))),
     }
   }
-  var opts = {
+  let opts = {
     provider: "mock",
     llm_caller: caller,
     loop_until_done: true,
@@ -144,16 +144,16 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
   if append_facts {
     opts = opts + {post_turn_callback: __eval_append_callback(arm_id)}
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "Complete five subtasks and use the subtask-1 account key in the final handoff.",
     "You are a cheap deterministic worker model in a retention eval.",
     opts,
   )
-  let final_scratchpad = result?.transcript?.metadata?.agent_scratchpad ?? {}
-  let retained = contains(json_stringify(final_scratchpad), "fact: account key AURORA-17")
-  let success = contains(result?.visible_text ?? "", "AURORA-17")
-  let reorg_calls = len(llm_mock_calls())
-  let reorg_error_rate = if reorg_calls == 0 {
+  const final_scratchpad = result?.transcript?.metadata?.agent_scratchpad ?? {}
+  const retained = contains(json_stringify(final_scratchpad), "fact: account key AURORA-17")
+  const success = contains(result?.visible_text ?? "", "AURORA-17")
+  const reorg_calls = len(llm_mock_calls())
+  const reorg_error_rate = if reorg_calls == 0 {
     "n/a"
   } else if retained {
     "0/" + to_string(reorg_calls)
@@ -173,9 +173,9 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
 }
 
 pipeline default() {
-  let none = __eval_run_arm("none", "none", nil, [], false)
-  let append = __eval_run_arm("append_only_recitation", "append", {enabled: true, reorganize_every: 0}, [], true)
-  let strong = __eval_run_arm(
+  const none = __eval_run_arm("none", "none", nil, [], false)
+  const append = __eval_run_arm("append_only_recitation", "append", {enabled: true, reorganize_every: 0}, [], true)
+  const strong = __eval_run_arm(
     "periodic_reorg_strong",
     "strong",
     {
@@ -189,7 +189,7 @@ pipeline default() {
     ],
     true,
   )
-  let weak = __eval_run_arm(
+  const weak = __eval_run_arm(
     "periodic_reorg_weak_ablation",
     "weak",
     {
@@ -203,7 +203,7 @@ pipeline default() {
     ],
     true,
   )
-  let rows = [none, append, strong, weak]
+  const rows = [none, append, strong, weak]
   __io_println(
     "arm,success,fact_retention,prompt_chars,estimated_prompt_tokens,worker_calls,reorg_calls,reorg_induced_errors",
   )

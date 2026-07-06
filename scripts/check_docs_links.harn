@@ -9,14 +9,14 @@
 //
 // Usage:
 //   harn run scripts/check_docs_links.harn   # exit 1 on any dead local link
-let DOCS_DIR = "docs/src"
+const DOCS_DIR = "docs/src"
 
 // Inline `[text](target ...)` / `![alt](target ...)` links. Group 1 is the
 // target up to the first whitespace or close paren.
-let INLINE_LINK_RE = r"!?\[[^\]\n]*(?:\][^\[\]\n]*)?\]\(([^)\s]+)(?:\s+[^)]*)?\)"
+const INLINE_LINK_RE = r"!?\[[^\]\n]*(?:\][^\[\]\n]*)?\]\(([^)\s]+)(?:\s+[^)]*)?\)"
 
 // Reference-style `[label]: target` definitions (<=3 leading spaces).
-let REFERENCE_LINK_RE = r"^\s{0,3}\[[^\]]+\]:\s+(\S+)"
+const REFERENCE_LINK_RE = r"^\s{0,3}\[[^\]]+\]:\s+(\S+)"
 
 // HTML `href="..."` / `src='...'` attributes. The Rust regex engine has no
 // backreferences, so the Python `(['"])(.*?)\1` is split into matched-quote
@@ -30,12 +30,12 @@ let HTML_ATTR_RE = r#"\b(?:href|src)=(?:"([^"]*)"|'([^']*)')"#
  * original source. Mirrors the Python `strip_fenced_blocks`.
  */
 pub fn strip_fenced_blocks(text: string) -> string {
-  var out: list<string> = []
-  var in_fence = false
-  var fence_marker = ""
+  let out: list<string> = []
+  let in_fence = false
+  let fence_marker = ""
   for line in text.split("\n") {
-    let marker = left_trim(line).substring(0, 3)
-    let is_fence = marker == "```" || marker == "~~~"
+    const marker = left_trim(line).substring(0, 3)
+    const is_fence = marker == "```" || marker == "~~~"
     if is_fence {
       if !in_fence {
         in_fence = true
@@ -58,10 +58,10 @@ pub fn strip_fenced_blocks(text: string) -> string {
 
 /** Strip leading ASCII whitespace (space, tab, CR, NL) from `s`. */
 pub fn left_trim(s: string) -> string {
-  var i = 0
-  let n = s.len()
+  let i = 0
+  const n = s.len()
   while i < n {
-    let c = s.char_at(i)
+    const c = s.char_at(i)
     if c == " " || c == "\t" || c == "\r" || c == "\n" {
       i = i + 1
     } else {
@@ -76,8 +76,8 @@ pub fn left_trim(s: string) -> string {
  * from `s`. Mirrors Python's `str.strip(chars)` (used for `<>` removal).
  */
 pub fn strip_chars(s: string, chars: string) -> string {
-  var start = 0
-  var end = s.len()
+  let start = 0
+  let end = s.len()
   while start < end && chars.contains(s.char_at(start)) {
     start = start + 1
   }
@@ -94,7 +94,7 @@ pub fn hex_digit(c: string) -> int {
 
 /** Printable-ASCII char (codes 32..126) for `code`, or "" otherwise. */
 pub fn printable_ascii(code: int) -> string {
-  let ascii = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+  const ascii = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
   if code < 32 || code > 126 {
     return ""
   }
@@ -107,16 +107,16 @@ pub fn printable_ascii(code: int) -> string {
  * left literal. Stands in for `urllib.parse.unquote` for doc-link paths.
  */
 pub fn unquote(s: string) -> string {
-  var out = ""
-  var i = 0
-  let n = s.len()
+  let out = ""
+  let i = 0
+  const n = s.len()
   while i < n {
-    let c = s.char_at(i)
+    const c = s.char_at(i)
     if c == "%" && i + 2 < n {
-      let hi = hex_digit(s.char_at(i + 1))
-      let lo = hex_digit(s.char_at(i + 2))
+      const hi = hex_digit(s.char_at(i + 1))
+      const lo = hex_digit(s.char_at(i + 2))
       if hi >= 0 && lo >= 0 {
-        let decoded = printable_ascii(hi * 16 + lo)
+        const decoded = printable_ascii(hi * 16 + lo)
         if decoded != "" {
           out = out + decoded
           i = i + 3
@@ -132,7 +132,7 @@ pub fn unquote(s: string) -> string {
 
 /** True when `c` is a valid URL-scheme character (letter/digit/+/-/.). */
 pub fn is_scheme_char(c: string) -> bool {
-  let lc = c.to_lower()
+  const lc = c.to_lower()
   if "abcdefghijklmnopqrstuvwxyz".contains(lc) {
     return true
   }
@@ -148,17 +148,17 @@ pub fn is_scheme_char(c: string) -> bool {
  * starting with a letter, ended by `:`, with no `/` before the `:`.
  */
 pub fn has_scheme(target: string) -> bool {
-  let n = target.len()
+  const n = target.len()
   if n == 0 {
     return false
   }
-  let first = target.char_at(0)
+  const first = target.char_at(0)
   if !"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(first) {
     return false
   }
-  var i = 0
+  let i = 0
   while i < n {
-    let c = target.char_at(i)
+    const c = target.char_at(i)
     if c == ":" {
       return i > 0
     }
@@ -181,7 +181,7 @@ pub fn has_scheme(target: string) -> bool {
  * decodes, and drops empties.
  */
 pub fn local_path(raw_target: string) -> string? {
-  let target = strip_chars(strip_chars(raw_target, " \t\r\n"), "<>")
+  const target = strip_chars(strip_chars(raw_target, " \t\r\n"), "<>")
   if target.len() == 0 || target.starts_with("#") {
     return nil
   }
@@ -192,16 +192,16 @@ pub fn local_path(raw_target: string) -> string? {
     return nil
   }
   // Path = everything before the first `?` or `#`.
-  var cut = target.len()
-  let q = target.index_of("?")
+  let cut = target.len()
+  const q = target.index_of("?")
   if q >= 0 && q < cut {
     cut = q
   }
-  let h = target.index_of("#")
+  const h = target.index_of("#")
   if h >= 0 && h < cut {
     cut = h
   }
-  let path = unquote(target.substring(0, cut))
+  const path = unquote(target.substring(0, cut))
   if path.len() == 0 {
     return nil
   }
@@ -210,7 +210,7 @@ pub fn local_path(raw_target: string) -> string? {
 
 /** The trailing path component of `p` (after the last `/`). */
 pub fn base_name(p: string) -> string {
-  let idx = last_index_of(p, "/")
+  const idx = last_index_of(p, "/")
   if idx < 0 {
     return p
   }
@@ -219,10 +219,10 @@ pub fn base_name(p: string) -> string {
 
 /** Index of the last occurrence of `needle` in `s`, or -1. */
 pub fn last_index_of(s: string, needle: string) -> int {
-  var found = -1
-  var i = 0
-  let n = s.len()
-  let m = needle.len()
+  let found = -1
+  let i = 0
+  const n = s.len()
+  const m = needle.len()
   while i + m <= n {
     if s.substring(i, i + m) == needle {
       found = i
@@ -240,12 +240,12 @@ pub fn last_index_of(s: string, needle: string) -> int {
  */
 pub fn path_suffix(link_path: string) -> string {
   // Path() normalises a single trailing slash away before taking suffix.
-  var p = link_path
+  let p = link_path
   while p.ends_with("/") && p.len() > 1 {
     p = p.substring(0, p.len() - 1)
   }
-  let name = base_name(p)
-  let dot = last_index_of(name, ".")
+  const name = base_name(p)
+  const dot = last_index_of(name, ".")
   if dot <= 0 {
     return ""
   }
@@ -254,7 +254,7 @@ pub fn path_suffix(link_path: string) -> string {
 
 /** Drop a single `*.ext` suffix from `p` and append `.md`. */
 pub fn with_md_suffix(p: string) -> string {
-  let suf = path_suffix(p)
+  const suf = path_suffix(p)
   if suf == "" {
     return p + ".md"
   }
@@ -276,9 +276,9 @@ pub fn join_path(a: string, b: string) -> string {
  * Mirrors `candidate_paths` branch-for-branch.
  */
 pub fn candidate_rel_paths(source_dir: string, link_path: string, docs_dir: string) -> list<string> {
-  var primary = ""
+  let primary = ""
   if link_path.starts_with("/") {
-    var rest = link_path
+    let rest = link_path
     while rest.starts_with("/") {
       rest = rest.substring(1, rest.len())
     }
@@ -291,8 +291,8 @@ pub fn candidate_rel_paths(source_dir: string, link_path: string, docs_dir: stri
   while primary.ends_with("/") && primary.len() > 1 {
     primary = primary.substring(0, primary.len() - 1)
   }
-  var candidates = [primary]
-  let suf = path_suffix(link_path)
+  let candidates = [primary]
+  const suf = path_suffix(link_path)
   if suf == ".html" {
     candidates = candidates + [with_md_suffix(primary)]
   } else if suf == "" {
@@ -310,8 +310,8 @@ pub fn candidate_rel_paths(source_dir: string, link_path: string, docs_dir: stri
  * past it). Mirrors `Path.resolve(strict=False)` segment collapsing.
  */
 pub fn normalize_path(path: string) -> string {
-  let absolute = path.starts_with("/")
-  var parts: list<string> = []
+  const absolute = path.starts_with("/")
+  let parts: list<string> = []
   for seg in path.split("/") {
     if seg == "" || seg == "." {
       continue
@@ -327,7 +327,7 @@ pub fn normalize_path(path: string) -> string {
     }
     parts = parts + [seg]
   }
-  let joined = parts.join("/")
+  const joined = parts.join("/")
   if absolute {
     return "/" + joined
   }
@@ -348,7 +348,7 @@ pub fn within_repo(repo_root: string, abs_path: string) -> bool {
  * suffix; the suffix is the repo-relative form.
  */
 pub fn rel_path(path: string) -> string {
-  let idx = path.index_of("/./")
+  const idx = path.index_of("/./")
   if idx >= 0 {
     return path.substring(idx + 3, path.len())
   }
@@ -357,7 +357,7 @@ pub fn rel_path(path: string) -> string {
 
 /** Directory portion of a repo-relative file path (`""` for a bare name). */
 pub fn dir_of(rel: string) -> string {
-  let idx = last_index_of(rel, "/")
+  const idx = last_index_of(rel, "/")
   if idx < 0 {
     return ""
   }
@@ -371,7 +371,7 @@ pub fn dir_of(rel: string) -> string {
  * tests can drive it.
  */
 pub fn collect_links(text: string) -> list {
-  var out: list = []
+  let out: list = []
   for m in regex_captures(INLINE_LINK_RE, text) {
     out = out + [{target: m.groups[0], start: m.start, line: m.line}]
   }
@@ -379,7 +379,7 @@ pub fn collect_links(text: string) -> list {
     out = out + [{target: m.groups[0], start: m.start, line: m.line}]
   }
   for m in regex_captures(HTML_ATTR_RE, text, "i") {
-    var value = m.groups[0]
+    let value = m.groups[0]
     if value == nil {
       value = m.groups[1]
     }
@@ -390,12 +390,12 @@ pub fn collect_links(text: string) -> list {
 
 /** Stable insertion sort of link records by their `start` offset. */
 pub fn sort_by_start(links: list) -> list {
-  var out: list = []
+  let out: list = []
   for link in links {
-    var lo = 0
-    var hi = out.count
+    let lo = 0
+    let hi = out.count
     while lo < hi {
-      let mid = (lo + hi) / 2
+      const mid = (lo + hi) / 2
       if out[mid].start <= link.start {
         lo = mid + 1
       } else {
@@ -408,35 +408,35 @@ pub fn sort_by_start(links: list) -> list {
 }
 
 pipeline main(task) {
-  let globbed = harness.fs.glob("${DOCS_DIR}/**/*.md")
-  var repo_root = ""
+  const globbed = harness.fs.glob("${DOCS_DIR}/**/*.md")
+  let repo_root = ""
   for g in globbed {
-    let idx = g.index_of("/./")
+    const idx = g.index_of("/./")
     if idx >= 0 {
       repo_root = g.substring(0, idx)
     }
     break
   }
-  var sources: list<string> = []
+  let sources: list<string> = []
   for g in globbed {
     sources = sources + [rel_path(g)]
   }
   sources = sources.sort()
-  var checked = 0
-  var failures: list = []
+  let checked = 0
+  let failures: list = []
   for source in sources {
-    let text = strip_fenced_blocks(harness.fs.read_text(source))
-    let source_dir = dir_of(source)
+    const text = strip_fenced_blocks(harness.fs.read_text(source))
+    const source_dir = dir_of(source)
     for link in collect_links(text) {
-      let path = local_path(link.target)
+      const path = local_path(link.target)
       if path == nil {
         continue
       }
       checked = checked + 1
-      let candidates = candidate_rel_paths(source_dir, path, DOCS_DIR)
-      var ok = false
+      const candidates = candidate_rel_paths(source_dir, path, DOCS_DIR)
+      let ok = false
       for cand in candidates {
-        let abs = normalize_path(join_path(repo_root, cand))
+        const abs = normalize_path(join_path(repo_root, cand))
         if within_repo(repo_root, abs) && harness.fs.exists(abs) {
           ok = true
           break
@@ -445,8 +445,8 @@ pipeline main(task) {
       if ok {
         continue
       }
-      let expected_abs = normalize_path(join_path(repo_root, candidates[0]))
-      var expected = expected_abs
+      const expected_abs = normalize_path(join_path(repo_root, candidates[0]))
+      let expected = expected_abs
       if within_repo(repo_root, expected_abs) {
         expected = expected_abs.substring(repo_root.len() + 1, expected_abs.len())
       }

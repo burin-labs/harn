@@ -1,12 +1,12 @@
 import "../_common"
 
 pipeline default() {
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  let root = path_join(harness.fs.temp_dir(), "harn_pack_unsigned_" + uuid_v7())
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn_pack_unsigned_" + uuid_v7())
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
-  let pack = exec_at(
+  const pack = exec_at(
     root,
     harn_bin,
     "pack",
@@ -16,13 +16,13 @@ pipeline default() {
     path_join(root, "hello.harnpack"),
   )
   __io_println(pack.success)
-  let strict = exec_at(root, harn_bin, "pack", "verify", path_join(root, "hello.harnpack"), "--json")
+  const strict = exec_at(root, harn_bin, "pack", "verify", path_join(root, "hello.harnpack"), "--json")
   // Strict verify on an unsigned bundle MUST exit non-zero.
   __io_println(strict.success)
-  let strict_data = json_parse(strict.stdout)
+  const strict_data = json_parse(strict.stdout)
   __io_println(strict_data.ok)
   __io_println(strict_data.error.code)
-  let lenient = exec_at(
+  const lenient = exec_at(
     root,
     harn_bin,
     "pack",
@@ -32,7 +32,7 @@ pipeline default() {
     "--json",
   )
   __io_println(lenient.success)
-  let lenient_data = json_parse(lenient.stdout)
+  const lenient_data = json_parse(lenient.stdout)
   __io_println(lenient_data.ok)
   __io_println(lenient_data.data.signature_present)
   __io_println(lenient_data.data.signature_verified)

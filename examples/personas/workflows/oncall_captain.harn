@@ -9,8 +9,8 @@ fn sample_incident() {
 }
 
 pipeline run(task) {
-  let incident = sample_incident()
-  let result = {
+  const incident = sample_incident()
+  const result = {
     persona: "oncall_captain",
     execution_mode: "dry_run",
     approval_required: true,

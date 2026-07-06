@@ -8,8 +8,8 @@ import { compose, with_cache, with_logging, with_retry } from "std/llm/handlers"
 
 pipeline default() {
   // Synthetic base — counts attempts via atomic, fails once then succeeds.
-  let counter = atomic(0)
-  let base = { _call ->
+  const counter = atomic(0)
+  const base = { _call ->
     let n = atomic_add(counter, 1)
     if n < 1 {
       __io_println("[base]   attempt " + to_string(n + 1) + " -> transient blip")
@@ -29,18 +29,18 @@ pipeline default() {
     }
   }
   // compose([logging, retry, cache])(base) == logging(retry(cache(base))).
-  let log_sink = { record -> __io_println(
+  const log_sink = { record -> __io_println(
     "[logging] status=" + to_string(record?.status) + " latency_ms=" + to_string(record?.latency_ms),
   ) }
-  let stack = compose(
+  const stack = compose(
     [
       { next -> with_logging(next, {sink: log_sink}) },
       { next -> with_retry(next, {max_attempts: 3, base_ms: 1}) },
       { next -> with_cache(next) },
     ],
   )
-  let caller = stack(base)
-  let env = caller(
+  const caller = stack(base)
+  const env = caller(
     {
       prompt: "hi",
       system: "",

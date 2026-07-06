@@ -5,10 +5,10 @@ fn handle_channel(event) {
 }
 
 pipeline default() {
-  let audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-replay-match-" + unique,
       kind: "channel.emit",
@@ -26,9 +26,9 @@ pipeline default() {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("ch.replay.match.input", {repo: "harn"})
-  let emit_entry = audit.next().value
-  let match_entry = audit.next().value
+  const _ = emit_channel("ch.replay.match.input", {repo: "harn"})
+  const emit_entry = audit.next().value
+  const match_entry = audit.next().value
   __io_println(emit_entry.kind)
   __io_println(match_entry.kind)
   __io_println(match_entry.headers.schema)

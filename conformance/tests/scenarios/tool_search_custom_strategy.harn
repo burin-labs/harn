@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(registry, "anchor", "Always visible", {parameters: {}, handler: { _ -> "anchor" }})
   registry = tool_define(
     registry,
@@ -15,7 +15,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "ship",
         nil,
         {
@@ -33,9 +33,9 @@ pipeline test(task) {
           max_iterations: 3,
         },
       )
-      let events = transcript_events(result.transcript)
-      var promoted = false
-      var saw_fixture = false
+      const events = transcript_events(result.transcript)
+      let promoted = false
+      let saw_fixture = false
       for ev in events {
         if ev.kind == "tool_search_query" {
           saw_fixture = ev.metadata.strategy == "fixture"

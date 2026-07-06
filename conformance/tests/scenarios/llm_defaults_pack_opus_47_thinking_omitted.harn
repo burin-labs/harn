@@ -5,10 +5,10 @@ import { lineage_of } from "std/llm/catalog"
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  let model = "claude-opus-4-7-20260101"
+  const model = "claude-opus-4-7-20260101"
   // Sanity: lineage_of must classify this id as the adaptive variant.
   assert_eq(lineage_of(model), "claude-opus-adaptive")
-  let r = pack_for({model: model, task: "agent", thinking: "medium"})
+  const r = pack_for({model: model, task: "agent", thinking: "medium"})
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, model)
   assert_eq(r.provider, "anthropic")

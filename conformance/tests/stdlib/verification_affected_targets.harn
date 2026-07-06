@@ -1,7 +1,7 @@
 import { verification_affected_targets } from "std/verification"
 
 pipeline test(task) {
-  let fact = verification_affected_targets(
+  const fact = verification_affected_targets(
     ["crates/app/src/lib.rs", "apps/web/src/index.ts", "plugins/a/file.foo"],
     [
       {
@@ -47,7 +47,7 @@ pipeline test(task) {
   assert_eq(fact.adapters[1].parser_id, "js.workspace_graph.v1")
   assert_eq(fact.adapters[2].target_count, 1)
   assert_eq(fact.fallback.enabled, false)
-  let templated = verification_affected_targets(
+  const templated = verification_affected_targets(
     ["x/a.txt", "y/b.txt"],
     [
       {

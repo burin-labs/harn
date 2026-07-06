@@ -1,17 +1,17 @@
 pipeline default() {
   // Create a real channel
-  let ch = channel("test", 10)
+  const ch = channel("test", 10)
   __io_println(type_of(ch))
   // Send and receive
-  let t = spawn {
+  const t = spawn {
     send(ch, "hello")
     send(ch, "world")
     send(ch, 42)
   }
   await(t)
-  let v1 = receive(ch)
-  let v2 = receive(ch)
-  let v3 = receive(ch)
+  const v1 = receive(ch)
+  const v2 = receive(ch)
+  const v3 = receive(ch)
   __io_println(v1)
   __io_println(v2)
   __io_println(v3)

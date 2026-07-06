@@ -4,15 +4,15 @@ import { propose_instructions } from "std/llm/refine"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  let judged = parallel_judge("Prompt", [{id: "one"}], { _ctx -> 0.5 })
+  const judged = parallel_judge("Prompt", [{id: "one"}], { _ctx -> 0.5 })
   __io_println(judged.best.score == 0.5)
-  let explicit = propose_instructions("Base", {instruction_proposals: "Tighten the answer."})
+  const explicit = propose_instructions("Base", {instruction_proposals: "Tighten the answer."})
   __io_println(explicit[0] == "Base")
   __io_println(explicit[1] == "Tighten the answer.")
   with_llm_script(
     [llm_text("{\"instructions\":[\"Plan first.\",\"Plan first.\"]}")],
     { ->
-      let proposed = propose_instructions(
+      const proposed = propose_instructions(
         "Base",
         {provider: "mock", proposal_count: 2, system: "Proposal sys", schema_retries: 0, repair: false},
       )
@@ -20,12 +20,12 @@ pipeline default() {
       __io_println(proposed[1] == "Plan first.")
       __io_println(len(proposed) == 2)
       __io_println(llm_mock_calls()[0].system == "Proposal sys")
-      let result = optimize_prompt(
+      const result = optimize_prompt(
         {
           base_prompt: "Answer the question.",
           eval_set: [{id: "add", input: "2 + 2", expected: "4"}, {id: "mul", input: "3 * 3", expected: "9"}],
           metric: { ctx ->
-            var score = 0.0
+            let score = 0.0
             if contains(lowercase(ctx.prompt), "calculate") {
               score = score + 0.7
             }

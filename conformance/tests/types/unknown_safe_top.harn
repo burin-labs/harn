@@ -4,10 +4,10 @@
  */
 pipeline test(task) {
   // Every concrete type is assignable to `unknown`.
-  let u1: unknown = 42
-  let u2: unknown = "hello"
-  let u3: unknown = nil
-  let u4: unknown = [1, 2, 3]
+  const u1: unknown = 42
+  const u2: unknown = "hello"
+  const u3: unknown = nil
+  const u4: unknown = [1, 2, 3]
   // Reading `type_of` on an unknown is fine.
   log(type_of(u1))
   log(type_of(u2))

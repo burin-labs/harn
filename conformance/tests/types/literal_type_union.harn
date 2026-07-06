@@ -8,13 +8,13 @@ type Score = 0 | 1 | 2
 
 pipeline test(task) {
   // Assignable: a literal flows into its base-typed slot.
-  let v: Verdict = "pass"
-  let s: Score = 2
+  const v: Verdict = "pass"
+  const s: Score = 2
   __io_println(v)
   __io_println(s)
   // schema_of emits canonical enum JSON Schema.
-  let vs = schema_of(Verdict)
-  let ss = schema_of(Score)
+  const vs = schema_of(Verdict)
+  const ss = schema_of(Score)
   __io_println(vs.type)
   __io_println(vs.enum)
   __io_println(ss.type)

@@ -20,11 +20,11 @@ fn pick(req) {
 }
 
 fn main(harness: Harness) {
-  let policy = create({allow: [], default: "deny", on_violation: pick})
-  let restricted = harness.with_net_policy(policy)
-  let safe = restricted.net.get("https://example.test/safe/hello")
+  const policy = create({allow: [], default: "deny", on_violation: pick})
+  const restricted = harness.with_net_policy(policy)
+  const safe = restricted.net.get("https://example.test/safe/hello")
   harness.stdio.println("safe=" + safe)
-  var hostile_err = nil
+  let hostile_err = nil
   try {
     restricted.net.get("https://example.test/danger")
   } catch (e) {

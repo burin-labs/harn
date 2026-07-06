@@ -7,7 +7,7 @@ pipeline test(task) {
     log("doing work")
     return "result"
   }
-  let r = with_cleanup()
+  const r = with_cleanup()
   log(r)
   // Multiple defers run in LIFO order
   fn lifo_order() {
@@ -39,7 +39,7 @@ pipeline test(task) {
     log("before throw")
     throw "boom"
   }
-  let err = try {
+  const err = try {
     throws_with_defer()
   }
   log(is_err(err))

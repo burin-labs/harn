@@ -8,7 +8,7 @@
  * @errors: []
  */
 pub fn int_to_string(value) {
-  let parsed = to_int(value)
+  const parsed = to_int(value)
   require parsed != nil, "int_to_string expects an integer-compatible value"
   return to_string(parsed)
 }
@@ -21,7 +21,7 @@ pub fn int_to_string(value) {
  * @errors: []
  */
 pub fn float_to_string(value) {
-  let parsed = to_float(value)
+  const parsed = to_float(value)
   require parsed != nil, "float_to_string expects a float-compatible value"
   return to_string(parsed)
 }
@@ -58,7 +58,7 @@ pub fn parse_float_or(value, fallback) {
  * @errors: []
  */
 pub fn extract_paths(text) {
-  let lines = split(text, "\n")
+  const lines = split(text, "\n")
     .filter(
     { line ->
       let t = trim(line)
@@ -67,13 +67,13 @@ pub fn extract_paths(text) {
         && !starts_with(t, "#")
     },
   )
-  var seen = []
+  let seen = []
   return lines
     .flat_map(
     { line -> return split(trim(line), " ")
       .map(
       { word ->
-        var clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
+        let clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
         while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":")
           || ends_with(clean, ";") {
           clean = substring(clean, 0, len(clean) - 1)
@@ -86,7 +86,7 @@ pub fn extract_paths(text) {
         if !contains(clean, "/") && !contains(clean, ".") {
           return false
         }
-        let ext = extname(clean)
+        const ext = extname(clean)
         return ext != "" && len(ext) <= 11
       },
     ) },
@@ -112,14 +112,14 @@ pub fn extract_paths(text) {
  * @errors: []
  */
 pub fn parse_cells(response) {
-  let lines = split(response, "\n")
-  var cells = []
-  var in_block = false
-  var block_type = "code"
-  var block_lang = nil
-  var current_lines = []
-  var trimmed = ""
-  var lang_part = ""
+  const lines = split(response, "\n")
+  let cells = []
+  let in_block = false
+  let block_type = "code"
+  let block_lang = nil
+  let current_lines = []
+  let trimmed = ""
+  let lang_part = ""
   for line in lines {
     trimmed = trim(line)
     if starts_with(trimmed, "```") && in_block {
@@ -184,11 +184,11 @@ pub fn filter_test_cells(cells, target_file) {
  * @errors: []
  */
 pub fn truncate_head_tail(text, n) {
-  let lines = split(text, "\n")
+  const lines = split(text, "\n")
   if len(lines) <= n * 2 {
     return text
   }
-  let skipped = len(lines) - n * 2
+  const skipped = len(lines) - n * 2
   return join(lines[:n], "\n")
     + "\n... ("
     + to_string(skipped)
@@ -203,12 +203,12 @@ pub fn truncate_head_tail(text, n) {
  * @errors: []
  */
 pub fn truncate_text(text, max_chars = 4000, marker = nil) {
-  let value = text ?? ""
-  let limit = max_chars ?? 4000
+  const value = text ?? ""
+  const limit = max_chars ?? 4000
   if limit <= 0 || len(value) <= limit {
     return value
   }
-  let suffix = marker ?? ("\n... truncated " + to_string(len(value) - limit) + " chars ...")
+  const suffix = marker ?? ("\n... truncated " + to_string(len(value) - limit) + " chars ...")
   return substring(value, 0, limit) + suffix
 }
 
@@ -219,21 +219,21 @@ pub fn truncate_text(text, max_chars = 4000, marker = nil) {
  * @errors: []
  */
 pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
-  let value = text ?? ""
-  let limit = max_chars ?? 4000
+  const value = text ?? ""
+  const limit = max_chars ?? 4000
   if limit <= 0 || len(value) <= limit {
     return value
   }
-  let suffix = marker ?? "..."
+  const suffix = marker ?? "..."
   if limit <= len(suffix) {
     return substring(suffix, 0, limit)
   }
-  let keep = limit - len(suffix)
+  const keep = limit - len(suffix)
   // Bias the head larger when `keep` is odd. Plain `ceil(keep / 2)` would
   // be a no-op here because integer `/` already truncates, so the head
   // landed smaller than the tail — the opposite of the intent.
-  let head = (keep + 1) / 2
-  let tail = keep - head
+  const head = (keep + 1) / 2
+  const tail = keep - head
   return substring(value, 0, head) + suffix + substring(value, len(value) - tail)
 }
 
@@ -244,7 +244,7 @@ pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
  * @errors: []
  */
 pub fn single_line_or(value, fallback = "") {
-  let text = trim(value ?? "")
+  const text = trim(value ?? "")
   if text == "" {
     return fallback
   }
@@ -258,7 +258,7 @@ pub fn single_line_or(value, fallback = "") {
  * @errors: []
  */
 pub fn prefix_lines(text, prefix = "  ") {
-  let p = prefix ?? ""
+  const p = prefix ?? ""
   return split(text ?? "", "\n").map({ line -> p + line }).join("\n")
 }
 
@@ -298,11 +298,11 @@ pub fn detect_compile_error(output) {
  * @errors: []
  */
 pub fn has_got_want(output) {
-  let has_got = contains(output, "got:")
+  const has_got = contains(output, "got:")
     || contains(output, "Got:")
     || contains(output, "actual:")
     || contains(output, "Actual:")
-  let has_want = contains(output, "want:")
+  const has_want = contains(output, "want:")
     || contains(output, "Want:")
     || contains(output, "expected:")
     || contains(output, "Expected:")
@@ -318,7 +318,7 @@ pub fn has_got_want(output) {
  * @errors: []
  */
 pub fn format_test_errors(output) {
-  let error_lines = split(output, "\n")
+  const error_lines = split(output, "\n")
     .filter(
     { line -> return contains(line, "FAIL")
       || contains(line, "Error")
@@ -388,11 +388,11 @@ pub fn repeat_string(text, count: int) -> string {
  * @example: regex_first_capture("v(\\d+\\.\\d+\\.\\d+)", tag)
  */
 pub fn regex_first_capture(pattern: string, text) {
-  let captures = regex_captures(pattern, to_string(text ?? "")) ?? []
+  const captures = regex_captures(pattern, to_string(text ?? "")) ?? []
   if len(captures) == 0 {
     return nil
   }
-  let groups = captures[0]?.groups ?? []
+  const groups = captures[0]?.groups ?? []
   if len(groups) == 0 {
     return nil
   }
@@ -409,7 +409,7 @@ pub fn regex_first_capture(pattern: string, text) {
  * @example: regex_capture_groups("(\\d+)\\.(\\d+)\\.(\\d+)", "1.2.3")
  */
 pub fn regex_capture_groups(pattern: string, text) -> list {
-  let captures = regex_captures(pattern, to_string(text ?? "")) ?? []
+  const captures = regex_captures(pattern, to_string(text ?? "")) ?? []
   if len(captures) == 0 {
     return []
   }
@@ -427,9 +427,9 @@ pub fn regex_capture_groups(pattern: string, text) -> list {
  * @example: regex_all_first_captures("#(\\d+)", "fixes #12 and #34")
  */
 pub fn regex_all_first_captures(pattern: string, text) -> list {
-  var out = []
+  let out = []
   for capture in regex_captures(pattern, to_string(text ?? "")) ?? [] {
-    let groups = capture?.groups ?? []
+    const groups = capture?.groups ?? []
     if len(groups) > 0 {
       out = out + [groups[0]]
     }

@@ -3,7 +3,7 @@ import { pool_create, pool_get, pool_list, pool_wait } from "std/lifecycle/pool"
 
 pipeline default() {
   // Create a named pool with a single worker slot.
-  let pool = pool_create({name: "demo", max_concurrent: 1})
+  const pool = pool_create({name: "demo", max_concurrent: 1})
   log(pool._type)
   log(pool.name)
   log(pool.max_concurrent)
@@ -11,16 +11,16 @@ pipeline default() {
   log(pool.queued)
   // Submit three closures. With max_concurrent=1 the second and third
   // should land in the queue when checked immediately after submit.
-  let h1 = pool.submit({ -> 100 })
-  let h2 = pool.submit({ -> 200 })
-  let h3 = pool.submit({ -> 300 })
+  const h1 = pool.submit({ -> 100 })
+  const h2 = pool.submit({ -> 200 })
+  const h3 = pool.submit({ -> 300 })
   log(h1._type)
   log(h1.pool)
   // Wait for completion via the pool-native API and via wait_agent —
   // both must return the same shape (pool_task snapshot dict).
-  let r1 = pool_wait(h1)
-  let r2 = wait_agent(h2)
-  let r3 = wait_agent(h3)
+  const r1 = pool_wait(h1)
+  const r2 = wait_agent(h2)
+  const r3 = wait_agent(h3)
   log(r1.status)
   log(r1.result)
   log(r2.status)
@@ -30,23 +30,23 @@ pipeline default() {
   // After draining, size() reports zero and snapshot tallies the
   // terminal-state counts.
   log(pool.size())
-  let snap = pool.snapshot()
+  const snap = pool.snapshot()
   log(snap.completed)
   log(snap.failed)
   log(snap.total)
   // Registry lookups round-trip by name.
-  let again = pool_get("demo")
+  const again = pool_get("demo")
   log(again.name)
   log(again.id == pool.id)
-  let pools = pool_list()
-  let listed = pools.find({ entry -> entry.name == "demo" })
+  const pools = pool_list()
+  const listed = pools.find({ entry -> entry.name == "demo" })
   log(listed.id == pool.id)
   // Failures surface as "failed" status with the error message.
-  let boom = { ->
+  const boom = { ->
     throw "boom"
   }
-  let failed = pool.submit(boom)
-  let f = wait_agent(failed)
+  const failed = pool.submit(boom)
+  const f = wait_agent(failed)
   log(f.status)
   log(f.error)
 }

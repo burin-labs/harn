@@ -1,9 +1,9 @@
 pipeline test(task) {
-  let held = sync_semaphore_acquire("pool", 1, 1)
-  let timed_out = sync_semaphore_acquire("pool", 1, 1, 0)
+  const held = sync_semaphore_acquire("pool", 1, 1)
+  const timed_out = sync_semaphore_acquire("pool", 1, 1, 0)
   __io_println(timed_out == nil)
   __io_println(sync_release(held))
-  let reacquired = sync_semaphore_acquire("pool", 1, 1, 0)
+  const reacquired = sync_semaphore_acquire("pool", 1, 1, 0)
   __io_println(reacquired != nil)
   sync_release(reacquired)
 }

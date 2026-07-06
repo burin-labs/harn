@@ -1,7 +1,7 @@
 import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
 
 pipeline test(task) {
-  let facts = verification_warm_state_facts(
+  const facts = verification_warm_state_facts(
     [
       {
         id: "svc/warm",
@@ -61,7 +61,7 @@ pipeline test(task) {
       ],
     },
   )
-  let plan = verification_ladder_plan(
+  const plan = verification_ladder_plan(
     {language: "toolchainy", task: "post_edit"},
     {timing_kind: "auto", warm_state_facts: facts},
   )
@@ -74,7 +74,7 @@ pipeline test(task) {
   assert_eq(plan.selected[1].timing_kind, "cold")
   assert_eq(plan.selected[1].p95_ms, 7000)
   assert_eq(plan.selected[1].warm_state.id, "svc/cold")
-  let cold_override = verification_ladder_plan(
+  const cold_override = verification_ladder_plan(
     {language: "toolchainy", task: "post_edit"},
     {timing_kind: "cold", warm_state_facts: facts},
   )

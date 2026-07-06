@@ -2,7 +2,7 @@ import "std/agents"
 import { with_llm_script } from "std/testing"
 
 fn write_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -20,7 +20,7 @@ pipeline main() {
   with_llm_script(
     [{tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]}],
     { ->
-      let worker = spawn_agent(
+      const worker = spawn_agent(
         {
           name: "permission-worker",
           task: "Try to write.",

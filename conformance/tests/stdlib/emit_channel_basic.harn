@@ -1,7 +1,7 @@
 pipeline default() {
   mock_time(1000)
-  let receipt = emit_channel("demo.created", {n: 1}, {id: "demo-1", ttl: 5s})
-  let events = channel_events("demo.created")
+  const receipt = emit_channel("demo.created", {n: 1}, {id: "demo-1", ttl: 5s})
+  const events = channel_events("demo.created")
   __io_println(receipt.name_resolved)
   __io_println(receipt.scope)
   __io_println(receipt.event_id)
@@ -13,7 +13,7 @@ pipeline default() {
   __io_println(events[0].payload.n)
   __io_println(events[0].id)
   __io_println(events[0].ttl_ms)
-  let duplicate = emit_channel("demo.created", {n: 2}, {id: "demo-1"})
+  const duplicate = emit_channel("demo.created", {n: 2}, {id: "demo-1"})
   __io_println(duplicate.event_id == receipt.event_id)
   __io_println(duplicate.duplicate)
   __io_println(channel_events("demo.created")[0].payload.n)

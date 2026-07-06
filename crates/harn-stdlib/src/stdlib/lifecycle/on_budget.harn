@@ -64,8 +64,8 @@ fn __on_budget_default_message(state, fallback) -> string {
 }
 
 fn __on_budget_emit_audit(harness, kind, strategy, state) {
-  let snapshot = __on_budget_snapshot(state)
-  let payload = {
+  const snapshot = __on_budget_snapshot(state)
+  const payload = {
     strategy: strategy,
     budget_state: snapshot,
     message: __on_budget_default_message(snapshot, "budget threshold crossed"),
@@ -74,7 +74,7 @@ fn __on_budget_emit_audit(harness, kind, strategy, state) {
 }
 
 fn __on_budget_terminate_error(state) {
-  let snapshot = __on_budget_snapshot(state)
+  const snapshot = __on_budget_snapshot(state)
   return {
     category: "budget_exceeded",
     kind: "terminal",
@@ -130,7 +130,7 @@ pub fn terminate(harness, budget_state) {
  */
 pub fn graceful_exit(harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_graceful_exit", "graceful_exit", budget_state)
-  let snapshot = __on_budget_snapshot(budget_state)
+  const snapshot = __on_budget_snapshot(budget_state)
   return {
     status: "budget_exhausted",
     strategy: "graceful_exit",
@@ -167,8 +167,8 @@ pub fn graceful_exit(harness, budget_state) {
  */
 pub fn warn_and_continue(harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_warn_and_continue", "warn_and_continue", budget_state)
-  let snapshot = __on_budget_snapshot(budget_state)
-  let body = __on_budget_default_message(
+  const snapshot = __on_budget_snapshot(budget_state)
+  const body = __on_budget_default_message(
     snapshot,
     "Your budget is exhausted (OnBudget.warn_and_continue). Consider wrapping up or asking for a budget extension.",
   )
@@ -179,7 +179,7 @@ pub fn warn_and_continue(harness, budget_state) {
 }
 
 fn __on_budget_int(value, fallback) {
-  let parsed = to_int(value ?? fallback)
+  const parsed = to_int(value ?? fallback)
   if parsed == nil || parsed < 0 {
     return fallback
   }
@@ -187,17 +187,17 @@ fn __on_budget_int(value, fallback) {
 }
 
 fn __on_budget_session_id(snapshot) {
-  let nested = snapshot?.session?.id
-  let direct = snapshot?.session_id
-  let current = agent_session_current_id()
-  let session_id = direct ?? nested ?? current ?? ""
+  const nested = snapshot?.session?.id
+  const direct = snapshot?.session_id
+  const current = agent_session_current_id()
+  const session_id = direct ?? nested ?? current ?? ""
   return to_string(session_id)
 }
 
 fn __on_budget_replan_keep_first(src, snapshot, iteration) {
-  var keep_first = __on_budget_int(snapshot?.last_good_iteration, iteration)
-  let source = agent_session_snapshot(src) ?? {}
-  let max_events = len(source.messages ?? [])
+  let keep_first = __on_budget_int(snapshot?.last_good_iteration, iteration)
+  const source = agent_session_snapshot(src) ?? {}
+  const max_events = len(source.messages ?? [])
   if keep_first > max_events {
     keep_first = max_events
   }
@@ -224,8 +224,8 @@ fn __on_budget_replan_reminder(kind, iteration) {
  */
 pub fn replan(harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_replan", "replan", budget_state)
-  let snapshot = __on_budget_snapshot(budget_state)
-  let src = __on_budget_session_id(snapshot)
+  const snapshot = __on_budget_snapshot(budget_state)
+  const src = __on_budget_session_id(snapshot)
   if src == "" {
     throw {
       category: "budget_exceeded",
@@ -236,16 +236,16 @@ pub fn replan(harness, budget_state) {
       message: "OnBudget.replan requires a source session",
     }
   }
-  let iteration = __on_budget_int(snapshot?.iteration ?? snapshot?.n, 0)
-  let keep_first = __on_budget_replan_keep_first(src, snapshot, iteration)
-  let dst = snapshot?.dst_session_id
-  let forked = if dst != nil {
+  const iteration = __on_budget_int(snapshot?.iteration ?? snapshot?.n, 0)
+  const keep_first = __on_budget_replan_keep_first(src, snapshot, iteration)
+  const dst = snapshot?.dst_session_id
+  const forked = if dst != nil {
     agent_session_fork_at(src, keep_first, to_string(dst))
   } else {
     agent_session_fork_at(src, keep_first)
   }
-  let budget_kind = to_string(snapshot?.budget_kind ?? snapshot?.kind ?? "budget")
-  let reminder_body = __on_budget_replan_reminder(budget_kind, iteration)
+  const budget_kind = to_string(snapshot?.budget_kind ?? snapshot?.kind ?? "budget")
+  const reminder_body = __on_budget_replan_reminder(budget_kind, iteration)
   agent_session_inject(
     forked,
     transcript_reminder_event(
@@ -257,9 +257,9 @@ pub fn replan(harness, budget_state) {
       },
     ),
   )
-  let task = snapshot?.task ?? snapshot?.message
-  let base_options = snapshot?.options ?? {}
-  let result = if task != nil {
+  const task = snapshot?.task ?? snapshot?.message
+  const base_options = snapshot?.options ?? {}
+  const result = if task != nil {
     agent_loop(task, snapshot?.system, base_options + {session_id: forked})
   } else {
     nil

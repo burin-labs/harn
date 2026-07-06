@@ -3,7 +3,7 @@ import { slack_message_disclosure } from "std/disclosure"
 import { merge } from "std/json"
 import { wait_for } from "std/monitors"
 
-var slack_connector_config = {}
+let slack_connector_config = {}
 
 /**
  * Configure default parameters merged into every Slack connector call.
@@ -43,16 +43,16 @@ fn __slack_disclosure_options(options) {
 }
 
 fn __with_slack_disclosure(options) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if __configured_slack_disclosure(opts) != nil {
     return opts
   }
-  let chain = __slack_actor_chain(opts)
+  const chain = __slack_actor_chain(opts)
   if chain == nil {
     return opts
   }
-  let disclosure = slack_message_disclosure(chain, __slack_disclosure_options(opts))
-  let harn = merge(opts?._harn ?? {}, {disclosure: merge(opts?._harn?.disclosure ?? {}, {slack: disclosure})})
+  const disclosure = slack_message_disclosure(chain, __slack_disclosure_options(opts))
+  const harn = merge(opts?._harn ?? {}, {disclosure: merge(opts?._harn?.disclosure ?? {}, {slack: disclosure})})
   return merge(opts, {_harn: harn})
 }
 
@@ -66,7 +66,7 @@ fn __with_slack_disclosure(options) {
  * @errors: [ConnectorError]
  */
 pub fn post_message(channel, text, blocks = nil, options = nil) {
-  let opts = __with_slack_disclosure(options)
+  const opts = __with_slack_disclosure(options)
   return __call("post_message", filter_nil(merge(opts, {channel: channel, text: text, blocks: blocks})))
 }
 
@@ -164,7 +164,7 @@ pub fn message_source(channel = nil, options = nil) {
     label: "slack.message:" + to_string(channel ?? "*"),
     prefers_push: true,
     poll: { ctx ->
-      let payload = __slack_payload(ctx?.last_push_event)
+      const payload = __slack_payload(ctx?.last_push_event)
       return {
         matched: payload != nil,
         message: payload,
@@ -176,8 +176,8 @@ pub fn message_source(channel = nil, options = nil) {
       }
     },
     push_filter: { log_event ->
-      let event = __slack_event(log_event)
-      let payload = __slack_payload(log_event)
+      const event = __slack_event(log_event)
+      const payload = __slack_payload(log_event)
       return event?.provider == "slack"
         && (event?.kind == "message" || event?.kind == "app_mention"
         || starts_with(event?.kind ?? "", "message."))
@@ -200,7 +200,7 @@ pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
     label: "slack.reaction:" + to_string(channel ?? "*") + ":" + to_string(reaction ?? "*"),
     prefers_push: true,
     poll: { ctx ->
-      let payload = __slack_payload(ctx?.last_push_event)
+      const payload = __slack_payload(ctx?.last_push_event)
       return {
         matched: payload != nil,
         reaction: payload?.reaction,
@@ -210,8 +210,8 @@ pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
       }
     },
     push_filter: { log_event ->
-      let event = __slack_event(log_event)
-      let payload = __slack_payload(log_event)
+      const event = __slack_event(log_event)
+      const payload = __slack_payload(log_event)
       return event?.provider == "slack"
         && event?.kind == "reaction_added"
         && (reaction == nil || payload?.reaction == reaction)

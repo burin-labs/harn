@@ -9,7 +9,7 @@
  */
 pipeline default(task) {
   log("Starting code review agent")
-  let system = """
+  const system = """
 You are a senior code reviewer.
 Review the change for correctness, security, maintainability, and tests.
 Return:
@@ -18,7 +18,7 @@ Return:
 - missing tests
 End with a short verdict.
 """
-  let review = llm_call(task, system, {temperature: 0.2, max_tokens: 1200})
+  const review = llm_call(task, system, {temperature: 0.2, max_tokens: 1200})
   eval_metric("review_chars", review.text.count)
   __io_println(review.text)
 }

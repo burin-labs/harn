@@ -11,17 +11,17 @@
  * Run with: cargo run --bin harn -- run examples/session-multi-turn.harn
  */
 pipeline main(task) {
-  let sid = agent_session_open()
+  const sid = agent_session_open()
   log("opened session ${sid}")
-  let first = agent_loop(
+  const first = agent_loop(
     "Remember that my favorite color is teal.",
     nil,
     {session_id: sid, provider: "mock", max_iterations: 2},
   )
   log("turn 1 status=${first.status} len=${agent_session_length(sid)}")
-  let second = agent_loop("What did I just tell you?", nil, {session_id: sid, provider: "mock", max_iterations: 2})
+  const second = agent_loop("What did I just tell you?", nil, {session_id: sid, provider: "mock", max_iterations: 2})
   log("turn 2 status=${second.status} len=${agent_session_length(sid)}")
-  let snap = agent_session_snapshot(sid)
+  const snap = agent_session_snapshot(sid)
   log("final transcript has ${len(snap["messages"])} messages")
   agent_session_close(sid)
 }

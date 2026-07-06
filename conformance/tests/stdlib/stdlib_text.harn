@@ -10,19 +10,19 @@ pipeline default() {
   __io_println(parse_float_or("2.25", 0.0))
   __io_println(parse_float_or("oops", 1.5))
   // extract_paths
-  let paths = extract_paths("Error in /src/main.rs at line 5\nAlso see ./lib/test.go\n// /ignored/comment.txt")
+  const paths = extract_paths("Error in /src/main.rs at line 5\nAlso see ./lib/test.go\n// /ignored/comment.txt")
   __io_println(len(paths))
   __io_println(paths[0])
   __io_println(paths[1])
-  let punctuated = extract_paths(
+  const punctuated = extract_paths(
     "Touch internal/manifest/parser.go. Then create internal/manifest/parser_extra_test.go, not validation.",
   )
   __io_println(len(punctuated))
   __io_println(punctuated[0])
   __io_println(punctuated[1])
   // parse_cells
-  let response = "Here is code:\n```go\nfmt.Println(\"hi\")\n```\nAnd a call:\n```call python\nwrite_file(\"test.py\", code)\n```\nDone"
-  let cells = parse_cells(response)
+  const response = "Here is code:\n```go\nfmt.Println(\"hi\")\n```\nAnd a call:\n```call python\nwrite_file(\"test.py\", code)\n```\nDone"
+  const cells = parse_cells(response)
   __io_println(len(cells))
   __io_println(cells[0].type)
   __io_println(cells[0].lang)
@@ -30,15 +30,15 @@ pipeline default() {
   __io_println(cells[1].type)
   __io_println(cells[1].lang)
   // filter_test_cells
-  let filtered = filter_test_cells(cells, nil)
+  const filtered = filter_test_cells(cells, nil)
   __io_println(len(filtered))
-  let filtered2 = filter_test_cells(cells, "test.py")
+  const filtered2 = filter_test_cells(cells, "test.py")
   __io_println(len(filtered2))
   // truncate_head_tail
-  let long_text = join(["a", "b", "c", "d", "e", "f", "g", "h"], "\n")
-  let short = truncate_head_tail(long_text, 2)
+  const long_text = join(["a", "b", "c", "d", "e", "f", "g", "h"], "\n")
+  const short = truncate_head_tail(long_text, 2)
   __io_println(contains(short, "4 lines omitted"))
-  let no_trunc = truncate_head_tail("one\ntwo\nthree", 2)
+  const no_trunc = truncate_head_tail("one\ntwo\nthree", 2)
   __io_println(no_trunc)
   // detect_compile_error
   __io_println(detect_compile_error("SyntaxError: unexpected EOF"))
@@ -49,8 +49,8 @@ pipeline default() {
   __io_println(has_got_want("Got: foo\nExpected: bar"))
   __io_println(has_got_want("just got: something"))
   // format_test_errors
-  let output = "ok test1\nFAIL test2\nerror: bad input\nok test3\nassert failed"
-  let formatted = format_test_errors(output)
+  const output = "ok test1\nFAIL test2\nerror: bad input\nok test3\nassert failed"
+  const formatted = format_test_errors(output)
   __io_println(formatted)
   // pad_right / pad_left
   __io_println("[" + pad_right("api", 6) + "]")

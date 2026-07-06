@@ -25,10 +25,10 @@ fn seed_workspace(root: string) {
 }
 
 pipeline default(_task) {
-  let root = path_join(asset_root(), "verification-workspace")
+  const root = path_join(asset_root(), "verification-workspace")
   seed_workspace(root)
-  let _ = hostlib_code_index_rebuild({root: root})
-  let before = verification_file_hash_snapshot(["src/app.rs", "src/missing.rs"])
+  const _ = hostlib_code_index_rebuild({root: root})
+  const before = verification_file_hash_snapshot(["src/app.rs", "src/missing.rs"])
   require before.algorithm == "fnv1a64", "snapshot algorithm should be fnv1a64"
   require before.snapshot["src/app.rs"] != nil, "indexed file hash should be captured"
   require before.files[0].known, "indexed file should be known"
@@ -37,8 +37,8 @@ pipeline default(_task) {
   harness.fs
     .write_text(path_join(root, "src/app.rs"), "pub fn answer() -> i32 { 43 }\npub fn extra() {}\n")
   harness.fs.write_text(path_join(root, "src/new.rs"), "pub fn new_file() {}\n")
-  let after = verification_file_hash_snapshot(["src/app.rs", "src/new.rs", "src/missing.rs"])
-  let diagnostic = verification_diagnostic_classify(
+  const after = verification_file_hash_snapshot(["src/app.rs", "src/new.rs", "src/missing.rs"])
+  const diagnostic = verification_diagnostic_classify(
     {
       rung: "R2",
       rowId: "verification-snapshot-demo",
@@ -66,7 +66,7 @@ pipeline default(_task) {
       + after.files[1].hash_source,
   )
   __io_println("")
-  let receipt = {
+  const receipt = {
     receipt_kind: "verification_snapshot_receipt",
     algorithm: after.algorithm,
     initial_seq: before.seq,

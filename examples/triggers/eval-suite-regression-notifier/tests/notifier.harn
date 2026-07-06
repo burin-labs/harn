@@ -1,22 +1,22 @@
 import { call_notify_on_eval_gate_flip } from "./support"
 
-let DEFAULT_SUITE = "eval-suite-regression"
+const DEFAULT_SUITE = "eval-suite-regression"
 
-let DEFAULT_MODEL = "mock-model"
+const DEFAULT_MODEL = "mock-model"
 
 @test
 pipeline test_regression_notification_posts(task) {
   egress_policy({allow: ["api.slack.com"], default: "deny"})
   http_mock_clear()
-  let base = "https://api.slack.com"
+  const base = "https://api.slack.com"
   http_mock(
     "POST",
     base + "/chat.postMessage",
     {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
   )
-  let namespace = "eval-notifier-test-" + uuid()
-  let manifest = load_eval_manifest()
-  let config = {
+  const namespace = "eval-notifier-test-" + uuid()
+  const manifest = load_eval_manifest()
+  const config = {
     namespace: namespace,
     suite: DEFAULT_SUITE,
     model: DEFAULT_MODEL,
@@ -25,21 +25,21 @@ pipeline test_regression_notification_posts(task) {
     branch: "main",
     resamples: 200,
   }
-  let plan = eval_ledger_resolve_resume_plan(manifest, ledger_options(config))
-  let baseline = eval_ledger_append_unique_case_rows(
+  const plan = eval_ledger_resolve_resume_plan(manifest, ledger_options(config))
+  const baseline = eval_ledger_append_unique_case_rows(
     baseline_rows(manifest, plan.harness_config_fingerprint, "commit-a"),
     ledger_options(config + {commit: "commit-a"}),
   )
   assert_eq(baseline.inserted, 2, "baseline rows inserted")
-  let outcome = call_notify_on_eval_gate_flip(notifier_event(config, base))
+  const outcome = call_notify_on_eval_gate_flip(notifier_event(config, base))
   assert(outcome.notified, "regression notifies")
   assert_eq(outcome.decision, "regression", "gate decision")
   assert_eq(outcome.verdict.gate.status, "regression", "regression gate used")
   assert_eq(outcome.verdict.paired_delta.status, "regression", "paired delta included")
   assert_eq(len(outcome.verdict.top_regressed_cases), 1, "top regressed case included")
-  let calls = http_mock_calls()
+  const calls = http_mock_calls()
   assert_eq(len(calls), 1, "one Slack post")
-  let body = json_parse(calls[0].body)
+  const body = json_parse(calls[0].body)
   assert(contains(body.text, "Eval regression detected"), "Slack digest labels regression")
   assert(
     contains(body.blocks[2].text.text, "tool-call-schema"),
@@ -52,9 +52,9 @@ pipeline test_regression_notification_posts(task) {
 pipeline test_no_prior_baseline_skips_notification(task) {
   egress_policy({allow: ["api.slack.com"], default: "deny"})
   http_mock_clear()
-  let base = "https://api.slack.com"
-  let namespace = "eval-notifier-test-" + uuid()
-  let config = {
+  const base = "https://api.slack.com"
+  const namespace = "eval-notifier-test-" + uuid()
+  const config = {
     namespace: namespace,
     suite: DEFAULT_SUITE,
     model: DEFAULT_MODEL,
@@ -62,7 +62,7 @@ pipeline test_no_prior_baseline_skips_notification(task) {
     commit: "commit-no-prior",
     branch: "main",
   }
-  let outcome = call_notify_on_eval_gate_flip(notifier_event(config, base))
+  const outcome = call_notify_on_eval_gate_flip(notifier_event(config, base))
   assert(!outcome.notified, "no prior baseline does not notify")
   assert(!(outcome.notify ?? false), "no prior baseline suppresses Slack")
   assert_eq(outcome.reason, "no_prior_baseline", "no baseline reason")
@@ -103,8 +103,8 @@ fn notifier_event(config, base) -> dict {
 }
 
 fn load_eval_manifest() -> dict {
-  let base_dir = path_join(source_dir(), "..")
-  let path = path_join(base_dir, "harn.eval.toml")
+  const base_dir = path_join(source_dir(), "..")
+  const path = path_join(base_dir, "harn.eval.toml")
   return eval_pack_manifest(toml_parse(harness.fs.read_text(path)) + {base_dir: base_dir})
 }
 
@@ -120,7 +120,7 @@ fn ledger_options(config) -> dict {
 }
 
 fn baseline_rows(manifest, harness_fingerprint, commit) -> list {
-  var rows = []
+  let rows = []
   for case in manifest.cases {
     rows = rows
       + [

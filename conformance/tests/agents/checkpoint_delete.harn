@@ -5,7 +5,7 @@ pipeline test(task) {
   checkpoint("a", 1)
   checkpoint("b", 2)
   checkpoint("c", 3)
-  let keys = checkpoint_list()
+  const keys = checkpoint_list()
   assert(len(keys) == 3, "should have 3 keys")
   // Delete a single key
   checkpoint_delete("b")
@@ -14,7 +14,7 @@ pipeline test(task) {
   assert(checkpoint_exists("c"), "c should still exist")
   assert(checkpoint_get("a") == 1, "a value intact")
   assert(checkpoint_get("c") == 3, "c value intact")
-  let keys2 = checkpoint_list()
+  const keys2 = checkpoint_list()
   assert(len(keys2) == 2, "should have 2 keys after delete")
   // Deleting a non-existent key is a no-op
   checkpoint_delete("nonexistent")

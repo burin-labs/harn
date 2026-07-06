@@ -3,8 +3,8 @@ pipeline default() {
   defer {
     __pop_llm_render_context()
   }
-  let tmpl = "provider={{ llm.provider }} family={{ llm.family }} native_tools={{ llm.capabilities.native_tools }}"
+  const tmpl = "provider={{ llm.provider }} family={{ llm.family }} native_tools={{ llm.capabilities.native_tools }}"
   __io_println(render_string(tmpl, {}))
-  let tmpl2 = "{{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }}"
+  const tmpl2 = "{{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }}"
   __io_println(render_string(tmpl2, {}))
 }

@@ -17,11 +17,11 @@ pipeline test(task) {
     description "Documentation polish"
     paths ["docs/**/*.md"]
   }
-  let registry = skill_define(infra_touch, "docs_touch", skill_find(docs_touch, "docs_touch") ?? {})
+  const registry = skill_define(infra_touch, "docs_touch", skill_find(docs_touch, "docs_touch") ?? {})
   with_llm_script(
     [llm_text("All done.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "fix the edge case",
         nil,
         {
@@ -33,9 +33,9 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "loop completes on path-only match")
-      let events = transcript_events(result?.transcript)
-      var infra_activated = false
-      var docs_activated = false
+      const events = transcript_events(result?.transcript)
+      let infra_activated = false
+      let docs_activated = false
       for ev in events {
         if ev.kind == "skill_activated" {
           if ev.metadata?.name == "infra_touch" {
@@ -48,7 +48,7 @@ pipeline test(task) {
       }
       assert(infra_activated, "path-match alone activates infra_touch")
       assert(!docs_activated, "non-matching skill stays inactive")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(
         contains(calls[0].system, "infra_touch"),
         "infra_touch prompt body weaves into system prompt",

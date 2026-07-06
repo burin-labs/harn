@@ -7,15 +7,15 @@
 //
 // Usage:
 //   harn run scripts/check_docs_cli_flags.harn
-let DOCS_GLOB = "docs/src/**/*.md"
+const DOCS_GLOB = "docs/src/**/*.md"
 
-let ALLOW_STALE = "harn-doc-cli: allow-stale"
+const ALLOW_STALE = "harn-doc-cli: allow-stale"
 
-let COMMAND_SEPARATORS: list<string> = ["&&", "||", ";", "|"]
+const COMMAND_SEPARATORS: list<string> = ["&&", "||", ";", "|"]
 
 /** Repo-relative form of a glob result (strip the `/./` marker). */
 pub fn rel_path(path: string) -> string {
-  let idx = path.index_of("/./")
+  const idx = path.index_of("/./")
   if idx >= 0 {
     return path.substring(idx + 3, path.len())
   }
@@ -24,7 +24,7 @@ pub fn rel_path(path: string) -> string {
 
 /** Strip trailing whitespace (Python `str.rstrip()`). */
 pub fn right_trim(s: string) -> string {
-  var end = s.len()
+  let end = s.len()
   while end > 0 && s.char_at(end - 1).trim() == "" {
     end = end - 1
   }
@@ -43,11 +43,11 @@ pub fn is_word_or_hyphen(c: string) -> bool {
  * line. Fences must be exactly ```bash or ```sh; any ``` line closes.
  */
 pub fn bash_blocks(text: string) -> list {
-  var blocks: list = []
-  var in_block = false
-  var block_start = 0
-  var body: list<string> = []
-  var line_no = 0
+  let blocks: list = []
+  let in_block = false
+  let block_start = 0
+  let body: list<string> = []
+  let line_no = 0
   for line in text.lines() {
     line_no = line_no + 1
     if !in_block {
@@ -75,15 +75,15 @@ pub fn bash_blocks(text: string) -> list {
  * whole logical line.
  */
 pub fn logical_lines(block_lines: list<string>, first_line: int) -> list {
-  var out: list = []
-  var buffer: list<string> = []
-  var start_line = first_line
-  var allow_stale = false
-  var offset = 0
+  let out: list = []
+  let buffer: list<string> = []
+  let start_line = first_line
+  let allow_stale = false
+  let offset = 0
   for line in block_lines {
-    let line_number = first_line + offset
+    const line_number = first_line + offset
     offset = offset + 1
-    var raw = line
+    let raw = line
     if buffer.count == 0 {
       start_line = line_number
       allow_stale = false
@@ -91,8 +91,8 @@ pub fn logical_lines(block_lines: list<string>, first_line: int) -> list {
     if raw.contains(ALLOW_STALE) {
       allow_stale = true
     }
-    let trimmed = right_trim(raw)
-    let continued = trimmed.ends_with("\\")
+    const trimmed = right_trim(raw)
+    const continued = trimmed.ends_with("\\")
     if continued {
       raw = trimmed.substring(0, trimmed.len() - 1)
     }
@@ -117,16 +117,16 @@ pub fn logical_lines(block_lines: list<string>, first_line: int) -> list {
 @complexity(allow)
 pub fn shell_tokens(command: string) -> list<string>? {
   // shlex does not split shell separators unless whitespace-delimited.
-  let padded = regex_replace(r"(\|\||&&|[;|])", " $1 ", command)
-  let cs = chars(padded)
-  let n = cs.count
-  var tokens: list<string> = []
-  var token = ""
-  var has_token = false
-  var state = " "
-  var i = 0
+  const padded = regex_replace(r"(\|\||&&|[;|])", " $1 ", command)
+  const cs = chars(padded)
+  const n = cs.count
+  let tokens: list<string> = []
+  let token = ""
+  let has_token = false
+  let state = " "
+  let i = 0
   while i < n {
-    let c = cs[i]
+    const c = cs[i]
     if state == " " {
       if c.trim() == "" {
         i = i + 1
@@ -206,7 +206,7 @@ pub fn shell_tokens(command: string) -> list<string>? {
       if i + 1 >= n {
         return nil
       }
-      let nc = cs[i + 1]
+      const nc = cs[i + 1]
       if nc == "\"" || nc == "\\" {
         token = token + nc
       } else {
@@ -231,8 +231,8 @@ pub fn shell_tokens(command: string) -> list<string>? {
 
 /** Split a token stream into command segments at shell separators. */
 pub fn command_segments(tokens: list<string>) -> list {
-  var segments: list = []
-  var segment: list<string> = []
+  let segments: list = []
+  let segment: list<string> = []
   for token in tokens {
     if COMMAND_SEPARATORS.contains(token) {
       if segment.count > 0 {
@@ -260,7 +260,7 @@ pub fn is_assignment(token: string) -> bool {
  * the args after `harn`, or nil when the segment is not a harn call.
  */
 pub fn find_harn_segment(segment: list<string>) -> list<string>? {
-  var index = 0
+  let index = 0
   while index < segment.count && (segment[index] == "$" || segment[index] == ">") {
     index = index + 1
   }
@@ -281,8 +281,8 @@ pub fn find_harn_segment(segment: list<string>) -> list<string>? {
  * words under a `Commands:` heading (until the first blank line).
  */
 pub fn parse_command_names(help_text: string) -> list<string> {
-  var names: list<string> = []
-  var in_commands = false
+  let names: list<string> = []
+  let in_commands = false
   for line in help_text.lines() {
     if line.trim() == "Commands:" {
       in_commands = true
@@ -292,9 +292,9 @@ pub fn parse_command_names(help_text: string) -> list<string> {
       break
     }
     if in_commands {
-      let ms = regex_captures(r"^\s{2}([A-Za-z0-9_-]+)\b", line)
+      const ms = regex_captures(r"^\s{2}([A-Za-z0-9_-]+)\b", line)
       if ms.count > 0 {
-        let name: string = ms[0].groups[0]
+        const name: string = ms[0].groups[0]
         if !names.contains(name) {
           names = names + [name]
         }
@@ -311,18 +311,18 @@ pub fn parse_command_names(help_text: string) -> list<string> {
  * look-behind; the preceding-character check is done by hand here.
  */
 pub fn parse_help_flags(help_text: string) {
-  var flags: list<string> = []
-  var takes: dict<string, bool> = {}
+  let flags: list<string> = []
+  let takes: dict<string, bool> = {}
   for line in help_text.lines() {
     for m in regex_captures(r"--([A-Za-z0-9][A-Za-z0-9-]*)\b", line) {
       if m.start > 0 && is_word_or_hyphen(line.char_at(m.start - 1)) {
         continue
       }
-      let flag = "--" + m.groups[0]
+      const flag = "--" + m.groups[0]
       if !flags.contains(flag) {
         flags = flags + [flag]
       }
-      let after = line.substring(m.end, line.len())
+      const after = line.substring(m.end, line.len())
       takes[flag] = regex_captures(r"^\s+(<|\[<)", after).count > 0
     }
   }
@@ -341,38 +341,38 @@ fn path_key(path: list<string>) -> string {
  * through explicitly.
  */
 pub fn help_text_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
-  let key = path_key(path)
-  let cached = state.help[key]
+  const key = path_key(path)
+  const cached = state.help[key]
   if cached != nil {
     return {state: state, text: cached}
   }
-  let text = fetch(path)
-  var help = state.help
+  const text = fetch(path)
+  let help = state.help
   help[key] = text
   return {state: {...state, help: help}, text: text}
 }
 
 /** Memoized `parse_help_flags` over the cached help text. */
 pub fn help_flags_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
-  let key = path_key(path)
-  let cached = state.flagsets[key]
+  const key = path_key(path)
+  const cached = state.flagsets[key]
   if cached != nil {
     return {state: state, flags: cached.flags, takes: cached.takes}
   }
-  let ht = help_text_cached(state, path, fetch)
-  let parsed = parse_help_flags(ht.text)
-  var flagsets = ht.state.flagsets
+  const ht = help_text_cached(state, path, fetch)
+  const parsed = parse_help_flags(ht.text)
+  let flagsets = ht.state.flagsets
   flagsets[key] = parsed
   return {state: {...ht.state, flagsets: flagsets}, flags: parsed.flags, takes: parsed.takes}
 }
 
 /** Flags accepted at `path`: the union over every prefix of the path. */
 pub fn accepted_flags_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
-  var st = state
-  var accepted: list<string> = []
-  var depth = 0
+  let st = state
+  let accepted: list<string> = []
+  let depth = 0
   while depth <= path.count {
-    let r = help_flags_cached(st, path.slice(0, depth), fetch)
+    const r = help_flags_cached(st, path.slice(0, depth), fetch)
     st = r.state
     for f in r.flags {
       if !accepted.contains(f) {
@@ -390,31 +390,31 @@ pub fn accepted_flags_cached(state, path: list<string>, fetch: fn(list<string>) 
  * Returns `{state, path, missing}`.
  */
 pub fn analyze_harn_args(state, args: list<string>, fetch: fn(list<string>) -> string) {
-  var st = state
-  var path: list<string> = []
-  var missing: list<string> = []
-  var index = 0
+  let st = state
+  let path: list<string> = []
+  let missing: list<string> = []
+  let index = 0
   while index < args.count {
-    let token = args[index]
+    const token = args[index]
     if token == "--" {
       break
     }
     if token.starts_with("--") {
-      let eq = token.index_of("=")
-      let flag = if eq >= 0 {
+      const eq = token.index_of("=")
+      const flag = if eq >= 0 {
         token.substring(0, eq)
       } else {
         token
       }
-      let ar = accepted_flags_cached(st, path, fetch)
+      const ar = accepted_flags_cached(st, path, fetch)
       st = ar.state
-      let accepted = ar.flags
+      const accepted = ar.flags
       if !accepted.contains(flag) {
         missing = missing + [flag]
       }
-      let hr = help_flags_cached(st, path, fetch)
+      const hr = help_flags_cached(st, path, fetch)
       st = hr.state
-      let takes_value = hr.takes[flag] ?? false
+      const takes_value = hr.takes[flag] ?? false
       if eq
         < 0
         && index + 1 < args.count
@@ -430,7 +430,7 @@ pub fn analyze_harn_args(state, args: list<string>, fetch: fn(list<string>) -> s
       index = index + 1
       continue
     }
-    let cr = help_text_cached(st, path, fetch)
+    const cr = help_text_cached(st, path, fetch)
     st = cr.state
     if parse_command_names(cr.text).contains(token) {
       path = path + [token]
@@ -456,15 +456,15 @@ pub fn has_long_flag(args: list<string>) -> bool {
  * missing) — the same ladder as the bash original.
  */
 fn resolve_harn_bin() -> string {
-  let env_bin = harness.env.get("HARN_BIN")
+  const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
   }
-  var target_dir = ""
-  let meta = harness.process
+  let target_dir = ""
+  const meta = harness.process
     .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
   if meta.success {
-    let parsed = try {
+    const parsed = try {
       json_parse(meta.stdout)
     } catch (err) {
       nil
@@ -477,10 +477,10 @@ fn resolve_harn_bin() -> string {
   if target_dir == "" {
     target_dir = "target"
   }
-  let bin = "${target_dir}/debug/harn"
+  const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    let build = harness.process
+    const build = harness.process
       .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       __io_eprint(build.stderr)
@@ -491,7 +491,7 @@ fn resolve_harn_bin() -> string {
 }
 
 fn fetch_help(harn_bin: string, path: list<string>) -> string {
-  let res = harness.process.spawn_captured({cmd: harn_bin, args: path + ["--help"]})
+  const res = harness.process.spawn_captured({cmd: harn_bin, args: path + ["--help"]})
   if res.exit_code == 0 {
     return res.stdout + res.stderr
   }
@@ -499,26 +499,26 @@ fn fetch_help(harn_bin: string, path: list<string>) -> string {
 }
 
 pipeline main(task) {
-  let harn_bin = resolve_harn_bin()
-  let fetch = { path: list<string> -> fetch_help(harn_bin, path) }
-  var md_files: list<string> = []
+  const harn_bin = resolve_harn_bin()
+  const fetch = { path: list<string> -> fetch_help(harn_bin, path) }
+  let md_files: list<string> = []
   for g in harness.fs.glob(DOCS_GLOB) {
     md_files = md_files + [rel_path(g)]
   }
-  var state = {help: {}, flagsets: {}}
-  var checked = 0
-  var skipped = 0
-  var parse_errors: list = []
-  var failures: list = []
+  let state = {help: {}, flagsets: {}}
+  let checked = 0
+  let skipped = 0
+  let parse_errors: list = []
+  let failures: list = []
   for md_file in md_files.sort() {
-    let text = harness.fs.read_text(md_file)
+    const text = harness.fs.read_text(md_file)
     for block in bash_blocks(text) {
       for logical in logical_lines(block.lines, block.first_line) {
         if logical.allow_stale {
           skipped = skipped + 1
           continue
         }
-        let tokens = shell_tokens(logical.command)
+        const tokens = shell_tokens(logical.command)
         if tokens == nil {
           if logical.command.contains("harn") {
             parse_errors = parse_errors
@@ -527,11 +527,11 @@ pipeline main(task) {
           continue
         }
         for segment in command_segments(tokens) {
-          let args = find_harn_segment(segment)
+          const args = find_harn_segment(segment)
           if args == nil {
             continue
           }
-          let res = analyze_harn_args(state, args, fetch)
+          const res = analyze_harn_args(state, args, fetch)
           state = res.state
           if has_long_flag(args) {
             checked = checked + 1
@@ -558,7 +558,7 @@ pipeline main(task) {
     __io_println("      command: ${err.command}")
   }
   for failure in failures {
-    let help_target = if failure.path.count > 0 {
+    const help_target = if failure.path.count > 0 {
       "harn " + failure.path.join(" ")
     } else {
       "harn"
@@ -568,7 +568,7 @@ pipeline main(task) {
     __io_println("      checked: ${help_target} --help")
     __io_println("      missing long flag(s): ${failure.missing.join(", ")}")
   }
-  let total_failures = parse_errors.count + failures.count
+  const total_failures = parse_errors.count + failures.count
   __io_println("")
   __io_println(
     "docs CLI flags: ${checked} flag-bearing harn invocation(s) checked, ${skipped} skipped, ${total_failures} failed",

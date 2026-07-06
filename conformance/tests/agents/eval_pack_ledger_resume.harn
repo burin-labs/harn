@@ -1,11 +1,11 @@
 import "../_common"
 
 pipeline default() {
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  let root = path_join(harness.fs.temp_dir(), "harn-eval-ledger-" + uuid_v7())
-  let state = path_join(root, "state")
-  let script = path_join(root, "eval_ledger_child.harn")
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn-eval-ledger-" + uuid_v7())
+  const state = path_join(root, "state")
+  const script = path_join(root, "eval_ledger_child.harn")
   harness.fs.mkdir(root)
   harness.fs
     .write_text(
@@ -123,9 +123,9 @@ pipeline default() {
       + "  }\n"
       + "}\n",
   )
-  let first = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "preseed")
-  let second = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "rerun")
-  let mismatch = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "mismatch")
+  const first = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "preseed")
+  const second = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "rerun")
+  const mismatch = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "mismatch")
   __io_println(first.success)
   __io_println(contains(first.stdout, "inserted=1"))
   __io_println(contains(first.stdout, "pass=true"))

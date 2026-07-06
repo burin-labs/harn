@@ -1,14 +1,14 @@
 import "../_common"
 
 pipeline default() {
-  let unique = uuid()
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-add-" + unique)
-  let workspace = path_join(base, "workspace")
-  let state_dir = path_join(base, "state")
-  let binary = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const unique = uuid()
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-add-" + unique)
+  const workspace = path_join(base, "workspace")
+  const state_dir = path_join(base, "state")
+  const binary = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   assert(harness.fs.exists(binary), "missing built harn binary at " + binary)
-  let script = """
+  const script = """
     set -eu
 
     base="${base}"
@@ -138,9 +138,9 @@ pipeline default() {
     sys.stdout.write(json.dumps({"status": result["status"], "version": snapshot["triggers"][0]["version"]}))
     PY
     """
-  let result = shell(script)
+  const result = shell(script)
   assert(result?.success, result?.stderr)
-  let summary = json_parse(result?.stdout)
+  const summary = json_parse(result?.stdout)
   assert(summary.status == 200, "new route accepts after add reload")
   assert(summary.version == 1, "added binding starts at version 1")
   log("orchestrator hot reload add status: " + to_string(summary.status))

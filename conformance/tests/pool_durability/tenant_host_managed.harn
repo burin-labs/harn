@@ -8,12 +8,12 @@ fn has_text(result, snippet) {
 }
 
 pipeline default() {
-  let tenant_result = try {
+  const tenant_result = try {
     pool_create({name: "tenant-demo", scope: "tenant"})
   }
   log(has_text(tenant_result, "host-managed"))
   log(is_err(tenant_result) && !contains(to_string(unwrap_err(tenant_result)), "harn-cloud"))
-  let org_result = try {
+  const org_result = try {
     pool_create({name: "org-demo", scope: "org"})
   }
   log(has_text(org_result, "host-managed"))

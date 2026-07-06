@@ -12,10 +12,10 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  * Tracking: harn#1864 (S-14).
  */
 pipeline default() {
-  let RB = ResumeBy()
+  const RB = ResumeBy()
   pipeline_on_finish(
     { harness, return_value ->
-      let result = RB
+      const result = RB
         .cloud_harness(
         harness,
         {
@@ -24,7 +24,7 @@ pipeline default() {
           conditions: {trigger: {kind: "issue.closed", provider: "github"}},
         },
       )
-      let audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("handled=" + to_string(result.handled))
       harness.stdio.println("mechanism=" + result.mechanism)
       harness.stdio.println("reason=" + result.reason)

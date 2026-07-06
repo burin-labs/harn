@@ -11,7 +11,7 @@ pipeline test(task) {
     "escalation",
     {accepted: true, reviewer: "oncall-primary", reason: "took over"},
   )
-  let handle = escalate_to(role: "oncall", reason: "deploy failed during maintenance window")
+  const handle = escalate_to(role: "oncall", reason: "deploy failed during maintenance window")
   __io_println(handle.role)
   __io_println(handle.reason)
   __io_println(handle.status)

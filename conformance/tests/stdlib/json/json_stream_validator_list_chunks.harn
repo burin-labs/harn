@@ -1,7 +1,7 @@
 import { stream_validator } from "std/json"
 
 pipeline default(task) {
-  let validator = stream_validator({type: "list", items: {type: "int"}})
+  const validator = stream_validator({type: "list", items: {type: "int"}})
   __io_println(validator.feed("[1,").variant)
   __io_println(validator.feed("2,3]").variant)
   __io_println(validator.value()[2])

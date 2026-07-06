@@ -1,19 +1,19 @@
 pipeline test(task) {
-  let text = "compression round trip: hello, Harn"
-  let bytes = bytes_from_hex("000102fffefd")
+  const text = "compression round trip: hello, Harn"
+  const bytes = bytes_from_hex("000102fffefd")
   assert_eq(bytes_to_string(gzip_decode(gzip_encode(text))), text)
   assert_eq(bytes_to_hex(gzip_decode(gzip_encode(bytes, 9))), "000102fffefd")
   assert_eq(bytes_to_string(zstd_decode(zstd_encode(text))), text)
   assert_eq(bytes_to_hex(zstd_decode(zstd_encode(bytes, 1))), "000102fffefd")
   assert_eq(bytes_to_string(brotli_decode(brotli_encode(text))), text)
   assert_eq(bytes_to_hex(brotli_decode(brotli_encode(bytes, 4))), "000102fffefd")
-  let tar_archive = tar_create(
+  const tar_archive = tar_create(
     [
       {path: "docs/readme.txt", content: text, mode: 420},
       {path: "bin/run", content: bytes_from_string("echo hi\n"), mode: 493},
     ],
   )
-  let tar_entries = tar_extract(tar_archive)
+  const tar_entries = tar_extract(tar_archive)
   assert_eq(len(tar_entries), 2)
   assert_eq(tar_entries[0].path, "docs/readme.txt")
   assert_eq(bytes_to_string(tar_entries[0].content), text)
@@ -21,8 +21,8 @@ pipeline test(task) {
   assert_eq(tar_entries[1].path, "bin/run")
   assert_eq(bytes_to_string(tar_entries[1].content), "echo hi\n")
   assert_eq(tar_entries[1].mode, 493)
-  let zip_archive = zip_create([{path: "notes/a.txt", content: "alpha"}, {path: "raw/data.bin", content: bytes}])
-  let zip_entries = zip_extract(zip_archive)
+  const zip_archive = zip_create([{path: "notes/a.txt", content: "alpha"}, {path: "raw/data.bin", content: bytes}])
+  const zip_entries = zip_extract(zip_archive)
   assert_eq(len(zip_entries), 2)
   assert_eq(zip_entries[0].path, "notes/a.txt")
   assert_eq(bytes_to_string(zip_entries[0].content), "alpha")

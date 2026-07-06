@@ -9,7 +9,7 @@ import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn preset_agent(kind, prompt, options = nil) {
-  let opts = agent_preset(kind, options)
+  const opts = agent_preset(kind, options)
   return agent_loop(prompt, opts?.system, opts)
 }
 
@@ -18,7 +18,7 @@ pipeline default() {
   with_llm_script(
     [{error: {category: "rate_limit", message: "429 transient"}}, llm_text("Recovered. ##DONE##")],
     { ->
-      let ok = preset_agent("summary", "finish", {provider: "mock", retry: {base_ms: 1}})
+      const ok = preset_agent("summary", "finish", {provider: "mock", retry: {base_ms: 1}})
       __io_println(ok.status)
       __io_println(ok.text)
       __io_println(len(llm_mock_calls()))
@@ -31,7 +31,7 @@ pipeline default() {
       llm_text("unreachable without a composed retry handler."),
     ],
     { ->
-      let ff = preset_agent("summary", "finish", {provider: "mock", retry: false})
+      const ff = preset_agent("summary", "finish", {provider: "mock", retry: false})
       __io_println(ff.status)
       __io_println(len(llm_mock_calls()))
     },

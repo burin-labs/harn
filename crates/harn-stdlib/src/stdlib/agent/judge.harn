@@ -23,7 +23,7 @@ import {
 const __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP = 5
 
 fn __unique_names(names) {
-  var unique = []
+  let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
       unique = unique.push(name)
@@ -33,7 +33,7 @@ fn __unique_names(names) {
 }
 
 fn __session_tool_names(messages) {
-  var names = []
+  let names = []
   for message in messages {
     if message?.role == "tool" {
       names = names.push(message?.name ?? "")
@@ -43,8 +43,8 @@ fn __session_tool_names(messages) {
 }
 
 fn __judge_payload(session, opts, stop_reason, text, iteration) {
-  let messages = agent_session_messages(session.session_id)
-  let tool_names = __session_tool_names(messages)
+  const messages = agent_session_messages(session.session_id)
+  const tool_names = __session_tool_names(messages)
   return {
     session_id: session.session_id,
     task: session?.task ?? "",
@@ -60,7 +60,7 @@ fn __judge_payload(session, opts, stop_reason, text, iteration) {
 }
 
 fn __judge_invoke_closure(verify_completion, payload) {
-  let result = verify_completion(payload)
+  const result = verify_completion(payload)
   if result == nil || result == "" {
     return {vetoed: false, confirm: true, trigger: "verify_completion"}
   }
@@ -71,8 +71,8 @@ fn __judge_invoke_closure(verify_completion, payload) {
     return {vetoed: true, feedback: result, confirm: false, trigger: "verify_completion"}
   }
   if type_of(result) == "dict" {
-    let confirm = result?.confirm ?? false
-    let message = result?.message ?? result?.feedback
+    const confirm = result?.confirm ?? false
+    const message = result?.message ?? result?.feedback
     return {
       vetoed: !confirm,
       feedback: message,
@@ -86,9 +86,9 @@ fn __judge_invoke_closure(verify_completion, payload) {
 }
 
 fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
-  let system = judge_cfg?.system ?? ""
-  let user = completion_judge_user_prompt(payload)
-  let schema = {
+  const system = judge_cfg?.system ?? ""
+  const user = completion_judge_user_prompt(payload)
+  const schema = {
     type: "object",
     properties: {
       verdict: {type: "string", description: "Use `done` or `continue`."},
@@ -97,7 +97,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     },
     required: ["verdict"],
   }
-  let ran = __judge_run_checkpoint(
+  const ran = __judge_run_checkpoint(
     harness,
     judge_cfg,
     opts,
@@ -107,8 +107,8 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     user,
     schema,
   )
-  let checkpoint = ran.checkpoint
-  let duration_ms = ran.duration_ms
+  const checkpoint = ran.checkpoint
+  const duration_ms = ran.duration_ms
   if !checkpoint.ok {
     if judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? false {
       return {
@@ -130,15 +130,15 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
       typed_checkpoint: checkpoint,
     }
   }
-  let result = checkpoint.data
-  let {reasoning = "", next_step = ""} = result ?? {}
+  const result = checkpoint.data
+  const {reasoning = "", next_step = ""} = result ?? {}
   // The done-judge prompt only ever asks for `done` or `continue`. A reflexive
   // `"yes"` from a cheap model usually means "yes, keep going" (continue), and
   // a bare `"true"` is just as ambiguous — classifying either as DONE
   // terminates incomplete work. Both are dropped from the allow-list.
-  let done_verdicts = ["done", "pass", "passed", "safe", "yield", "yield_to_user", "complete", "completed"]
-  let feedback_default = judge_cfg?.feedback_fallback ?? ""
-  let outcome = __judge_classify_verdict(
+  const done_verdicts = ["done", "pass", "passed", "safe", "yield", "yield_to_user", "complete", "completed"]
+  const feedback_default = judge_cfg?.feedback_fallback ?? ""
+  const outcome = __judge_classify_verdict(
     result?.verdict ?? "continue",
     done_verdicts,
     [next_step, reasoning],
@@ -159,12 +159,12 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
  * positive integer ceiling on judge invocations.
  */
 fn __verify_completion_judge_cap(judge_cfg) {
-  let configured = if type_of(judge_cfg) == "dict" {
+  const configured = if type_of(judge_cfg) == "dict" {
     judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
   } else {
     nil
   }
-  let cap = configured ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+  const cap = configured ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
   if cap <= 0 {
     return nil
   }
@@ -181,7 +181,7 @@ fn __done_judge_cap(judge_cfg) {
   if type_of(judge_cfg) != "dict" {
     return nil
   }
-  let cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+  const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
   if cap == nil || cap <= 0 {
     return nil
   }
@@ -249,17 +249,17 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
  * @api_stability: experimental
  */
 pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0) {
-  let payload = __judge_payload(session, opts, stop_reason, text, iteration)
-  var verdict = {vetoed: false}
+  const payload = __judge_payload(session, opts, stop_reason, text, iteration)
+  let verdict = {vetoed: false}
   if opts?.verify_completion != nil {
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
     __emit_judge_decision(session.session_id, iteration, verdict)
   }
-  var completion_judge_invoked = false
-  var completion_judge_cap_reached = false
-  let prior_judge_invocations = opts?._verify_completion_judge_invocations ?? 0
+  let completion_judge_invoked = false
+  let completion_judge_cap_reached = false
+  const prior_judge_invocations = opts?._verify_completion_judge_invocations ?? 0
   if !verdict.vetoed && opts?.verify_completion_judge != nil {
-    let cap = __verify_completion_judge_cap(opts.verify_completion_judge)
+    const cap = __verify_completion_judge_cap(opts.verify_completion_judge)
     if cap != nil && prior_judge_invocations >= cap {
       // Cap reached: stop firing the judge (and injecting its feedback). The
       // loop surfaces this as stop_reason `completion_judge_cap_reached` plus a
@@ -273,14 +273,14 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
       __emit_judge_decision(session.session_id, iteration, verdict)
     }
   }
-  let done_judge_due = opts?._done_judge_due ?? true
-  let done_judge_applies = opts?.done_judge != nil
+  const done_judge_due = opts?._done_judge_due ?? true
+  const done_judge_applies = opts?.done_judge != nil
     && (stop_reason == "sentinel" || stop_reason == "natural" || stop_reason == "stalled")
     && done_judge_due
-  var done_judge_cap_reached = false
-  let prior_done_judge_invocations = opts?._done_judge_invocations ?? 0
+  let done_judge_cap_reached = false
+  const prior_done_judge_invocations = opts?._done_judge_invocations ?? 0
   if !verdict.vetoed && done_judge_applies {
-    let cap = __done_judge_cap(opts.done_judge)
+    const cap = __done_judge_cap(opts.done_judge)
     if cap != nil && prior_done_judge_invocations >= cap {
       done_judge_cap_reached = true
     } else {
@@ -403,7 +403,7 @@ fn __completion_gate_write_counts(raw, classify_write) {
     }
   }
   if raw?.writes != nil {
-    let counts = __completion_gate_classify_writes(raw.writes, classify_write)
+    const counts = __completion_gate_classify_writes(raw.writes, classify_write)
     return counts + {source_known: true}
   }
   return {source_write_count: 0, cosmetic_write_count: 0, source_known: false}
@@ -418,11 +418,11 @@ fn __completion_gate_write_counts(raw, classify_write) {
  * at all (never a silent fabricated pass).
  */
 fn __completion_gate_evaluate(payload, opts, facts_available) {
-  let session_id = to_string(payload?.session_id ?? "")
-  let classify_write = opts?.classify_write
-  let verify_command = opts?.verify_command
-  let facts = opts?.facts
-  let max_vetoes = to_int(opts?.max_vetoes ?? 3) ?? 3
+  const session_id = to_string(payload?.session_id ?? "")
+  const classify_write = opts?.classify_write
+  const verify_command = opts?.verify_command
+  const facts = opts?.facts
+  const max_vetoes = to_int(opts?.max_vetoes ?? 3) ?? 3
   if !facts_available {
     // No host facts: the deterministic gate cannot assert anything, so it
     // abstains (allow). Any configured LLM judge still runs — judge-only mode.
@@ -431,36 +431,36 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
     // `facts_unavailable` reason, so a harness never mistakes it for a real pass.
     return {confirm: true, reason: "facts_unavailable"}
   }
-  let messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
-  let ctx = {
+  const messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
+  const ctx = {
     session_id: session_id,
     task: to_string(payload?.task ?? ""),
     stop_reason: to_string(payload?.stop_reason ?? ""),
     text: to_string(payload?.text ?? ""),
     messages: messages,
   }
-  let raw = if facts != nil {
+  const raw = if facts != nil {
     facts(ctx) ?? {}
   } else {
     {}
   }
-  let counts = __completion_gate_write_counts(raw, classify_write)
-  let verify_raw = if raw?.verify != nil {
+  const counts = __completion_gate_write_counts(raw, classify_write)
+  const verify_raw = if raw?.verify != nil {
     raw.verify
   } else if verify_command != nil {
     verify_command()
   } else {
     nil
   }
-  let verify = __completion_gate_combine_verify(verify_raw, opts?.veto_combine)
-  let requires_write = if opts?.requires_write != nil {
+  const verify = __completion_gate_combine_verify(verify_raw, opts?.veto_combine)
+  const requires_write = if opts?.requires_write != nil {
     opts.requires_write
   } else if raw?.requires_write != nil {
     raw.requires_write
   } else {
     opts?.require_source_write ?? true
   }
-  let derived = {
+  const derived = {
     source_known: counts.source_known,
     source_write_count: counts.source_write_count,
     cosmetic_write_count: counts.cosmetic_write_count,
@@ -468,13 +468,13 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
     verify: verify,
     oracle_expected: verify_command != nil || raw?.verify != nil,
   }
-  let verdict = __completion_gate_ladder(derived)
-  let vetoes_used = __completion_gate_vetoes_used(session_id)
-  let budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
+  const verdict = __completion_gate_ladder(derived)
+  const vetoes_used = __completion_gate_vetoes_used(session_id)
+  const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
   if budgeted.charge && session_id != "" {
     store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
   }
-  let resolved = budgeted.verdict
+  const resolved = budgeted.verdict
   if resolved?.ok ?? false {
     return {confirm: true, reason: resolved?.reason ?? "", converted_from: resolved?.converted_from ?? nil}
   }
@@ -507,10 +507,10 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
  * @example: agent_completion_gate({facts: host_facts, verify_command: host_verify})
  */
 pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
-  let opts = options ?? {}
-  let facts_available = opts.facts != nil || opts.verify_command != nil || opts.classify_write != nil
-  let gate = fn(payload) { return __completion_gate_evaluate(payload, opts, facts_available) }
-  var out = {
+  const opts = options ?? {}
+  const facts_available = opts.facts != nil || opts.verify_command != nil || opts.classify_write != nil
+  const gate = fn(payload) { return __completion_gate_evaluate(payload, opts, facts_available) }
+  let out = {
     verify_completion: gate,
     _completion_gate: {
       facts_available: facts_available,
@@ -518,15 +518,15 @@ pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
       require_source_write: opts.require_source_write ?? true,
     },
   }
-  let judge = opts.judge
+  const judge = opts.judge
   if judge != nil && judge {
-    let judge_cfg = if type_of(judge) == "dict" {
+    const judge_cfg = if type_of(judge) == "dict" {
       judge
     } else {
       {}
     }
-    let seam = opts.judge_seam ?? "verify_completion_judge"
-    let cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+    const seam = opts.judge_seam ?? "verify_completion_judge"
+    const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
     out = out + {[seam]: judge_cfg + {max_invocations: cap}}
   }
   return out

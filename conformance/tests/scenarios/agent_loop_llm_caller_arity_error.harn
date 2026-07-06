@@ -3,7 +3,7 @@
  * time with a friendly diagnostic from __validate_llm_caller.
  */
 pipeline default() {
-  let result = try {
+  const result = try {
     agent_loop("hi", nil, {provider: "mock", llm_caller: 42})
   }
   __io_println(unwrap_err(result))

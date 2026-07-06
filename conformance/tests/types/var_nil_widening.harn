@@ -4,7 +4,7 @@
  * precise escape hatch when callers want to say so up front.
  */
 fn first_hit() -> {name: string, score: int}? {
-  var hit = nil
+  let hit = nil
   for entry in {a: 1, b: 2}.entries() {
     if hit == nil && entry.value > 1 {
       hit = {name: entry.key, score: entry.value}
@@ -21,15 +21,15 @@ fn render_hit(hit: {name: string, score: int}?) -> string {
 }
 
 fn widen_direct() -> string {
-  var label = nil
+  let label = nil
   label = "ready"
-  let current: string? = label
+  const current: string? = label
   label = nil
   return current ?? "none"
 }
 
 fn annotated_roundtrip() -> bool {
-  var label: string? = nil
+  let label: string? = nil
   label = "set"
   label = nil
   return label == nil

@@ -1038,7 +1038,12 @@ mod tests {
         let mut env = ConstEnv::new();
         let mut last = None;
         for snode in &program {
-            if let Node::ConstBinding { name, value, .. } = &snode.node {
+            if let Node::ConstBinding {
+                pattern: crate::ast::BindingPattern::Identifier(name),
+                value,
+                ..
+            } = &snode.node
+            {
                 let folded = const_eval(value, &env)?;
                 env.insert(name.clone(), folded.clone());
                 last = Some(folded);

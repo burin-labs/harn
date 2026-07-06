@@ -1,7 +1,7 @@
 import "../_common"
 
 fn first_group(pattern, text) {
-  let matches = regex_captures(pattern, text)
+  const matches = regex_captures(pattern, text)
   if len(matches) == 0 {
     return nil
   }
@@ -9,9 +9,9 @@ fn first_group(pattern, text) {
 }
 
 pipeline test(task) {
-  let root = path_join(harness.fs.temp_dir(), "harn-orchestrator-cli-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-cli-" + uuid())
   harness.fs.mkdir(root)
-  let replay_marker = path_join(root, "replay-ready.marker")
+  const replay_marker = path_join(root, "replay-ready.marker")
   harness.fs
     .write_text(
     path_join(root, "harn.toml"),
@@ -24,19 +24,19 @@ pipeline test(task) {
       + replay_marker
       + "\"\n\npub fn on_tick(event: TriggerEvent) {\n  log(event.kind)\n}\n\npub fn flaky_issue(event: TriggerEvent) -> dict {\n  if !file_exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
   )
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(harness, repo_root)
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  let start = shell_at(
+  const start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
       + harn_bin
       + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
   )
-  let pid = start.stdout.trim()
+  const pid = start.stdout.trim()
   assert(start.success, "failed to start orchestrator")
   assert(pid != "", "missing orchestrator pid")
-  let url = wait_for_listener_url(harness, path_join(root, "orchestrator.log"))
+  const url = wait_for_listener_url(harness, path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
   assert(
     wait_for_log_contains(
@@ -46,11 +46,11 @@ pipeline test(task) {
     ),
     "connectors did not activate",
   )
-  let _ = shell("kill -TERM " + pid)
+  const _ = shell("kill -TERM " + pid)
   assert(wait_for_exit(pid), "orchestrator did not exit")
-  let state_dir = path_join(root, "state")
-  let config_path = path_join(root, "harn.toml")
-  let inspect = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
+  const state_dir = path_join(root, "state")
+  const config_path = path_join(root, "harn.toml")
+  const inspect = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
   __io_println(
     inspect.success
       && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active")
@@ -59,7 +59,7 @@ pipeline test(task) {
       && inspect.stdout.contains("cron bindings=1")
       && inspect.stdout.contains("a2a-push bindings=2"),
   )
-  let inspect_json = exec(
+  const inspect_json = exec(
     harn_bin,
     "orchestrator",
     "inspect",
@@ -69,7 +69,7 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  let inspect_data = json_parse(inspect_json.stdout)
+  const inspect_data = json_parse(inspect_json.stdout)
   __io_println(
     inspect_json.success
       && len(inspect_data.triggers ?? []) == 3
@@ -78,7 +78,7 @@ pipeline test(task) {
       && contains(json_stringify(inspect_data.triggers ?? []), "\"id\":\"manual-replay\"")
       && contains(json_stringify(inspect_data.activations ?? []), "\"provider\":\"cron\""),
   )
-  let fire_replay = exec(
+  const fire_replay = exec(
     harn_bin,
     "orchestrator",
     "fire",
@@ -88,7 +88,7 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  let fire_discard = exec(
+  const fire_discard = exec(
     harn_bin,
     "orchestrator",
     "fire",
@@ -98,7 +98,7 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  let replay_event_id = first_group("event_id=(\\S+)", fire_replay.stdout)
+  const replay_event_id = first_group("event_id=(\\S+)", fire_replay.stdout)
   assert(replay_event_id != nil, "missing replay event id")
   __io_println(
     fire_replay.success
@@ -106,9 +106,9 @@ pipeline test(task) {
       && fire_discard.success
       && fire_discard.stdout.contains("status=dlq"),
   )
-  let dlq_list = exec(harn_bin, "orchestrator", "dlq", "--list", "--config", config_path, "--state-dir", state_dir)
-  let replay_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-replay", dlq_list.stdout)
-  let discard_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-discard", dlq_list.stdout)
+  const dlq_list = exec(harn_bin, "orchestrator", "dlq", "--list", "--config", config_path, "--state-dir", state_dir)
+  const replay_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-replay", dlq_list.stdout)
+  const discard_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-discard", dlq_list.stdout)
   assert(replay_entry_id != nil, "missing replay dlq entry id")
   assert(discard_entry_id != nil, "missing discard dlq entry id")
   __io_println(
@@ -116,7 +116,7 @@ pipeline test(task) {
       && dlq_list.stdout.contains("binding=manual-replay")
       && dlq_list.stdout.contains("binding=manual-discard"),
   )
-  let dlq_list_json = exec(
+  const dlq_list_json = exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -127,7 +127,7 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  let dlq_data = json_parse(dlq_list_json.stdout)
+  const dlq_data = json_parse(dlq_list_json.stdout)
   __io_println(
     dlq_list_json.success
       && dlq_data.pending_entries == 2
@@ -135,14 +135,14 @@ pipeline test(task) {
       && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-replay\"")
       && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-discard\""),
   )
-  let inspect_after = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
+  const inspect_after = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
   __io_println(
     inspect_after.success
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-replay")
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-discard"),
   )
   harness.fs.write_text(replay_marker, "ready")
-  let dlq_replay = exec(
+  const dlq_replay = exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -154,7 +154,7 @@ pipeline test(task) {
     state_dir,
   )
   __io_println(dlq_replay.success && dlq_replay.stdout.contains("status=dispatched"))
-  let direct_replay = exec(
+  const direct_replay = exec(
     harn_bin,
     "orchestrator",
     "replay",
@@ -165,14 +165,14 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  let direct_replay_data = json_parse(direct_replay.stdout)
+  const direct_replay_data = json_parse(direct_replay.stdout)
   __io_println(
     direct_replay.success
       && direct_replay_data.status == "dispatched"
       && direct_replay_data.replay_of_event_id == replay_event_id
       && direct_replay_data.binding_id == "manual-replay",
   )
-  let discard = exec(
+  const discard = exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -184,9 +184,9 @@ pipeline test(task) {
     state_dir,
   )
   __io_println(discard.success && discard.stdout.contains("state=discarded"))
-  let dlq_after = exec(harn_bin, "orchestrator", "dlq", "--list", "--config", config_path, "--state-dir", state_dir)
+  const dlq_after = exec(harn_bin, "orchestrator", "dlq", "--list", "--config", config_path, "--state-dir", state_dir)
   __io_println(dlq_after.success && dlq_after.stdout.contains("pending_entries=0"))
-  let queue = exec(harn_bin, "orchestrator", "queue", "--config", config_path, "--state-dir", state_dir)
+  const queue = exec(harn_bin, "orchestrator", "queue", "--config", config_path, "--state-dir", state_dir)
   __io_println(
     queue.success
       && queue.stdout.contains("dispatcher_in_flight=0")

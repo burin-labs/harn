@@ -251,7 +251,6 @@ fn collect_ast_ranges(
             collect_ast_ranges(value, ranges, seen);
         }
         Node::LetBinding { value, .. }
-        | Node::VarBinding { value, .. }
         | Node::ConstBinding { value, .. }
         | Node::ThrowStmt { value }
         | Node::EmitExpr { value } => collect_ast_ranges(value, ranges, seen),

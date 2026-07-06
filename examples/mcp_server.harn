@@ -18,7 +18,7 @@
  */
 pipeline main(task) {
   // ---- Tools (with annotations) ----
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "greet",
@@ -90,7 +90,7 @@ pipeline main(task) {
         {name: "language", description: "Programming language"},
       ],
       handler: { args ->
-        let lang = args.language ?? "unknown"
+        const lang = args.language ?? "unknown"
         "Please review this " + lang + " code for quality, bugs, and improvements:\n\n" + args.code
       },
     },

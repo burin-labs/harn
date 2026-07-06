@@ -1,7 +1,7 @@
 pipeline default() {
-  let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let server_path = path_join(root, "conformance/helpers/mcp_echo_server.py")
-  let client = mcp_connect("python3", [server_path])
+  const root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const server_path = path_join(root, "conformance/helpers/mcp_echo_server.py")
+  const client = mcp_connect("python3", [server_path])
   // Call a tool that reports isError: true
   try {
     mcp_call(client, "fail")

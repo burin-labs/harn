@@ -13,11 +13,11 @@ fn fail_handler(event: TriggerEvent) -> any {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let ok_id = "ok-trigger-" + unique
-  let fail_id = "fail-trigger-" + unique
-  let ok_config = {
+  const ok_id = "ok-trigger-" + unique
+  const fail_id = "fail-trigger-" + unique
+  const ok_config = {
     id: ok_id,
     kind: "issue.opened",
     provider: "github",
@@ -34,7 +34,7 @@ pipeline test(task) {
     manifest_path: "runtime://trigger-stdlib",
     package_name: "conformance",
   }
-  let fail_config = {
+  const fail_config = {
     id: fail_id,
     kind: "issue.opened",
     provider: "github",
@@ -51,37 +51,37 @@ pipeline test(task) {
     manifest_path: nil,
     package_name: nil,
   }
-  let ok_handle: TriggerHandle = trigger_register(ok_config)
-  let fail_handle: TriggerHandle = trigger_register(fail_config)
+  const ok_handle: TriggerHandle = trigger_register(ok_config)
+  const fail_handle: TriggerHandle = trigger_register(fail_config)
   __io_println(ok_handle.id == ok_id && ok_handle.state == "active")
   __io_println(fail_handle.id == fail_id && fail_handle.handler_kind == "local")
-  let bindings: list<TriggerBinding> = trigger_list()
-  let listed_ok = bindings.find({ binding -> binding.id == ok_handle.id })
+  const bindings: list<TriggerBinding> = trigger_list()
+  const listed_ok = bindings.find({ binding -> binding.id == ok_handle.id })
   __io_println(len(bindings) == 2 && listed_ok?.provider == "github")
   __io_println(listed_ok?.metrics?.received == 0)
-  let ok_fire: DispatchHandle = trigger_fire(
+  const ok_fire: DispatchHandle = trigger_fire(
     ok_handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-success"}},
   )
   __io_println(ok_fire.status == "dispatched" && ok_fire.error == nil)
   __io_println(contains(json_stringify(ok_fire.result ?? {}), "\"kind\":\"issue.opened\""))
-  let fail_fire: DispatchHandle = trigger_fire(
+  const fail_fire: DispatchHandle = trigger_fire(
     fail_handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-dlq"}},
   )
   __io_println(fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"))
-  let dlq_before: list<DlqEntry> = trigger_inspect_dlq()
-  let current_dlq_before = dlq_before.filter({ entry -> entry.binding_id == fail_handle.id })
+  const dlq_before: list<DlqEntry> = trigger_inspect_dlq()
+  const current_dlq_before = dlq_before.filter({ entry -> entry.binding_id == fail_handle.id })
   __io_println(len(current_dlq_before) == 1 && current_dlq_before[0].event_id == fail_fire.event_id)
   __io_println(len(current_dlq_before[0].retry_history) == 1)
   __io_println(current_dlq_before[0].event.provider == "github")
-  let replay: DispatchHandle = trigger_replay(fail_fire.event_id)
+  const replay: DispatchHandle = trigger_replay(fail_fire.event_id)
   __io_println(replay.status == "dlq" && replay.replay_of_event_id == fail_fire.event_id)
-  let dlq_after: list<DlqEntry> = trigger_inspect_dlq()
-  let current_dlq_after = dlq_after.filter({ entry -> entry.binding_id == fail_handle.id })
+  const dlq_after: list<DlqEntry> = trigger_inspect_dlq()
+  const current_dlq_after = dlq_after.filter({ entry -> entry.binding_id == fail_handle.id })
   __io_println(len(current_dlq_after) == 1 && len(current_dlq_after[0].retry_history) == 2)
   __io_println(current_dlq_after[0].retry_history[1].status == "replay_dlq")
-  let bindings_after: list<TriggerBinding> = trigger_list()
-  let live_fail = bindings_after.find({ binding -> binding.id == fail_handle.id })
+  const bindings_after: list<TriggerBinding> = trigger_list()
+  const live_fail = bindings_after.find({ binding -> binding.id == fail_handle.id })
   __io_println(live_fail?.metrics?.dlq == 2)
 }

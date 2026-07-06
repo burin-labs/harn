@@ -2,14 +2,14 @@ import "std/triggers"
 
 /** Return true when the Slack message looks like a summarize request. */
 pub fn should_summarize(event: TriggerEvent) -> bool {
-  let raw = event.provider_payload.raw
-  let text = lowercase(raw.text ?? raw.event?.text ?? "")
+  const raw = event.provider_payload.raw
+  const text = lowercase(raw.text ?? raw.event?.text ?? "")
   return contains(text, "summarize")
 }
 
 /** Create a thread-summary planning payload. */
 pub fn summarize_thread(event: TriggerEvent) -> dict {
-  let raw = event.provider_payload.raw
+  const raw = event.provider_payload.raw
   return {
     action: "summarize_thread",
     channel: raw.channel ?? raw.event?.channel,

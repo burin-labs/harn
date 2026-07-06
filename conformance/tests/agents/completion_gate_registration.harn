@@ -28,7 +28,7 @@ fn event_field_values(events, field) {
 }
 
 fn done_turns(n) {
-  var turns = []
+  let turns = []
   for i in range(0, n) {
     turns = turns.push(llm_text("<user_response>attempt</user_response>\n<done>##DONE##</done>"))
   }
@@ -40,10 +40,10 @@ pipeline default() {
   with_llm_script(
     done_turns(6),
     { ->
-      let session = "cg-cosmetic-" + uuid()
-      let calls_key = "cg-calls-" + session
+      const session = "cg-cosmetic-" + uuid()
+      const calls_key = "cg-calls-" + session
       store_set(calls_key, 0)
-      let captured = agent_capture_events(
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Implement the feature.",
@@ -59,7 +59,7 @@ pipeline default() {
           ),
         ) },
       )
-      let decisions = events_of(captured.events, "judge_decision")
+      const decisions = events_of(captured.events, "judge_decision")
       __io_println("A.status=" + captured.result.status)
       __io_println("A.gate_calls=" + to_string(store_get(calls_key)))
       __io_println("A.reasons=" + event_field_values(decisions, "reason"))
@@ -70,9 +70,9 @@ pipeline default() {
   with_llm_script(
     done_turns(2),
     { ->
-      let session = "cg-green-" + uuid()
-      let probe = "cg-probe-" + session
-      let captured = agent_capture_events(
+      const session = "cg-green-" + uuid()
+      const probe = "cg-probe-" + session
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Implement the feature.",
@@ -90,7 +90,7 @@ pipeline default() {
           ),
         ) },
       )
-      let decisions = events_of(captured.events, "judge_decision")
+      const decisions = events_of(captured.events, "judge_decision")
       __io_println("B.status=" + captured.result.status)
       __io_println("B.session_matches=" + to_string(store_get(probe + ".session_matches")))
       __io_println("B.has_task=" + to_string(store_get(probe + ".has_task")))
@@ -103,8 +103,8 @@ pipeline default() {
   with_llm_script(
     done_turns(4),
     { ->
-      let session = "cg-red-" + uuid()
-      let captured = agent_capture_events(
+      const session = "cg-red-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Implement the feature.",
@@ -126,13 +126,13 @@ pipeline default() {
     },
   )
   // --- D. no host facts: judge-only degradation, surfaced (never a silent pass) ---
-  let bundle = agent_completion_gate({})
+  const bundle = agent_completion_gate({})
   __io_println("D.facts_available=" + to_string(bundle._completion_gate.facts_available))
   with_llm_script(
     done_turns(2),
     { ->
-      let session = "cg-degraded-" + uuid()
-      let captured = agent_capture_events(
+      const session = "cg-degraded-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Answer the question.",

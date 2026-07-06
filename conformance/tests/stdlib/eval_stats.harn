@@ -14,14 +14,14 @@ fn row(name, group, passes, trials, skips, timeouts, cost) {
 }
 
 pipeline test(task) {
-  let rows = [
+  const rows = [
     row("py-a", "python", 4, 4, 0, 0, 1.0),
     row("py-b", "python", 1, 4, 0, 1, 2.0),
     row("rs-a", "rust", 0, 4, 0, 0, 3.0),
     row("rs-skip", "rust", 0, 4, 4, 0, 4.0) + {status: "skip"},
   ]
   assert_eq(round(macro_pass_at_1(rows) * 1000), 417)
-  let reliability = reliability_breakdown(rows)
+  const reliability = reliability_breakdown(rows)
   assert_eq(reliability.all_pass_cases, 1)
   assert_eq(reliability.flaky_cases, 1)
   assert_eq(reliability.all_fail_cases, 1)
@@ -54,7 +54,7 @@ pipeline test(task) {
   assert_eq(realized_trial_cost_usd(0.42, false), 0.42)
   assert_eq(realized_trial_cost_usd(nil, true), nil)
   assert_eq(worst_group(rows), {group: "rust", pass_rate: 0.0, cases: 2})
-  let aggregate = aggregate_trials(
+  const aggregate = aggregate_trials(
     "agg-a",
     [
       {verification: "PASS", wallTimeSeconds: 10.0, costUsd: 0.2},
@@ -75,47 +75,47 @@ pipeline test(task) {
   assert_eq(aggregate.mean_wall_time_seconds, 15.0)
   assert_eq(aggregate.stdev_wall_time_seconds, 11.18)
   assert_eq(aggregate.total_cost_usd, 1.2)
-  let aggregate_with_harness = aggregate_trials(
+  const aggregate_with_harness = aggregate_trials(
     "agg-harness",
     [{verification: "PASS", wallTimeSeconds: 1.0}],
     {harnessConfigFingerprint: "cfg-1"},
   )
   assert_eq(aggregate_with_harness.harness_config_fingerprint, "cfg-1")
-  let power_two_values = [0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0]
-  let ci = bootstrap_mean_ci(power_two_values, 200, 0.05, 12345)
+  const power_two_values = [0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0]
+  const ci = bootstrap_mean_ci(power_two_values, 200, 0.05, 12345)
   assert_eq(ci, bootstrap_mean_ci(power_two_values, 200, 0.05, 12345))
   assert(ci.hi > ci.lo, "n=16 bootstrap CI must not collapse")
-  let baseline = [
+  const baseline = [
     row("case-a", "python", 0, 4, 0, 0, 1.0) + {case_fingerprint: "a"},
     row("case-b", "python", 0, 4, 0, 0, 1.0) + {case_fingerprint: "b"},
   ]
-  let current = [
+  const current = [
     row("case-a", "python", 4, 4, 0, 0, 1.0) + {case_fingerprint: "a"},
     row("case-b", "python", 2, 4, 0, 0, 1.0) + {case_fingerprint: "b"},
   ]
   assert_eq(paired_case_deltas(baseline, current), [1.0, 0.5])
-  let harness_baseline = [
+  const harness_baseline = [
     row("case-a", "python", 0, 4, 0, 0, 1.0)
       + {case_fingerprint: "a", harness_config_fingerprint: "cfg-a"},
   ]
-  let harness_current = [
+  const harness_current = [
     row("case-a", "python", 4, 4, 0, 0, 1.0)
       + {case_fingerprint: "a", harness_config_fingerprint: "cfg-b"},
   ]
   assert_eq(paired_case_deltas(harness_baseline, harness_current), [])
-  let delta = paired_delta_report(baseline, current, 200, 99)
+  const delta = paired_delta_report(baseline, current, 200, 99)
   assert(delta.improved)
   assert_eq(delta.status, "improved")
-  let regression = regression_gate(current, baseline)
+  const regression = regression_gate(current, baseline)
   assert(!regression.passed)
   assert_eq(regression.status, "regression")
-  let cheap = [row("case-a", "python", 1, 2, 0, 0, 0.2), row("case-b", "python", 0, 2, 0, 0, 0.2)]
-  let ladder = [
+  const cheap = [row("case-a", "python", 1, 2, 0, 0, 0.2), row("case-b", "python", 0, 2, 0, 0, 0.2)]
+  const ladder = [
     row("case-a", "python", 1, 2, 0, 0, 0.5) + {escalated: true},
     row("case-b", "python", 0, 2, 0, 0, 0.5) + {escalated: false},
   ]
-  let frontier = [row("case-a", "python", 2, 2, 0, 0, 1.0), row("case-b", "python", 2, 2, 0, 0, 1.0)]
-  let routing = routing_calibration_report(cheap, ladder, frontier)
+  const frontier = [row("case-a", "python", 2, 2, 0, 0, 1.0), row("case-b", "python", 2, 2, 0, 0, 1.0)]
+  const routing = routing_calibration_report(cheap, ladder, frontier)
   assert_eq(routing.paired_cases, 2)
   assert_eq(routing.escalated_cases, 1)
   assert_eq(routing.over_escalated_cases, 1)

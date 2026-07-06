@@ -1463,7 +1463,6 @@ impl Compiler {
             // underflows the stack) after compiling, e.g., a `@route pub fn`.
             Node::AttributedDecl { inner, .. } => Self::produces_value(&inner.node),
             Node::LetBinding { .. }
-            | Node::VarBinding { .. }
             | Node::ConstBinding { .. }
             | Node::Assignment { .. }
             | Node::ReturnStmt { .. }

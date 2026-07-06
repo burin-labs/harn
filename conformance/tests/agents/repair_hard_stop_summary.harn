@@ -13,7 +13,7 @@ fn events_of(events, kind) {
 }
 
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_test",
@@ -45,8 +45,8 @@ pipeline default() {
       llm_text("unreachable ##DONE##"),
     ],
     { ->
-      let session = "repair-hard-stop-" + uuid()
-      let captured = agent_capture_events(
+      const session = "repair-hard-stop-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the failing test pass.",
@@ -71,15 +71,15 @@ pipeline default() {
       )
       __io_println(captured.result.status)
       __io_println(captured.result.stop_reason)
-      let cf = captured.result?.current_failure
+      const cf = captured.result?.current_failure
       __io_println(cf != nil)
       __io_println(cf?.class)
       __io_println(contains(to_string(cf?.snippet ?? ""), "FATAL: linker error in module X"))
       __io_println(cf?.same_diagnostic_streak)
-      let decisions = events_of(captured.events, "loop_control_decision")
+      const decisions = events_of(captured.events, "loop_control_decision")
         .filter({ d -> d.reason == "thrash_hard_stop" })
       __io_println(len(decisions))
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
         .filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
       __io_println(
         contains(to_string(stalls[0].warning?.diagnostic_snippet ?? ""), "FATAL: linker error in module X"),

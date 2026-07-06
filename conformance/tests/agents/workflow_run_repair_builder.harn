@@ -7,22 +7,22 @@ import { workflow_run_repair } from "std/workflow/repair"
  * task, so a dropped builder exhausts attempts and fails.
  */
 pipeline default() {
-  let token = "REPAIRED"
-  let executor = { ctx ->
+  const token = "REPAIRED"
+  const executor = { ctx ->
     if contains(ctx.task, token) {
       return {text: ctx.task + "|PASS"}
     }
     return {text: "first attempt"}
   }
-  let verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: ["need " + token]} }
-  let builder = { ctx -> return token
+  const verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: ["need " + token]} }
+  const builder = { ctx -> return token
     + "|attempt="
     + to_string(ctx.attempt)
     + "|findings="
     + join(ctx.findings, ",")
     + "|prior="
     + ctx.prior_text }
-  let out = workflow_run_repair(
+  const out = workflow_run_repair(
     {
       task: "base",
       executor: executor,

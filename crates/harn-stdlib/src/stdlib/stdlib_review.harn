@@ -49,6 +49,6 @@ pub fn review_rubrics() {
 }
 
 pub fn review_rubric(name) {
-  let rubrics = review_rubrics()
+  const rubrics = review_rubrics()
   return rubrics[name] ?? nil
 }

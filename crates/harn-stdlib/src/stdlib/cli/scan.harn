@@ -14,8 +14,8 @@ import { rules_report, rules_search } from "std/rules"
  *   HARN_OUTPUT_JSON      — "1" for the JSON envelope, else human text.
  */
 fn join_strs(parts: list, sep: string) -> string {
-  var out = ""
-  var first = true
+  let out = ""
+  let first = true
   for part in parts {
     if first {
       out = part
@@ -33,11 +33,11 @@ fn loc(m: dict) -> string {
 }
 
 fn captures_suffix(caps: dict) -> string {
-  let names = keys(caps)
+  const names = keys(caps)
   if len(names) == 0 {
     return ""
   }
-  var parts = []
+  let parts = []
   for name in names {
     parts = parts.push(name + "=" + caps[name])
   }
@@ -49,16 +49,16 @@ fn summary_line(total: int, files: int) -> string {
 }
 
 fn run_search(plan: list) -> dict {
-  var lines = []
-  var results = []
-  var total = 0
-  var seen = {}
+  let lines = []
+  let results = []
+  let total = 0
+  let seen = {}
   for entry in plan {
     if len(entry.files) == 0 {
       continue
     }
-    let res = rules_search({rule: entry.rule, paths: entry.files})
-    let matches = res.matches ?? []
+    const res = rules_search({rule: entry.rule, paths: entry.files})
+    const matches = res.matches ?? []
     total = total + len(matches)
     for m in matches {
       seen = seen.merge({[m.path]: true})
@@ -70,18 +70,18 @@ fn run_search(plan: list) -> dict {
 }
 
 fn run_report(plan: list) -> dict {
-  var lines = []
-  var tables = []
-  var total = 0
-  var seen = {}
+  let lines = []
+  let tables = []
+  let total = 0
+  let seen = {}
   for entry in plan {
     if len(entry.files) == 0 {
       continue
     }
-    let table = rules_report({rule: entry.rule, paths: entry.files})
-    let summary = table.summary ?? {total_rows: 0, files: 0, per_file: {}}
+    const table = rules_report({rule: entry.rule, paths: entry.files})
+    const summary = table.summary ?? {total_rows: 0, files: 0, per_file: {}}
     total = total + summary.total_rows
-    let per_file = summary.per_file ?? {}
+    const per_file = summary.per_file ?? {}
     for path in keys(per_file) {
       seen = seen.merge({[path]: true})
       lines = lines.push(path + ": " + to_string(per_file[path]))
@@ -92,18 +92,18 @@ fn run_report(plan: list) -> dict {
 }
 
 fn main(harness: Harness) {
-  let raw = harness.env.get_or("HARN_SCAN_PLAN_JSON", "")
+  const raw = harness.env.get_or("HARN_SCAN_PLAN_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("scan: internal error — HARN_SCAN_PLAN_JSON not set by the shim")
     exit(70)
   }
-  let plan = json_parse(raw)
-  let report_only = harness.env.get_or("HARN_SCAN_REPORT_ONLY", "0") == "1"
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const plan = json_parse(raw)
+  const report_only = harness.env.get_or("HARN_SCAN_REPORT_ONLY", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if report_only {
-    let out = run_report(plan)
+    const out = run_report(plan)
     if json_mode {
-      let envelope = {
+      const envelope = {
         schemaVersion: 1,
         mode: "report",
         tables: out.tables,
@@ -117,9 +117,9 @@ fn main(harness: Harness) {
       harness.stdio.println(summary_line(out.total, out.files))
     }
   } else {
-    let out = run_search(plan)
+    const out = run_search(plan)
     if json_mode {
-      let envelope = {
+      const envelope = {
         schemaVersion: 1,
         mode: "search",
         results: out.results,

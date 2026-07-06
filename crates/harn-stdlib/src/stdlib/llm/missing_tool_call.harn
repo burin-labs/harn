@@ -40,7 +40,7 @@ fn __missing_tool_call_string(value) -> string {
 }
 
 fn __missing_tool_call_float(value, fallback) {
-  let parsed = to_float(value ?? fallback)
+  const parsed = to_float(value ?? fallback)
   if parsed == nil {
     return fallback
   }
@@ -54,7 +54,7 @@ fn __missing_tool_call_float(value, fallback) {
 }
 
 fn __missing_tool_call_threshold(value) -> float {
-  let threshold = to_float(value ?? 0.65)
+  const threshold = to_float(value ?? 0.65)
   if threshold == nil || threshold < 0.0 || threshold > 1.0 {
     throw "missing_tool_call_classifier: confidence_threshold must be between 0.0 and 1.0"
   }
@@ -62,7 +62,7 @@ fn __missing_tool_call_threshold(value) -> float {
 }
 
 fn __missing_tool_call_candidate_tool_entries(payload) {
-  let registry = payload?.tools
+  const registry = payload?.tools
   if type_of(registry) == "dict" {
     return registry?.tools ?? []
   }
@@ -73,10 +73,10 @@ fn __missing_tool_call_candidate_tool_entries(payload) {
 }
 
 fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
-  var out = []
-  var names = []
+  let out = []
+  let names = []
   for entry in __missing_tool_call_candidate_tool_entries(payload) {
-    let name = __missing_tool_call_string(entry?.name ?? entry?.function?.name)
+    const name = __missing_tool_call_string(entry?.name ?? entry?.function?.name)
     if name == "" || contains(names, name) {
       continue
     }
@@ -90,7 +90,7 @@ fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
     )
   }
   for name in payload?.tool_names ?? [] {
-    let text = __missing_tool_call_string(name)
+    const text = __missing_tool_call_string(name)
     if text != "" && !contains(names, text) {
       names = names.push(text)
       out = out.push({name: text, description: ""})
@@ -100,9 +100,9 @@ fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
 }
 
 fn __missing_tool_call_tool_names(candidate_tools: list<MissingToolCallTool>) -> list<string> {
-  var names = []
+  let names = []
   for entry in candidate_tools {
-    let name = __missing_tool_call_string(entry.name)
+    const name = __missing_tool_call_string(entry.name)
     if name != "" && !contains(names, name) {
       names = names.push(name)
     }
@@ -111,7 +111,7 @@ fn __missing_tool_call_tool_names(candidate_tools: list<MissingToolCallTool>) ->
 }
 
 fn __missing_tool_call_tool_name(value, candidate_tools: list<MissingToolCallTool>) -> string {
-  let requested = __missing_tool_call_string(value)
+  const requested = __missing_tool_call_string(value)
   if requested == "" {
     return ""
   }
@@ -158,7 +158,7 @@ fn __missing_tool_call_prompt(payload, candidate_tools) {
 }
 
 fn __missing_tool_call_action(value) -> MissingToolCallAction {
-  let action = __missing_tool_call_string(value)
+  const action = __missing_tool_call_string(value)
   if action == "tool_call_intended" || action == "no_tool_call_intended" || action == "ambiguous" {
     return action
   }
@@ -176,17 +176,17 @@ fn __missing_tool_call_normalize(raw, candidate_tools: list<MissingToolCallTool>
       evidence: "classifier returned " + type_of(raw) + ", not a dict",
     }
   }
-  let original_action = __missing_tool_call_action(raw?.action)
-  let confidence = __missing_tool_call_float(raw?.confidence, 0.0)
-  let tool_name = __missing_tool_call_tool_name(raw?.tool_name ?? raw?.tool, candidate_tools)
-  let action = if original_action == "tool_call_intended" && confidence >= threshold && tool_name != "" {
+  const original_action = __missing_tool_call_action(raw?.action)
+  const confidence = __missing_tool_call_float(raw?.confidence, 0.0)
+  const tool_name = __missing_tool_call_tool_name(raw?.tool_name ?? raw?.tool, candidate_tools)
+  const action = if original_action == "tool_call_intended" && confidence >= threshold && tool_name != "" {
     "tool_call_intended"
   } else if original_action == "no_tool_call_intended" && confidence >= threshold {
     "no_tool_call_intended"
   } else {
     "ambiguous"
   }
-  let evidence = __missing_tool_call_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning)
+  const evidence = __missing_tool_call_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning)
   return raw
     + {
     action: action,
@@ -233,17 +233,17 @@ fn __missing_tool_call_fail_open(error, threshold: float) -> MissingToolCallVerd
  * @api_stability: experimental
  */
 pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
-  let cfg = opts ?? {}
+  const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
     throw "missing_tool_call_classifier: opts must be a dict or nil; got " + type_of(cfg)
   }
-  let enabled = cfg.enabled ?? true
+  const enabled = cfg.enabled ?? true
   if type_of(enabled) != "bool" {
     throw "missing_tool_call_classifier: enabled must be a bool"
   }
-  let model = __missing_tool_call_string(cfg.model)
-  let threshold = __missing_tool_call_threshold(cfg.confidence_threshold)
-  let classifier = cfg.classifier
+  const model = __missing_tool_call_string(cfg.model)
+  const threshold = __missing_tool_call_threshold(cfg.confidence_threshold)
+  const classifier = cfg.classifier
   if classifier != nil && type_of(classifier) != "closure" {
     throw "missing_tool_call_classifier: classifier must be a closure or nil; got " + type_of(classifier)
   }
@@ -251,22 +251,22 @@ pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
     if !enabled {
       return nil
     }
-    let candidate_tools = __missing_tool_call_candidate_tools(payload)
+    const candidate_tools = __missing_tool_call_candidate_tools(payload)
     if len(candidate_tools) == 0 {
       return nil
     }
-    let classifier_payload = payload
+    const classifier_payload = payload
       + {
       candidate_tools: candidate_tools,
       tool_names: __missing_tool_call_tool_names(candidate_tools),
       confidence_threshold: threshold,
     }
     if classifier != nil {
-      let custom = try {
+      const custom = try {
         classifier(classifier_payload)
       }
       if is_err(custom) {
-        let err = unwrap_err(custom)
+        const err = unwrap_err(custom)
         if error_category(err) == "cancelled" {
           throw err
         }
@@ -275,8 +275,8 @@ pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
       return __missing_tool_call_normalize(unwrap(custom), candidate_tools, threshold)
         + {classifier_kind: "custom"}
     }
-    let schema = __missing_tool_call_schema()
-    var llm_opts = {
+    const schema = __missing_tool_call_schema()
+    let llm_opts = {
       output_schema: schema,
       max_tokens: cfg.max_tokens ?? 192,
       temperature: cfg.temperature ?? 0.0,
@@ -293,7 +293,7 @@ pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
         llm_opts[key] = cfg[key]
       }
     }
-    let checkpoint = agent_typed_output_checkpoint(
+    const checkpoint = agent_typed_output_checkpoint(
       "agent.missing_tool_call",
       __missing_tool_call_prompt(classifier_payload, candidate_tools),
       schema,

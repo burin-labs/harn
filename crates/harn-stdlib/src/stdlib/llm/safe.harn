@@ -36,9 +36,9 @@ import { agent_session_messages } from "std/agent/state"
  * @example: strip_think_blocks("<think>reasoning</think>The answer is 4")
  */
 pub fn strip_think_blocks(text) {
-  let raw = to_string(text ?? "")
-  let no_think = regex_replace("(?s)<think>.*?</think>", "", raw)
-  let no_thinking = regex_replace("(?s)<thinking>.*?</thinking>", "", no_think)
+  const raw = to_string(text ?? "")
+  const no_think = regex_replace("(?s)<think>.*?</think>", "", raw)
+  const no_thinking = regex_replace("(?s)<thinking>.*?</thinking>", "", no_think)
   return trim(no_thinking)
 }
 
@@ -56,8 +56,8 @@ pub fn strip_think_blocks(text) {
  * @example: strip_code_fences("```md\n# Title\n```")
  */
 pub fn strip_code_fences(text) {
-  let raw = to_string(text ?? "")
-  var out = []
+  const raw = to_string(text ?? "")
+  let out = []
   for line in raw.split("\n") {
     if starts_with(trim(line), "```") {
       continue
@@ -99,23 +99,23 @@ pub fn strip_code_fences(text) {
  * line up with `substring`, which is likewise char-indexed.
  */
 fn __first_balanced_span(raw, openers) {
-  let cs = raw.chars()
-  let n = len(cs)
-  var i = 0
+  const cs = raw.chars()
+  const n = len(cs)
+  let i = 0
   while i < n {
-    let ch = cs[i]
+    const ch = cs[i]
     if contains(openers, ch) {
-      let close = if ch == "{" {
+      const close = if ch == "{" {
         "}"
       } else {
         "]"
       }
-      var depth = 0
-      var in_string = false
-      var escaped = false
-      var j = i
+      let depth = 0
+      let in_string = false
+      let escaped = false
+      let j = i
       while j < n {
-        let cj = cs[j]
+        const cj = cs[j]
         if in_string {
           if escaped {
             escaped = false
@@ -157,8 +157,8 @@ fn __first_balanced_span(raw, openers) {
  * @example: extract_first_json_object("Sure! {\"a\": 1} hope that helps")
  */
 pub fn extract_first_json_object(text) {
-  let raw = to_string(text ?? "")
-  let span = __first_balanced_span(raw, ["{"])
+  const raw = to_string(text ?? "")
+  const span = __first_balanced_span(raw, ["{"])
   if span == nil {
     return nil
   }
@@ -176,8 +176,8 @@ pub fn extract_first_json_object(text) {
  * @example: extract_first_json_value("rows: [1, 2, 3] (3 total)")
  */
 pub fn extract_first_json_value(text) {
-  let raw = to_string(text ?? "")
-  let span = __first_balanced_span(raw, ["{", "["])
+  const raw = to_string(text ?? "")
+  const span = __first_balanced_span(raw, ["{", "["])
   if span == nil {
     return nil
   }
@@ -199,14 +199,14 @@ pub fn extract_first_json_value(text) {
  * @example: parse_first_json("```json\n{\"ok\": true}\n```")
  */
 pub fn parse_first_json(text) {
-  var rest = strip_code_fences(to_string(text ?? ""))
+  let rest = strip_code_fences(to_string(text ?? ""))
   while rest != "" {
-    let span = __first_balanced_span(rest, ["{", "["])
+    const span = __first_balanced_span(rest, ["{", "["])
     if span == nil {
       return nil
     }
-    let candidate = substring(rest, span.start, span.end)
-    let parsed = try {
+    const candidate = substring(rest, span.start, span.end)
+    const parsed = try {
       json_parse(candidate)
     }
     if !is_err(parsed) {
@@ -234,8 +234,8 @@ pub fn __wrap_llm_result(result) {
   if !is_err(result) {
     return {ok: true, value: unwrap(result)}
   }
-  let err = unwrap_err(result)
-  let reason = if type_of(err) == "dict" {
+  const err = unwrap_err(result)
+  const reason = if type_of(err) == "dict" {
     err?.reason ?? ""
   } else {
     ""
@@ -272,7 +272,7 @@ pub fn dict_get_ci(d, key) {
   if type_of(d) != "dict" {
     return nil
   }
-  let target = lowercase(to_string(key))
+  const target = lowercase(to_string(key))
   for k in d.keys() {
     if lowercase(to_string(k)) == target {
       return d[k]
@@ -285,7 +285,7 @@ fn __value_is_present(value) {
   if value == nil {
     return false
   }
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "string" {
     return value != ""
   }
@@ -313,7 +313,7 @@ pub fn safe_field(envelope, names, default) {
     return default
   }
   for name in names {
-    let value = dict_get_ci(envelope, name)
+    const value = dict_get_ci(envelope, name)
     if __value_is_present(value) {
       return value
     }
@@ -330,15 +330,15 @@ pub fn safe_field(envelope, names, default) {
  */
 pub fn with_case_insensitive_keys(envelope) {
   if type_of(envelope) == "dict" {
-    var out = {}
+    let out = {}
     for k in envelope.keys() {
-      let new_key = lowercase(to_string(k))
+      const new_key = lowercase(to_string(k))
       out = out + {[new_key]: with_case_insensitive_keys(envelope[k])}
     }
     return out
   }
   if type_of(envelope) == "list" {
-    var out = []
+    let out = []
     for item in envelope {
       out = out.push(with_case_insensitive_keys(item))
     }
@@ -355,7 +355,7 @@ pub fn with_case_insensitive_keys(envelope) {
  * @errors: []
  */
 pub fn structured_envelope_or_default(envelope, defaults) {
-  let base = if type_of(defaults) == "dict" {
+  const base = if type_of(defaults) == "dict" {
     defaults
   } else {
     {}
@@ -369,7 +369,7 @@ pub fn structured_envelope_or_default(envelope, defaults) {
   if !(envelope?.ok ?? false) {
     return {ok: false} + base + envelope
   }
-  let data = if type_of(envelope?.data) == "dict" {
+  const data = if type_of(envelope?.data) == "dict" {
     envelope.data
   } else {
     {}
@@ -378,7 +378,7 @@ pub fn structured_envelope_or_default(envelope, defaults) {
 }
 
 fn __unique_names(names) {
-  var unique = []
+  let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
       unique = unique.push(name)
@@ -388,7 +388,7 @@ fn __unique_names(names) {
 }
 
 fn __session_tool_names(messages) {
-  var names = []
+  let names = []
   for message in messages {
     if message?.role == "tool" {
       names = names.push(message?.name ?? "")
@@ -407,8 +407,8 @@ fn __session_tool_names(messages) {
  * @errors: []
  */
 pub fn judge_payload(session, _opts, stop_reason, text, iteration) {
-  let session_id = session?.session_id ?? ""
-  let messages = if session_id != "" {
+  const session_id = session?.session_id ?? ""
+  const messages = if session_id != "" {
     let m = try {
       agent_session_messages(session_id)
     }
@@ -420,7 +420,7 @@ pub fn judge_payload(session, _opts, stop_reason, text, iteration) {
   } else {
     []
   }
-  let tool_names = __session_tool_names(messages)
+  const tool_names = __session_tool_names(messages)
   return {
     session_id: session_id,
     task: session?.task ?? "",
@@ -444,12 +444,12 @@ pub fn judge_payload(session, _opts, stop_reason, text, iteration) {
  * @errors: []
  */
 pub fn verdict_normalize(text, alias_groups) {
-  let normalized = lowercase(trim(to_string(text ?? "")))
+  const normalized = lowercase(trim(to_string(text ?? "")))
   if alias_groups == nil || type_of(alias_groups) != "list" || len(alias_groups) == 0 {
     return normalized
   }
   for group in alias_groups {
-    let {canonical = "", aliases = []} = group ?? {}
+    const {canonical = "", aliases = []} = group ?? {}
     if canonical != "" && type_of(aliases) == "list" && contains(aliases, normalized) {
       return canonical
     }
@@ -466,18 +466,18 @@ pub fn verdict_normalize(text, alias_groups) {
  * @errors: []
  */
 pub fn schema_retry_nudge_for(schema, hint) {
-  let required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
+  const required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
     schema.required
   } else {
     []
   }
-  let sorted_required = required.sort()
-  let required_line = if len(sorted_required) > 0 {
+  const sorted_required = required.sort()
+  const required_line = if len(sorted_required) > 0 {
     "Required keys (lowercase): " + join(sorted_required, ", ") + "."
   } else {
     "No required keys are declared."
   }
-  var lines = [
+  let lines = [
     "Your previous response did not pass schema validation.",
     "Re-emit valid JSON only:",
     "- Use lowercase keys exactly as specified.",
@@ -537,13 +537,13 @@ pub fn schema_retry_nudge_for(schema, hint) {
  * @errors: []
  */
 pub fn safe_structured_call(prompt, schema, options) {
-  let user_options = if type_of(options) == "dict" {
+  const user_options = if type_of(options) == "dict" {
     options
   } else {
     {}
   }
-  let resolved = __apply_judge_defaults(schema, user_options)
-  let envelope = llm_call_structured_result(prompt, schema, resolved)
+  const resolved = __apply_judge_defaults(schema, user_options)
+  const envelope = llm_call_structured_result(prompt, schema, resolved)
   return __augment_envelope(envelope)
 }
 
@@ -554,7 +554,7 @@ pub fn safe_structured_call(prompt, schema, options) {
  * only RAISES an unset or too-small budget; an explicit larger `max_tokens`
  * (e.g. a 1200-token rubric judge) is left untouched.
  */
-let STRUCTURED_MIN_MAX_TOKENS = 512
+const STRUCTURED_MIN_MAX_TOKENS = 512
 
 /**
  * Minimum output-token budget for the structured REPAIR side-call on a
@@ -565,7 +565,7 @@ let STRUCTURED_MIN_MAX_TOKENS = 512
  * for non-reasoning callers while fixing the reasoning-route starvation twin of
  * the #3598 judge bug.
  */
-let REPAIR_MIN_MAX_TOKENS = 600
+const REPAIR_MIN_MAX_TOKENS = 600
 
 /**
  * Headroom (output tokens) reserved for the visible JSON verdict ON TOP of a
@@ -574,14 +574,14 @@ let REPAIR_MIN_MAX_TOKENS = 600
  * shared `max_tokens` budget, so the floor reserves this much beyond the
  * resolved reasoning budget.
  */
-let STRUCTURED_REASONING_VERDICT_HEADROOM = 768
+const STRUCTURED_REASONING_VERDICT_HEADROOM = 768
 
 /**
  * Hard ceiling for the reasoning-aware structured floor, mirroring the Rust
  * `MAX_TOKENS_RETRY_CEILING` so a high-effort reasoning route never inflates a
  * single judge call without bound.
  */
-let STRUCTURED_MAX_MAX_TOKENS = 32768
+const STRUCTURED_MAX_MAX_TOKENS = 32768
 
 /**
  * Approximate reasoning-channel output budget (tokens) Harn's reasoning policy
@@ -606,25 +606,25 @@ fn __reasoning_effort_budget(level) {
  * opts through untouched.
  */
 fn __structured_reasoning_budget(options) {
-  let opts = if type_of(options) == "dict" {
+  const opts = if type_of(options) == "dict" {
     options
   } else {
     {}
   }
-  let resolved = try {
+  const resolved = try {
     llm_apply_reasoning_policy(opts)
   }
-  let safe_resolved = if is_err(resolved) {
+  const safe_resolved = if is_err(resolved) {
     opts
   } else {
     unwrap(resolved)
   }
-  let thinking = safe_resolved?.thinking
+  const thinking = safe_resolved?.thinking
   // Caller set reasoning_effort explicitly -> policy returns opts unchanged
   // (no `thinking`), so fall back to the caller's effort level.
   if type_of(thinking) != "dict" {
     if opts?.reasoning_effort != nil {
-      let effort = to_string(opts.reasoning_effort)
+      const effort = to_string(opts.reasoning_effort)
       if effort == "off" || effort == "none" || effort == "disabled" {
         return 0
       }
@@ -632,11 +632,11 @@ fn __structured_reasoning_budget(options) {
     }
     return 0
   }
-  let mode = to_string(thinking?.mode ?? "")
+  const mode = to_string(thinking?.mode ?? "")
   if mode == "disabled" {
     return 0
   }
-  let explicit_budget = to_int(thinking?.budget_tokens ?? 0) ?? 0
+  const explicit_budget = to_int(thinking?.budget_tokens ?? 0) ?? 0
   if explicit_budget > 0 {
     return explicit_budget
   }
@@ -661,11 +661,11 @@ fn __structured_reasoning_budget(options) {
  * @errors: []
  */
 pub fn structured_min_max_tokens(options) {
-  let reasoning_budget = __structured_reasoning_budget(options)
+  const reasoning_budget = __structured_reasoning_budget(options)
   if reasoning_budget <= 0 {
     return STRUCTURED_MIN_MAX_TOKENS
   }
-  let floor = reasoning_budget + STRUCTURED_REASONING_VERDICT_HEADROOM
+  const floor = reasoning_budget + STRUCTURED_REASONING_VERDICT_HEADROOM
   if floor > STRUCTURED_MAX_MAX_TOKENS {
     return STRUCTURED_MAX_MAX_TOKENS
   }
@@ -691,7 +691,7 @@ pub fn structured_min_max_tokens(options) {
  * @errors: []
  */
 pub fn repair_min_max_tokens(options) {
-  let floor = structured_min_max_tokens(options)
+  const floor = structured_min_max_tokens(options)
   if floor > REPAIR_MIN_MAX_TOKENS {
     return floor
   }
@@ -699,9 +699,9 @@ pub fn repair_min_max_tokens(options) {
 }
 
 fn __apply_judge_defaults(schema, options) {
-  var resolved = options
-  let requested_max_tokens = to_int(resolved?.max_tokens ?? 0) ?? 0
-  let floor = structured_min_max_tokens(resolved)
+  let resolved = options
+  const requested_max_tokens = to_int(resolved?.max_tokens ?? 0) ?? 0
+  const floor = structured_min_max_tokens(resolved)
   if requested_max_tokens < floor {
     resolved = resolved + {max_tokens: floor}
   }
@@ -714,12 +714,12 @@ fn __apply_judge_defaults(schema, options) {
   if resolved?.schema_retry_nudge == nil {
     resolved = resolved + {schema_retry_nudge: schema_retry_nudge_for(schema, nil)}
   }
-  let user_repair = if type_of(resolved?.repair) == "dict" {
+  const user_repair = if type_of(resolved?.repair) == "dict" {
     resolved.repair
   } else {
     {}
   }
-  var repair = user_repair
+  let repair = user_repair
   if repair?.enabled == nil {
     repair = repair + {enabled: true}
   }
@@ -729,8 +729,8 @@ fn __apply_judge_defaults(schema, options) {
   // starved by the route's hidden reasoning channel (twin of the #3598 judge
   // bug). Resolved against the same options as the main floor so the two never
   // drift. Only ever RAISES.
-  let repair_floor = repair_min_max_tokens(resolved)
-  let requested_repair_max_tokens = to_int(repair?.max_tokens ?? 0) ?? 0
+  const repair_floor = repair_min_max_tokens(resolved)
+  const requested_repair_max_tokens = to_int(repair?.max_tokens ?? 0) ?? 0
   if requested_repair_max_tokens < repair_floor {
     repair = repair + {max_tokens: repair_floor}
   }
@@ -759,15 +759,15 @@ fn __apply_judge_defaults(schema, options) {
  */
 pub fn is_context_overflow_error(err) {
   if type_of(err) == "dict" {
-    let reason = to_string(err?.reason ?? "")
+    const reason = to_string(err?.reason ?? "")
     if reason == "context_overflow" {
       return true
     }
-    let category = to_string(err?.error_category ?? "")
+    const category = to_string(err?.error_category ?? "")
     if category == "context_overflow" {
       return true
     }
-    let message = to_string(err?.message ?? "") + " " + to_string(err?.error ?? "")
+    const message = to_string(err?.message ?? "") + " " + to_string(err?.error ?? "")
     return contains(message, "[context_overflow]")
   }
   return contains(to_string(err), "[context_overflow]")
@@ -775,21 +775,21 @@ pub fn is_context_overflow_error(err) {
 
 fn __augment_envelope(envelope) {
   if type_of(envelope) != "dict" {
-    let exc_status = if is_context_overflow_error(envelope) {
+    const exc_status = if is_context_overflow_error(envelope) {
       "context_overflow"
     } else {
       "exception"
     }
     return {ok: false, status: exc_status, value: {}, error: envelope}
   }
-  let ok_flag = envelope?.ok ?? false
-  let data = if type_of(envelope?.data) == "dict" {
+  const ok_flag = envelope?.ok ?? false
+  const data = if type_of(envelope?.data) == "dict" {
     envelope.data
   } else {
     {}
   }
-  let normalized = with_case_insensitive_keys(data)
-  let status = if ok_flag {
+  const normalized = with_case_insensitive_keys(data)
+  const status = if ok_flag {
     "ok"
   } else if is_context_overflow_error(envelope) {
     "context_overflow"

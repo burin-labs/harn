@@ -37,7 +37,7 @@ pipeline test_evaluate_handler_at_budget_returns_nil(task) {
 
 @test
 pipeline test_evaluate_handler_over_budget(task) {
-  let v = evaluate_handler("a.rs", 100, 101)
+  const v = evaluate_handler("a.rs", 100, 101)
   assert_eq(v.path, "a.rs")
   assert_eq(v.actual, 101)
   assert_eq(v.max_loc, 100)
@@ -46,7 +46,7 @@ pipeline test_evaluate_handler_over_budget(task) {
 
 @test
 pipeline test_evaluate_handler_missing_file(task) {
-  let v = evaluate_handler("ghost.rs", 100, nil)
+  const v = evaluate_handler("ghost.rs", 100, nil)
   assert_eq(v.path, "ghost.rs")
   assert_eq(v.actual, nil)
   assert_eq(v.reason, "missing file")
@@ -54,18 +54,18 @@ pipeline test_evaluate_handler_missing_file(task) {
 
 @test
 pipeline test_evaluate_handler_invalid_empty_path(task) {
-  let v = evaluate_handler("", 100, 50)
+  const v = evaluate_handler("", 100, 50)
   assert_eq(v.reason, "invalid entry: path and max_loc are required")
 }
 
 @test
 pipeline test_evaluate_handler_invalid_nil_path(task) {
-  let v = evaluate_handler(nil, 100, 50)
+  const v = evaluate_handler(nil, 100, 50)
   assert_eq(v.reason, "invalid entry: path and max_loc are required")
 }
 
 @test
 pipeline test_evaluate_handler_invalid_nil_max_loc(task) {
-  let v = evaluate_handler("a.rs", nil, 50)
+  const v = evaluate_handler("a.rs", nil, 50)
   assert_eq(v.reason, "invalid entry: path and max_loc are required")
 }

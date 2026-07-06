@@ -1,20 +1,20 @@
 import "std/waitpoint"
 
 pipeline test(task) {
-  let wp: Waitpoint = create("fan-in-" + uuid())
-  let first = spawn {
+  const wp: Waitpoint = create("fan-in-" + uuid())
+  const first = spawn {
     wait(wp).value + "-1"
   }
-  let second = spawn {
+  const second = spawn {
     wait(wp).value + "-2"
   }
-  let third = spawn {
+  const third = spawn {
     wait(wp).value + "-3"
   }
-  let fourth = spawn {
+  const fourth = spawn {
     wait(wp).value + "-4"
   }
-  let fifth = spawn {
+  const fifth = spawn {
     wait(wp).value + "-5"
   }
   complete(wp, "go")

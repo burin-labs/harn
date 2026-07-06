@@ -1,5 +1,5 @@
 pipeline main() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_command",
@@ -11,7 +11,7 @@ pipeline main() {
       annotations: {kind: "execute", side_effect_level: "process_exec", emits_artifacts: true},
     },
   )
-  let missing_reader = tool_surface_validate({tools: tools, policy: {side_effect_level: "process_exec"}})
+  const missing_reader = tool_surface_validate({tools: tools, policy: {side_effect_level: "process_exec"}})
   require !missing_reader.valid, "execute artifact tool without reader is invalid"
   require missing_reader.diagnostics[0].code == "TOOL_SURFACE_MISSING_RESULT_READER", "stable missing-reader code"
   tools = tool_define(
@@ -25,7 +25,7 @@ pipeline main() {
       annotations: {kind: "read", side_effect_level: "read_only"},
     },
   )
-  let with_reader = tool_surface_validate(
+  const with_reader = tool_surface_validate(
     {
       tools: tools,
       policy: {
@@ -38,9 +38,9 @@ pipeline main() {
     },
   )
   require with_reader.valid, "reader makes artifact tool valid"
-  var saw_arg_key = false
-  var saw_prompt_policy = false
-  var saw_approval = false
+  let saw_arg_key = false
+  let saw_prompt_policy = false
+  let saw_approval = false
   for diag in with_reader.diagnostics {
     if diag.code == "TOOL_SURFACE_UNKNOWN_ARG_CONSTRAINT_KEY" {
       saw_arg_key = true

@@ -6,7 +6,7 @@ import "std/edit"
  * Python, TypeScript, and Go fixtures plus selector + validation modes.
  */
 fn write_fixture(dir: string, name: string, body: string) -> string {
-  let path = path_join(dir, name)
+  const path = path_join(dir, name)
   harness.fs.write_text(path, body)
   return path
 }
@@ -15,18 +15,18 @@ pipeline default() {
   // `hostlib_ast_apply_node` writes edited source to disk, so it requires
   // the deterministic-tools feature gate (issue #2548).
   hostlib_enable("tools:deterministic")
-  let root = path_join(
+  const root = path_join(
     harness.fs.temp_dir(),
     "harn_edit_apply_node_" + to_string(harness.random.gen_range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   // 1) Rust: rewrite the body of `beta`, leaving `alpha` alone.
-  let rs_path = write_fixture(
+  const rs_path = write_fixture(
     root,
     "rs_lib.rs",
     "fn alpha() {\n    let x = 1;\n}\n\nfn beta() {\n    let y = 2;\n}\n",
   )
-  let rs_result = edit_apply_node(
+  const rs_result = edit_apply_node(
     {
       path: rs_path,
       query: "(function_item name: (identifier) @name (#eq? @name \"beta\") body: (block) @target)",
@@ -34,15 +34,15 @@ pipeline default() {
     },
   )
   __io_println(rs_result.applied && rs_result.result == "applied")
-  let rs_after = harness.fs.read_text(rs_path)
+  const rs_after = harness.fs.read_text(rs_path)
   __io_println(contains(rs_after, "let y = 42"))
   __io_println(contains(rs_after, "alpha"))
   __io_println(!contains(rs_after, "let y = 2"))
   // 2) Python: rewrite a function body. Dry-run only — verify the file
   //    is left untouched while `preview` carries the new text.
-  let py_path = write_fixture(root, "py_lib.py", "def greet(name):\n    return 'hi ' + name\n")
-  let py_before = harness.fs.read_text(py_path)
-  let py_result = edit_apply_node(
+  const py_path = write_fixture(root, "py_lib.py", "def greet(name):\n    return 'hi ' + name\n")
+  const py_before = harness.fs.read_text(py_path)
+  const py_result = edit_apply_node(
     {
       path: py_path,
       query: "(function_definition name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
@@ -54,12 +54,12 @@ pipeline default() {
   __io_println(contains(py_result.preview, "f'hi {name}!'"))
   __io_println(harness.fs.read_text(py_path) == py_before)
   // 3) TypeScript: select=all rewrites every match.
-  let ts_path = write_fixture(
+  const ts_path = write_fixture(
     root,
     "ts_lib.ts",
     "function a() { return 1 }\nfunction b() { return 2 }\nfunction c() { return 3 }\n",
   )
-  let ts_result = edit_apply_node(
+  const ts_result = edit_apply_node(
     {
       path: ts_path,
       query: "(function_declaration body: (statement_block) @target)",
@@ -70,12 +70,12 @@ pipeline default() {
   __io_println(ts_result.applied && ts_result.match_count == 3)
   __io_println(contains(harness.fs.read_text(ts_path), "{ return 0 }"))
   // 4) Go: select=nth rewrites the chosen match in document order.
-  let go_path = write_fixture(
+  const go_path = write_fixture(
     root,
     "go_lib.go",
     "package main\n\nfunc a() int { return 1 }\nfunc b() int { return 2 }\nfunc c() int { return 3 }\n",
   )
-  let go_result = edit_apply_node(
+  const go_result = edit_apply_node(
     {
       path: go_path,
       query: "(function_declaration body: (block) @target)",
@@ -85,26 +85,26 @@ pipeline default() {
     },
   )
   __io_println(go_result.applied && go_result.match_count == 1)
-  let go_after = harness.fs.read_text(go_path)
+  const go_after = harness.fs.read_text(go_path)
   __io_println(contains(go_after, "func a() int { return 1 }"))
   __io_println(contains(go_after, "func b() int { return 7 }"))
   __io_println(contains(go_after, "func c() int { return 3 }"))
   // 5) Selector=unique with multiple matches returns ambiguous.
-  let multi_path = write_fixture(root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
-  let ambiguous = edit_apply_node(
+  const multi_path = write_fixture(root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
+  const ambiguous = edit_apply_node(
     {path: multi_path, query: "(function_item body: (block) @target)", replacement: "{ 0 }"},
   )
   __io_println(!ambiguous.applied && ambiguous.result == "ambiguous" && ambiguous.match_count == 2)
   // 6) Validation rejects edits that produce a syntax error and leaves
   //    the file untouched.
-  let broken_path = write_fixture(root, "broken.rs", "fn alpha() { 1 }\n")
-  let broken_before = harness.fs.read_text(broken_path)
-  let broken = edit_apply_node(
+  const broken_path = write_fixture(root, "broken.rs", "fn alpha() { 1 }\n")
+  const broken_before = harness.fs.read_text(broken_path)
+  const broken = edit_apply_node(
     {path: broken_path, query: "(function_item body: (block) @target)", replacement: "{ ( }"},
   )
   __io_println(!broken.applied && broken.result == "syntax_error")
   __io_println(harness.fs.read_text(broken_path) == broken_before)
   // 7) Invalid tree-sitter queries return a structured error.
-  let bad_query = edit_apply_node({path: rs_path, query: "((((", replacement: "{ }"})
+  const bad_query = edit_apply_node({path: rs_path, query: "((((", replacement: "{ }"})
   __io_println(!bad_query.applied && bad_query.result == "invalid_query")
 }

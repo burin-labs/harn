@@ -14,14 +14,14 @@ pipeline main() {
       } },
     },
   )
-  let session = agent_session_open("reminder-provider-user-defined")
+  const session = agent_session_open("reminder-provider-user-defined")
   agent_session_reset(session)
-  let payload = {session: {id: session}, iteration: 1, wake_interval_ms: 0, note: "provider"}
-  let first = agent_reminder_providers_fire(session, "session_idle", payload, {})
-  let second = agent_reminder_providers_fire(session, "session_idle", payload, {})
-  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  let ttl = agent_session_apply_reminder_post_turn(session, 2)
-  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const payload = {session: {id: session}, iteration: 1, wake_interval_ms: 0, note: "provider"}
+  const first = agent_reminder_providers_fire(session, "session_idle", payload, {})
+  const second = agent_reminder_providers_fire(session, "session_idle", payload, {})
+  const before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const ttl = agent_session_apply_reminder_post_turn(session, 2)
+  const after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
   __io_println(first.fired_count)
   __io_println(second.reports[0].deduped_count)
   __io_println(len(before))

@@ -9,7 +9,7 @@ pipeline main() {
       evaluate: { _ctx -> return {reminder: {tags: ["bad"]}} },
     },
   )
-  let session = agent_session_open("reminder-provider-malformed-spec")
+  const session = agent_session_open("reminder-provider-malformed-spec")
   agent_session_reset(session)
   agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
   clear_reminder_providers()

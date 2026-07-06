@@ -12,7 +12,7 @@ pipeline default() {
     return match m.kind {
       "ping" | "pong" -> { "live:" + m.kind }
       "close" -> {
-        let c: {kind: "close", reason: string} = m
+        const c: {kind: "close", reason: string} = m
         "closed:" + c.reason
       }
     }

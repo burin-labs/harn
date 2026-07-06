@@ -1,17 +1,17 @@
 pipeline default() {
-  let counter = shared_cell({scope: "task_group", key: "budget", initial: 0})
+  const counter = shared_cell({scope: "task_group", key: "budget", initial: 0})
   parallel 10 { i ->
-    var done = false
+    let done = false
     while !done {
-      let snap = shared_snapshot(counter)
+      const snap = shared_snapshot(counter)
       done = shared_cas(counter, snap, snap.value + 1)
     }
   }
   __io_println(shared_get(counter))
-  let stale = shared_snapshot(counter)
+  const stale = shared_snapshot(counter)
   shared_set(counter, 99)
   __io_println(shared_cas(counter, stale, 100))
-  let metrics = shared_metrics(counter)
+  const metrics = shared_metrics(counter)
   __io_println(metrics.cas_success_count >= 10)
   __io_println(metrics.cas_failure_count >= 1)
   __io_println(metrics.stale_read_count >= 1)

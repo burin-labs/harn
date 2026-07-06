@@ -6,10 +6,10 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * rewrite inserts `--quiet` so subsequent agent reads see clean stdout.
  */
 fn probe_with_rewrite(reg, cmd) {
-  let m = tool_hooks_match(reg, cmd, {stacks: ["harn"]})
+  const m = tool_hooks_match(reg, cmd, {stacks: ["harn"]})
   if len(m) > 0 {
-    let rewrite = m[0].rewrite
-    let after = if rewrite == nil {
+    const rewrite = m[0].rewrite
+    const after = if rewrite == nil {
       cmd
     } else {
       to_string(rewrite(cmd, {}))
@@ -21,7 +21,7 @@ fn probe_with_rewrite(reg, cmd) {
 }
 
 pipeline default() {
-  let reg = tool_hooks_seed_registry(["harn"])
+  const reg = tool_hooks_seed_registry(["harn"])
   /* Bare `cargo run --bin harn` fires, rewrite inserts --quiet. */
   probe_with_rewrite(reg, "cargo run --bin harn -- run script.harn")
   /* Already-quiet calls are skipped. */

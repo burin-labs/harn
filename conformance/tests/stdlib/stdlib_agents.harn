@@ -2,7 +2,7 @@ import "std/agents"
 import "std/context"
 
 pipeline default() {
-  let flow = workflow(
+  const flow = workflow(
     {
       name: "demo",
       model_tier: "mid",
@@ -12,12 +12,12 @@ pipeline default() {
       repair: {mode: "llm", model_tier: "frontier"},
     },
   )
-  let result = task_run("Write a note", flow, {provider: "mock"})
+  const result = task_run("Write a note", flow, {provider: "mock"})
   __io_println(result?.status)
   __io_println(result?.repair != nil)
   __io_println(result?.transcript?._type)
-  let continued = workflow_continue(result, "Continue", flow, {provider: "mock"})
+  const continued = workflow_continue(result, "Continue", flow, {provider: "mock"})
   __io_println(continued?.transcript?._type)
-  let compacted = workflow_compact(continued, {provider: "mock", keep_last: 1})
+  const compacted = workflow_compact(continued, {provider: "mock", keep_last: 1})
   __io_println(transcript_summary(compacted) != nil)
 }

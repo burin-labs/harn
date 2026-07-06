@@ -2,7 +2,7 @@ import "std/agents"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn current_worker(handle) {
-  let worker_id = handle?.id
+  const worker_id = handle?.id
   for worker in list_agents() {
     if worker?.id == worker_id {
       return worker
@@ -12,8 +12,8 @@ fn current_worker(handle) {
 }
 
 fn wait_for_status(handle, status) {
-  var attempts = 0
-  var worker = current_worker(handle)
+  let attempts = 0
+  let worker = current_worker(handle)
   while attempts < 200 && worker?.status != status {
     sleep(10ms)
     worker = current_worker(handle)
@@ -23,12 +23,12 @@ fn wait_for_status(handle, status) {
 }
 
 fn worker_snapshot(harness: Harness, handle) {
-  let worker = current_worker(handle)
+  const worker = current_worker(handle)
   return json_parse(harness.fs.read_text(worker?.snapshot_path))
 }
 
 fn worker_snapshot_text(harness: Harness, handle) {
-  let worker = current_worker(handle)
+  const worker = current_worker(handle)
   return harness.fs.read_text(worker?.snapshot_path)
 }
 
@@ -36,10 +36,10 @@ pipeline main() {
   with_llm_script(
     [llm_text("one-shot summary")],
     { ->
-      let one_shot = sub_agent_run("Answer once.", {provider: "mock", background: true})
-      let one_shot_done = wait_agent(one_shot)
+      const one_shot = sub_agent_run("Answer once.", {provider: "mock", background: true})
+      const one_shot_done = wait_agent(one_shot)
       __io_println(one_shot_done?.status == "completed")
-      let one_shot_trigger_error = try {
+      const one_shot_trigger_error = try {
         worker_trigger(one_shot_done, {follow_up: "again"})
         false
       } catch (e) {
@@ -51,37 +51,37 @@ pipeline main() {
   with_llm_script(
     [llm_text("first answer"), llm_text("follow-up answer")],
     { ->
-      let loop = sub_agent_run(
+      const loop = sub_agent_run(
         "Answer the first question.",
         {provider: "mock", background: true, carry: {retriggerable: true}},
       )
-      let first = wait_for_status(loop, "awaiting")
+      const first = wait_for_status(loop, "awaiting")
       __io_println(first?.status == "awaiting")
       __io_println(contains(worker_result(first)?.summary ?? "", "first answer"))
-      let first_snapshot = worker_snapshot(harness, loop)
-      let first_snapshot_text = worker_snapshot_text(harness, loop)
-      let first_messages = first_snapshot?.transcript?.messages ?? []
+      const first_snapshot = worker_snapshot(harness, loop)
+      const first_snapshot_text = worker_snapshot_text(harness, loop)
+      const first_messages = first_snapshot?.transcript?.messages ?? []
       __io_println(len(first_messages) >= 2)
       __io_println(contains(first_snapshot_text, "Answer the first question."))
-      let waiter = channel("waiter")
-      let _wait_task = spawn {
+      const waiter = channel("waiter")
+      const _wait_task = spawn {
         let done = wait_agent(loop)
         send(waiter, done?.status)
       }
       sleep(20ms)
       __io_println(try_receive(waiter) == nil)
-      let retriggered = worker_trigger(loop, {follow_up: "Need one more detail"})
+      const retriggered = worker_trigger(loop, {follow_up: "Need one more detail"})
       __io_println(retriggered?.status == "running")
-      let second = wait_for_status(loop, "awaiting")
+      const second = wait_for_status(loop, "awaiting")
       __io_println(second?.status == "awaiting")
       __io_println(contains(worker_result(second)?.summary ?? "", "follow-up answer"))
       __io_println(worker_request(second)?.task == "Answer the first question.")
       __io_println(worker_provenance(second)?.worker_id == loop?.id)
-      let closed = close_agent(loop)
+      const closed = close_agent(loop)
       __io_println(closed?.status == "cancelled")
-      let final_snapshot_path = path_join(harness.fs.temp_dir(), "worker-final-" + closed?.id + ".json")
+      const final_snapshot_path = path_join(harness.fs.temp_dir(), "worker-final-" + closed?.id + ".json")
       harness.fs.copy(closed?.snapshot_path, final_snapshot_path)
-      let final_snapshot_text = harness.fs.read_text(final_snapshot_path)
+      const final_snapshot_text = harness.fs.read_text(final_snapshot_path)
       __io_println(len(final_snapshot_text) > len(first_snapshot_text))
       __io_println(contains(final_snapshot_text, "Answer the first question."))
       __io_println(contains(final_snapshot_text, "Need one more detail"))

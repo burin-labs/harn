@@ -6,7 +6,7 @@ pipeline default() {
   // gpt-4o-mini: 0.15/0.60 per MTok. Per-call: 1000*0.15/1e6 + 200*0.60/1e6
   //   = 0.00015 + 0.00012 = 0.00027.
   // 10_000 calls/day * 30 days = 300_000 calls. Total = $81.
-  let row = volume_cost(
+  const row = volume_cost(
     {
       provider: "openai",
       model: "gpt-4o-mini",
@@ -22,7 +22,7 @@ pipeline default() {
   __io_println("per_period=" + format_usd(row.cost_per_period))
   __io_println("total=" + format_usd(row.total_cost))
   // Unknown pricing keeps shape but reports nils.
-  let unknown = volume_cost(
+  const unknown = volume_cost(
     {
       provider: "nonexistent_provider",
       model: "ghost-model",

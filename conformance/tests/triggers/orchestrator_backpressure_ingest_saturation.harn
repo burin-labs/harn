@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("orchestrator_backpressure_ingest_saturation")
+  const result = trigger_test_harness("orchestrator_backpressure_ingest_saturation")
   __io_println(result.ok)
   __io_println(result.attempts[1].status == "ingest_saturated")
   __io_println(result.attempts[1].backoff_ms == 60000)

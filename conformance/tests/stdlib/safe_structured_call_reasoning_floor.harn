@@ -11,30 +11,30 @@ import { structured_min_max_tokens } from "std/llm/safe"
 
 pipeline test(task) {
   // Non-reasoning route (mock model): flat floor, unchanged behavior.
-  let non_reasoning = structured_min_max_tokens({provider: "mock", model: "mock-model"})
+  const non_reasoning = structured_min_max_tokens({provider: "mock", model: "mock-model"})
   __io_println("non_reasoning=" + to_string(non_reasoning))
   __io_println("non_reasoning_is_512=" + to_string(non_reasoning == 512))
   // Reasoning route under Harn's auto policy (gpt-oss-120b -> effort low =
   // 1024 reasoning tokens). The floor must clear BOTH the prior 640 starvation
   // budget AND the resolved reasoning budget, with verdict headroom on top.
-  let reasoning = structured_min_max_tokens({provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b"})
+  const reasoning = structured_min_max_tokens({provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b"})
   __io_println("reasoning_exceeds_old_640=" + to_string(reasoning > 640))
   __io_println("reasoning_exceeds_1024_reasoning_budget=" + to_string(reasoning > 1024))
   __io_println("reasoning_value=" + to_string(reasoning))
   // High explicit reasoning effort scales the floor further (12000 + headroom)
   // yet stays clamped to the structured ceiling.
-  let high = structured_min_max_tokens(
+  const high = structured_min_max_tokens(
     {provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b", reasoning_effort: "high"},
   )
   __io_println("high_scales_above_reasoning=" + to_string(high > reasoning))
   __io_println("high_within_ceiling=" + to_string(high <= 32768))
   // Explicit reasoning-off on a reasoning-capable route collapses to the flat
   // floor (no needless inflation when the caller disabled reasoning).
-  let disabled = structured_min_max_tokens(
+  const disabled = structured_min_max_tokens(
     {provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b", reasoning_effort: "off"},
   )
   __io_println("disabled_is_512=" + to_string(disabled == 512))
   // The floor only RAISES: an explicit oversized budget is never lowered.
-  let explicit_large = structured_min_max_tokens({provider: "mock", model: "mock-model", max_tokens: 4096})
+  const explicit_large = structured_min_max_tokens({provider: "mock", model: "mock-model", max_tokens: 4096})
   __io_println("floor_does_not_lower_explicit=" + to_string(explicit_large == 512))
 }

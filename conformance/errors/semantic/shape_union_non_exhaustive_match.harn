@@ -3,7 +3,7 @@
 type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
 
 pipeline test(task) {
-  let m: Msg = {kind: "ping", ttl: 5}
+  const m: Msg = {kind: "ping", ttl: 5}
   match m.kind {
     "ping" -> { log("ping") }
   }

@@ -1,7 +1,7 @@
 pipeline default() {
-  let catalog = host_call("process.list_shells", {})
-  let default_shell = host_call("process.get_default_shell", {})
-  let invocation = host_call(
+  const catalog = host_call("process.list_shells", {})
+  const default_shell = host_call("process.get_default_shell", {})
+  const invocation = host_call(
     "process.shell_invocation",
     {shell_id: default_shell?.id, command: "printf shell-contract"},
   )
@@ -9,7 +9,7 @@ pipeline default() {
   __io_println(catalog?.default_shell_id == default_shell?.id)
   __io_println(invocation?.program == default_shell?.path)
   __io_println(invocation?.args != nil)
-  let result = host_call(
+  const result = host_call(
     "process.exec",
     {mode: "shell", shell_id: default_shell?.id, command: "printf shell-contract"},
   )

@@ -5,15 +5,15 @@ import {
 } from "std/verification"
 
 pipeline test(task) {
-  let fresh = verification_snapshot_staleness({"src/a.tx": "h1"}, {"src/a.tx": "h1"})
+  const fresh = verification_snapshot_staleness({"src/a.tx": "h1"}, {"src/a.tx": "h1"})
   assert_eq(fresh.status, "bound_fresh")
   assert_eq(fresh.fresh, true)
   assert_eq(fresh.stale_files, [])
-  let stale = verification_snapshot_staleness({"src/a.tx": "h1", "src/b.tx": "h2"}, {"src/a.tx": "h9"})
+  const stale = verification_snapshot_staleness({"src/a.tx": "h1", "src/b.tx": "h2"}, {"src/a.tx": "h9"})
   assert_eq(stale.status, "bound_stale")
   assert_eq(stale.stale, true)
   assert_eq(stale.stale_files, ["src/a.tx", "src/b.tx"])
-  let unbound = verification_snapshot_staleness({}, {"src/a.tx": "h1"})
+  const unbound = verification_snapshot_staleness({}, {"src/a.tx": "h1"})
   assert_eq(unbound.status, "unbound")
   assert_eq(unbound.advisory, true)
   verification_profiles_set(
@@ -34,7 +34,7 @@ pipeline test(task) {
       ],
     },
   )
-  let model = verification_hud_model(
+  const model = verification_hud_model(
     {
       started_ms: 1000,
       last_edit_ms: 61000,
@@ -57,7 +57,7 @@ pipeline test(task) {
   assert_eq(model.next_check.p95, "0s")
   assert_eq(model.full_check.row_id, "tx/full")
   assert_eq(model.full_check.p95, "9s")
-  let text = verification_hud_text(model)
+  const text = verification_hud_text(model)
   assert(contains(text, "[verification]"), "HUD text has header")
   assert(contains(text, "last check: R2 -> failed @11s ago - STALE"), "HUD text labels stale red")
   assert(contains(text, "next check: R0 toolchainx parse {file}"), "HUD text names next check")

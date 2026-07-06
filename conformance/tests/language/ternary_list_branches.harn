@@ -1,17 +1,17 @@
 pipeline default() {
-  let repo = "burin-labs/harn"
-  let repo_args = repo ? ["--repo", repo] : []
+  const repo = "burin-labs/harn"
+  const repo_args = repo ? ["--repo", repo] : []
   __io_println(len(repo_args))
   __io_println(repo_args[0])
   __io_println(repo_args[1])
-  let selected = repo ? ["steel", "thread"][1] : "none"
+  const selected = repo ? ["steel", "thread"][1] : "none"
   __io_println(selected)
-  let missing = nil
-  let missing_args = missing ? ["--repo", missing] : []
+  const missing = nil
+  const missing_args = missing ? ["--repo", missing] : []
   __io_println(len(missing_args))
-  let nested = true ? [1, true ? [2] : []] : []
+  const nested = true ? [1, true ? [2] : []] : []
   __io_println(len(nested))
   __io_println(nested[1][0])
-  let xs = [10, 20]
+  const xs = [10, 20]
   __io_println(xs[0])
 }

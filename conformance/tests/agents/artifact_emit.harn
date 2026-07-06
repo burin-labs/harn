@@ -1,9 +1,9 @@
 import { agent_capture_events } from "std/agent/events"
 
 pipeline main() {
-  let session = agent_session_open("artifact-emit-conformance")
+  const session = agent_session_open("artifact-emit-conformance")
   agent_session_reset(session)
-  let captured = agent_capture_events(
+  const captured = agent_capture_events(
     session,
     fn() {
       let mermaid = artifact_emit(
@@ -58,22 +58,22 @@ pipeline main() {
   __io_println(captured.events[3].spec.sha256)
   __io_println(captured.events[3].fallback.contains("report.pdf"))
   __io_println(captured.result[3].ok)
-  let snapshot_events = transcript_events_by_kind(agent_session_snapshot(session), "artifact")
+  const snapshot_events = transcript_events_by_kind(agent_session_snapshot(session), "artifact")
   __io_println(len(snapshot_events))
   __io_println(snapshot_events[0].metadata.artifactId)
   __io_println(snapshot_events[1].metadata.metadata.unit)
-  let imported = transcript_import(transcript_export(agent_session_snapshot(session)))
-  let imported_events = transcript_events_by_kind(imported, "artifact")
+  const imported = transcript_import(transcript_export(agent_session_snapshot(session)))
+  const imported_events = transcript_events_by_kind(imported, "artifact")
   __io_println(len(imported_events))
   __io_println(imported_events[2].metadata.kind)
   __io_println(imported_events[3].metadata.mimeType)
-  let svg_rejected = try {
+  const svg_rejected = try {
     artifact_emit("mermaid", "flowchart TD\n  A[<svg onload=alert(1)>]", {session_id: session})
     false
   } catch (e) {
     contains(json_stringify(e), "unsafe payload marker")
   }
-  let external_rejected = try {
+  const external_rejected = try {
     artifact_emit(
       "vega-lite",
       {
@@ -87,13 +87,13 @@ pipeline main() {
   } catch (e) {
     contains(json_stringify(e), "external reference")
   }
-  let raw_svg_kind_rejected = try {
+  const raw_svg_kind_rejected = try {
     artifact_emit("svg", "<svg></svg>", {session_id: session})
     false
   } catch (e) {
     contains(json_stringify(e), "unsupported artifact kind")
   }
-  let file_http_rejected = try {
+  const file_http_rejected = try {
     artifact_emit(
       "file",
       {uri: "https://example.invalid/report.pdf", mime_type: "application/pdf"},
@@ -103,7 +103,7 @@ pipeline main() {
   } catch (e) {
     contains(json_stringify(e), "must not reference a network")
   }
-  let file_payload_rejected = try {
+  const file_payload_rejected = try {
     artifact_emit(
       "file",
       {uri: "file:///tmp/report.pdf", mime_type: "application/pdf", base64: "JVBERi0xLjQ="},

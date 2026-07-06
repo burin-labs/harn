@@ -9,9 +9,9 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(task) {
-  let _ = mock_time(1700000000000)
-  let store = memory()
-  let provider = custom(
+  const _ = mock_time(1700000000000)
+  const store = memory()
+  const provider = custom(
     {
       id: "mockPending",
       auth_url: "https://idp.example/authorize",
@@ -53,15 +53,15 @@ pipeline test(task) {
       ],
     },
   )
-  let token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
+  const token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
   assert_eq(
     token_set.access_token,
     "OK-PEND",
     "device_flow returns final access token after pending retries",
   )
-  let stored = store.get("mockPending")
+  const stored = store.get("mockPending")
   assert_eq(stored.access_token, "OK-PEND", "token persisted after pending retries")
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   // 1 device call + 3 token polls.
   assert_eq(len(calls), 4, "device + three token polls")
   assert(contains(calls[0].url, "/device"), "first call to device endpoint")
@@ -71,6 +71,6 @@ pipeline test(task) {
   assert(contains(calls[2].body, "device_code=DEV-PENDING"), "second poll body has device_code")
   assert(contains(calls[3].url, "/token"), "third poll to token endpoint")
   assert(contains(calls[3].body, "device_code=DEV-PENDING"), "third poll body has device_code")
-  let _ = unmock_time()
+  const _ = unmock_time()
   log("oauth device flow pending ok")
 }

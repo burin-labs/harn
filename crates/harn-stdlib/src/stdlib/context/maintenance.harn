@@ -43,11 +43,11 @@ type ContextMaintenanceJobReceipt = {
   metadata: dict,
 }
 
-let CONTEXT_MAINTENANCE_RECEIPT_SCHEMA = "harn.context_maintenance.job_receipt.v1"
+const CONTEXT_MAINTENANCE_RECEIPT_SCHEMA = "harn.context_maintenance.job_receipt.v1"
 
-let CONTEXT_MAINTENANCE_STATUSES = ["queued", "running", "succeeded", "failed", "skipped"]
+const CONTEXT_MAINTENANCE_STATUSES = ["queued", "running", "succeeded", "failed", "skipped"]
 
-let CONTEXT_MAINTENANCE_REPLAY_MODES = ["include", "skip"]
+const CONTEXT_MAINTENANCE_REPLAY_MODES = ["include", "skip"]
 
 fn __cm_text(value) {
   if value == nil {
@@ -57,7 +57,7 @@ fn __cm_text(value) {
 }
 
 fn __cm_required_text(value, field) {
-  let text = __cm_text(value)
+  const text = __cm_text(value)
   if text == "" {
     throw "std/context/maintenance: " + field + " is required"
   }
@@ -75,9 +75,9 @@ fn __cm_list(value, field) {
 }
 
 fn __cm_string_list(value, field) {
-  var out = []
+  let out = []
   for item in __cm_list(value, field) {
-    let text = __cm_text(item)
+    const text = __cm_text(item)
     if text != "" && !out.contains(text) {
       out = out.push(text)
     }
@@ -86,8 +86,8 @@ fn __cm_string_list(value, field) {
 }
 
 fn __cm_paths(input) {
-  let opts = input ?? {}
-  var paths = opts?.affected_paths ?? opts?.paths ?? opts?.changed_paths
+  const opts = input ?? {}
+  let paths = opts?.affected_paths ?? opts?.paths ?? opts?.changed_paths
   if paths == nil && opts?.path != nil {
     paths = [opts.path]
   }
@@ -95,12 +95,12 @@ fn __cm_paths(input) {
 }
 
 fn __cm_artifact_ids(input) {
-  let opts = input ?? {}
+  const opts = input ?? {}
   return __cm_string_list(opts?.artifact_ids ?? opts?.artifacts ?? [], "artifact_ids")
 }
 
 fn __cm_status(value) {
-  let status = __cm_required_text(value, "status")
+  const status = __cm_required_text(value, "status")
   if !CONTEXT_MAINTENANCE_STATUSES.contains(status) {
     throw "std/context/maintenance: unsupported status `" + status + "`"
   }
@@ -108,7 +108,7 @@ fn __cm_status(value) {
 }
 
 fn __cm_replay_mode(value) {
-  let mode = __cm_text(value ?? "include")
+  const mode = __cm_text(value ?? "include")
   if !CONTEXT_MAINTENANCE_REPLAY_MODES.contains(mode) {
     throw "std/context/maintenance: unsupported replay mode `" + mode + "`"
   }
@@ -116,7 +116,7 @@ fn __cm_replay_mode(value) {
 }
 
 fn __cm_retry_hint(value) {
-  let hint = value ?? {}
+  const hint = value ?? {}
   if type_of(hint) != "dict" {
     throw "std/context/maintenance: retry_hint must be a dict"
   }
@@ -131,7 +131,7 @@ fn __cm_retry_hint(value) {
 }
 
 fn __cm_replay_hint(value, dedupe_key) {
-  let hint = value ?? {}
+  const hint = value ?? {}
   if type_of(hint) != "dict" {
     throw "std/context/maintenance: replay must be a dict"
   }
@@ -149,7 +149,7 @@ fn __cm_event_name(event) {
 }
 
 fn __cm_source_id(input) {
-  let opts = input ?? {}
+  const opts = input ?? {}
   return __cm_text(opts?.source_id ?? opts?.session_id ?? opts?.session?.id ?? opts?.event_id)
 }
 
@@ -165,7 +165,7 @@ pub fn context_maintenance_dedupe_key(
   affected_paths = [],
   source_id = nil,
 ) -> string {
-  let seed = __cm_required_text(job_id, "job_id")
+  const seed = __cm_required_text(job_id, "job_id")
     + "\n"
     + __cm_text(lifecycle_event)
     + "\n"
@@ -186,15 +186,15 @@ pub fn context_maintenance_receipt(
   status: ContextMaintenanceJobStatus = "queued",
   input = nil,
 ) -> ContextMaintenanceJobReceipt {
-  let opts = input ?? {}
-  let resolved_job_id = __cm_required_text(job_id, "job_id")
-  let resolved_status = __cm_status(status)
-  let lifecycle_event = __cm_event_name(opts)
-  let affected_paths = __cm_paths(opts)
-  let source_id = __cm_source_id(opts)
-  let dedupe_key = opts?.dedupe_key
+  const opts = input ?? {}
+  const resolved_job_id = __cm_required_text(job_id, "job_id")
+  const resolved_status = __cm_status(status)
+  const lifecycle_event = __cm_event_name(opts)
+  const affected_paths = __cm_paths(opts)
+  const source_id = __cm_source_id(opts)
+  const dedupe_key = opts?.dedupe_key
     ?? context_maintenance_dedupe_key(resolved_job_id, lifecycle_event, affected_paths, source_id)
-  let run_id = opts?.run_id ?? ("ctx_run_" + substring(sha256(dedupe_key), 0, 16))
+  const run_id = opts?.run_id ?? ("ctx_run_" + substring(sha256(dedupe_key), 0, 16))
   return filter_nil(
     {
       schema: CONTEXT_MAINTENANCE_RECEIPT_SCHEMA,
@@ -225,9 +225,9 @@ pub fn context_maintenance_receipt(
  * @errors: []
  */
 pub fn context_maintenance_queue_receipt(job_id: string, event, options = nil) -> ContextMaintenanceJobReceipt {
-  let opts = options ?? {}
-  let source_event = event ?? {}
-  let status = opts?.status ?? "queued"
+  const opts = options ?? {}
+  const source_event = event ?? {}
+  const status = opts?.status ?? "queued"
   return context_maintenance_receipt(
     job_id,
     status,
@@ -253,7 +253,7 @@ pub fn context_maintenance_transition(
   status: ContextMaintenanceJobStatus,
   input = nil,
 ) -> ContextMaintenanceJobReceipt {
-  let opts = (receipt ?? {}).merge(input ?? {})
+  const opts = (receipt ?? {}).merge(input ?? {})
   return context_maintenance_receipt(
     opts.job_id,
     status,
@@ -278,10 +278,10 @@ pub fn context_maintenance_transition(
  * @errors: []
  */
 pub fn context_maintenance_replay_decision(receipt: ContextMaintenanceJobReceipt, options = nil) {
-  let opts = options ?? {}
-  let mode = __cm_replay_mode(opts?.mode ?? opts?.replay_mode ?? receipt.replay.mode ?? "include")
+  const opts = options ?? {}
+  const mode = __cm_replay_mode(opts?.mode ?? opts?.replay_mode ?? receipt.replay.mode ?? "include")
   if mode == "skip" {
-    let reason = __cm_text(opts?.reason ?? receipt.replay.reason ?? "deterministic_replay_skip")
+    const reason = __cm_text(opts?.reason ?? receipt.replay.reason ?? "deterministic_replay_skip")
     return {
       mode: "skip",
       should_run: false,

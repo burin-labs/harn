@@ -2,14 +2,14 @@ import "std/project"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  let namespace = "coding-enrichment-${uuid()}"
-  let root = path_join(harness.fs.temp_dir(), "project-deep-scan-invalidation-" + uuid())
+  const namespace = "coding-enrichment-${uuid()}"
+  const root = path_join(harness.fs.temp_dir(), "project-deep-scan-invalidation-" + uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
   with_llm_script(
     [llm_text("{\"purpose\":\"root\"}"), llm_text("{\"purpose\":\"root changed\"}")],
     { ->
-      let first = project_deep_scan(
+      const first = project_deep_scan(
         root,
         {
           namespace: namespace,
@@ -25,7 +25,7 @@ pipeline test(task) {
         },
       )
       harness.fs.write_text(path_join(root, "README.md"), "# repo changed\n")
-      let second = project_deep_scan(
+      const second = project_deep_scan(
         root,
         {
           namespace: namespace,
@@ -40,7 +40,7 @@ pipeline test(task) {
           },
         },
       )
-      let second_status = project_deep_scan_status(namespace, root)
+      const second_status = project_deep_scan_status(namespace, root)
       __io_println(first["."].enriched.purpose == "root")
       __io_println(second["."].enriched.purpose == "root changed")
       __io_println(second_status.cache_hits == 0)

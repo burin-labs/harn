@@ -1,8 +1,8 @@
 import { parse, parser } from "std/cli/argparse"
 
 fn main(harness: Harness) {
-  let spec = parser({name: "demo", args: [{name: "json", kind: "switch", long: "--json"}]})
-  let r = parse(spec, ["--json", "--", "--not-a-flag", "x", "y"])
+  const spec = parser({name: "demo", args: [{name: "json", kind: "switch", long: "--json"}]})
+  const r = parse(spec, ["--json", "--", "--not-a-flag", "x", "y"])
   harness.stdio.println(r.ok.json)
   harness.stdio.println(len(r.ok.rest))
   for s in r.ok.rest {

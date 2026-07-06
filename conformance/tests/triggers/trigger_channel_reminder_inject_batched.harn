@@ -12,10 +12,10 @@ import "std/triggers"
  */
 pipeline test(task) {
   mock_time(1000000)
-  let target_session = agent_session_open("trigger-channel-reminder-batched")
+  const target_session = agent_session_open("trigger-channel-reminder-batched")
   agent_session_reset(target_session)
-  let unique = to_string(harness.random.gen_range(100000, 999999))
-  let _handle: TriggerHandle = trigger_register(
+  const unique = to_string(harness.random.gen_range(100000, 999999))
+  const _handle: TriggerHandle = trigger_register(
     {
       id: "trigger-channel-reminder-batched-" + unique,
       kind: "channel.emit",
@@ -40,22 +40,22 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("ch.reminder.batched.input", {seq: 1})
-  let _ = emit_channel("ch.reminder.batched.input", {seq: 2})
-  let before = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
+  const _ = emit_channel("ch.reminder.batched.input", {seq: 1})
+  const _ = emit_channel("ch.reminder.batched.input", {seq: 2})
+  const before = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
   __io_println("before-threshold:" + to_string(len(before)))
   // Threshold-fire path: the third emit closes the batch and dispatches once.
-  let _ = emit_channel("ch.reminder.batched.input", {seq: 3})
-  let after = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
+  const _ = emit_channel("ch.reminder.batched.input", {seq: 3})
+  const after = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
   __io_println("after-threshold:" + to_string(len(after)))
   __io_println(after[0].reminder.body)
   __io_println(after[0].reminder.tags[0])
   // Subsequent emits in a fresh batch generate a new inject — proves
   // the batch counter resets cleanly after a fire.
-  let _ = emit_channel("ch.reminder.batched.input", {seq: 4})
-  let _ = emit_channel("ch.reminder.batched.input", {seq: 5})
-  let _ = emit_channel("ch.reminder.batched.input", {seq: 6})
-  let after_second = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
+  const _ = emit_channel("ch.reminder.batched.input", {seq: 4})
+  const _ = emit_channel("ch.reminder.batched.input", {seq: 5})
+  const _ = emit_channel("ch.reminder.batched.input", {seq: 6})
+  const after_second = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
   __io_println("after-second-batch:" + to_string(len(after_second)))
   unmock_time()
 }

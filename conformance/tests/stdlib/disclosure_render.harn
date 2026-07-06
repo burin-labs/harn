@@ -1,18 +1,18 @@
 import { render } from "std/disclosure"
 
 pipeline default() {
-  let chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}}}
-  let config = {
+  const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}}}
+  const config = {
     identities: {
       "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com", github: "kennethsinder"},
       "agent:merge-captain": {name: "Merge Captain", email: "merge-captain@bots.example", github: "merge-captain-bot"},
       "agent:burin": {name: "Burin", email: "burin@bots.example", github: "burin-bot"},
     },
   }
-  let options = {project: false, env: false, config: config}
+  const options = {project: false, env: false, config: config}
   __io_println(render(chain, "git", options))
   __io_println(render(chain, "slack", options))
-  let github = render(chain, "github", options)
+  const github = render(chain, "github", options)
   __io_println(github.kind)
   __io_println(github.mode)
   __io_println(github.author.subject)

@@ -5,7 +5,7 @@ import {
 } from "std/workflow/prompts"
 
 pipeline default() {
-  let artifacts = [
+  const artifacts = [
     {
       id: "artifact-1",
       kind: "workspace_file",
@@ -16,17 +16,17 @@ pipeline default() {
       priority: 7,
     },
   ]
-  let xml_context = workflow_render_artifacts_context(artifacts, {})
+  const xml_context = workflow_render_artifacts_context(artifacts, {})
   __io_println(contains(xml_context, "<title>src/main.rs</title>"))
   __io_println(contains(xml_context, "<source>stage&lt;a&gt;</source>"))
   __io_println(contains(xml_context, "<freshness>fresh&amp;ready</freshness>"))
   __io_println(contains(xml_context, "fn " + "main() {}"))
-  let json_context = workflow_render_artifacts_context(
+  const json_context = workflow_render_artifacts_context(
     [{id: "artifact-2", kind: "summary", data: {b: 2, a: 1}}],
     {render: "json"},
   )
   __io_println(contains(json_context, "\"text\":\"{"))
-  let verification = workflow_render_verification_context(
+  const verification = workflow_render_verification_context(
     [
       {
         source_node: "build",
@@ -38,7 +38,7 @@ pipeline default() {
   __io_println(contains(verification, "<source_node>build</source_node>"))
   __io_println(contains(verification, "- rate&lt;Limit"))
   __io_println(contains(verification, "- command: cargo test (must pass)"))
-  let prepared = workflow_prepare_stage_prompt(
+  const prepared = workflow_prepare_stage_prompt(
     {
       task: "  Ship it  ",
       task_label: "  Implement <X>  ",
@@ -51,7 +51,7 @@ pipeline default() {
   __io_println(contains(prepared.prompt, "Ship it"))
   __io_println(prepared.rendered_context == xml_context)
   __io_println(prepared.rendered_verification == "")
-  let ordered = workflow_prepare_stage_prompt(
+  const ordered = workflow_prepare_stage_prompt(
     {
       task: "Create the missing test file with one edit call.",
       task_label: "Create Required Outputs",
@@ -75,7 +75,7 @@ pipeline default() {
     contains(ordered.prompt, "do only what the current workflow task and system prompt authorize"),
   )
   __io_println(contains(ordered.prompt, "When the current stage is complete, stop"))
-  let prepared_override = workflow_prepare_stage_prompt(
+  const prepared_override = workflow_prepare_stage_prompt(
     {task: "Task", rendered_context: "override", verification_contracts: []},
   )
   __io_println(prepared_override.rendered_context)

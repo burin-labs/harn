@@ -77,22 +77,22 @@ fn __ends_with_newline(s: string) -> bool {
  * uses `{n}` / `{n:.1}` which doesn't pad.
  */
 fn __format_float_3(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
   // Round half-up to 3 decimals via int math.
-  let scaled = to_int(round(abs_f * 1000.0)) ?? 0
-  let whole = scaled / 1000
-  let frac = scaled - whole * 1000
-  var frac_str = to_string(frac)
+  const scaled = to_int(round(abs_f * 1000.0)) ?? 0
+  const whole = scaled / 1000
+  const frac = scaled - whole * 1000
+  let frac_str = to_string(frac)
   while len(frac_str) < 3 {
     frac_str = "0" + frac_str
   }
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     ""
@@ -106,29 +106,29 @@ fn __format_float_3(value) -> string {
 fn __line_diff_summary(baseline, candidate) -> string {
   // Match the Rust impl's BTreeSet semantics: count *unique* lines on
   // either side, not raw line counts.
-  var baseline_set = {}
+  let baseline_set = {}
   for line in baseline {
     baseline_set = baseline_set + {[line]: true}
   }
-  var candidate_set = {}
+  let candidate_set = {}
   for line in candidate {
     candidate_set = candidate_set + {[line]: true}
   }
-  var only_in_baseline = 0
+  let only_in_baseline = 0
   for k in keys(baseline_set) {
     if candidate_set[k] == nil {
       only_in_baseline = only_in_baseline + 1
     }
   }
-  var only_in_candidate = 0
+  let only_in_candidate = 0
   for k in keys(candidate_set) {
     if baseline_set[k] == nil {
       only_in_candidate = only_in_candidate + 1
     }
   }
   if only_in_baseline == 0 && only_in_candidate == 0 {
-    let total_baseline = len(baseline)
-    let total_candidate = len(candidate)
+    const total_baseline = len(baseline)
+    const total_candidate = len(candidate)
     if total_baseline == total_candidate {
       return ""
     }
@@ -142,7 +142,7 @@ fn __line_diff_summary(baseline, candidate) -> string {
 
 fn __first_rendered(renders) -> string {
   for r in renders {
-    let rd = __safe_dict(r)
+    const rd = __safe_dict(r)
     if type_of(rd["rendered"]) == "string" {
       return rd["rendered"]
     }
@@ -151,7 +151,7 @@ fn __first_rendered(renders) -> string {
 }
 
 fn __terminal_render_section(render, idx, baseline_lines) -> string {
-  var out = "## [" + to_string(idx) + "] "
+  let out = "## [" + to_string(idx) + "] "
     + __safe_string(render["selector"], "")
     + " ("
     + __safe_string(render["provider"], "")
@@ -160,16 +160,16 @@ fn __terminal_render_section(render, idx, baseline_lines) -> string {
     + ")  family="
     + __safe_string(render["family"], "")
     + "\n"
-  let auth_available = render["auth_available"] ?? true
+  const auth_available = render["auth_available"] ?? true
   if !auth_available {
     out = out + "    auth: not configured\n"
   }
-  let error = render["error"]
+  const error = render["error"]
   if type_of(error) == "string" {
     out = out + "    render error: " + error + "\n\n"
     return out
   }
-  let rendered = render["rendered"]
+  const rendered = render["rendered"]
   if type_of(rendered) != "string" {
     return out
   }
@@ -180,14 +180,14 @@ fn __terminal_render_section(render, idx, baseline_lines) -> string {
   }
   out = out + "---\n"
   if idx > 0 && len(baseline_lines) > 0 {
-    let candidate_lines = split(rendered, "\n")
+    const candidate_lines = split(rendered, "\n")
     // Rust uses `lines()` which drops a trailing empty entry from a
     // terminal "\n"; mirror that here so the diff summary matches.
-    var candidate_trim = candidate_lines
+    let candidate_trim = candidate_lines
     if len(candidate_trim) > 0 && candidate_trim[len(candidate_trim) - 1] == "" {
       candidate_trim = candidate_trim[0:len(candidate_trim) - 1]
     }
-    let summary = __line_diff_summary(baseline_lines, candidate_trim)
+    const summary = __line_diff_summary(baseline_lines, candidate_trim)
     if summary != "" {
       out = out + "    diff vs #0: " + summary + "\n"
     }
@@ -197,13 +197,13 @@ fn __terminal_render_section(render, idx, baseline_lines) -> string {
 }
 
 fn __terminal_render_context_eval(context_eval) -> string {
-  var out = "\n# Context fixture gates: "
+  let out = "\n# Context fixture gates: "
     + to_string(context_eval["passed"] ?? 0)
     + " passed / "
     + to_string(context_eval["total"] ?? 0)
     + " total\n"
   for fixture in __safe_list(context_eval["fixtures"]) {
-    let fx = __safe_dict(fixture)
+    const fx = __safe_dict(fixture)
     out = out + "\n## " + __safe_string(fx["path"], "")
       + " ("
       + to_string(fx["passed"] ?? 0)
@@ -211,16 +211,16 @@ fn __terminal_render_context_eval(context_eval) -> string {
       + to_string(fx["total"] ?? 0)
       + " total)\n"
     for case in __safe_list(fx["cases"]) {
-      let cs = __safe_dict(case)
-      let score = __safe_dict(cs["score"])
-      let budget = __safe_dict(cs["budget"])
-      let selected = __safe_list(cs["selected_artifact_ids"])
-      let pass_label = if cs["pass"] ?? false {
+      const cs = __safe_dict(case)
+      const score = __safe_dict(cs["score"])
+      const budget = __safe_dict(cs["budget"])
+      const selected = __safe_list(cs["selected_artifact_ids"])
+      const pass_label = if cs["pass"] ?? false {
         "pass"
       } else {
         "fail"
       }
-      let overall = score["overall"] ?? 0.0
+      const overall = score["overall"] ?? 0.0
       out = out + "- " + __safe_string(cs["id"], "")
         + ": "
         + pass_label
@@ -242,19 +242,19 @@ fn __terminal_render_context_eval(context_eval) -> string {
 }
 
 fn __terminal_render_runs(report) -> string {
-  let runs = __safe_dict(report["runs"])
+  const runs = __safe_dict(report["runs"])
   if len(keys(runs)) == 0 {
     return ""
   }
-  var out = "\n# Model responses\n"
+  let out = "\n# Model responses\n"
   for render in __safe_list(report["renders"]) {
-    let rd = __safe_dict(render)
-    let selector = __safe_string(rd["selector"], "")
-    let run = runs[selector]
+    const rd = __safe_dict(render)
+    const selector = __safe_string(rd["selector"], "")
+    const run = runs[selector]
     if run == nil {
       continue
     }
-    let run_d = __safe_dict(run)
+    const run_d = __safe_dict(run)
     out = out + "\n## " + selector
       + " ("
       + __safe_string(rd["model"], "")
@@ -263,12 +263,12 @@ fn __terminal_render_runs(report) -> string {
       out = out + "    skipped: unauthenticated provider\n"
       continue
     }
-    let error = run_d["error"]
+    const error = run_d["error"]
     if type_of(error) == "string" {
       out = out + "    error: " + error + "\n"
       continue
     }
-    let response = run_d["response"]
+    const response = run_d["response"]
     if type_of(response) == "string" {
       out = out + "---\n" + response
       if !__ends_with_newline(response) {
@@ -281,31 +281,31 @@ fn __terminal_render_runs(report) -> string {
 }
 
 fn __render_terminal(report) -> string {
-  var out = "# harn eval prompt — "
+  let out = "# harn eval prompt — "
     + __safe_string(report["template_path"], "")
     + " (mode: "
     + __safe_string(report["mode"], "")
     + ")\n\n"
-  let renders = __safe_list(report["renders"])
-  let baseline_text = __first_rendered(renders)
-  var baseline_lines = []
+  const renders = __safe_list(report["renders"])
+  const baseline_text = __first_rendered(renders)
+  let baseline_lines = []
   if baseline_text != "" {
     baseline_lines = split(baseline_text, "\n")
     if len(baseline_lines) > 0 && baseline_lines[len(baseline_lines) - 1] == "" {
       baseline_lines = baseline_lines[0:len(baseline_lines) - 1]
     }
   }
-  var idx = 0
+  let idx = 0
   for render in renders {
     out = out + __terminal_render_section(__safe_dict(render), idx, baseline_lines)
     idx = idx + 1
   }
-  let context_eval = report["context_eval"]
+  const context_eval = report["context_eval"]
   if type_of(context_eval) == "dict" {
     out = out + __terminal_render_context_eval(context_eval)
   }
   out = out + __terminal_render_runs(report)
-  let judge = report["judge"]
+  const judge = report["judge"]
   if type_of(judge) == "dict" {
     out = out + "\n# Judge verdict ("
       + __safe_string(judge["judge_model"], "")
@@ -342,7 +342,7 @@ fn __html_escape(s: string) -> string {
 }
 
 fn __html_render_card(render, runs) -> string {
-  var out = "<div class=\"card\"><h2>"
+  let out = "<div class=\"card\"><h2>"
     + __html_escape(__safe_string(render["selector"], ""))
     + " <span class=\"meta\">("
     + __html_escape(__safe_string(render["provider"], ""))
@@ -354,21 +354,21 @@ fn __html_render_card(render, runs) -> string {
   if !(render["auth_available"] ?? true) {
     out = out + "<p class=\"skip\">auth: not configured</p>"
   }
-  let error = render["error"]
-  let rendered = render["rendered"]
+  const error = render["error"]
+  const rendered = render["rendered"]
   if type_of(error) == "string" {
     out = out + "<p class=\"err\">render error: " + __html_escape(error) + "</p>"
   } else if type_of(rendered) == "string" {
     out = out + "<pre>" + __html_escape(rendered) + "</pre>"
   }
-  let selector = __safe_string(render["selector"], "")
-  let run = runs[selector]
+  const selector = __safe_string(render["selector"], "")
+  const run = runs[selector]
   if type_of(run) == "dict" {
     if run["skipped"] ?? false {
       out = out + "<p class=\"skip\">run: skipped (no credentials)</p>"
     } else {
-      let run_error = run["error"]
-      let response = run["response"]
+      const run_error = run["error"]
+      const response = run["response"]
       if type_of(run_error) == "string" {
         out = out + "<p class=\"err\">run error: " + __html_escape(run_error) + "</p>"
       } else if type_of(response) == "string" {
@@ -381,7 +381,7 @@ fn __html_render_card(render, runs) -> string {
 }
 
 fn __render_html(report) -> string {
-  var out = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
+  let out = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
     + "harn eval prompt report</title>"
   out = out + "<style>body{font-family:system-ui,sans-serif;margin:2rem;color:#222}h1{margin-bottom:0}"
   out = out + ".meta{color:#666;font-size:0.9rem;margin-bottom:1.5rem}"
@@ -398,12 +398,12 @@ fn __render_html(report) -> string {
     + __safe_string(report["mode"], "")
     + "</div>"
   out = out + "<div class=\"grid\">"
-  let runs = __safe_dict(report["runs"])
+  const runs = __safe_dict(report["runs"])
   for render in __safe_list(report["renders"]) {
     out = out + __html_render_card(__safe_dict(render), runs)
   }
   out = out + "</div>"
-  let context_eval = report["context_eval"]
+  const context_eval = report["context_eval"]
   if type_of(context_eval) == "dict" {
     out = out + "<h2>Context fixture gates</h2><p>"
       + to_string(context_eval["passed"] ?? 0)
@@ -411,18 +411,18 @@ fn __render_html(report) -> string {
       + to_string(context_eval["total"] ?? 0)
       + " total</p>"
     for fixture in __safe_list(context_eval["fixtures"]) {
-      let fx = __safe_dict(fixture)
+      const fx = __safe_dict(fixture)
       out = out + "<h3>" + __html_escape(__safe_string(fx["path"], "")) + "</h3><ul>"
       for case in __safe_list(fx["cases"]) {
-        let cs = __safe_dict(case)
-        let score = __safe_dict(cs["score"])
-        let budget = __safe_dict(cs["budget"])
-        let pass_label = if cs["pass"] ?? false {
+        const cs = __safe_dict(case)
+        const score = __safe_dict(cs["score"])
+        const budget = __safe_dict(cs["budget"])
+        const pass_label = if cs["pass"] ?? false {
           "pass"
         } else {
           "fail"
         }
-        let selected = __safe_list(cs["selected_artifact_ids"])
+        const selected = __safe_list(cs["selected_artifact_ids"])
         out = out + "<li><strong>" + __html_escape(__safe_string(cs["id"], ""))
           + "</strong>: "
           + pass_label
@@ -439,7 +439,7 @@ fn __render_html(report) -> string {
       out = out + "</ul>"
     }
   }
-  let judge = report["judge"]
+  const judge = report["judge"]
   if type_of(judge) == "dict" {
     out = out + "<h2>Judge (" + __html_escape(__safe_string(judge["judge_model"], "")) + ")</h2>"
       + "<pre>"
@@ -454,20 +454,20 @@ fn __render_html(report) -> string {
  * ─── Entrypoint ───────────────────────────────────────────────────────────
  */
 fn main(harness: Harness) {
-  let raw = harness.env.get_or("HARN_EVAL_PROMPT_REPORT_JSON", "")
+  const raw = harness.env.get_or("HARN_EVAL_PROMPT_REPORT_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_EVAL_PROMPT_REPORT_JSON not set by dispatch shim")
     exit(70)
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse PromptReport: " + to_string(e))
     exit(70)
   }
-  let output = harness.env.get_or("HARN_EVAL_PROMPT_OUTPUT", "terminal")
-  let payload = if output == "json" {
+  const output = harness.env.get_or("HARN_EVAL_PROMPT_OUTPUT", "terminal")
+  const payload = if output == "json" {
     __render_json(report)
   } else if output == "html" {
     __render_html(report)

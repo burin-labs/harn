@@ -12,14 +12,14 @@ import {
 } from "std/oauth/dynamic_registration"
 
 fn expect_reject(label, metadata, marker) {
-  let validation = validate_metadata(metadata)
+  const validation = validate_metadata(metadata)
   if validation.ok {
     throw label + ": expected validate_metadata to report ok=false"
   }
   if len(validation.errors) == 0 {
     throw label + ": expected at least one error"
   }
-  let first_error = validation.errors[0]
+  const first_error = validation.errors[0]
   if !contains(first_error, "HARN-OAU-005") {
     throw label + ": expected HARN-OAU-005 diagnostic prefix, got `" + first_error + "`"
   }
@@ -29,8 +29,8 @@ fn expect_reject(label, metadata, marker) {
 }
 
 pipeline test(task) {
-  let store = dynamic_registration_store()
-  let cursor_before = len(list_clients(store))
+  const store = dynamic_registration_store()
+  const cursor_before = len(list_clients(store))
   // Missing redirect_uris.
   expect_reject("missing redirect_uris", {}, "redirect_uris is required")
   // Empty redirect_uris list.
@@ -69,9 +69,9 @@ pipeline test(task) {
   // Validation never mutates the store.
   assert_eq(len(list_clients(store)), cursor_before, "store unchanged by validation calls")
   // register_client must also reject and not insert.
-  var caught = false
+  let caught = false
   try {
-    let _ = register_client(store, {redirect_uris: ["http://attacker.example/cb"]})
+    const _ = register_client(store, {redirect_uris: ["http://attacker.example/cb"]})
   } catch (err) {
     if contains(to_string(err), "HARN-OAU-005") {
       caught = true
@@ -80,7 +80,7 @@ pipeline test(task) {
   assert(caught, "register_client must throw HARN-OAU-005 on bad metadata")
   assert_eq(len(list_clients(store)), cursor_before, "store unchanged after rejected registration")
   // A valid registration after rejections still works.
-  let good = register_client(store, {redirect_uris: ["https://app.example/ok"]})
+  const good = register_client(store, {redirect_uris: ["https://app.example/ok"]})
   assert(good.client_id != nil, "valid registration after rejections succeeds")
   assert_eq(len(list_clients(store)), cursor_before + 1, "valid registration appears in store")
   log("oauth dynamic registration rejects ok")

@@ -51,7 +51,7 @@ fn classify(pr) {
   return "merge"
 }
 
-let PR_PROMPT = """
+const PR_PROMPT = """
 [merge_captain][pr={{ number }}][tag={{ tag }}]
 
 Decide: should PR #{{ number }} ({{ title }}) merge, hand off to
@@ -77,16 +77,16 @@ fn render_pr_prompt(pr) {
 }
 
 pipeline default(_task) {
-  let prs = pull_requests()
-  var decisions = []
-  var merged = 0
-  var handed_off = 0
-  var blocked = 0
+  const prs = pull_requests()
+  let decisions = []
+  let merged = 0
+  let handed_off = 0
+  let blocked = 0
   for pr in prs {
-    let prompt = render_pr_prompt(pr)
-    let llm_envelope = llm_call(prompt, "You are merge_captain, a senior release engineer.")
-    let llm_response = llm_envelope.text
-    let decision = classify(pr)
+    const prompt = render_pr_prompt(pr)
+    const llm_envelope = llm_call(prompt, "You are merge_captain, a senior release engineer.")
+    const llm_response = llm_envelope.text
+    const decision = classify(pr)
     if decision == "merge" {
       merged = merged + 1
     }
@@ -96,14 +96,14 @@ pipeline default(_task) {
     if decision == "block" {
       blocked = blocked + 1
     }
-    let row = {repo: pr.repo, pr: pr.number, title: pr.title, decision: decision, reasoning: llm_response}
+    const row = {repo: pr.repo, pr: pr.number, title: pr.title, decision: decision, reasoning: llm_response}
     decisions = decisions + [row]
     __io_println("[#${pr.number}] ${pr.title}")
     __io_println("    decision: ${decision}")
     __io_println("    reasoning: ${llm_response}")
     __io_println("")
   }
-  let receipt = {
+  const receipt = {
     persona: "merge_captain",
     execution_mode: "dry_run",
     approval_required: blocked > 0 || handed_off > 0,

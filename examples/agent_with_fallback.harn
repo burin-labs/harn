@@ -8,11 +8,11 @@
 import { with_fallback } from "std/llm/handlers"
 
 pipeline default() {
-  let primary = { _call ->
+  const primary = { _call ->
     __io_println("[primary]   -> auth failure")
     return {ok: false, status: "auth", error: "no creds"}
   }
-  let secondary = { _call ->
+  const secondary = { _call ->
     __io_println("[secondary] -> success")
     return {
       ok: true,
@@ -26,8 +26,8 @@ pipeline default() {
       },
     }
   }
-  let caller = with_fallback([primary, secondary])
-  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: caller})
+  const caller = with_fallback([primary, secondary])
+  const result = agent_loop("hi", nil, {provider: "mock", llm_caller: caller})
   __io_println("status      = " + result.status)
   __io_println("visible     = " + result.visible_text)
 }

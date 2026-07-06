@@ -32,7 +32,7 @@ pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: Pi
   if type_of(d) != "dict" {
     return {}
   }
-  let drop_nil = options.drop_nil ?? false
+  const drop_nil = options.drop_nil ?? false
   return __dict_pick_keys(d, selected_keys, drop_nil)
 }
 
@@ -85,7 +85,7 @@ pub fn dict_from_pairs<V>(pairs: list<list<V>>) -> dict<string, V> {
  * @example: index_by(records, { r -> r.id })
  */
 pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
-  var pairs = []
+  let pairs = []
   for item in items ?? [] {
     pairs = pairs + [[to_string(key_fn(item)), item]]
   }

@@ -7,25 +7,25 @@ import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
  * receipt that fires on every accepted submit.
  */
 pipeline default() {
-  let bp = Backpressure()
+  const bp = Backpressure()
   // Filter to drop receipts so the cursor is anchored to backpressure
   // events even though `pool_submit` / `pool_dequeue` receipts also fan
   // out on the same audit topic.
-  let drops = event_log
+  const drops = event_log
     .subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
-  let gate = channel(nil, 1)
-  let pool = pool_create({name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
-  let warmup = pool
+  const gate = channel(nil, 1)
+  const pool = pool_create({name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
+  const warmup = pool
     .submit(
     { ->
       receive(gate)
       return "warmup"
     },
   )
-  let queued = pool.submit({ -> "queued" })
-  let dropped = pool.submit({ -> "dropped" })
+  const queued = pool.submit({ -> "queued" })
+  const dropped = pool.submit({ -> "dropped" })
   // The drop_newest policy rejects the third submission immediately.
-  let drop_receipt = drops.next().value
+  const drop_receipt = drops.next().value
   __io_println(drop_receipt.kind)
   __io_println(drop_receipt.headers.schema)
   __io_println(drop_receipt.payload.policy)
@@ -35,7 +35,7 @@ pipeline default() {
   __io_println(drop_receipt.payload.queue_depth)
   // Drain so the two surviving tasks finish.
   send(gate, "go")
-  let results = pool_wait([warmup, queued, dropped])
+  const results = pool_wait([warmup, queued, dropped])
   __io_println(results[0].status)
   __io_println(results[1].result)
   __io_println(results[2].status)

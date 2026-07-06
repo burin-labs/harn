@@ -38,7 +38,7 @@ pub fn validate_shape(output) {
   if type_of(output) != "dict" {
     return _err(["output must be a dict, got ${type_of(output)}"])
   }
-  var missing = []
+  let missing = []
   for key in required_keys() {
     if output[key] == nil {
       missing = missing + [key]
@@ -69,7 +69,7 @@ pub fn validate_shape(output) {
  * worker did not prove they pass locally.
  */
 pub fn validate_tests(bundle, output) {
-  let tests = output.tests_run ?? []
+  const tests = output.tests_run ?? []
   if len(tests) == 0 {
     return _err(
       [
@@ -78,9 +78,9 @@ pub fn validate_tests(bundle, output) {
     )
   }
   if len(bundle.required_verification) > 0 {
-    var missing = []
+    let missing = []
     for cmd in bundle.required_verification {
-      let saw = tests.filter({ t -> t.command == cmd.command || t.name == cmd.name })
+      const saw = tests.filter({ t -> t.command == cmd.command || t.name == cmd.name })
       if len(saw) == 0 {
         missing = missing + [cmd.name ?? cmd.command]
       }
@@ -89,7 +89,7 @@ pub fn validate_tests(bundle, output) {
       return _err(["missing tests: required_verification entries not run: ${json_stringify(missing)}"])
     }
   }
-  var failed = []
+  let failed = []
   for t in tests {
     if t.status != "ok" {
       failed = failed + [t.name ?? t.command ?? "unnamed"]
@@ -121,15 +121,15 @@ pub fn path_matches_glob(path, glob) {
     return true
   }
   if glob.ends_with("/**") {
-    let prefix = glob[0:len(glob) - 3]
+    const prefix = glob[0:len(glob) - 3]
     return path == prefix || path.starts_with(prefix + "/")
   }
   if glob.ends_with("/*") {
-    let prefix = glob[0:len(glob) - 2]
+    const prefix = glob[0:len(glob) - 2]
     if !path.starts_with(prefix + "/") {
       return false
     }
-    let tail = path[len(prefix) + 1:len(path)]
+    const tail = path[len(prefix) + 1:len(path)]
     return !tail.contains("/")
   }
   if glob.contains("**") {
@@ -157,7 +157,7 @@ pub fn path_matches_any(path, globs) {
  * outside that scope even when they are syntactically valid.
  */
 pub fn validate_write_scope(bundle, output) {
-  let scope = bundle.allowed_write_scope ?? []
+  const scope = bundle.allowed_write_scope ?? []
   if len(scope) == 0 {
     if len(output.files_changed ?? []) > 0 {
       return _err(
@@ -168,9 +168,9 @@ pub fn validate_write_scope(bundle, output) {
     }
     return _err([])
   }
-  var violations = []
+  let violations = []
   for entry in output.files_changed ?? [] {
-    let path = entry.path ?? ""
+    const path = entry.path ?? ""
     if !path_matches_any(path, scope) {
       violations = violations + [path]
     }
@@ -191,8 +191,8 @@ pub fn validate_write_scope(bundle, output) {
  * leaves the repo in a state Merge Captain cannot reason about.
  */
 pub fn validate_pushed(bundle, output) {
-  let commits = output.commits_created ?? []
-  let push = output.push_result ?? {}
+  const commits = output.commits_created ?? []
+  const push = output.push_result ?? {}
   if len(commits) == 0 {
     if push.pushed ?? false {
       return _err(["push without commits: push_result.pushed=true but commits_created is empty"])
@@ -209,7 +209,7 @@ pub fn validate_pushed(bundle, output) {
   if push.ref == nil || len(to_string(push.ref)) == 0 {
     return _err(["unpushed commits: push_result.ref is missing"])
   }
-  let target = bundle.push_target?.branch ?? ""
+  const target = bundle.push_target?.branch ?? ""
   if len(target) > 0 && push.ref != target && !push.ref.ends_with("/" + target) {
     return _err(
       [
@@ -226,16 +226,16 @@ pub fn validate_pushed(bundle, output) {
  * downstream checks all assume a well-formed dict.
  */
 pub fn validate_all(bundle, output) {
-  let shape = validate_shape(output)
+  const shape = validate_shape(output)
   if !shape.ok {
     return shape
   }
-  var errors = []
-  let v_tests = validate_tests(bundle, output)
+  let errors = []
+  const v_tests = validate_tests(bundle, output)
   errors = errors + v_tests.errors
-  let v_scope = validate_write_scope(bundle, output)
+  const v_scope = validate_write_scope(bundle, output)
   errors = errors + v_scope.errors
-  let v_push = validate_pushed(bundle, output)
+  const v_push = validate_pushed(bundle, output)
   errors = errors + v_push.errors
   return _err(errors)
 }
@@ -247,8 +247,8 @@ pub fn validate_all(bundle, output) {
  * cwd from trusted state, but this is a cheap defence-in-depth.
  */
 pub fn cwd_has_shell_metacharacters(cwd) {
-  let text = to_string(cwd ?? "")
-  let blocked = [";", "|", "&", "$", "`", "<", ">", "\n", "\\r"]
+  const text = to_string(cwd ?? "")
+  const blocked = [";", "|", "&", "$", "`", "<", ">", "\n", "\\r"]
   for ch in blocked {
     if text.contains(ch) {
       return true
@@ -267,19 +267,19 @@ pub fn harness_validate(bundle, output, options) {
   if !(options.enabled ?? false) {
     return _err([])
   }
-  let cwd = to_string(options.cwd ?? ".")
+  const cwd = to_string(options.cwd ?? ".")
   if cwd_has_shell_metacharacters(cwd) {
     return _err(["harness cwd contains shell metacharacters"])
   }
-  let result = try {
+  const result = try {
     process_run(["git", "-C", cwd, "status", "--porcelain"], {timeout_ms: options.timeout_ms ?? 30000})
   }
   if !is_ok(result) {
     return _err(["harness check failed: ${to_string(unwrap_err(result))}"])
   }
-  let value = unwrap(result)
-  let stdout = to_string(value.stdout ?? "")
-  let exit_code = value.exit_code ?? 0
+  const value = unwrap(result)
+  const stdout = to_string(value.stdout ?? "")
+  const exit_code = value.exit_code ?? 0
   if exit_code != 0 {
     return _err(
       [
@@ -287,7 +287,7 @@ pub fn harness_validate(bundle, output, options) {
       ],
     )
   }
-  let trimmed = stdout.trim()
+  const trimmed = stdout.trim()
   if len(trimmed) > 0 {
     return _err(
       [

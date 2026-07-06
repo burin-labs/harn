@@ -28,7 +28,7 @@ fn define_failing_tool(tools, name, message) {
 }
 
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = define_failing_tool(tools, "verify_a", "error A")
   tools = define_failing_tool(tools, "verify_b", "error B")
   tools = define_failing_tool(tools, "verify_c", "error C")
@@ -49,8 +49,8 @@ pipeline default() {
       verify_call("d", "verify_d"),
     ],
     { ->
-      let session = "no-net-hard-cap-" + uuid()
-      let captured = agent_capture_events(
+      const session = "no-net-hard-cap-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the failing verification pass.",
@@ -80,8 +80,8 @@ pipeline default() {
       )
       __io_println(captured.result.status)
       __io_println(captured.result.stop_reason)
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
-      let hard_caps = stalls.filter({ s -> s.warning.pattern == "no_net_progress_hard_cap" })
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const hard_caps = stalls.filter({ s -> s.warning.pattern == "no_net_progress_hard_cap" })
       __io_println(len(hard_caps))
       __io_println(hard_caps[0].warning.pattern)
       __io_println(hard_caps[0].warning.count)

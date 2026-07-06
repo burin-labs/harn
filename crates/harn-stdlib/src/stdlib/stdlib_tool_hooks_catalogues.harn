@@ -83,7 +83,7 @@ fn __cat_find_to_rg(command, file_type) -> string {
   // `command` is intentionally discarded — `find .` callers rarely
   // depend on extra `-name` predicates beyond the extension we're
   // re-encoding as `-t`.
-  let _ = command
+  const _ = command
   if file_type == nil || file_type == "" {
     return "rg --files"
   }
@@ -141,7 +141,7 @@ fn __cat_pred_prefix(prefix_re, suppress_markers) {
  * tripping.
  */
 fn __cat_pred_find_for_ext(extensions) {
-  let ext_re = "(?:" + join(extensions, "|") + ")"
+  const ext_re = "(?:" + join(extensions, "|") + ")"
   // The trailing `(?:[\"']|\\s|$)` is essential: without an anchor on
   // the extension's right side, `*.js` would match `*.json` because
   // the closing quote is optional. Requiring quote / whitespace /
@@ -165,22 +165,22 @@ fn __cat_pred_force_push_main(command, _context) -> bool {
   if !__cat_re("^git push\\b", command) {
     return false
   }
-  let allow = harness.env.get_or("HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH", "")
+  const allow = harness.env.get_or("HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH", "")
   if allow == "1" || allow == "true" {
     return false
   }
   // `--force-with-lease=false|0` is treated as the unsafe long --force.
   // Any other `--force-with-lease` (no value, or non-falsey value) is
   // the safe form and short-circuits the deny.
-  let force_lease_false = __cat_re("--force-with-lease=(?:false|0)\\b", command)
-  let safe_lease = !force_lease_false && contains(command, "--force-with-lease")
+  const force_lease_false = __cat_re("--force-with-lease=(?:false|0)\\b", command)
+  const safe_lease = !force_lease_false && contains(command, "--force-with-lease")
   // Long `--force` (boolean / `--force=true` form), but NOT
   // `--force-with-lease` which contains "--force" as a substring.
-  let force_long = __cat_re("--force(?:\\s|=|$)", command) && !safe_lease
+  const force_long = __cat_re("--force(?:\\s|=|$)", command) && !safe_lease
   // Short -f / bundled (-rf, -fx, etc.). Suppressed when the only
   // force flag is the safe `--force-with-lease`.
-  let force_short = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command) && !safe_lease
-  let forced = force_long || force_lease_false || force_short
+  const force_short = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command) && !safe_lease
+  const forced = force_long || force_lease_false || force_short
   if !forced {
     return false
   }
@@ -207,17 +207,17 @@ fn __cat_pred_rm_rf_root(command, _context) -> bool {
   }
   // Recursive flag: short -r / -R / bundled with other letters, or
   // long --recursive.
-  let recursive = __cat_re("(?:^|\\s)-[a-zA-Z]*[rR][a-zA-Z]*\\b", command)
+  const recursive = __cat_re("(?:^|\\s)-[a-zA-Z]*[rR][a-zA-Z]*\\b", command)
     || __cat_re("--recursive\\b", command)
   // Force flag: short -f / bundled, or long --force.
-  let forced = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command)
+  const forced = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command)
     || __cat_re("--force\\b", command)
   if !(recursive && forced) {
     return false
   }
   // Dangerous path tokens. Each is allowed to be wrapped in single or
   // double quotes and surrounded by whitespace or end-of-string.
-  let dangerous = [
+  const dangerous = [
     "[\\s\"'=]/(?:\\s|[\"']|$)",
     "[\\s\"'=]~(?:\\s|[\"']|$)",
     "[\\s\"'=]\\.\\.(?:\\s|[\"']|$)",
@@ -227,7 +227,7 @@ fn __cat_pred_rm_rf_root(command, _context) -> bool {
   // Pad the command with a leading space so the path token at the
   // very start of the argv (e.g. `rm -rf /`) is preceded by whitespace
   // for the regex.
-  let padded = " " + command + " "
+  const padded = " " + command + " "
   for pat in dangerous {
     if __cat_re(pat, padded) {
       return true
@@ -263,7 +263,7 @@ fn __cat_pred_rm_rf_root(command, _context) -> bool {
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_rust())
  */
 pub fn tool_hooks_catalogue_rust() {
-  let target_dir_rule = tool_rule(
+  const target_dir_rule = tool_rule(
     {
       id: "rust.cargo.target_dir_conflict",
       pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?(?:build|test|check|run)(?:\\s|$)", ["--target-dir"]),
@@ -277,7 +277,7 @@ pub fn tool_hooks_catalogue_rust() {
       rewrite: { command, _context -> __cat_append_flag(command, "--target-dir target-shared") },
     },
   )
-  let test_capture_rule = tool_rule(
+  const test_capture_rule = tool_rule(
     {
       id: "rust.cargo.test_no_capture_default",
       pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?test(?:\\s|$)", ["-- ", "--nocapture"]),
@@ -291,7 +291,7 @@ pub fn tool_hooks_catalogue_rust() {
       rewrite: { command, _context -> __cat_append_flag(command, "-- --nocapture") },
     },
   )
-  let clippy_workspace_rule = tool_rule(
+  const clippy_workspace_rule = tool_rule(
     {
       id: "rust.cargo.clippy_full_workspace",
       pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?clippy(?:\\s|$)", ["--workspace"]),
@@ -305,7 +305,7 @@ pub fn tool_hooks_catalogue_rust() {
       rewrite: { command, _context -> __cat_append_flag(command, "--workspace") },
     },
   )
-  let fmt_check_rule = tool_rule(
+  const fmt_check_rule = tool_rule(
     {
       id: "rust.cargo.fmt_check_vs_apply",
       pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?fmt(?:\\s|$)", ["--check"]),
@@ -346,7 +346,7 @@ pub fn tool_hooks_catalogue_rust() {
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_python())
  */
 pub fn tool_hooks_catalogue_python() {
-  let find_rule = tool_rule(
+  const find_rule = tool_rule(
     {
       id: "python.find_versus_rg",
       pattern: __cat_pred_find_for_ext(["py"]),
@@ -360,7 +360,7 @@ pub fn tool_hooks_catalogue_python() {
       rewrite: { command, _context -> __cat_find_to_rg(command, "py") },
     },
   )
-  let pip_user_rule = tool_rule(
+  const pip_user_rule = tool_rule(
     {
       id: "python.pip_install_no_user",
       pattern: __cat_pred_prefix(
@@ -376,7 +376,7 @@ pub fn tool_hooks_catalogue_python() {
       ],
     },
   )
-  let pytest_capture_rule = tool_rule(
+  const pytest_capture_rule = tool_rule(
     {
       id: "python.pytest_no_capture",
       pattern: __cat_pred_prefix(
@@ -413,7 +413,7 @@ pub fn tool_hooks_catalogue_python() {
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_typescript())
  */
 pub fn tool_hooks_catalogue_typescript() {
-  let find_rule = tool_rule(
+  const find_rule = tool_rule(
     {
       id: "ts.find_versus_rg",
       pattern: __cat_pred_find_for_ext(["ts", "tsx", "js", "jsx", "mjs", "cjs"]),
@@ -424,7 +424,7 @@ pub fn tool_hooks_catalogue_typescript() {
       rewrite: { command, _context -> __cat_find_to_rg(command, "ts") },
     },
   )
-  let force_resolution_rule = tool_rule(
+  const force_resolution_rule = tool_rule(
     {
       id: "ts.npm_install_force_resolution",
       pattern: { command, _context ->
@@ -464,7 +464,7 @@ pub fn tool_hooks_catalogue_typescript() {
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_swift())
  */
 pub fn tool_hooks_catalogue_swift() {
-  let clean_rule = tool_rule(
+  const clean_rule = tool_rule(
     {
       id: "swift.swift_build_clean_cache_misuse",
       pattern: "^swift (?:build\\s+--clean\\b|package\\s+clean\\b)",
@@ -499,7 +499,7 @@ pub fn tool_hooks_catalogue_swift() {
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_sql())
  */
 pub fn tool_hooks_catalogue_sql() {
-  let select_star_rule = tool_rule(
+  const select_star_rule = tool_rule(
     {
       id: "sql.select_star_warning",
       pattern: { command, _context ->
@@ -543,7 +543,7 @@ pub fn tool_hooks_catalogue_sql() {
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_harn())
  */
 pub fn tool_hooks_catalogue_harn() {
-  let cargo_quiet_rule = tool_rule(
+  const cargo_quiet_rule = tool_rule(
     {
       id: "harn.cargo_run_quiet",
       pattern: { command, _context ->
@@ -596,7 +596,7 @@ pub fn tool_hooks_catalogue_harn() {
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
  */
 pub fn tool_hooks_catalogue_universal() {
-  let force_push_rule = tool_rule(
+  const force_push_rule = tool_rule(
     {
       id: "universal.git_push_force_main",
       pattern: __cat_pred_force_push_main,
@@ -610,7 +610,7 @@ pub fn tool_hooks_catalogue_universal() {
       priority: 1000,
     },
   )
-  let rm_rf_rule = tool_rule(
+  const rm_rf_rule = tool_rule(
     {
       id: "universal.rm_rf_root_adjacent",
       pattern: __cat_pred_rm_rf_root,
@@ -669,14 +669,14 @@ fn __cat_for_stack(stack) {
  * @example: tool_hooks_seed_registry(["rust", "python"])
  */
 pub fn tool_hooks_seed_registry(stacks = nil) {
-  let opt_in = if type_of(stacks) == "list" {
+  const opt_in = if type_of(stacks) == "list" {
     stacks
   } else {
     []
   }
-  let registry = tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
-  var seen = {}
-  var acc = registry
+  const registry = tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
+  let seen = {}
+  let acc = registry
   for stack in opt_in {
     if type_of(stack) != "string" {
       continue
@@ -685,7 +685,7 @@ pub fn tool_hooks_seed_registry(stacks = nil) {
       continue
     }
     seen = seen + {[stack]: true}
-    let cat = __cat_for_stack(stack)
+    const cat = __cat_for_stack(stack)
     if cat == nil {
       continue
     }

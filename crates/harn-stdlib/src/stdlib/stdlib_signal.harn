@@ -36,9 +36,9 @@ pub fn interrupted() -> bool {
  * @errors: []
  */
 pub fn with_interrupt(handler, body, options = nil) {
-  let registration = on_interrupt(handler, options)
+  const registration = on_interrupt(handler, options)
   try {
-    let result = body()
+    const result = body()
     off_interrupt(registration)
     return result
   } catch (e) {

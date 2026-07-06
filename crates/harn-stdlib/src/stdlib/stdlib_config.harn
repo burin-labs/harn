@@ -17,7 +17,7 @@ type ModelIdParts = {provider: string, model: string, raw: string}
  * @errors: []
  */
 pub fn env_str(key: string) -> any {
-  let raw = harness.env.get(key)
+  const raw = harness.env.get(key)
   if raw == nil {
     return nil
   }
@@ -34,7 +34,7 @@ pub fn env_str(key: string) -> any {
  * @errors: []
  */
 pub fn env_int(key: string, default: int) -> int {
-  let raw = harness.env.get(key)
+  const raw = harness.env.get(key)
   if raw == nil {
     return default
   }
@@ -48,7 +48,7 @@ pub fn env_int(key: string, default: int) -> int {
  * @errors: []
  */
 pub fn env_float(key: string, default: float) -> float {
-  let raw = harness.env.get(key)
+  const raw = harness.env.get(key)
   if raw == nil {
     return default
   }
@@ -64,11 +64,11 @@ pub fn env_float(key: string, default: float) -> float {
  * @errors: []
  */
 pub fn env_bool(key: string, default: bool) -> bool {
-  let raw = harness.env.get(key)
+  const raw = harness.env.get(key)
   if raw == nil {
     return default
   }
-  let normalized = lowercase(trim(to_string(raw)))
+  const normalized = lowercase(trim(to_string(raw)))
   if normalized == "" {
     return default
   }
@@ -91,17 +91,17 @@ pub fn env_bool(key: string, default: bool) -> bool {
  * @example: env_list(key, separator, ")
  */
 pub fn env_list(key: string, separator: string = ",") -> list<string> {
-  let raw = harness.env.get(key)
+  const raw = harness.env.get(key)
   if raw == nil {
     return []
   }
-  let text = to_string(raw)
+  const text = to_string(raw)
   if text == "" {
     return []
   }
-  var out = []
+  let out = []
   for part in split(text, separator) {
-    let trimmed = trim(part)
+    const trimmed = trim(part)
     if trimmed != "" {
       out = out + [trimmed]
     }
@@ -124,7 +124,7 @@ pub fn env_list(key: string, separator: string = ",") -> list<string> {
  * @errors: []
  */
 pub fn parse_model_id(id: string) -> ModelIdParts {
-  let raw = id ?? ""
+  const raw = id ?? ""
   if raw == "" {
     return {provider: "auto", model: "", raw: ""}
   }
@@ -133,7 +133,7 @@ pub fn parse_model_id(id: string) -> ModelIdParts {
   // `crates/harn-vm/src/llm/provider.rs::PROVIDER_NAMES`; the runtime
   // adds the prefix matcher does too, so drift here silently downgrades
   // explicit prefixes (e.g. `minimax:M2.5`) to `provider: "auto"`.
-  let provider_prefixes = [
+  const provider_prefixes = [
     "anthropic:",
     "azure:",
     "cerebras:",
@@ -158,7 +158,7 @@ pub fn parse_model_id(id: string) -> ModelIdParts {
   ]
   for prefix in provider_prefixes {
     if starts_with(raw, prefix) {
-      let provider = substring(prefix, 0, len(prefix) - 1)
+      const provider = substring(prefix, 0, len(prefix) - 1)
       return {provider: provider, model: substring(raw, len(prefix)), raw: raw}
     }
   }
@@ -177,7 +177,7 @@ pub fn parse_model_id(id: string) -> ModelIdParts {
  * @errors: []
  */
 pub fn model_from_env(env_key: string, default: string) -> string {
-  let resolved = env_str(env_key)
+  const resolved = env_str(env_key)
   if resolved == nil {
     return default
   }

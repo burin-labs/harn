@@ -2,10 +2,10 @@
 // so iterating it yields `int` and binding an element to `string` is an error.
 // Before this, the rest binding was the opaque `list` type and slipped through.
 pipeline default() {
-  let [first, ...rest] = [1, 2, 3]
+  const [first, ...rest] = [1, 2, 3]
   __io_println(first)
   for r in rest {
-    let bad: string = r
+    const bad: string = r
     __io_println(bad)
   }
 }

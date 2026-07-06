@@ -4,7 +4,7 @@
 // spec.
 import "../check_openapi_snapshot.harn"
 
-let MINI_SPEC = """
+const MINI_SPEC = """
 openapi: 3.1.0
 paths:
   /v1/widgets:
@@ -27,7 +27,7 @@ components:
 
 @test
 pipeline test_collect_surface_paths_and_methods(task) {
-  let out = collect_surface(MINI_SPEC)
+  const out = collect_surface(MINI_SPEC)
   assert(out.contains("GET /v1/widgets"))
   assert(out.contains("POST /v1/widgets"))
   assert(out.contains("GET /v1/widgets/{id}"))
@@ -36,16 +36,16 @@ pipeline test_collect_surface_paths_and_methods(task) {
 
 @test
 pipeline test_collect_surface_schemas(task) {
-  let out = collect_surface(MINI_SPEC)
+  const out = collect_surface(MINI_SPEC)
   assert(out.contains("Widget"))
   assert(out.contains("WidgetList"))
 }
 
 @test
 pipeline test_collect_surface_section_order(task) {
-  let out = collect_surface(MINI_SPEC)
-  let paths_idx = out.index_of("## Paths")
-  let schemas_idx = out.index_of("## Schemas")
+  const out = collect_surface(MINI_SPEC)
+  const paths_idx = out.index_of("## Paths")
+  const schemas_idx = out.index_of("## Schemas")
   assert(paths_idx >= 0 && schemas_idx >= 0)
   assert(paths_idx < schemas_idx)
 }
@@ -54,7 +54,7 @@ pipeline test_collect_surface_section_order(task) {
 pipeline test_collect_surface_ignores_nested_path_methods(task) {
   // Methods nested under a path/parameters block shouldn't get picked up
   // — the regex matches only on a four-space indent under a path key.
-  let nested = """
+  const nested = """
 paths:
   /v1/foo:
     parameters:
@@ -62,14 +62,14 @@ paths:
     get:
       summary: ok
 """
-  let out = collect_surface(nested)
+  const out = collect_surface(nested)
   assert(out.contains("GET /v1/foo"))
   assert(!out.contains("PARAMETERS /v1/foo"))
 }
 
 @test
 pipeline test_collect_surface_empty_spec(task) {
-  let out = collect_surface("")
+  const out = collect_surface("")
   assert(out.contains("## Paths"))
   assert(out.contains("## Schemas"))
 }

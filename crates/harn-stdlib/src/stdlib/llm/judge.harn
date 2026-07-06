@@ -3,21 +3,21 @@ fn __as_candidate(value, index) {
     return {index: index, prompt: value, instruction: value, demos: []}
   }
   require type_of(value) == "dict", "parallel_judge: candidates must be strings or dicts"
-  let instruction = value?.instruction ?? value?.prompt ?? ""
-  let prompt = value?.prompt ?? instruction
+  const instruction = value?.instruction ?? value?.prompt ?? ""
+  const prompt = value?.prompt ?? instruction
   return value
     + {index: value?.index ?? index, prompt: prompt, instruction: instruction, demos: value?.demos ?? []}
 }
 
 fn __candidate_rows(candidates) {
-  let candidate_list = if type_of(candidates) == "list" {
+  const candidate_list = if type_of(candidates) == "list" {
     candidates
   } else {
     [candidates]
   }
   require len(candidate_list) > 0, "parallel_judge: candidates must not be empty"
-  var rows = []
-  var idx = 0
+  let rows = []
+  let idx = 0
   while idx < len(candidate_list) {
     rows = rows.push({index: idx, candidate: __as_candidate(candidate_list[idx], idx)})
     idx = idx + 1
@@ -28,8 +28,8 @@ fn __candidate_rows(candidates) {
 fn __case_rows(eval_set) {
   require type_of(eval_set) == "list", "parallel_judge: eval_set must be a list"
   require len(eval_set) > 0, "parallel_judge: eval_set must not be empty"
-  var rows = []
-  var idx = 0
+  let rows = []
+  let idx = 0
   while idx < len(eval_set) {
     rows = rows.push({index: idx, case: eval_set[idx]})
     idx = idx + 1
@@ -45,18 +45,18 @@ fn __case_id(case, index) {
 }
 
 fn __score_value(value) {
-  let raw = if type_of(value) == "dict" {
+  const raw = if type_of(value) == "dict" {
     value?.score
   } else {
     value
   }
-  let score = to_float(raw)
+  const score = to_float(raw)
   require score != nil, "parallel_judge: metric must return a numeric score or {score}"
   return score
 }
 
 fn __score_case(candidate, case, case_index, candidate_index, metric) {
-  let output = metric(
+  const output = metric(
     {
       prompt: candidate.prompt,
       candidate: candidate,
@@ -74,7 +74,7 @@ fn __score_case(candidate, case, case_index, candidate_index, metric) {
 }
 
 fn __mean_case_score(case_scores) {
-  var total = 0.0
+  let total = 0.0
   for row in case_scores {
     total = total + row.score
   }
@@ -82,8 +82,8 @@ fn __mean_case_score(case_scores) {
 }
 
 fn __insert_ranked(ranked, entry) {
-  var out = []
-  var inserted = false
+  let out = []
+  let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
       out = out.push(entry)
@@ -98,7 +98,7 @@ fn __insert_ranked(ranked, entry) {
 }
 
 fn __rank(entries) {
-  var ranked = []
+  let ranked = []
   for entry in entries {
     ranked = __insert_ranked(ranked, entry)
   }
@@ -113,13 +113,13 @@ fn __rank(entries) {
  */
 pub fn parallel_judge(candidates, eval_set, metric, options = nil) {
   require metric != nil, "parallel_judge: metric closure is required"
-  let candidate_rows = __candidate_rows(candidates)
-  let case_rows = __case_rows(eval_set)
-  let _max_concurrent = options?.max_concurrent ?? options?.budget?.max_concurrent
-  var scored = []
+  const candidate_rows = __candidate_rows(candidates)
+  const case_rows = __case_rows(eval_set)
+  const _max_concurrent = options?.max_concurrent ?? options?.budget?.max_concurrent
+  let scored = []
   for row in candidate_rows {
-    let candidate = row.candidate
-    let case_scores = parallel each case_rows with { max_concurrent: _max_concurrent } { case_row ->
+    const candidate = row.candidate
+    const case_scores = parallel each case_rows with { max_concurrent: _max_concurrent } { case_row ->
       __score_case(candidate, case_row.case, case_row.index, row.index, metric)
     }
     scored = scored
@@ -133,7 +133,7 @@ pub fn parallel_judge(candidates, eval_set, metric, options = nil) {
       },
     )
   }
-  let ranked = __rank(scored)
+  const ranked = __rank(scored)
   return {
     ranked: ranked,
     scores: scored,

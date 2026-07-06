@@ -1,19 +1,19 @@
 pipeline default() {
   mock_time(3000)
-  let opts = {scope: "tenant", tenant_id: "coord-tenant"}
-  let first = emit_channel("coord.ack.demo", {seq: 1}, opts + {id: "coord-ack-1"})
-  let second = emit_channel("coord.ack.demo", {seq: 2}, opts + {id: "coord-ack-2"})
-  let before = channel_consumer_cursor("coord.ack.demo", "worker-A", opts)
+  const opts = {scope: "tenant", tenant_id: "coord-tenant"}
+  const first = emit_channel("coord.ack.demo", {seq: 1}, opts + {id: "coord-ack-1"})
+  const second = emit_channel("coord.ack.demo", {seq: 2}, opts + {id: "coord-ack-2"})
+  const before = channel_consumer_cursor("coord.ack.demo", "worker-A", opts)
   __io_println(before == nil)
-  let all = channel_events("coord.ack.demo", opts)
+  const all = channel_events("coord.ack.demo", opts)
   __io_println(len(all))
   __io_println(all[0].cursor == first.cursor)
   __io_println(all[1].cursor == second.cursor)
-  let acked = channel_ack("coord.ack.demo", "worker-A", first.cursor, opts)
+  const acked = channel_ack("coord.ack.demo", "worker-A", first.cursor, opts)
   __io_println(acked.consumer_id)
   __io_println(acked.cursor == first.cursor)
   __io_println(channel_consumer_cursor("coord.ack.demo", "worker-A", opts) == first.cursor)
-  let unread = channel_events(
+  const unread = channel_events(
     "coord.ack.demo",
     opts + {from_cursor: channel_consumer_cursor("coord.ack.demo", "worker-A", opts)},
   )

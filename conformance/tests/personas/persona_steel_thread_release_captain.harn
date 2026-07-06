@@ -11,7 +11,7 @@ import {
 } from "std/testing"
 
 fn release_receipt(step, result) {
-  let wrapped = with_audit_receipt(
+  const wrapped = with_audit_receipt(
     fn() { return result },
     {persona: "release_captain", step: step, started_at: "2026-01-01T00:00:00Z"},
   )
@@ -20,13 +20,13 @@ fn release_receipt(step, result) {
 
 @persona(name: "release_captain")
 fn release_captain(fixture) {
-  let branch = setup_branch(fixture)
-  let stash = stash_dirty_worktree(branch.result)
-  let changelog = analyze_changelog(stash.result)
-  let notes = rewrite_release_notes(changelog.result)
-  let recovered = recover_shell_error({step: "cargo publish --dry-run", stderr: "network unavailable"})
-  let pr = plan_release_pr(notes.result + {recovery: recovered.result})
-  let merge = enable_auto_merge(pr.result)
+  const branch = setup_branch(fixture)
+  const stash = stash_dirty_worktree(branch.result)
+  const changelog = analyze_changelog(stash.result)
+  const notes = rewrite_release_notes(changelog.result)
+  const recovered = recover_shell_error({step: "cargo publish --dry-run", stderr: "network unavailable"})
+  const pr = plan_release_pr(notes.result + {recovery: recovered.result})
+  const merge = enable_auto_merge(pr.result)
   return {
     branch: branch,
     stash: stash,
@@ -75,7 +75,7 @@ fn analyze_changelog(state) {
 
 @step(name: "rewrite_release_notes")
 fn rewrite_release_notes(changelog) {
-  let library = prompt_library(
+  const library = prompt_library(
     [
       prompt_fragment(
         "release-note-rewrite",
@@ -84,7 +84,7 @@ fn rewrite_release_notes(changelog) {
       ),
     ],
   )
-  let payload = prompt_library_payload(library, "release-note-rewrite", {count: len(changelog.missing_entries)})
+  const payload = prompt_library_payload(library, "release-note-rewrite", {count: len(changelog.missing_entries)})
   return release_receipt(
     "rewrite_release_notes",
     {text: payload.text, prompt: payload, agentic_checkpoint: true, review_required: true},
@@ -127,7 +127,7 @@ fn enable_auto_merge(pr) {
 
 pipeline test() {
   step_assertions_begin("release_captain")
-  let result = release_captain(
+  const result = release_captain(
     {repo: "burin-labs/harn", starting_branch: "feature/release", release_branch: "release/0.7.x"},
   )
   assert_steps_ran(

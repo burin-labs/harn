@@ -9,7 +9,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lookup_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -37,7 +37,7 @@ pipeline main() {
       llm_text("Final answer: release evidence verified."),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Inspect evidence and finish.",
         nil,
         {
@@ -49,10 +49,10 @@ pipeline main() {
           max_iterations: 6,
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(len(calls))
-      let feedback_messages = json_stringify(calls[2].messages)
+      const feedback_messages = json_stringify(calls[2].messages)
       __io_println(contains(feedback_messages, "emitted text-mode tool calls"))
       __io_println(contains(feedback_messages, "native tool channel"))
       __io_println(len(result.tools.successful))
@@ -62,7 +62,7 @@ pipeline main() {
   with_llm_script(
     [llm_text(MARKUP_TURN), llm_text("All set.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Look up the evidence.",
         nil,
         {
@@ -92,7 +92,7 @@ pipeline main() {
       llm_text("Final answer: release evidence verified."),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Inspect evidence and finish.",
         nil,
         {
@@ -104,10 +104,10 @@ pipeline main() {
           max_iterations: 6,
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(len(calls))
-      let feedback_messages = json_stringify(calls[2].messages)
+      const feedback_messages = json_stringify(calls[2].messages)
       __io_println(contains(feedback_messages, "parse_guidance"))
       __io_println(contains(feedback_messages, "TRUNCATED"))
       __io_println(contains(feedback_messages, "native tool channel"))

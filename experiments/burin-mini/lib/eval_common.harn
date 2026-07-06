@@ -4,7 +4,7 @@ import { evaluator_model, provider_name, render_csv, render_facts } from "common
 
 /** Resolve the provider for semantic Burin Mini grading runs. */
 pub fn semantic_eval_provider() {
-  let configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_PROVIDER", "")
+  const configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_PROVIDER", "")
   if configured != "" {
     return configured
   }
@@ -13,7 +13,7 @@ pub fn semantic_eval_provider() {
 
 /** Resolve the model for semantic Burin Mini grading runs. */
 pub fn semantic_eval_model() {
-  let configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODEL", "")
+  const configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODEL", "")
   if configured != "" {
     return configured
   }
@@ -22,7 +22,7 @@ pub fn semantic_eval_model() {
 
 /** Select heuristic or LLM semantic grading mode. */
 pub fn semantic_eval_mode() {
-  let configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODE", "")
+  const configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODE", "")
   if configured != "" {
     return configured
   }
@@ -34,7 +34,7 @@ pub fn semantic_eval_mode() {
 
 /** Load and parse a JSON file or throw with context. */
 pub fn load_json_file(path) {
-  let parsed = safe_parse(harness.fs.read_text(path))
+  const parsed = safe_parse(harness.fs.read_text(path))
   guard parsed != nil else {
     throw "Failed to parse JSON file: ${path}"
   }
@@ -53,7 +53,7 @@ fn render_list(items) {
   if len(items) == 0 {
     return "(none)"
   }
-  var lines = []
+  let lines = []
   for item in items {
     lines = lines + ["- ${item}"]
   }
@@ -71,24 +71,24 @@ fn clamp_score(value) {
 }
 
 fn reference_signal_text(report, run) {
-  var sections = []
-  let final_response = report?.final_response ?? ""
+  let sections = []
+  const final_response = report?.final_response ?? ""
   if final_response != "" {
     sections = sections + [final_response]
   }
-  let plan_summary = report?.plan?.plan_summary ?? ""
+  const plan_summary = report?.plan?.plan_summary ?? ""
   if plan_summary != "" {
     sections = sections + [plan_summary]
   }
-  let graph_json = json_stringify(report?.action_graph ?? {})
+  const graph_json = json_stringify(report?.action_graph ?? {})
   if graph_json != "{}" {
     sections = sections + [graph_json]
   }
-  let contract_json = json_stringify(report?.verification_contract ?? {})
+  const contract_json = json_stringify(report?.verification_contract ?? {})
   if contract_json != "{}" {
     sections = sections + [contract_json]
   }
-  let facts = render_facts(report?.research ?? [])
+  const facts = render_facts(report?.research ?? [])
   if facts != "- no research yet" {
     sections = sections + [facts]
   }
@@ -183,7 +183,7 @@ pub fn task_reference(task_id) {
 }
 
 fn failed_stage_ids(run) {
-  var failed = []
+  let failed = []
   for stage in run?.stages ?? [] {
     if stage?.status == "failed" {
       failed = failed + [stage?.node_id ?? stage?.kind ?? "unknown-stage"]
@@ -193,7 +193,7 @@ fn failed_stage_ids(run) {
 }
 
 fn verification_outcome_lines(run) {
-  var lines = []
+  let lines = []
   for item in run?.observability?.verification_outcomes ?? [] {
     lines = lines
       + [
@@ -204,7 +204,7 @@ fn verification_outcome_lines(run) {
 }
 
 fn planner_round_lines(run) {
-  var lines = []
+  let lines = []
   for round in run?.observability?.planner_rounds ?? [] {
     lines = lines
       + [
@@ -215,10 +215,10 @@ fn planner_round_lines(run) {
 }
 
 fn batch_output_lines(run) {
-  var lines = []
+  let lines = []
   for artifact in run?.artifacts ?? [] {
-    let source = artifact?.source ?? ""
-    let cleaned = strip_done_sentinel(artifact?.text ?? "")
+    const source = artifact?.source ?? ""
+    const cleaned = strip_done_sentinel(artifact?.text ?? "")
     if (artifact?.kind == "artifact" || artifact?.kind == "summary") && starts_with(source, "batch_")
       && cleaned != "" {
       lines = lines + ["- ${source}: ${cleaned}"]
@@ -229,7 +229,7 @@ fn batch_output_lines(run) {
 
 /** Render a stable actual trace summary from the report and persisted run. */
 pub fn render_actual_trace(report, run) {
-  var sections = []
+  let sections = []
   sections = sections + ["Task: ${report?.task ?? ""}"]
   sections = sections + ["Pipeline verdict: ${report?.verdict ?? "unknown"}"]
   sections = sections + ["Workflow status: ${report?.workflow_status ?? "unknown"}"]
@@ -243,19 +243,19 @@ pub fn render_actual_trace(report, run) {
 }
 
 fn render_file_bundle(harness: Harness, dir_path, heading) {
-  let files = collect_tree_files(harness, dir_path)
+  const files = collect_tree_files(harness, dir_path)
   if len(files) == 0 {
     return "${heading}:\n(none)"
   }
-  var sections = []
+  let sections = []
   for path in files {
-    let prefix = "${dir_path}/"
-    let label = if starts_with(path, prefix) {
+    const prefix = "${dir_path}/"
+    const label = if starts_with(path, prefix) {
       path.replace(prefix, "")
     } else {
       path
     }
-    let content = try {
+    const content = try {
       harness.fs.read_text(path)
     } catch (e) {
       ""
@@ -293,7 +293,7 @@ pub fn render_ideal_reference(reference) {
 }
 
 fn text_contains_all(text, needles) {
-  let haystack = lowercase(text ?? "")
+  const haystack = lowercase(text ?? "")
   for needle in needles ?? [] {
     if !contains(haystack, lowercase(needle)) {
       return false
@@ -304,10 +304,10 @@ fn text_contains_all(text, needles) {
 
 /** Compute a deterministic pre-grade over the semantic-eval dimensions. */
 pub fn heuristic_semantic_eval(report, run, reference) {
-  let failed = failed_stage_ids(run)
-  let rounds = run?.observability?.planner_rounds ?? []
-  var churn = []
-  let max_iterations = reference?.max_iterations_per_stage ?? 3
+  const failed = failed_stage_ids(run)
+  const rounds = run?.observability?.planner_rounds ?? []
+  let churn = []
+  const max_iterations = reference?.max_iterations_per_stage ?? 3
   for round in rounds {
     if (round?.iteration_count ?? 0) > max_iterations {
       churn = churn
@@ -316,7 +316,7 @@ pub fn heuristic_semantic_eval(report, run, reference) {
       ]
     }
   }
-  var gating_failures = []
+  let gating_failures = []
   if !report?.plan?.ready {
     gating_failures = gating_failures + ["Planner never reached a ready state."]
   }
@@ -326,24 +326,24 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   if report?.verdict != "pass" {
     gating_failures = gating_failures + ["Pipeline verdict was `${report?.verdict ?? "unknown"}`."]
   }
-  let signal_text = reference_signal_text(report, run)
-  var architecture_issues = []
+  const signal_text = reference_signal_text(report, run)
+  let architecture_issues = []
   if !text_contains_all(signal_text, reference?.required_strings ?? []) {
     architecture_issues = architecture_issues + ["Run artifacts did not clearly preserve the key reference identifiers."]
   }
   if !text_contains_all(signal_text, reference?.expected_paths ?? []) {
     architecture_issues = architecture_issues + ["Run artifacts did not clearly preserve the expected workspace paths."]
   }
-  let completion_score = if len(gating_failures) == 0 {
+  const completion_score = if len(gating_failures) == 0 {
     10
   } else {
     2
   }
-  let convergence_score = clamp_score(10 - len(churn) * 2 - len(failed) * 4)
-  let tool_discipline_score = clamp_score(10 - len(churn) * 2)
-  let architecture_score = clamp_score(10 - len(architecture_issues) * 3)
-  let overall_score = clamp_score((completion_score + convergence_score + tool_discipline_score + architecture_score) / 4)
-  var strengths = []
+  const convergence_score = clamp_score(10 - len(churn) * 2 - len(failed) * 4)
+  const tool_discipline_score = clamp_score(10 - len(churn) * 2)
+  const architecture_score = clamp_score(10 - len(architecture_issues) * 3)
+  const overall_score = clamp_score((completion_score + convergence_score + tool_discipline_score + architecture_score) / 4)
+  let strengths = []
   if len(failed) == 0 {
     strengths = strengths + ["No workflow stages failed."]
   }
@@ -355,7 +355,7 @@ pub fn heuristic_semantic_eval(report, run, reference) {
     strengths = strengths
       + ["The run artifacts preserve the expected identifiers, paths, and architecture cues."]
   }
-  var weaknesses = []
+  let weaknesses = []
   for item in gating_failures {
     weaknesses = weaknesses + [item]
   }
@@ -365,7 +365,7 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   for item in architecture_issues {
     weaknesses = weaknesses + [item]
   }
-  var fixes = []
+  let fixes = []
   if len(churn) > 0 {
     fixes = fixes
       + ["Tighten the stage prompt or stop condition so repeated non-progress turns end earlier."]
@@ -410,7 +410,7 @@ pub fn heuristic_semantic_eval(report, run, reference) {
 }
 
 fn collect_tree_files(harness: Harness, dir_path) {
-  let info = try {
+  const info = try {
     harness.fs.stat(dir_path)
   } catch (e) {
     nil
@@ -418,10 +418,10 @@ fn collect_tree_files(harness: Harness, dir_path) {
   if info == nil || !info.is_dir {
     return []
   }
-  var files = []
+  let files = []
   for name in harness.fs.list_dir(dir_path) {
-    let child = path_join(dir_path, name)
-    let child_info = try {
+    const child = path_join(dir_path, name)
+    const child_info = try {
       harness.fs.stat(child)
     } catch (e) {
       nil

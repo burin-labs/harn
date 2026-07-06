@@ -18,7 +18,7 @@ pipeline test(task) {
       {text: "frontier completed the release", model: "mock-frontier", provider: "mock"},
     ],
     { ->
-      let result = llm_call(
+      const result = llm_call(
         "cut the release",
         nil,
         {

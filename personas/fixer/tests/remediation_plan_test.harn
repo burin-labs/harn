@@ -2,7 +2,7 @@
 import { plan_for_atoms } from "../lib/remediation_plan"
 
 pipeline test_rewrite_node_atom_picks_apply_node(task) {
-  let atoms = [
+  const atoms = [
     {
       kind: "rewrite_node",
       path: "src/lib.rs",
@@ -10,7 +10,7 @@ pipeline test_rewrite_node_atom_picks_apply_node(task) {
       replacement: "{ unimplemented!() }",
     },
   ]
-  let result = plan_for_atoms(atoms)
+  const result = plan_for_atoms(atoms)
   assert_eq(len(result.plan), 1)
   assert_eq(result.plan[0].op, "apply_node")
   assert_eq(result.plan[0].path, "src/lib.rs")
@@ -19,7 +19,7 @@ pipeline test_rewrite_node_atom_picks_apply_node(task) {
 }
 
 pipeline test_insert_at_anchor_atom_picks_insert_at_anchor(task) {
-  let atoms = [
+  const atoms = [
     {
       kind: "insert_at_anchor",
       path: "src/lib.rs",
@@ -28,14 +28,14 @@ pipeline test_insert_at_anchor_atom_picks_insert_at_anchor(task) {
       content: "#[test]\nfn added() {}",
     },
   ]
-  let result = plan_for_atoms(atoms)
+  const result = plan_for_atoms(atoms)
   assert_eq(len(result.plan), 1)
   assert_eq(result.plan[0].op, "insert_at_anchor")
   assert_eq(result.plan[0].position, "last_child")
 }
 
 pipeline test_rename_symbol_atom_falls_back_to_standalone_primitive(task) {
-  let atoms = [
+  const atoms = [
     {
       kind: "rename_symbol",
       symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
@@ -43,14 +43,14 @@ pipeline test_rename_symbol_atom_falls_back_to_standalone_primitive(task) {
       scope: "workspace",
     },
   ]
-  let result = plan_for_atoms(atoms)
+  const result = plan_for_atoms(atoms)
   assert_eq(len(result.plan), 0)
   assert_eq(len(result.fallbacks), 1)
   assert_eq(result.fallbacks[0].reason, "rename_symbol_uses_standalone_primitive")
 }
 
 pipeline test_text_atom_drops_to_safe_text_patch(task) {
-  let atoms = [
+  const atoms = [
     {
       kind: "text",
       path: "CHANGELOG.md",
@@ -58,13 +58,13 @@ pipeline test_text_atom_drops_to_safe_text_patch(task) {
       new_text: "## Unreleased\n\n- Fixed onboarding race.\n",
     },
   ]
-  let result = plan_for_atoms(atoms)
+  const result = plan_for_atoms(atoms)
   assert_eq(len(result.plan), 1)
   assert_eq(result.plan[0].op, "safe_text_patch")
 }
 
 pipeline test_unsupported_language_drops_to_safe_text_patch(task) {
-  let atoms = [
+  const atoms = [
     {
       kind: "rewrite_node",
       path: "weird.zigzag",
@@ -73,21 +73,21 @@ pipeline test_unsupported_language_drops_to_safe_text_patch(task) {
       language_supports_ast: false,
     },
   ]
-  let result = plan_for_atoms(atoms)
+  const result = plan_for_atoms(atoms)
   assert_eq(len(result.plan), 1)
   assert_eq(result.plan[0].op, "safe_text_patch")
 }
 
 pipeline test_unknown_kind_reports_fallback(task) {
-  let atoms = [{kind: "mystery", path: "x"}]
-  let result = plan_for_atoms(atoms)
+  const atoms = [{kind: "mystery", path: "x"}]
+  const result = plan_for_atoms(atoms)
   assert_eq(len(result.plan), 0)
   assert_eq(len(result.fallbacks), 1)
   assert_eq(result.fallbacks[0].reason, "unknown_remediation_atom_kind")
 }
 
 pipeline test_empty_input_yields_empty_plan(task) {
-  let result = plan_for_atoms([])
+  const result = plan_for_atoms([])
   assert_eq(len(result.plan), 0)
   assert_eq(len(result.fallbacks), 0)
 }

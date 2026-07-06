@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("multi_tenant_isolation_stub")
+  const result = trigger_test_harness("multi_tenant_isolation_stub")
   __io_println(result.ok)
   __io_println(result.stub)
   __io_println(len(result.emitted) == 2)

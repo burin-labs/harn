@@ -28,9 +28,9 @@ fn header(headers, name) {
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
-  let event = header(raw.headers, "X-Event-Key")
-  let delivery = header(raw.headers, "X-Hook-UUID")
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const event = header(raw.headers, "X-Event-Key")
+  const delivery = header(raw.headers, "X-Hook-UUID")
   return {
     type: "event",
     event: {kind: event, dedupe_key: delivery, payload: body, signature_status: {state: "verified"}},

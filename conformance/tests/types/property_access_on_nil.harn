@@ -2,6 +2,6 @@
 // always a mistake. The diagnostic explicitly tells the author the
 // type is nil here and points at `?.` / nil-guard fixes.
 pipeline default(_) {
-  let x: nil = nil
+  const x: nil = nil
   __io_println(x.foo)
 }

@@ -1,5 +1,5 @@
 pipeline main() {
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "delegated-flow",
       entry: "delegate",
@@ -15,7 +15,7 @@ pipeline main() {
       edges: [],
     },
   )
-  let result = workflow_execute("Write a delegated note", flow, [], {max_steps: 2})
+  const result = workflow_execute("Write a delegated note", flow, [], {max_steps: 2})
   __io_println(result?.status)
   __io_println(result?.run?.stages[0]?.kind)
   __io_println(result?.run?.stages[0]?.metadata?.worker?.name == "delegate-1")
@@ -23,8 +23,8 @@ pipeline main() {
   __io_println(result?.run?.stages[0]?.artifacts[0]?.metadata?.delegated)
   __io_println(result?.run?.stages[0]?.artifacts[1]?.kind == "worker_result")
   __io_println(result?.run?.stages[0]?.artifacts[1]?.data?.request?.workflow_stages[0] == "delegate")
-  let artifact_worker_id = result?.run?.stages[0]?.artifacts[1]?.data?.provenance?.worker_id
-  let stage_worker_id = result?.run?.stages[0]?.metadata?.worker?.id
+  const artifact_worker_id = result?.run?.stages[0]?.artifacts[1]?.data?.provenance?.worker_id
+  const stage_worker_id = result?.run?.stages[0]?.metadata?.worker?.id
   __io_println(artifact_worker_id == stage_worker_id)
   __io_println(result?.run?.stages[0]?.metadata?.worker_id != nil)
 }

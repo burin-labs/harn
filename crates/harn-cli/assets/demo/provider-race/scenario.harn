@@ -24,25 +24,25 @@ fn prompt_for(name: string, model: string) -> string {
 }
 
 pipeline default(_task) {
-  let prompt = "Race 3 providers on a one-sentence question and pick the lowest-latency winner."
+  const prompt = "Race 3 providers on a one-sentence question and pick the lowest-latency winner."
   __io_println("=== provider-race · prompt ===")
   __io_println(prompt)
   __io_println("")
-  let prov = provider_meta()
+  const prov = provider_meta()
   // `parallel each` races the LLM calls; the returned strings are
   // zipped back to the provider metadata serially below. Splitting the
   // race result into a single typed string avoids the type checker
   // widening every per-row dict field to `_`.
-  let responses: list<string> = parallel each prov { p ->
+  const responses: list<string> = parallel each prov { p ->
     __io_println("[start ${p.name}]")
     let envelope = llm_call(prompt_for(p.name, p.model), "Be concise. Answer in one sentence.")
     envelope.text
   }
   // Zip provider metadata + LLM response into a typed result list.
-  var results: list<{provider: string, model: string, latency_ms: int, est_cost_usd: float, response: string}> = []
-  var i = 0
+  let results: list<{provider: string, model: string, latency_ms: int, est_cost_usd: float, response: string}> = []
+  let i = 0
   for p in prov {
-    let row = {
+    const row = {
       provider: p.name,
       model: p.model,
       latency_ms: p.sim_latency_ms,
@@ -54,13 +54,13 @@ pipeline default(_task) {
   }
   // Pick the lowest-latency completion as the "winner" — what a
   // latency-aware routing_policy would do once #1649 lands.
-  var winner = results[0]
+  let winner = results[0]
   for r in results {
     if r.latency_ms < winner.latency_ms {
       winner = r
     }
   }
-  var total_cost: float = 0.0
+  let total_cost: float = 0.0
   for r in results {
     total_cost = total_cost + r.est_cost_usd
   }
@@ -69,7 +69,7 @@ pipeline default(_task) {
     __io_println("    ${r.response}")
     __io_println("")
   }
-  let attribution = {
+  const attribution = {
     persona: "routing_policy",
     receipt_kind: "race_attribution_receipt",
     winner: winner.provider,

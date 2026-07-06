@@ -1,7 +1,7 @@
 import { verification_toolchain_facts } from "std/verification"
 
 pipeline test(task) {
-  let facts = verification_toolchain_facts(
+  const facts = verification_toolchain_facts(
     [
       {
         id: "go/unit",

@@ -10,10 +10,10 @@
 //
 // Pure logic lives in `pub fn`s that take source text directly so the paired
 // test can drive them with no filesystem. `main` does the globbing/reads.
-let REGISTRY = "crates/harn-parser/src/diagnostic_codes.rs"
+const REGISTRY = "crates/harn-parser/src/diagnostic_codes.rs"
 
 // Ordered so `missing` reporting matches Python's `sorted(...)`.
-let CATEGORIES = [
+const CATEGORIES = [
   "Cap",
   "Cmp",
   "Cst",
@@ -37,7 +37,7 @@ let CATEGORIES = [
   "Typ",
 ]
 
-let HELPERS = [
+const HELPERS = [
   "error_at_with_help",
   "error_at_with_fix",
   "error_at",
@@ -54,7 +54,7 @@ let HELPERS = [
  * `text.count("\n", 0, offset) + 1`.
  */
 pub fn line_of(text: string, offset: int) -> int {
-  let prefix = text.substring(0, offset)
+  const prefix = text.substring(0, offset)
   return prefix.split("\n").count
 }
 
@@ -64,7 +64,7 @@ pub fn line_of(text: string, offset: int) -> int {
  * suffix is exactly the Python `relative_to(ROOT)` form.
  */
 pub fn rel_path(path: string) -> string {
-  let idx = path.index_of("/./")
+  const idx = path.index_of("/./")
   if idx >= 0 {
     return path.substring(idx + 3, path.len())
   }
@@ -79,8 +79,8 @@ pub fn find_from(text: string, needle: string, start: int) -> int {
   if start >= text.len() {
     return -1
   }
-  let tail = text.substring(start, text.len())
-  let rel = tail.index_of(needle)
+  const tail = text.substring(start, text.len())
+  const rel = tail.index_of(needle)
   if rel < 0 {
     return -1
   }
@@ -92,7 +92,7 @@ pub fn find_from(text: string, needle: string, start: int) -> int {
  * mirrors Python `text.startswith(needle, offset)`.
  */
 pub fn starts_with_at(text: string, needle: string, offset: int) -> bool {
-  let nlen = needle.len()
+  const nlen = needle.len()
   if offset < 0 {
     return false
   }
@@ -110,10 +110,10 @@ pub fn starts_with_at(text: string, needle: string, offset: int) -> bool {
  * so this matches Python for every byte that can appear in Rust source.
  */
 pub fn first_non_ws(text: string, offset: int) -> int {
-  let n = text.len()
-  var i = offset
+  const n = text.len()
+  let i = offset
   while i < n {
-    let ch = text.char_at(i)
+    const ch = text.char_at(i)
     if ch.trim() != "" {
       return i
     }
@@ -141,19 +141,19 @@ pub fn category_code(category: string) -> string? {
  * `Code::*`). `errors` is appended in the same order as the Python loop.
  */
 pub fn check_registry_text(text: string) -> any {
-  var errors: list<string> = []
-  let entries = regex_captures(r#"^\s*([A-Za-z][A-Za-z0-9_]*),\s+"([^"]+)",\s+([A-Za-z]+),"#, text, "m")
+  let errors: list<string> = []
+  const entries = regex_captures(r#"^\s*([A-Za-z][A-Za-z0-9_]*),\s+"([^"]+)",\s+([A-Za-z]+),"#, text, "m")
   if entries.count < 40 {
     errors = errors
       + ["${REGISTRY}: expected at least 40 registered codes, found ${entries.count}"]
   }
-  var seen_ids: list<string> = []
-  var seen_variants: list<string> = []
-  var seen_categories: list<string> = []
+  let seen_ids: list<string> = []
+  let seen_variants: list<string> = []
+  let seen_categories: list<string> = []
   for entry in entries {
-    let variant = entry.groups[0]
-    let identifier = entry.groups[1]
-    let category = entry.groups[2]
+    const variant = entry.groups[0]
+    const identifier = entry.groups[1]
+    const category = entry.groups[2]
     if seen_ids.contains(identifier) {
       errors = errors + ["${REGISTRY}: duplicate diagnostic identifier ${identifier}"]
     }
@@ -170,12 +170,12 @@ pub fn check_registry_text(text: string) -> any {
       errors = errors + ["${REGISTRY}: unknown category enum variant ${category}"]
       continue
     }
-    let m = regex_captures(r"^HARN-([A-Z]{3})-\d{3}$", identifier, "")
+    const m = regex_captures(r"^HARN-([A-Z]{3})-\d{3}$", identifier, "")
     if m.count == 0 {
       errors = errors + ["${REGISTRY}: malformed diagnostic identifier ${identifier}"]
       continue
     }
-    let category_text = m[0].groups[0]
+    const category_text = m[0].groups[0]
     if category_text != category_code(category) {
       errors = errors
         + ["${REGISTRY}: identifier ${identifier} does not match category ${category}"]
@@ -184,7 +184,7 @@ pub fn check_registry_text(text: string) -> any {
       seen_categories = seen_categories + [category]
     }
   }
-  var missing: list<string> = []
+  let missing: list<string> = []
   for category in CATEGORIES {
     if !seen_categories.contains(category) {
       missing = missing + [category]
@@ -202,7 +202,7 @@ pub fn check_registry_text(text: string) -> any {
  * preserves sorted order.
  */
 pub fn format_str_list(items: list<string>) -> string {
-  var parts: list<string> = []
+  let parts: list<string> = []
   for item in items {
     parts = parts + ["'${item}'"]
   }
@@ -216,20 +216,20 @@ pub fn format_str_list(items: list<string>) -> string {
  * span runs to end-of-text.
  */
 pub fn find_struct_literals(text: string, needle: string) -> list {
-  var out: list = []
-  let n = text.len()
-  var start = 0
+  let out: list = []
+  const n = text.len()
+  let start = 0
   while true {
-    let idx = find_from(text, needle, start)
+    const idx = find_from(text, needle, start)
     if idx < 0 {
       return out
     }
-    let brace = find_from(text, "{", idx)
-    var depth = 0
-    var end = -1
-    var pos = brace
+    const brace = find_from(text, "{", idx)
+    let depth = 0
+    let end = -1
+    let pos = brace
     while pos < n {
-      let ch = text.char_at(pos)
+      const ch = text.char_at(pos)
       if ch == "{" {
         depth = depth + 1
       } else if ch == "}" {
@@ -257,25 +257,25 @@ pub fn find_struct_literals(text: string, needle: string) -> list {
  * openings exactly as the Python `check_struct_literals` does.
  */
 pub fn check_struct_literals_text(rel: string, name: string, text: string) -> list<string> {
-  var out: list<string> = []
-  let needle = "${name} {"
-  let def_marker = "pub struct ${name}"
-  let prefix_pat = r"(?:\bimpl(?:\s*<[^>]*>)?\s+(?:[\w:]+::)?|->\s*(?:[\w:]+::)?)$"
+  let out: list<string> = []
+  const needle = "${name} {"
+  const def_marker = "pub struct ${name}"
+  const prefix_pat = r"(?:\bimpl(?:\s*<[^>]*>)?\s+(?:[\w:]+::)?|->\s*(?:[\w:]+::)?)$"
   for lit in find_struct_literals(text, needle) {
-    let start = lit.start
-    let end = lit.end
-    var pstart = start - 80
+    const start = lit.start
+    const end = lit.end
+    let pstart = start - 80
     if pstart < 0 {
       pstart = 0
     }
-    let prefix = text.substring(pstart, start)
+    const prefix = text.substring(pstart, start)
     if prefix.contains(def_marker) {
       continue
     }
     if regex_captures(prefix_pat, prefix, "").count > 0 {
       continue
     }
-    let block = text.substring(start, end)
+    const block = text.substring(start, end)
     if regex_captures(r"\bcode\s*[:,]", block, "").count == 0 {
       out = out + ["${rel}:${line_of(text, start)}: ${name} literal missing code"]
     }
@@ -290,17 +290,17 @@ pub fn check_struct_literals_text(rel: string, name: string, text: string) -> li
  * the caller).
  */
 pub fn check_helper_calls_text(rel: string, text: string) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for helper in HELPERS {
-    let needle = "self.${helper}("
-    let nlen = needle.len()
-    var start = 0
+    const needle = "self.${helper}("
+    const nlen = needle.len()
+    let start = 0
     while true {
-      let idx = find_from(text, needle, start)
+      const idx = find_from(text, needle, start)
       if idx < 0 {
         start = -1
       } else {
-        let arg = first_non_ws(text, idx + nlen)
+        const arg = first_non_ws(text, idx + nlen)
         if !starts_with_at(text, "Code::", arg) {
           out = out
             + ["${rel}:${line_of(text, idx)}: self.${helper} must pass Code::* first"]
@@ -320,16 +320,16 @@ pub fn check_helper_calls_text(rel: string, text: string) -> list<string> {
  * first. Returns violation strings. Mirrors `check_code_constructor_calls`.
  */
 pub fn check_constructor_calls_text(rel: string, needle: string, text: string) -> list<string> {
-  var out: list<string> = []
-  let call = "${needle}("
-  let clen = call.len()
-  var start = 0
+  let out: list<string> = []
+  const call = "${needle}("
+  const clen = call.len()
+  let start = 0
   while true {
-    let idx = find_from(text, call, start)
+    const idx = find_from(text, call, start)
     if idx < 0 {
       start = -1
     } else {
-      let arg = first_non_ws(text, idx + clen)
+      const arg = first_non_ws(text, idx + clen)
       if !starts_with_at(text, "Code::", arg) {
         out = out + ["${rel}:${line_of(text, idx)}: ${needle} must pass Code::* first"]
       }
@@ -348,9 +348,9 @@ pub fn check_constructor_calls_text(rel: string, needle: string, text: string) -
  * intentionally ignored. Mirrors `check_unknown_code_variants`'s per-file body.
  */
 pub fn check_unknown_variants_text(rel: string, text: string, code_names: list<string>) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for m in regex_captures(r"\bCode::([A-Z][A-Za-z0-9_]*)", text, "") {
-    let variant = m.groups[0]
+    const variant = m.groups[0]
     if !code_names.contains(variant) {
       out = out + ["${rel}:${line_of(text, m.start)}: unknown Code::${variant}"]
     }
@@ -359,10 +359,10 @@ pub fn check_unknown_variants_text(rel: string, text: string, code_names: list<s
 }
 
 pipeline main(task) {
-  var errors: list<string> = []
-  let registry_text = harness.fs.read_text(REGISTRY)
-  let reg = check_registry_text(registry_text)
-  let code_names: list<string> = reg.variants
+  let errors: list<string> = []
+  const registry_text = harness.fs.read_text(REGISTRY)
+  const reg = check_registry_text(registry_text)
+  const code_names: list<string> = reg.variants
   errors = errors + reg.errors
   errors = errors + scan_struct_literals("LintDiagnostic", "crates/harn-lint/src")
   errors = errors + scan_struct_literals("TypeDiagnostic", "crates/harn-parser/src")
@@ -389,7 +389,7 @@ pipeline main(task) {
  * the scan order matches Python's `sorted(root.rglob("*.rs"))`.
  */
 fn sorted_rs_files(root: string) -> list<string> {
-  var paths: list<string> = []
+  let paths: list<string> = []
   for path in harness.fs.glob("${root}/**/*.rs") {
     paths = paths + [path]
   }
@@ -397,41 +397,41 @@ fn sorted_rs_files(root: string) -> list<string> {
 }
 
 fn scan_struct_literals(name: string, root: string) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for path in sorted_rs_files(root) {
-    let rel = rel_path(path)
-    let text = harness.fs.read_text(path)
+    const rel = rel_path(path)
+    const text = harness.fs.read_text(path)
     out = out + check_struct_literals_text(rel, name, text)
   }
   return out
 }
 
 fn scan_helper_calls(root: string) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for path in sorted_rs_files(root) {
-    let rel = rel_path(path)
+    const rel = rel_path(path)
     if rel.ends_with("/mod.rs") || rel == "mod.rs" {
       continue
     }
-    let text = harness.fs.read_text(path)
+    const text = harness.fs.read_text(path)
     out = out + check_helper_calls_text(rel, text)
   }
   return out
 }
 
 fn scan_constructor_calls(root: string, needle: string) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for path in sorted_rs_files(root) {
-    let rel = rel_path(path)
-    let text = harness.fs.read_text(path)
+    const rel = rel_path(path)
+    const text = harness.fs.read_text(path)
     out = out + check_constructor_calls_text(rel, needle, text)
   }
   return out
 }
 
 fn scan_unknown_variants(code_names: list<string>) -> list<string> {
-  var out: list<string> = []
-  let roots = [
+  let out: list<string> = []
+  const roots = [
     "crates/harn-parser/src",
     "crates/harn-lint/src",
     "crates/harn-fmt/src",
@@ -440,11 +440,11 @@ fn scan_unknown_variants(code_names: list<string>) -> list<string> {
   ]
   for root in roots {
     for path in sorted_rs_files(root) {
-      let rel = rel_path(path)
+      const rel = rel_path(path)
       if rel == REGISTRY {
         continue
       }
-      let text = harness.fs.read_text(path)
+      const text = harness.fs.read_text(path)
       out = out + check_unknown_variants_text(rel, text, code_names)
     }
   }

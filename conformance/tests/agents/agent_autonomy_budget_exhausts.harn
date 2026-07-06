@@ -13,10 +13,10 @@ pipeline test(task) {
       {text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"},
     ],
     { ->
-      let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+      const unique = to_string(to_int(harness.clock.timestamp())) + "-"
         + to_string(harness.random.gen_range(100000, 999999))
-      let key = "agent.autonomy.budget." + unique
-      let first = agent_loop(
+      const key = "agent.autonomy.budget." + unique
+      const first = agent_loop(
         "First task",
         "You are helpful",
         {
@@ -28,7 +28,7 @@ pipeline test(task) {
         },
       )
       __io_println(first.status)
-      let second = agent_loop(
+      const second = agent_loop(
         "Second task",
         "You are helpful",
         {
@@ -46,7 +46,7 @@ pipeline test(task) {
       __io_println(second.requested_tier)
       __io_println(second.reviewers[0])
       __io_println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
-      let pending = hitl_pending({}).filter({ row -> row.agent == key })
+      const pending = hitl_pending({}).filter({ row -> row.agent == key })
       __io_println(len(pending) >= 1)
       __io_println(pending[0].request_kind)
     },

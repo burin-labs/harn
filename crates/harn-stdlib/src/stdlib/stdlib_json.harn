@@ -22,7 +22,7 @@ pub fn pretty(value) {
  * @errors: []
  */
 pub fn safe_parse(text) {
-  let result = try {
+  const result = try {
     json_parse(text)
   }
   if is_ok(result) {

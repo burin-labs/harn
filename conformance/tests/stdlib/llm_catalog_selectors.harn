@@ -4,13 +4,13 @@ pipeline test(task) {
   // models_with returns ranked frontier models when asked. Multiple
   // open-weight frontier models exist in the catalog (MiniMax-M2.7,
   // glm-5.1, deepseek-v4-pro, ...), so the result must be non-empty.
-  let frontier = models_with({tier: "frontier"})
+  const frontier = models_with({tier: "frontier"})
   __io_println(len(frontier) > 0)
   __io_println(frontier[0].tier == "frontier")
   // Strength filtering — every result must declare the requested tag.
-  let coders = models_with({strengths: ["coding"]})
+  const coders = models_with({strengths: ["coding"]})
   __io_println(len(coders) > 0)
-  var all_coding = true
+  let all_coding = true
   for model in coders {
     if !model.strengths.contains("coding") {
       all_coding = false
@@ -18,9 +18,9 @@ pipeline test(task) {
   }
   __io_println(all_coding)
   // Open-weight filter excludes Anthropic/OpenAI/Gemini closed models.
-  let open_only = models_with({open_weight: true, tier: "frontier"})
+  const open_only = models_with({open_weight: true, tier: "frontier"})
   __io_println(len(open_only) > 0)
-  var all_open = true
+  let all_open = true
   for model in open_only {
     if !model.open_weight {
       all_open = false
@@ -29,29 +29,29 @@ pipeline test(task) {
   __io_println(all_open)
   // min_benchmark filter — require swe_bench_verified ≥ 70 (matches
   // claude-sonnet-4-7 / opus-4-6 / opus-4-7 in the catalog).
-  let elite = models_with({min_benchmark: {swe_bench_verified: 70.0}})
+  const elite = models_with({min_benchmark: {swe_bench_verified: 70.0}})
   __io_println(len(elite) > 0)
   // Impossibly strict filter returns an empty list.
-  let nothing = models_with({tier: "frontier", strengths: ["coding"], min_benchmark: {swe_bench_verified: 999.0}})
+  const nothing = models_with({tier: "frontier", strengths: ["coding"], min_benchmark: {swe_bench_verified: 999.0}})
   __io_println(len(nothing) == 0)
   // best_available_models relaxes constraints until something matches.
-  let relaxed = best_available_models(
+  const relaxed = best_available_models(
     {tier: "frontier", strengths: ["coding"], min_benchmark: {swe_bench_verified: 999.0}},
   )
   __io_println(len(relaxed.models) > 0)
   // Relaxation step > 0 because the strict filter would never match.
   __io_println(relaxed.relaxed_step > 0)
   // pick_model returns a single dict.
-  let one = pick_model({tier: "frontier"})
+  const one = pick_model({tier: "frontier"})
   __io_println(one != nil)
   __io_println(one.tier == "frontier")
   __io_println(type_of(one._relaxed_step) == "int")
-  let routes = routing_routes()
+  const routes = routing_routes()
   __io_println(len(routes) > 0)
   __io_println(routes[0].provider != nil && routes[0].model != nil)
   // pick_model on impossible filter still returns the best fallback
   // (never nil for a non-empty catalog).
-  let fallback = pick_model({tier: "frontier", min_benchmark: {nonexistent_metric: 100.0}})
+  const fallback = pick_model({tier: "frontier", min_benchmark: {nonexistent_metric: 100.0}})
   __io_println(fallback != nil)
   __io_println(fallback._relaxed_step >= 1)
 }

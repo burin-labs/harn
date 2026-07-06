@@ -22,7 +22,7 @@
  * @example: rules_search({rule: src, source: "foo();", language: "typescript"})
  */
 pub fn rules_search(params) -> dict {
-  let payload = hostlib_rules_search(params ?? {}) ?? {}
+  const payload = hostlib_rules_search(params ?? {}) ?? {}
   return payload
     .merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_search"}},
@@ -40,7 +40,7 @@ pub fn rules_search(params) -> dict {
  * @example: rules_report({rule: src, paths: ["a.ts", "b.ts"]})
  */
 pub fn rules_report(params) -> dict {
-  let payload = hostlib_rules_report(params ?? {}) ?? {}
+  const payload = hostlib_rules_report(params ?? {}) ?? {}
   return payload.merge({provenance: {module: "std/rules", helper: "rules_report"}})
 }
 
@@ -57,7 +57,7 @@ pub fn rules_report(params) -> dict {
  * @example: rules_diagnostics({rule: src, source: "foo();", language: "typescript"})
  */
 pub fn rules_diagnostics(params) -> dict {
-  let payload = hostlib_rules_diagnostics(params ?? {}) ?? {}
+  const payload = hostlib_rules_diagnostics(params ?? {}) ?? {}
   return payload
     .merge(
     {
@@ -92,7 +92,7 @@ pub fn rules_diagnostics(params) -> dict {
  * @example: rules_visit({rule: src, source: "f();", language: "typescript", on_match: fn(node, ctx) { return {message: "call"} }})
  */
 pub fn rules_visit(params) -> dict {
-  let payload = hostlib_rules_visit(params ?? {}) ?? {}
+  const payload = hostlib_rules_visit(params ?? {}) ?? {}
   return payload
     .merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_visit"}},
@@ -114,7 +114,7 @@ pub fn rules_visit(params) -> dict {
  * @example: rules_apply({rule: src, paths: ["a.ts"], dry_run: false})
  */
 pub fn rules_apply(params) -> dict {
-  let payload = hostlib_rules_apply(params ?? {}) ?? {}
+  const payload = hostlib_rules_apply(params ?? {}) ?? {}
   return payload
     .merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_apply"}},
@@ -134,7 +134,7 @@ pub fn rules_apply(params) -> dict {
  * @example: rules_fold({paths: ["a.harn"], dry_run: false})
  */
 pub fn rules_fold(params) -> dict {
-  let payload = hostlib_rules_fold(params ?? {}) ?? {}
+  const payload = hostlib_rules_fold(params ?? {}) ?? {}
   return payload
     .merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_fold"}},

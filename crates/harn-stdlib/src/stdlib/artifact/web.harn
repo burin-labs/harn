@@ -12,9 +12,9 @@ fn __web_matches(pattern, text) {
 }
 
 fn __web_tag_fragments(html, tag) {
-  let pattern = "(?is)<" + tag + "\\b([^>]*)>(.*?)</" + tag + ">"
-  var fragments = []
-  var index = 0
+  const pattern = "(?is)<" + tag + "\\b([^>]*)>(.*?)</" + tag + ">"
+  let fragments = []
+  let index = 0
   for capture in regex_captures(pattern, html ?? "") {
     fragments = fragments
       + [
@@ -32,8 +32,8 @@ fn __web_tag_fragments(html, tag) {
 }
 
 fn __web_tag_balance_errors(html, tag) {
-  let opens = len(__web_matches("(?is)<" + tag + "\\b", html))
-  let closes = len(__web_matches("(?is)</" + tag + ">", html))
+  const opens = len(__web_matches("(?is)<" + tag + "\\b", html))
+  const closes = len(__web_matches("(?is)</" + tag + ">", html))
   if opens > closes {
     return [
       {
@@ -58,7 +58,7 @@ fn __web_tag_balance_errors(html, tag) {
 }
 
 fn __web_unique_codes(items) {
-  var codes = []
+  let codes = []
   for item in items ?? [] {
     if item?.code != nil && !codes.contains(item.code) {
       codes = codes + [item.code]
@@ -76,9 +76,9 @@ fn __web_warning(code, message, fragment = nil) {
 }
 
 fn __web_pattern_errors(text, patterns) {
-  var errors = []
+  let errors = []
   for pattern in patterns {
-    let matches = __web_matches(pattern.regex, text)
+    const matches = __web_matches(pattern.regex, text)
     if len(matches) > 0 {
       errors = errors + [__web_error(pattern.code, pattern.message, pattern.fragment, matches)]
     }
@@ -87,10 +87,10 @@ fn __web_pattern_errors(text, patterns) {
 }
 
 fn __web_fragment_pattern_errors(fragments, patterns) {
-  var errors = []
+  let errors = []
   for fragment in fragments ?? [] {
     for pattern in patterns {
-      let matches = __web_matches(pattern.regex, fragment.content)
+      const matches = __web_matches(pattern.regex, fragment.content)
       if len(matches) > 0 {
         errors = errors
           + [
@@ -108,9 +108,9 @@ fn __web_fragment_pattern_errors(fragments, patterns) {
 }
 
 fn __web_secret_errors(html) {
-  var errors = []
+  let errors = []
   for finding in secret_scan(html ?? "") {
-    let title = finding?.title ?? finding?.detector ?? "secret"
+    const title = finding?.title ?? finding?.detector ?? "secret"
     errors = errors
       + [
       {
@@ -126,7 +126,7 @@ fn __web_secret_errors(html) {
 }
 
 fn __web_fragment_kind(html, old_text) {
-  let extracted = web_artifact_extract(html)
+  const extracted = web_artifact_extract(html)
   for style in extracted.styles {
     if contains(style.content, old_text ?? "") {
       return "style"
@@ -154,21 +154,21 @@ fn __web_annotate_regions(regions, kind) {
  * @errors: []
  */
 pub fn web_artifact_extract(html) {
-  let source = html ?? ""
-  let scripts = __web_tag_fragments(source, "script")
-  let styles = __web_tag_fragments(source, "style")
-  let body_captures = regex_captures("(?is)<body\\b([^>]*)>(.*?)</body>", source)
-  let body_attributes = if len(body_captures) > 0 {
+  const source = html ?? ""
+  const scripts = __web_tag_fragments(source, "script")
+  const styles = __web_tag_fragments(source, "style")
+  const body_captures = regex_captures("(?is)<body\\b([^>]*)>(.*?)</body>", source)
+  const body_attributes = if len(body_captures) > 0 {
     body_captures[0].groups[0] ?? ""
   } else {
     ""
   }
-  let body = if len(body_captures) > 0 {
+  const body = if len(body_captures) > 0 {
     body_captures[0].groups[1] ?? ""
   } else {
     source
   }
-  let errors = __web_tag_balance_errors(source, "script")
+  const errors = __web_tag_balance_errors(source, "script")
     + __web_tag_balance_errors(source, "style")
     + __web_tag_balance_errors(source, "body")
   return {
@@ -189,19 +189,19 @@ pub fn web_artifact_extract(html) {
  * @errors: []
  */
 pub fn web_artifact_text_fallback(html, options = nil) {
-  let without_scripts = regex_replace("(?is)<script\\b[^>]*>.*?</script>", " ", html ?? "")
-  let without_styles = regex_replace("(?is)<style\\b[^>]*>.*?</style>", " ", without_scripts)
-  let without_head = regex_replace("(?is)<head\\b[^>]*>.*?</head>", " ", without_styles)
-  let without_tags = regex_replace("(?is)<[^>]+>", " ", without_head)
-  let decoded = without_tags
+  const without_scripts = regex_replace("(?is)<script\\b[^>]*>.*?</script>", " ", html ?? "")
+  const without_styles = regex_replace("(?is)<style\\b[^>]*>.*?</style>", " ", without_scripts)
+  const without_head = regex_replace("(?is)<head\\b[^>]*>.*?</head>", " ", without_styles)
+  const without_tags = regex_replace("(?is)<[^>]+>", " ", without_head)
+  const decoded = without_tags
     .replace("&nbsp;", " ")
     .replace("&amp;", "&")
     .replace("&lt;", "<")
     .replace("&gt;", ">")
     .replace("&quot;", "\"")
     .replace("&#39;", "'")
-  let fallback = trim(regex_replace("\\s+", " ", decoded))
-  let max_chars = options?.max_chars ?? nil
+  const fallback = trim(regex_replace("\\s+", " ", decoded))
+  const max_chars = options?.max_chars ?? nil
   if max_chars != nil && len(fallback) > max_chars {
     return substring(fallback, 0, max_chars)
   }
@@ -218,11 +218,11 @@ pub fn web_artifact_text_fallback(html, options = nil) {
  * @errors: []
  */
 pub fn web_artifact_validate(html, options = nil) {
-  let source = html ?? ""
-  let opts = options ?? {}
-  let extracted = web_artifact_extract(source)
-  var errors = extracted.errors
-  var warnings = extracted.warnings
+  const source = html ?? ""
+  const opts = options ?? {}
+  const extracted = web_artifact_extract(source)
+  let errors = extracted.errors
+  let warnings = extracted.warnings
   if len(trim(source)) == 0 {
     errors = errors + [__web_error("empty_artifact", "artifact HTML must not be empty", "document")]
   }
@@ -381,8 +381,8 @@ pub fn web_artifact_validate(html, options = nil) {
   if len(extracted.styles) == 0 {
     warnings = warnings + [__web_warning("no_style_fragment", "artifact has no <style> fragment", "style")]
   }
-  let error_codes = __web_unique_codes(errors)
-  let warning_codes = __web_unique_codes(warnings)
+  const error_codes = __web_unique_codes(errors)
+  const warning_codes = __web_unique_codes(warnings)
   return {
     ok: len(errors) == 0,
     source_sha256: __web_sha256(source),
@@ -408,12 +408,12 @@ pub fn web_artifact_validate(html, options = nil) {
  * @errors: []
  */
 pub fn web_artifact_apply_patch(html, old_text, new_text, options = nil) {
-  let source = html ?? ""
-  let opts = options ?? {}
-  let patch_opts = opts?.patch ?? opts
-  let patch = edit_apply_old_new_patch(source, old_text ?? "", new_text ?? "", patch_opts)
+  const source = html ?? ""
+  const opts = options ?? {}
+  const patch_opts = opts?.patch ?? opts
+  const patch = edit_apply_old_new_patch(source, old_text ?? "", new_text ?? "", patch_opts)
   if !(patch?.ok ?? false) {
-    let error = __web_error(patch.error_code, patch.message, "patch")
+    const error = __web_error(patch.error_code, patch.message, "patch")
     return {
       ok: false,
       patched: source,
@@ -434,17 +434,17 @@ pub fn web_artifact_apply_patch(html, old_text, new_text, options = nil) {
       },
     }
   }
-  let validation = web_artifact_validate(patch.patched, opts?.validation ?? opts)
-  let expected = patch.expected_region.merge({kind: __web_fragment_kind(source, old_text ?? "")})
-  let region_report = edit_validate_changed_regions(source, patch.patched, [expected], {provenance: opts?.provenance})
-  var errors = validation.errors
+  const validation = web_artifact_validate(patch.patched, opts?.validation ?? opts)
+  const expected = patch.expected_region.merge({kind: __web_fragment_kind(source, old_text ?? "")})
+  const region_report = edit_validate_changed_regions(source, patch.patched, [expected], {provenance: opts?.provenance})
+  let errors = validation.errors
   if !region_report.ok {
     errors = errors + region_report.errors
   }
-  let warnings = validation.warnings + patch.warnings + region_report.warnings
-  let changed_regions = __web_annotate_regions(patch.changed_regions, expected.kind)
-  let before_hash = __web_sha256(source)
-  let after_hash = __web_sha256(patch.patched)
+  const warnings = validation.warnings + patch.warnings + region_report.warnings
+  const changed_regions = __web_annotate_regions(patch.changed_regions, expected.kind)
+  const before_hash = __web_sha256(source)
+  const after_hash = __web_sha256(patch.patched)
   return {
     ok: patch.ok && validation.ok && region_report.ok,
     patched: patch.patched,

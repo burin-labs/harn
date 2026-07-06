@@ -5,9 +5,9 @@ import { memory } from "std/oauth/storage"
 import { delegated_claims, token_type } from "std/oauth/token_exchange"
 
 pipeline test(task) {
-  let topic = "oauth.client.audit"
-  let cursor = event_log.latest(topic) ?? 0
-  let provider = custom(
+  const topic = "oauth.client.audit"
+  const cursor = event_log.latest(topic) ?? 0
+  const provider = custom(
     {
       id: "rfc8693",
       auth_url: "https://as.example.com/as/authorize",
@@ -15,7 +15,7 @@ pipeline test(task) {
       default_scopes: [],
     },
   )
-  let cli = client(
+  const cli = client(
     provider,
     {
       client_id: "rs08",
@@ -34,7 +34,7 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  let exchanged = token_exchange(
+  const exchanged = token_exchange(
     cli,
     {
       resource: "urn:example:cooperation-context",
@@ -50,11 +50,11 @@ pipeline test(task) {
   assert_eq(exchanged.issued_token_type, token_type("jwt"), "issued token type returned")
   assert_eq(exchanged.token_exchange_mode, "delegation", "actor token selects delegation")
   assert_eq(exchanged.scopes, ["status", "feed"], "response scopes split")
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "one token-exchange request")
   assert_eq(calls[0].method, "POST", "token exchange uses POST")
   assert(starts_with(calls[0].headers.authorization, "Basic "), "client_secret_basic auth header")
-  let body = calls[0].body
+  const body = calls[0].body
   assert(
     contains(body, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange"),
     "token-exchange grant type",
@@ -71,7 +71,7 @@ pipeline test(task) {
     "actor token type parameter",
   )
   assert(contains(body, "scope=status%20feed"), "scope parameter")
-  let claims = delegated_claims(
+  const claims = delegated_claims(
     {
       aud: "https://service26.example.com",
       iss: "https://issuer.example.com",
@@ -81,12 +81,12 @@ pipeline test(task) {
     },
     [{sub: "https://service16.example.com"}, {sub: "https://service77.example.com"}],
   )
-  let round_trip = json_parse(json_stringify(claims))
+  const round_trip = json_parse(json_stringify(claims))
   assert_eq(round_trip.sub, "user@example.com", "RFC nested act subject")
   assert_eq(round_trip.act.sub, "https://service16.example.com", "RFC nested act current actor")
   assert_eq(round_trip.act.act.sub, "https://service77.example.com", "RFC nested act prior actor")
-  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
-  let logged = stream.next().value
+  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const logged = stream.next().value
   assert_eq(logged.kind, "token_exchanged", "audit event kind")
   assert_eq(logged.payload.provider, "rfc8693", "audit provider")
   assert_eq(logged.payload.mode, "delegation", "audit mode")

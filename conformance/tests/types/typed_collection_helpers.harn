@@ -5,16 +5,16 @@
 import { filter_nil, pick_keys } from "std/collections"
 
 pipeline default(task) {
-  let counts: dict<string, int> = {a: 1, b: 2, c: 3}
-  let cleaned: dict<string, int> = filter_nil(counts)
+  const counts: dict<string, int> = {a: 1, b: 2, c: 3}
+  const cleaned: dict<string, int> = filter_nil(counts)
   __io_println(cleaned.a)
   __io_println(cleaned.b)
   __io_println(cleaned.c)
-  let picked: dict<string, int> = pick_keys(counts, ["a", "c"])
+  const picked: dict<string, int> = pick_keys(counts, ["a", "c"])
   __io_println(picked.a)
   __io_println(picked.c)
   __io_println(contains(picked.keys(), "b"))
-  let dropped = pick_keys<int?>({a: 1, b: nil, c: 3}, ["a", "b", "c"], {drop_nil: true})
+  const dropped = pick_keys<int?>({a: 1, b: nil, c: 3}, ["a", "b", "c"], {drop_nil: true})
   __io_println(dropped.a)
   __io_println(dropped.c)
   __io_println(contains(dropped.keys(), "b"))

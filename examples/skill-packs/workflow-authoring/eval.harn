@@ -17,23 +17,23 @@
  * case; non-zero otherwise.
  */
 pipeline default() {
-  let opts = parse_argv(harness, argv)
+  const opts = parse_argv(harness, argv)
   if opts.case == "" {
     __io_write_stderr(
       "usage: harn run eval.harn -- --case <path> [--provider <id>] [--model <name>] [--tmp <dir>]\n",
     )
     return 2
   }
-  let case = json_parse(harness.fs.read_text(opts.case))
-  let case_dir = dirname(opts.case)
-  let golden_path = case_dir + "/" + case.golden_bundle_path
-  let golden_text = harness.fs.read_text(golden_path)
-  var bundle_text = ""
+  const case = json_parse(harness.fs.read_text(opts.case))
+  const case_dir = dirname(opts.case)
+  const golden_path = case_dir + "/" + case.golden_bundle_path
+  const golden_text = harness.fs.read_text(golden_path)
+  let bundle_text = ""
   if opts.provider == "fake" {
     bundle_text = golden_text
   } else {
-    let opts_dict = {provider: opts.provider, model: opts.model, temperature: 0.0, max_tokens: 4000}
-    let response = llm_call(case.user_prompt, case.system_prompt, opts_dict)
+    const opts_dict = {provider: opts.provider, model: opts.model, temperature: 0.0, max_tokens: 4000}
+    const response = llm_call(case.user_prompt, case.system_prompt, opts_dict)
     bundle_text = extract_block(response.text, "bundle")
     if bundle_text == "" {
       __io_write_stderr("eval: model response missing <bundle>...</bundle>\n")
@@ -41,21 +41,21 @@ pipeline default() {
     }
   }
   exec("mkdir", "-p", opts.tmp)
-  let bundle_path = opts.tmp + "/" + case.id + ".bundle.json"
+  const bundle_path = opts.tmp + "/" + case.id + ".bundle.json"
   harness.fs.write_text(bundle_path, bundle_text)
-  let harn_bin = opts.harn_bin
-  let validate = exec(harn_bin, "workflow", "validate", "--bundle", bundle_path, "--json")
-  let preview = exec(harn_bin, "workflow", "preview", "--bundle", bundle_path, "--json")
-  let runres = exec(harn_bin, "workflow", "run", "--bundle", bundle_path, "--json")
-  let validate_ok = validate.success
-  let preview_ok = preview.success
-  let run_ok = runres.success
-  let assertions = if validate_ok {
+  const harn_bin = opts.harn_bin
+  const validate = exec(harn_bin, "workflow", "validate", "--bundle", bundle_path, "--json")
+  const preview = exec(harn_bin, "workflow", "preview", "--bundle", bundle_path, "--json")
+  const runres = exec(harn_bin, "workflow", "run", "--bundle", bundle_path, "--json")
+  const validate_ok = validate.success
+  const preview_ok = preview.success
+  const run_ok = runres.success
+  const assertions = if validate_ok {
     check_structural_assertions(json_parse(bundle_text), case.structural_assertions)
   } else {
     {ok: false, failures: ["bundle did not validate; skipping structural assertions"]}
   }
-  let report = {
+  const report = {
     case_id: case.id,
     provider: opts.provider,
     model: opts.model,
@@ -76,17 +76,17 @@ pipeline default() {
 }
 
 fn parse_argv(harness: Harness, args: list<string>) -> dict {
-  var opts = {
+  let opts = {
     case: "",
     provider: "fake",
     model: "fake-model",
     tmp: ".harn-runs/workflow-authoring-eval",
     harn_bin: harness.env.get_or("HARN_BIN", "harn"),
   }
-  var i = 0
+  let i = 0
   while i < len(args) {
-    let flag = args[i]
-    let value = if i + 1 < len(args) {
+    const flag = args[i]
+    const value = if i + 1 < len(args) {
       args[i + 1]
     } else {
       ""
@@ -114,13 +114,13 @@ fn parse_argv(harness: Harness, args: list<string>) -> dict {
 }
 
 fn extract_block(text: string, tag: string) -> string {
-  let open = "<" + tag + ">"
-  let close = "</" + tag + ">"
-  let after_open = split(text, open)
+  const open = "<" + tag + ">"
+  const close = "</" + tag + ">"
+  const after_open = split(text, open)
   if len(after_open) < 2 {
     return ""
   }
-  let body = split(after_open[1], close)
+  const body = split(after_open[1], close)
   if len(body) < 2 {
     return ""
   }
@@ -128,15 +128,15 @@ fn extract_block(text: string, tag: string) -> string {
 }
 
 fn check_structural_assertions(bundle: dict, want: dict) -> dict {
-  let scalar_failures = check_scalar_fields(bundle, want)
-  let collection_failures = check_collection_fields(bundle, want)
-  let failures = scalar_failures + collection_failures
+  const scalar_failures = check_scalar_fields(bundle, want)
+  const collection_failures = check_collection_fields(bundle, want)
+  const failures = scalar_failures + collection_failures
   return {ok: len(failures) == 0, failures: failures}
 }
 
 fn check_scalar_fields(bundle: dict, want: dict) -> list<string> {
-  let want_keys = keys(want)
-  var out = []
+  const want_keys = keys(want)
+  let out = []
   if contains(want_keys, "bundle_id") && bundle.id != want.bundle_id {
     out = out + ["bundle.id != " + want.bundle_id]
   }
@@ -163,8 +163,8 @@ fn check_scalar_fields(bundle: dict, want: dict) -> list<string> {
 }
 
 fn check_collection_fields(bundle: dict, want: dict) -> list<string> {
-  let want_keys = keys(want)
-  var out = []
+  const want_keys = keys(want)
+  let out = []
   if contains(want_keys, "required_node_ids") {
     out = out
       + missing_members(want.required_node_ids, keys(bundle.workflow.nodes), "workflow.nodes missing ")
@@ -197,7 +197,7 @@ fn check_collection_fields(bundle: dict, want: dict) -> list<string> {
 }
 
 fn project(items: list<dict>, field: string) -> list<string> {
-  var out = []
+  let out = []
   for item in items {
     out = out + [item[field]]
   }
@@ -205,7 +205,7 @@ fn project(items: list<dict>, field: string) -> list<string> {
 }
 
 fn missing_members(required: list<string>, present: list<string>, prefix: string) -> list<string> {
-  var out = []
+  let out = []
   for item in required {
     if !contains(present, item) {
       out = out + [prefix + item]

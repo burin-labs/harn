@@ -7,16 +7,16 @@
  * installs a paused clock automatically.
  */
 pipeline test(task) {
-  let root = source_dir() + "/testbench_fs_overlay_diff.fs-overlay"
+  const root = source_dir() + "/testbench_fs_overlay_diff.fs-overlay"
   harness.fs.write_text(root + "/new_a.txt", "alpha")
   harness.fs.write_text(root + "/new_b.txt", "beta")
   harness.fs.write_text(root + "/new_c.txt", "gamma")
   harness.fs.write_text(root + "/existing.txt", "updated content")
   harness.fs.delete(root + "/to_delete.txt")
-  let diff = testbench_fs_diff()
-  let added = diff.filter({ e -> e.kind == "added" })
-  let modified = diff.filter({ e -> e.kind == "modified" })
-  let deleted = diff.filter({ e -> e.kind == "deleted" })
+  const diff = testbench_fs_diff()
+  const added = diff.filter({ e -> e.kind == "added" })
+  const modified = diff.filter({ e -> e.kind == "modified" })
+  const deleted = diff.filter({ e -> e.kind == "deleted" })
   __io_println(len(added) == 3)
   __io_println(len(modified) == 1)
   __io_println(len(deleted) == 1)

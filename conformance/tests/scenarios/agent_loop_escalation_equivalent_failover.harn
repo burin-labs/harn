@@ -9,10 +9,10 @@
  */
 import { AgentLoopOptions } from "std/agent/options"
 
-let calls = atomic(0)
+const calls = atomic(0)
 
 fn tools() {
-  let r = tool_registry()
+  const r = tool_registry()
   return tool_define(
     r,
     "echo",
@@ -25,7 +25,7 @@ fn tools() {
 }
 
 pipeline default() {
-  let caller = { call ->
+  const caller = { call ->
     let _ = atomic_add(calls, 1)
     let n = atomic_get(calls)
     if n == 1 {
@@ -60,7 +60,7 @@ pipeline default() {
       },
     }
   }
-  let opts: AgentLoopOptions = {
+  const opts: AgentLoopOptions = {
     provider: "fireworks",
     model: "gpt-oss-120b",
     tools: tools(),
@@ -79,7 +79,7 @@ pipeline default() {
       return ""
     },
   }
-  let result = agent_loop("do it", nil, opts)
+  const result = agent_loop("do it", nil, opts)
   __io_println(result.status)
   __io_println("visible=" + to_string(result.visible_text ?? ""))
 }

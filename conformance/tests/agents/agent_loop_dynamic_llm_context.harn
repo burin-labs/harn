@@ -5,13 +5,13 @@ fn iteration_events(events) {
 }
 
 pipeline test(task) {
-  let call_count = atomic(0)
-  let first_context_ok = atomic(0)
-  let second_context_ok = atomic(0)
-  let second_call_options_ok = atomic(0)
-  let first_thinking_kept = atomic(0)
-  let second_thinking_stripped = atomic(0)
-  let caller = { call ->
+  const call_count = atomic(0)
+  const first_context_ok = atomic(0)
+  const second_context_ok = atomic(0)
+  const second_call_options_ok = atomic(0)
+  const first_thinking_kept = atomic(0)
+  const second_thinking_stripped = atomic(0)
+  const caller = { call ->
     let index = atomic_add(call_count, 1) + 1
     if index == 1
       && contains(call?.system ?? "", "ctx provider=anthropic model=claude-sonnet-4-6") {
@@ -50,8 +50,8 @@ pipeline test(task) {
       },
     }
   }
-  let session = "agent-loop-dynamic-llm-context-" + uuid()
-  let captured = agent_capture_events(
+  const session = "agent-loop-dynamic-llm-context-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "finish",
@@ -80,7 +80,7 @@ pipeline test(task) {
       },
     ) },
   )
-  let starts = iteration_events(captured.events)
+  const starts = iteration_events(captured.events)
   assert(captured.result.status == "done", "loop completed after dynamic model switch")
   assert(atomic_get(call_count) == 2, "two LLM calls were made")
   assert(atomic_get(first_context_ok) == 1, "first turn rendered primary model context")

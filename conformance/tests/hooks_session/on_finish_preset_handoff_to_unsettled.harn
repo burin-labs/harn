@@ -9,12 +9,12 @@
 import { lifecycle_audit_log_take, on_finish_handoff_to } from "std/lifecycle"
 
 pipeline default() {
-  let preset = on_finish_handoff_to("nightly-drain", {priority: "high"})
+  const preset = on_finish_handoff_to("nightly-drain", {priority: "high"})
   pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("seed-pipeline", {note: "seed work"})
-      let result = preset(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const result = preset(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("result_status=" + result.status)
       harness.stdio.println("target=" + result.envelope.target_pipeline)
       harness.stdio.println("priority=" + result.envelope.payload.priority)

@@ -1,9 +1,9 @@
 import { agent_reminder_providers_fire } from "std/agent/state"
 
 pipeline main() {
-  let session = agent_session_open("reminder-provider-resume-continuity")
+  const session = agent_session_open("reminder-provider-resume-continuity")
   agent_session_reset(session)
-  let payload = {
+  const payload = {
     session: {id: session},
     worker: {id: "worker-1"},
     suspension: {reason: "waiting on review", suspended_at_turn: 2},
@@ -22,18 +22,18 @@ pipeline main() {
     digest: "Prior digest",
     turn: 0,
   }
-  let first = agent_reminder_providers_fire(session, "worker_resumed", payload, {})
-  let second = agent_reminder_providers_fire(
+  const first = agent_reminder_providers_fire(session, "worker_resumed", payload, {})
+  const second = agent_reminder_providers_fire(
     session,
     "worker_resumed",
     payload
       + {input_rendered: "approved again", resume: payload.resume + {input_rendered: "approved again"}},
     {},
   )
-  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  let disabled_session = agent_session_open("reminder-provider-resume-continuity-disabled")
+  const reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const disabled_session = agent_session_open("reminder-provider-resume-continuity-disabled")
   agent_session_reset(disabled_session)
-  let disabled = agent_reminder_providers_fire(
+  const disabled = agent_reminder_providers_fire(
     disabled_session,
     "worker_resumed",
     payload + {session: {id: disabled_session}, session_id: disabled_session},

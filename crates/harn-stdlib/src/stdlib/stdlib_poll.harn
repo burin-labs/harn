@@ -28,8 +28,8 @@ type RetryOptions = {max_attempts?: int, base_ms?: int, cap_ms?: int, multiplier
 type RetryReport = {ok: bool, value: any, error: any, attempts: int, elapsed_ms: int}
 
 fn __poll_options(options) {
-  let opts = options ?? {}
-  let interval = to_int(opts?.interval_ms) ?? 250
+  const opts = options ?? {}
+  const interval = to_int(opts?.interval_ms) ?? 250
   return {
     timeout_ms: to_int(opts?.timeout_ms) ?? 30000,
     interval_ms: if interval > 0 {
@@ -52,14 +52,14 @@ fn __poll_options(options) {
  * @errors: []
  */
 pub fn poll_until(check, options: PollOptions = {}) -> any {
-  let resolved = __poll_options(options)
+  const resolved = __poll_options(options)
   if resolved.initial_delay_ms > 0 {
     harness.clock.sleep_ms(resolved.initial_delay_ms)
   }
-  let started = harness.clock.monotonic_ms()
-  var attempts = 0
+  const started = harness.clock.monotonic_ms()
+  let attempts = 0
   while true {
-    let value = check()
+    const value = check()
     attempts = attempts + 1
     if value {
       return value
@@ -88,17 +88,17 @@ pub fn poll_until(check, options: PollOptions = {}) -> any {
  * @errors: []
  */
 pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {}, extractor = nil) -> any {
-  let resolved = __poll_options(options)
-  let terminal_set = set(terminal ?? [])
+  const resolved = __poll_options(options)
+  const terminal_set = set(terminal ?? [])
   if resolved.initial_delay_ms > 0 {
     harness.clock.sleep_ms(resolved.initial_delay_ms)
   }
-  let started = harness.clock.monotonic_ms()
-  var attempts = 0
+  const started = harness.clock.monotonic_ms()
+  let attempts = 0
   while true {
-    let row = probe()
+    const row = probe()
     attempts = attempts + 1
-    let status = if extractor == nil {
+    const status = if extractor == nil {
       row
     } else {
       extractor(row)
@@ -117,11 +117,11 @@ pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {},
 }
 
 fn __retry_options(options) {
-  let opts = options ?? {}
-  let max_attempts = to_int(opts?.max_attempts) ?? 5
-  let base = to_int(opts?.base_ms) ?? 200
-  let cap = to_int(opts?.cap_ms) ?? 30000
-  let mult = to_float(opts?.multiplier) ?? 2.0
+  const opts = options ?? {}
+  const max_attempts = to_int(opts?.max_attempts) ?? 5
+  const base = to_int(opts?.base_ms) ?? 200
+  const cap = to_int(opts?.cap_ms) ?? 30000
+  const mult = to_float(opts?.multiplier) ?? 2.0
   return {
     max_attempts: if max_attempts > 0 {
       max_attempts
@@ -147,13 +147,13 @@ fn __retry_options(options) {
 }
 
 fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -> int {
-  var delay = to_float(base_ms) ?? 0.0
-  var i = 0
+  let delay = to_float(base_ms) ?? 0.0
+  let i = 0
   while i < attempt {
     delay = delay * multiplier
     i = i + 1
   }
-  let capped = if delay > to_float(cap_ms) {
+  const capped = if delay > to_float(cap_ms) {
     to_float(cap_ms)
   } else {
     delay
@@ -172,14 +172,14 @@ fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -
  * @errors: []
  */
 pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
-  let resolved = __retry_options(options)
-  let timing = start_timing("poll.retry", {max_attempts: resolved.max_attempts})
-  var attempt = 0
-  var last_error = nil
+  const resolved = __retry_options(options)
+  const timing = start_timing("poll.retry", {max_attempts: resolved.max_attempts})
+  let attempt = 0
+  let last_error = nil
   while attempt < resolved.max_attempts {
-    let outcome = action(attempt)
+    const outcome = action(attempt)
     if is_ok(outcome) {
-      let report = end_timing(timing, {attempts: attempt + 1, outcome: "ok"})
+      const report = end_timing(timing, {attempts: attempt + 1, outcome: "ok"})
       return {
         ok: true,
         value: unwrap(outcome),
@@ -191,11 +191,11 @@ pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
     last_error = unwrap_err(outcome)
     attempt = attempt + 1
     if attempt < resolved.max_attempts {
-      let delay = __backoff_delay(resolved.base_ms, attempt - 1, resolved.multiplier, resolved.cap_ms)
+      const delay = __backoff_delay(resolved.base_ms, attempt - 1, resolved.multiplier, resolved.cap_ms)
       harness.clock.sleep_ms(delay)
     }
   }
-  let report = end_timing(timing, {attempts: resolved.max_attempts, outcome: "exhausted"})
+  const report = end_timing(timing, {attempts: resolved.max_attempts, outcome: "exhausted"})
   return {
     ok: false,
     value: nil,

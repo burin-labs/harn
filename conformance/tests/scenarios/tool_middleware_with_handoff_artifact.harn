@@ -7,7 +7,7 @@
  */
 import { with_handoff_artifact } from "std/llm/tool_middleware"
 
-let captured = atomic(0)
+const captured = atomic(0)
 
 fn next_with_result(payload) {
   return { call -> return {
@@ -50,14 +50,14 @@ fn full_handoff_payload() {
 pipeline default() {
   // (1) Tool returns `{__handoff: <full handoff>}` — middleware emits the
   // typed handoff record on audit.handoff and fires the sink.
-  let mw = with_handoff_artifact(
+  const mw = with_handoff_artifact(
     {
       sink: { _record, _call ->
         let _ = atomic_add(captured, 1)
       },
     },
   )
-  let r1 = mw(envelope("escalate"), next_with_result({__handoff: full_handoff_payload()}))
+  const r1 = mw(envelope("escalate"), next_with_result({__handoff: full_handoff_payload()}))
   __io_println(r1.ok)
   __io_println(r1.audit.kind)
   __io_println(r1.audit.handoff.source_persona)
@@ -65,13 +65,13 @@ pipeline default() {
   __io_println(r1.audit.handoff.task)
   __io_println(atomic_get(captured))
   // (2) Tool returned a plain result — no handoff emission, no sink fire.
-  let r2 = mw(envelope("read_file"), next_with_result("contents"))
+  const r2 = mw(envelope("read_file"), next_with_result("contents"))
   __io_println(r2.ok)
   __io_println(r2.audit?.handoff == nil)
   __io_println(atomic_get(captured))
   // (3) custom detect closure: pull the handoff out of an unconventional
   // result key.
-  let mw2 = with_handoff_artifact(
+  const mw2 = with_handoff_artifact(
     {
       detect: { _call, result ->
         let payload = result?.result
@@ -82,17 +82,17 @@ pipeline default() {
       },
     },
   )
-  let r3 = mw2(envelope("rollup"), next_with_result({escalation: full_handoff_payload()}))
+  const r3 = mw2(envelope("rollup"), next_with_result({escalation: full_handoff_payload()}))
   __io_println(r3.audit.handoff.target_persona_or_human.id)
   __io_println(r3.audit.handoff.source_persona)
   // (4) source override populates source_persona when the payload omits it.
-  let mw3 = with_handoff_artifact({source: "ship_captain"})
-  let abbreviated = {
+  const mw3 = with_handoff_artifact({source: "ship_captain"})
+  const abbreviated = {
     target_persona_or_human: {kind: "human", id: "lead-on-call"},
     task: "Resolve incident",
     reason: "Rollback pending",
   }
-  let r4 = mw3(envelope("escalate"), next_with_result({__handoff: abbreviated}))
+  const r4 = mw3(envelope("escalate"), next_with_result({__handoff: abbreviated}))
   __io_println(r4.audit.handoff.source_persona)
   __io_println(r4.audit.handoff.target_persona_or_human.kind)
 }

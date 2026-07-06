@@ -77,7 +77,7 @@ fn __cc_list_has(items, needle) {
 }
 
 fn __cc_basename(word) {
-  let slash = word.last_index_of("/")
+  const slash = word.last_index_of("/")
   if slash < 0 {
     return word
   }
@@ -86,7 +86,7 @@ fn __cc_basename(word) {
 
 fn __cc_first_token(segment) {
   for raw in segment.split(" ") {
-    let token = raw.trim()
+    const token = raw.trim()
     if token != "" {
       return token
     }
@@ -101,7 +101,7 @@ fn __cc_first_token(segment) {
  */
 fn __cc_grep_short_circuits(segment) {
   for raw in segment.split(" ") {
-    let token = raw.trim()
+    const token = raw.trim()
     if token != "" {
       if token == "--max-count"
         || token.starts_with("--max-count=")
@@ -112,7 +112,7 @@ fn __cc_grep_short_circuits(segment) {
         return true
       }
       if token.starts_with("-") && !token.starts_with("--") && token.len() > 1 {
-        let cluster = token.substring(1, token.len())
+        const cluster = token.substring(1, token.len())
         if cluster.contains("q") || cluster.contains("m") || cluster.contains("l")
           || cluster.contains("L") {
           return true
@@ -124,7 +124,7 @@ fn __cc_grep_short_circuits(segment) {
 }
 
 fn __cc_filter_allowed(filter) {
-  let word = __cc_first_token(filter)
+  const word = __cc_first_token(filter)
   if word == "" {
     return false
   }
@@ -133,7 +133,7 @@ fn __cc_filter_allowed(filter) {
   if word.contains("=") {
     return false
   }
-  let name = __cc_basename(word).lowercase()
+  const name = __cc_basename(word).lowercase()
   if !__cc_list_has(__cc_consume_all_filters(), name) {
     return false
   }
@@ -175,13 +175,13 @@ fn __cc_hazardous(command) {
  * `|&` pipe, or unbalanced quotes.
  */
 fn __cc_scan_cuts(command) {
-  let n = command.len()
-  var i = 0
-  var squote = false
-  var dquote = false
-  var cuts = []
+  const n = command.len()
+  let i = 0
+  let squote = false
+  let dquote = false
+  let cuts = []
   while i < n {
-    let ch = command.char_at(i)
+    const ch = command.char_at(i)
     if squote {
       if ch == "'" {
         squote = false
@@ -222,7 +222,7 @@ fn __cc_scan_cuts(command) {
         return nil
       }
     } else if ch == "|" {
-      let next = command.char_at(i + 1)
+      const next = command.char_at(i + 1)
       if next == "|" {
         cuts = cuts.push({pos: i, len: 2, kind: "stmt"})
         i = i + 2
@@ -265,19 +265,19 @@ pub fn command_capture_detect(command) {
   if __cc_hazardous(command) {
     return nil
   }
-  let cuts = __cc_scan_cuts(command)
+  const cuts = __cc_scan_cuts(command)
   if cuts == nil {
     return nil
   }
   // Start of the last top-level statement.
-  var start = 0
+  let start = 0
   for cut in cuts {
     if cut.kind == "stmt" {
       start = cut.pos + cut.len
     }
   }
   // Last top-level pipe within that statement.
-  var pipe_pos = -1
+  let pipe_pos = -1
   for cut in cuts {
     if cut.kind == "pipe" && cut.pos >= start {
       pipe_pos = cut.pos
@@ -286,10 +286,10 @@ pub fn command_capture_detect(command) {
   if pipe_pos < 0 {
     return nil
   }
-  let n = command.len()
-  let prefix = command.substring(0, start)
-  let producer = command.substring(start, pipe_pos).trim()
-  let filter = command.substring(pipe_pos + 1, n).trim()
+  const n = command.len()
+  const prefix = command.substring(0, start)
+  const producer = command.substring(start, pipe_pos).trim()
+  const filter = command.substring(pipe_pos + 1, n).trim()
   if producer == "" || filter == "" {
     return nil
   }
@@ -321,16 +321,16 @@ fn __cc_shquote(value) {
  * @example: command_capture_plan("seq 100 | tail -3", "/tmp/out")
  */
 pub fn command_capture_plan(command, capture_path) {
-  let detected = command_capture_detect(command)
+  const detected = command_capture_detect(command)
   if detected == nil {
     return nil
   }
-  let head = if detected.prefix.trim() == "" {
+  const head = if detected.prefix.trim() == "" {
     ""
   } else {
     detected.prefix.trim_end() + " "
   }
-  let rewritten = head + detected.producer + " | tee " + __cc_shquote(capture_path)
+  const rewritten = head + detected.producer + " | tee " + __cc_shquote(capture_path)
     + " 2>/dev/null | "
     + detected.filter
   return {
@@ -358,7 +358,7 @@ fn __cc_new_capture_path() {
 }
 
 fn __cc_posix_shell(word) {
-  let name = __cc_basename(word).lowercase()
+  const name = __cc_basename(word).lowercase()
   return name == "sh" || name == "bash" || name == "zsh" || name == "dash" || name == "ksh"
 }
 
@@ -379,17 +379,17 @@ pub fn command_capture_plan_request(request) {
   if request == nil {
     return nil
   }
-  let mode = request?.mode
+  const mode = request?.mode
   if mode == "argv" {
-    let argv = request?.argv ?? []
+    const argv = request?.argv ?? []
     if len(argv) >= 3 && argv[1] == "-c" && __cc_posix_shell(argv[0]) {
-      let capture_path = __cc_new_capture_path()
-      let plan = command_capture_plan(argv[2], capture_path)
+      const capture_path = __cc_new_capture_path()
+      const plan = command_capture_plan(argv[2], capture_path)
       if plan == nil {
         return nil
       }
-      var new_argv = []
-      var i = 0
+      let new_argv = []
+      let i = 0
       while i < len(argv) {
         if i == 2 {
           new_argv = new_argv.push(plan.rewritten)
@@ -406,8 +406,8 @@ pub fn command_capture_plan_request(request) {
     if platform() == "windows" {
       return nil
     }
-    let capture_path = __cc_new_capture_path()
-    let plan = command_capture_plan(request?.command ?? "", capture_path)
+    const capture_path = __cc_new_capture_path()
+    const plan = command_capture_plan(request?.command ?? "", capture_path)
     if plan == nil {
       return nil
     }
@@ -429,14 +429,14 @@ pub fn command_capture_annotate(result, plan) {
   if result == nil || plan == nil {
     return result
   }
-  let path = plan?.capture_path
+  const path = plan?.capture_path
   if path == nil {
     return result
   }
   if !harness.fs.exists(path) {
     return result
   }
-  let hint = "Filtered output is shown above. The full, unfiltered output of `"
+  const hint = "Filtered output is shown above. The full, unfiltered output of `"
     + plan.producer
     + "` was captured to "
     + path

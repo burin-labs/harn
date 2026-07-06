@@ -11,7 +11,7 @@ import { governor_post_turn } from "std/agent/governors"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn noop_tools() {
-  let tools = tool_registry()
+  const tools = tool_registry()
   return tool_define(
     tools,
     "noop",
@@ -34,8 +34,8 @@ pipeline default() {
       {text: "", tool_calls: [{arguments: {}, id: "n3", name: "noop"}]},
     ],
     { ->
-      let session = "governor-fires-" + uuid()
-      let result = agent_loop(
+      const session = "governor-fires-" + uuid()
+      const result = agent_loop(
         "Work until the budget governor stops you.",
         nil,
         {
@@ -63,8 +63,8 @@ pipeline default() {
       llm_text("All done."),
     ],
     { ->
-      let session = "governor-nofire-" + uuid()
-      let result = agent_loop(
+      const session = "governor-nofire-" + uuid()
+      const result = agent_loop(
         "Finish well within the budget.",
         nil,
         {

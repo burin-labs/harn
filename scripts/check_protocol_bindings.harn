@@ -1,8 +1,8 @@
 import { parse_args } from "std/cli"
 
-let ARTIFACTS_REL = "spec/protocol-artifacts"
+const ARTIFACTS_REL = "spec/protocol-artifacts"
 
-let PYTHON_BINDING_PROBE = """
+const PYTHON_BINDING_PROBE = """
 from __future__ import annotations
 
 import json
@@ -91,9 +91,9 @@ pub fn python_binding_probe_args(artifacts: string) -> list<string> {
 }
 
 pub fn check_python_protocol_bindings(python: string = "python3", root: string = "") -> dict {
-  let artifacts = artifact_root(root)
-  let binding = path_join(artifacts, "python", "harn_protocol.py")
-  let compile = harness.process
+  const artifacts = artifact_root(root)
+  const binding = path_join(artifacts, "python", "harn_protocol.py")
+  const compile = harness.process
     .spawn_captured({cmd: python, args: ["-m", "py_compile", binding]})
   if !compile.success {
     return {
@@ -104,7 +104,7 @@ pub fn check_python_protocol_bindings(python: string = "python3", root: string =
       stderr: compile.stderr,
     }
   }
-  let probe = harness.process.spawn_captured({cmd: python, args: python_binding_probe_args(artifacts)})
+  const probe = harness.process.spawn_captured({cmd: python, args: python_binding_probe_args(artifacts)})
   return {
     ok: probe.success,
     stage: if probe.success {
@@ -126,8 +126,8 @@ fn arg_spec() -> list {
 }
 
 fn emit_captured(report: dict) -> nil {
-  let stdout = to_string(report.stdout ?? "")
-  let stderr = to_string(report.stderr ?? "")
+  const stdout = to_string(report.stdout ?? "")
+  const stderr = to_string(report.stderr ?? "")
   if stdout.trim() != "" {
     harness.stdio.println(stdout.trim())
   }
@@ -138,7 +138,7 @@ fn emit_captured(report: dict) -> nil {
 }
 
 fn main(harness: Harness) {
-  let parsed = parse_args(argv, arg_spec())
+  const parsed = parse_args(argv, arg_spec())
   if parsed?._help ?? false {
     harness.stdio
       .println(
@@ -147,11 +147,11 @@ fn main(harness: Harness) {
     return nil
   }
   if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    let errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
     harness.stdio.eprintln(join(errors, "\n"))
     exit(2)
   }
-  let report = check_python_protocol_bindings(
+  const report = check_python_protocol_bindings(
     to_string(parsed?.python ?? "python3"),
     to_string(parsed?.root ?? ""),
   )

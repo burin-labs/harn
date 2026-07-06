@@ -8,7 +8,7 @@ import { require_policy } from "std/harness/policy"
 pipeline test(task) {
   // kinds clause: an anonymous principal can never satisfy a non-empty
   // allow-set, so it is denied before kind details are considered.
-  let kind_denial = require_policy({kinds: ["operator", "platform_admin"]})
+  const kind_denial = require_policy({kinds: ["operator", "platform_admin"]})
   assert(kind_denial != nil, "unclassified principal must be denied")
   assert_eq(kind_denial.status, 401)
   assert_eq(kind_denial.body.code, "unauthorized")
@@ -18,17 +18,17 @@ pipeline test(task) {
   log("kind missing auth ok")
   // scopes clause: anonymous callers fail as missing-auth, not as a
   // principal-specific missing-scope denial.
-  let scope_denial = require_policy({scopes: ["secrets:write"]})
+  const scope_denial = require_policy({scopes: ["secrets:write"]})
   assert(scope_denial != nil, "missing scope must be denied")
   assert_eq(scope_denial.status, 401)
   assert_eq(scope_denial.body.details.kind, "missing_auth")
   log("scope missing auth ok")
-  let req = {
+  const req = {
     method: "POST",
     path_params: {tenant: "acme"},
     body: "{\"method\":\"doc.write\",\"owner\":\"user_1\"}",
   }
-  let mismatch = require_policy(
+  const mismatch = require_policy(
     {
       matches: [
         {kind: "tenant_mismatch", label: "tenant", left: "req.path_params.tenant", right: {value: "globex"}},
@@ -46,11 +46,11 @@ pipeline test(task) {
   log("tenant mismatch ok")
   assert_eq(require_policy({matches: [{left: "body.owner", right: {value: "user_1"}}]}, req), nil)
   log("body match ok")
-  let auth_match = require_policy({matches: [{left: "body.owner", right: "auth.subject"}]}, req)
+  const auth_match = require_policy({matches: [{left: "body.owner", right: "auth.subject"}]}, req)
   assert_eq(auth_match.status, 401)
   assert_eq(auth_match.body.details.kind, "missing_auth")
   log("auth match missing auth ok")
-  let method_denial = require_policy(
+  const method_denial = require_policy(
     {
       method_path: "body.method",
       methods: {

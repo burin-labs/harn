@@ -16,22 +16,22 @@ import { default_llm_caller, with_cache } from "std/llm/handlers"
 import { with_llm_script } from "std/testing"
 
 pipeline default() {
-  let store = mem_cache({namespace: "with-cache-caller-" + uuid()})
+  const store = mem_cache({namespace: "with-cache-caller-" + uuid()})
   cache_clear({store: store})
-  let caller = with_cache(default_llm_caller(), {store: store, ttl: "1h"})
-  let session_id = "with-cache-caller-session-" + uuid()
-  let hits = atomic(0)
-  let misses = atomic(0)
-  let last_hit_tokens = atomic(0)
+  const caller = with_cache(default_llm_caller(), {store: store, ttl: "1h"})
+  const session_id = "with-cache-caller-session-" + uuid()
+  const hits = atomic(0)
+  const misses = atomic(0)
+  const last_hit_tokens = atomic(0)
   agent_subscribe(
     session_id,
     { ev ->
       if ev?.type == "cache_hit" {
-        let _ = atomic_add(hits, 1)
-        let _ = atomic_set(last_hit_tokens, to_int(ev?.payload?.metrics?.tokens_saved ?? 0))
+        const _ = atomic_add(hits, 1)
+        const _ = atomic_set(last_hit_tokens, to_int(ev?.payload?.metrics?.tokens_saved ?? 0))
       }
       if ev?.type == "cache_miss" {
-        let _ = atomic_add(misses, 1)
+        const _ = atomic_add(misses, 1)
       }
     },
   )
@@ -44,23 +44,23 @@ pipeline default() {
       {text: "fresh-if-uncached", model: "m", provider: "p"},
     ],
     { ->
-      let opts = {provider: "p", model: "m", stream: false}
-      let call_one = {
+      const opts = {provider: "p", model: "m", stream: false}
+      const call_one = {
         prompt: "hello",
         system: "sys",
         opts: opts,
         turn: {iteration: 0, session_id: session_id, attempt: 1},
       }
-      let first = caller(call_one)
-      let second = caller(call_one)
+      const first = caller(call_one)
+      const second = caller(call_one)
       __io_println("first.ok=" + to_string(first.ok))
       __io_println("second.ok=" + to_string(second.ok))
       __io_println(
         "byte_identical=" + to_string(json_stringify(first.value) == json_stringify(second.value)),
       )
       __io_println("mock_calls=" + to_string(len(llm_mock_calls())))
-      let tool_call = call_one + {opts: opts + {tools: []}}
-      let _ = caller(tool_call)
+      const tool_call = call_one + {opts: opts + {tools: []}}
+      const _ = caller(tool_call)
       __io_println("after_tool_call_mock_calls=" + to_string(len(llm_mock_calls())))
       __io_println("misses=" + to_string(atomic_get(misses)))
       __io_println("hits=" + to_string(atomic_get(hits)))

@@ -11,19 +11,19 @@ import {
 } from "std/graphql"
 
 pipeline test(task) {
-  let root = project_root() ?? cwd()
-  let schema_text = harness.fs.read_text(path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"))
-  let parsed = graphql_parse_schema(schema_text)
-  let issue = parsed.types.find({ entry -> return entry.name == "Issue" })
-  let identifier = issue.fields.find({ field -> return field.name == "identifier" })
+  const root = project_root() ?? cwd()
+  const schema_text = harness.fs.read_text(path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"))
+  const parsed = graphql_parse_schema(schema_text)
+  const issue = parsed.types.find({ entry -> return entry.name == "Issue" })
+  const identifier = issue.fields.find({ field -> return field.name == "identifier" })
   __io_println(identifier.type)
-  let introspected = graphql_schema_from_introspection(
+  const introspected = graphql_schema_from_introspection(
     {data: {__schema: {queryType: {name: "Query"}, types: [{kind: "OBJECT", name: "Issue"}]}}},
   )
   __io_println(introspected.query_type)
-  let endpoint = "https://linear.example/graphql"
-  let query = "query Viewer($id: String!) { viewer(id: $id) { id name } }"
-  let operation = graphql_operation(
+  const endpoint = "https://linear.example/graphql"
+  const query = "query Viewer($id: String!) { viewer(id: $id) { id name } }"
+  const operation = graphql_operation(
     "viewer",
     query,
     {
@@ -31,7 +31,7 @@ pipeline test(task) {
       variables_schema: {type: "dict", required: ["id"], properties: {id: {type: "string"}}},
     },
   )
-  let generated = graphql_generate_client([operation])
+  const generated = graphql_generate_client([operation])
   __io_println(contains(generated, "pub fn viewer"))
   http_mock(
     "POST",
@@ -42,7 +42,7 @@ pipeline test(task) {
       headers: {"X-Complexity": "7", "X-RateLimit-Requests-Remaining": "49", "X-Request-Id": "req-1"},
     },
   )
-  let envelope = graphql_execute_operation(
+  const envelope = graphql_execute_operation(
     {endpoint: endpoint, auth: {access_token: "linear-token"}},
     operation,
     {id: "user-1"},
@@ -53,17 +53,17 @@ pipeline test(task) {
   __io_println(envelope.meta.rate_limit.complexity)
   __io_println(envelope.meta.request_id)
   __io_println(envelope.result.meta.status)
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   __io_println(json_parse(calls[0].body).operationName)
   __io_println(calls[0].headers.authorization)
-  let page = graphql_page_info({nodes: [{id: "ISS-1"}], pageInfo: {hasNextPage: true, endCursor: "cursor-1"}})
+  const page = graphql_page_info({nodes: [{id: "ISS-1"}], pageInfo: {hasNextPage: true, endCursor: "cursor-1"}})
   __io_println(page.nodes[0].id)
   __io_println(
     graphql_next_page_variables({first: 1}, {pageInfo: {hasNextPage: true, endCursor: "cursor-1"}}).after,
   )
-  let persisted = graphql_persisted_query(query)
+  const persisted = graphql_persisted_query(query)
   __io_println(len(persisted.sha256_hash))
-  let normalized = graphql_normalize_response(
+  const normalized = graphql_normalize_response(
     {status: 200, headers: {}, body: "{\"data\":{\"ok\":true},\"errors\":[{\"message\":\"partial\"}]}"},
   )
   __io_println(normalized.partial)

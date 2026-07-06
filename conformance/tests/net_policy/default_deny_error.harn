@@ -8,9 +8,9 @@
 import { create, domain } from "std/net_policy"
 
 fn main(harness: Harness) {
-  let policy = create({allow: [domain("github.com")], default: "deny"})
-  let restricted = harness.with_net_policy(policy)
-  var err = nil
+  const policy = create({allow: [domain("github.com")], default: "deny"})
+  const restricted = harness.with_net_policy(policy)
+  let err = nil
   try {
     restricted.net.get("https://example.test/blocked")
   } catch (e) {

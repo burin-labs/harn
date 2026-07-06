@@ -1,4 +1,4 @@
 pipeline default(task) {
-  let x = 42
+  const x = 42
   log(x.name)
 }

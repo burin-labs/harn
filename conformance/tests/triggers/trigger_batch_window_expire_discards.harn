@@ -11,9 +11,9 @@ fn handle_batch(event) {
 
 pipeline test(task) {
   mock_time(2000000)
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "batch-discard-" + unique,
       kind: "channel.emit",
@@ -32,12 +32,12 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("batch.discard.input", {seq: 1})
-  let _ = emit_channel("batch.discard.input", {seq: 2})
-  let _ = emit_channel("batch.discard.input", {seq: 3})
-  let _ = advance_time(60000)
+  const _ = emit_channel("batch.discard.input", {seq: 1})
+  const _ = emit_channel("batch.discard.input", {seq: 2})
+  const _ = emit_channel("batch.discard.input", {seq: 3})
+  const _ = advance_time(60000)
   flush_trigger_aggregations()
-  let fired = channel_events("batch.discard.fired")
+  const fired = channel_events("batch.discard.fired")
   __io_println("after-window:" + to_string(len(fired)))
   unmock_time()
 }

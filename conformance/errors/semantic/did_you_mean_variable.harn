@@ -1,4 +1,4 @@
 pipeline default() {
-  let response = "hello"
+  const response = "hello"
   log(reponse)
 }

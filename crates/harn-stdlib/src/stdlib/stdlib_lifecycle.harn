@@ -76,7 +76,7 @@ pub fn counts(state) {
  * @example: harness.emit_audit("snapshot", {summary: summary(state)})
  */
 pub fn summary(state) {
-  let c = counts(state)
+  const c = counts(state)
   if c.suspended == 0 && c.queued == 0 && c.partial == 0 && c.in_flight == 0
     && c.pool_pending == 0 {
     return "no unsettled work"
@@ -107,7 +107,7 @@ pub fn summary(state) {
  * @example: pipeline_on_finish(on_finish_abandon)
  */
 pub fn on_finish_abandon(harness, return_value) {
-  let unsettled = harness.unsettled_state()
+  const unsettled = harness.unsettled_state()
   if !is_empty(unsettled) {
     harness
       .emit_audit(
@@ -135,7 +135,7 @@ pub fn on_finish_abandon(harness, return_value) {
  * @example: pipeline_on_finish(on_finish_drain)
  */
 pub fn on_finish_drain(harness, return_value) {
-  let unsettled = harness.unsettled_state()
+  const unsettled = harness.unsettled_state()
   if is_empty(unsettled) {
     harness.emit_audit("pipeline_finalized", {reason: "no_unsettled"})
     return return_value
@@ -160,14 +160,14 @@ pub fn on_finish_drain(harness, return_value) {
  */
 pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
   return { harness, return_value ->
-    let result = harness.wait_for_any_settlement(timeout)
+    const result = harness.wait_for_any_settlement(timeout)
     if result?.status == "settled" {
       harness
         .emit_audit("pipeline_finalized", {reason: "settled_within_timeout", timeout: timeout})
       return return_value
     }
     harness.emit_audit("settlement_timeout", {timeout: timeout, result: result})
-    let next = if fallback == nil {
+    const next = if fallback == nil {
       on_finish_drain
     } else {
       fallback
@@ -192,7 +192,7 @@ pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
  */
 pub fn on_finish_handoff_to(target_pipeline, options = nil) {
   return { harness, return_value ->
-    let unsettled = harness.unsettled_state()
+    const unsettled = harness.unsettled_state()
     if is_empty(unsettled) {
       harness
         .emit_audit(
@@ -201,7 +201,7 @@ pub fn on_finish_handoff_to(target_pipeline, options = nil) {
       )
       return return_value
     }
-    let envelope = {unsettled: unsettled, origin: harness.current_pipeline_id()}
+    const envelope = {unsettled: unsettled, origin: harness.current_pipeline_id()}
       + (options ?? {})
     return harness.handoff_to(target_pipeline, envelope)
   }

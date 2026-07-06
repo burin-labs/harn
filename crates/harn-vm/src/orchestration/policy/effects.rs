@@ -591,10 +591,7 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
                 children.extend(summarize.iter());
             }
         }
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
-            children.push(value.as_ref());
-        }
-        Node::ConstBinding { value, .. } => {
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
             children.push(value.as_ref());
         }
         Node::DeadlineBlock { duration, body } => {

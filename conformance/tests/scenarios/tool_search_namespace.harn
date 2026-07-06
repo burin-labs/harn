@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * without another round of schema plumbing.
  */
 pipeline test(task) {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "anchor",
@@ -49,9 +49,9 @@ pipeline test(task) {
     },
   )
   // Registry inspection: namespace survives into tool_list metadata.
-  let tools = tool_list(registry)
-  var deploy_api_ns = nil
-  var lookup_ns = nil
+  const tools = tool_list(registry)
+  let deploy_api_ns = nil
+  let lookup_ns = nil
   for t in tools {
     if t.name == "deploy_api" {
       deploy_api_ns = t.namespace
@@ -78,18 +78,18 @@ pipeline test(task) {
           tool_search: {variant: "bm25", mode: "native"},
         },
       )
-      let calls = llm_mock_calls()
-      let meta = calls[0].tools[0]
+      const calls = llm_mock_calls()
+      const meta = calls[0].tools[0]
       assert(meta.type == "tool_search", "meta-tool in slot 0")
-      let ns_list = meta.namespaces
+      const ns_list = meta.namespaces
       assert(ns_list != nil, "meta-tool carries namespaces")
       assert(len(ns_list) == 2, "two distinct namespaces")
       assert(ns_list[0] == "crm", "crm sorts first")
       assert(ns_list[1] == "ops", "ops second")
-      var saw_deploy_api_ns = false
+      let saw_deploy_api_ns = false
       for t in calls[0].tools {
         if t.type == "function" {
-          let fname = t.function?.name
+          const fname = t.function?.name
           if fname == "deploy_api" {
             assert(t.namespace == "ops", "deploy_api.namespace reaches OpenAI wrapper")
             saw_deploy_api_ns = true
@@ -97,7 +97,7 @@ pipeline test(task) {
         }
       }
       assert(saw_deploy_api_ns, "deploy_api namespace passthrough confirmed")
-      let caught_bad_ns = try {
+      const caught_bad_ns = try {
         tool_define(
           tool_registry(),
           "busted",

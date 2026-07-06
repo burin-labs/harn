@@ -2,7 +2,7 @@ import "../gha_spend_report.harn"
 
 @test
 pipeline test_billing_usage_rows_filters_and_sorts(task) {
-  let rows = billing_usage_rows(
+  const rows = billing_usage_rows(
     {
       usageItems: [
         {
@@ -37,7 +37,7 @@ pipeline test_billing_usage_rows_filters_and_sorts(task) {
   assert_eq(rows[1].label, "repo:burin-code")
   assert_eq(rows[1].minutes, 15.0)
   assert_eq(rows[1].usd, 2.0)
-  let filtered = billing_usage_rows(
+  const filtered = billing_usage_rows(
     {
       usageItems: [
         {
@@ -57,7 +57,7 @@ pipeline test_billing_usage_rows_filters_and_sorts(task) {
 
 @test
 pipeline test_action_run_refs_preserve_workflow_names(task) {
-  let refs = action_run_refs(
+  const refs = action_run_refs(
     {workflow_runs: [{id: 123, name: "Rust on Windows (build + smoke test)"}, {name: "missing id"}]},
   )
   assert_eq(refs, [{id: "123", name: "Rust on Windows (build + smoke test)"}])
@@ -65,7 +65,7 @@ pipeline test_action_run_refs_preserve_workflow_names(task) {
 
 @test
 pipeline test_run_timing_rows_groups_by_repo_workflow(task) {
-  let rows = run_timing_rows(
+  const rows = run_timing_rows(
     [
       {
         repo: "harn",
@@ -84,7 +84,7 @@ pipeline test_run_timing_rows_groups_by_repo_workflow(task) {
 
 @test
 pipeline test_render_spend_table(task) {
-  let rendered = render_spend_table([{label: "repo:harn", minutes: 12.345, usd: 1.2, source: "billing-usage"}])
+  const rendered = render_spend_table([{label: "repo:harn", minutes: 12.345, usd: 1.2, source: "billing-usage"}])
   assert(rendered.contains("workflow"), "header rendered")
   assert(rendered.contains("repo:harn"), "row label rendered")
   assert(rendered.contains("12.35"), "minutes rounded")

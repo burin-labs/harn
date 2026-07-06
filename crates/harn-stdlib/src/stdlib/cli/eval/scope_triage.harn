@@ -2,12 +2,12 @@ import { agent_capture_events } from "std/agent/events"
 import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
 
 fn __env_bool(harness: Harness, name: string) -> bool {
-  let value = lowercase(trim(harness.env.get_or(name, "")))
+  const value = lowercase(trim(harness.env.get_or(name, "")))
   return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 fn __env_int(harness: Harness, name: string) {
-  let value = trim(harness.env.get_or(name, ""))
+  const value = trim(harness.env.get_or(name, ""))
   if value == "" {
     return nil
   }
@@ -15,7 +15,7 @@ fn __env_int(harness: Harness, name: string) {
 }
 
 fn __env_float(harness: Harness, name: string, fallback) {
-  let value = trim(harness.env.get_or(name, ""))
+  const value = trim(harness.env.get_or(name, ""))
   if value == "" {
     return fallback
   }
@@ -26,8 +26,8 @@ fn __mkdirp(harness: Harness, path: string) {
   if trim(path) == "" {
     return
   }
-  let absolute = starts_with(path, "/")
-  var current = if absolute {
+  const absolute = starts_with(path, "/")
+  let current = if absolute {
     "/"
   } else {
     ""
@@ -50,19 +50,19 @@ fn __mkdirp(harness: Harness, path: string) {
 }
 
 fn __load_cases(harness: Harness, path: string, max_cases) {
-  let raw = try {
+  const raw = try {
     harness.fs.read_text(path)
   } catch (e) {
     harness.stdio.eprintln("error: failed to read scope-triage dataset " + path + ": " + to_string(e))
     return nil
   }
-  let decoded = try {
+  const decoded = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("error: failed to parse scope-triage dataset " + path + ": " + to_string(e))
     return nil
   }
-  var cases = if type_of(decoded) == "list" {
+  let cases = if type_of(decoded) == "list" {
     decoded
   } else {
     decoded?.cases ?? []
@@ -72,8 +72,8 @@ fn __load_cases(harness: Harness, path: string, max_cases) {
     return nil
   }
   if max_cases != nil && max_cases >= 0 && len(cases) > max_cases {
-    var limited = []
-    var i = 0
+    let limited = []
+    let i = 0
     while i < max_cases {
       limited = limited.push(cases[i])
       i = i + 1
@@ -93,8 +93,8 @@ fn __contains_any(text, needles) {
 }
 
 fn __reference_classifier(payload) {
-  let text = lowercase(to_string(payload?.user_message ?? ""))
-  let out_markers = [
+  const text = lowercase(to_string(payload?.user_message ?? ""))
+  const out_markers = [
     "sibling-ide",
     "sibling-cloud",
     "project y",
@@ -118,7 +118,7 @@ fn __reference_classifier(payload) {
       evidence: "message names a path or repo outside /workspace/harn",
     }
   }
-  let ambiguous = [
+  const ambiguous = [
     "maybe",
     "explore",
     "compare",
@@ -140,7 +140,7 @@ fn __reference_classifier(payload) {
       evidence: "message names a path or repo outside /workspace/harn",
     }
   }
-  let in_markers = [
+  const in_markers = [
     "this repo",
     "current repo",
     "current workspace",
@@ -170,7 +170,7 @@ fn __scope_eval_anchor() {
 }
 
 fn __verdict_event(events) {
-  let verdicts = events.filter({ event -> event.type == "scope_classifier_verdict" })
+  const verdicts = events.filter({ event -> event.type == "scope_classifier_verdict" })
   if len(verdicts) == 0 {
     return {label: "none", confidence: 0.0, evidence: "no scope_classifier_verdict event"}
   }
@@ -178,8 +178,8 @@ fn __verdict_event(events) {
 }
 
 fn __run_case(case, classifier) {
-  let session = "scope-triage-eval-" + to_string(case?.id ?? uuid())
-  let captured = agent_capture_events(
+  const session = "scope-triage-eval-" + to_string(case?.id ?? uuid())
+  const captured = agent_capture_events(
     session,
     fn() {
       agent_session_open(session, {workspace_anchor: __scope_eval_anchor()})
@@ -207,17 +207,17 @@ fn __run_case(case, classifier) {
       )
     },
   )
-  let verdict = __verdict_event(captured.events)
-  let expected = to_string(case?.expected ?? case?.label ?? "")
-  let predicted = to_string(verdict?.label ?? "none")
-  let correct = if expected == "ambiguous" || expected == "escalate" {
+  const verdict = __verdict_event(captured.events)
+  const expected = to_string(case?.expected ?? case?.label ?? "")
+  const predicted = to_string(verdict?.label ?? "none")
+  const correct = if expected == "ambiguous" || expected == "escalate" {
     predicted == "escalate"
   } else {
     predicted == expected
   }
-  let skipped_main_turn = captured.result?.status == "scope_alert"
+  const skipped_main_turn = captured.result?.status == "scope_alert"
     && captured.result?.stop_reason == "out_of_scope"
-  let main_calls = if skipped_main_turn {
+  const main_calls = if skipped_main_turn {
     0
   } else {
     1
@@ -248,14 +248,14 @@ fn __rate(n, d) {
 }
 
 fn __summarize(dataset_path, output_dir, live, model, threshold, cases, reports) {
-  var correct = 0
-  var covered = 0
-  var false_positive = 0
-  var false_negative = 0
-  var in_scope = 0
-  var out_scope = 0
-  var ambiguous = 0
-  var main_calls = 0
+  let correct = 0
+  let covered = 0
+  let false_positive = 0
+  let false_negative = 0
+  let in_scope = 0
+  let out_scope = 0
+  let ambiguous = 0
+  let main_calls = 0
   for report in reports {
     if report.correct {
       correct = correct + 1
@@ -278,14 +278,14 @@ fn __summarize(dataset_path, output_dir, live, model, threshold, cases, reports)
     }
     main_calls = main_calls + report.main_llm_calls
   }
-  let total = len(reports)
-  let baseline_main_calls = total
-  let saved_main_calls = baseline_main_calls - main_calls
-  let cost_reduction = __rate(saved_main_calls, baseline_main_calls)
-  let false_positive_rate = __rate(false_positive, in_scope)
-  let false_negative_rate = __rate(false_negative, out_scope)
-  let pass = cost_reduction >= 0.3 && false_positive_rate <= 0.05 && false_negative_rate <= 0.2
-  let decision = if pass {
+  const total = len(reports)
+  const baseline_main_calls = total
+  const saved_main_calls = baseline_main_calls - main_calls
+  const cost_reduction = __rate(saved_main_calls, baseline_main_calls)
+  const false_positive_rate = __rate(false_positive, in_scope)
+  const false_negative_rate = __rate(false_negative, out_scope)
+  const pass = cost_reduction >= 0.3 && false_positive_rate <= 0.05 && false_negative_rate <= 0.2
+  const decision = if pass {
     "keep_opt_in_candidate_for_default_on"
   } else if false_positive_rate > 0.15 || cost_reduction < 0.1 {
     "did_not_converge_keep_hook_opt_in"
@@ -323,7 +323,7 @@ fn __summarize(dataset_path, output_dir, live, model, threshold, cases, reports)
 }
 
 fn __jsonl(reports) {
-  var lines = []
+  let lines = []
   for report in reports {
     lines = lines.push(json_stringify(report))
   }
@@ -335,12 +335,12 @@ fn __pct(value) {
 }
 
 fn __markdown(report) {
-  let status = if report.pass {
+  const status = if report.pass {
     "PASS"
   } else {
     "FAIL"
   }
-  var out = "# Scope Triage Eval\n\n"
+  let out = "# Scope Triage Eval\n\n"
   out = out + "- status: " + status + "\n"
   out = out + "- cases: " + to_string(report.total_cases) + "\n"
   out = out + "- accuracy: " + __pct(report.accuracy) + "\n"
@@ -352,7 +352,7 @@ fn __markdown(report) {
   out = out + "| id | expected | predicted | main calls | correct |\n"
   out = out + "|---|---|---|---:|---:|\n"
   for case in report.cases {
-    let correct_label = if case.correct {
+    const correct_label = if case.correct {
       "yes"
     } else {
       "no"
@@ -372,23 +372,23 @@ fn __markdown(report) {
 }
 
 fn main(harness: Harness) -> int {
-  let dataset_path = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_DATASET", "evals/scope_triage/dataset.json")
-  let output_dir = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_OUTPUT", "")
-  let resolved_output = if trim(output_dir) == "" {
+  const dataset_path = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_DATASET", "evals/scope_triage/dataset.json")
+  const output_dir = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_OUTPUT", "")
+  const resolved_output = if trim(output_dir) == "" {
     ".harn-runs/scope-triage/latest"
   } else {
     output_dir
   }
-  let json_mode = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_JSON")
-  let live = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_LIVE")
-  let model = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_MODEL", "ollama:qwen3:1.7b")
-  let threshold = __env_float(harness, "HARN_EVAL_SCOPE_TRIAGE_THRESHOLD", 0.65)
-  let max_cases = __env_int(harness, "HARN_EVAL_SCOPE_TRIAGE_MAX_CASES")
-  let cases = __load_cases(harness, dataset_path, max_cases)
+  const json_mode = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_JSON")
+  const live = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_LIVE")
+  const model = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_MODEL", "ollama:qwen3:1.7b")
+  const threshold = __env_float(harness, "HARN_EVAL_SCOPE_TRIAGE_THRESHOLD", 0.65)
+  const max_cases = __env_int(harness, "HARN_EVAL_SCOPE_TRIAGE_MAX_CASES")
+  const cases = __load_cases(harness, dataset_path, max_cases)
   if cases == nil {
     return 1
   }
-  let classifier = if live {
+  const classifier = if live {
     pre_turn_scope_classifier({enabled: true, model: model, confidence_threshold: threshold})
   } else {
     pre_turn_scope_classifier(
@@ -399,11 +399,11 @@ fn main(harness: Harness) -> int {
       },
     )
   }
-  var reports = []
+  let reports = []
   for case in cases {
     reports = reports.push(__run_case(case, classifier))
   }
-  let report = __summarize(dataset_path, resolved_output, live, model, threshold, cases, reports)
+  const report = __summarize(dataset_path, resolved_output, live, model, threshold, cases, reports)
   __mkdirp(harness, resolved_output)
   harness.fs.write_text(path_join(resolved_output, "summary.json"), json_stringify_pretty(report))
   harness.fs.write_text(path_join(resolved_output, "per_case.jsonl"), __jsonl(reports))

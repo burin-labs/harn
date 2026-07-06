@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("crash_recovery_replays_in_flight_events")
+  const result = trigger_test_harness("crash_recovery_replays_in_flight_events")
   __io_println(result.ok)
   __io_println(len(result.emitted) == 1)
   __io_println(result.emitted[0].note == "recovered")

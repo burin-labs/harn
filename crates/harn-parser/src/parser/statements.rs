@@ -147,33 +147,14 @@ impl Parser {
         ))
     }
 
-    /// Parse `const NAME [: Type] = EXPR`. Const bindings are restricted to a
-    /// simple identifier on the left-hand side — destructuring patterns are
-    /// disallowed because each constant must have a single, statically known
-    /// name addressable by the const-eval cache. The right-hand side is
-    /// stored verbatim; bounded sandbox validation happens during typecheck
-    /// via `harn_parser::const_eval`.
+    /// Parse `const PATTERN [: Type] = EXPR` — the immutable binding form.
+    /// A destructuring pattern is permitted (like `let`); only a plain
+    /// identifier binding is eligible for compile-time folding by
+    /// `harn_parser::const_eval`. An impure initializer is not an error — it
+    /// is simply a non-folded immutable runtime binding.
     pub(super) fn parse_const_binding(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Const, "const")?;
-        let name = self.consume_identifier("const binding name")?;
-        let type_ann = self.try_parse_type_annotation()?;
-        self.consume(&TokenKind::Assign, "=")?;
-        let value = self.parse_expression()?;
-        let end = value.span;
-        Ok(spanned(
-            Node::ConstBinding {
-                name,
-                type_ann,
-                value: Box::new(value),
-            },
-            Span::merge(start, end),
-        ))
-    }
-
-    pub(super) fn parse_var_binding(&mut self) -> Result<SNode, ParserError> {
-        let start = self.current_span();
-        self.consume(&TokenKind::Var, "var")?;
         let pattern = self.parse_binding_pattern()?;
         let type_ann = if matches!(pattern, BindingPattern::Identifier(_)) {
             self.try_parse_type_annotation()?
@@ -184,13 +165,28 @@ impl Parser {
         let value = self.parse_expression()?;
         let end = value.span;
         Ok(spanned(
-            Node::VarBinding {
+            Node::ConstBinding {
                 pattern,
                 type_ann,
                 value: Box::new(value),
             },
             Span::merge(start, end),
         ))
+    }
+
+    /// `var` was removed in the TypeScript-aligned keyword re-platform. It is
+    /// still lexed as a reserved word so this migration diagnostic can fire
+    /// instead of an opaque parse error. Mutable bindings are now `let`;
+    /// immutable bindings (formerly `let`) are `const`.
+    pub(super) fn parse_var_binding(&mut self) -> Result<SNode, ParserError> {
+        let span = self.current_span();
+        Err(ParserError::Unexpected {
+            got: "removed keyword `var`".into(),
+            expected:
+                "`let` for a mutable binding (or `const`, formerly `let`, for an immutable one)"
+                    .into(),
+            span,
+        })
     }
 
     pub(super) fn parse_if_else(&mut self) -> Result<SNode, ParserError> {

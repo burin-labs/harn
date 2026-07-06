@@ -1,7 +1,7 @@
 import { parse, parser } from "std/cli/argparse"
 
 fn main(harness: Harness) {
-  let spec = parser(
+  const spec = parser(
     {
       name: "demo",
       args: [
@@ -10,7 +10,7 @@ fn main(harness: Harness) {
       ],
     },
   )
-  let r = parse(spec, ["foo.txt", "bar.txt"])
+  const r = parse(spec, ["foo.txt", "bar.txt"])
   harness.stdio.println(r.ok.input)
   harness.stdio.println(r.ok.output)
   harness.stdio.println(len(r.ok.rest))

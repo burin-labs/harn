@@ -5,8 +5,8 @@ pipeline test_template_persona_smoke(task) {
   llm_mock(
     {text: "{\"decision\": \"ship\", \"confidence\": 0.92, \"rationale\": \"fixture is low risk\"}"},
   )
-  let fixture = json_parse(harness.fs.read_text("../fixtures/happy_path.json"))
-  let result = template_persona({fixture: fixture})
+  const fixture = json_parse(harness.fs.read_text("../fixtures/happy_path.json"))
+  const result = template_persona({fixture: fixture})
   assert_eq(result.status, "completed")
   assert_eq(result.state.decision, "ship")
   assert_eq(result.receipt.schema, "harn.receipt.v1")

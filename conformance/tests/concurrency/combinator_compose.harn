@@ -10,30 +10,30 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
 import { compose } from "std/lifecycle/combinators"
 
 pipeline default() {
-  let log_a = { harness, return_value ->
+  const log_a = { harness, return_value ->
     harness.emit_audit("step_a", {value: return_value})
     return return_value + 1
   }
-  let log_b = { harness, return_value ->
+  const log_b = { harness, return_value ->
     harness.emit_audit("step_b", {value: return_value})
     return return_value + 10
   }
-  let log_c = { harness, return_value ->
+  const log_c = { harness, return_value ->
     harness.emit_audit("step_c", {value: return_value})
     return return_value * 2
   }
   pipeline_on_finish(
     { harness, return_value ->
-      let chained = compose([log_a, log_b, log_c])
-      let result = chained(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const chained = compose([log_a, log_b, log_c])
+      const result = chained(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("result=" + to_string(result))
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("a_value=" + to_string(audits[0].payload.value))
       harness.stdio.println("b_value=" + to_string(audits[1].payload.value))
       harness.stdio.println("c_value=" + to_string(audits[2].payload.value))
       harness.stdio.println("kind_order=" + audits[0].kind + "," + audits[1].kind + "," + audits[2].kind)
-      let empty_chain = compose([])
+      const empty_chain = compose([])
       harness.stdio.println("empty=" + to_string(empty_chain(harness, 42)))
       return return_value
     },

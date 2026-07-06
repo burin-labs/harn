@@ -9,32 +9,32 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
 import { first_available } from "std/lifecycle/combinators"
 
 pipeline default() {
-  let nil_cb = { harness, _return_value ->
+  const nil_cb = { harness, _return_value ->
     harness.emit_audit("nil_called", {})
     return nil
   }
-  let value_cb = { harness, _return_value ->
+  const value_cb = { harness, _return_value ->
     harness.emit_audit("value_called", {})
     return "from_value"
   }
-  let never_cb = { harness, _return_value ->
+  const never_cb = { harness, _return_value ->
     harness.emit_audit("never_called", {})
     return "never"
   }
   pipeline_on_finish(
     { harness, return_value ->
-      let chain = first_available([nil_cb, value_cb, never_cb])
-      let result = chain(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const chain = first_available([nil_cb, value_cb, never_cb])
+      const result = chain(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("result=" + result)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("kind_order=" + audits[0].kind + "," + audits[1].kind)
-      let only_nils = first_available([nil_cb, nil_cb])
-      let none = only_nils(harness, return_value)
-      let trailing = lifecycle_audit_log_take()
+      const only_nils = first_available([nil_cb, nil_cb])
+      const none = only_nils(harness, return_value)
+      const trailing = lifecycle_audit_log_take()
       harness.stdio.println("none=" + to_string(none == nil))
       harness.stdio.println("trailing_count=" + to_string(len(trailing)))
-      let empty = first_available([])
+      const empty = first_available([])
       harness.stdio.println("empty=" + to_string(empty(harness, return_value) == nil))
       return return_value
     },

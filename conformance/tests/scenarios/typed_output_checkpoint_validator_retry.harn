@@ -3,7 +3,7 @@ import { typed_output_checkpoint } from "std/checkpoint"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     additionalProperties: false,
     required: ["decision", "confidence", "evidence"],
@@ -21,8 +21,8 @@ pipeline default() {
       llm_text("{\"decision\":\"wait\",\"confidence\":0.95,\"evidence\":[\"ci still pending\"]}"),
     ],
     { ->
-      let session_id = "typed-checkpoint-session"
-      let captured = agent_capture_events(
+      const session_id = "typed-checkpoint-session"
+      const captured = agent_capture_events(
         session_id,
         fn() { typed_output_checkpoint(
           "merge_captain.next_action",
@@ -30,7 +30,7 @@ pipeline default() {
           schema,
           {provider: "mock", session_id: session_id, validator_retries: 1, repair: {enabled: false}},
           fn(data) {
-            var errors = []
+            let errors = []
             if data.confidence < 0.7 {
               errors = errors.push("confidence must be at least 0.7")
             }
@@ -41,7 +41,7 @@ pipeline default() {
           },
         ) },
       )
-      let checkpoint = captured.result
+      const checkpoint = captured.result
       __io_println(checkpoint.ok)
       __io_println(checkpoint.data.decision)
       __io_println(checkpoint.attempts)
@@ -51,8 +51,8 @@ pipeline default() {
       __io_println(contains(llm_mock_calls()[1].messages[0].content, "confidence must be at least 0.7"))
       __io_println(captured.events[0].type)
       __io_println(captured.events[0].checkpoint.final_accepted)
-      let trace = agent_trace()
-      var found = false
+      const trace = agent_trace()
+      let found = false
       for event in trace {
         if event.type == "typed_checkpoint" && event.name == "merge_captain.next_action" {
           found = event.final_accepted

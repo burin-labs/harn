@@ -2,7 +2,7 @@ import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  let routed = agent_chat_route_input("/help", {}, {"/runs": { _req -> {kind: "handled", message: "runs"} }})
+  const routed = agent_chat_route_input("/help", {}, {"/runs": { _req -> {kind: "handled", message: "runs"} }})
   __io_println(routed.kind)
   __io_println(contains(routed.message, "/runs"))
   with_llm_script(
@@ -14,10 +14,10 @@ pipeline default() {
       llm_text("Done."),
     ],
     { ->
-      let input_count = atomic(0)
-      let model_count = atomic(0)
-      let wait_count = atomic(0)
-      let result = agent_chat_loop(
+      const input_count = atomic(0)
+      const model_count = atomic(0)
+      const wait_count = atomic(0)
+      const result = agent_chat_loop(
         {
           session_id: "agent-chat-loop-conformance",
           provider: "mock",

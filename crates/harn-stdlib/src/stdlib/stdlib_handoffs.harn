@@ -7,7 +7,7 @@
 import "std/triggers"
 
 fn __handoff_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -19,7 +19,7 @@ fn __handoff_value_string(value) -> string {
 }
 
 fn __handoff_kind(payload, context) -> string {
-  let kind = __handoff_value_string(payload?.kind ?? context?.kind)
+  const kind = __handoff_value_string(payload?.kind ?? context?.kind)
   if kind == "" {
     return "handoff"
   }
@@ -31,26 +31,26 @@ fn __handoff_source(payload, context) -> string {
 }
 
 fn __handoff_route_matches(route, kind, source) -> bool {
-  let route_kind = __handoff_value_string(route?.kind)
-  let route_source = __handoff_value_string(route?.from)
+  const route_kind = __handoff_value_string(route?.kind)
+  const route_source = __handoff_value_string(route?.from)
   return (route_kind == "*" || route_kind == kind)
     && (route_source == "*" || route_source == source)
 }
 
 fn __handoff_target_record(raw_target, route_target) {
-  let target = __handoff_value_string(raw_target)
+  const target = __handoff_value_string(raw_target)
   if starts_with(target, "human:") {
-    let label = trim(substring(target, len("human:")))
+    const label = trim(substring(target, len("human:")))
     return {kind: "human", id: label, label: label}
   }
   if starts_with(target, "a2a://") {
     return {kind: "a2a", uri: target, label: target}
   }
   if starts_with(target, "worker://") {
-    let queue = trim(substring(target, len("worker://")))
+    const queue = trim(substring(target, len("worker://")))
     return {kind: "worker", id: queue, label: queue}
   }
-  let persona = if starts_with(target, "persona://") {
+  const persona = if starts_with(target, "persona://") {
     trim(substring(target, len("persona://")))
   } else {
     target
@@ -62,7 +62,7 @@ fn __handoff_budget_exhausted(handoff, context) -> bool {
   if context?.budget_exhausted {
     return true
   }
-  let budget = handoff?.budget_remaining
+  const budget = handoff?.budget_remaining
   return (budget?.tokens != nil && budget.tokens <= 0)
     || (budget?.tool_calls != nil && budget.tool_calls <= 0)
     || (budget?.dollars != nil && budget.dollars <= 0.0)
@@ -72,12 +72,12 @@ fn __handoff_approval_denied(handoff, context) -> bool {
   if context?.approval_denied {
     return true
   }
-  let status = lowercase(__handoff_value_string(context?.approval_status ?? handoff?.approval_status))
+  const status = lowercase(__handoff_value_string(context?.approval_status ?? handoff?.approval_status))
   return status == "denied" || status == "rejected"
 }
 
 fn __handoff_predicate_matches(raw_when, handoff, context) -> bool {
-  let when = __handoff_value_string(raw_when)
+  const when = __handoff_value_string(raw_when)
   if when == "" || when == "always" {
     return true
   }
@@ -87,8 +87,8 @@ fn __handoff_predicate_matches(raw_when, handoff, context) -> bool {
   if when == "approval_denied" {
     return __handoff_approval_denied(handoff, context)
   }
-  let predicates = context?.predicates ?? {}
-  let predicate = predicates[when]
+  const predicates = context?.predicates ?? {}
+  const predicate = predicates[when]
   if __handoff_is_callable(predicate) {
     return predicate(handoff, context)
   }
@@ -96,8 +96,8 @@ fn __handoff_predicate_matches(raw_when, handoff, context) -> bool {
 }
 
 fn __handoff_decision(route, route_index, route_target, target_index, handoff, context) {
-  let raw_target = __handoff_value_string(route_target?.target)
-  let target = __handoff_target_record(raw_target, route_target)
+  const raw_target = __handoff_value_string(route_target?.target)
+  const target = __handoff_target_record(raw_target, route_target)
   return {
     route_id: route?.id,
     route_index: route_index,
@@ -122,16 +122,16 @@ fn __handoff_decision(route, route_index, route_target, target_index, handoff, c
  * @errors: []
  */
 pub fn handoff_route_select(handoff_payload, routes = nil, context = nil) {
-  let route_table = routes ?? handoff_routes()
-  let kind = __handoff_kind(handoff_payload, context)
-  let source = __handoff_source(handoff_payload, context)
+  const route_table = routes ?? handoff_routes()
+  const kind = __handoff_kind(handoff_payload, context)
+  const source = __handoff_source(handoff_payload, context)
   for (route_index, route) in iter(route_table).enumerate() {
     if !__handoff_route_matches(route, kind, source) {
       continue
     }
-    var fallback = nil
+    let fallback = nil
     for (target_index, route_target) in iter(route?.route ?? []).enumerate() {
-      let when = __handoff_value_string(route_target?.when)
+      const when = __handoff_value_string(route_target?.when)
       if when == "" || when == "always" {
         if fallback == nil {
           fallback = __handoff_decision(route, route_index, route_target, target_index, handoff_payload, context)
@@ -156,11 +156,11 @@ pub fn handoff_route_select(handoff_payload, routes = nil, context = nil) {
  * @errors: []
  */
 pub fn handoff_routed(payload, routes = nil, context = nil) {
-  let decision = handoff_route_select(payload, routes, context)
+  const decision = handoff_route_select(payload, routes, context)
   if decision == nil {
     throw "handoff_routed: no matching handoff route"
   }
-  let metadata = (payload?.metadata ?? {}) + {route_decision: decision}
+  const metadata = (payload?.metadata ?? {}) + {route_decision: decision}
   return handoff(
     (payload ?? {})
       + {
@@ -188,9 +188,9 @@ fn __handoff_dispatcher(options, selected) {
   if __handoff_is_callable(options?.dispatcher) {
     return options.dispatcher
   }
-  let dispatchers = options?.dispatchers ?? {}
-  let target_id = selected?.target_persona_or_human?.id
-  let target = selected?.target
+  const dispatchers = options?.dispatchers ?? {}
+  const target_id = selected?.target_persona_or_human?.id
+  const target = selected?.target
   if __handoff_is_callable(dispatchers[target]) {
     return dispatchers[target]
   }
@@ -208,7 +208,7 @@ fn __handoff_dispatch_audit_scope(handoff_value) {
 }
 
 fn __handoff_policy_override(handoff_value) {
-  let policy = handoff_value?.policy_override
+  const policy = handoff_value?.policy_override
   if type_of(policy) == "dict" {
     return policy
   }
@@ -216,7 +216,7 @@ fn __handoff_policy_override(handoff_value) {
 }
 
 fn __handoff_invoke_dispatcher(dispatcher, envelope) {
-  let policy = __handoff_policy_override(envelope?.handoff)
+  const policy = __handoff_policy_override(envelope?.handoff)
   if policy == nil {
     return dispatcher(envelope)
   }
@@ -230,37 +230,37 @@ fn __handoff_invoke_dispatcher(dispatcher, envelope) {
  * @errors: []
  */
 pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
-  let handoff_value = handoff(handoff_payload)
-  let selected = decision ?? handoff_value?.route_decision
+  const handoff_value = handoff(handoff_payload)
+  const selected = decision ?? handoff_value?.route_decision
   if selected == nil {
     throw "handoff_dispatch: route decision is required"
   }
-  let dispatch = selected
+  const dispatch = selected
     + {dispatch_status: "enqueued", dispatch_receipt: nil}
-  let payload = {
+  const payload = {
     handoff_id: handoff_value.id,
     handoff: handoff_value,
     decision: dispatch,
     tenant_id: options?.tenant_id,
     audit: {scope: __handoff_dispatch_audit_scope(handoff_value)},
   }
-  let decision_event_id = event_log
+  const decision_event_id = event_log
     .emit(
     "handoff.dispatch.decisions",
     "handoff_route_selected",
     payload,
     {handoff_id: handoff_value.id, handoff_kind: handoff_value.kind, target: selected.target},
   )
-  let enqueue_event_id = event_log
+  const enqueue_event_id = event_log
     .emit(
     __handoff_dispatch_topic(selected),
     "handoff_dispatch_enqueued",
     payload + {decision_event_id: decision_event_id},
     {handoff_id: handoff_value.id, target: selected.target},
   )
-  let dispatcher = __handoff_dispatcher(options, selected)
-  let invocation_envelope = payload + {decision_event_id: decision_event_id, enqueue_event_id: enqueue_event_id}
-  let invocation_result = if dispatcher == nil {
+  const dispatcher = __handoff_dispatcher(options, selected)
+  const invocation_envelope = payload + {decision_event_id: decision_event_id, enqueue_event_id: enqueue_event_id}
+  const invocation_result = if dispatcher == nil {
     nil
   } else {
     __handoff_invoke_dispatcher(dispatcher, invocation_envelope)

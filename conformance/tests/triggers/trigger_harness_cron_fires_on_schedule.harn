@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("cron_fires_on_schedule")
+  const result = trigger_test_harness("cron_fires_on_schedule")
   __io_println(result.ok)
   __io_println(len(result.emitted) == 1)
   __io_println(result.emitted[0].provider == "cron")

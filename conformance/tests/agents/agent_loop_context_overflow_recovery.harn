@@ -11,7 +11,7 @@ import { llm_done, with_llm_script } from "std/testing"
  * failures which stay terminal immediately.
  */
 fn lookup_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -54,7 +54,7 @@ pipeline main() {
       llm_done(),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Inspect evidence and finish.",
         nil,
         {
@@ -87,7 +87,7 @@ pipeline main() {
       overflow_turn(),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Inspect evidence and finish.",
         nil,
         {
@@ -108,7 +108,7 @@ pipeline main() {
   with_llm_script(
     [{error: {category: "auth", message: "missing API key"}}, llm_done()],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Inspect evidence and finish.",
         nil,
         {

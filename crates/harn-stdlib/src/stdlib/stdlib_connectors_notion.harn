@@ -1,7 +1,7 @@
 import { filter_nil } from "std/collections"
 import { merge } from "std/json"
 
-var notion_connector_config = {}
+let notion_connector_config = {}
 
 pub fn configure(config) {
   notion_connector_config = filter_nil(config ?? {})

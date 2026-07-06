@@ -60,17 +60,17 @@ fn __safe_dict(value) -> dict {
  * and `drop_pp` renderings.
  */
 fn __format_float_1(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  let scaled = to_int(round(abs_f * 10.0)) ?? 0
-  let whole = scaled / 10
-  let frac = scaled - whole * 10
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const scaled = to_int(round(abs_f * 10.0)) ?? 0
+  const whole = scaled / 10
+  const frac = scaled - whole * 10
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     ""
@@ -83,21 +83,21 @@ fn __format_float_1(value) -> string {
  * `drop_pp` and `max_drop_pp` lines.
  */
 fn __format_float_2(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  let scaled = to_int(round(abs_f * 100.0)) ?? 0
-  let whole = scaled / 100
-  let frac = scaled - whole * 100
-  var frac_str = to_string(frac)
+  const scaled = to_int(round(abs_f * 100.0)) ?? 0
+  const whole = scaled / 100
+  const frac = scaled - whole * 100
+  let frac_str = to_string(frac)
   while len(frac_str) < 2 {
     frac_str = "0" + frac_str
   }
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     ""
@@ -110,21 +110,21 @@ fn __format_float_2(value) -> string {
  * for the summary's `total_cost_usd={:.6}` line.
  */
 fn __format_float_6(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let negative = f < 0.0
-  let abs_f = if negative {
+  const f = to_float(value) ?? 0.0
+  const negative = f < 0.0
+  const abs_f = if negative {
     -f
   } else {
     f
   }
-  let scaled = to_int(round(abs_f * 1000000.0)) ?? 0
-  let whole = scaled / 1000000
-  let frac = scaled - whole * 1000000
-  var frac_str = to_string(frac)
+  const scaled = to_int(round(abs_f * 1000000.0)) ?? 0
+  const whole = scaled / 1000000
+  const frac = scaled - whole * 1000000
+  let frac_str = to_string(frac)
   while len(frac_str) < 6 {
     frac_str = "0" + frac_str
   }
-  let sign = if negative && (whole != 0 || frac != 0) {
+  const sign = if negative && (whole != 0 || frac != 0) {
     "-"
   } else {
     ""
@@ -133,11 +133,11 @@ fn __format_float_6(value) -> string {
 }
 
 fn __render_summary_line(envelope: dict) -> string {
-  let passed = envelope["passed_cases"] ?? 0
-  let total = envelope["total_cases"] ?? 0
-  let pass_rate = envelope["pass_rate"] ?? 0.0
-  let cost = envelope["total_cost_usd"] ?? 0.0
-  let pct = if type_of(pass_rate) == "float" || type_of(pass_rate) == "int" {
+  const passed = envelope["passed_cases"] ?? 0
+  const total = envelope["total_cases"] ?? 0
+  const pass_rate = envelope["pass_rate"] ?? 0.0
+  const cost = envelope["total_cost_usd"] ?? 0.0
+  const pct = if type_of(pass_rate) == "float" || type_of(pass_rate) == "int" {
     (to_float(pass_rate) ?? 0.0) * 100.0
   } else {
     0.0
@@ -158,8 +158,8 @@ fn __render_summary_line(envelope: dict) -> string {
  * line goes to stdout and the failure line goes to stderr.
  */
 fn __render_regression(envelope: dict) -> dict {
-  let current_total = envelope["current_total_cases"]
-  let baseline_total = envelope["baseline_total_cases"]
+  const current_total = envelope["current_total_cases"]
+  const baseline_total = envelope["baseline_total_cases"]
   if envelope["total_cases_mismatch"] ?? false {
     return {
       stdout: "",
@@ -169,11 +169,11 @@ fn __render_regression(envelope: dict) -> dict {
       exit_code: 1,
     }
   }
-  let current_pass = to_float(envelope["current_pass_rate"]) ?? 0.0
-  let baseline_pass = to_float(envelope["baseline_pass_rate"]) ?? 0.0
-  let max_drop_pp = to_float(envelope["max_drop_pp"]) ?? 0.0
-  let drop_pp = (baseline_pass - current_pass) * 100.0
-  let label = __safe_string(envelope["label"], "current")
+  const current_pass = to_float(envelope["current_pass_rate"]) ?? 0.0
+  const baseline_pass = to_float(envelope["baseline_pass_rate"]) ?? 0.0
+  const max_drop_pp = to_float(envelope["max_drop_pp"]) ?? 0.0
+  const drop_pp = (baseline_pass - current_pass) * 100.0
+  const label = __safe_string(envelope["label"], "current")
   if drop_pp > max_drop_pp {
     return {
       stdout: "",
@@ -185,7 +185,7 @@ fn __render_regression(envelope: dict) -> dict {
       exit_code: 1,
     }
   }
-  let drop_shown = if drop_pp > 0.0 {
+  const drop_shown = if drop_pp > 0.0 {
     drop_pp
   } else {
     0.0
@@ -214,27 +214,27 @@ fn __render_regression(envelope: dict) -> dict {
  * forwards it.
  */
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
-  let envelope = try {
+  const envelope = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse payload: " + to_string(e))
     return 70
   }
-  let mode = harness.env.get_or("HARN_EVAL_TOOL_CALLS_MODE", "summary")
+  const mode = harness.env.get_or("HARN_EVAL_TOOL_CALLS_MODE", "summary")
   if mode == "summary" {
     harness.stdio.println(__render_summary_line(envelope))
     return 0
   }
   if mode == "regression" {
-    let verdict = __render_regression(envelope)
-    let stderr_text = __safe_string(verdict["stderr"], "")
-    let stdout_text = __safe_string(verdict["stdout"], "")
+    const verdict = __render_regression(envelope)
+    const stderr_text = __safe_string(verdict["stderr"], "")
+    const stdout_text = __safe_string(verdict["stdout"], "")
     if stderr_text != "" {
       harness.stdio.eprintln(stderr_text)
     }

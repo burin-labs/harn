@@ -1,5 +1,5 @@
 pipeline main() {
-  let evt = transcript_drain_decision_event(
+  const evt = transcript_drain_decision_event(
     {
       pipeline_id: "pipeline-1",
       item: {category: "suspended_subagent", id: "worker://triage/42", summary: "worker is suspended"},

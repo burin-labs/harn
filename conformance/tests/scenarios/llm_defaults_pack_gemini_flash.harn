@@ -2,7 +2,7 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  let r = pack_for({model: "gemini-2.5-flash", thinking: "auto"})
+  const r = pack_for({model: "gemini-2.5-flash", thinking: "auto"})
   assert_eq(r.provider, "gemini")
   assert_eq(r.thinking.mode, "adaptive")
   log("llm_defaults_pack_gemini_flash passed")

@@ -1,22 +1,22 @@
 pipeline default() {
-  let first_id = event_log.emit("tests.events", "one", {n: 1})
-  let second_id = event_log.emit("tests.events", "two", {n: 2})
-  let replay = event_log.subscribe({topic: "tests.events", from_cursor: first_id})
-  let replayed = replay.next()
+  const first_id = event_log.emit("tests.events", "one", {n: 1})
+  const second_id = event_log.emit("tests.events", "two", {n: 2})
+  const replay = event_log.subscribe({topic: "tests.events", from_cursor: first_id})
+  const replayed = replay.next()
   __io_println(replayed.value.kind)
   __io_println(replayed.value.payload.n)
-  let live = event_log.subscribe({topic: "tests.events", from_cursor: second_id})
+  const live = event_log.subscribe({topic: "tests.events", from_cursor: second_id})
   event_log.emit("tests.events", "three", {n: 3})
-  let live_event = live.next()
+  const live_event = live.next()
   __io_println(live_event.value.kind)
   __io_println(live_event.value.cursor)
-  let filtered = event_log
+  const filtered = event_log
     .subscribe(
     {topic: "tests.events", from_cursor: live_event.value.cursor, kind_prefix: "transcript.reminder."},
   )
   event_log.emit("tests.events", "other", {n: 4})
   event_log.emit("tests.events", "transcript.reminder.injected", {n: 5})
-  let filtered_event = filtered.next()
+  const filtered_event = filtered.next()
   __io_println(filtered_event.value.kind)
   __io_println(filtered_event.value.payload.n)
 }

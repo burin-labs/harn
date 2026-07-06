@@ -1,14 +1,14 @@
 pipeline test(task) {
   // .first() and .last() on an inclusive range
-  let inc = 1 to 5
+  const inc = 1 to 5
   log(inc.first())
   log(inc.last())
   // .first() and .last() on an exclusive range
-  let exc = 0 to 5 exclusive
+  const exc = 0 to 5 exclusive
   log(exc.first())
   log(exc.last())
   // Empty ranges — first/last return nil
-  let empty = 5 to 1
+  const empty = 5 to 1
   log(empty.first())
   log(empty.last())
   log(empty.len())

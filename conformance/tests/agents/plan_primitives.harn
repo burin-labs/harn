@@ -2,10 +2,10 @@ import "std/plan"
 import { clear_host_mocks, llm_text, mock_host_response, with_llm_script } from "std/testing"
 
 pipeline main() {
-  let tools = plan_tools()
+  const tools = plan_tools()
   require tool_find(tools, "emit_plan") != nil, "emit_plan should be registered"
   require tool_find(tools, "update_plan") != nil, "update_plan should be registered"
-  let artifact = plan_from(
+  const artifact = plan_from(
     {
       summary: "Add a health endpoint.",
       steps: [
@@ -23,7 +23,7 @@ pipeline main() {
   require len(plan_acp_entries(artifact)) == 2, "ACP entries should derive from steps"
   clear_host_mocks()
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
-  let approved = request_plan_approval(artifact, {reviewers: ["lead"]})
+  const approved = request_plan_approval(artifact, {reviewers: ["lead"]})
   require approved.approval.state == "approved", "plan approval should use HITL"
   require approved.approval.reviewers?.[0] == "lead", "reviewer should round-trip"
   with_llm_script(
@@ -47,13 +47,13 @@ pipeline main() {
       llm_text("Plan emitted."),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Plan a parser change",
         nil,
         {provider: "mock", tools: tools, max_iterations: 2, session_id: "plan-conformance"},
       )
-      let events = transcript_events(result?.transcript)
-      var saw_plan = false
+      const events = transcript_events(result?.transcript)
+      let saw_plan = false
       for event in events {
         if event.kind == "plan" {
           saw_plan = true

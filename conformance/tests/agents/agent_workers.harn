@@ -1,7 +1,7 @@
 import "std/agents"
 
 pipeline main() {
-  let stage_worker = spawn_agent(
+  const stage_worker = spawn_agent(
     {
       name: "stage-worker",
       task: "Draft a short note",
@@ -15,17 +15,17 @@ pipeline main() {
   )
   __io_println(stage_worker.status)
   __io_println(stage_worker.mode)
-  let stage_done = wait_agent(stage_worker)
+  const stage_done = wait_agent(stage_worker)
   __io_println(stage_done?.status)
   __io_println(stage_done?.artifact_count >= 1)
   __io_println(stage_done?.has_transcript)
   __io_println(stage_done?.parent_stage_id == nil)
-  let resumed = send_input(stage_done, "Continue and add one more sentence")
+  const resumed = send_input(stage_done, "Continue and add one more sentence")
   __io_println(resumed?.status)
-  let resumed_done = wait_agent(stage_done)
+  const resumed_done = wait_agent(stage_done)
   __io_println(resumed_done?.status)
   __io_println(len(list_agents()) >= 1)
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "worker-flow",
       entry: "act",
@@ -40,23 +40,23 @@ pipeline main() {
       edges: [],
     },
   )
-  let workflow_worker = spawn_agent(
+  const workflow_worker = spawn_agent(
     {name: "flow-worker", task: "Write a workflow summary", graph: flow, options: {max_steps: 2}},
   )
   __io_println(workflow_worker.mode)
-  let workflow_done = wait_agent(workflow_worker)
+  const workflow_done = wait_agent(workflow_worker)
   __io_println(workflow_done?.status)
   __io_println(workflow_done?.result?.status == "completed")
   __io_println(workflow_done?.child_run_id != nil)
   __io_println(workflow_done?.child_run_path != nil)
   __io_println(workflow_done?.snapshot_path != nil)
-  let restored = resume_agent(workflow_done?.snapshot_path)
+  const restored = resume_agent(workflow_done?.snapshot_path)
   __io_println(restored?.status == "completed")
-  let restored_resumed = send_input(restored, "Continue the workflow with one more update")
+  const restored_resumed = send_input(restored, "Continue the workflow with one more update")
   __io_println(restored_resumed?.status)
-  let restored_done = wait_agent(restored_resumed)
+  const restored_done = wait_agent(restored_resumed)
   __io_println(restored_done?.status == "completed")
   __io_println(restored_done?.child_run_path != nil)
-  let closed = close_agent(workflow_done)
+  const closed = close_agent(workflow_done)
   __io_println(closed?.status)
 }

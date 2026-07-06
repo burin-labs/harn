@@ -23,21 +23,21 @@ pipeline main() {
       llm_text("first resume wins"),
     ],
     { ->
-      let handle = sub_agent_run(
+      const handle = sub_agent_run(
         "Park then race two resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      let suspended = wait_agent(handle)
+      const suspended = wait_agent(handle)
       __io_println("pre_race_status=" + suspended.status)
-      let first = resume_agent(handle)
-      let done = wait_agent(handle)
+      const first = resume_agent(handle)
+      const done = wait_agent(handle)
       __io_println("first_resume_status=" + first.status)
       __io_println("post_first_status=" + done.status)
-      let second = try {
+      const second = try {
         resume_agent(handle)
       }
       __io_println("second_resume_failed=" + to_string(is_err(second)))
-      let err_text = to_string(unwrap_err(second))
+      const err_text = to_string(unwrap_err(second))
       __io_println(
         "second_err_has_sus_code="
           + to_string(contains(err_text, "HARN-SUS-003") || contains(err_text, "HARN-SUS-006")),

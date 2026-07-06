@@ -25,7 +25,7 @@ type JsonStreamValidator = {
  * @errors: []
  */
 pub fn stream_validator(schema) -> JsonStreamValidator {
-  let handle = __json_stream_validator(schema)
+  const handle = __json_stream_validator(schema)
   return {
     _namespace: "json_stream_validator",
     feed: fn(chunk) { return __json_stream_validator_feed(handle, chunk) },

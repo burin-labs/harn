@@ -1,7 +1,7 @@
 import { assert_host_called, host_call_count, with_host_mocks } from "std/testing"
 
 fn body_process_exec_alias() {
-  let result = hostlib_tools_run_command({argv: ["echo", "from-mock"], cwd: "/definitely/not/a/harn-test-root"})
+  const result = hostlib_tools_run_command({argv: ["echo", "from-mock"], cwd: "/definitely/not/a/harn-test-root"})
   require result.status == "completed"
   require result.exit_code == 0
   require result.stdout == "legacy stdout"
@@ -11,7 +11,7 @@ fn body_process_exec_alias() {
 }
 
 fn body_tools_run_command() {
-  let result = hostlib_tools_run_command({argv: ["printf", "direct"], cwd: "/definitely/not/a/harn-test-root"})
+  const result = hostlib_tools_run_command({argv: ["printf", "direct"], cwd: "/definitely/not/a/harn-test-root"})
   require result.status == "completed"
   require result.exit_code == 0
   require result.stdout == "direct stdout"
@@ -21,7 +21,7 @@ fn body_tools_run_command() {
 }
 
 pipeline test_hostlib_run_command_host_mocks(task) {
-  let first = with_host_mocks(
+  const first = with_host_mocks(
     [
       {
         capability: "process",
@@ -34,7 +34,7 @@ pipeline test_hostlib_run_command_host_mocks(task) {
   )
   assert_eq(first.command_id, "mock-legacy")
   assert_eq(host_call_count(), 0)
-  let second = with_host_mocks(
+  const second = with_host_mocks(
     [
       {
         capability: "tools",

@@ -14,7 +14,7 @@ fn failing_handler(event: TriggerEvent) -> any {
 }
 
 fn action_graph_has_node(trace_id: string, kind: string) -> bool {
-  let records: list<TriggerActionGraphEvent> = trigger_inspect_action_graph(trace_id)
+  const records: list<TriggerActionGraphEvent> = trigger_inspect_action_graph(trace_id)
   for entry in records {
     for node in entry.payload?.observability?.action_graph_nodes ?? [] {
       if node?.trace_id == trace_id && node?.kind == kind {
@@ -26,7 +26,7 @@ fn action_graph_has_node(trace_id: string, kind: string) -> bool {
 }
 
 fn action_graph_has_edge(trace_id: string, kind: string) -> bool {
-  let records: list<TriggerActionGraphEvent> = trigger_inspect_action_graph(trace_id)
+  const records: list<TriggerActionGraphEvent> = trigger_inspect_action_graph(trace_id)
   for entry in records {
     for edge in entry.payload?.observability?.action_graph_edges ?? [] {
       if edge?.kind == kind {
@@ -38,36 +38,36 @@ fn action_graph_has_edge(trace_id: string, kind: string) -> bool {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let root = path_join(harness.fs.temp_dir(), "harn-action-graph-dispatcher-" + unique)
+  const root = path_join(harness.fs.temp_dir(), "harn-action-graph-dispatcher-" + unique)
   harness.fs.mkdir(root)
   harness.fs
     .write_text(
     path_join(root, "receiver.harn"),
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  let start = shell_at(
+  const start = shell_at(
     root,
     "nohup " + harn_bin + " serve --port 0"
       + " receiver.harn >receiver.log 2>&1 </dev/null & echo $!",
   )
-  let pid = start.stdout.trim()
+  const pid = start.stdout.trim()
   assert(start.success, "failed to start A2A receiver")
   assert(pid != "", "missing A2A receiver pid")
-  let receiver_url = wait_for_a2a_server_url(harness, path_join(root, "receiver.log"))
+  const receiver_url = wait_for_a2a_server_url(harness, path_join(root, "receiver.log"))
   assert(receiver_url != nil, "A2A receiver did not start")
-  let port_matches = regex_captures(r":(\d+)$", receiver_url)
+  const port_matches = regex_captures(r":(\d+)$", receiver_url)
   assert(len(port_matches) == 1, "A2A receiver URL did not include a port: " + receiver_url)
-  let port = port_matches[0].groups[0]
-  let local_trace = "trace-graph-local-" + unique
-  let worker_trace = "trace-graph-worker-" + unique
-  let retry_trace = "trace-graph-retry-" + unique
-  let a2a_trace = "trace-graph-a2a-" + unique
-  let local_handle: TriggerHandle = trigger_register(
+  const port = port_matches[0].groups[0]
+  const local_trace = "trace-graph-local-" + unique
+  const worker_trace = "trace-graph-worker-" + unique
+  const retry_trace = "trace-graph-retry-" + unique
+  const a2a_trace = "trace-graph-a2a-" + unique
+  const local_handle: TriggerHandle = trigger_register(
     {
       id: "graph-local-" + unique,
       kind: "issue.opened",
@@ -84,7 +84,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let worker_handle: TriggerHandle = trigger_register(
+  const worker_handle: TriggerHandle = trigger_register(
     {
       id: "graph-worker-" + unique,
       kind: "issue.opened",
@@ -101,7 +101,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let retry_handle: TriggerHandle = trigger_register(
+  const retry_handle: TriggerHandle = trigger_register(
     {
       id: "graph-retry-" + unique,
       kind: "issue.opened",
@@ -118,7 +118,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let a2a_handle: TriggerHandle = trigger_register(
+  const a2a_handle: TriggerHandle = trigger_register(
     {
       id: "graph-a2a-" + unique,
       kind: "issue.opened",
@@ -136,7 +136,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let local_fire: DispatchHandle = trigger_fire(
+  const local_fire: DispatchHandle = trigger_fire(
     local_handle,
     {
       provider: "github",
@@ -145,7 +145,7 @@ pipeline test(task) {
       headers: {x_delivery: "evt-local-" + unique},
     },
   )
-  let worker_fire: DispatchHandle = trigger_fire(
+  const worker_fire: DispatchHandle = trigger_fire(
     worker_handle,
     {
       provider: "github",
@@ -154,7 +154,7 @@ pipeline test(task) {
       headers: {x_delivery: "evt-worker-" + unique},
     },
   )
-  let retry_fire: DispatchHandle = trigger_fire(
+  const retry_fire: DispatchHandle = trigger_fire(
     retry_handle,
     {
       provider: "github",
@@ -163,7 +163,7 @@ pipeline test(task) {
       headers: {x_delivery: "evt-retry-" + unique},
     },
   )
-  let a2a_fire: DispatchHandle = trigger_fire(
+  const a2a_fire: DispatchHandle = trigger_fire(
     a2a_handle,
     {
       provider: "github",
@@ -172,7 +172,7 @@ pipeline test(task) {
       headers: {x_delivery: "evt-a2a-" + unique},
     },
   )
-  let _ = shell("kill -TERM " + pid)
+  const _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
   harness.fs.delete(root)
   __io_println(local_fire.status == "dispatched" && worker_fire.status == "dispatched")

@@ -5,8 +5,8 @@ import "../check_docs_snippets.harn"
 // --- extract_blocks ---------------------------------------------------------
 @test
 pipeline test_extract_basic_block(task) {
-  let md = "intro\n```harn\nlet x = 1\nlog(x)\n```\noutro\n"
-  let events = extract_blocks(md)
+  const md = "intro\n```harn\nlet x = 1\nlog(x)\n```\noutro\n"
+  const events = extract_blocks(md)
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "block")
   assert_eq(events[0].idx, 1)
@@ -15,8 +15,8 @@ pipeline test_extract_basic_block(task) {
 
 @test
 pipeline test_extract_ignore_block_skipped(task) {
-  let md = "```harn,ignore\npartial fragment\n```\n"
-  let events = extract_blocks(md)
+  const md = "```harn,ignore\npartial fragment\n```\n"
+  const events = extract_blocks(md)
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "skip")
   assert_eq(events[0].idx, 1)
@@ -26,8 +26,8 @@ pipeline test_extract_ignore_block_skipped(task) {
 pipeline test_extract_idx_counts_all_harn_fences(task) {
   // The block index counts harn fences (checked AND ignored), matching the
   // awk `idx++` on both fence kinds.
-  let md = "```harn,ignore\na\n```\n\n```harn\nb\n```\n"
-  let events = extract_blocks(md)
+  const md = "```harn,ignore\na\n```\n\n```harn\nb\n```\n"
+  const events = extract_blocks(md)
   assert_eq(events.count, 2)
   assert_eq(events[0].kind, "skip")
   assert_eq(events[1].kind, "block")
@@ -36,8 +36,8 @@ pipeline test_extract_idx_counts_all_harn_fences(task) {
 
 @test
 pipeline test_extract_other_fences_ignored(task) {
-  let md = "```bash\necho hi\n```\n```harn\nx\n```\n"
-  let events = extract_blocks(md)
+  const md = "```bash\necho hi\n```\n```harn\nx\n```\n"
+  const events = extract_blocks(md)
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "block")
   assert_eq(events[0].content, "x\n")
@@ -52,7 +52,7 @@ pipeline test_extract_info_string_must_be_exact(task) {
 
 @test
 pipeline test_extract_unclosed_at_eof(task) {
-  let events = extract_blocks("pre\n```harn\nbody\n")
+  const events = extract_blocks("pre\n```harn\nbody\n")
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "unclosed")
   assert_eq(events[0].open_line, 2)
@@ -62,7 +62,7 @@ pipeline test_extract_unclosed_at_eof(task) {
 pipeline test_extract_reopened_fence_reports_previous(task) {
   // A new ```harn fence while one is open reports the earlier open line
   // and starts a fresh block.
-  let events = extract_blocks("```harn\na\n```harn\nb\n```\n")
+  const events = extract_blocks("```harn\na\n```harn\nb\n```\n")
   assert_eq(events.count, 2)
   assert_eq(events[0].kind, "unclosed")
   assert_eq(events[0].open_line, 1)

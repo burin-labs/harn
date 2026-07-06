@@ -15,13 +15,13 @@ fn scenario_veto_then_confirm() {
   with_llm_script(
     [llm_text("Round 1. ##DONE##"), llm_text("Round 2. ##DONE##")],
     { ->
-      let cb = { info ->
+      const cb = { info ->
         if info.iteration == 0 {
           return "not yet — try once more"
         }
         nil
       }
-      let result = agent_loop(
+      const result = agent_loop(
         "do work",
         "you are an agent.",
         {
@@ -49,8 +49,8 @@ fn scenario_max_verify_exhausted() {
       llm_text("Trying. ##DONE##"),
     ],
     { ->
-      let always_veto = { _info -> "still not good enough" }
-      let result = agent_loop(
+      const always_veto = { _info -> "still not good enough" }
+      const result = agent_loop(
         "do work",
         "you are an agent.",
         {
@@ -72,8 +72,8 @@ fn scenario_confirm_immediately() {
   with_llm_script(
     [llm_text("First and final. ##DONE##")],
     { ->
-      let always_confirm = { _info -> nil }
-      let result = agent_loop(
+      const always_confirm = { _info -> nil }
+      const result = agent_loop(
         "do work",
         "you are an agent.",
         {

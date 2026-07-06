@@ -29,11 +29,11 @@ pipeline test_agent_progress_spam_trips_no_progress(task) {
   // Three consecutive turns whose only call is agent_progress → trips at the
   // third (no_progress_messages = 3). Before the fix these were treated as real
   // tool calls and never tripped.
-  let o1 = _observe(agent_stall_initial_state(), _progress_only(), 1)
+  const o1 = _observe(agent_stall_initial_state(), _progress_only(), 1)
   assert(o1.warning == nil)
-  let o2 = _observe(o1.state, _progress_only(), 2)
+  const o2 = _observe(o1.state, _progress_only(), 2)
   assert(o2.warning == nil)
-  let o3 = _observe(o2.state, _progress_only(), 3)
+  const o3 = _observe(o2.state, _progress_only(), 3)
   assert(o3.warning != nil)
 }
 
@@ -43,26 +43,26 @@ pipeline test_real_tool_calls_do_not_trip_no_progress(task) {
   // with no dispatch outcome would (correctly) trip the signature-only
   // repeated-same-signature fallback (threshold 3), which is thrash, not
   // progress. Distinct edits are real forward motion.
-  let o1 = _observe(agent_stall_initial_state(), [{name: "edit", arguments: {path: "a.rs"}}], 1)
-  let o2 = _observe(o1.state, [{name: "edit", arguments: {path: "b.rs"}}], 2)
-  let o3 = _observe(o2.state, [{name: "edit", arguments: {path: "c.rs"}}], 3)
+  const o1 = _observe(agent_stall_initial_state(), [{name: "edit", arguments: {path: "a.rs"}}], 1)
+  const o2 = _observe(o1.state, [{name: "edit", arguments: {path: "b.rs"}}], 2)
+  const o3 = _observe(o2.state, [{name: "edit", arguments: {path: "c.rs"}}], 3)
   assert(o3.warning == nil)
 }
 
 pipeline test_mixed_turn_with_real_call_is_progress(task) {
   // agent_progress alongside a real (distinct) edit is progress — the real call
   // carries the action stream, so the no-progress streak never accumulates.
-  let o1 = _observe(
+  const o1 = _observe(
     agent_stall_initial_state(),
     [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "a.rs"}}],
     1,
   )
-  let o2 = _observe(
+  const o2 = _observe(
     o1.state,
     [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "b.rs"}}],
     2,
   )
-  let o3 = _observe(
+  const o3 = _observe(
     o2.state,
     [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "c.rs"}}],
     3,
@@ -107,13 +107,13 @@ pipeline test_parse_error_turn_is_not_no_progress(task) {
   // (3) it must NOT trip the stall detector and must NOT accumulate the
   // no-progress streak — the model already tried to act; parse-guidance feedback
   // (injected by the loop) is the correct response, not a narration-loop nudge.
-  let o1 = _observe_parse_error(agent_stall_initial_state(), 1)
+  const o1 = _observe_parse_error(agent_stall_initial_state(), 1)
   assert(o1.warning == nil)
   assert(o1.state.no_progress_streak == 0)
-  let o2 = _observe_parse_error(o1.state, 2)
+  const o2 = _observe_parse_error(o1.state, 2)
   assert(o2.warning == nil)
   assert(o2.state.no_progress_streak == 0)
-  let o3 = _observe_parse_error(o2.state, 3)
+  const o3 = _observe_parse_error(o2.state, 3)
   assert(o3.warning == nil)
   assert(o3.state.no_progress_streak == 0)
 }
@@ -141,11 +141,11 @@ pipeline test_errored_no_tool_call_gets_cause_specific_feedback(task) {
   // cause-specific `errored_no_tool_call` warning (so the model is told its
   // turn errored and to re-emit the intended call), NOT the generic
   // no_progress_monologue nag.
-  let o1 = _observe_errored_no_call(agent_stall_initial_state(), 1)
+  const o1 = _observe_errored_no_call(agent_stall_initial_state(), 1)
   assert(o1.warning == nil)
-  let o2 = _observe_errored_no_call(o1.state, 2)
+  const o2 = _observe_errored_no_call(o1.state, 2)
   assert(o2.warning == nil)
-  let o3 = _observe_errored_no_call(o2.state, 3)
+  const o3 = _observe_errored_no_call(o2.state, 3)
   assert(o3.warning != nil)
   assert(o3.warning.pattern == "errored_no_tool_call")
 }
@@ -154,12 +154,12 @@ pipeline test_text_only_turn_without_parse_errors_still_trips(task) {
   // Control: the SAME 0-call + text turn WITHOUT parse errors is a real
   // no-progress monologue and must still trip at the threshold. Guards against
   // the parse-error gate accidentally disabling no-progress detection wholesale.
-  let o1 = _observe_text_only(agent_stall_initial_state(), 1)
+  const o1 = _observe_text_only(agent_stall_initial_state(), 1)
   assert(o1.warning == nil)
   assert(o1.state.no_progress_streak == 1)
-  let o2 = _observe_text_only(o1.state, 2)
+  const o2 = _observe_text_only(o1.state, 2)
   assert(o2.warning == nil)
-  let o3 = _observe_text_only(o2.state, 3)
+  const o3 = _observe_text_only(o2.state, 3)
   assert(o3.warning != nil)
 }
 
@@ -212,7 +212,7 @@ fn _fold(state, prev_dispatch, prior_made_edit) {
 
 pipeline test_fold_first_failure_records_model(task) {
   // First failing verification: class "fail", streak 1, epoch 0, no edit owed.
-  let o = _fold(agent_stall_initial_state(), _fail_dispatch("boom: assertion X"), false)
+  const o = _fold(agent_stall_initial_state(), _fail_dispatch("boom: assertion X"), false)
   assert(o.state.last_diagnostic_class == "fail")
   assert(o.state.same_diagnostic_streak == 1)
   assert(o.state.write_epoch == 0)
@@ -223,11 +223,11 @@ pipeline test_fold_first_failure_records_model(task) {
 
 pipeline test_fold_same_failure_no_edit_increments_streak(task) {
   // Same failure twice with no intervening edit => futile retry, streak grows.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
-  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  const o2 = _fold(o1.state, _fail_dispatch("boom"), false)
   assert(o2.state.same_diagnostic_streak == 2)
-  let o3 = _fold(o2.state, _fail_dispatch("boom"), false)
+  const o3 = _fold(o2.state, _fail_dispatch("boom"), false)
   // Streak hit stuck_same_diagnostic_after (3) => trip with the new pattern.
   assert(o3.state.same_diagnostic_streak == 3)
   assert(o3.warning != nil)
@@ -237,29 +237,29 @@ pipeline test_fold_same_failure_no_edit_increments_streak(task) {
 }
 
 pipeline test_fold_location_shift_uses_verification_delta_normalization(task) {
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("src/a.rs:10:2: error E0425: missing foo"), false)
-  let o2 = _fold(o1.state, _fail_dispatch("src/a.rs:99:7: error E0425: missing foo"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("src/a.rs:10:2: error E0425: missing foo"), false)
+  const o2 = _fold(o1.state, _fail_dispatch("src/a.rs:99:7: error E0425: missing foo"), false)
   assert(o2.state.same_diagnostic_streak == 2)
   assert(o2.state.last_diagnostic_delta_status == "unchanged")
 }
 
 pipeline test_fold_stale_diagnostic_does_not_feed_repair_gate(task) {
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   assert(o1.state.failing_verify_turns == 1)
-  let stale = _fold(o1.state, _stale_dispatch("boom"), false)
+  const stale = _fold(o1.state, _stale_dispatch("boom"), false)
   assert(stale.warning == nil)
   assert(stale.state.same_diagnostic_streak == 1)
   assert(stale.state.failing_verify_turns == 1)
   assert(stale.state.last_diagnostic_delta_status == "initialized")
-  let fresh_again = _fold(stale.state, _fail_dispatch("boom"), false)
+  const fresh_again = _fold(stale.state, _fail_dispatch("boom"), false)
   assert(fresh_again.state.same_diagnostic_streak == 2)
   assert(fresh_again.warning == nil)
 }
 
 pipeline test_fold_stale_after_edit_keeps_reverify_owed(task) {
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
-  let stale = _fold(o1.state, _stale_dispatch("boom"), true)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const stale = _fold(o1.state, _stale_dispatch("boom"), true)
   assert(stale.warning == nil)
   assert(stale.state.same_diagnostic_streak == 1)
   assert(stale.state.failing_verify_turns == 1)
@@ -267,7 +267,7 @@ pipeline test_fold_stale_after_edit_keeps_reverify_owed(task) {
 }
 
 pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(task) {
-  let config = {
+  const config = {
     enabled: true,
     repair_aware: false,
     post_edit_reverify: false,
@@ -276,7 +276,7 @@ pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(task) 
     no_progress_messages: 99,
     ping_pong_cycles: 99,
   }
-  let o1 = agent_stall_observe_tool_calls(
+  const o1 = agent_stall_observe_tool_calls(
     "unit-stale-core",
     _run_call(),
     1,
@@ -285,7 +285,7 @@ pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(task) 
     true,
     _stale_dispatch("boom"),
   )
-  let o2 = agent_stall_observe_tool_calls(
+  const o2 = agent_stall_observe_tool_calls(
     "unit-stale-core",
     _run_call(),
     2,
@@ -305,18 +305,18 @@ pipeline test_fold_productive_edit_resets_streak(task) {
   // re-verify), then a DIFFERENT failure (sigB) => the productive edit changed
   // the error, so the streak resets to 1 and nothing trips. A blind counter
   // would keep climbing; the evidence-aware model recognizes the progress.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom A"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom A"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   // The PRIOR turn made a successful edit (turn_made_edit = true). The fold sees
   // no new verification result this turn (prev_dispatch is the edit's ok result),
   // so it bumps the epoch and owes a re-verify; the failure model is preserved.
-  let oe = _fold(o1.state, _ok_dispatch(), true)
+  const oe = _fold(o1.state, _ok_dispatch(), true)
   assert(oe.state.write_epoch == 1)
   assert(oe.state.reverify_owed)
   assert(oe.state.last_diagnostic_class == "fail")
   assert(oe.state.same_diagnostic_streak == 1)
   // A DIFFERENT failure recurs => productive edit, streak resets to 1, no trip.
-  let of = _fold(oe.state, _fail_dispatch("boom B different"), false)
+  const of = _fold(oe.state, _fail_dispatch("boom B different"), false)
   assert(of.state.same_diagnostic_streak == 1)
   assert(of.warning == nil)
   // The verification result satisfied the owed re-verify.
@@ -324,7 +324,7 @@ pipeline test_fold_productive_edit_resets_streak(task) {
 }
 
 pipeline test_repair_diagnostics_nested_config_lowers_to_stall_fields(task) {
-  let parsed = agent_stall_repair_config(
+  const parsed = agent_stall_repair_config(
     {
       enabled: true,
       repair_diagnostics: {
@@ -350,7 +350,7 @@ pipeline test_repair_diagnostics_nested_config_lowers_to_stall_fields(task) {
 }
 
 pipeline test_repair_diagnostics_flat_fields_override_nested(task) {
-  let parsed = agent_stall_repair_config(
+  const parsed = agent_stall_repair_config(
     {
       enabled: true,
       repair_aware: false,
@@ -371,20 +371,20 @@ pipeline test_fold_edit_retest_thrash_increments_streak(task) {
   // advances ACROSS the intervening edits and trips at
   // stuck_same_diagnostic_after (3). The old epoch-keyed model reset on every
   // edit and could NEVER trip this case.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   // Edit turn: no result yet, owes a re-verify, model + streak preserved.
-  let e1 = _fold(o1.state, _ok_dispatch(), true)
+  const e1 = _fold(o1.state, _ok_dispatch(), true)
   assert(e1.state.same_diagnostic_streak == 1)
   assert(e1.state.reverify_owed)
   // Same failure recurs after the edit => streak advances to 2 (not reset).
-  let o2 = _fold(e1.state, _fail_dispatch("boom"), false)
+  const o2 = _fold(e1.state, _fail_dispatch("boom"), false)
   assert(o2.state.same_diagnostic_streak == 2)
   assert(!o2.state.reverify_owed)
-  let e2 = _fold(o2.state, _ok_dispatch(), true)
+  const e2 = _fold(o2.state, _ok_dispatch(), true)
   assert(e2.state.same_diagnostic_streak == 2)
   // Same failure recurs again => streak hits 3 => trip.
-  let o3 = _fold(e2.state, _fail_dispatch("boom"), false)
+  const o3 = _fold(e2.state, _fail_dispatch("boom"), false)
   assert(o3.state.same_diagnostic_streak == 3)
   assert(o3.warning != nil)
   assert(o3.warning.pattern == "stuck_same_diagnostic")
@@ -392,10 +392,10 @@ pipeline test_fold_edit_retest_thrash_increments_streak(task) {
 
 pipeline test_fold_pass_clears_model(task) {
   // A passing verification clears the current-failure model entirely.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
-  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o2 = _fold(o1.state, _fail_dispatch("boom"), false)
   assert(o2.state.same_diagnostic_streak == 2)
-  let op = _fold(o2.state, _ok_dispatch(), false)
+  const op = _fold(o2.state, _ok_dispatch(), false)
   assert(op.state.last_diagnostic_class == "pass")
   assert(op.state.same_diagnostic_streak == 0)
   assert(!op.state.reverify_owed)
@@ -405,10 +405,10 @@ pipeline test_fold_pass_clears_model(task) {
 
 pipeline test_fold_different_failure_resets_streak(task) {
   // A DIFFERENT failure signature is a different mistake, not a futile retry.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom A"), false)
-  let o2 = _fold(o1.state, _fail_dispatch("boom A"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom A"), false)
+  const o2 = _fold(o1.state, _fail_dispatch("boom A"), false)
   assert(o2.state.same_diagnostic_streak == 2)
-  let o3 = _fold(o2.state, _fail_dispatch("totally different B"), false)
+  const o3 = _fold(o2.state, _fail_dispatch("totally different B"), false)
   assert(o3.state.same_diagnostic_streak == 1)
   assert(o3.warning == nil)
 }
@@ -416,7 +416,7 @@ pipeline test_fold_different_failure_resets_streak(task) {
 pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(task) {
   // repair_aware:false disables the strategy-shift nudge, not the
   // current-failure model used by post-edit final verification.
-  let off_config = {
+  const off_config = {
     enabled: true,
     repair_aware: false,
     stuck_same_diagnostic_after: 2,
@@ -425,7 +425,7 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(task) {
     no_progress_messages: 99,
     ping_pong_cycles: 99,
   }
-  let o1 = agent_stall_observe_tool_calls(
+  const o1 = agent_stall_observe_tool_calls(
     "unit-repair-off",
     _run_call(),
     1,
@@ -441,7 +441,7 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(task) {
   assert(o1.state.same_diagnostic_streak == 1)
   assert(!o1.state.reverify_owed)
   assert(o1.warning == nil)
-  let o2 = agent_stall_observe_tool_calls(
+  const o2 = agent_stall_observe_tool_calls(
     "unit-repair-off",
     _run_call(),
     2,
@@ -462,13 +462,13 @@ pipeline test_reset_action_preserves_failure_model(task) {
   // corrective action does not clear "same root failure". We force a reset by
   // observing an exempt tool after a recorded failure, and assert the repair
   // fields persist.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
-  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o2 = _fold(o1.state, _fail_dispatch("boom"), false)
   assert(o2.state.same_diagnostic_streak == 2)
   assert(o2.state.last_diagnostic_class == "fail")
   // An exempt tool triggers __agent_stall_reset_action inside the core observe.
-  let reset_config = REPAIR_CONFIG + {exempt_tools: ["search"]}
-  let o3 = agent_stall_observe_tool_calls(
+  const reset_config = REPAIR_CONFIG + {exempt_tools: ["search"]}
+  const o3 = agent_stall_observe_tool_calls(
     "unit-repair",
     [{name: "search", arguments: {q: "x"}}],
     3,
@@ -492,13 +492,13 @@ pipeline test_clear_current_failure_on_success(task) {
   // run can end (clean done / verify_completion pass) without ever folding a
   // passing result, leaving last_diagnostic_class == "fail". The loop clears
   // the model on the successful-termination signal before projecting it.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
-  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o2 = _fold(o1.state, _fail_dispatch("boom"), false)
   assert(o2.state.last_diagnostic_class == "fail")
   // A live failure projects a current_failure on a STUCK hand-back.
   assert(agent_stall_current_failure(o2.state) != nil)
   // Clearing on success drops the stale failure.
-  let cleared = agent_stall_clear_current_failure(o2.state)
+  const cleared = agent_stall_clear_current_failure(o2.state)
   assert(agent_stall_current_failure(cleared) == nil)
   assert(cleared.last_diagnostic_class == "pass")
   assert(cleared.same_diagnostic_streak == 0)
@@ -574,9 +574,9 @@ fn _fold_stale_guarded(state, prev_dispatch, prior_made_edit) {
 pipeline test_no_net_progress_default_off(task) {
   // (a)/(default) Guard OFF (REPAIR_CONFIG has no guard flag): even a long thrash
   // streak never reports no-net-progress => today's behavior is preserved.
-  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
-  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
-  let o3 = _fold(o2.state, _fail_dispatch("boom"), false)
+  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  const o3 = _fold(o2.state, _fail_dispatch("boom"), false)
   assert(o3.state.same_diagnostic_streak == 3)
   assert(!agent_stall_no_net_progress(REPAIR_CONFIG, o3.state))
 }
@@ -585,13 +585,13 @@ pipeline test_no_net_progress_thrash_trips_once_armed(task) {
   // (a) Guard ON: a thrash (same failure recurring every turn, no draining)
   // crosses the threshold and IS reported as no-net-progress, so the loop stops
   // extending. Below threshold it is NOT reported (conservative).
-  let o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o1.state))
-  let o2 = _fold_guarded(o1.state, _fail_dispatch("boom"), false)
+  const o2 = _fold_guarded(o1.state, _fail_dispatch("boom"), false)
   assert(o2.state.same_diagnostic_streak == 2)
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o2.state))
-  let o3 = _fold_guarded(o2.state, _fail_dispatch("boom"), false)
+  const o3 = _fold_guarded(o2.state, _fail_dispatch("boom"), false)
   assert(o3.state.same_diagnostic_streak == 3)
   assert(agent_stall_no_net_progress(GUARD_CONFIG, o3.state))
 }
@@ -600,9 +600,9 @@ pipeline test_no_net_progress_productive_run_keeps_budget(task) {
   // (b) Guard ON: a genuinely-progressing run where each turn changes the error
   // (a productive edit shifts the signature => streak resets to 1) NEVER reports
   // no-net-progress, so its budget is preserved. Errors draining is progress.
-  let o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("error A"), true)
-  let o2 = _fold_guarded(o1.state, _fail_dispatch("error B"), true)
-  let o3 = _fold_guarded(o2.state, _fail_dispatch("error C"), true)
+  const o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("error A"), true)
+  const o2 = _fold_guarded(o1.state, _fail_dispatch("error B"), true)
+  const o3 = _fold_guarded(o2.state, _fail_dispatch("error C"), true)
   assert(o3.state.same_diagnostic_streak == 1)
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o3.state))
 }
@@ -611,9 +611,9 @@ pipeline test_no_net_progress_pass_keeps_budget(task) {
   // (b) Guard ON: a turn whose verification PASSES clears the failure model
   // (class != "fail") so it never reports no-net-progress even after a prior
   // thrash streak — a failing-then-passing run still progresses.
-  let o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
-  let o2 = _fold_guarded(o1.state, _fail_dispatch("boom"), false)
-  let op = _fold_guarded(o2.state, _ok_dispatch(), false)
+  const o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o2 = _fold_guarded(o1.state, _fail_dispatch("boom"), false)
+  const op = _fold_guarded(o2.state, _ok_dispatch(), false)
   assert(op.state.last_diagnostic_class == "pass")
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, op.state))
 }
@@ -622,27 +622,27 @@ pipeline test_no_net_progress_explore_turn_not_starved(task) {
   // (c) Guard ON: a read-only / explore turn has no failing verification, so the
   // failure model is never armed (class stays "") and the guard NEVER reports
   // no-net-progress. Legitimately-exploring turns are not starved of budget.
-  let initial = agent_stall_initial_state()
+  const initial = agent_stall_initial_state()
   assert(initial.last_diagnostic_class != "fail")
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, initial))
   // A turn with no verification result (e.g. pure read/list) leaves the model
   // untouched => still not reported.
-  let o = _fold_guarded(initial, nil, false)
+  const o = _fold_guarded(initial, nil, false)
   assert(o.state.last_diagnostic_class != "fail")
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o.state))
 }
 
 pipeline test_no_net_progress_ignores_stale_diagnostics(task) {
-  let o1 = _fold_stale_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  const o1 = _fold_stale_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   assert(o1.state.failing_verify_turns == 1)
-  let stale1 = _fold_stale_guarded(o1.state, _stale_dispatch("boom"), false)
-  let stale2 = _fold_stale_guarded(stale1.state, _stale_dispatch("boom"), false)
+  const stale1 = _fold_stale_guarded(o1.state, _stale_dispatch("boom"), false)
+  const stale2 = _fold_stale_guarded(stale1.state, _stale_dispatch("boom"), false)
   assert(stale2.warning == nil)
   assert(stale2.state.same_diagnostic_streak == 1)
   assert(stale2.state.failing_verify_turns == 1)
   assert(!agent_stall_no_net_progress(STALE_GUARD_CONFIG, stale2.state))
-  let fresh_again = _fold_stale_guarded(stale2.state, _fail_dispatch("boom"), false)
+  const fresh_again = _fold_stale_guarded(stale2.state, _fail_dispatch("boom"), false)
   assert(fresh_again.state.same_diagnostic_streak == 2)
   assert(!agent_stall_no_net_progress(STALE_GUARD_CONFIG, fresh_again.state))
 }
@@ -680,17 +680,17 @@ pipeline test_no_net_progress_hard_cap_trips_on_varied_failures(task) {
   // same-diagnostic streak never reaches the no-net threshold. The hard cap is
   // deliberately signature-agnostic: three failing verify turns without a clean
   // pass trips the terminal stuck path anyway.
-  let o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
+  const o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   assert(o1.state.failing_verify_turns == 1)
   assert(o1.warning == nil)
   assert(!agent_stall_no_net_progress(HARD_CAP_CONFIG, o1.state))
-  let o2 = _fold_hard_cap(o1.state, _fail_dispatch("error B"), false)
+  const o2 = _fold_hard_cap(o1.state, _fail_dispatch("error B"), false)
   assert(o2.state.same_diagnostic_streak == 1)
   assert(o2.state.failing_verify_turns == 2)
   assert(o2.warning == nil)
   assert(!agent_stall_no_net_progress(HARD_CAP_CONFIG, o2.state))
-  let o3 = _fold_hard_cap(o2.state, _fail_dispatch("error C"), false)
+  const o3 = _fold_hard_cap(o2.state, _fail_dispatch("error C"), false)
   assert(o3.state.same_diagnostic_streak == 1)
   assert(o3.state.failing_verify_turns == 3)
   assert(o3.warning != nil)
@@ -701,14 +701,14 @@ pipeline test_no_net_progress_hard_cap_trips_on_varied_failures(task) {
 }
 
 pipeline test_no_net_progress_hard_cap_resets_only_on_clean_verify(task) {
-  let o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
-  let o2 = _fold_hard_cap(o1.state, _fail_dispatch("error B"), false)
+  const o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
+  const o2 = _fold_hard_cap(o1.state, _fail_dispatch("error B"), false)
   assert(o2.state.failing_verify_turns == 2)
-  let pass = _fold_hard_cap(o2.state, _ok_dispatch(), false)
+  const pass = _fold_hard_cap(o2.state, _ok_dispatch(), false)
   assert(pass.state.last_diagnostic_class == "pass")
   assert(pass.state.failing_verify_turns == 0)
   assert(!agent_stall_no_net_progress(HARD_CAP_CONFIG, pass.state))
-  let fail_after_pass = _fold_hard_cap(pass.state, _fail_dispatch("error C"), false)
+  const fail_after_pass = _fold_hard_cap(pass.state, _fail_dispatch("error C"), false)
   assert(fail_after_pass.state.failing_verify_turns == 1)
   assert(fail_after_pass.warning == nil)
 }
@@ -717,11 +717,11 @@ pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(task) {
   // Edit success is not a clean verification. It should preserve the failing
   // verify counter so a model cannot evade the cap by interleaving successful
   // writes with still-red verifies.
-  let o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
-  let edit_ok = _fold_hard_cap(o1.state, _ok_dispatch(), true)
+  const o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
+  const edit_ok = _fold_hard_cap(o1.state, _ok_dispatch(), true)
   assert(edit_ok.state.reverify_owed)
   assert(edit_ok.state.failing_verify_turns == 1)
-  let o2 = _fold_hard_cap(edit_ok.state, _fail_dispatch("error B"), false)
+  const o2 = _fold_hard_cap(edit_ok.state, _fail_dispatch("error B"), false)
   assert(o2.state.failing_verify_turns == 2)
   assert(o2.warning == nil)
 }

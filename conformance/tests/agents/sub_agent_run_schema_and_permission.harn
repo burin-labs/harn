@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn write_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -19,7 +19,7 @@ pipeline main() {
   with_llm_script(
     [llm_text("{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}")],
     { ->
-      let typed = sub_agent_run(
+      const typed = sub_agent_run(
         "Find all callers of parse_config.",
         {
           provider: "mock",
@@ -39,7 +39,7 @@ pipeline main() {
   with_llm_script(
     [{tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]}],
     { ->
-      let denied = sub_agent_run(
+      const denied = sub_agent_run(
         "Try to write a note.",
         {
           provider: "mock",

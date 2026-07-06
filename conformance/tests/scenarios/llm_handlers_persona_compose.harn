@@ -7,48 +7,48 @@
 import { compose, with_budget, with_logging, with_routing } from "std/llm/handlers"
 
 pipeline run() {
-  let cheap_calls = atomic(0)
-  let frontier_calls = atomic(0)
-  let log_records = atomic(0)
-  let cheap = { _call ->
+  const cheap_calls = atomic(0)
+  const frontier_calls = atomic(0)
+  const log_records = atomic(0)
+  const cheap = { _call ->
     let _ = atomic_add(cheap_calls, 1)
     return {
       ok: true,
       value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 1, output_tokens: 1},
     }
   }
-  let frontier = { _call ->
+  const frontier = { _call ->
     let _ = atomic_add(frontier_calls, 1)
     return {
       ok: true,
       value: {text: "frontier", model: "mock", provider: "mock", input_tokens: 1, output_tokens: 1},
     }
   }
-  let router = with_routing(
+  const router = with_routing(
     {
       default: cheap,
       routes: [{name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: frontier}],
     },
   )
-  let sink = { _record ->
+  const sink = { _record ->
     let _ = atomic_add(log_records, 1)
   }
-  let middleware = compose(
+  const middleware = compose(
     [with_logging({level: "info", sink: sink}), with_budget({max_calls: 2, on_exceed: "short_circuit"})],
   )
-  let persona = middleware(router)
+  const persona = middleware(router)
   // First call — under budget, default route.
-  let env1 = persona({prompt: "p1", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env1 = persona({prompt: "p1", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(env1.value.text)
   __io_println(env1.route_name)
   // Second call — escalates to frontier.
-  let env2 = persona(
+  const env2 = persona(
     {prompt: "p2", system: "", opts: {escalate: true}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
   __io_println(env2.value.text)
   __io_println(env2.route_name)
   // Third call — budget exhausted.
-  let env3 = persona({prompt: "p3", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env3 = persona({prompt: "p3", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(env3.ok)
   __io_println(env3.status)
   __io_println(atomic_get(cheap_calls))

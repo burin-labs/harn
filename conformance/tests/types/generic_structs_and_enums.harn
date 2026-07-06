@@ -7,8 +7,8 @@ pipeline test(task) {
     Some(value: T)
     None
   }
-  let pair: Pair<int, string> = Pair {first: 1, second: "two"}
-  let maybe: Option<int> = Option.Some(pair.first)
+  const pair: Pair<int, string> = Pair {first: 1, second: "two"}
+  const maybe: Option<int> = Option.Some(pair.first)
   log(pair.first)
   log(pair.second)
   match maybe {

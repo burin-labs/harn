@@ -5,6 +5,6 @@
  * the most negative i64 must be written as `-9223372036854775807 - 1`.
  */
 pipeline test(task) {
-  let too_big = 9223372036854775808
+  const too_big = 9223372036854775808
   log(too_big)
 }

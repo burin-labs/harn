@@ -6,19 +6,19 @@
 import { write_json } from "std/fs"
 import { memory_forget, memory_store, memory_summarize } from "std/memory"
 
-let PATTERN_SCHEMA = "harn.pattern_learning.v1"
+const PATTERN_SCHEMA = "harn.pattern_learning.v1"
 
-let PATTERN_NAMESPACE = "project/pattern-learning"
+const PATTERN_NAMESPACE = "project/pattern-learning"
 
-let OBSERVATION_CAP: int = 500
+const OBSERVATION_CAP: int = 500
 
-let DEFAULT_SUPPORT_THRESHOLD: int = 5
+const DEFAULT_SUPPORT_THRESHOLD: int = 5
 
-let DEFAULT_WINDOW_DAYS: int = 14
+const DEFAULT_WINDOW_DAYS: int = 14
 
-let DEFAULT_SUPPRESSION_DAYS: int = 14
+const DEFAULT_SUPPRESSION_DAYS: int = 14
 
-let STOP_WORDS = [
+const STOP_WORDS = [
   "about",
   "after",
   "again",
@@ -69,7 +69,7 @@ fn pl_project_root(options = nil) -> string {
 }
 
 fn pl_memory_root(options = nil) -> string {
-  let explicit = pl_text(options?.memory_root ?? options?.root)
+  const explicit = pl_text(options?.memory_root ?? options?.root)
   if explicit != "" {
     return explicit
   }
@@ -77,7 +77,7 @@ fn pl_memory_root(options = nil) -> string {
 }
 
 fn pl_namespace(options = nil) -> string {
-  let explicit = pl_text(options?.namespace)
+  const explicit = pl_text(options?.namespace)
   return explicit == "" ? PATTERN_NAMESPACE : explicit
 }
 
@@ -86,7 +86,7 @@ fn pl_memory_options(options = nil) -> dict {
 }
 
 fn pl_now(options = nil) -> string {
-  let explicit = pl_text(options?.now)
+  const explicit = pl_text(options?.now)
   return explicit == "" ? date_now_iso() : explicit
 }
 
@@ -125,13 +125,13 @@ fn pl_read_jsonl_payloads(path: string) -> list {
   if !path || !harness.fs.exists(path) {
     return []
   }
-  var out = []
+  let out = []
   for raw_line in (harness.fs.read_text(path) ?? "").split("\n") {
-    let line = pl_text(raw_line)
+    const line = pl_text(raw_line)
     if line == "" {
       continue
     }
-    let parsed = try {
+    const parsed = try {
       json_parse(line)
     }
     if is_ok(parsed) {
@@ -142,13 +142,13 @@ fn pl_read_jsonl_payloads(path: string) -> list {
 }
 
 fn pl_project_collection(mutations: list) -> list {
-  var records = {}
-  var order = []
+  let records = {}
+  let order = []
   for mutation in mutations ?? [] {
-    let op = pl_text(mutation?.operation)
+    const op = pl_text(mutation?.operation)
     if op == "upsert" {
-      let record = mutation?.record ?? {}
-      let id = pl_text(record?.id)
+      const record = mutation?.record ?? {}
+      const id = pl_text(record?.id)
       if id == "" {
         continue
       }
@@ -157,14 +157,14 @@ fn pl_project_collection(mutations: list) -> list {
       }
       records = records + {[id]: record}
     } else if op == "delete" {
-      let id = pl_text(mutation?.id)
+      const id = pl_text(mutation?.id)
       records = records + {[id]: nil}
       order = order.filter({ existing -> existing != id })
     } else if op == "replace" {
       records = {}
       order = []
       for record in mutation?.records ?? [] {
-        let id = pl_text(record?.id)
+        const id = pl_text(record?.id)
         if id == "" {
           continue
         }
@@ -182,9 +182,9 @@ fn pl_project_collection(mutations: list) -> list {
 }
 
 fn pl_project_value(mutations: list, fallback: dict) -> dict {
-  var value = fallback
+  let value = fallback
   for mutation in mutations ?? [] {
-    let op = pl_text(mutation?.operation)
+    const op = pl_text(mutation?.operation)
     if op == "replace" && mutation?.value != nil {
       value = mutation.value
     } else if op == "clear" {
@@ -195,9 +195,9 @@ fn pl_project_value(mutations: list, fallback: dict) -> dict {
 }
 
 fn pl_tags(kind: string, extra = nil) -> list {
-  var tags = ["pattern_learning", "pattern_learning:" + kind, "schema:" + PATTERN_SCHEMA]
+  let tags = ["pattern_learning", "pattern_learning:" + kind, "schema:" + PATTERN_SCHEMA]
   for raw in extra ?? [] {
-    let tag = pl_text(raw)
+    const tag = pl_text(raw)
     if tag != "" && !tags.contains(tag) {
       tags = tags + [tag]
     }
@@ -206,9 +206,9 @@ fn pl_tags(kind: string, extra = nil) -> list {
 }
 
 fn pl_store_record(kind: string, key: string, value: dict, options = nil) -> dict {
-  let opts = pl_memory_options(options)
-  let now = pl_now(options)
-  let id = pl_text(options?.id)
+  const opts = pl_memory_options(options)
+  const now = pl_now(options)
+  const id = pl_text(options?.id)
   return memory_store(
     pl_namespace(options),
     key,
@@ -224,7 +224,7 @@ fn pl_store_record(kind: string, key: string, value: dict, options = nil) -> dic
 }
 
 fn pl_memory_records(kind: string = "", options = nil) -> list {
-  let window = if kind == "" {
+  const window = if kind == "" {
     {limit: options?.record_limit ?? 2000}
   } else {
     {limit: options?.record_limit ?? 2000, tag: "pattern_learning:" + kind}
@@ -264,7 +264,7 @@ fn pl_replace_state(state: dict, options = nil) -> dict {
  */
 pub fn pattern_learning_state(options = nil) -> dict {
   pattern_learning_ensure_migrated(options)
-  var best = nil
+  let best = nil
   for value in pl_record_values("state", options) {
     if best == nil || pl_text(value?.updated_at) >= pl_text(best?.updated_at) {
       best = value
@@ -281,18 +281,18 @@ pub fn pattern_learning_state(options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn pattern_learning_set_enabled(enabled: bool, options = nil) -> dict {
-  let state = pattern_learning_state(options)
+  const state = pattern_learning_state(options)
   return pl_replace_state(state + {enabled: enabled}, options)
 }
 
 fn pl_normalize_words(text: string) -> list {
-  let cleaned = regex_replace(r"[^a-z0-9]+", " ", (text ?? "").lower()) ?? ""
+  const cleaned = regex_replace(r"[^a-z0-9]+", " ", (text ?? "").lower()) ?? ""
   return cleaned.split(" ").filter({ word -> word != "" }).to_list()
 }
 
 fn pl_significant_words(text: string) -> list {
-  var seen = []
-  var out = []
+  let seen = []
+  let out = []
   for word in pl_normalize_words(text) {
     if len(word) < 3 || STOP_WORDS.contains(word) || seen.contains(word) {
       continue
@@ -304,7 +304,7 @@ fn pl_significant_words(text: string) -> list {
 }
 
 fn pl_slugify(raw) -> string {
-  var slug = regex_replace(r"[^a-z0-9]+", "-", pl_text(raw).lower()) ?? ""
+  let slug = regex_replace(r"[^a-z0-9]+", "-", pl_text(raw).lower()) ?? ""
   while slug.starts_with("-") {
     slug = slug[1:]
   }
@@ -323,9 +323,9 @@ fn pl_unique_record_id(prefix: string, options = nil) -> string {
 }
 
 fn pl_sanitize_tool_sequence(sequence: list) -> list {
-  var out = []
+  let out = []
   for raw in sequence ?? [] {
-    let clean = pl_slugify(raw)
+    const clean = pl_slugify(raw)
     if clean != "" && clean != "load-skill" {
       out = out + [clean]
     }
@@ -334,7 +334,7 @@ fn pl_sanitize_tool_sequence(sequence: list) -> list {
 }
 
 fn pl_redact_sensitive(text: string) -> string {
-  let no_private = regex_replace(
+  const no_private = regex_replace(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
     "<redacted-private-key>",
     text ?? "",
@@ -349,11 +349,11 @@ fn pl_redact_sensitive(text: string) -> string {
 }
 
 fn pl_observation_from_input(input: dict, options = nil) -> dict {
-  let prompt = pl_redact_sensitive(pl_text(input?.prompt ?? input?.message))
+  const prompt = pl_redact_sensitive(pl_text(input?.prompt ?? input?.message))
   if prompt == "" {
     throw "HARN-PATTERN-001: prompt is required"
   }
-  let id = pl_text(input?.id)
+  const id = pl_text(input?.id)
   return {
     id: id == "" ? uuid() : id,
     session_id: pl_text(input?.session_id ?? input?.sessionID),
@@ -397,8 +397,8 @@ fn pl_forget_observation(id: string, options = nil) -> nil {
 }
 
 fn pl_cap_observations(options = nil) -> nil {
-  let observations = pattern_learning_observations(options)
-  let overflow = len(observations) - OBSERVATION_CAP
+  const observations = pattern_learning_observations(options)
+  const overflow = len(observations) - OBSERVATION_CAP
   if overflow <= 0 {
     return
   }
@@ -408,7 +408,7 @@ fn pl_cap_observations(options = nil) -> nil {
 }
 
 fn pl_prompt_cluster_key(prompt: string) -> string {
-  let words = pl_significant_words(prompt)
+  const words = pl_significant_words(prompt)
   if len(words) < 3 {
     return ""
   }
@@ -416,7 +416,7 @@ fn pl_prompt_cluster_key(prompt: string) -> string {
 }
 
 fn pl_tool_sequence_key(sequence: list) -> string {
-  let names = pl_sanitize_tool_sequence(sequence)
+  const names = pl_sanitize_tool_sequence(sequence)
   if len(names) < 2 {
     return ""
   }
@@ -427,22 +427,22 @@ fn pl_push_group(groups: dict, key: string, observation: dict) -> dict {
   if key == "" {
     return groups
   }
-  let current = groups[key] ?? []
+  const current = groups[key] ?? []
   return groups + {[key]: current + [observation]}
 }
 
 fn pl_recent_observations(observations: list, now_iso: string, window_days: int) -> list {
-  let now = date_parse(now_iso)
-  let max_age = window_days * 86400
-  var out = []
+  const now = date_parse(now_iso)
+  const max_age = window_days * 86400
+  let out = []
   for observation in observations {
-    let observed = try {
+    const observed = try {
       date_parse(pl_text(observation?.observed_at))
     }
     if is_err(observed) {
       continue
     }
-    let age_seconds = duration_to_seconds(date_diff(now, unwrap(observed)))
+    const age_seconds = duration_to_seconds(date_diff(now, unwrap(observed)))
     if age_seconds >= 0 && age_seconds <= max_age {
       out = out + [observation]
     }
@@ -451,10 +451,10 @@ fn pl_recent_observations(observations: list, now_iso: string, window_days: int)
 }
 
 fn pl_sample_prompts(observations: list) -> list {
-  var seen = []
-  var out = []
+  let seen = []
+  let out = []
   for observation in observations.sort_by({ item -> pl_text(item?.observed_at) }) {
-    let prompt = pl_text(observation?.prompt)
+    const prompt = pl_text(observation?.prompt)
     if prompt == "" || seen.contains(prompt) {
       continue
     }
@@ -468,9 +468,9 @@ fn pl_sample_prompts(observations: list) -> list {
 }
 
 fn pl_representative_tool_sequence(observations: list) -> list {
-  var best = []
+  let best = []
   for observation in observations {
-    let sequence = observation?.tool_sequence ?? []
+    const sequence = observation?.tool_sequence ?? []
     if len(sequence) > len(best) {
       best = sequence
     }
@@ -483,11 +483,11 @@ fn pl_title_from_words(words: list) -> string {
 }
 
 fn pl_skill_name(base: string) -> string {
-  let slug = pl_slugify(base)
+  const slug = pl_slugify(base)
   if slug == "" {
     return "learned-pattern"
   }
-  var trimmed = slug[0:min(80, len(slug))]
+  let trimmed = slug[0:min(80, len(slug))]
   while trimmed.ends_with("-") {
     trimmed = trimmed[0:len(trimmed) - 1]
   }
@@ -503,7 +503,7 @@ fn pl_render_skill_body(
   sequence: list,
   source: string,
 ) -> string {
-  var lines = [
+  let lines = [
     "# " + title,
     "",
     description,
@@ -532,11 +532,11 @@ fn pl_render_skill_body(
 }
 
 fn pl_make_prompt_proposal(id: string, key: string, observations: list, existing: dict, now: string) -> dict {
-  let words = key.split("-")
-  let title = pl_title_from_words(words)
-  let description = "Reusable guidance learned from " + to_string(len(observations)) + " similar prompts."
-  let when_to_use = "Use when the request matches these recurring prompt terms: " + key.replace("-", ", ") + "."
-  let sequence = pl_representative_tool_sequence(observations)
+  const words = key.split("-")
+  const title = pl_title_from_words(words)
+  const description = "Reusable guidance learned from " + to_string(len(observations)) + " similar prompts."
+  const when_to_use = "Use when the request matches these recurring prompt terms: " + key.replace("-", ", ") + "."
+  const sequence = pl_representative_tool_sequence(observations)
   return {
     id: id,
     kind: "skill",
@@ -563,11 +563,11 @@ fn pl_make_prompt_proposal(id: string, key: string, observations: list, existing
 }
 
 fn pl_make_tool_proposal(id: string, key: string, observations: list, existing: dict, now: string) -> dict {
-  let sequence = key.split("-")
-  let title = "Repeated " + join(sequence, " -> ") + " workflow"
-  let description = "Reusable guidance learned from " + to_string(len(observations))
+  const sequence = key.split("-")
+  const title = "Repeated " + join(sequence, " -> ") + " workflow"
+  const description = "Reusable guidance learned from " + to_string(len(observations))
     + " runs with the same tool sequence."
-  let when_to_use = "Use when the task is likely to follow this tool sequence: " + join(sequence, " -> ") + "."
+  const when_to_use = "Use when the task is likely to follow this tool sequence: " + join(sequence, " -> ") + "."
   return {
     id: id,
     kind: "skill",
@@ -594,7 +594,7 @@ fn pl_make_tool_proposal(id: string, key: string, observations: list, existing: 
 }
 
 fn pl_skill_roots(options = nil) -> list {
-  let root = pl_project_root(options)
+  const root = pl_project_root(options)
   return [path_join(root, ".claude", "skills"), path_join(root, ".burin", "skills")]
 }
 
@@ -610,11 +610,11 @@ pub fn pattern_learning_skill_root(options = nil) -> string {
 }
 
 fn pl_frontmatter_value(body: string, key: string) -> string {
-  let prefix = key + ":"
+  const prefix = key + ":"
   for line in (body ?? "").split("\n") {
-    let trimmed = to_string(line ?? "").trim()
+    const trimmed = to_string(line ?? "").trim()
     if trimmed.starts_with(prefix) {
-      var value = trimmed[len(prefix):].trim()
+      let value = trimmed[len(prefix):].trim()
       if len(value) >= 2
         && ((value.starts_with("\"") && value.ends_with("\""))
         || (value.starts_with("'") && value.ends_with("'"))) {
@@ -627,7 +627,7 @@ fn pl_frontmatter_value(body: string, key: string) -> string {
 }
 
 fn pl_load_skill_file(name: string, path: string) -> dict {
-  let body = harness.fs.read_text(path)
+  const body = harness.fs.read_text(path)
   return {
     name: name,
     description: pl_frontmatter_value(body, "description"),
@@ -644,14 +644,14 @@ fn pl_load_skill_file(name: string, path: string) -> dict {
  * @api_stability: experimental
  */
 pub fn pattern_learning_accepted_skills(options = nil) -> list {
-  var seen = []
-  var out = []
+  let seen = []
+  let out = []
   for root in pl_skill_roots(options) {
     if !harness.fs.exists(root) {
       continue
     }
     for name in (harness.fs.list_dir(root) ?? []).sort() {
-      let skill_file = path_join(root, name, "SKILL.md")
+      const skill_file = path_join(root, name, "SKILL.md")
       if seen.contains(name) || !harness.fs.exists(skill_file) {
         continue
       }
@@ -672,7 +672,7 @@ fn pl_skill_exists(name: string, options = nil) -> bool {
 }
 
 fn pl_existing_pending_by_id(options = nil) -> dict {
-  var out = {}
+  let out = {}
   for proposal in pattern_learning_pending(options) {
     out = out + {[proposal.id]: proposal}
   }
@@ -680,15 +680,15 @@ fn pl_existing_pending_by_id(options = nil) -> dict {
 }
 
 fn pl_is_suppressed(id: string, state: dict, now: string) -> bool {
-  let until = pl_text((state?.suppressed_until ?? state?.suppressedUntil ?? {})[id])
+  const until = pl_text((state?.suppressed_until ?? state?.suppressedUntil ?? {})[id])
   return until != "" && until > now
 }
 
 fn pl_sorted_proposal_insert(proposals: list, proposal: dict) -> list {
-  var out = []
-  var inserted = false
+  let out = []
+  let inserted = false
   for existing in proposals {
-    let before = proposal.support > (existing?.support ?? 0)
+    const before = proposal.support > (existing?.support ?? 0)
       || (proposal.support == (existing?.support ?? 0) && proposal.id < existing.id)
     if before && !inserted {
       out = out + [proposal]
@@ -711,46 +711,46 @@ fn pl_sorted_proposal_insert(proposals: list, proposal: dict) -> list {
  */
 pub fn pattern_learning_refresh(options = nil) -> list {
   pattern_learning_ensure_migrated(options)
-  let state = pattern_learning_state(options)
+  const state = pattern_learning_state(options)
   if !(state?.enabled ?? true) {
     return pattern_learning_pending(options)
   }
-  let now = pl_now(options)
-  let support_threshold = options?.support_threshold ?? DEFAULT_SUPPORT_THRESHOLD
-  let window_days = options?.window_days ?? DEFAULT_WINDOW_DAYS
-  let observations = pl_recent_observations(pattern_learning_observations(options), now, window_days)
-  let existing = pl_existing_pending_by_id(options)
-  var prompt_groups = {}
-  var tool_groups = {}
+  const now = pl_now(options)
+  const support_threshold = options?.support_threshold ?? DEFAULT_SUPPORT_THRESHOLD
+  const window_days = options?.window_days ?? DEFAULT_WINDOW_DAYS
+  const observations = pl_recent_observations(pattern_learning_observations(options), now, window_days)
+  const existing = pl_existing_pending_by_id(options)
+  let prompt_groups = {}
+  let tool_groups = {}
   for observation in observations {
     prompt_groups = pl_push_group(prompt_groups, pl_prompt_cluster_key(observation.prompt), observation)
     tool_groups = pl_push_group(tool_groups, pl_tool_sequence_key(observation.tool_sequence), observation)
   }
-  var proposals = []
+  let proposals = []
   for key in keys(prompt_groups).sort() {
-    let group = prompt_groups[key] ?? []
+    const group = prompt_groups[key] ?? []
     if len(group) < support_threshold {
       continue
     }
-    let id = "prompt-" + pl_short_hash(key)
+    const id = "prompt-" + pl_short_hash(key)
     if pl_is_suppressed(id, state, now) {
       continue
     }
-    let proposal = pl_make_prompt_proposal(id, key, group, existing[id] ?? {}, now)
+    const proposal = pl_make_prompt_proposal(id, key, group, existing[id] ?? {}, now)
     if !pl_skill_exists(proposal.name, options) {
       proposals = pl_sorted_proposal_insert(proposals, proposal)
     }
   }
   for key in keys(tool_groups).sort() {
-    let group = tool_groups[key] ?? []
+    const group = tool_groups[key] ?? []
     if len(group) < support_threshold {
       continue
     }
-    let id = "tools-" + pl_short_hash(key)
+    const id = "tools-" + pl_short_hash(key)
     if pl_is_suppressed(id, state, now) {
       continue
     }
-    let proposal = pl_make_tool_proposal(id, key, group, existing[id] ?? {}, now)
+    const proposal = pl_make_tool_proposal(id, key, group, existing[id] ?? {}, now)
     if !pl_skill_exists(proposal.name, options) {
       proposals = pl_sorted_proposal_insert(proposals, proposal)
     }
@@ -815,7 +815,7 @@ fn pattern_learning_observe_inner(
   options = nil,
 ) -> dict {
   pattern_learning_ensure_migrated(options)
-  let state = pattern_learning_state(options)
+  const state = pattern_learning_state(options)
   if !(state?.enabled ?? true) {
     return {
       observed: false,
@@ -825,7 +825,7 @@ fn pattern_learning_observe_inner(
       proposals: pattern_learning_pending(options),
     }
   }
-  let observation = pl_store_observation(
+  const observation = pl_store_observation(
     pl_observation_from_input(
       {
         session_id: session_id,
@@ -838,7 +838,7 @@ fn pattern_learning_observe_inner(
     options,
   )
   pl_cap_observations(options)
-  let proposals = pattern_learning_refresh(options)
+  const proposals = pattern_learning_refresh(options)
   return {
     observed: true,
     enabled: true,
@@ -853,9 +853,9 @@ fn pl_score_skill(skill_entry: dict, query_words: list) -> dict {
   if len(query_words) == 0 {
     return {learned_skill: skill_entry, score: 0.0, reason: "project learned skill"}
   }
-  let haystack = join([skill_entry.name, skill_entry.description, skill_entry.when_to_use, skill_entry.body], " ")
-  let skill_words = pl_significant_words(haystack)
-  var overlap = []
+  const haystack = join([skill_entry.name, skill_entry.description, skill_entry.when_to_use, skill_entry.body], " ")
+  const skill_words = pl_significant_words(haystack)
+  let overlap = []
   for word in query_words {
     if skill_words.contains(word) && !overlap.contains(word) {
       overlap = overlap + [word]
@@ -875,10 +875,10 @@ fn pl_insert_match(matches: list, item: dict) -> list {
   if item?.learned_skill == nil {
     return matches
   }
-  var out = []
-  var inserted = false
+  let out = []
+  let inserted = false
   for existing in matches {
-    let before = item.score > existing.score
+    const before = item.score > existing.score
       || (item.score == existing.score && item.learned_skill.name < existing.learned_skill.name)
     if before && !inserted {
       out = out + [item]
@@ -900,8 +900,8 @@ fn pl_insert_match(matches: list, item: dict) -> list {
  * @api_stability: experimental
  */
 pub fn pattern_learning_skill_matches(query: string, limit: int = 3, options = nil) -> list {
-  let query_words = pl_significant_words(query)
-  var matches = []
+  const query_words = pl_significant_words(query)
+  let matches = []
   for skill_entry in pattern_learning_accepted_skills(options) {
     matches = pl_insert_match(matches, pl_score_skill(skill_entry, query_words))
   }
@@ -929,15 +929,15 @@ fn pattern_learning_context_inner(
   limit: int = 3,
   options = nil,
 ) -> dict {
-  let read_options = (options ?? {}) + {skip_migration: true}
-  let pending = pattern_learning_pending(read_options)
-  let matches = pattern_learning_skill_matches(message, limit, read_options)
+  const read_options = (options ?? {}) + {skip_migration: true}
+  const pending = pattern_learning_pending(read_options)
+  const matches = pattern_learning_skill_matches(message, limit, read_options)
   if len(matches) == 0 && len(pending) == 0 {
     return {body: "", matches: [], pending_count: 0, banner: ""}
   }
-  var lines = ["<learned_context>"]
+  let lines = ["<learned_context>"]
   if len(matches) > 0 {
-    let loaded = join(
+    const loaded = join(
       matches.map({ candidate -> candidate.learned_skill.name + " (" + to_string(candidate.score) + ")" }),
       ", ",
     )
@@ -956,16 +956,16 @@ fn pattern_learning_context_inner(
     lines = lines + ["</learned_skills>"]
   }
   if len(pending) > 0 {
-    let suffix = len(pending) == 1 ? "" : "s"
+    const suffix = len(pending) == 1 ? "" : "s"
     lines = lines
       + [
       "<learning_review>" + to_string(len(pending)) + " proposal" + suffix
         + " pending; run `/learn list` to review.</learning_review>",
     ]
   }
-  let names = join(matches.map({ candidate -> "`" + candidate.learned_skill.name + "`" }), ", ")
-  let match_suffix = len(matches) == 1 ? "" : "s"
-  let banner = if len(matches) > 0 {
+  const names = join(matches.map({ candidate -> "`" + candidate.learned_skill.name + "`" }), ", ")
+  const match_suffix = len(matches) == 1 ? "" : "s"
+  const banner = if len(matches) > 0 {
     "loaded " + to_string(len(matches)) + " learned skill" + match_suffix + ": " + names
   } else {
     ""
@@ -989,13 +989,13 @@ fn pl_validate_skill_name(name: string) -> nil {
 }
 
 fn pl_write_skill(proposal: dict, options = nil) -> string {
-  let name = pl_text(proposal?.name)
+  const name = pl_text(proposal?.name)
   pl_validate_skill_name(name)
-  let root = pattern_learning_skill_root(options)
-  let dir = path_join(root, name)
-  let path = path_join(dir, "SKILL.md")
+  const root = pattern_learning_skill_root(options)
+  const dir = path_join(root, name)
+  const path = path_join(dir, "SKILL.md")
   harness.fs.mkdir(dir)
-  let body = join(
+  const body = join(
     [
       "---",
       "name: " + name,
@@ -1039,11 +1039,11 @@ fn pl_find_pending(id: string, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn pattern_learning_accept(id: string, options = nil) -> dict {
-  let proposal = pl_find_pending(pl_text(id), options)
+  const proposal = pl_find_pending(pl_text(id), options)
   if proposal?.id == nil {
     return {accepted: false, is_error: true, error: "proposal not found: " + pl_text(id)}
   }
-  let skill_path = pl_write_skill(proposal, options)
+  const skill_path = pl_write_skill(proposal, options)
   memory_forget(pl_namespace(options), {key: "pending:" + proposal.id}, pl_memory_options(options))
   return {accepted: true, skill_path: skill_path, proposal: proposal}
 }
@@ -1060,14 +1060,14 @@ fn pl_add_days_iso(now: string, days: int) -> string {
  * @api_stability: experimental
  */
 pub fn pattern_learning_reject(id: string, options = nil) -> dict {
-  let clean = pl_text(id)
-  let proposal = pl_find_pending(clean, options)
+  const clean = pl_text(id)
+  const proposal = pl_find_pending(clean, options)
   if proposal?.id == nil {
     return {rejected: false, is_error: true, error: "proposal not found: " + clean}
   }
   memory_forget(pl_namespace(options), {key: "pending:" + clean}, pl_memory_options(options))
-  let state = pattern_learning_state(options)
-  let suppressed = (state?.suppressed_until ?? {})
+  const state = pattern_learning_state(options)
+  const suppressed = (state?.suppressed_until ?? {})
     + {[clean]: pl_add_days_iso(pl_now(options), options?.suppression_days ?? DEFAULT_SUPPRESSION_DAYS)}
   pl_replace_state(state + {suppressed_until: suppressed}, options)
   return {rejected: true}
@@ -1081,8 +1081,8 @@ pub fn pattern_learning_reject(id: string, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn pattern_learning_status(options = nil) -> dict {
-  let state = pattern_learning_state(options)
-  let pending = pattern_learning_pending(options)
+  const state = pattern_learning_state(options)
+  const pending = pattern_learning_pending(options)
   return {
     enabled: state?.enabled ?? true,
     observation_count: len(pattern_learning_observations(options)),
@@ -1093,9 +1093,9 @@ pub fn pattern_learning_status(options = nil) -> dict {
 }
 
 fn pl_migrate_observations(options = nil) -> nil {
-  let project = pl_project_root(options)
+  const project = pl_project_root(options)
   for legacy in pl_project_collection(pl_read_jsonl_payloads(pl_observation_file(project))) {
-    let converted = try {
+    const converted = try {
       pl_observation_from_legacy(legacy, options)
     }
     if is_ok(converted) {
@@ -1105,10 +1105,10 @@ fn pl_migrate_observations(options = nil) -> nil {
 }
 
 fn pl_migrate_pending(options = nil) -> nil {
-  let project = pl_project_root(options)
-  let pending = pl_project_value(pl_read_jsonl_payloads(pl_pending_file(project)), {generatedAt: "", proposals: []})
+  const project = pl_project_root(options)
+  const pending = pl_project_value(pl_read_jsonl_payloads(pl_pending_file(project)), {generatedAt: "", proposals: []})
   for proposal in pending?.proposals ?? [] {
-    let normalized = {
+    const normalized = {
       id: pl_text(proposal?.id),
       kind: pl_text(proposal?.kind) == "" ? "skill" : pl_text(proposal.kind),
       source: pl_text(proposal?.source),
@@ -1135,8 +1135,8 @@ fn pl_migrate_pending(options = nil) -> nil {
 }
 
 fn pl_migrate_state(options = nil) -> nil {
-  let project = pl_project_root(options)
-  let state = pl_project_value(
+  const project = pl_project_root(options)
+  const state = pl_project_value(
     pl_read_jsonl_payloads(pl_state_file(project)),
     {enabled: true, suppressedUntil: {}},
   )
@@ -1160,7 +1160,7 @@ pub fn pattern_learning_ensure_migrated(options = nil) -> dict {
   if options?.skip_migration ?? false {
     return {migrated: false, skipped: true}
   }
-  let marker = pl_migration_marker(options)
+  const marker = pl_migration_marker(options)
   if harness.fs.exists(marker) {
     return {migrated: false, already_done: true}
   }

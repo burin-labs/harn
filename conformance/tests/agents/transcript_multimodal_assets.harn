@@ -1,6 +1,6 @@
 pipeline main() {
-  let base = transcript({source: "conformance"})
-  let with_asset = transcript_add_asset(
+  const base = transcript({source: "conformance"})
+  const with_asset = transcript_add_asset(
     base,
     {
       kind: "image",
@@ -9,8 +9,8 @@ pipeline main() {
       storage: {path: ".harn/assets/diagram.png"},
     },
   )
-  let asset_id = transcript_assets(with_asset)[0].id
-  let multimodal = add_user(
+  const asset_id = transcript_assets(with_asset)[0].id
+  const multimodal = add_user(
     with_asset,
     [
       {type: "image", asset_id: asset_id, name: "diagram.png", visibility: "public"},
@@ -20,9 +20,9 @@ pipeline main() {
   __io_println(len(transcript_assets(multimodal)) == 1)
   __io_println(transcript_messages(multimodal)[0].content[0].asset_id == asset_id)
   __io_println(contains(transcript_render_visible(multimodal), "diagram.png"))
-  let forked = transcript_fork(multimodal)
+  const forked = transcript_fork(multimodal)
   __io_println(len(transcript_assets(forked)) == 1)
-  let imported = transcript_import(transcript_export(multimodal))
-  let imported_assets = transcript_assets(imported)
+  const imported = transcript_import(transcript_export(multimodal))
+  const imported_assets = transcript_assets(imported)
   __io_println(len(imported_assets) == 1)
 }

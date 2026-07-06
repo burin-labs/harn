@@ -14,8 +14,8 @@ import {
 } from "std/settled"
 
 pipeline default() {
-  let results = [Ok({status: "pass"}), Err("bad-input"), Ok({status: "fail"}), Err("timeout"), Ok({status: "pass"})]
-  let parts = partition(results)
+  const results = [Ok({status: "pass"}), Err("bad-input"), Ok({status: "fail"}), Err("timeout"), Ok({status: "pass"})]
+  const parts = partition(results)
   __io_println(parts.ok_count)
   __io_println(parts.err_count)
   __io_println(len(parts.oks))
@@ -24,11 +24,11 @@ pipeline default() {
   __io_println(len(errs(results)))
   __io_println(count_oks(results))
   __io_println(count_errs(results))
-  let summarized = summary(results)
+  const summarized = summary(results)
   __io_println(summarized.total)
   __io_println(summarized.any_failed)
   __io_println(summarized.all_ok)
-  let mapped = map_settled(
+  const mapped = map_settled(
     results,
     fn(value, idx) { return "ok#" + to_string(idx) + ":" + value.status },
     fn(error, idx) { return "err#" + to_string(idx) + ":" + to_string(error) },
@@ -36,7 +36,7 @@ pipeline default() {
   for row in mapped {
     __io_println(row)
   }
-  let by_status = tally_by(
+  const by_status = tally_by(
     results,
     fn(payload, was_ok) {
       if was_ok {
@@ -48,7 +48,7 @@ pipeline default() {
   __io_println(by_status?.pass)
   __io_println(by_status?.fail)
   __io_println(by_status?.error)
-  let rows = enumerate_settled(results)
+  const rows = enumerate_settled(results)
   __io_println(rows[0].ok)
   __io_println(rows[1].ok)
   __io_println(rows[1].error)

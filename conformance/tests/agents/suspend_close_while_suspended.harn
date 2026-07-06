@@ -18,15 +18,15 @@ pipeline main() {
       },
     ],
     { ->
-      let handle = sub_agent_run(
+      const handle = sub_agent_run(
         "Park, get closed, reject resume.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      let suspended = wait_agent(handle)
+      const suspended = wait_agent(handle)
       __io_println("pre_close_status=" + suspended.status)
-      let closed = close_agent(handle)
+      const closed = close_agent(handle)
       __io_println("post_close_status=" + closed.status)
-      let resume_attempt = try {
+      const resume_attempt = try {
         resume_agent(handle)
       }
       __io_println("resume_failed=" + to_string(is_err(resume_attempt)))
@@ -34,7 +34,7 @@ pipeline main() {
         "resume_err_has_code="
           + to_string(contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010")),
       )
-      let closed_again = close_agent(handle)
+      const closed_again = close_agent(handle)
       __io_println("reclose_status=" + closed_again.status)
     },
   )

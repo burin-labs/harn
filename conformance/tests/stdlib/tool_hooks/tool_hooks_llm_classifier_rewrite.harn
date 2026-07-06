@@ -22,11 +22,11 @@ pipeline default() {
       ),
     ],
     { ->
-      let inner = { args -> {ok: true, ran: args.command} }
-      let wrapper = preset_run_command(
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
         {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8}, inner: inner},
       )
-      let result = wrapper({command: "npm run lint"})
+      const result = wrapper({command: "npm run lint"})
       __io_println(result.action)
       __io_println(result.rule_id)
       __io_println(result.catalogue_id)
@@ -36,10 +36,10 @@ pipeline default() {
       __io_println(result.command)
       __io_println(result.result.ok)
       __io_println(result.result.ran)
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(len(calls))
       __io_println(contains(to_string(calls[0].system), "shell-command safety reviewer"))
-      let log = pipeline_lifecycle_audit_log_take()
+      const log = pipeline_lifecycle_audit_log_take()
       __io_println(len(log))
       __io_println(log[0].kind)
       __io_println(log[0].payload.kind)

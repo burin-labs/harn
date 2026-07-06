@@ -3,7 +3,7 @@ fn apply_once(value: int, f: fn(int) -> int) -> int {
 }
 
 pipeline default() {
-  let inc: fn(int) -> int = { x -> x + 1 }
+  const inc: fn(int) -> int = { x -> x + 1 }
   __io_println(inc(5))
   __io_println(apply_once(6, { x -> x + 1 }))
 }

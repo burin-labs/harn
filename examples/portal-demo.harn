@@ -1,9 +1,9 @@
 pipeline main() {
-  let root = ".harn-runs"
-  let dir = path_join(root, "portal-demo")
+  const root = ".harn-runs"
+  const dir = path_join(root, "portal-demo")
   harness.fs.mkdir(root)
   harness.fs.mkdir(dir)
-  let graph_flow = workflow_graph(
+  const graph_flow = workflow_graph(
     {
       name: "portal_demo",
       entry: "gate",
@@ -34,18 +34,18 @@ pipeline main() {
       ],
     },
   )
-  let graph_artifacts = [
+  const graph_artifacts = [
     artifact({kind: "plan", text: "go build the report", relevance: 0.9}),
     artifact({kind: "workspace_file", title: "alpha.md", text: "alpha content", relevance: 0.8}),
     artifact({kind: "workspace_file", title: "beta.md", text: "beta content", relevance: 0.7}),
   ]
-  let success = workflow_execute(
+  const success = workflow_execute(
     "Assemble the report",
     graph_flow,
     graph_artifacts,
     {max_steps: 8, persist_path: path_join(dir, "portal-success.json")},
   )
-  let replayed = workflow_execute(
+  const replayed = workflow_execute(
     "Assemble the report",
     graph_flow,
     graph_artifacts,
@@ -56,7 +56,7 @@ pipeline main() {
       persist_path: path_join(dir, "portal-replay.json"),
     },
   )
-  let failing_flow = workflow_graph(
+  const failing_flow = workflow_graph(
     {
       name: "portal_demo",
       entry: "act",
@@ -78,7 +78,7 @@ pipeline main() {
       edges: [{from: "act", to: "verify"}],
     },
   )
-  let failed = workflow_execute(
+  const failed = workflow_execute(
     "Write a note that will fail verification",
     failing_flow,
     [artifact({kind: "summary", text: "seed note", relevance: 0.6})],

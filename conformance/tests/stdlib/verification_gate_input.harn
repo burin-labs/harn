@@ -1,23 +1,23 @@
 import { verification_gate_input } from "std/verification"
 
 pipeline test(task) {
-  let old_red = {
+  const old_red = {
     rung: "R2",
     rowId: "zig/test",
     at: "2026-07-03T00:00:00Z",
     snapshot: {"src/writer.zig": "old"},
     diagnostics: [{path: "src/writer.zig", line: 10, column: 2, code: "E1", message: "missing writeEscaped"}],
   }
-  let fresh_red = {
+  const fresh_red = {
     rung: "R2",
     rowId: "zig/test",
     at: "2026-07-03T00:01:00Z",
     snapshot: {"src/writer.zig": "new"},
     diagnostics: [{path: "src/writer.zig", line: 99, column: 7, code: "E1", message: "missing writeEscaped"}],
   }
-  let hashes = {"src/writer.zig": "new"}
-  let normalization = {row: {diagnosticDelta: {include_path: true}}}
-  let stale_current = verification_gate_input(nil, old_red, hashes, normalization)
+  const hashes = {"src/writer.zig": "new"}
+  const normalization = {row: {diagnosticDelta: {include_path: true}}}
+  const stale_current = verification_gate_input(nil, old_red, hashes, normalization)
   assert_eq(stale_current.schema, "harn.verification.gate_input.v1")
   assert_eq(stale_current.status, "advisory")
   assert_eq(stale_current.feedsGates, false)
@@ -25,20 +25,20 @@ pipeline test(task) {
   assert_eq(stale_current.blocks_completion, false)
   assert_eq(stale_current.delta.status, "advisory")
   assert_eq(stale_current.current.classification.staleFiles, ["src/writer.zig"])
-  let hashes_unavailable = verification_gate_input(nil, old_red, nil, normalization)
+  const hashes_unavailable = verification_gate_input(nil, old_red, nil, normalization)
   assert_eq(hashes_unavailable.current.classification.status, "unclassified")
   assert_eq(hashes_unavailable.feedsGates, true)
   assert_eq(hashes_unavailable.status, "initialized")
-  let unbound = verification_gate_input(nil, {diagnostics: ["missing writeEscaped"]}, hashes)
+  const unbound = verification_gate_input(nil, {diagnostics: ["missing writeEscaped"]}, hashes)
   assert_eq(unbound.status, "advisory")
   assert_eq(unbound.current.classification.status, "unbound")
   assert_eq(unbound.gate_bearing_failure, false)
-  let unchanged = verification_gate_input(fresh_red, fresh_red, hashes, normalization)
+  const unchanged = verification_gate_input(fresh_red, fresh_red, hashes, normalization)
   assert_eq(unchanged.status, "unchanged")
   assert_eq(unchanged.no_progress, true)
   assert_eq(unchanged.progress_credit, false)
   assert_eq(unchanged.blocks_completion, true)
-  let advanced = verification_gate_input(
+  const advanced = verification_gate_input(
     fresh_red + {diagnostics: ["A", "B"]},
     fresh_red + {diagnostics: ["B"]},
     hashes,
@@ -46,7 +46,7 @@ pipeline test(task) {
   assert_eq(advanced.status, "advanced")
   assert_eq(advanced.progress_credit, true)
   assert_eq(advanced.delta.removed, ["a"])
-  let green = verification_gate_input(
+  const green = verification_gate_input(
     old_red,
     {rung: "R2", rowId: "zig/test", at: "2026-07-03T00:02:00Z", snapshot: hashes, success: true},
     hashes,
@@ -55,7 +55,7 @@ pipeline test(task) {
   assert_eq(green.progress_credit, false)
   assert_eq(green.blocks_completion, false)
   assert_eq(green.previous.classification.status, "bound_stale")
-  let stale_previous_not_baseline = verification_gate_input(old_red, fresh_red + {diagnostics: ["B"]}, hashes)
+  const stale_previous_not_baseline = verification_gate_input(old_red, fresh_red + {diagnostics: ["B"]}, hashes)
   assert_eq(stale_previous_not_baseline.status, "initialized")
   assert_eq(stale_previous_not_baseline.progress_credit, false)
   assert_eq(stale_previous_not_baseline.blocks_completion, true)

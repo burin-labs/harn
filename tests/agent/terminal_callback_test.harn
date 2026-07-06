@@ -13,7 +13,7 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
       llm_text("The rescue turn completed the task. ##DONE##"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Continue once, then finish.",
         nil,
         {
@@ -34,14 +34,14 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
       )
       assert_eq(result.status, "done")
       assert(result.llm.iterations >= 2, "terminal callback must allow the scripted rescue turn")
-      let decisions = result?.adaptive_budget?.decisions ?? []
+      const decisions = result?.adaptive_budget?.decisions ?? []
       assert(
         len(decisions) > 0 && decisions[len(decisions) - 1]?.reason == "terminal_callback_continue",
         "adaptive budget decisions should record the terminal rescue extension",
       )
-      let messages = result?.transcript?.messages ?? []
-      var saw_post_turn_feedback = false
-      var saw_terminal_feedback = false
+      const messages = result?.transcript?.messages ?? []
+      let saw_post_turn_feedback = false
+      let saw_terminal_feedback = false
       for message in messages {
         if contains(message?.content ?? "", "<runtime_feedback kind=\"post_turn\">") {
           saw_post_turn_feedback = true

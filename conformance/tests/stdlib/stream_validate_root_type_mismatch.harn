@@ -1,8 +1,8 @@
 import { stream_validate_chunk, stream_validate_create } from "std/json"
 
 pipeline default(task) {
-  let validator = stream_validate_create({type: "dict"})
-  let r1 = stream_validate_chunk(validator, "\"oops\"")
+  const validator = stream_validate_create({type: "dict"})
+  const r1 = stream_validate_chunk(validator, "\"oops\"")
   __io_println(r1.verdict)
   __io_println(r1.path)
   __io_println(r1.reason)

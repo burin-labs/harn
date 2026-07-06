@@ -8,7 +8,7 @@ import "std/triggers"
  * batched dispatch back to the emit timeline.
  */
 fn handle_batch(event) {
-  let batch_len = if event.batch == nil {
+  const batch_len = if event.batch == nil {
     0
   } else {
     len(event.batch)
@@ -18,10 +18,10 @@ fn handle_batch(event) {
 
 pipeline default() {
   enable_tracing(true)
-  let stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-otel-batch-" + unique,
       kind: "channel.emit",
@@ -40,16 +40,16 @@ pipeline default() {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("ch.otel.batch.input", {seq: 1})
-  let _ = emit_channel("ch.otel.batch.input", {seq: 2})
-  let _ = emit_channel("ch.otel.batch.input", {seq: 3})
+  const _ = emit_channel("ch.otel.batch.input", {seq: 1})
+  const _ = emit_channel("ch.otel.batch.input", {seq: 2})
+  const _ = emit_channel("ch.otel.batch.input", {seq: 3})
   // Drain emit + match lifecycle events. Three input emits land first,
   // then the batched match, then the nested emit of `ch.otel.batch.fired`
   // (with its own match event since no binding listens to it).
-  let first = stream.next().value
-  let second = stream.next().value
-  let third = stream.next().value
-  let fourth = stream.next().value
+  const first = stream.next().value
+  const second = stream.next().value
+  const third = stream.next().value
+  const fourth = stream.next().value
   __io_println(first.kind)
   __io_println(second.kind)
   __io_println(third.kind)
@@ -58,18 +58,18 @@ pipeline default() {
   __io_println(fourth.payload.batch.count)
   __io_println(len(fourth.payload.batch.constituent_event_ids))
   // Span check: match span must multi-link to every emit span.
-  let spans = trace_spans()
-  let emit_spans = spans
+  const spans = trace_spans()
+  const emit_spans = spans
     .filter(
     { s -> s.kind == "channel_emit" && s.metadata.name_resolved == "tenant:default:ch.otel.batch.input" },
   )
-  let match_spans = spans
+  const match_spans = spans
     .filter(
     { s -> s.kind == "channel_match" && s.name == "channel.match tenant:default:ch.otel.batch.input" },
   )
   __io_println(len(emit_spans) >= 3)
   __io_println(len(match_spans) >= 1)
-  let match_span = match_spans[0]
+  const match_span = match_spans[0]
   __io_println(len(match_span.links) >= 3)
   enable_tracing(false)
 }

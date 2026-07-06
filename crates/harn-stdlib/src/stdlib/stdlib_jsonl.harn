@@ -11,7 +11,7 @@
 type ReadJsonlOptions = {strict?: bool, max_records?: int, on_error?: any}
 
 fn __read_options(options) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return {
     strict: opts?.strict ?? false,
     max_records: to_int(opts?.max_records) ?? 0,
@@ -20,11 +20,11 @@ fn __read_options(options) {
 }
 
 fn __parse_line(text: string, opts, out_in: list, dropped_in: int) -> dict {
-  let trimmed = trim(text)
+  const trimmed = trim(text)
   if trimmed == "" {
     return {out: out_in, dropped: dropped_in, halt: false}
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(trimmed)
   }
   if is_ok(parsed) {
@@ -48,18 +48,18 @@ fn __parse_line(text: string, opts, out_in: list, dropped_in: int) -> dict {
  * @errors: []
  */
 pub fn parse_jsonl(text: string, options: ReadJsonlOptions = {}) -> list {
-  let opts = __read_options(options)
-  let body = text ?? ""
+  const opts = __read_options(options)
+  const body = text ?? ""
   if body == "" {
     return []
   }
-  var out = []
-  var dropped = 0
+  let out = []
+  let dropped = 0
   for line in split(body, "\n") {
     if opts.max_records > 0 && len(out) >= opts.max_records {
       break
     }
-    let outcome = __parse_line(line, opts, out, dropped)
+    const outcome = __parse_line(line, opts, out, dropped)
     out = outcome.out
     dropped = outcome.dropped
   }
@@ -78,7 +78,7 @@ pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
   if !harness.fs.exists(path) {
     return []
   }
-  let raw = try {
+  const raw = try {
     harness.fs.read_text(path)
   }
   if !is_ok(raw) {
@@ -91,7 +91,7 @@ pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
 }
 
 fn __serialize(items: list) -> string {
-  var lines = []
+  let lines = []
   for item in items ?? [] {
     lines = lines + [json_stringify(item)]
   }
@@ -106,7 +106,7 @@ fn __serialize(items: list) -> string {
  * @errors: []
  */
 pub fn write_jsonl(path: string, items: list) -> int {
-  let body = __serialize(items)
+  const body = __serialize(items)
   harness.fs.write_text(path, body)
   return len(items ?? [])
 }
@@ -119,7 +119,7 @@ pub fn write_jsonl(path: string, items: list) -> int {
  * @errors: []
  */
 pub fn append_jsonl(path: string, item) -> int {
-  let line = json_stringify(item) + "\n"
+  const line = json_stringify(item) + "\n"
   harness.fs.append(path, line)
   return len(line)
 }
@@ -134,22 +134,22 @@ pub fn append_jsonl(path: string, item) -> int {
  * @errors: []
  */
 pub fn fold_jsonl(text: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
-  let opts = __read_options(options)
-  var state = initial
-  var index = 0
-  let body = text ?? ""
+  const opts = __read_options(options)
+  let state = initial
+  let index = 0
+  const body = text ?? ""
   if body == "" {
     return state
   }
   for line in split(body, "\n") {
-    let trimmed = trim(line)
+    const trimmed = trim(line)
     if trimmed == "" {
       continue
     }
     if opts.max_records > 0 && index >= opts.max_records {
       break
     }
-    let parsed = try {
+    const parsed = try {
       json_parse(trimmed)
     }
     if is_ok(parsed) {

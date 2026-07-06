@@ -3,21 +3,21 @@ pipeline test(task) {
   // doesn't bleed into the clone. (Harn dicts are immutable by value,
   // but we still want to confirm the identity guarantees: structural
   // equality holds, and `==` returns true.)
-  let original = {name: "Ada", year: 1815}
-  let copy = clone(original)
+  const original = {name: "Ada", year: 1815}
+  const copy = clone(original)
   assert_eq(copy.name, "Ada", "clone preserves string field")
   assert_eq(copy.year, 1815, "clone preserves int field")
   assert(copy == original, "clone is structurally equal to source")
   // deep_clone duplicates nested structures recursively.
-  let nested = {config: {retries: 3, backoff: 100}, paths: ["src/a.harn", "src/b.harn"]}
-  let deep = deep_clone(nested)
+  const nested = {config: {retries: 3, backoff: 100}, paths: ["src/a.harn", "src/b.harn"]}
+  const deep = deep_clone(nested)
   assert_eq(deep.config.retries, 3, "deep_clone preserves nested ints")
   assert_eq(deep.paths[1], "src/b.harn", "deep_clone preserves nested list")
   assert(deep == nested, "deep_clone is structurally equal to source")
   // deep_merge recurses into nested dicts; right-side wins on scalars.
-  let defaults = {config: {retries: 3, backoff: 100, retry_on: ["timeout"]}, name: "default"}
-  let overrides = {config: {retries: 5, jitter: true}, extra: "value"}
-  let merged = deep_merge(defaults, overrides)
+  const defaults = {config: {retries: 3, backoff: 100, retry_on: ["timeout"]}, name: "default"}
+  const overrides = {config: {retries: 5, jitter: true}, extra: "value"}
+  const merged = deep_merge(defaults, overrides)
   assert_eq(merged.config.retries, 5, "right wins on scalar conflict")
   assert_eq(merged.config.backoff, 100, "left preserved when right is silent")
   assert_eq(merged.config.jitter, true, "right adds new key")
@@ -25,15 +25,15 @@ pipeline test(task) {
   assert_eq(merged.name, "default", "left scalar preserved")
   assert_eq(merged.extra, "value", "right-only key added")
   // unique preserves first-seen order.
-  let ints = [1, 2, 1, 3, 2, 4]
-  let dedup = unique(ints)
+  const ints = [1, 2, 1, 3, 2, 4]
+  const dedup = unique(ints)
   assert_eq(len(dedup), 4, "unique drops duplicates")
   assert_eq(dedup[0], 1, "unique preserves first-seen order: 1")
   assert_eq(dedup[1], 2, "unique preserves first-seen order: 2")
   assert_eq(dedup[2], 3, "unique preserves first-seen order: 3")
   assert_eq(dedup[3], 4, "unique preserves first-seen order: 4")
   // dict_from_pairs builds a dict; later entries override earlier.
-  let lookup = dict_from_pairs([["a", 1], ["b", 2], ["a", 3]])
+  const lookup = dict_from_pairs([["a", 1], ["b", 2], ["a", 3]])
   assert_eq(lookup.a, 3, "dict_from_pairs: last write wins")
   assert_eq(lookup.b, 2, "dict_from_pairs: distinct keys preserved")
   log("clone + merge: all tests passed")

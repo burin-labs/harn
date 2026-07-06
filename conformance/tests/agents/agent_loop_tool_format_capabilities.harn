@@ -1,7 +1,7 @@
 import { agent_capture_events } from "std/agent/events"
 
 fn sample_tools() {
-  let tools = tool_registry()
+  const tools = tool_registry()
   return tool_define(
     tools,
     "noop",
@@ -17,7 +17,7 @@ fn sample_tools() {
 
 fn format_echo_caller() {
   return { call ->
-    let format = to_string(call?.opts?.tool_format ?? "")
+    const format = to_string(call?.opts?.tool_format ?? "")
     return {
       ok: true,
       value: {
@@ -67,15 +67,15 @@ tool_mode_parity = "native_unreliable"
   defer {
     provider_capabilities_clear()
   }
-  let preferred_session = "tool-format-preferred-" + uuid()
-  let preferred = agent_capture_events(
+  const preferred_session = "tool-format-preferred-" + uuid()
+  const preferred = agent_capture_events(
     preferred_session,
     fn() { return run_format({provider: "testcatalog", model: "catalogued-native", session_id: preferred_session}) },
   )
   __io_println(preferred.result.text)
   __io_println(len(events_of(preferred.events, "capability_gap")))
-  let auto_session = "tool-format-auto-" + uuid()
-  let auto = agent_capture_events(
+  const auto_session = "tool-format-auto-" + uuid()
+  const auto = agent_capture_events(
     auto_session,
     fn() { return run_format(
       {provider: "testcatalog", model: "catalogued-native", session_id: auto_session, tool_format: "auto"},
@@ -83,15 +83,15 @@ tool_mode_parity = "native_unreliable"
   )
   __io_println(auto.result.text)
   __io_println(len(events_of(auto.events, "capability_gap")))
-  let fallback_session = "tool-format-fallback-" + uuid()
-  let fallback = agent_capture_events(
+  const fallback_session = "tool-format-fallback-" + uuid()
+  const fallback = agent_capture_events(
     fallback_session,
     fn() { return run_format({provider: "testcatalog", model: "uncatalogued-model", session_id: fallback_session}) },
   )
   // An uncatalogued model has no preferred_tool_format, so resolution falls
   // back to the GLOBAL text-channel default (now fenced-json, `json`) and emits
   // a capability_gap whose fallback_tool_format is `json` (was heredoc `text`).
-  let gaps = events_of(fallback.events, "capability_gap")
+  const gaps = events_of(fallback.events, "capability_gap")
   __io_println(fallback.result.text)
   __io_println(len(gaps))
   __io_println(gaps[0].level)
@@ -99,8 +99,8 @@ tool_mode_parity = "native_unreliable"
   __io_println(gaps[0].model)
   __io_println(gaps[0].capability)
   __io_println(gaps[0].fallback_tool_format)
-  let override_session = "tool-format-override-" + uuid()
-  let override_capture = agent_capture_events(
+  const override_session = "tool-format-override-" + uuid()
+  const override_capture = agent_capture_events(
     override_session,
     fn() { return run_format(
       {
@@ -111,7 +111,7 @@ tool_mode_parity = "native_unreliable"
       },
     ) },
   )
-  let override_events = transcript_events_of(override_capture.result, "tool_format_override")
+  const override_events = transcript_events_of(override_capture.result, "tool_format_override")
   __io_println(override_capture.result.text)
   __io_println(len(override_events))
   __io_println(override_events[0].metadata?.provider)
@@ -120,8 +120,8 @@ tool_mode_parity = "native_unreliable"
   __io_println(override_events[0].metadata?.recommended_format)
   __io_println(override_events[0].metadata?.catalog_parity)
   __io_println(override_events[0].metadata?.override_reason == nil)
-  let missing_reason_session = "tool-format-native-unreliable-missing-" + uuid()
-  let missing_reason = agent_capture_events(
+  const missing_reason_session = "tool-format-native-unreliable-missing-" + uuid()
+  const missing_reason = agent_capture_events(
     missing_reason_session,
     fn() { return run_format(
       {
@@ -132,15 +132,15 @@ tool_mode_parity = "native_unreliable"
       },
     ) },
   )
-  let missing_reason_events = transcript_events_of(missing_reason.result, "tool_format_override")
+  const missing_reason_events = transcript_events_of(missing_reason.result, "tool_format_override")
   __io_println(missing_reason.result.text)
   __io_println(len(missing_reason_events))
   __io_println(missing_reason_events[0].metadata?.requested_format)
   __io_println(missing_reason_events[0].metadata?.recommended_format)
   __io_println(missing_reason_events[0].metadata?.catalog_parity)
   __io_println(missing_reason_events[0].metadata?.override_reason == nil)
-  let with_reason_session = "tool-format-native-unreliable-reason-" + uuid()
-  let with_reason = agent_capture_events(
+  const with_reason_session = "tool-format-native-unreliable-reason-" + uuid()
+  const with_reason = agent_capture_events(
     with_reason_session,
     fn() { return run_format(
       {
@@ -152,7 +152,7 @@ tool_mode_parity = "native_unreliable"
       },
     ) },
   )
-  let with_reason_events = transcript_events_of(with_reason.result, "tool_format_override")
+  const with_reason_events = transcript_events_of(with_reason.result, "tool_format_override")
   __io_println(with_reason.result.text)
   __io_println(len(with_reason_events))
   __io_println(with_reason_events[0].metadata?.requested_format)

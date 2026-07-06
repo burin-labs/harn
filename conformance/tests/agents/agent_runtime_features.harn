@@ -5,7 +5,7 @@ import {
 import { llm_text, with_llm_script } from "std/testing"
 
 fn list_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "list_directory",
@@ -21,7 +21,7 @@ fn list_tools() {
 
 pipeline test(task) {
   register_tool_hook({pattern: "list_directory", deny: "listing disabled"})
-  let denied = agent_loop(
+  const denied = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {provider: "mock", tools: list_tools(), tool_format: "native", max_iterations: 1},
@@ -32,7 +32,7 @@ pipeline test(task) {
       .contains("permission_denied"),
   )
   clear_tool_hooks()
-  var trunc_tools = tool_registry()
+  let trunc_tools = tool_registry()
   trunc_tools = tool_define(
     trunc_tools,
     "verbose_tool",
@@ -40,19 +40,19 @@ pipeline test(task) {
     {handler: { _args -> "x" * 300 }, parameters: {}},
   )
   register_tool_hook({pattern: "verbose_tool", max_output: 200})
-  let truncated = agent_loop(
+  const truncated = agent_loop(
     "Run the tool",
     "You are helpful",
     {provider: "mock", tools: trunc_tools, tool_format: "native", max_iterations: 1},
   )
   __io_println(json_stringify(transcript_messages(truncated?.transcript)).contains("snipped"))
   clear_tool_hooks()
-  let base_messages = [
+  const base_messages = [
     {role: "user", content: "Need a parser plan"},
     {role: "assistant", content: "We should isolate the lexer first."},
     {role: "user", content: "Then update the diagnostics."},
   ]
-  let llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1, token_threshold: 1})
+  const llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1, token_threshold: 1})
   // transcript_auto_compact now returns { messages, archived, summary }; the
   // archived count and summary come straight from the engine instead of being
   // inferred from a length delta.
@@ -60,7 +60,7 @@ pipeline test(task) {
   __io_println(llm_compacted.archived)
   __io_println(llm_compacted.messages[0].content.contains("auto-compacted"))
   __io_println(llm_compacted.summary.contains("auto-compacted"))
-  let custom_compacted = transcript_auto_compact(
+  const custom_compacted = transcript_auto_compact(
     base_messages,
     {
       keep_last: 1,
@@ -70,7 +70,7 @@ pipeline test(task) {
     },
   )
   __io_println(custom_compacted.messages[0].content.contains("custom compact 2"))
-  let policy_compacted = transcript_auto_compact(
+  const policy_compacted = transcript_auto_compact(
     base_messages,
     {
       keep_last: 1,
@@ -84,7 +84,7 @@ pipeline test(task) {
     policy_compacted.messages[0].content
       .contains("policy compact preserve_test_failures failing test names"),
   )
-  let loop_compacted = agent_loop(
+  const loop_compacted = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {
@@ -102,7 +102,7 @@ pipeline test(task) {
   __io_println(
     transcript_summary(loop_compacted?.transcript)?.contains("loop compact retain_current_plan"),
   )
-  let request_compacted = agent_loop(
+  const request_compacted = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {
@@ -122,7 +122,7 @@ pipeline test(task) {
   __io_println(
     transcript_summary(request_compacted?.transcript)?.contains("request compact resume_request host"),
   )
-  let stopped_after_tool_turn = agent_loop(
+  const stopped_after_tool_turn = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {
@@ -151,7 +151,7 @@ pipeline test(task) {
       llm_text("Final answer from the model."),
     ],
     { ->
-      let hook_driven_final = agent_loop(
+      const hook_driven_final = agent_loop(
         "Inspect the workspace",
         "You are helpful",
         {
@@ -171,8 +171,8 @@ pipeline test(task) {
           },
         },
       )
-      let hook_calls = llm_mock_calls()
-      let second_call = json_stringify(hook_calls[1].messages)
+      const hook_calls = llm_mock_calls()
+      const second_call = json_stringify(hook_calls[1].messages)
       __io_println(hook_driven_final?.llm?.iterations == 2)
       __io_println(second_call.contains("current=list_directory"))
       __io_println(second_call.contains("session=list_directory"))
@@ -187,8 +187,8 @@ pipeline test(task) {
       llm_text("Final answer after clearing tools."),
     ],
     { ->
-      let final_tools = tool_registry()
-      let cleared_final = agent_loop(
+      const final_tools = tool_registry()
+      const cleared_final = agent_loop(
         "Inspect the workspace",
         "You are helpful",
         {
@@ -210,7 +210,7 @@ pipeline test(task) {
           },
         },
       )
-      let cleared_calls = llm_mock_calls()
+      const cleared_calls = llm_mock_calls()
       __io_println(cleared_final?.status == "done")
       __io_println(cleared_final?.llm?.iterations == 2)
       __io_println(len(cleared_calls[1]?.tools ?? []) == 0)

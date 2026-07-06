@@ -35,8 +35,8 @@ fn signed_reasoning_transcript() {
 }
 
 fn gc_transcript() {
-  var stale = "src/old.rs\n"
-  var rooted = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
+  let stale = "src/old.rs\n"
+  let rooted = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
   for i in range(0, 80) {
     stale = stale + "old stale line " + to_string(i) + "\n"
     rooted = rooted + "live rooted line " + to_string(i) + "\n"
@@ -63,11 +63,11 @@ fn gc_transcript() {
 }
 
 fn long_gc_transcript(stale_count) {
-  var messages = [{role: "user", content: "inspect many stale files and one live file"}]
+  let messages = [{role: "user", content: "inspect many stale files and one live file"}]
   for i in range(0, stale_count) {
-    let path = "src/stale_" + to_string(i) + ".rs"
-    let call_id = "stale_call_" + to_string(i)
-    var body = path + "\n"
+    const path = "src/stale_" + to_string(i) + ".rs"
+    const call_id = "stale_call_" + to_string(i)
+    let body = path + "\n"
     for j in range(0, 24) {
       body = body + "stale output " + to_string(i) + " line " + to_string(j) + "\n"
     }
@@ -77,7 +77,7 @@ fn long_gc_transcript(stale_count) {
     )
     messages = messages.push({role: "tool", tool_call_id: call_id, name: "read", content: body})
   }
-  var live_body = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
+  let live_body = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
   for k in range(0, 24) {
     live_body = live_body + "live output line " + to_string(k) + "\n"
   }
@@ -89,7 +89,7 @@ fn long_gc_transcript(stale_count) {
       tool_calls: [{id: "live_call", name: "read", arguments: {path: "src/live.rs"}}],
     },
   )
-  let live_result_index = messages.count
+  const live_result_index = messages.count
   messages = messages.push({role: "tool", tool_call_id: "live_call", name: "read", content: live_body})
   messages = messages.push({role: "assistant", content: "The active change is in src/live.rs."})
   messages = messages.push({role: "user", content: "Continue from the live file finding."})
@@ -97,26 +97,26 @@ fn long_gc_transcript(stale_count) {
 }
 
 pipeline default() {
-  let transcript = raw_transcript()
-  let raw_result = transcript_project(transcript, {policy: "raw"})
+  const transcript = raw_transcript()
+  const raw_result = transcript_project(transcript, {policy: "raw"})
   __io_println("raw_policy:" + raw_result.policy)
   __io_println("raw_kept:" + to_string(raw_result.kept_count))
   __io_println("raw_dropped:" + to_string(raw_result.dropped_count))
-  let hash_prefix = substring(raw_result.prefix_hash, 0, 7)
+  const hash_prefix = substring(raw_result.prefix_hash, 0, 7)
   __io_println("raw_hash_prefix:" + hash_prefix)
-  let clean = transcript_project(transcript, {policy: "clean_tool_repair"})
+  const clean = transcript_project(transcript, {policy: "clean_tool_repair"})
   __io_println("clean_policy:" + clean.policy)
   __io_println("clean_kept:" + to_string(clean.kept_count))
   __io_println("clean_dropped:" + to_string(clean.dropped_count))
   __io_println("clean_blocked:" + to_string(clean.provider_safety_blocked))
   __io_println("clean_event_kind:" + clean.event.kind)
-  let squashed = transcript_project(transcript, "squash_failed_calls")
+  const squashed = transcript_project(transcript, "squash_failed_calls")
   __io_println("squash_dropped:" + to_string(squashed.dropped_count))
-  let summary = transcript_project(transcript, {policy: "summary_prefix", keep_last: 2})
+  const summary = transcript_project(transcript, {policy: "summary_prefix", keep_last: 2})
   __io_println("summary_kept:" + to_string(summary.kept_count))
   __io_println("summary_first_role:" + summary.messages[0].role)
-  let user_only_projector = fn(messages) {
-    var kept = []
+  const user_only_projector = fn(messages) {
+    let kept = []
     for message in messages {
       if message.role == "user" {
         kept = kept.push(message)
@@ -124,19 +124,19 @@ pipeline default() {
     }
     return {messages: kept, reason: "user_only"}
   }
-  let custom = transcript_project(transcript, {policy: "custom", projector: user_only_projector})
+  const custom = transcript_project(transcript, {policy: "custom", projector: user_only_projector})
   __io_println("custom_messages:" + to_string(len(custom.messages)))
   __io_println("custom_reason:" + custom.reason)
-  let blocked = transcript_project(signed_reasoning_transcript(), {policy: "clean_tool_repair"})
+  const blocked = transcript_project(signed_reasoning_transcript(), {policy: "clean_tool_repair"})
   __io_println("blocked_safety:" + to_string(blocked.provider_safety_blocked))
   __io_println("blocked_dropped:" + to_string(blocked.dropped_count))
-  let bypassed = transcript_project(
+  const bypassed = transcript_project(
     signed_reasoning_transcript(),
     {policy: "clean_tool_repair", respect_provider_signatures: false},
   )
   __io_println("bypassed_safety:" + to_string(bypassed.provider_safety_blocked))
   __io_println("bypassed_dropped:" + to_string(bypassed.dropped_count))
-  let gc = transcript_project(gc_transcript(), {policy: "reachability_gc", root_window: 2, min_chars: 100})
+  const gc = transcript_project(gc_transcript(), {policy: "reachability_gc", root_window: 2, min_chars: 100})
   __io_println("gc_policy:" + gc.policy)
   __io_println("gc_redacted:" + to_string(gc.redacted_count))
   __io_println("gc_reclaimed:" + to_string(gc.reclaimed_tokens > 0))
@@ -148,18 +148,18 @@ pipeline default() {
   )
   __io_println("gc_roots:" + to_string(gc.event.metadata.roots_consulted.contains("last_2_messages")))
   __io_println("gc_pointer:" + gc.redaction_pointers[0].source)
-  let blocked_gc = transcript_project(
+  const blocked_gc = transcript_project(
     gc_transcript(),
     {policy: "reachability_gc", root_window: 2, min_chars: 100, require_write_barrier: true},
   )
   __io_println("gc_barrier_blocked:" + to_string(blocked_gc.redacted_count == 0))
-  let long_case = long_gc_transcript(60)
-  let long_raw = transcript_project(long_case.transcript, {policy: "raw"})
-  let long_gc = transcript_project(
+  const long_case = long_gc_transcript(60)
+  const long_raw = transcript_project(long_case.transcript, {policy: "raw"})
+  const long_gc = transcript_project(
     long_case.transcript,
     {policy: "reachability_gc", root_window: 2, min_chars: 100},
   )
-  let long_barrier_gc = transcript_project(
+  const long_barrier_gc = transcript_project(
     long_case.transcript,
     {
       policy: "reachability_gc",

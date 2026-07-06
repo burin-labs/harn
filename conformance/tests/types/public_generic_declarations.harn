@@ -14,8 +14,8 @@ interface Repository<T> {
 }
 
 pub pipeline default() {
-  let status = Status.Ready("ready")
-  let cfg = Config({host: "localhost"})
+  const status = Status.Ready("ready")
+  const cfg = Config({host: "localhost"})
   __io_println(status.variant)
   __io_println(cfg.host)
 }

@@ -1,7 +1,7 @@
 import { with_temp_dir } from "std/testing"
 import "../check_protocol_bindings.harn"
 
-let FAKE_PYTHON_BINDING = """
+const FAKE_PYTHON_BINDING = """
 HARN_PROTOCOL_ARTIFACT_VERSION = "{VERSION}"
 HARN_AGENT_EVENT_METHOD = "harn/agent_event"
 HARN_PROVIDER_CATALOG_METHOD = "harn/provider_catalog"
@@ -32,8 +32,8 @@ ToolCallReceipt = _RoundTrip
 """
 
 fn mkdirs(path: string) -> nil {
-  let parts = split(path_normalize(path), "/")
-  var current = if path.starts_with("/") {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
     "/"
   } else {
     ""
@@ -55,14 +55,14 @@ fn mkdirs(path: string) -> nil {
 }
 
 fn write_text(root: string, rel: string, text: string) -> nil {
-  let path = path_join(root, rel)
+  const path = path_join(root, rel)
   mkdirs(dirname(path) ?? root)
   harness.fs.write_text(path, text)
   return nil
 }
 
 fn fixture_payload(version: string) -> dict {
-  let envelopes = {
+  const envelopes = {
     request: {jsonrpc: "2.0", id: 1, method: "session/new", params: {project: "demo"}},
     response: {jsonrpc: "2.0", id: 1, result: {ok: true}},
     errorResponse: {jsonrpc: "2.0", id: 2, error: {code: -1, message: "bad"}},
@@ -99,7 +99,7 @@ fn write_fake_artifacts(root: string, binding_version: string, fixture_version: 
 
 @test
 pipeline test_probe_args_pass_artifact_root_to_python(task) {
-  let args = python_binding_probe_args("/tmp/artifacts")
+  const args = python_binding_probe_args("/tmp/artifacts")
   assert_eq(args[0], "-c")
   assert(args[1].contains("python bindings: OK"))
   assert_eq(args[2], "/tmp/artifacts")
@@ -110,7 +110,7 @@ pipeline test_fake_python_binding_round_trip_passes(task) {
   with_temp_dir(
     { root ->
       write_fake_artifacts(root, "test-version", "test-version")
-      let report = check_python_protocol_bindings("python3", root)
+      const report = check_python_protocol_bindings("python3", root)
       assert_eq(report.ok, true)
       assert_eq(report.stage, "ok")
       assert(to_string(report.stdout).contains("python bindings: OK"))
@@ -123,7 +123,7 @@ pipeline test_version_drift_is_reported_as_round_trip_failure(task) {
   with_temp_dir(
     { root ->
       write_fake_artifacts(root, "binding-version", "fixture-version")
-      let report = check_python_protocol_bindings("python3", root)
+      const report = check_python_protocol_bindings("python3", root)
       assert_eq(report.ok, false)
       assert_eq(report.stage, "round_trip")
       assert(to_string(report.stderr).contains("version drift"))
@@ -133,7 +133,7 @@ pipeline test_version_drift_is_reported_as_round_trip_failure(task) {
 
 @test
 pipeline test_current_repo_python_binding_round_trips(task) {
-  let report = check_python_protocol_bindings()
+  const report = check_python_protocol_bindings()
   assert_eq(report.ok, true)
   assert_eq(report.stage, "ok")
 }

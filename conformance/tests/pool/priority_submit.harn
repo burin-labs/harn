@@ -11,23 +11,23 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
  * priority order.
  */
 pipeline default() {
-  let pool = pool_create({name: "priority-demo", max_concurrent: 1})
-  let order = atomic(0)
-  let gate = channel(nil, 1)
-  let warmup_body = { ->
+  const pool = pool_create({name: "priority-demo", max_concurrent: 1})
+  const order = atomic(0)
+  const gate = channel(nil, 1)
+  const warmup_body = { ->
     receive(gate)
     return atomic_add(order, 1)
   }
-  let stamp = { -> atomic_add(order, 1) }
-  let warmup = pool.submit(warmup_body)
-  let low = pool.submit(stamp, {priority: 0})
-  let mid = pool.submit(stamp, {priority: 5})
-  let high = pool.submit(stamp, {priority: 10})
-  let mid_second = pool.submit(stamp, {priority: 5})
+  const stamp = { -> atomic_add(order, 1) }
+  const warmup = pool.submit(warmup_body)
+  const low = pool.submit(stamp, {priority: 0})
+  const mid = pool.submit(stamp, {priority: 5})
+  const high = pool.submit(stamp, {priority: 10})
+  const mid_second = pool.submit(stamp, {priority: 5})
   // All five tasks are now resident: warmup is parked, the others wait
   // in priority order behind it. Open the gate so warmup completes.
   send(gate, "go")
-  let results = pool_wait([warmup, low, mid, high, mid_second])
+  const results = pool_wait([warmup, low, mid, high, mid_second])
   // Expected dispatch order:
   //   warmup     (occupied the slot first)
   //   high       (priority 10)

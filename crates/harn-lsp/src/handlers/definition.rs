@@ -524,7 +524,7 @@ fn node_children(node: &SNode) -> Vec<&SNode> {
             out
         }
         Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => args.iter().collect(),
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => vec![value.as_ref()],
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => vec![value.as_ref()],
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             value.iter().map(|v| v.as_ref()).collect()
         }

@@ -27,7 +27,7 @@ pipeline test_not_generated(task) {
 // --- stale_refs -------------------------------------------------------------
 @test
 pipeline test_stale_ref_flagged(task) {
-  let refs = stale_refs("Use claude-sonnet-4-0 today.\n", "claude-sonnet-4-6")
+  const refs = stale_refs("Use claude-sonnet-4-0 today.\n", "claude-sonnet-4-6")
   assert_eq(refs.count, 1)
   assert_eq(refs[0].model, "claude-sonnet-4-0")
   assert_eq(refs[0].line_no, 1)
@@ -40,14 +40,14 @@ pipeline test_current_alias_ok(task) {
 
 @test
 pipeline test_allow_stale_marker_suppresses(task) {
-  let text = "old claude-sonnet-4-0 <!-- harn-doc-model-ref: allow-stale -->\n"
+  const text = "old claude-sonnet-4-0 <!-- harn-doc-model-ref: allow-stale -->\n"
   assert_eq(stale_refs(text, "claude-sonnet-4-6"), [])
 }
 
 @test
 pipeline test_multiple_refs_and_line_numbers(task) {
-  let text = "intro\nclaude-sonnet-4-0 and claude-sonnet-4-1\nfine\nclaude-sonnet-4-2\n"
-  let refs = stale_refs(text, "claude-sonnet-4-6")
+  const text = "intro\nclaude-sonnet-4-0 and claude-sonnet-4-1\nfine\nclaude-sonnet-4-2\n"
+  const refs = stale_refs(text, "claude-sonnet-4-6")
   assert_eq(refs.count, 3)
   assert_eq(refs[0].line_no, 2)
   assert_eq(refs[1].model, "claude-sonnet-4-1")
@@ -65,7 +65,7 @@ pipeline test_bare_family_name_not_matched(task) {
 pipeline test_longest_match_taken(task) {
   // Greedy matching consumes the full dashed id, so a dated id like
   // claude-sonnet-4-6-20250929 is one ref, not a stale prefix + tail.
-  let refs = stale_refs("claude-sonnet-4-6-20250929\n", "claude-sonnet-4-6")
+  const refs = stale_refs("claude-sonnet-4-6-20250929\n", "claude-sonnet-4-6")
   assert_eq(refs.count, 1)
   assert_eq(refs[0].model, "claude-sonnet-4-6-20250929")
 }

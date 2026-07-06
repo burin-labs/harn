@@ -104,30 +104,32 @@ pub enum Node {
         extends: Option<String>,
         is_pub: bool,
     },
+    /// `let PATTERN [: Type] = EXPR` — a **mutable** binding (reassignable).
+    ///
+    /// This is the TypeScript-aligned `let`: a normal block-scoped mutable
+    /// variable. (Before the const/let keyword re-platform, `let` was
+    /// immutable and `var` was the mutable form; `var` has been removed and
+    /// its mutable role is now `let`.)
     LetBinding {
         pattern: BindingPattern,
         type_ann: Option<TypeExpr>,
         value: Box<SNode>,
     },
-    VarBinding {
-        pattern: BindingPattern,
-        type_ann: Option<TypeExpr>,
-        value: Box<SNode>,
-    },
-    /// `const NAME [: Type] = EXPR` — compile-time-evaluated binding.
+    /// `const PATTERN [: Type] = EXPR` — an **immutable** binding.
     ///
-    /// The initializer is run through `harn_parser::const_eval` during
-    /// typecheck under a strict, bounded sandbox: pure arithmetic, string
-    /// concatenation, literal lists/dicts, ternaries, and reads of earlier
-    /// `const` identifiers are permitted; any call to host capabilities,
-    /// fs/net/env/process bridges, mutation, or unbounded loops/recursion
-    /// is rejected with a `HARN-CST-*` or `HARN-MET-001` diagnostic. At
-    /// runtime the binding behaves like a `let` binding — the same
-    /// expression is re-evaluated by the VM so the runtime value matches
-    /// the compile-time fold byte-for-byte (the sandbox subset is a
-    /// strict subset of runtime semantics for pure expressions).
+    /// The TypeScript-aligned `const`: the default, immutable binding form
+    /// (reassignment is rejected). When the initializer falls in the pure,
+    /// bounded const-eval subset (literal arithmetic, string concat, literal
+    /// lists/dicts, ternaries, reads of earlier `const` identifiers, and a
+    /// whitelist of pure builtins) it is **folded at compile time** via
+    /// `harn_parser::const_eval`; otherwise it is an ordinary immutable
+    /// runtime binding. Unlike the pre-re-platform `const`, an impure
+    /// initializer is *not* an error (it simply is not folded), and a
+    /// destructuring `pattern` is permitted (only a plain identifier pattern
+    /// is eligible for folding). At runtime a folded binding re-evaluates the
+    /// same expression so the value matches the compile-time fold byte-for-byte.
     ConstBinding {
-        name: String,
+        pattern: BindingPattern,
         type_ann: Option<TypeExpr>,
         value: Box<SNode>,
     },

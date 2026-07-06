@@ -1,11 +1,11 @@
 import "std/corrections"
 
 pipeline test(task) {
-  let unique = uuid_v7()
-  let actor_id = "correction-policy-" + unique
-  let action = "github.issue.opened"
-  let evidence: CorrectionEvidenceRef = {kind: "trigger_replay", event_id: "evt-" + unique}
-  let correction: CorrectionInput = {
+  const unique = uuid_v7()
+  const actor_id = "correction-policy-" + unique
+  const action = "github.issue.opened"
+  const evidence: CorrectionEvidenceRef = {kind: "trigger_replay", event_id: "evt-" + unique}
+  const correction: CorrectionInput = {
     actor_id: actor_id,
     action: action,
     from_decision: {actor_id: actor_id, action: action, outcome: "success"},
@@ -17,9 +17,9 @@ pipeline test(task) {
     step: "outcome",
     evidence_refs: [evidence],
   }
-  let correction_id: CorrectionId = record(correction)
-  let records: list<CorrectionRecord> = query({actor_id: actor_id, action: action})
-  let policy: CapabilityPolicy = trust.policy_for(actor_id)
+  const correction_id: CorrectionId = record(correction)
+  const records: list<CorrectionRecord> = query({actor_id: actor_id, action: action})
+  const policy: CapabilityPolicy = trust.policy_for(actor_id)
   __io_println(correction_id != "")
   __io_println(len(records) == 1)
   __io_println(records[0].scope == "this_persona" && records[0].from_decision.outcome == "success")

@@ -11,12 +11,12 @@ pipeline test(task) {
       return self.base + x + y + z
     }
   }
-  let calc = Calculator({base: 100})
-  let args = [1, 2]
+  const calc = Calculator({base: 100})
+  const args = [1, 2]
   log(calc.add(...args))
-  let more = [10, 20, 30]
+  const more = [10, 20, 30]
   log(calc.sum_three(...more))
   // Mixed: regular args + spread
-  let pair = [5]
+  const pair = [5]
   log(calc.add(3, ...pair))
 }

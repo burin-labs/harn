@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("rate_limit_throttles")
+  const result = trigger_test_harness("rate_limit_throttles")
   __io_println(result.ok)
   __io_println(len(result.emitted) == 2)
   __io_println(result.attempts[1].backoff_ms == 60000)

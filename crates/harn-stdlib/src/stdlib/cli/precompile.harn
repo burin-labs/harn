@@ -35,27 +35,27 @@ fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
   // The Rust collect_harn_files() (crates/harn-cli/src/commands/mod.rs)
   // also drops files with a sibling `<name>.conformance-skip` marker;
   // mirror that here so a directory with skip markers walks identically.
-  let entries = harness.fs.walk(root)
-  var files = []
+  const entries = harness.fs.walk(root)
+  let files = []
   for entry in entries {
-    let path = entry["path"]
-    let is_file = entry["is_file"] ?? false
+    const path = entry["path"]
+    const is_file = entry["is_file"] ?? false
     if !is_file {
       continue
     }
     if path_extension(path) != ".harn" {
       continue
     }
-    let skip_marker = path_with_extension(path, "conformance-skip")
+    const skip_marker = path_with_extension(path, "conformance-skip")
     if harness.fs.exists(skip_marker) {
       continue
     }
     files = files.push(path)
   }
-  let sorted = files.sort()
+  const sorted = files.sort()
   // dedupe stable-sorted list: keep entry when it differs from previous.
-  var out = []
-  var prev = ""
+  let out = []
+  let prev = ""
   for path in sorted {
     if path != prev || len(out) == 0 {
       out = out.push(path)
@@ -72,7 +72,7 @@ fn __destination_path(source_path: string, source_root: string, out_root: string
   if out_root == "" {
     return path_with_extension(source_path, extension)
   }
-  let relative = if source_root == "" {
+  const relative = if source_root == "" {
     path_basename(source_path)
   } else {
     let rel = path_relative_to(source_path, source_root)
@@ -82,12 +82,12 @@ fn __destination_path(source_path: string, source_root: string, out_root: string
       rel
     }
   }
-  let joined = path_join(out_root, relative)
+  const joined = path_join(out_root, relative)
   return path_with_extension(joined, extension)
 }
 
 fn __ensure_parent(harness: Harness, path: string) {
-  let parent = path_parent(path)
+  const parent = path_parent(path)
   if parent != "" && !harness.fs.exists(parent) {
     harness.fs.mkdir(parent)
   }
@@ -101,25 +101,25 @@ fn __spawn_precompile(harness: Harness, bin: string, source_path: string, per_fi
   // --quiet on the child suppresses its own per-file println; the
   // parent script owns the user-visible output so the byte-for-byte
   // shape is preserved when this port becomes the default.
-  var args = ["precompile", "--quiet", source_path]
+  let args = ["precompile", "--quiet", source_path]
   if per_file_out != "" {
     args = args.push("--out")
     args = args.push(per_file_out)
   }
-  let env = {HARN_PRECOMPILE_INNER: "1"}
+  const env = {HARN_PRECOMPILE_INNER: "1"}
   return harness.process.spawn_captured({cmd: bin, args: args, env: env})
 }
 
 fn __render_failure(source: string, child: dict) -> string {
   // Match the Rust eprintln format `{source}: {err}` where `err` is
   // either the child's first stderr line or a compact exit summary.
-  let stderr = child["stderr"] ?? ""
-  let trimmed = trim(stderr)
+  const stderr = child["stderr"] ?? ""
+  const trimmed = trim(stderr)
   if trimmed != "" {
-    let lines = split(trimmed, "\n")
+    const lines = split(trimmed, "\n")
     return source + ": " + lines[0]
   }
-  let exit_code = child["exit_code"] ?? -1
+  const exit_code = child["exit_code"] ?? -1
   return source + ": precompile exited with code " + to_string(exit_code)
 }
 
@@ -128,28 +128,28 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("precompile: target path is required")
     exit(2)
   }
-  let bin = harness.env.get_or("HARN_CLI_SELF_EXE", "")
+  const bin = harness.env.get_or("HARN_CLI_SELF_EXE", "")
   if bin == "" {
     harness.stdio
       .eprintln("internal error: HARN_CLI_SELF_EXE not set by dispatch shim")
     exit(70)
   }
-  let target = argv[0]
-  let out_root = harness.env.get_or("HARN_PRECOMPILE_OUT", "")
-  let keep_going = harness.env.get_or("HARN_PRECOMPILE_KEEP_GOING", "0") == "1"
-  let quiet = harness.env.get_or("HARN_PRECOMPILE_QUIET", "0") == "1"
+  const target = argv[0]
+  const out_root = harness.env.get_or("HARN_PRECOMPILE_OUT", "")
+  const keep_going = harness.env.get_or("HARN_PRECOMPILE_KEEP_GOING", "0") == "1"
+  const quiet = harness.env.get_or("HARN_PRECOMPILE_QUIET", "0") == "1"
   if !harness.fs.exists(target) {
     harness.stdio.eprintln("error: target does not exist: " + target)
     exit(1)
   }
-  let info = harness.fs.stat(target)
-  let is_dir = info["is_dir"] ?? false
-  let sources = if is_dir {
+  const info = harness.fs.stat(target)
+  const is_dir = info["is_dir"] ?? false
+  const sources = if is_dir {
     __collect_harn_files(harness, target)
   } else {
     [target]
   }
-  let source_root = if is_dir {
+  const source_root = if is_dir {
     target
   } else {
     ""
@@ -158,27 +158,27 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("error: no .harn files found under " + target)
     exit(1)
   }
-  var compiled = 0
-  var failed = 0
+  let compiled = 0
+  let failed = 0
   for source in sources {
     // For each source, pre-compute the destination dir so the child --out
     // points at the exact directory the .harnbc should land in. This
     // preserves the source-tree mirroring the Rust output_path() does;
     // without this, the child (which sees a single-file target) would
     // collapse everything into out_root with no subdirectories.
-    let per_file_out = if out_root == "" {
+    const per_file_out = if out_root == "" {
       ""
     } else {
       let dest = __destination_path(source, source_root, out_root, "harnbc")
       __ensure_parent(harness, dest)
       path_parent(dest)
     }
-    let child = __spawn_precompile(harness, bin, source, per_file_out)
-    let exit_code = child["exit_code"] ?? -1
+    const child = __spawn_precompile(harness, bin, source, per_file_out)
+    const exit_code = child["exit_code"] ?? -1
     if exit_code == 0 {
       compiled = compiled + 1
       if !quiet {
-        let dest = __destination_path(source, source_root, out_root, "harnbc")
+        const dest = __destination_path(source, source_root, out_root, "harnbc")
         harness.stdio.println(source + " -> " + dest)
       }
     } else {

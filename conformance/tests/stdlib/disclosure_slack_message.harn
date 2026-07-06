@@ -1,17 +1,17 @@
 import { render, slack_message_disclosure } from "std/disclosure"
 
 pipeline default() {
-  let chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
-  let config = {
+  const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
+  const config = {
     identities: {
       "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com"},
       "agent:merge-captain": {name: "Merge Captain", label: "Merge Captain", email: "merge-captain@bots.example"},
     },
     surfaces: {slack: {customize_icon_emoji: ":harn:"}},
   }
-  let options = {project: false, env: false, config: config}
-  let byline = render(chain, "slack", options)
-  let disclosure = slack_message_disclosure(chain, options)
+  const options = {project: false, env: false, config: config}
+  const byline = render(chain, "slack", options)
+  const disclosure = slack_message_disclosure(chain, options)
   __io_println(byline)
   __io_println(disclosure.kind)
   __io_println(disclosure.byline)
