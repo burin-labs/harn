@@ -93,8 +93,13 @@ make -n -C "$repo_root" \
   conformance \
   protocol-conformance \
   test-harn-scripts \
+  lint-test-patterns \
+  check-bindings \
   check-language-spec \
   check-highlight \
+  lint-diagnostic-codes \
+  check-receipt-structs \
+  check-docs-links \
   HARN_BIN="$fake_harn" > "$tmp_root/make-dry-run.txt"
 
 if ! grep -Fq "\"$fake_harn\" test conformance" "$tmp_root/make-dry-run.txt"; then
@@ -106,6 +111,19 @@ if ! grep -Fq "\"$fake_harn\" dump-highlight-keywords --check" "$tmp_root/make-d
   echo "make check-highlight did not route Harn CLI commands through HARN_BIN" >&2
   exit 1
 fi
+
+for expected in \
+  "\"$fake_harn\" run scripts/lint_test_patterns.harn" \
+  "\"$fake_harn\" run scripts/check_protocol_bindings.harn" \
+  "\"$fake_harn\" run scripts/check_diagnostic_codes.harn" \
+  "\"$fake_harn\" run scripts/check_receipt_struct_duplication.harn" \
+  "\"$fake_harn\" run scripts/check_docs_links.harn"
+do
+  if ! grep -Fq "$expected" "$tmp_root/make-dry-run.txt"; then
+    echo "make dry-run did not route through HARN_BIN: $expected" >&2
+    exit 1
+  fi
+done
 
 if grep -q "cargo run .*harn" "$tmp_root/make-dry-run.txt"; then
   echo "HARN_BIN dry-run unexpectedly fell back to cargo run:" >&2
