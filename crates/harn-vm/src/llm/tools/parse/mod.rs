@@ -222,6 +222,10 @@ pub(crate) struct TextToolParseResult {
     /// replays these to the model as structured `protocol_violation`
     /// feedback so it can self-correct.
     pub violations: Vec<String>,
+    /// Count of calls recovered from top-level stray text rather than a
+    /// recognized call wrapper. The agent loop uses this to bound ambiguous
+    /// recovered batches without parsing diagnostic strings.
+    pub recovered_from_stray_count: usize,
     /// Body of the `<done>` block when one was emitted, trimmed of
     /// surrounding whitespace. The agent compares this against the
     /// pipeline's configured `done_sentinel` (default `##DONE##`) to

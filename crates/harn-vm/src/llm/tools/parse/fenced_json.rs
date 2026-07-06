@@ -160,6 +160,7 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
         prose,
         user_response: None,
         violations,
+        recovered_from_stray_count: 0,
         done_marker: None,
         canonical: src.to_string(),
     }

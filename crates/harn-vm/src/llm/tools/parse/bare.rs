@@ -413,6 +413,7 @@ pub(crate) fn parse_bare_calls_in_body(
                 prose: String::new(),
                 user_response: None,
                 violations: Vec::new(),
+                recovered_from_stray_count: 0,
                 done_marker: None,
                 canonical: String::new(),
             };
@@ -425,6 +426,7 @@ pub(crate) fn parse_bare_calls_in_body(
         prose,
         user_response: None,
         violations: Vec::new(),
+        recovered_from_stray_count: 0,
         done_marker: None,
         canonical: String::new(),
     }

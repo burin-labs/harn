@@ -103,4 +103,41 @@ pipeline default() {
       __io_println(!contains(retry_messages, "no_progress_streak"))
     },
   )
+  // Wrapper-corrupted batches are different from partial-success siblings:
+  // multiple calls recovered from top-level stray text are ambiguous, so the
+  // loop should dispatch none of them and ask for one clean retry.
+  with_llm_script(
+    [
+      llm_text(
+        "<|assistant|>\n"
+          + "write_note({ path: \"a.txt\" })\n"
+          + "write_note({ path: \"b.txt\" })\n"
+          + "</tool_calls>",
+      ),
+      llm_text("<tool_call>\nwrite_note({ path: \"retry.txt\" })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Write one note.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 5,
+          max_nudges: 5,
+          tools: note_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      let retry_messages = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(result.tools.successful[0])
+      __io_println(len(result.tools.successful))
+      __io_println(contains(retry_messages, "parse_guidance"))
+      __io_println(contains(retry_messages, "none were dispatched"))
+      __io_println(!contains(retry_messages, "parsed successfully and were dispatched"))
+    },
+  )
 }

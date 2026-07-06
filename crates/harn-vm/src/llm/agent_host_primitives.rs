@@ -786,6 +786,7 @@ async fn host_agent_parse_tool_calls_impl(
         "tool_calls": parsed.calls,
         "tool_parse_errors": parsed.errors,
         "protocol_violations": parsed.violations,
+        "recovered_from_stray_count": parsed.recovered_from_stray_count,
         "prose": parsed.prose,
         "user_response": parsed.user_response,
         "done_marker": parsed.done_marker,
