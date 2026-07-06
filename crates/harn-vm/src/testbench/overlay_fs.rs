@@ -109,6 +109,14 @@ impl OverlayFs {
 
     pub fn write(&self, path: &Path, contents: &[u8]) -> std::io::Result<()> {
         if !self.within_root(path) {
+            // Mirror the production scoped-write contract (`mkdir -p`): a
+            // content-producing write recreates its missing parent chain. The
+            // in-root branch below already tolerates absent parents (it is a
+            // flat map insert), so this keeps overlay-active test runs faithful
+            // to real filesystem writes for paths outside the overlay root.
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent)?;
+            }
             return std::fs::write(path, contents);
         }
         let key = self.key(path);
@@ -119,6 +127,11 @@ impl OverlayFs {
 
     pub fn append(&self, path: &Path, contents: &[u8]) -> std::io::Result<()> {
         if !self.within_root(path) {
+            // Match the scoped `append_file` contract: create the parent chain
+            // when appending to a new log in a not-yet-created directory.
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent)?;
+            }
             return std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
