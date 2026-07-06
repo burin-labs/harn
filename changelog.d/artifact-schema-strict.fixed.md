@@ -1,0 +1,1 @@
+- Tighten the artifact manifest JSON Schema to reject unknown manifest and file-spec fields, matching `artifact_emit` validation.

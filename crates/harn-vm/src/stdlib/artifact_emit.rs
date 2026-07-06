@@ -1164,7 +1164,7 @@ mod tests {
             "title": "Report bundle",
             "artifact_count": 2,
             "total_size_bytes": 1536,
-            "metadata": {"producer": "@harn/documents"},
+            "metadata": {"producer": "@burin/documents"},
             "artifacts": [
                 {
                     "uri": "file:///tmp/report.pdf",
@@ -1300,6 +1300,38 @@ mod tests {
                 DEFAULT_MAX_BYTES,
             ),
             "must not reference a network",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::ArtifactManifest,
+                json!({
+                    "schema_version": "harn.artifacts.v1",
+                    "kind": "artifact_manifest",
+                    "artifact_count": 0,
+                    "artifacts": [],
+                    "schema_url": "https://harnlang.com/schemas/artifact-manifest.v1.schema.json"
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "unknown artifact_manifest spec key",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::ArtifactManifest,
+                json!({
+                    "schema_version": "harn.artifacts.v1",
+                    "kind": "artifact_manifest",
+                    "artifact_count": 1,
+                    "artifacts": [{
+                        "uri": "file:///tmp/report.pdf",
+                        "name": "report.pdf",
+                        "mime_type": "application/pdf",
+                        "schema_url": "https://harnlang.com/schemas/artifact-manifest.v1.schema.json"
+                    }]
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "unknown file spec key",
         );
     }
 
