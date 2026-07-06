@@ -285,7 +285,9 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
 }
 
 fn __chat_files(project_name: string, harn_range: string) -> list {
-  let main_harn = "fn build_chat_prompt(history, message) {\n"
+  let main_harn = "import { read_line } from \"std/io\"\n"
+    + "\n"
+    + "fn build_chat_prompt(history, message) {\n"
     + "  if history == \"\" {\n"
     + "    return \"User: \" + message\n"
     + "  }\n"
@@ -311,7 +313,7 @@ fn __chat_files(project_name: string, harn_range: string) -> list {
     + "  harness.stdio.println(\"Harn chat. Type /clear to reset history or /exit to quit.\")\n"
     + "  while true {\n"
     + "    harness.stdio.print(\"you> \")\n"
-    + "    let raw = harness.stdio.read_line()\n"
+    + "    let raw = read_line()\n"
     + "    if !raw.ok {\n"
     + "      break\n"
     + "    }\n"

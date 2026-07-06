@@ -58,9 +58,11 @@ impl crate::vm::Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
-        if let Some(result) =
+        let sync_result = {
+            let _interrupt = self.sync_builtin_interrupt_guard();
             Self::call_harness_method_sync_fast(&mut self.output, handle, method, args)
-        {
+        };
+        if let Some(result) = sync_result {
             return result;
         }
         // Enforce per-harness `NetPolicy` (issue #1913) ahead of mock

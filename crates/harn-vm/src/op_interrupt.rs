@@ -77,6 +77,14 @@ pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> Op
     OpInterruptGuard { prev: Some(prev) }
 }
 
+/// Returns `true` when an interrupt context is installed on this thread.
+///
+/// This is separate from [`requested`] so blocking operations can decide
+/// whether to use a short heartbeat poll or a true indefinite wait.
+pub fn installed() -> bool {
+    CURRENT.with(|slot| slot.borrow().is_some())
+}
+
 /// Returns `true` when the interrupt context installed on this thread has
 /// fired: the cancel token is set, or the deadline has passed. Cheap enough
 /// to call from a ~20ms poll loop. Returns `false` when nothing is armed.
@@ -321,6 +329,15 @@ mod tests {
     #[test]
     fn requested_is_false_without_context() {
         assert!(!requested());
+    }
+
+    #[test]
+    fn installed_tracks_guard_lifetime() {
+        assert!(!installed());
+        let guard = install(None, None);
+        assert!(installed());
+        drop(guard);
+        assert!(!installed());
     }
 
     #[test]
