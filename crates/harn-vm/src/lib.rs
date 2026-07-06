@@ -240,8 +240,9 @@ pub use mcp_registry::{
     sweep_expired as mcp_sweep_expired, RegisteredMcpServer, RegistryStatus,
 };
 pub use mcp_server::{
-    take_mcp_serve_prompts, take_mcp_serve_registry, take_mcp_serve_resource_templates,
-    take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
+    take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,
+    take_mcp_serve_resource_templates, take_mcp_serve_resources, tool_registry_to_mcp_tools,
+    McpServer, McpServerMetadata,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};

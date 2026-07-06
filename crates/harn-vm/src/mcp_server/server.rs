@@ -19,7 +19,8 @@ use crate::vm::Vm;
 
 use super::convert::{prompt_value_to_messages, vm_value_to_content, vm_value_to_json};
 use super::defs::{
-    McpCompletionSource, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpToolDef,
+    McpCompletionSource, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServerMetadata,
+    McpToolDef,
 };
 use super::uri::{match_uri_template, uri_template_variables};
 use super::PROTOCOL_VERSION;
@@ -38,6 +39,7 @@ pub struct McpServer {
     /// resource at the well-known URI `well-known://mcp-card`.
     /// Populated by `harn serve mcp --card path/to/card.json`.
     server_card: Option<serde_json::Value>,
+    instructions: Option<String>,
 }
 
 impl McpServer {
@@ -57,7 +59,20 @@ impl McpServer {
             prompts,
             log_level: RefCell::new("warning".to_string()),
             server_card: None,
+            instructions: None,
         }
+    }
+
+    /// Apply script-supplied server metadata from `mcp_server_metadata(...)`.
+    pub fn with_metadata(mut self, metadata: McpServerMetadata) -> Self {
+        if let Some(name) = metadata.name {
+            self.server_name = name;
+        }
+        if let Some(version) = metadata.version {
+            self.server_version = version;
+        }
+        self.instructions = metadata.instructions;
+        self
     }
 
     /// Attach a Server Card to be advertised over `initialize` and via
@@ -260,7 +275,11 @@ impl McpServer {
 
     fn handle_server_discover(&self, id: &serde_json::Value) -> serde_json::Value {
         let capabilities = serde_json::Value::Object(self.server_capabilities());
-        let result = server_discover_result(capabilities, self.server_info_value(), None);
+        let result = server_discover_result(
+            capabilities,
+            self.server_info_value(),
+            self.instructions.as_deref(),
+        );
         crate::jsonrpc::response(id.clone(), result)
     }
 
@@ -284,7 +303,7 @@ impl McpServer {
             })
             .filter(|version| is_supported_protocol_version(version))
             .unwrap_or(PROTOCOL_VERSION);
-        serde_json::json!({
+        let mut result = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": {
@@ -292,7 +311,11 @@ impl McpServer {
                 "capabilities": self.server_capabilities(),
                 "serverInfo": self.server_info_value(),
             }
-        })
+        });
+        if let Some(instructions) = self.instructions.as_ref() {
+            result["result"]["instructions"] = serde_json::json!(instructions);
+        }
+        result
     }
 
     fn handle_tools_list(
@@ -433,7 +456,7 @@ impl McpServer {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
-                    "content": [{ "type": "text", "text": format!("{e}") }],
+                    "content": [{ "type": "text", "text": tool_error_text(&e) }],
                     "isError": true,
                 },
             }),
@@ -955,6 +978,13 @@ fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
 
 /// Stamp the RC `resultType`/cache-hint envelope onto a handler's
 /// response in one place. Error responses pass through untouched.
+fn tool_error_text(error: &VmError) -> String {
+    match error {
+        VmError::Thrown(value) => value.display(),
+        other => format!("{other}"),
+    }
+}
+
 fn apply_envelope(
     mut response: serde_json::Value,
     mode: McpProtocolMode,

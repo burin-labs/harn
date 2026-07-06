@@ -20,11 +20,11 @@ mod tests;
 use crate::mcp_protocol::PROTOCOL_VERSION;
 pub use defs::{
     McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
-    McpToolDef,
+    McpServerMetadata, McpToolDef,
 };
 pub use register::{
-    register_mcp_server_builtins, take_mcp_serve_prompts, take_mcp_serve_registry,
-    take_mcp_serve_resource_templates, take_mcp_serve_resources,
+    register_mcp_server_builtins, take_mcp_serve_metadata, take_mcp_serve_prompts,
+    take_mcp_serve_registry, take_mcp_serve_resource_templates, take_mcp_serve_resources,
 };
 pub use server::McpServer;
 pub use tools_schema::tool_registry_to_mcp_tools;

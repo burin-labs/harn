@@ -11,7 +11,7 @@ use super::defs::{
 use super::tool_registry_to_mcp_tools;
 use super::tools_schema::params_to_json_schema;
 use super::uri::match_uri_template;
-use super::McpServer;
+use super::{McpServer, McpServerMetadata};
 
 fn empty_closure(name: &str) -> VmClosure {
     VmClosure {
@@ -425,6 +425,63 @@ async fn server_advertises_elicitation_capability() {
     assert!(
         response["result"]["capabilities"]["elicitation"].is_object(),
         "expected elicitation capability, got {response:?}"
+    );
+}
+
+#[tokio::test]
+async fn server_metadata_overrides_initialize_and_discover() {
+    let server = McpServer::new(
+        "file-stem".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .with_metadata(McpServerMetadata {
+        name: Some("test-echo-server".to_string()),
+        version: Some("1.0.0".to_string()),
+        instructions: Some("Use echo server tools only for conformance.".to_string()),
+    });
+    let mut vm = crate::Vm::new();
+
+    let initialize = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "initialize",
+                serde_json::json!({"protocolVersion": super::PROTOCOL_VERSION}),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("initialize response");
+    assert_eq!(
+        initialize["result"]["instructions"],
+        serde_json::json!("Use echo server tools only for conformance.")
+    );
+    assert_eq!(
+        initialize["result"]["serverInfo"],
+        serde_json::json!({"name": "test-echo-server", "version": "1.0.0"})
+    );
+
+    let discover = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                2,
+                crate::mcp_protocol::METHOD_SERVER_DISCOVER,
+                serde_json::json!({}),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("discover response");
+    assert_eq!(
+        discover["result"]["instructions"],
+        serde_json::json!("Use echo server tools only for conformance.")
+    );
+    assert_eq!(
+        discover["result"]["serverInfo"],
+        serde_json::json!({"name": "test-echo-server", "version": "1.0.0"})
     );
 }
 

@@ -274,7 +274,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/mcp_server/register.rs"
-statics = ["MCP_SERVE_REGISTRY", "MCP_SERVE_RESOURCES", "MCP_SERVE_RESOURCE_TEMPLATES", "MCP_SERVE_PROMPTS"]
+statics = ["MCP_SERVE_REGISTRY", "MCP_SERVE_RESOURCES", "MCP_SERVE_RESOURCE_TEMPLATES", "MCP_SERVE_PROMPTS", "MCP_SERVE_METADATA"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 

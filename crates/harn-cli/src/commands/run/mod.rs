@@ -2577,12 +2577,19 @@ pub(crate) async fn run_file_mcp_serve(
             let resources = harn_vm::take_mcp_serve_resources();
             let resource_templates = harn_vm::take_mcp_serve_resource_templates();
             let prompts = harn_vm::take_mcp_serve_prompts();
+            let metadata = harn_vm::take_mcp_serve_metadata();
 
-            let server_name = std::path::Path::new(path)
+            let mut server_name = std::path::Path::new(path)
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("harn")
                 .to_string();
+            if let Some(name) = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.name.as_ref())
+            {
+                server_name = name.clone();
+            }
 
             let mut caps = Vec::new();
             if !tools.is_empty() {
@@ -2613,6 +2620,9 @@ pub(crate) async fn run_file_mcp_serve(
 
             let mut server =
                 harn_vm::McpServer::new(server_name, tools, resources, resource_templates, prompts);
+            if let Some(metadata) = metadata {
+                server = server.with_metadata(metadata);
+            }
             if let Some(source) = card_source {
                 match resolve_card_source(source) {
                     Ok(card) => server = server.with_server_card(card),
