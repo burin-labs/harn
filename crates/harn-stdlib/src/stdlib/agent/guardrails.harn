@@ -1,0 +1,331 @@
+import { agent_typed_output_checkpoint } from "std/agent/primitives"
+
+fn __input_guardrail_bool(value, fallback) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  let normalized = lowercase(trim(to_string(value)))
+  if contains(
+    ["true", "yes", "y", "1", "block", "blocked", "deny", "halt", "tripwire", "unsafe"],
+    normalized,
+  ) {
+    return true
+  }
+  if contains(["false", "no", "n", "0", "allow", "allowed", "pass", "safe"], normalized) {
+    return false
+  }
+  return fallback
+}
+
+fn __input_guardrail_action(value) {
+  let normalized = lowercase(trim(to_string(value ?? "")))
+  if contains(["block", "blocked", "deny", "halt", "stop", "tripwire"], normalized) {
+    return "tripwire"
+  }
+  if contains(["allow", "allowed", "pass", "safe"], normalized) {
+    return "allow"
+  }
+  return normalized
+}
+
+fn __input_guardrail_reason(raw, fallback) {
+  if type_of(raw) == "string" {
+    let text = trim(raw)
+    if text != "" {
+      return text
+    }
+  }
+  if type_of(raw) != "dict" {
+    return fallback
+  }
+  for key in ["reason", "message", "evidence", "rationale", "explanation"] {
+    let value = trim(to_string(raw[key] ?? ""))
+    if value != "" {
+      return value
+    }
+  }
+  return fallback
+}
+
+fn __input_guardrail_confidence(value) {
+  let parsed = to_float(value ?? 0.0)
+  if parsed == nil {
+    return 0.0
+  }
+  if parsed < 0.0 {
+    return 0.0
+  }
+  if parsed > 1.0 {
+    return 1.0
+  }
+  return parsed
+}
+
+fn __input_guardrail_threshold(value) {
+  let threshold = to_float(value ?? 0.0)
+  if threshold == nil || threshold < 0.0 || threshold > 1.0 {
+    throw "agent_input_guardrail: confidence_threshold must be between 0.0 and 1.0"
+  }
+  return threshold
+}
+
+fn __input_guardrail_schema() {
+  return {
+    type: "object",
+    properties: {
+      tripwire: {type: "boolean", description: "True only when the request should stop before the agent loop."},
+      reason: {type: "string", description: "Concrete reason for the tripwire or allow decision."},
+      label: {type: "string", description: "Short policy label such as safe, pii, prompt_injection, or abuse."},
+      confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
+    },
+    required: ["tripwire", "reason"],
+  }
+}
+
+fn __input_guardrail_prompt(payload, opts) {
+  let policy = trim(to_string(opts?.policy ?? opts?.system ?? ""))
+  let prefix = if policy == "" {
+    "Classify whether the user request should trip an input guardrail before an agent spends a main model turn."
+  } else {
+    policy
+  }
+  return prefix
+    + "\n\nUser request:\n"
+    + to_string(payload?.user_message ?? payload?.task ?? "")
+    + "\n\nRecent context JSON:\n"
+    + json_stringify(payload?.recent_context ?? [])
+    + "\n\nReturn JSON exactly matching this shape: "
+    + "{\"tripwire\":false,\"reason\":\"...\",\"label\":\"safe\",\"confidence\":0.0}\n"
+}
+
+fn __input_guardrail_context_value(raw, context, key, fallback = nil) {
+  if context != nil && context[key] != nil {
+    return context[key]
+  }
+  if type_of(raw) == "dict" && raw[key] != nil {
+    return raw[key]
+  }
+  return fallback
+}
+
+/**
+ * Internal normalizer shared by `agent_input_guardrail_check` and
+ * `agent_loop`'s pre-turn bookend.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __agent_input_guardrail_normalize(raw, opts = nil, context = nil) {
+  let options = opts ?? {}
+  let threshold_source = options?.confidence_threshold
+    ?? if type_of(raw) == "dict" {
+    raw?.confidence_threshold ?? raw?.threshold
+  } else {
+    nil
+  }
+  let threshold = __input_guardrail_threshold(threshold_source)
+  let action = if type_of(raw) == "dict" {
+    __input_guardrail_action(raw?.action ?? raw?.verdict ?? raw?.label)
+  } else {
+    ""
+  }
+  let explicit = if type_of(raw) == "dict" {
+    raw?.tripwire ?? raw?.blocked ?? raw?.halt ?? raw?.unsafe ?? raw?.flagged
+  } else if type_of(raw) == "bool" {
+    raw
+  } else if type_of(raw) == "string" {
+    true
+  } else {
+    false
+  }
+  let confidence = if type_of(raw) == "dict" && raw.confidence == nil {
+    1.0
+  } else if type_of(raw) == "dict" {
+    __input_guardrail_confidence(raw.confidence)
+  } else {
+    1.0
+  }
+  let action_tripwire = if action == "" {
+    false
+  } else {
+    action == "tripwire"
+  }
+  let raw_tripwire = __input_guardrail_bool(explicit, action_tripwire)
+  let tripwire = raw_tripwire && confidence >= threshold
+  let fallback_reason = if tripwire {
+    "input guardrail tripwire"
+  } else {
+    "input guardrail allowed"
+  }
+  let label = if type_of(raw) == "dict" {
+    trim(to_string(raw?.label ?? raw?.category ?? action ?? ""))
+  } else if tripwire {
+    "tripwire"
+  } else {
+    "allow"
+  }
+  return {
+    session_id: __input_guardrail_context_value(raw, context, "session_id"),
+    iteration: __input_guardrail_context_value(raw, context, "iteration"),
+    tripwire: tripwire,
+    reason: __input_guardrail_reason(raw, fallback_reason),
+    label: label,
+    confidence: confidence,
+    confidence_threshold: threshold,
+    classifier_kind: __input_guardrail_context_value(raw, context, "classifier_kind"),
+    model: __input_guardrail_context_value(raw, context, "model"),
+    error: __input_guardrail_context_value(raw, context, "error"),
+  }
+}
+
+/**
+ * Internal fail-open verdict shared by guardrail builders and the loop seam.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __agent_input_guardrail_fail_open(err, opts = nil, context = nil) {
+  let options = opts ?? {}
+  if options?.fail_open ?? true {
+    return {
+      tripwire: false,
+      reason: "input guardrail failed open: " + to_string(err),
+      label: "guardrail_error",
+      confidence: 0.0,
+      confidence_threshold: __input_guardrail_threshold(options?.confidence_threshold),
+      classifier_kind: __input_guardrail_context_value(nil, context, "classifier_kind"),
+      model: __input_guardrail_context_value(nil, context, "model"),
+      session_id: __input_guardrail_context_value(nil, context, "session_id"),
+      iteration: __input_guardrail_context_value(nil, context, "iteration"),
+      error: to_string(err),
+    }
+  }
+  throw err
+}
+
+/**
+ * agent_input_guardrail.
+ *
+ * Build an input-guardrail option bundle to spread into `agent_loop` options.
+ * The guard runs before the first main model turn and returns a normalized
+ * `{tripwire, reason, label, confidence}` verdict. A tripwire stops the loop
+ * with `status: "input_guardrail"` before any main-model spend.
+ *
+ * @effects: [llm]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, base_opts + agent_input_guardrail(classifier))
+ */
+pub fn agent_input_guardrail(classifier = nil, options = nil) {
+  let opts = options ?? {}
+  if type_of(opts) != "dict" {
+    throw "agent_input_guardrail: options must be a dict or nil; got " + type_of(opts)
+  }
+  if classifier != nil && type_of(classifier) != "closure" {
+    throw "agent_input_guardrail: classifier must be a closure or nil; got " + type_of(classifier)
+  }
+  let enabled = opts?.enabled ?? true
+  if type_of(enabled) != "bool" {
+    throw "agent_input_guardrail: enabled must be a bool"
+  }
+  let model = trim(to_string(opts?.model ?? ""))
+  let provider = trim(to_string(opts?.provider ?? ""))
+  let classifier_kind = if classifier != nil {
+    "custom"
+  } else {
+    "llm"
+  }
+  let guardrail = { payload ->
+    if !enabled {
+      return {
+        tripwire: false,
+        reason: "input guardrail disabled",
+        label: "disabled",
+        confidence: 0.0,
+        confidence_threshold: __input_guardrail_threshold(opts?.confidence_threshold),
+        classifier_kind: classifier_kind,
+        model: model,
+      }
+    }
+    if classifier != nil {
+      let custom = try {
+        classifier(payload)
+      }
+      if is_err(custom) {
+        let err = unwrap_err(custom)
+        if error_category(err) == "cancelled" {
+          throw err
+        }
+        return __agent_input_guardrail_fail_open(err, opts, {classifier_kind: classifier_kind, model: model})
+      }
+      return __agent_input_guardrail_normalize(
+        unwrap(custom),
+        opts,
+        {classifier_kind: classifier_kind, model: model},
+      )
+    }
+    let schema = opts?.output_schema ?? __input_guardrail_schema()
+    var llm_opts = {
+      output_schema: schema,
+      max_tokens: opts?.max_tokens ?? 256,
+      temperature: opts?.temperature ?? 0.0,
+      session_id: payload?.session_id ?? "",
+    }
+    if model != "" {
+      llm_opts = llm_opts + {model: model}
+    }
+    if provider != "" {
+      llm_opts = llm_opts + {provider: provider}
+    }
+    for key in ["top_p", "seed", "reasoning_effort", "timeout"] {
+      if opts[key] != nil {
+        llm_opts[key] = opts[key]
+      }
+    }
+    let checkpoint = agent_typed_output_checkpoint(
+      "agent.input_guardrail",
+      __input_guardrail_prompt(payload, opts),
+      schema,
+      llm_opts,
+    )
+    if !checkpoint.ok {
+      return __agent_input_guardrail_fail_open(
+        checkpoint.error,
+        opts,
+        {classifier_kind: classifier_kind, model: model},
+      )
+        + {typed_checkpoint: checkpoint}
+    }
+    return __agent_input_guardrail_normalize(
+      checkpoint.data,
+      opts,
+      {classifier_kind: classifier_kind, model: model},
+    )
+      + {typed_checkpoint: checkpoint}
+  }
+  return {
+    input_guardrail: guardrail,
+    _input_guardrail: {enabled: enabled, classifier_kind: classifier_kind, model: model, provider: provider},
+  }
+}
+
+/**
+ * agent_input_guardrail_check.
+ *
+ * Run the same guardrail directly for scripts that want an explicit preflight
+ * verdict instead of composing it into `agent_loop`.
+ *
+ * @effects: [llm]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_input_guardrail_check(task, classifier)
+ */
+pub fn agent_input_guardrail_check(task, classifier = nil, options = nil) {
+  let bundle = agent_input_guardrail(classifier, options)
+  return bundle.input_guardrail({task: task, user_message: task, messages: [], recent_context: []})
+}

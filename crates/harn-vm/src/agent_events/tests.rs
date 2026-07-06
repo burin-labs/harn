@@ -466,6 +466,60 @@ fn scope_classifier_verdict_round_trips_through_jsonl_sink() {
 }
 
 #[test]
+fn input_guardrail_verdict_round_trips_through_jsonl_sink() {
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!(
+        "harn-input-guardrail-event-log-{}",
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("event_log.jsonl");
+    let sink = JsonlEventSink::open(&path).unwrap();
+    sink.handle_event(&AgentEvent::InputGuardrailVerdict {
+        session_id: "s".into(),
+        iteration: 1,
+        tripwire: true,
+        reason: "policy denied".into(),
+        label: "prompt_injection".into(),
+        confidence: 0.97,
+        confidence_threshold: 0.8,
+        classifier_kind: Some("custom".into()),
+        model: None,
+        error: None,
+    });
+    sink.flush().unwrap();
+
+    let file = std::fs::File::open(&path).unwrap();
+    let line = BufReader::new(file).lines().next().unwrap().unwrap();
+    let recovered: PersistedAgentEvent = serde_json::from_str(&line).unwrap();
+    match recovered.event {
+        AgentEvent::InputGuardrailVerdict {
+            session_id,
+            iteration,
+            tripwire,
+            reason,
+            label,
+            confidence,
+            classifier_kind,
+            ..
+        } => {
+            assert_eq!(session_id, "s");
+            assert_eq!(iteration, 1);
+            assert!(tripwire);
+            assert_eq!(reason, "policy denied");
+            assert_eq!(label, "prompt_injection");
+            assert_eq!(confidence, 0.97);
+            assert_eq!(classifier_kind.as_deref(), Some("custom"));
+        }
+        other => panic!("expected InputGuardrailVerdict, got {other:?}"),
+    }
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(value["type"], "input_guardrail_verdict");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
 fn missing_tool_call_verdict_round_trips_through_jsonl_sink() {
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!(
@@ -1442,6 +1496,41 @@ fn from_host_verdict_deserializes_complete_payload() {
             assert!(!skip_main_turn);
         }
         other => panic!("expected ScopeClassifierVerdict, got {other:?}"),
+    }
+}
+
+#[test]
+fn from_host_input_guardrail_deserializes_complete_payload() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "input_guardrail_verdict",
+        &json!({
+            "iteration": 1,
+            "tripwire": true,
+            "reason": "policy denied",
+            "label": "prompt_injection",
+            "confidence": 0.97,
+            "confidence_threshold": 0.8,
+            "classifier_kind": "custom",
+        }),
+    )
+    .expect("input_guardrail_verdict");
+    match event {
+        AgentEvent::InputGuardrailVerdict {
+            tripwire,
+            reason,
+            label,
+            confidence,
+            classifier_kind,
+            ..
+        } => {
+            assert!(tripwire);
+            assert_eq!(reason, "policy denied");
+            assert_eq!(label, "prompt_injection");
+            assert_eq!(confidence, 0.97);
+            assert_eq!(classifier_kind.as_deref(), Some("custom"));
+        }
+        other => panic!("expected InputGuardrailVerdict, got {other:?}"),
     }
 }
 

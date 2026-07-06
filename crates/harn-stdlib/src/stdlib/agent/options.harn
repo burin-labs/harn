@@ -252,6 +252,7 @@ pub type AgentLoopOptions = {
   llm_caller?: any,
   tool_caller?: any,
   structural_validator?: any,
+  input_guardrail?: any,
   pre_turn_scope_classifier?: any,
   context_callback?: any,
   context_filter?: any,
@@ -1141,6 +1142,15 @@ fn __validate_pre_turn_scope_classifier(value) {
   }
 }
 
+fn __validate_input_guardrail(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `input_guardrail` must be a closure or nil; got " + type_of(value)
+  }
+}
+
 fn __validate_missing_tool_call_recovery(value) {
   if value == nil {
     return
@@ -1465,6 +1475,9 @@ fn __validate_agent_loop_callback_options(opts) {
   if __has_key(opts, "structural_validator") {
     __validate_structural_validator(opts.structural_validator)
   }
+  if __has_key(opts, "input_guardrail") {
+    __validate_input_guardrail(opts.input_guardrail)
+  }
   if __has_key(opts, "pre_turn_scope_classifier") {
     __validate_pre_turn_scope_classifier(opts.pre_turn_scope_classifier)
   }
@@ -1678,6 +1691,7 @@ pub fn agent_loop_options(options = nil) {
   let on_delta = opts?.on_delta
   let tool_caller = opts?.tool_caller
   let structural_validator = opts?.structural_validator
+  let input_guardrail = opts?.input_guardrail
   let pre_turn_scope_classifier = opts?.pre_turn_scope_classifier
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
@@ -1738,6 +1752,7 @@ pub fn agent_loop_options(options = nil) {
     _on_delta: on_delta,
     _tool_caller: tool_caller,
     _structural_validator: structural_validator,
+    _input_guardrail: input_guardrail,
     _pre_turn_scope_classifier: pre_turn_scope_classifier,
   }
   return opts

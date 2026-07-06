@@ -1,0 +1,16 @@
+input_guardrail
+input_guardrail_tripwire
+true
+1
+true
+secret_exfiltration
+true
+done
+main model reached
+1
+true
+safe request
+true
+destructive request
+true
+true

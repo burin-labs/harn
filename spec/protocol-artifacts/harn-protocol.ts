@@ -142,6 +142,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "control_outcome",
   "daemon_watchdog_tripped",
   "feedback_injected",
+  "input_guardrail_verdict",
   "iteration_end",
   "iteration_start",
   "judge_decision",

@@ -745,6 +745,34 @@ async fn structural_validator_decision_agent_event_carries_retry_shape() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn input_guardrail_verdict_agent_event_carries_tripwire_shape() {
+    let actual = collect_notifications(vec![AgentEvent::InputGuardrailVerdict {
+        session_id: "session-1".to_string(),
+        iteration: 1,
+        tripwire: true,
+        reason: "private key exfiltration".to_string(),
+        label: "secret_exfiltration".to_string(),
+        confidence: 0.99,
+        confidence_threshold: 0.8,
+        classifier_kind: Some("custom".to_string()),
+        model: None,
+        error: None,
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "input_guardrail_verdict");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["tripwire"], true);
+    assert_eq!(params["reason"], "private key exfiltration");
+    assert_eq!(params["label"], "secret_exfiltration");
+    assert_eq!(params["confidenceThreshold"], 0.8);
+    assert_eq!(params["classifierKind"], "custom");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn tool_format_override_agent_event_uses_camel_case_fields() {
     let actual = collect_notifications(vec![AgentEvent::ToolFormatOverride {
         session_id: "session-1".to_string(),

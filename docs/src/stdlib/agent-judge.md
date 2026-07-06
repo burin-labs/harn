@@ -129,6 +129,8 @@ Both return `nil` when the cap is disabled.
 
 ## See also
 
+- [Agent guardrails](./agent-guardrails.md) — the input-side bookend that can
+  stop before the first main model turn.
 - [Agent loops: completion gate](../llm/agent_loop.md#completion-gate-agent_completion_gate)
   — the same gate in the context of the loop's other completion seams
   (`verify_completion`, `verify_completion_judge`, `done_judge`).

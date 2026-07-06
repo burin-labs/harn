@@ -310,6 +310,21 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    InputGuardrailVerdict {
+        session_id: String,
+        iteration: usize,
+        tripwire: bool,
+        reason: String,
+        label: String,
+        confidence: f64,
+        confidence_threshold: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        classifier_kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     MissingToolCallVerdict {
         session_id: String,
         iteration: usize,
@@ -863,6 +878,7 @@ impl AgentEvent {
             | Self::StepJudgeDecision { session_id, .. }
             | Self::StructuralValidatorDecision { session_id, .. }
             | Self::ScopeClassifierVerdict { session_id, .. }
+            | Self::InputGuardrailVerdict { session_id, .. }
             | Self::MissingToolCallVerdict { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }

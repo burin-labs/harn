@@ -486,6 +486,7 @@ pub const HARN_AGENT_EVENT_KIND_COMPASS_ROUTING_DECISION: &str = "compass_routin
 pub const HARN_AGENT_EVENT_KIND_CONTROL_OUTCOME: &str = "control_outcome";
 pub const HARN_AGENT_EVENT_KIND_DAEMON_WATCHDOG_TRIPPED: &str = "daemon_watchdog_tripped";
 pub const HARN_AGENT_EVENT_KIND_FEEDBACK_INJECTED: &str = "feedback_injected";
+pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail_verdict";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_END: &str = "iteration_end";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
@@ -517,6 +518,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",
+    "input_guardrail_verdict",
     "iteration_end",
     "iteration_start",
     "judge_decision",

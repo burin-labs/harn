@@ -18,7 +18,7 @@ table for that system.
 | `max_turns` | `max_iterations` | Both bound a budget, but the nouns are off-by-one — OpenAI counts outer SDK invocations, Harn counts inner LLM calls. |
 | `Session` (`SQLiteSession("id")`) | `session_id` + `agent_session_open(id)` | Direct match. |
 | `handoff` | persona handoff or `spawn_agent` | Direct match in shape. |
-| `input_guardrails` / `output_guardrails` | tool middleware + persona pre/post hooks | Harn has no single "guardrails" noun; the shape is built from hooks. |
+| `input_guardrails` / `output_guardrails` | `agent_input_guardrail` + tool middleware + completion gates | Harn exposes input guardrails as a named pre-loop bookend; output checks use completion gates, judges, validators, and tool middleware. |
 
 ## Anthropic Claude Agent SDK
 
