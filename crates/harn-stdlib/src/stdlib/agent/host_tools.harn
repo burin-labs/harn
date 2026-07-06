@@ -647,7 +647,7 @@ fn __agent_host_cancel_command_request(args) {
  *
  * @effects: [agent]
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_read_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
@@ -836,7 +836,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
  *
  * @effects: [agent]
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_command_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
@@ -1107,7 +1107,7 @@ fn __agent_host_code_mode_enabled(options) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_composition_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
@@ -1209,7 +1209,7 @@ fn __agent_host_edit_file_apply(args, options) {
  *
  * @effects: [agent]
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_edit_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
@@ -1330,7 +1330,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_host_tools(registry = nil, options = nil) {
   var tools = agent_read_tools(registry, options)

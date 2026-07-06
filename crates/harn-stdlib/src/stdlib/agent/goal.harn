@@ -89,7 +89,7 @@ fn __normalize_criteria(value) {
  *
  * @effects: []
  * @errors: [runtime]
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: goal({objective: "Fix the flaky test", success_criteria: ["suite green twice"]})
  */
 pub fn goal(spec) {
@@ -138,7 +138,7 @@ fn __render_goal_text(g) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn goal_text(g) {
   return __render_goal_text(g)
@@ -153,7 +153,7 @@ pub fn goal_text(g) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn goal_prompt_part(g) {
   return system_prompt_part(__render_goal_text(g), {label: "goal", position: "before"})
@@ -166,7 +166,7 @@ pub fn goal_prompt_part(g) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn goal_context_fragment(g) {
   return {body: __render_goal_text(g), id: "goal", source: "goal"}
@@ -181,7 +181,7 @@ pub fn goal_context_fragment(g) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: agent_loop(task, nil, with_goal({provider: "anthropic"}, g))
  */
 pub fn with_goal(agent_options, g) {
@@ -194,7 +194,7 @@ pub fn with_goal(agent_options, g) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn goal_pin(g) {
   return pin("goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
@@ -209,7 +209,7 @@ pub fn goal_pin(g) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn goal_check(g, facts = nil) {
   let bindings = if type_of(facts) == "dict" {
@@ -251,7 +251,7 @@ fn __goal_judge_system(g) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: agent_loop(task, nil, {done_judge: goal_judge(g), loop_until_done: true})
  */
 pub fn goal_judge(g, opts = nil) {
@@ -271,9 +271,11 @@ pub fn goal_judge(g, opts = nil) {
   }
 }
 
-// Feedback that threads the unmet success criteria (the findings) into the next
-// attempt. agent_verify_or_continue injects this into the transcript on a vetoed
-// completion, so the re-run agent sees exactly which criteria remain.
+/**
+ * Feedback that threads the unmet success criteria (the findings) into the next
+ * attempt. agent_verify_or_continue injects this into the transcript on a vetoed
+ * completion, so the re-run agent sees exactly which criteria remain.
+ */
 fn __goal_unmet_feedback(g, unmet_ids) {
   var lines = ["The goal is not yet met. Address these unmet success criteria before finishing:"]
   var any = false
@@ -324,7 +326,7 @@ fn __goal_without_control_keys(o) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: agent_loop(task, nil, goal_reloop(g, {facts_fn: read_facts, max_attempts: 3}))
  */
 pub fn goal_reloop(g, opts = nil) {
