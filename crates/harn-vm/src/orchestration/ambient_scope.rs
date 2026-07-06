@@ -48,7 +48,7 @@ use crate::llm::permissions::{swap_dynamic_permission_stack, DynamicPermissionPo
 use crate::llm::swap_current_host_bridge;
 use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextOverlay};
 use crate::stdlib::process::{swap_source_dir, swap_thread_execution_context};
-use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContext};
+use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 
 /// An isolated snapshot of every ambient capability/identity stack a worker
 /// task owns while it runs. `Default` is the empty scope (no policies, depth 0).
@@ -60,7 +60,7 @@ pub(crate) struct AmbientExecutionScope {
     permissions: Vec<DynamicPermissionPolicy>,
     runtime_context: Vec<RuntimeContextOverlay>,
     autonomy: Vec<AutonomyPolicy>,
-    llm_render: Vec<LlmRenderContext>,
+    llm_render: Vec<LlmRenderContextFrame>,
     connector_ctx: Vec<ConnectorCtx>,
     /// Active agent-session breadcrumb. It starts empty for a spawned worker
     /// (never inherited from the parent), then the child's own
@@ -435,12 +435,88 @@ impl<F: Future> Future for Scoped<F> {
 mod tests {
     use super::*;
     use crate::orchestration::{current_execution_policy, push_execution_policy};
+    use crate::stdlib::template::{
+        current_llm_render_context, LlmRenderContext, LlmRenderContextGuard,
+    };
+    use std::future::pending;
 
     fn policy_named(tool: &str) -> CapabilityPolicy {
         CapabilityPolicy {
             tools: vec![tool.to_string()],
             ..Default::default()
         }
+    }
+
+    async fn spawn_pending_llm_context_task(
+        provider: &'static str,
+        model: &'static str,
+    ) -> tokio::task::JoinHandle<()> {
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let handle = tokio::task::spawn_local(scope_ambient(
+            AmbientExecutionScope::default(),
+            async move {
+                let _guard =
+                    LlmRenderContextGuard::enter(LlmRenderContext::resolve(provider, model));
+                let _ = entered_tx.send(());
+                pending::<()>().await;
+            },
+        ));
+        entered_rx.await.expect("child entered LLM render context");
+        handle
+    }
+
+    #[tokio::test]
+    async fn cancelling_swapped_out_llm_context_guard_does_not_panic() {
+        crate::stdlib::template::llm_context::reset_llm_render_stack();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let handle = spawn_pending_llm_context_task("anthropic", "claude-opus-4-7").await;
+                assert!(current_llm_render_context().is_none());
+                handle.abort();
+                let error = handle
+                    .await
+                    .expect_err("aborted child should report cancellation");
+                assert!(error.is_cancelled(), "unexpected join error: {error}");
+            })
+            .await;
+        assert!(current_llm_render_context().is_none());
+    }
+
+    #[tokio::test]
+    async fn cancelling_child_llm_context_guard_preserves_parent_context() {
+        crate::stdlib::template::llm_context::reset_llm_render_stack();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let parent =
+                    LlmRenderContextGuard::enter(LlmRenderContext::resolve("openai", "gpt-5.4"));
+                assert_eq!(
+                    current_llm_render_context().map(|ctx| ctx.provider),
+                    Some("openai".to_string())
+                );
+
+                let handle = spawn_pending_llm_context_task("anthropic", "claude-opus-4-7").await;
+                assert_eq!(
+                    current_llm_render_context().map(|ctx| ctx.provider),
+                    Some("openai".to_string()),
+                    "child poll should restore the parent LLM render context"
+                );
+                handle.abort();
+                let error = handle
+                    .await
+                    .expect_err("aborted child should report cancellation");
+                assert!(error.is_cancelled(), "unexpected join error: {error}");
+                assert_eq!(
+                    current_llm_render_context().map(|ctx| ctx.provider),
+                    Some("openai".to_string()),
+                    "cancelled child guard must not pop the parent LLM render context"
+                );
+
+                drop(parent);
+                assert!(current_llm_render_context().is_none());
+            })
+            .await;
     }
 
     /// Two cooperatively-scheduled tasks on one `LocalSet`, each pushing a
