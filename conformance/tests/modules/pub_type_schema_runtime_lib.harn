@@ -1,0 +1,1 @@
+pub type DirectTarget = {name: string, score: int}
