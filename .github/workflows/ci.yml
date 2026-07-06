@@ -64,6 +64,8 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.force.outputs.rust }}
+      portal: ${{ steps.surface_filter.outputs.portal }}
+      docs_site: ${{ steps.surface_filter.outputs.docs_site }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -77,6 +79,18 @@ jobs:
               - '!docs/**'
               - '!website/**'
               - '!**/*.md'
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: surface_filter
+        with:
+          filters: |
+            portal:
+              - '.github/workflows/ci.yml'
+              - 'crates/harn-cli/portal/**'
+            docs_site:
+              - '.github/workflows/ci.yml'
+              - 'docs/**'
+              - 'scripts/build_docs_site.sh'
+              - 'website/**'
       - name: Detect release metadata-only PR
         id: release_metadata
         shell: bash
@@ -799,6 +813,8 @@ jobs:
 
   portal:
     name: Portal frontend
+    needs: changes
+    if: needs.changes.outputs.portal == 'true'
     # ~30 s npm pipeline; setup-node's cache covers the only meaningful
     # download and there's no sccache/cargo win to reclaim.
     runs-on: ubuntu-latest
@@ -820,6 +836,8 @@ jobs:
 
   docs-site:
     name: Docs site
+    needs: changes
+    if: needs.changes.outputs.docs_site == 'true'
     # Type-checks, bundles, and statically prerenders the harnlang.com site
     # (website/) into docs/dist. ~25 s npm pipeline; setup-node's cache covers
     # the only meaningful download.
@@ -925,8 +943,6 @@ jobs:
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
-            ["Portal frontend"]="${{ needs.portal.result }}"
-            ["Docs site"]="${{ needs['docs-site'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
 
@@ -969,6 +985,24 @@ jobs:
           echo "Rust on macOS (deny-warnings build + lint): $macos_result"
           if [ "$macos_result" != "success" ] && [ "$macos_result" != "skipped" ]; then
             echo "::error::macOS job failed."
+            exit 1
+          fi
+
+          # Portal and docs-site jobs are path-gated by `changes`: they run
+          # when the frontend/docs surfaces or this workflow change, and skip
+          # on unrelated Rust/runtime PRs. Treat an intentional skip as pass;
+          # only an actual job failure should fail the aggregate status.
+          portal_result="${{ needs.portal.result }}"
+          echo "Portal frontend: $portal_result"
+          if [ "$portal_result" != "success" ] && [ "$portal_result" != "skipped" ]; then
+            echo "::error::Portal frontend failed."
+            exit 1
+          fi
+
+          docs_site_result="${{ needs['docs-site'].result }}"
+          echo "Docs site: $docs_site_result"
+          if [ "$docs_site_result" != "success" ] && [ "$docs_site_result" != "skipped" ]; then
+            echo "::error::Docs site failed."
             exit 1
           fi
 
