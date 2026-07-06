@@ -255,9 +255,11 @@ pub fn __wrap_llm_result(result) {
  * @errors: []
  */
 pub fn safe_call(prompt, system, options) {
-  return __wrap_llm_result(try {
-    llm_call(prompt, system, options)
-  })
+  return __wrap_llm_result(
+    try {
+      llm_call(prompt, system, options)
+    },
+  )
 }
 
 /**

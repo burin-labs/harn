@@ -97,7 +97,16 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     },
     required: ["verdict"],
   }
-  let ran = __judge_run_checkpoint(harness, judge_cfg, opts, payload, "agent.completion_judge", system, user, schema)
+  let ran = __judge_run_checkpoint(
+    harness,
+    judge_cfg,
+    opts,
+    payload,
+    "agent.completion_judge",
+    system,
+    user,
+    schema,
+  )
   let checkpoint = ran.checkpoint
   let duration_ms = ran.duration_ms
   if !checkpoint.ok {

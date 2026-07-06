@@ -45,7 +45,16 @@ pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __judge_run_checkpoint(harness: Harness, judge_cfg, opts, payload, checkpoint_name, system, user, schema) {
+pub fn __judge_run_checkpoint(
+  harness: Harness,
+  judge_cfg,
+  opts,
+  payload,
+  checkpoint_name,
+  system,
+  user,
+  schema,
+) {
   let base = opts?.llm_options ?? {}
   let llm_opts = __judge_apply_llm_overrides(
     base

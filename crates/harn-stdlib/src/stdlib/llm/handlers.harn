@@ -41,9 +41,11 @@ pub fn default_llm_caller() {
         __pop_llm_render_context()
       }
     }
-    return __wrap_llm_result(try {
-      llm_call(call.prompt, call.system, llm_call_options(call.opts))
-    })
+    return __wrap_llm_result(
+      try {
+        llm_call(call.prompt, call.system, llm_call_options(call.opts))
+      },
+    )
   }
 }
 
