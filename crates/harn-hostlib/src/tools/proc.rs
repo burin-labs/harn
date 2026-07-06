@@ -295,6 +295,9 @@ pub(crate) fn process_error_to_hostlib(builtin: &'static str, err: ProcessError)
             builtin,
             message: format!("spawn failed: {message}"),
         },
+        ProcessError::CatastrophicFloor(message) => {
+            HostlibError::CatastrophicFloor { builtin, message }
+        }
     }
 }
 

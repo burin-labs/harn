@@ -236,6 +236,14 @@ pub enum ProcessError {
     /// Generic spawn failure (typically io::Error from `Command::spawn`).
     #[error("spawn failed: {0}")]
     Spawn(String),
+    /// A never-approvable UNIVERSAL catastrophic command (machine/disk/data
+    /// destruction) was rejected by the floor BEFORE spawning. Enforced
+    /// unconditionally at [`spawn_process`] — no `command_policy` required —
+    /// so it is universal across every hostlib process tool, embedders, and
+    /// standalone Harn. See
+    /// [`harn_vm::orchestration::universal_catastrophic_reason`].
+    #[error("{0}")]
+    CatastrophicFloor(String),
 }
 
 use std::cell::RefCell;
@@ -288,7 +296,33 @@ pub fn current_spawner() -> Arc<dyn ProcessSpawner> {
 }
 
 /// Spawn a process via the currently installed spawner.
+///
+/// This is the single chokepoint every hostlib process tool funnels through
+/// (`run_command`, `run_test`, `run_build_command`, `manage_packages`, and the
+/// long-running background path). The UNIVERSAL catastrophic-command floor is
+/// enforced HERE, UNCONDITIONALLY — no `command_policy` on the stack is
+/// required — so a machine/disk/data-destroying command (`rm -rf /`, fork bomb,
+/// `mkfs`, `dd of=<device>`, `chmod -R 000`, `truncate -s 0` of a source file,
+/// redirect-over-source, project-root delete) is rejected before the child is
+/// ever created, on standalone Harn and under every embedder alike. The
+/// recoverable git workflow family (`git reset --hard`, `git clean -fd`,
+/// force-push) is deliberately NOT enforced here: it stays policy-gated so
+/// Harn's own stdlib `git.push --force-with-lease` flow keeps working. The
+/// spec's raw `program`/`args` are classified BEFORE any sandbox wrapper is
+/// applied, so a `sandbox-exec`/`bwrap` prefix can't bury the real command.
 pub fn spawn_process(spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
+    let workspace_roots: Vec<String> = spec
+        .cwd
+        .as_ref()
+        .map(|cwd| vec![cwd.display().to_string()])
+        .unwrap_or_default();
+    if let Some(reason) = harn_vm::orchestration::universal_catastrophic_reason(
+        &spec.program,
+        &spec.args,
+        &workspace_roots,
+    ) {
+        return Err(ProcessError::CatastrophicFloor(reason));
+    }
     current_spawner().spawn(spec)
 }
 
