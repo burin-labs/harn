@@ -650,6 +650,80 @@ fn project_fingerprint_detects_cpp_profile() {
 }
 
 #[test]
+fn project_fingerprint_ranks_source_languages_before_tooling_hints() {
+    let php_dir = temp_dir("fingerprint-php-with-frontend-tooling");
+    std::fs::create_dir_all(php_dir.path().join("app")).unwrap();
+    std::fs::write(
+        php_dir.path().join("composer.json"),
+        r#"{"require":{"laravel/framework":"^12.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        php_dir.path().join("package.json"),
+        r#"{"dependencies":{"react":"19.0.0","typescript":"^5.0.0","vite":"^6.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(php_dir.path().join("vite.config.js"), "export default {}\n").unwrap();
+    std::fs::write(php_dir.path().join("app/Controller.php"), "<?php\n").unwrap();
+
+    let php = detect_project_fingerprint(php_dir.path());
+    assert_eq!(php.primary_language, "php");
+    assert_eq!(php.languages.first().map(String::as_str), Some("php"));
+    assert!(php.languages.contains(&"typescript".to_string()));
+
+    let java_dir = temp_dir("fingerprint-java-with-kotlin-build");
+    std::fs::create_dir_all(java_dir.path().join("src/main/java/app")).unwrap();
+    std::fs::write(
+        java_dir.path().join("build.gradle.kts"),
+        "plugins { java }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        java_dir.path().join("src/main/java/app/App.java"),
+        "package app;\npublic class App {}\n",
+    )
+    .unwrap();
+
+    let java = detect_project_fingerprint(java_dir.path());
+    assert_eq!(java.primary_language, "java");
+    assert_eq!(java.languages.first().map(String::as_str), Some("java"));
+    assert!(java.languages.contains(&"kotlin".to_string()));
+
+    let cpp_dir = temp_dir("fingerprint-cpp-with-c-header");
+    std::fs::create_dir_all(cpp_dir.path().join("src")).unwrap();
+    std::fs::write(
+        cpp_dir.path().join("src/lib.cpp"),
+        "int lib() { return 1; }\n",
+    )
+    .unwrap();
+    std::fs::write(cpp_dir.path().join("src/lib.h"), "int lib();\n").unwrap();
+
+    let cpp = detect_project_fingerprint(cpp_dir.path());
+    assert_eq!(cpp.primary_language, "cpp");
+    assert_eq!(cpp.languages.first().map(String::as_str), Some("cpp"));
+    assert!(cpp.languages.contains(&"c".to_string()));
+
+    let ruby_dir = temp_dir("fingerprint-ruby-with-frontend-tooling");
+    std::fs::create_dir_all(ruby_dir.path().join("app/models")).unwrap();
+    std::fs::write(ruby_dir.path().join("Gemfile"), "gem \"rails\"\n").unwrap();
+    std::fs::write(
+        ruby_dir.path().join("package.json"),
+        r#"{"dependencies":{"react":"19.0.0","typescript":"^5.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ruby_dir.path().join("app/models/user.rb"),
+        "class User\nend\n",
+    )
+    .unwrap();
+
+    let ruby = detect_project_fingerprint(ruby_dir.path());
+    assert_eq!(ruby.primary_language, "ruby");
+    assert_eq!(ruby.languages.first().map(String::as_str), Some("ruby"));
+    assert!(ruby.languages.contains(&"typescript".to_string()));
+}
+
+#[test]
 fn project_fingerprint_detects_swift_spm_profile() {
     let dir = temp_dir("fingerprint-swift");
     std::fs::create_dir_all(dir.path().join("Sources/App")).unwrap();
