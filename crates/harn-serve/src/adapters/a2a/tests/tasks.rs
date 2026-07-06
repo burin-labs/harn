@@ -1457,6 +1457,120 @@ fn agent_artifact_event_emits_artifact_update() {
 }
 
 #[test]
+fn agent_artifact_manifest_event_emits_bundle_artifact_update() {
+    let task_id = "task-artifact-manifest".to_string();
+    let task = TaskState {
+        id: task_id.clone(),
+        context_id: Some("ctx-artifacts".into()),
+        status: TaskStatus::Working,
+        history: Vec::new(),
+        artifacts: Vec::new(),
+        metadata: BTreeMap::new(),
+        events: Vec::new(),
+        subscribers: Vec::new(),
+        cancel_token: None,
+    };
+    let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+    let sink = super::A2aWorkerSink {
+        task_id: task_id.clone(),
+        tasks: tasks.clone(),
+    };
+
+    sink.handle_event(&harn_vm::agent_events::AgentEvent::Artifact {
+        session_id: super::a2a_worker_session_id(&task_id),
+        artifact_id: "artifact-manifest-1".into(),
+        kind: "artifact_manifest".into(),
+        title: Some("Code findings report".into()),
+        mime_type: "application/vnd.harn.artifact-manifest+json".into(),
+        spec: json!({
+            "schema_version": "harn.artifacts.v1",
+            "kind": "artifact_manifest",
+            "title": "Code findings report",
+            "artifact_count": 2,
+            "total_size_bytes": 42,
+            "artifacts": [
+                {
+                    "name": "findings.pdf",
+                    "relative_path": "artifacts/findings.pdf",
+                    "uri": "file:///tmp/findings.pdf",
+                    "mime_type": "application/pdf",
+                    "size_bytes": 40,
+                    "sha256": format!("sha256:{}", "a".repeat(64)),
+                },
+                {
+                    "name": "chart.png",
+                    "relative_path": "artifacts/chart.png",
+                    "uri": "file:///tmp/chart.png",
+                    "mime_type": "image/png",
+                    "size_bytes": 2,
+                    "sha256": format!("sha256:{}", "b".repeat(64)),
+                },
+            ],
+            "metadata": {
+                "contract_package": "@harn/documents",
+                "contract_version": "0.1.3",
+            },
+        }),
+        fallback: "Code findings report: findings.pdf, chart.png".into(),
+        size_bytes: 512,
+        provenance: json!({"generator": "artifact_emit"}),
+        metadata: json!({"scope": "bundle"}),
+    });
+
+    let tasks = tasks.lock().expect("tasks");
+    let task = tasks.get(&task_id).expect("task");
+    assert_eq!(task.artifacts.len(), 1, "artifact manifest not stored");
+    let stored = &task.artifacts[0];
+    assert_eq!(stored["artifactId"], "artifact-manifest-1");
+    assert_eq!(stored["name"], "Code findings report");
+    assert_eq!(stored["parts"][0]["type"], "data");
+    assert_eq!(stored["parts"][0]["data"]["kind"], "artifact_manifest");
+    assert_eq!(
+        stored["parts"][0]["data"]["mimeType"],
+        "application/vnd.harn.artifact-manifest+json"
+    );
+    assert_eq!(
+        stored["parts"][0]["data"]["spec"]["schema_version"],
+        "harn.artifacts.v1"
+    );
+    assert_eq!(stored["parts"][0]["data"]["spec"]["artifact_count"], 2);
+    assert_eq!(
+        stored["parts"][0]["data"]["spec"]["artifacts"][0]["mime_type"],
+        "application/pdf"
+    );
+    assert_eq!(
+        stored["parts"][0]["data"]["spec"]["artifacts"][1]["mime_type"],
+        "image/png"
+    );
+    assert_eq!(stored["parts"][1]["type"], "text");
+    assert_eq!(
+        stored["parts"][1]["text"],
+        "Code findings report: findings.pdf, chart.png"
+    );
+    assert_eq!(stored["metadata"]["artifact_kind"], "artifact_manifest");
+    assert_eq!(
+        stored["metadata"]["mime_type"],
+        "application/vnd.harn.artifact-manifest+json"
+    );
+    assert_eq!(stored["metadata"]["size_bytes"], 512);
+    assert_eq!(
+        stored["metadata"]["provenance"]["generator"],
+        "artifact_emit"
+    );
+    assert_eq!(stored["metadata"]["harn_metadata"]["scope"], "bundle");
+    assert!(stored["metadata"]["timestamp"].is_string());
+
+    let event = task
+        .events
+        .iter()
+        .find(|event| event.get("kind").and_then(JsonValue::as_str) == Some("artifact-update"))
+        .expect("artifact-update event");
+    assert_eq!(event["taskId"], task_id);
+    assert_eq!(event["contextId"], "ctx-artifacts");
+    assert_eq!(event["artifact"]["artifactId"], "artifact-manifest-1");
+}
+
+#[test]
 fn tool_call_pending_does_not_emit_artifact_update() {
     // Only terminal `Completed` updates with a `raw_output` payload
     // map to artifacts; intermediate streaming chunks (Pending /
