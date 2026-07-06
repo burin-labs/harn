@@ -628,6 +628,17 @@ pub mod helpers {
         result
     }
 
+    pub fn write_scoped(builtin: &str, path: &Path, contents: &[u8]) -> std::io::Result<()> {
+        let result = match active_overlay() {
+            Some(overlay) => overlay.write(path, contents),
+            None => crate::stdlib::sandbox::atomic_write_scoped_at_open(builtin, path, contents),
+        };
+        if result.is_ok() {
+            record_file_write(path, contents);
+        }
+        result
+    }
+
     /// Crash-safe replacement for `std::fs::write`.
     ///
     /// `std::fs::write` opens the destination with `O_CREAT|O_TRUNC`, so it
@@ -703,6 +714,17 @@ pub mod helpers {
         result
     }
 
+    pub fn append_scoped(builtin: &str, path: &Path, contents: &[u8]) -> std::io::Result<()> {
+        let result = match active_overlay() {
+            Some(overlay) => overlay.append(path, contents),
+            None => crate::stdlib::sandbox::append_scoped_at_open(builtin, path, contents),
+        };
+        if result.is_ok() {
+            record_file_write(path, contents);
+        }
+        result
+    }
+
     pub fn copy(src: &Path, dst: &Path) -> std::io::Result<u64> {
         match active_overlay() {
             Some(overlay) => {
@@ -717,6 +739,30 @@ pub mod helpers {
             }
             None => {
                 let copied = std::fs::copy(src, dst)?;
+                if tape::active_recorder().is_some() {
+                    let bytes = std::fs::read(dst)?;
+                    record_file_read(src, &bytes);
+                    record_file_write(dst, &bytes);
+                }
+                Ok(copied)
+            }
+        }
+    }
+
+    pub fn copy_scoped(builtin: &str, src: &Path, dst: &Path) -> std::io::Result<u64> {
+        match active_overlay() {
+            Some(overlay) => {
+                let result = overlay.copy(src, dst);
+                if let Ok(bytes) = overlay.read(src) {
+                    record_file_read(src, &bytes);
+                    if result.is_ok() {
+                        record_file_write(dst, &bytes);
+                    }
+                }
+                result
+            }
+            None => {
+                let copied = crate::stdlib::sandbox::copy_scoped_at_open(builtin, src, dst)?;
                 if tape::active_recorder().is_some() {
                     let bytes = std::fs::read(dst)?;
                     record_file_read(src, &bytes);
@@ -762,6 +808,41 @@ pub mod helpers {
         }
     }
 
+    pub fn rename_scoped(builtin: &str, src: &Path, dst: &Path) -> std::io::Result<u64> {
+        match active_overlay() {
+            Some(overlay) => {
+                let bytes_for_record = overlay.read(src).ok();
+                let result = overlay.rename(src, dst);
+                if result.is_ok() {
+                    if let Some(bytes) = bytes_for_record.as_deref() {
+                        record_file_read(src, bytes);
+                        record_file_write(dst, bytes);
+                        record_file_delete(src);
+                    }
+                }
+                result
+            }
+            None => {
+                let bytes = tape::active_recorder()
+                    .is_some()
+                    .then(|| std::fs::read(src))
+                    .transpose()?;
+                let len = bytes
+                    .as_ref()
+                    .map(|bytes| bytes.len() as u64)
+                    .or_else(|| std::fs::metadata(src).ok().map(|metadata| metadata.len()))
+                    .unwrap_or(0);
+                crate::stdlib::sandbox::rename_scoped_at_open(builtin, src, dst)?;
+                if let Some(bytes) = bytes.as_deref() {
+                    record_file_read(src, bytes);
+                    record_file_write(dst, bytes);
+                    record_file_delete(src);
+                }
+                Ok(len)
+            }
+        }
+    }
+
     pub fn exists(path: &Path) -> bool {
         match active_overlay() {
             Some(overlay) => overlay.exists(path),
@@ -791,6 +872,14 @@ pub mod helpers {
         match active_overlay() {
             Some(overlay) => overlay.create_dir(path),
             None => std::fs::create_dir(path),
+        }
+    }
+
+    pub fn create_dir_scoped(builtin: &str, path: &Path, recursive: bool) -> std::io::Result<()> {
+        match active_overlay() {
+            Some(overlay) if recursive => overlay.create_dir_all(path),
+            Some(overlay) => overlay.create_dir(path),
+            None => crate::stdlib::sandbox::create_dir_scoped_at_open(builtin, path, recursive),
         }
     }
 
