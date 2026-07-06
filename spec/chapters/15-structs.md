@@ -33,9 +33,9 @@ a named-field body:
 struct Point { x: int, y: int }
 struct User { name: string, age: int }
 struct Pair<A, B> { first: A, second: B }
-let p = Point { x: 3, y: 4 }
-let u = User { name: "Alice", age: 30 }
-let pair: Pair<int, string> = Pair { first: 1, second: "two" }
+const p = Point { x: 3, y: 4 }
+const u = User { name: "Alice", age: 30 }
+const pair: Pair<int, string> = Pair { first: 1, second: "two" }
 ```
 
 ### Field access

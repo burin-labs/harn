@@ -41,11 +41,11 @@ pipeline release_agent_setup() {
     when: { event -> event.provider_payload.payload.target_branch == "main" },
     batch: {count: 3, window: "2h", key: "repo", expire_action: "fire_partial"},
     handler: { event ->
-      let merged = event.batch
-      let repo = merged[0].provider_payload.payload.repo
-      let shas = merged
+      const merged = event.batch
+      const repo = merged[0].provider_payload.payload.repo
+      const shas = merged
         |> map({ e -> e.provider_payload.payload.sha })
-      let release = cut_release(repo, shas)
+      const release = cut_release(repo, shas)
       emit_channel("harn-release.shipped", {
         repo: repo,
         version: release.version,
@@ -63,7 +63,7 @@ pipeline merge_captain_setup() {
     provider: "channel",
     match: {events: ["channel:harn-release.shipped"]},
     handler: { event ->
-      let release = event.provider_payload.payload
+      const release = event.provider_payload.payload
       rebase_queued_prs_against(release.version)
     },
   })
@@ -151,8 +151,8 @@ import { trigger_register, ReminderInject } from "std/triggers"
 
 // --- planner ---
 pipeline planner_loop(task) {
-  let session = agent_session_open("planner")
-  let draft = llm_call(task, "Write a one-page plan.", {session_id: session})
+  const session = agent_session_open("planner")
+  const draft = llm_call(task, "Write a one-page plan.", {session_id: session})
   emit_channel("plan.draft", {
     plan: draft,
     revision: 1,
@@ -185,8 +185,8 @@ pipeline reviewer_setup() {
     provider: "channel",
     match: {events: ["channel:plan.draft"]},
     handler: { event ->
-      let draft = event.provider_payload.payload
-      let critique = llm_call(
+      const draft = event.provider_payload.payload
+      const critique = llm_call(
         "Critique this plan in 3 bullets:\n" + draft.plan,
         "You are a careful reviewer.",
       )
@@ -248,7 +248,7 @@ pipeline dashboard_setup() {
     // emits from any pipeline running for this tenant.
     match: {events: ["channel:pipeline.step.completed"]},
     handler: { event ->
-      let row = event.provider_payload.payload
+      const row = event.provider_payload.payload
       dashboard_upsert(row.pipeline, row.step, {
         last_run_at: event.occurred_at,
         last_duration_ms: row.duration_ms,
@@ -283,9 +283,9 @@ import { pipeline_on_finish } from "std/lifecycle"
 
 // --- pipeline A: live ingest ---
 pipeline ingest_pipeline(events) {
-  let deferred = []
+  const deferred = []
   for event in events {
-    let result = try_process_now(event)
+    const result = try_process_now(event)
     if result.deferred {
       deferred = deferred + [event]
     }
@@ -313,7 +313,7 @@ pipeline settlement_setup() {
     match: {events: ["channel:pipeline.drained"]},
     when: { event -> event.provider_payload.payload.source_pipeline == "ingest" },
     handler: { event ->
-      let bucket = event.provider_payload.payload.deferred_payload
+      const bucket = event.provider_payload.payload.deferred_payload
       for deferred in bucket {
         settle(deferred)
       }

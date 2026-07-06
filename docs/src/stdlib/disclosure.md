@@ -12,16 +12,16 @@ surface-specific rendering policy.
 import { append_git_trailers, render, slack_message_disclosure } from "std/disclosure"
 
 pipeline default() {
-  let chain = {
+  const chain = {
     sub: "user:kenneth",
     act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}},
   }
 
-  let trailers = render(chain, "git")
-  let commit_message = append_git_trailers("Fix the merge gate", chain)
-  let byline = render(chain, "slack")
-  let slack = slack_message_disclosure(chain)
-  let github = render(chain, "github")
+  const trailers = render(chain, "git")
+  const commit_message = append_git_trailers("Fix the merge gate", chain)
+  const byline = render(chain, "slack")
+  const slack = slack_message_disclosure(chain)
+  const github = render(chain, "github")
 }
 ```
 

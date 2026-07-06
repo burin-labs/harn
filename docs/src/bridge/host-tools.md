@@ -27,11 +27,11 @@ pipeline inspect_readme(task) {
     return nil
   }
 
-  let read_tool = host_tool_lookup("Read")
+  const read_tool = host_tool_lookup("Read")
   assert(read_tool != nil, "Read tool metadata should be present")
   assert(read_tool?.deprecated != true, "Read tool is deprecated on this host")
 
-  let result = host_tool_call("Read", {path: "README.md"})
+  const result = host_tool_call("Read", {path: "README.md"})
   log(result)
 }
 ```

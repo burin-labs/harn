@@ -15,7 +15,7 @@ import "std/project"
 skill-card and persona bootstraps can consume without paying for enrichment:
 
 ```harn
-let fp = project_fingerprint(".")
+const fp = project_fingerprint(".")
 ```
 
 Typical fields:
@@ -63,7 +63,7 @@ workspace:
 ```harn
 import "std/project"
 
-let profile = project_context_profile(".", {include_env_credentials: false})
+const profile = project_context_profile(".", {include_env_credentials: false})
 ```
 
 The resolver composes existing signals instead of indexing code itself. It uses
@@ -101,7 +101,7 @@ instead of forcing another project scan:
 ```harn
 import { agent_loop_options } from "std/agent/options"
 
-let _opts = agent_loop_options(
+const _opts = agent_loop_options(
   {
     root: ".",
     code_librarian_signals: {
@@ -125,7 +125,7 @@ dictionary describing exactly that directory:
 ```harn
 import "std/project"
 
-let ev = project_scan(".", {tiers: ["ambient", "config"]})
+const ev = project_scan(".", {tiers: ["ambient", "config"]})
 ```
 
 Typical fields:
@@ -165,7 +165,7 @@ sub-project evidence:
 ```harn
 import "std/project"
 
-let tree = project_scan_tree(".", {tiers: ["ambient"], depth: 3})
+const tree = project_scan_tree(".", {tiers: ["ambient"], depth: 3})
 // {".": {...}, "frontend": {...}, "backend": {...}}
 ```
 
@@ -195,8 +195,8 @@ Typical use:
 ```harn
 import "std/project"
 
-let base = project_scan(".", {tiers: ["ambient", "config"]})
-let enriched = project_enrich(".", {
+const base = project_scan(".", {tiers: ["ambient", "config"]})
+const enriched = project_enrich(".", {
   base_evidence: base,
   prompt: "Project: {{package_name}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON.",
   schema: {
@@ -302,7 +302,7 @@ Typical shape:
 ```harn
 import "std/project"
 
-let tree = project_deep_scan(".", {
+const tree = project_deep_scan(".", {
   namespace: "coding-enrichment-v1",
   tiers: ["ambient", "config", "enriched"],
   incremental: true,

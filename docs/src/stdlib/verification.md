@@ -14,9 +14,9 @@ batch of workspace paths under one code-index sequence binding:
 import { verification_file_hash_snapshot } from "std/verification"
 
 pipeline default() {
-  let _ = hostlib_code_index_rebuild({root: "."})
-  let snap = verification_file_hash_snapshot(["src/main.zig", "build.zig"])
-  let verdict = verification_diagnostic_classify(
+  const _ = hostlib_code_index_rebuild({root: "."})
+  const snap = verification_file_hash_snapshot(["src/main.zig", "build.zig"])
+  const verdict = verification_diagnostic_classify(
     {rung: "R2", rowId: "zig/file", at: snap.captured_at_ms, snapshot: snap.snapshot},
     snap.snapshot,
   )
@@ -51,7 +51,7 @@ contract, while project stacks add rows without changing Rust or host glue:
 import { verification_affected_targets } from "std/verification"
 
 pipeline default() {
-  let affected = verification_affected_targets(
+  const affected = verification_affected_targets(
     ["crates/app/src/lib.rs", "apps/web/src/index.ts"],
     [
       {id: "cargo", parser_id: "cargo.metadata.v1", spec: {mode: "shell", command: "cargo metadata --format-version=1 --no-deps"}},
@@ -89,8 +89,8 @@ shape:
 import { verification_record_check_result } from "std/verification"
 
 pipeline default() {
-  let result = {success: false, exit_code: 1, duration_ms: 420, stderr: "failed"}
-  let recorded = verification_record_check_result(
+  const result = {success: false, exit_code: 1, duration_ms: 420, stderr: "failed"}
+  const recorded = verification_record_check_result(
     "cargo/test",
     result,
     {warm: false, snapshot: {"src/lib.rs": "hash1"}, failure_signature_from: "stderr"},
@@ -146,7 +146,7 @@ version extraction pattern:
 import { verification_toolchain_facts } from "std/verification"
 
 pipeline default() {
-  let facts = verification_toolchain_facts([
+  const facts = verification_toolchain_facts([
     {
       id: "go/default",
       name: "go",
@@ -190,7 +190,7 @@ Zig, or any other stack.
 import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
 
 pipeline default() {
-  let warm = verification_warm_state_facts([
+  const warm = verification_warm_state_facts([
     {
       id: "scala/full",
       name: "sbt",
@@ -202,7 +202,7 @@ pipeline default() {
       cacheIdentity: {BLOOP_HOME: ".bloop"},
     },
   ])
-  let plan = verification_ladder_plan(
+  const plan = verification_ladder_plan(
     {path: "modules/cart/src/Main.scala", language: "scala", task: "post_edit"},
     {timing_kind: "auto", warm_state_facts: warm},
   )
@@ -247,7 +247,7 @@ import {
 } from "std/verification"
 
 pipeline default() {
-  let row = {
+  const row = {
     id: "scala/build-server",
     warmMode: {
       mode: "build-server",
@@ -255,7 +255,7 @@ pipeline default() {
       readyProbe: {spec: {mode: "shell", command: "test -S .bloop/socket"}},
     },
   }
-  let receipt = verification_start_warm_state(row)
+  const receipt = verification_start_warm_state(row)
   // Later, or during test teardown:
   return verification_teardown_warm_state(receipt).cancelled
 }
@@ -282,7 +282,7 @@ matched rows:
 import { verification_ladder_plan } from "std/verification"
 
 pipeline default() {
-  let plan = verification_ladder_plan(
+  const plan = verification_ladder_plan(
     {path: "src/main.zig", language: "zig", task: "post_edit"},
     {resource_classes: ["cheap", "moderate"], max_rung: "R3"},
   )
@@ -328,7 +328,7 @@ verification status model from explicit host facts and Harn profile rows:
 import { verification_hud_model, verification_hud_text } from "std/verification"
 
 pipeline default() {
-  let model = verification_hud_model(
+  const model = verification_hud_model(
     {
       started_ms: 1000,
       last_edit_ms: 61000,
@@ -374,7 +374,7 @@ a host product or in agent-loop string heuristics:
 import { verification_diagnostic_delta } from "std/verification"
 
 pipeline default() {
-  let delta = verification_diagnostic_delta(
+  const delta = verification_diagnostic_delta(
     {diagnostics: ["src/a.zig:10:2: error: missing writeEscaped"]},
     {diagnostics: ["src/a.zig:44:9: error: missing writeEscaped"]},
     {row: {diagnosticDelta: {strip_locations: true}}},
@@ -421,14 +421,14 @@ stale or unbound diagnostics to advisory, and then runs
 import { verification_gate_input } from "std/verification"
 
 pipeline default() {
-  let current_hashes = {"src/writer.zig": "new"}
-  let previous = {
+  const current_hashes = {"src/writer.zig": "new"}
+  const previous = {
     rung: "R2",
     at: "2026-07-03T00:00:00Z",
     snapshot: {"src/writer.zig": "old"},
     diagnostics: ["src/writer.zig:10:2: error: missing writeEscaped"],
   }
-  let current = {
+  const current = {
     rung: "R2",
     at: "2026-07-03T00:01:00Z",
     snapshot: current_hashes,

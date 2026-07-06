@@ -618,7 +618,7 @@ pub(super) fn go_typed_array_owned(type_name: &str, slice_name: &str, values: &[
     out.push_str(&format!(
         "// {slice_name} enumerates every wire value Harn currently emits for {type_name}.\n"
     ));
-    out.push_str(&format!("let {slice_name} = []{type_name}{{\n"));
+    out.push_str(&format!("var {slice_name} = []{type_name}{{\n"));
     for value in values {
         out.push('\t');
         out.push_str(&json_string_literal(value));
@@ -630,7 +630,7 @@ pub(super) fn go_typed_array_owned(type_name: &str, slice_name: &str, values: &[
 
 pub(super) fn go_string_array(name: &str, values: &[&str]) -> String {
     let mut out = format!("// {name} enumerates the wire values Harn currently emits.\n");
-    out.push_str(&format!("let {name} = []string{{\n"));
+    out.push_str(&format!("var {name} = []string{{\n"));
     for value in values {
         out.push('\t');
         out.push_str(&json_string_literal(value));

@@ -115,7 +115,7 @@ transcript is unchanged and the returned `transcript` contains the new
 event.
 
 ```harn,ignore
-let injected = transcript.inject_reminder(transcript(), {
+const injected = transcript.inject_reminder(transcript(), {
   body: "Approaching context window cap.",
   tags: ["token_pressure"],
   dedupe_key: "token_pressure",
@@ -125,7 +125,7 @@ let injected = transcript.inject_reminder(transcript(), {
   role_hint: "developer",
 })
 
-let next_transcript = injected.transcript
+const next_transcript = injected.transcript
 log(injected.reminder_id)
 log(injected.deduped_count)
 ```
@@ -148,7 +148,7 @@ Use `transcript.clear_reminders(transcript, selector)` to remove
 pending reminders:
 
 ```harn,ignore
-let cleared = transcript.clear_reminders(next_transcript, {
+const cleared = transcript.clear_reminders(next_transcript, {
   tag: "token_pressure",
 })
 log(cleared.removed_count)
@@ -361,7 +361,7 @@ rebuilds the transcript:
   argument
 
 ```harn,ignore
-let compacted = transcript_compact(snapshot, {
+const compacted = transcript_compact(snapshot, {
   strategy: "custom",
   custom_compactor: { messages, reminders ->
     return transcript({
@@ -494,7 +494,7 @@ one pending nudge.
 
 ```harn,ignore
 register_session_hook("file_edited", { event ->
-  let path = to_string(event?.path ?? "")
+  const path = to_string(event?.path ?? "")
   return {
     reminder: {
       body: "File changed externally: " + path + ". Re-read it before editing.",
@@ -512,8 +512,8 @@ register_session_hook("file_edited", { event ->
 Use `propagate: "all"` only when downstream agents need the same caution.
 
 ```harn,ignore
-let memory_warning = "Customer prefers patch-sized PRs and explicit verification."
-let injected = transcript.inject_reminder(transcript(), {
+const memory_warning = "Customer prefers patch-sized PRs and explicit verification."
+const injected = transcript.inject_reminder(transcript(), {
   body: memory_warning,
   tags: ["memory"],
   dedupe_key: "memory:customer-pr-style",
@@ -529,7 +529,7 @@ let injected = transcript.inject_reminder(transcript(), {
 Clear by `dedupe_key` for singleton reminders and by `tag` for groups.
 
 ```harn,ignore
-let cleared = transcript.clear_reminders(current_transcript, {
+const cleared = transcript.clear_reminders(current_transcript, {
   dedupe_key: "workspace-change",
 })
 ```

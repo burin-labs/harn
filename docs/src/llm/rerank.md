@@ -7,13 +7,13 @@ models that expose token log probabilities.
 ```harn
 import { pairwise_rerank, self_certainty } from "std/llm/rerank"
 
-let candidates = [
+const candidates = [
   {id: "a", answer: "Use a bounded retry loop."},
   {id: "b", answer: "Retry forever until it works."},
   {id: "c", answer: "Fail fast on the first timeout."},
 ]
 
-let result = pairwise_rerank(candidates, {
+const result = pairwise_rerank(candidates, {
   task: "Choose the answer with the safest production behavior.",
   criteria: "Prefer bounded retries, clear failure modes, and low operational risk.",
   model_tier: "small",
@@ -42,8 +42,8 @@ omitted, normal `llm_call` options on `opts` are used directly.
 ```harn
 import { pairwise_rerank } from "std/llm/rerank"
 
-let items = ["primary source", "unattributed summary", "official documentation"]
-let ranked = pairwise_rerank(items, {
+const items = ["primary source", "unattributed summary", "official documentation"]
+const ranked = pairwise_rerank(items, {
   task: "Pick the most relevant search result.",
   criteria: "Prefer direct answers from primary sources.",
   llm_options: {
@@ -60,7 +60,7 @@ bool, or number:
 ```harn
 import { pairwise_rerank } from "std/llm/rerank"
 
-let ranked = pairwise_rerank(
+const ranked = pairwise_rerank(
   ["short", "much longer"],
   {
     compare: { left, right, ctx ->
@@ -86,7 +86,7 @@ probabilities:
 ```harn
 import { self_certainty } from "std/llm/rerank"
 
-let score = self_certainty(
+const score = self_certainty(
   "ignored when logprobs are supplied",
   {
     logprobs: [
@@ -103,14 +103,14 @@ second argument:
 ```harn
 import { self_certainty } from "std/llm/rerank"
 
-let response = llm_call("Write a short release note.", nil, {
+const response = llm_call("Write a short release note.", nil, {
   provider: "openai",
   logprobs: true,
   top_logprobs: 3,
   stream: false,
 })
 
-let confidence = self_certainty(response)
+const confidence = self_certainty(response)
 ```
 
 When no logprobs are supplied, `self_certainty` makes one extra model call

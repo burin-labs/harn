@@ -9,12 +9,12 @@ same outer shape:
 import "std/triggers"
 
 fn on_event(event: TriggerEvent) {
-  let payload = event.provider_payload
+  const payload = event.provider_payload
   if payload.provider == "github" && payload.event == "issues" {
     log(payload.issue.title ?? "unknown")
   }
 
-  let signature = event.signature_status
+  const signature = event.signature_status
   if signature.state == "failed" {
     log(signature.reason)
   }

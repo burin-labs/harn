@@ -27,7 +27,7 @@ result. The pipeline returns as soon as the loop completes.
 pipeline main() {
   llm_mock({text: "Triaged ticket #42 as duplicate of #38."})
 
-  let result = agent_loop(
+  const result = agent_loop(
     "Triage ticket #42.",
     "You are a careful triage assistant.",
     {provider: "mock"},
@@ -64,7 +64,7 @@ pipeline main() {
   pipeline_on_finish(on_finish_drain)
   llm_mock({text: "Triaged ticket #42 as duplicate of #38."})
 
-  let result = agent_loop(
+  const result = agent_loop(
     "Triage ticket #42.",
     "You are a careful triage assistant.",
     {provider: "mock"},
@@ -106,7 +106,7 @@ pipeline main() {
     }],
   })
 
-  let result = agent_loop(
+  const result = agent_loop(
     "Triage ticket #42, escalate to a human if you need review.",
     "If you need a human review before proceeding, call agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 2},
@@ -157,7 +157,7 @@ pipeline main() {
   })
   llm_mock({text: "Approved. Triaged ticket #42 as duplicate of #38."})
 
-  let first = agent_loop(
+  const first = agent_loop(
     "Triage ticket #42, escalate to a human if you need review.",
     "If you need a human review before proceeding, call agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 3},
@@ -167,7 +167,7 @@ pipeline main() {
   log("snapshot=" + first.handle.snapshot_path)
 
   resume_agent(first.handle)
-  let done = wait_agent(first.handle)
+  const done = wait_agent(first.handle)
 
   log("after_resume=" + done.status)
   log("text=" + done.result.summary)
@@ -222,18 +222,18 @@ pipeline main() {
   })
   llm_mock({text: "Release cut; tagged v0.9.0 and posted to the changelog."})
 
-  let worker = sub_agent_run(
+  const worker = sub_agent_run(
     "Tag the next release once the maintainer signals.",
     {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
   )
 
-  let parked = wait_agent(worker)
+  const parked = wait_agent(worker)
   log("parked_status=" + parked.status)
   log("waiting_on=" + parked.suspension.conditions.trigger.match.events[0])
 
   emit_channel("release.cut", {tag: "v0.9.0"})
 
-  let done = wait_agent(worker)
+  const done = wait_agent(worker)
   log("final_status=" + done.status)
   log("final_text=" + done.result.summary)
 }
@@ -271,7 +271,7 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
 pipeline main() {
   pipeline_on_finish(on_finish_drain)
 
-  let tickets = ["t-101", "t-102", "t-103"]
+  const tickets = ["t-101", "t-102", "t-103"]
 
   for ticket in tickets {
     llm_mock({
@@ -281,10 +281,10 @@ pipeline main() {
     })
   }
 
-  let pool = pool_create({name: "ticket-triage", max_concurrent: 2})
-  var handles = []
+  const pool = pool_create({name: "ticket-triage", max_concurrent: 2})
+  let handles = []
   for ticket in tickets {
-    let t = ticket
+    const t = ticket
     handles = handles + [pool.submit({ ->
       return agent_loop(
         "Triage ticket " + t + ".",
@@ -294,7 +294,7 @@ pipeline main() {
     })]
   }
 
-  let outcomes = pool_wait(handles)
+  const outcomes = pool_wait(handles)
   for outcome in outcomes {
     log(outcome.status + " " + outcome.result.visible_text)
   }

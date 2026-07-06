@@ -24,7 +24,7 @@ import { trigger_register, SpawnToPool } from "std/triggers"
 import { Backpressure, fair_round_robin, pool_create } from "std/lifecycle/pool"
 
 pipeline webhook_intake_setup() {
-  let bp = Backpressure()
+  const bp = Backpressure()
 
   // One named pool, shared across every webhook source.
   pool_create({
@@ -47,7 +47,7 @@ pipeline webhook_intake_setup() {
       key_from: "provider_payload.payload.source",
       priority_from: "provider_payload.payload.urgency",
       task_factory: { event ->
-        let payload = event.provider_payload.payload
+        const payload = event.provider_payload.payload
         return { -> process_webhook(payload) }
       },
     }),
@@ -90,8 +90,8 @@ import { trigger_register, SpawnToPool } from "std/triggers"
 import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
 
 pipeline inference_pool_setup() {
-  let bp = Backpressure()
-  let gpu_count = 4   // discovered from the host worker tier in real deployments
+  const bp = Backpressure()
+  const gpu_count = 4   // discovered from the host worker tier in real deployments
 
   pool_create({
     name: "gpu-inference",
@@ -110,7 +110,7 @@ pipeline inference_pool_setup() {
       pool: "gpu-inference",
       key_from: "provider_payload.payload.tenant_id",
       task_factory: { event ->
-        let req = event.provider_payload.payload
+        const req = event.provider_payload.payload
         return { ->
           // Per-request closure; runs on a GPU-tier worker because the
           // pool's scope routes through the host GPU worker tier.
@@ -123,8 +123,8 @@ pipeline inference_pool_setup() {
 
 // Synchronous caller path that wraps the trigger flow for in-process use.
 pipeline inference_call(tenant_id, model, prompt, params) {
-  let pool = pool_get("gpu-inference")
-  let handle = pool.submit({ ->
+  const pool = pool_get("gpu-inference")
+  const handle = pool.submit({ ->
     return run_gpu_inference(model, prompt, params)
   }, {tenant_id: tenant_id})
 
@@ -161,7 +161,7 @@ import { trigger_register, SpawnToPool } from "std/triggers"
 import { Backpressure, fair_round_robin, pool_create } from "std/lifecycle/pool"
 
 pipeline tenant_work_setup() {
-  let bp = Backpressure()
+  const bp = Backpressure()
 
   pool_create({
     name: "tenant-agents",
@@ -182,7 +182,7 @@ pipeline tenant_work_setup() {
       key_from: "provider_payload.payload.tenant_id",
       priority_from: "provider_payload.payload.priority",
       task_factory: { event ->
-        let req = event.provider_payload.payload
+        const req = event.provider_payload.payload
         return { -> run_agent_task(req.tenant_id, req.task_kind, req.input) }
       },
     }),
@@ -222,7 +222,7 @@ import { trigger_register, SpawnToPool } from "std/triggers"
 import { Backpressure, fifo, pool_create, pool_wait } from "std/lifecycle/pool"
 
 pipeline nightly_report_setup() {
-  let bp = Backpressure()
+  const bp = Backpressure()
 
   pool_create({
     name: "nightly-reports",
@@ -239,13 +239,13 @@ pipeline nightly_report_setup() {
     provider: "cron",
     match: {schedule: "0 2 * * *"},          // 02:00 UTC nightly
     handler: { event ->
-      let pool = pool_get("nightly-reports")
-      let customers = list_active_customers()
+      const pool = pool_get("nightly-reports")
+      const customers = list_active_customers()
       for customer in customers {
         // Idempotency key = (run date, customer). A retry of the cron
         // for the same date short-circuits to the same task handle
         // instead of double-running.
-        let key = event.occurred_at_date + ":" + customer.id
+        const key = event.occurred_at_date + ":" + customer.id
         pool.submit({ ->
           return generate_report(customer.id, event.occurred_at_date)
         }, {idempotency_key: key})
@@ -255,7 +255,7 @@ pipeline nightly_report_setup() {
 }
 
 fn generate_report(customer_id, run_date) {
-  let data = fetch_customer_data(customer_id, run_date)   // slow SaaS call
+  const data = fetch_customer_data(customer_id, run_date)   // slow SaaS call
   return upload_report(customer_id, run_date, data)
 }
 ```

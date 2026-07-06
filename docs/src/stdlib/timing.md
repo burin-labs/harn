@@ -14,8 +14,8 @@ import { agent_preset } from "std/agent/presets"
 import { timed } from "std/timing"
 
 pipeline default() {
-  let outcome = timed("benchmark.agent_loop", {case_id: "python-add"}, { ->
-    let opts = agent_preset("repair")
+  const outcome = timed("benchmark.agent_loop", {case_id: "python-add"}, { ->
+    const opts = agent_preset("repair")
     return agent_loop(task, opts?.system, opts)
   })
   __io_println("duration_ms=${outcome.timing.duration_ms}")
@@ -31,11 +31,11 @@ branches, or async-ish lifecycle boundaries:
 import { start_timing, timing_event, end_timing } from "std/timing"
 
 pipeline default() {
-  let timing = start_timing("provider.preflight", {provider: "ollama"})
+  const timing = start_timing("provider.preflight", {provider: "ollama"})
   timing_event(timing, "credentials.checked", {available: true})
   timing_event(timing, "model.warm", {cache: "hit"})
-  let result = preflight()
-  let finished = end_timing(timing, {status: "ok"})
+  const result = preflight()
+  const finished = end_timing(timing, {status: "ok"})
   return {result: result, duration_ms: finished.duration_ms}
 }
 ```
@@ -94,7 +94,7 @@ should pass the same shape explicitly:
 ```harn,ignore
 import { start_timing, end_timing } from "std/timing"
 
-let timing = start_timing("risky")
+const timing = start_timing("risky")
 try {
   risky_work()
   end_timing(timing, {status: "ok"})

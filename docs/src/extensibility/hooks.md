@@ -94,7 +94,7 @@ Any other return shape raises a runtime error so misuse fails loudly.
 
 ```harn
 register_session_hook("user_prompt_submit", { event ->
-  let prompt = to_string(event?.prompt ?? "")
+  const prompt = to_string(event?.prompt ?? "")
   if prompt.contains("secret") {
     return {block: true, reason: "policy violation: secret in prompt"}
   }
@@ -117,7 +117,7 @@ register_session_hook("permission_asked", { event ->
 
 ```harn
 register_session_hook("file_edited", { event ->
-  let path = to_string(event?.path ?? "")
+  const path = to_string(event?.path ?? "")
   if path.ends_with(".rs") {
     log("re-running clippy after edit to " + path)
   }

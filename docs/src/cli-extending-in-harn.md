@@ -123,7 +123,7 @@ Command::Greet(args) => {
  * standard signal.
  */
 fn render_envelope(name: string) -> string {
-  let env = {
+  const env = {
     schemaVersion: 1,
     ok: true,
     data: {greeting: "hello " + name},
@@ -134,8 +134,8 @@ fn render_envelope(name: string) -> string {
 }
 
 fn main(harness: Harness) {
-  let name = harness.env.get_or("HARN_GREET_NAME", "world")
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const name = harness.env.get_or("HARN_GREET_NAME", "world")
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     harness.stdio.println(render_envelope(name))
   } else {
@@ -214,14 +214,14 @@ error check.
 ```harn
 import { parser, parse } from "std/cli/argparse"
 
-let spec = parser({
+const spec = parser({
   name: "render",
   args: [
     {name: "template", kind: "positional", required: true,
      help: "Path to the .harn.prompt template."},
   ],
 })
-let result = parse(spec, argv)
+const result = parse(spec, argv)
 ```
 
 Positionals are required by default — flip to `required: false` to opt
@@ -260,14 +260,14 @@ usage block:
 ```harn
 import { parser, parse, render_help } from "std/cli/argparse"
 
-let result = parse(spec, argv)
-let err = result.err
+const result = parse(spec, argv)
+const err = result.err
 if err != nil {
   __io_eprintln(render_help(spec))
   __io_eprintln("error: " + (err.hint ?? ""))
   exit(2)
 }
-let parsed = result.ok
+const parsed = result.ok
 ```
 
 The error `kind` is one of `missing_required`, `unknown_flag`,
@@ -288,7 +288,7 @@ import { ansi_bold } from "std/ansi"
 import { render_table } from "std/table"
 
 fn main(harness: Harness) {
-  let items = [{provider: "anthropic", model: "claude-opus-4-7"}]
+  const items = [{provider: "anthropic", model: "claude-opus-4-7"}]
   if json_mode() {
     write_envelope(envelope({
       schema_version: 1,
@@ -329,9 +329,9 @@ CLI scripts that need app-specific directories should use
 ```harn
 import { xdg_cache_home, xdg_config_home, xdg_data_home } from "std/cli/paths"
 
-let config_dir = xdg_config_home("harn")
-let data_dir = xdg_data_home("harn")
-let cache_dir = xdg_cache_home("harn")
+const config_dir = xdg_config_home("harn")
+const data_dir = xdg_data_home("harn")
+const cache_dir = xdg_cache_home("harn")
 ```
 
 The helpers honor absolute XDG env vars first, ignore relative XDG env

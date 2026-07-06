@@ -102,7 +102,7 @@ top-level loops):
 ```harn,ignore
 import { agent_await_resumption } from "std/agent/workers"
 
-let result = agent_loop("Wait for the maintainer's review.", nil, {
+const result = agent_loop("Wait for the maintainer's review.", nil, {
   provider: "openai",
   model: "gpt-5",
   tool_format: "native",
@@ -143,7 +143,7 @@ model-callable tools:
 ```harn,ignore
 import { agent_lifecycle_tools } from "std/agent/workers"
 
-let parent_registry = agent_lifecycle_tools(tool_registry(), {subagents: true})
+const parent_registry = agent_lifecycle_tools(tool_registry(), {subagents: true})
 
 agent_loop("Coordinate the review.", nil, {
   tools: parent_registry,
@@ -164,15 +164,15 @@ Scripts can drive the same lifecycle directly without going through the
 model:
 
 ```harn,ignore
-let handle = sub_agent_run("Draft the changelog.", {
+const handle = sub_agent_run("Draft the changelog.", {
   background: true,
   provider: "openai",
 })
 
-let snapshot = suspend_agent(handle, "operator pulled context")
+const snapshot = suspend_agent(handle, "operator pulled context")
 // ... do other work ...
-let resumed = resume_agent(handle, "Pick up where you left off.")
-let final = wait_agent(handle)
+const resumed = resume_agent(handle, "Pick up where you left off.")
+const final = wait_agent(handle)
 log(final.status)         // "done"
 log(final.has_transcript) // true — transcript continuity preserved
 ```
@@ -197,7 +197,7 @@ so they survive restart:
 import { agent_await_resumption } from "std/agent/workers"
 
 // Self-park until either a review approval lands OR 30 minutes pass.
-let request = agent_await_resumption("waiting on review", {
+const request = agent_await_resumption("waiting on review", {
   trigger: {
     kind: "review.approved",
     provider: "github",
@@ -223,7 +223,7 @@ worker can be born already parked:
 ```harn,ignore
 import { parse_resume_conditions, spawn_agent } from "std/agent/workers"
 
-let resume_when = parse_resume_conditions({
+const resume_when = parse_resume_conditions({
   trigger: {
     kind: "channel.emit",
     provider: "channel",
@@ -263,10 +263,10 @@ so they compose with `first_available(...)`, `compose(...)`, and the rest of
 ```harn,ignore
 import { ResumeBy, first_handled } from "std/agent/resume_by"
 
-let RB = ResumeBy()
-let chain = first_handled([RB.cloud_harness, RB.local_runtime, RB.parent_llm])
+const RB = ResumeBy()
+const chain = first_handled([RB.cloud_harness, RB.local_runtime, RB.parent_llm])
 
-let request = agent_await_resumption(
+const request = agent_await_resumption(
   "wait for upstream merge",
   {trigger: {kind: "channel.emit", provider: "channel", match: {events: ["channel:upstream.merged"]}}},
   chain,

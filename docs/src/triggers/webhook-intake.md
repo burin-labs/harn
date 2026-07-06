@@ -112,7 +112,7 @@ Remove an intake. The published deliveries on the topic remain.
 ```harn,ignore
 import "std/triggers"
 
-let intake = webhook_intake_register({
+const intake = webhook_intake_register({
   id: "github",
   path: "/hooks/github",
   secret: secret_get("github/webhook-secret"),
@@ -122,7 +122,7 @@ let intake = webhook_intake_register({
 })
 
 // In your inbound HTTP handler:
-let outcome = webhook_intake_feed(intake.id, {
+const outcome = webhook_intake_feed(intake.id, {
   headers: request.headers,
   body: request.body,
   path: request.path,
@@ -151,7 +151,7 @@ the substrate from a recorded delivery in a test or replay job, build the
 request dict directly:
 
 ```harn,ignore
-let outcome = webhook_intake_feed("github", {
+const outcome = webhook_intake_feed("github", {
   headers: load_json("fixtures/github_pr_opened_headers.json"),
   body: read_file("fixtures/github_pr_opened.body"),
 })

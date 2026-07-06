@@ -398,7 +398,7 @@ or `harn serve mcp`) can prompt the connected client for structured user
 input mid-tool-call via the `mcp_elicit(...)` builtin:
 
 ```harn
-let answer = mcp_elicit({
+const answer = mcp_elicit({
   message: "Which environment should I deploy to?",
   requestedSchema: {
     type: "object",
@@ -442,7 +442,7 @@ token:
 
 ```harn,ignore
 pub fn import_records(rows: list) -> string {
-  var i = 0
+  let i = 0
   for row in rows {
     i = i + 1
     process(row)

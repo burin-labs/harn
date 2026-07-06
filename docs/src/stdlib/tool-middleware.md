@@ -132,8 +132,8 @@ the model omits the synthetic `reason` field, while still recording
 `"(no reason given)"` in the audit summary.
 
 ```harn,ignore
-let mw = with_required_reason({schema_required: false})
-let registry = tools_use_middleware(my_registry, mw.schema_transform)
+const mw = with_required_reason({schema_required: false})
+const registry = tools_use_middleware(my_registry, mw.schema_transform)
 agent_loop(task, system, {tools: registry, tool_caller: mw.caller})
 ```
 
@@ -165,7 +165,7 @@ When the local sink is active, the middleware attaches a `file://`
 persisted JSONL line.
 
 ```harn,ignore
-let caller = compose_tool_callers([
+const caller = compose_tool_callers([
   with_audit_log({sink: "both", redact: ["token", "content"]}),
   with_required_reason({schema_required: false}).caller,
 ])
@@ -197,7 +197,7 @@ Compose this **outside** binder / consent layers so it can reject
 before either does expensive work:
 
 ```harn,ignore
-let caller = compose_tool_callers([
+const caller = compose_tool_callers([
   with_audit_log({...}),
   with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]}),
   with_consent(prompt),
@@ -307,7 +307,7 @@ runs the wrappers right-to-left: the leftmost wrapper is the
 outermost. This mirrors `compose` in `std/llm/handlers`.
 
 ```harn,ignore
-let caller = compose_tool_callers([
+const caller = compose_tool_callers([
   with_audit_log({sink: "both", redact: ["token", "content"]}),
   with_consent(prompt),
   with_redaction(redactor),
@@ -338,9 +338,9 @@ import {
   with_telemetry,
 } from "std/llm/tool_middleware"
 
-let reason_mw = with_required_reason({schema_required: false})
+const reason_mw = with_required_reason({schema_required: false})
 
-let captain_tool_caller = compose_tool_callers([
+const captain_tool_caller = compose_tool_callers([
   with_audit_log({sink: "both", redact: ["token", "content"]}), // typed tool receipts
   with_telemetry({sink: "langfuse", project: "harn-dev"}), // tool-call spans
   with_summary({ call, _r -> describe(call) }), // user-facing one-liner
@@ -353,7 +353,7 @@ let captain_tool_caller = compose_tool_callers([
   with_dry_run({only: persona.shadow_tools}),  // crystallization shadow runs
 ])
 
-let registry = tools_use_middleware(my_registry, reason_mw.schema_transform)
+const registry = tools_use_middleware(my_registry, reason_mw.schema_transform)
 
 agent_loop(task, system, {
   tools: registry,

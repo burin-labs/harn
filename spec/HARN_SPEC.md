@@ -39,9 +39,9 @@ Both the backslash and the newline are removed from the token stream, so the two
 physical lines are treated as a single logical line by the lexer.
 
 ```harn
-let total = 1 + 2 \
+const total = 1 + 2 \
   + 3 + 4
-// equivalent to: let total = 1 + 2 + 3 + 4
+// equivalent to: const total = 1 + 2 + 3 + 4
 ```
 
 This is useful for breaking long expressions that do not involve a binary operator
@@ -159,8 +159,8 @@ anywhere an expression is expected:
 ```harn
 sleep(500ms)
 deadline 30s { /* ... */ }
-let one_day = 1d       // 86400000
-let two_weeks = 2w     // 1209600000
+const one_day = 1d       // 86400000
+const two_weeks = 2w     // 1209600000
 ```
 
 ### String literals
@@ -198,8 +198,8 @@ Raw strings are useful for regex patterns and file paths where backslashes are
 common:
 
 ```harn
-let pattern = r"\d+\.\d+"
-let path = r"C:\Users\alice\docs"
+const pattern = r"\d+\.\d+"
+const path = r"C:\Users\alice\docs"
 ```
 
 To embed a literal double quote, use the *hashed* form `r#"..."#`. The literal
@@ -211,7 +211,7 @@ escape-free:
 
 ```harn
 // A regex matching a double-quoted string body, with no backslash soup:
-let caps = regex_captures(r#""([^"\\]*)""#, "name=\"value\"")
+const caps = regex_captures(r#""([^"\\]*)""#, "name=\"value\"")
 log("first body: ${caps[0].groups[0]}")
 ```
 
@@ -231,8 +231,8 @@ stripping. If at least one `${...}` interpolation is present, the result is an
 Use `\${` for a literal `${` sequence inside a multi-line string.
 
 ```harn
-let name = "world"
-let doc = """
+const name = "world"
+const doc = """
   Hello, ${name}!
   Today is ${timestamp()}.
 """
@@ -581,7 +581,7 @@ list type: `...nums: int` accepts only integer extras and binds `nums` as
 
 ```harn
 fn sum(...nums) {
-  var total = 0
+  let total = 0
   for n in nums {
     total = total + n
   }
@@ -744,15 +744,15 @@ negation prefix. Keyword operators `in`, `not in`, and `to` also require an
 explicit backslash continuation.
 
 ```harn,ignore
-let result = items
+const result = items
   .filter({ x -> x > 0 })
   .map({ x -> x * 2 })
 
-let msg = "hello"
+const msg = "hello"
   + " "
   + "world"
 
-let ok = check_a()
+const ok = check_a()
   && check_b()
   || fallback()
 ```
@@ -846,7 +846,7 @@ Destructuring binds multiple variables from a dict or list in a single
 ### Dict destructuring
 
 ```harn
-let {name, age} = {name: "Alice", age: 30}
+const {name, age} = {name: "Alice", age: 30}
 // name == "Alice", age == 30
 ```
 
@@ -855,7 +855,7 @@ If the key is missing from the dict, the variable is bound to `nil`.
 Use `_` as a discard binding when you want to ignore an extracted field:
 
 ```harn
-let {name, debug: _} = {name: "Alice", debug: true}
+const {name, debug: _} = {name: "Alice", debug: true}
 // name == "Alice"; `_` is not bound
 ```
 
@@ -867,17 +867,17 @@ when the key is missing from the dict or the index is out of bounds for
 a list):
 
 ```harn
-let { name = "workflow", system = "" } = { name: "custom" }
+const { name = "workflow", system = "" } = { name: "custom" }
 // name == "custom" (key exists), system == "" (default applied)
 
-let [a = 10, b = 20, c = 30] = [1, 2]
+const [a = 10, b = 20, c = 30] = [1, 2]
 // a == 1, b == 2, c == 30 (default applied)
 ```
 
 Defaults can be combined with field renaming:
 
 ```harn
-let { name: displayName = "Unknown" } = {}
+const { name: displayName = "Unknown" } = {}
 // displayName == "Unknown"
 ```
 
@@ -888,7 +888,7 @@ default values.
 ### List destructuring
 
 ```harn
-let [first, second, third] = [10, 20, 30]
+const [first, second, third] = [10, 20, 30]
 // first == 10, second == 20, third == 30
 ```
 
@@ -898,7 +898,7 @@ specified).
 Use `_` to discard positions without creating a binding:
 
 ```harn
-let [_, second, _] = [10, 20, 30]
+const [_, second, _] = [10, 20, 30]
 // second == 20; `_` is not bound
 ```
 
@@ -907,7 +907,7 @@ let [_, second, _] = [10, 20, 30]
 A dict pattern field can be renamed with `key: alias` syntax:
 
 ```harn
-let {name: user_name} = {name: "Bob"}
+const {name: user_name} = {name: "Bob"}
 // user_name == "Bob"
 ```
 
@@ -916,10 +916,10 @@ let {name: user_name} = {name: "Bob"}
 A `...rest` element collects remaining items into a new list or dict:
 
 ```harn
-let [head, ...tail] = [1, 2, 3, 4]
+const [head, ...tail] = [1, 2, 3, 4]
 // head == 1, tail == [2, 3, 4]
 
-let {name, ...extras} = {name: "Carol", age: 25, role: "dev"}
+const {name, ...extras} = {name: "Carol", age: 25, role: "dev"}
 // name == "Carol", extras == {age: 25, role: "dev"}
 ```
 
@@ -932,12 +932,12 @@ last in the pattern.
 Destructuring patterns work in `for`-`in` loops to unpack each element:
 
 ```harn
-let entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
+const entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
 for {name, val} in entries {
   log("${name}=${val}")
 }
 
-let pairs = [[1, 2], [3, 4]]
+const pairs = [[1, 2], [3, 4]]
 for [a, b] in pairs {
   log("${a}+${b}")
 }
@@ -951,7 +951,7 @@ or `for (_, value) in ...` drops the ignored element instead of binding it.
 `var` destructuring creates mutable bindings that can be reassigned:
 
 ```harn
-var {x, y} = {x: 1, y: 2}
+let {x, y} = {x: 1, y: 2}
 x = 10
 y = 20
 ```
@@ -1380,8 +1380,8 @@ If no arm matches, a runtime error is thrown (`No match arm matched the value`).
 This makes non-exhaustive matches a hard failure rather than a silent `nil`.
 
 ```harn
-let x = 5
-let label = match x {
+const x = 5
+const label = match x {
   1 -> { "one" }
   n if n > 3 -> { "big: ${n}" }
   _ -> { "other" }
@@ -1491,7 +1491,7 @@ of failures.
 ### parallel each as stream
 
 ```harn
-let results = parallel each list with { max_concurrent: 4 } { item ->
+const results = parallel each list with { max_concurrent: 4 } { item ->
   // body for each item
 } as stream
 
@@ -1537,8 +1537,8 @@ All parallel forms accept `with { max_concurrent: N }` before the body:
 
 ```harn
 fn fetch_page(cursor) { cursor }
-let cursors = ["a", "b", "c"]
-let pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
+const cursors = ["a", "b", "c"]
+const pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
   fetch_page(cursor)
 }
 ```
@@ -1569,7 +1569,7 @@ inside an `if` block fires when control leaves that `if`. A `defer` inside a
 ```harn
 fn open(path) { path }
 fn close(f) { log("closing ${f}") }
-let f = open("data.txt")
+const f = open("data.txt")
 defer { close(f) }
 // ... use f ...
 // close(f) runs automatically on scope exit
@@ -1578,7 +1578,7 @@ defer { close(f) }
 ### owned\<T\> and drop()
 
 ```harn
-let ch: owned<channel> = channel("log", 64)
+const ch: owned<channel> = channel("log", 64)
 // implicit: defer { drop(ch) } registered at this `let`
 ```
 
@@ -1602,7 +1602,7 @@ return type as `owned<T>`:
 
 ```harn
 fn open_log() -> owned<channel> {
-  let ch: owned<channel> = channel("log", 64)
+  const ch: owned<channel> = channel("log", 64)
   return ch                              // ownership transfers to caller
 }
 ```
@@ -1610,12 +1610,12 @@ fn open_log() -> owned<channel> {
 ### spawn/await/cancel
 
 ```harn
-let handle = spawn {
+const handle = spawn {
   // async body
 }
-let result = await(handle)
+const result = await(handle)
 cancel(handle)
-let outcome = cancel_graceful(handle, 2s)
+const outcome = cancel_graceful(handle, 2s)
 ```
 
 `spawn` launches an async task and returns a `taskHandle`.
@@ -1636,7 +1636,7 @@ When a VM exits, any un-awaited spawned tasks it owns are cancelled and aborted.
 ```harn
 import "std/signal"
 
-let registration = on_interrupt({ ->
+const registration = on_interrupt({ ->
   agent_session_close(session, {status: "interrupted"})
 }, {signals: ["SIGINT", "SIGTERM"], once: true})
 
@@ -1688,9 +1688,9 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-let lock = sync_mutex_acquire("state:customer-42", 250ms)
-let slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
-let gate = sync_gate_acquire("workflow-runner", 8, 5s)
+const lock = sync_mutex_acquire("state:customer-42", 250ms)
+const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
+const gate = sync_gate_acquire("workflow-runner", 8, 5s)
 ```
 
 - `sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
@@ -1829,12 +1829,12 @@ host approval payloads and permission transcript events carry that receipt for
 audit and replay.
 
 ```harn
-let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
 
 parallel 10 { i ->
-  var updated = false
+  let updated = false
   while !updated {
-    let snap = shared_snapshot(budget)
+    const snap = shared_snapshot(budget)
     updated = shared_cas(budget, snap, snap.value + 1)
   }
 }
@@ -1884,8 +1884,8 @@ for cells and maps.
 Use named synchronization around multi-step updates:
 
 ```harn
-let memo = shared_map({scope: "workflow_run", key: "memo"})
-let lock = sync_mutex_acquire("memo:customer-42", 250ms)
+const memo = shared_map({scope: "workflow_run", key: "memo"})
+const lock = sync_mutex_acquire("memo:customer-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
 try {
   shared_map_set(memo, "customer-42", "summary")
@@ -1901,11 +1901,11 @@ tasks and long-lived workers. They provide targeted messages without using
 transcript mutation as the transport.
 
 ```harn
-let inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
 spawn {
   mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
 }
-let msg = mailbox_receive(inbox)
+const msg = mailbox_receive(inbox)
 ```
 
 - `mailbox_open(name_or_options, capacity?)` opens or creates an inbox.
@@ -1931,7 +1931,7 @@ fn poll_connector(name) {
   name
 }
 
-let sup = supervisor_start({
+const sup = supervisor_start({
   name: "ops",
   strategy: "one_for_one",
   children: [
@@ -1953,9 +1953,9 @@ let sup = supervisor_start({
   ],
 })
 
-let _state = supervisor_state(sup)
+const _state = supervisor_state(sup)
 
-let _events = supervisor_events(sup)
+const _events = supervisor_events(sup)
 supervisor_stop(sup, 2s)
 ```
 
@@ -1984,9 +1984,9 @@ active EventLog topic `supervisor.lifecycle` when an EventLog is installed.
 Channels provide typed message-passing between concurrent tasks.
 
 ```harn
-let ch = channel("name", 10)   // buffered channel with capacity 10
+const ch = channel("name", 10)   // buffered channel with capacity 10
 send(ch, "hello")               // send a value, returns true
-let msg = receive(ch)           // blocking receive
+const msg = receive(ch)           // blocking receive
 ```
 
 #### Channel iteration
@@ -1995,7 +1995,7 @@ A `for`-`in` loop over a channel asynchronously receives values until the
 channel is closed and drained:
 
 ```harn
-let ch = channel("stream", 10)
+const ch = channel("stream", 10)
 spawn {
   send(ch, "a")
   send(ch, "b")
@@ -2044,7 +2044,7 @@ corresponding body. Only one case fires per select.
 
 ```harn
 fn handle(msg) { log(msg) }
-let ch1 = channel("events")
+const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   timeout 5s {
@@ -2059,7 +2059,7 @@ If no channel produces a value within the duration, the timeout body runs.
 
 ```harn
 fn handle(msg) { log(msg) }
-let ch1 = channel("events")
+const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   default {
@@ -2085,7 +2085,7 @@ producer is declared with the contextual `gen fn` modifier and returns
 
 ```harn
 gen fn numbers(start: int, end: int) -> Stream<int> {
-  var n = start
+  let n = start
   while n < end {
     emit n
     n = n + 1
@@ -2103,7 +2103,7 @@ Streams are single-pass. They can be consumed directly in `for` loops:
 
 ```harn
 gen fn numbers(start: int, end: int) -> Stream<int> {
-  var n = start
+  let n = start
   while n < end {
     emit n
     n = n + 1
@@ -2715,7 +2715,7 @@ it, instead of forcing the caller to manually convert thrown errors
 into a `Result` and then `guard is_ok / unwrap`. The lowered form is:
 
 ```harn,ignore
-{ let _r = try { EXPR }
+{ const _r = try { EXPR }
   guard is_ok(_r) else { throw unwrap_err(_r) }
   unwrap(_r) }
 ```
@@ -2728,12 +2728,12 @@ site and the innermost catch handler exactly once, matching the
 ```harn,ignore
 fn fetch(prompt) {
   // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
-  let response = try* llm_call(prompt)
+  const response = try* llm_call(prompt)
   return parse(response)
 }
 
-let outcome = try {
-  let result = fetch(prompt)
+const outcome = try {
+  const result = fetch(prompt)
   Ok(result)
 } catch (e: ApiError) {
   Err(e.code)
@@ -2797,7 +2797,7 @@ fn config(host = "localhost", port = 8080, debug = false) {
   // all params optional
 }
 
-let add = { x, y = 10 -> x + y }  // closures support defaults too
+const add = { x, y = 10 -> x + y }  // closures support defaults too
 ```
 
 Explicit `nil` counts as a provided argument (does NOT trigger the default).
@@ -2863,7 +2863,7 @@ the bound registry has no executable backend. The error message names
 the offending tool and the documented set of executors.
 
 ```harn
-let registry = tool_registry()
+const registry = tool_registry()
 registry = tool_define(registry, "ask_user", "Ask the user", {
   parameters: {prompt: "string"},
   executor: "host_bridge",
@@ -3069,7 +3069,7 @@ context on each LLM call until a tool-search call surfaces them.
 ```harn
 fn admin(token) { log(token) }
 
-let registry = tool_registry()
+const registry = tool_registry()
 registry = tool_define(registry, "rare_admin_action", "...", {
   parameters: {token: {type: "string"}},
   defer_loading: true,
@@ -3120,7 +3120,7 @@ is a shipped TOML matrix overridable per-project via
 effective matrix at runtime with:
 
 ```harn
-let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
@@ -3198,8 +3198,8 @@ variable.
 #### Skill registry operations
 
 ```harn
-let reg = skill_registry()
-let reg = skill_define(reg, "review", {
+const reg = skill_registry()
+const reg = skill_define(reg, "review", {
   description: "Code review",
   invocation: "auto",
   paths: ["src/**"],
@@ -3234,8 +3234,8 @@ error.
 ### Closures
 
 ```harn
-let f = { x -> x * 2 }
-let g = { a, b -> a + b }
+const f = { x -> x * 2 }
+const g = { a, b -> a + b }
 ```
 
 First-class values. When invoked, a child environment is created from the *captured*
@@ -3251,7 +3251,7 @@ fn add(a, b, c) {
   return a + b + c
 }
 
-let args = [1, 2, 3]
+const args = [1, 2, 3]
 add(...args)           // equivalent to add(1, 2, 3)
 ```
 
@@ -3260,7 +3260,7 @@ Spread arguments can be mixed with regular arguments:
 ```harn
 fn add(a, b, c) { return a + b + c }
 
-let rest = [2, 3]
+const rest = [2, 3]
 add(1, ...rest)        // equivalent to add(1, 2, 3)
 ```
 
@@ -3270,8 +3270,8 @@ position:
 ```harn
 fn add(a, b, c) { return a + b + c }
 
-let first = [1]
-let last = [3]
+const first = [1]
+const last = [3]
 add(...first, 2, ...last)   // equivalent to add(1, 2, 3)
 ```
 
@@ -3313,9 +3313,9 @@ fields specified in parentheses.
 Variants are constructed using dot syntax on the enum name:
 
 ```harn
-let c = Color.Red
-let s = Shape.Circle(5.0)
-let r = Shape.Rectangle(3.0, 4.0)
+const c = Color.Red
+const s = Shape.Circle(5.0)
+const r = Shape.Rectangle(3.0, 4.0)
 ```
 
 ### Pattern matching on enums
@@ -3347,13 +3347,13 @@ Shorthand constructor functions `Ok(value)` and `Err(value)` are available
 as builtins, equivalent to `Result.Ok(value)` and `Result.Err(value)`.
 
 ```harn
-let ok = Ok(42)
-let err = Err("something failed")
-let typed_ok: Result<int, string> = ok
+const ok = Ok(42)
+const err = Err("something failed")
+const typed_ok: Result<int, string> = ok
 
 // Equivalent long form:
-let ok2 = Result.Ok(42)
-let err2 = Result.Err("oops")
+const ok2 = Result.Ok(42)
+const err2 = Result.Err("oops")
 ```
 
 ### Result helper functions
@@ -3381,12 +3381,12 @@ fn divide(a, b) {
 }
 
 fn compute(x) {
-  let result = divide(x, 2)?   // unwraps Ok, or returns Err early
+  const result = divide(x, 2)?   // unwraps Ok, or returns Err early
   return Ok(result + 10)
 }
 
-let r1 = compute(20)   // Result.Ok(20)
-let r2 = compute(0)    // would propagate Err from divide
+const r1 = compute(20)   // Result.Ok(20)
+const r2 = compute(0)    // would propagate Err from divide
 ```
 
 The `?` operator requires its operand to be a `Result` value. Applying `?`
@@ -3420,10 +3420,10 @@ It evaluates the body and wraps the result in a `Result`:
 - If the body throws an error, returns `Result.Err(error)`.
 
 ```harn
-let result = try { json_parse(raw_input) }
+const result = try { json_parse(raw_input) }
 // result is Result.Ok(parsed_data) or Result.Err("invalid JSON: ...")
 
-let checked = try { schema_check(data, schema) }
+const checked = try { schema_check(data, schema) }
 // checked is schema_check's Result directly, not Result.Ok(Result.Ok(...))
 ```
 
@@ -3433,12 +3433,12 @@ errors. Together they form a complete error-handling pipeline:
 
 ```harn
 fn safe_divide(a, b) {
-  let result = try { a / b }
+  const result = try { a / b }
   return result
 }
 
 fn compute(x) {
-  let val = safe_divide(x, 2)?  // unwrap Ok or propagate Err
+  const val = safe_divide(x, 2)?  // unwrap Ok or propagate Err
   return Ok(val + 10)
 }
 ```
@@ -3455,8 +3455,8 @@ The `?` operator works naturally in pipelines:
 
 ```harn
 fn fetch_and_parse(url) {
-  let response = http_get(url)?
-  let data = json_parse(response)?
+  const response = http_get(url)?
+  const data = json_parse(response)?
   return Ok(data)
 }
 ```
@@ -3496,9 +3496,9 @@ a named-field body:
 struct Point { x: int, y: int }
 struct User { name: string, age: int }
 struct Pair<A, B> { first: A, second: B }
-let p = Point { x: 3, y: 4 }
-let u = User { name: "Alice", age: 30 }
-let pair: Pair<int, string> = Pair { first: 1, second: "two" }
+const p = Point { x: 3, y: 4 }
+const u = User { name: "Alice", age: 30 }
+const pair: Pair<int, string> = Pair { first: 1, second: "two" }
 ```
 
 ### Field access
@@ -3547,9 +3547,9 @@ impl Point {
   }
 }
 
-let p = Point { x: 3, y: 4 }
+const p = Point { x: 3, y: 4 }
 log(p.distance())           // 5.0
-let p2 = p.translate(10, 20)
+const p2 = p.translate(10, 20)
 log(p2.x)                   // 13
 ```
 
@@ -3619,7 +3619,7 @@ fn show(item: Displayable) {
   log(item.display())
 }
 
-let d = Dog({name: "Rex"})
+const d = Dog({name: "Rex"})
 show(d)  // OK: Dog satisfies Displayable
 ```
 
@@ -3712,11 +3712,11 @@ accepts a wider input or produces a narrower output is always a valid
 substitute.
 
 ```harn,ignore
-let wide = fn(x: float) { return 0 }
-let cb: fn(int) -> int = wide   // OK: float-accepting closure stands in for int-accepting
+const wide = fn(x: float) { return 0 }
+const cb: fn(int) -> int = wide   // OK: float-accepting closure stands in for int-accepting
 
-let narrow = fn(x: int) { return 0 }
-let bad: fn(float) -> int = narrow   // ERROR: narrow cannot accept the float a caller may pass
+const narrow = fn(x: int) { return 0 }
+const bad: fn(float) -> int = narrow   // ERROR: narrow cannot accept the float a caller may pass
 ```
 
 #### Declaration-site checking
@@ -4011,11 +4011,11 @@ but do not affect runtime behavior. Omitting annotations is always valid.
 ### Basic types
 
 ```harn
-let name: string = "Alice"
-let age: int = 30
-let rate: float = 3.14
-let ok: bool = true
-let nothing: nil = nil
+const name: string = "Alice"
+const age: int = 30
+const rate: float = 3.14
+const ok: bool = true
+const nothing: nil = nil
 ```
 
 ### The `never` type
@@ -4057,8 +4057,8 @@ fn passthrough(x: any) -> any {
   return x
 }
 
-let s: string = passthrough("hello")  // any → string, no narrowing required
-let n: int    = passthrough(42)
+const s: string = passthrough("hello")  // any → string, no narrowing required
+const n: int    = passthrough(42)
 ```
 
 Use `any` deliberately, when you want to opt out of checking — for
@@ -4193,7 +4193,7 @@ fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
   return a + b
 }
 
-let m = merge({a: 1, b: 2}, {b: "x", c: true})
+const m = merge({a: 1, b: 2}, {b: "x", c: true})
 // m : {a: int, b: string, c: bool}   (b overridden by the right side)
 ```
 
@@ -4219,8 +4219,8 @@ Rules:
 ### Union types
 
 ```harn
-let value: string | nil = nil
-let id: int | string = "abc"
+const value: string | nil = nil
+const id: int | string = "abc"
 ```
 
 Union members may also be **literal types** — specific string or int
@@ -4230,7 +4230,7 @@ values used to encode enum-like discriminated sets:
 type Verdict = "pass" | "fail" | "unclear"
 type RetryCount = 0 | 1 | 2 | 3
 
-let v: Verdict = "pass"
+const v: Verdict = "pass"
 ```
 
 Literal types are assignable to their base type (`"pass"` flows into
@@ -4324,9 +4324,9 @@ shape mismatch is.
 ### Parameterized types
 
 ```harn
-let numbers: list<int> = [1, 2, 3]
-let also_numbers: [int] = [1, 2, 3]
-let headers: dict<string, string> = {content_type: "json"}
+const numbers: list<int> = [1, 2, 3]
+const also_numbers: [int] = [1, 2, 3]
+const headers: dict<string, string> = {content_type: "json"}
 ```
 
 `[T]` is shorthand for `list<T>` in type positions. User-defined functions,
@@ -4337,7 +4337,7 @@ instantiation should be documented at the call site:
 
 ```harn,ignore
 fn map<T, U>(xs: [T], f: fn(T) -> U) -> [U] { ... }
-let labels: [string] = map<int, string>([1, 2, 3], label)
+const labels: [string] = map<int, string>([1, 2, 3], label)
 ```
 
 Explicit type arguments are erased at runtime. They are checked statically:
@@ -4350,13 +4350,13 @@ Dict shape types describe the expected fields of a dict value. The type checker
 verifies that dict literals have the required fields with compatible types.
 
 ```harn
-let user: {name: string, age: int} = {name: "Alice", age: 30}
+const user: {name: string, age: int} = {name: "Alice", age: 30}
 ```
 
 Optional fields use `?` and need not be present:
 
 ```harn
-let config: {host: string, port?: int} = {host: "localhost"}
+const config: {host: string, port?: int} = {host: "localhost"}
 ```
 
 Width subtyping: a dict with extra fields satisfies a shape that requires fewer fields.
@@ -4390,7 +4390,7 @@ pick({dropnil: true})   // type error — unknown option `dropnil`
 Nested shapes:
 
 ```harn
-let data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
+const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
 ```
 
 Shapes are compatible with `dict` and `dict<string, V>` when all field values match `V`.
@@ -4399,7 +4399,7 @@ Shapes are compatible with `dict` and `dict<string, V>` when all field values ma
 
 ```harn
 type Config = {model: string, max_tokens: int}
-let cfg: Config = {model: "gpt-4", max_tokens: 100}
+const cfg: Config = {model: "gpt-4", max_tokens: 100}
 ```
 
 A type alias can also drive schema validation for structured LLM output
@@ -4414,10 +4414,10 @@ type GraderOut = {
 }
 
 // Use the alias directly wherever a schema dict is expected.
-let s = schema_of(GraderOut)
-let ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
+const s = schema_of(GraderOut)
+const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
 
-let r = llm_call(prompt, nil, {
+const r = llm_call(prompt, nil, {
   provider: "openai",
   output_schema: GraderOut,     // alias in value position — compiled to schema_of(T)
   schema_retries: 2,
@@ -4440,7 +4440,7 @@ recorded in LLM transcript events with the selected route plus all considered
 alternatives so costs can be re-scored later:
 
 ```harn
-let r = llm_call(prompt, nil, {
+const r = llm_call(prompt, nil, {
   route_policy: "cheapest_over_quality(mid)",
   fallback_chain: ["local", "ollama", "openai"],
 })
@@ -4463,11 +4463,11 @@ the agent scratchpad.
 ```harn
 import { system_preamble, with_system_prompt_parts } from "std/llm/prompts"
 
-let opts = with_system_prompt_parts(
+const opts = with_system_prompt_parts(
   {provider: "anthropic", session_id: "review-42"},
   [system_preamble("Follow the repository's validation gate before final output.")]
 )
-let r = agent_loop("Review this change", "You are a code review agent.", opts)
+const r = agent_loop("Review this change", "You are a code review agent.", opts)
 ```
 
 For call sites that want routing policy to be visibly scoped around the work,
@@ -4476,7 +4476,7 @@ of its block. Nested `llm_call` invocations inherit the block's routing and
 budget options; an explicit option on the call wins for the same key.
 
 ```harn
-let r = cost_route {
+const r = cost_route {
   budget_usd: 0.05
   prefer: ["anthropic:claude-haiku-4-5", "openai:gpt-5.4-mini"]
   fallback_strategy: cheapest_first
@@ -4509,7 +4509,7 @@ to override that policy.
 ```harn
 import { with_cache } from "std/llm/handlers"
 
-let r = with_cache("Summarize this file", nil, {
+const r = with_cache("Summarize this file", nil, {
   provider: "anthropic",
   model: "claude-haiku-4-5",
   store: {backend: "fs", namespace: "summaries"},
@@ -4594,13 +4594,13 @@ A user-defined wrapper such as
 
 ```harn,ignore
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-  let r = llm_call(prompt, nil,
+  const r = llm_call(prompt, nil,
     {provider: "mock", output_schema: schema, output_validation: "error",
      response_format: "json"})
   return r.data
 }
 
-let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+const out: GraderOut = grade("Grade this", schema_of(GraderOut))
 log(out.verdict)
 ```
 
@@ -4623,12 +4623,12 @@ primitive accepts either named arguments or the legacy positional form;
 both lower to the same runtime.
 
 ```harn,ignore
-let answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
-let record = request_approval(action: "merge_pr", quorum: 2,
+const answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+const record = request_approval(action: "merge_pr", quorum: 2,
                               reviewers: ["alice", "bob", "carol"])
-let merged = dual_control(n: 2, m: 3, action: destructive_step,
+const merged = dual_control(n: 2, m: 3, action: destructive_step,
                           approvers: ["alice", "bob", "carol"])
-let handle = escalate_to(role: "oncall", reason: "deploy failed")
+const handle = escalate_to(role: "oncall", reason: "deploy failed")
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log
@@ -5191,14 +5191,14 @@ Sets are iterable with `for ... in` and support `len()`.
 | `multipart_form_data(fields, opts?)` | Deterministically builds `{content_type, boundary, body}` multipart fixtures for tests; field content may be bytes or string |
 
 ```harn
-let encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
-let decoded = base64_decode(encoded)        // "hello world"
-let jwt = base64url_encode("{\"alg\":\"HS256\"}") // no `=` padding
-let text = hex_decode("68656c6c6f")         // "hello"
-let hash = sha256("hello")                  // hex string
-let md5hash = md5("hello")                  // hex string
-let gz = gzip_encode("hello")               // bytes
-let hello = bytes_to_string(gzip_decode(gz)) // "hello"
+const encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
+const decoded = base64_decode(encoded)        // "hello world"
+const jwt = base64url_encode("{\"alg\":\"HS256\"}") // no `=` padding
+const text = hex_decode("68656c6c6f")         // "hello"
+const hash = sha256("hello")                  // hex string
+const md5hash = md5("hello")                  // hex string
+const gz = gzip_encode("hello")               // bytes
+const hello = bytes_to_string(gzip_decode(gz)) // "hello"
 ```
 
 `multipart_parse` returns `{boundary, fields, field_count, total_bytes}`.
@@ -5206,7 +5206,7 @@ Each field is `{name, filename, content_type, headers, bytes, text}`. `text`
 is `nil` for non-UTF-8 uploads so binary data remains lossless in `bytes`.
 
 ```harn
-let fixture = multipart_form_data([
+const fixture = multipart_form_data([
   {name: "title", content: "Quarterly report"},
   {
     name: "upload",
@@ -5216,14 +5216,14 @@ let fixture = multipart_form_data([
   },
 ])
 
-let form = multipart_parse(fixture.body, fixture.content_type, {
+const form = multipart_parse(fixture.body, fixture.content_type, {
   max_total_bytes: 1048576,
   max_field_bytes: 262144,
   max_fields: 8,
 })
 
-let title = multipart_field_text(form.fields[0])
-let uploaded = multipart_field_bytes(form.fields[1])
+const title = multipart_field_text(form.fields[0])
+const uploaded = multipart_field_bytes(form.fields[1])
 log(title)
 log(bytes_to_hex(uploaded))
 ```
@@ -5302,17 +5302,17 @@ and returns a list of dicts, one per match. Each dict contains:
 - Any named capture groups (from `(?P<name>...)`) as additional keys
 
 ```harn
-let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
+const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // results == [
 //   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
 //   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
 // ]
 
-let named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
 // named == [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
 
-let body = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
-let also_body = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
+const body = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
+const also_body = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
 ```
 
 Returns an empty list if there are no matches.
@@ -5693,10 +5693,10 @@ fn run_model(cleaned) { cleaned }
 fn upload(result) { log(result) }
 
 pipeline process(task) {
-  let url = "https://example.com/data.csv"
-  let data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
-  let cleaned = checkpoint_stage("clean",   fn() { clean(data) })
-  let result  = checkpoint_stage("process", fn() { run_model(cleaned) })
+  const url = "https://example.com/data.csv"
+  const data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
+  const cleaned = checkpoint_stage("clean",   fn() { clean(data) })
+  const result  = checkpoint_stage("process", fn() { run_model(cleaned) })
   upload(result)
 }
 ```
@@ -5715,8 +5715,8 @@ import { checkpoint_stage_retry } from "std/checkpoint"
 
 fn fetch_with_timeout(url) { url }
 
-let url = "https://example.com/data.csv"
-let data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
+const url = "https://example.com/data.csv"
+const data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
 log(data)
 ```
 
@@ -7151,7 +7151,7 @@ pipeline test_addition() {
 }
 
 pipeline test_string_concat() {
-  let result = "hello" + " " + "world"
+  const result = "hello" + " " + "world"
   assert_eq(result, "hello world")
 }
 ```

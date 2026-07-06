@@ -17,7 +17,7 @@ A named pipeline declaration. `params` are the formal parameter names.
 
 ```harn
 pipeline default(task, project) {
-  let x = 1
+  const x = 1
 }
 ```
 
@@ -30,8 +30,8 @@ LetBinding { pattern: BindingPattern, type_ann: Option<TypeExpr>, value: Box<SNo
 An immutable variable binding. `pattern` supports identifier or destructuring.
 
 ```harn
-let result: string = compute()
-let {x, y} = point
+const result: string = compute()
+const {x, y} = point
 ```
 
 ### `VarBinding`
@@ -43,7 +43,7 @@ VarBinding { pattern: BindingPattern, type_ann: Option<TypeExpr>, value: Box<SNo
 A mutable variable binding.
 
 ```harn
-var count: int = 0
+let count: int = 0
 ```
 
 ### `OverrideDecl`
@@ -340,7 +340,7 @@ A try-expression (no catch). Wraps the result as `Result.Ok(value)` or
 `Result.Err(error)`.
 
 ```harn
-let result = try { json_parse(raw_input) }
+const result = try { json_parse(raw_input) }
 ```
 
 ### `TryOperator`
@@ -353,7 +353,7 @@ Postfix `?` operator. Unwraps `Result.Ok(v)` to `v`, propagates
 `Result.Err(e)` from the enclosing function.
 
 ```harn
-let value = might_fail()?
+const value = might_fail()?
 ```
 
 ## Concurrency
@@ -367,7 +367,7 @@ SpawnExpr { body: Vec<SNode> }
 Spawns an asynchronous task and returns a task handle.
 
 ```harn
-let handle = spawn {
+const handle = spawn {
   long_running_work()
 }
 ```

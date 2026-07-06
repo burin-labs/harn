@@ -8,10 +8,10 @@ metric, or event.
 import { obs } from "std/observability"
 
 pipeline default() {
-  let o = obs()
+  const o = obs()
   o.configure({backend: o.Backend.auto})
 
-  let span = o.start_span("sync", {tenant: "acme"})
+  const span = o.start_span("sync", {tenant: "acme"})
   o.log_in_span(span, "queued", "info", {items: 3})
   o.end_span(span)
 }

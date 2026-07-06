@@ -8,14 +8,14 @@ relational state.
 import "std/postgres"
 
 pipeline default() {
-  let db = pg_pool("env:DATABASE_URL", {
+  const db = pg_pool("env:DATABASE_URL", {
     max_connections: 5,
     acquire_timeout_ms: 3000,
     ssl_mode: "require",
     application_name: "harn-harness",
   })
 
-  let rows = pg_query(
+  const rows = pg_query(
     db,
     "select id, payload, created_at from receipts where tenant_id = $1 order by created_at desc",
     ["tenant-123"],
@@ -72,7 +72,7 @@ Always pass dynamic values through the `params` list. Harn values are bound as
 Postgres parameters rather than interpolated into SQL:
 
 ```harn
-let receipt = pg_query_one(
+const receipt = pg_query_one(
   db,
   "select id, payload from receipts where tenant_id = $1 and id = $2::uuid",
   [tenant_id, receipt_id],
@@ -148,7 +148,7 @@ in `params`. If the same placeholder appears more than once, it reuses the
 first parameter index. Use `{{` and `}}` for literal braces:
 
 ```harn,ignore
-let q = sql(
+const q = sql(
   "SELECT '{{}}' AS empty_json, {tenant_id}::uuid AS tenant_id, {tenant_id}::uuid AS again",
   {tenant_id: tenant_id},
 )
@@ -164,7 +164,7 @@ noisy and error-prone. `raw_sql(template, params?)` and
 positional — write `$1`, `$2`, ... yourself and pass the matching list:
 
 ```harn,ignore
-let q = raw_sql(
+const q = raw_sql(
   "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",
   [tenant_id],
 )
@@ -182,7 +182,7 @@ Postgres cannot bind identifiers as parameters. Use `ident(...)` or
 covers:
 
 ```harn,ignore
-let q = sql(
+const q = sql(
   "SELECT {column} FROM {table} WHERE tenant_id = {tenant_id}",
   {column: ident("created_at"), table: ident_path(["app", "receipts"]), tenant_id: tenant_id},
 )
@@ -191,7 +191,7 @@ let q = sql(
 For one-off call sites, pass the template query record directly:
 
 ```harn,ignore
-let rows = many(db, sql(
+const rows = many(db, sql(
   "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = {tenant_id}::uuid",
   {tenant_id: tenant_id},
 ))
@@ -201,7 +201,7 @@ Compared with direct `pg_query`, named query records make the SQL and params
 easy to inspect in tests while keeping execution explicit:
 
 ```harn,ignore
-let db = pg_mock_pool([
+const db = pg_mock_pool([
   {
     sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
     params: ["tenant-a"],
@@ -209,7 +209,7 @@ let db = pg_mock_pool([
   },
 ])
 
-let rows = run(db, named(
+const rows = run(db, named(
   "list_receipts",
   "many",
   "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
@@ -250,7 +250,7 @@ strings — into one fragment for a `{projection}` placeholder, so a whole colum
 list composes without `unsafe_sql(...)`:
 
 ```harn,ignore
-let q = sql(
+const q = sql(
   "SELECT {projection} FROM receipts WHERE tenant_id = {tenant_id}::uuid",
   {
     projection: columns([uuid_text("id"), timestamptz_json("created_at"), "payload"]),
@@ -295,7 +295,7 @@ Wrap intermediate steps inside a transaction so the outer commit can keep
 the surviving writes while the rolled-back ones disappear:
 
 ```harn
-let drop_inner = true
+const drop_inner = true
 
 pg_transaction(db, { tx ->
   pg_execute(tx, "insert into entries (id, label) values ($1, $2)", [1, "outer"])
@@ -322,8 +322,8 @@ ignored — keep down migrations alongside ups for tooling outside Harn but
 let Harn only apply the ups.
 
 ```harn
-let pool = pg_pool("env:DATABASE_URL", {max_connections: 1})
-let result = pg_migrate(pool, {dir: "./migrations"})
+const pool = pg_pool("env:DATABASE_URL", {max_connections: 1})
+const result = pg_migrate(pool, {dir: "./migrations"})
 log("applied " + to_string(len(result.applied)) + " of " + to_string(len(result.available)))
 ```
 
@@ -345,8 +345,8 @@ Pass `ledger: "sqlx"` to apply an existing SQLx migration history into
 SQLx's own `_sqlx_migrations` table, byte-for-byte compatibly:
 
 ```harn
-let pool = pg_pool("env:DATABASE_URL", {max_connections: 1})
-let result = pg_migrate(pool, {dir: "./migrations", ledger: "sqlx"})
+const pool = pg_pool("env:DATABASE_URL", {max_connections: 1})
+const result = pg_migrate(pool, {dir: "./migrations", ledger: "sqlx"})
 ```
 
 In this mode `pg_migrate`:
@@ -400,7 +400,7 @@ database is required — this is build-time codegen.
 ```harn,ignore
 import { ReceiptsRow } from "./db_types.harn"
 
-let receipt: ReceiptsRow = pg_query_one(pool, "select * from receipts where id = $1", [id])
+const receipt: ReceiptsRow = pg_query_one(pool, "select * from receipts where id = $1", [id])
 log(receipt.kind)   // type-checked against the column set
 ```
 
@@ -470,9 +470,9 @@ and emits the corresponding `NOTIFY` command.
 [sqlx-listener]: https://docs.rs/sqlx/latest/sqlx/postgres/struct.PgListener.html
 
 ```harn
-let listener = pg_listen(db, ["receipts.updated", "captain.notice"])
+const listener = pg_listen(db, ["receipts.updated", "captain.notice"])
 while (true) {
-  let n = pg_listener_recv(listener, 5000)
+  const n = pg_listener_recv(listener, 5000)
   if (n == nil) { continue }
   log(n.channel + " -> " + n.payload)
 }
@@ -491,9 +491,9 @@ The `pg.jsonb.*` helpers execute Postgres' native JSONB functions/operators with
 bound operands, which keeps quick JSON manipulation out of string-built SQL:
 
 ```harn
-let ids = pg.jsonb.path(db, {items: [{id: 1}, {id: 2}]}, "$.items[*].id")
-let merged = pg.jsonb.merge(db, {a: 1}, {b: 2})
-let has_b = pg.jsonb.contains(db, merged, {b: 2})
+const ids = pg.jsonb.path(db, {items: [{id: 1}, {id: 2}]}, "$.items[*].id")
+const merged = pg.jsonb.merge(db, {a: 1}, {b: 2})
+const has_b = pg.jsonb.contains(db, merged, {b: 2})
 ```
 
 Use ordinary `pg_query` for predicates over table columns; these helpers are for
@@ -502,7 +502,7 @@ JSON values already available to the Harn program.
 ## Pool observability
 
 ```harn
-let stats = pg_pool_stats(db)
+const stats = pg_pool_stats(db)
 // → {size, idle, in_use, max_connections, statement_cache_capacity,
 //    read_routing_policy, replicas, circuit_state, circuit_failures,
 //    circuit_opened_at_ms}
@@ -535,7 +535,7 @@ string concatenation hits the wire.
 ## Read replicas
 
 ```harn
-let db = pg_pool("env:DATABASE_URL", {
+const db = pg_pool("env:DATABASE_URL", {
   max_connections: 10,
   replicas: ["env:DATABASE_REPLICA_URL", "env:DATABASE_REPLICA2_URL"],
   read_routing_policy: "round_robin_replica",
@@ -562,7 +562,7 @@ pg_partition_attach(db, "events", "events_2026_05",
                     {from: "2026-05-01", to: "2026-06-01"})       // range
 pg_partition_attach(db, "events", "events_h0", {modulus: 4, remainder: 0})  // hash
 pg_partition_detach(db, "events", "events_2026_03", {concurrently: true})
-let pruned = pg_partition_prune(db, "events", "2026-01-01")
+const pruned = pg_partition_prune(db, "events", "2026-01-01")
 // Returns the list of `<schema>.<partition>` names that were dropped.
 // Pass {dry_run: true} to compute the list without dropping.
 ```
@@ -577,12 +577,12 @@ them constant and trusted.
 ```harn
 // Drop every partition whose data is entirely older than 90 days. This
 // is the one-call form of `pg_partition_prune(db, parent, now - 90d)`.
-let dropped = pg_partition_retain(db, "events", {keep_days: 90})
+const dropped = pg_partition_retain(db, "events", {keep_days: 90})
 // `{keep_hours: N}` retains an hour-granular window instead.
 
 // Pre-create the next 7 daily partitions (pg_partman's run_maintenance
 // equivalent) so inserts never fall through to the DEFAULT partition.
-let created = pg_partition_create_for_window(db, "events",
+const created = pg_partition_create_for_window(db, "events",
                 {interval: "day", ahead: 7})
 // `interval` is "day" or "hour"; `start` (an ISO date/timestamp)
 // defaults to now. Child partitions are named `<table>_<YYYY_MM_DD[_HH]>`
@@ -617,7 +617,7 @@ fall back to their textual representation.
 Tests can avoid a live Postgres server with `pg_mock_pool`.
 
 ```harn
-let db = pg_mock_pool([
+const db = pg_mock_pool([
   {
     sql: "select id, payload from receipts where tenant_id = $1",
     params: ["tenant-123"],
@@ -630,10 +630,10 @@ let db = pg_mock_pool([
   },
 ])
 
-let rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-123"])
+const rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-123"])
 assert_eq(rows[0].payload.ok, true)
 
-let result = pg_execute(db, "insert into audit_records(tenant_id, action) values ($1, $2)", [
+const result = pg_execute(db, "insert into audit_records(tenant_id, action) values ($1, $2)", [
   "tenant-123",
   "receipt.read",
 ])

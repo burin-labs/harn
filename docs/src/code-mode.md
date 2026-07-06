@@ -46,7 +46,7 @@ deferred tool entries:
 
 ```harn
 pipeline main() {
-  let tools = [
+  const tools = [
     {
       name: "read_file",
       description: "Read a workspace file",
@@ -60,7 +60,7 @@ pipeline main() {
     },
   ]
 
-  let manifest = composition_binding_manifest(tools)
+  const manifest = composition_binding_manifest(tools)
   return manifest.bindings[0].binding
 }
 ```
@@ -84,7 +84,7 @@ generated `pipeline main()` with one wrapper function per manifest binding:
 
 ```harn
 pipeline main() {
-  let manifest = composition_binding_manifest([
+  const manifest = composition_binding_manifest([
     {
       name: "read_file",
       parameters: {type: "object", required: ["path"]},
@@ -94,7 +94,7 @@ pipeline main() {
   ])
 
   return composition_execute(
-    "let file = read_file({path: \"README.md\"})\nreturn file.text",
+    "const file = read_file({path: \"README.md\"})\nreturn file.text",
     manifest,
     {run_id: "docs-code-mode", max_operations: 8, timeout_ms: 1000},
   )
@@ -139,13 +139,13 @@ audits. Hosts that want real tool dispatch pass a `dispatcher` closure on the
 options dict:
 
 ```harn
-let dispatch = { binding_name, input ->
+const dispatch = { binding_name, input ->
   if binding_name == "read_file" {
     return host_call("workspace.read_text", input)
   }
   return {error: "unknown binding " + binding_name}
 }
-let report = composition_execute(snippet, manifest, {dispatcher: dispatch})
+const report = composition_execute(snippet, manifest, {dispatcher: dispatch})
 ```
 
 The dispatcher receives `(binding_name: string, input: dict)` for each child
@@ -187,9 +187,9 @@ deferred until the agent asks for a slice:
 ```harn
 import { composition_mcp_api, composition_mcp_execute } from "std/composition"
 
-let api = composition_mcp_api(tool_registry, {query: "issues", limit: 5})
-let output = composition_mcp_execute(
-  "let hits = github_search_issues({query: \"is:open label:bug\"})\nreturn hits",
+const api = composition_mcp_api(tool_registry, {query: "issues", limit: 5})
+const output = composition_mcp_execute(
+  "const hits = github_search_issues({query: \"is:open label:bug\"})\nreturn hits",
   tool_registry,
   {
     manifest: api.manifest,

@@ -39,10 +39,10 @@ fn run_model(cleaned) { cleaned }
 fn upload(result) { log(result) }
 
 pipeline process(task) {
-  let url = "https://example.com/data.csv"
-  let data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
-  let cleaned = checkpoint_stage("clean",   fn() { clean(data) })
-  let result  = checkpoint_stage("process", fn() { run_model(cleaned) })
+  const url = "https://example.com/data.csv"
+  const data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
+  const cleaned = checkpoint_stage("clean",   fn() { clean(data) })
+  const result  = checkpoint_stage("process", fn() { run_model(cleaned) })
   upload(result)
 }
 ```
@@ -61,8 +61,8 @@ import { checkpoint_stage_retry } from "std/checkpoint"
 
 fn fetch_with_timeout(url) { url }
 
-let url = "https://example.com/data.csv"
-let data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
+const url = "https://example.com/data.csv"
+const data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
 log(data)
 ```
 

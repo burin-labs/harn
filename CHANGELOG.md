@@ -12833,7 +12833,7 @@ offset.
   Pipe it through `llm_call(... routing: policy ...)`:
 
   ```harn,ignore
-  let policy = routing_policy({
+  const policy = routing_policy({
     chain: [
       {provider: "anthropic", model: "claude-opus-4-20250514"},
       {provider: "openai",    model: "gpt-4o"},
@@ -12845,7 +12845,7 @@ offset.
     observe: {emit_event: "billing.routing_decision"},
   })
 
-  let result = llm_call("Summarize this PR.", nil, {routing: policy})
+  const result = llm_call("Summarize this PR.", nil, {routing: policy})
   ```
 
   Each chain attempt rides on the result envelope's `routing.attempts`
@@ -14124,7 +14124,7 @@ After:
 ```harn,ignore
 import {default_llm_caller, with_retry} from "std/llm/handlers"
 
-let caller = with_retry(default_llm_caller(), {
+const caller = with_retry(default_llm_caller(), {
   max_attempts: 4,        // NOTE: total attempts; llm_retries: 3 == 4 attempts
   base_ms: 250,
   backoff: "exponential",

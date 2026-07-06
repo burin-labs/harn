@@ -68,7 +68,7 @@ Create a `.harn` file with a `pipeline default(task)` entry point and use
 ```harn,ignore
 // conformance/tests/<group>/my_feature.harn  (e.g. stdlib/, types/)
 pipeline default(task) {
-  let result = my_feature(42)
+  const result = my_feature(42)
   log(result)
 }
 ```
@@ -137,7 +137,7 @@ pipeline default(task) {
   mock_host_result("workspace", "read_text", "file contents")
 
   // Code under test calls host_call("workspace.read_text", ...)
-  let content = host_call("workspace.read_text", {path: "test.txt"})
+  const content = host_call("workspace.read_text", {path: "test.txt"})
   log(content)
 
   // Verify the call was made
@@ -193,7 +193,7 @@ pipeline test_skill_registry() {
       {capability: "project", operation: "skills", result: []},
     ],
     { ->
-      let registry = skill_registry_from_host()
+      const registry = skill_registry_from_host()
       assert_eq(len(registry.skills), 0, "no skills registered")
       assert_host_called("project", "skills", nil, nil)
     },
@@ -279,7 +279,7 @@ For testing agent loops without real LLM calls, use `llm_mock()`:
 ```harn
 llm_mock({text: "The answer is 42"})
 
-let result = llm_call([
+const result = llm_call([
   {role: "user", content: "What is the answer?"},
 ].join("\n"))
 log(result)

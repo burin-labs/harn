@@ -41,11 +41,11 @@ Supported node labels are `Function`, `Type`, `Field`, `EnumCase`,
 import "std/code_librarian"
 
 pipeline default() {
-  let _ = hostlib_code_index_rebuild(
+  const _ = hostlib_code_index_rebuild(
     {root: "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"},
   )
 
-  let callers: list<LibrarianCallSite> = code_librarian_who_calls("fetchUser")
+  const callers: list<LibrarianCallSite> = code_librarian_who_calls("fetchUser")
   __io_println("fetchUser has " + to_string(len(callers)) + " call sites:")
   for c in callers {
     __io_println("  " + c.path)

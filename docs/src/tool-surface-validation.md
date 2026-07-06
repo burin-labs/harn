@@ -8,7 +8,7 @@ loop confusing or unusable.
 Use `tool_surface_validate(surface, options?)` for targeted checks:
 
 ```harn
-let report = tool_surface_validate({
+const report = tool_surface_validate({
   tools: tools,
   policy: policy,
   approval_policy: approval_policy,

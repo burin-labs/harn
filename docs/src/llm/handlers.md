@@ -7,11 +7,11 @@ accept a call dict such as `{prompt, system, opts}`.
 import { with_circuit_breaker } from "std/llm/handlers"
 
 pipeline default() {
-  let raw_handler = fn(call) {
+  const raw_handler = fn(call) {
     return llm_call(call.prompt, call?.system, call.opts)
   }
-  let pooled = with_circuit_breaker(raw_handler)
-  let shared = with_circuit_breaker(raw_handler, {name: "primary-llm", threshold: 3})
+  const pooled = with_circuit_breaker(raw_handler)
+  const shared = with_circuit_breaker(raw_handler, {name: "primary-llm", threshold: 3})
 }
 ```
 

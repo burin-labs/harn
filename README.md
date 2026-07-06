@@ -14,7 +14,7 @@ tool search(pattern: string) -> string {
   exec("rg", "--", pattern).stdout
 }
 
-let result = agent_loop(
+const result = agent_loop(
   "Find the failing test and fix it.",
   "You are a senior engineer.",
   {loop_until_done: true, tools: search, max_iterations: 24}
@@ -130,11 +130,11 @@ tool read(path: string) -> string {
 
 tool test(filter: string) -> string {
   description "Run a targeted cargo test filter"
-  let result = exec("cargo", "test", filter)
+  const result = exec("cargo", "test", filter)
   result.stdout + result.stderr
 }
 
-let result = agent_loop(
+const result = agent_loop(
   "Fix the failing test and verify the change.",
   "You are a senior engineer.",
   {loop_until_done: true, tools: read, max_iterations: 24}
@@ -150,7 +150,7 @@ cache behavior, without touching the loop:
 ```harn
 import {default_llm_caller, with_retry, compose} from "std/llm/handlers"
 
-let caller = compose([with_retry({max_attempts: 4, backoff: "exponential"})])(default_llm_caller())
+const caller = compose([with_retry({max_attempts: 4, backoff: "exponential"})])(default_llm_caller())
 agent_loop(task, system, {loop_until_done: true, llm_caller: caller})
 ```
 
@@ -225,7 +225,7 @@ approval for destructive operations.
 ## Workflow example
 
 ```harn
-let graph = workflow_graph({
+const graph = workflow_graph({
   name: "review_and_repair",
   entry: "plan",
   nodes: {
@@ -250,7 +250,7 @@ let graph = workflow_graph({
   ]
 })
 
-let run = workflow_execute("Refactor the parser error message and verify it.", graph, [], {max_steps: 8})
+const run = workflow_execute("Refactor the parser error message and verify it.", graph, [], {max_steps: 8})
 log(run.status)
 log(run.path)
 ```

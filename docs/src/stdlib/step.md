@@ -10,11 +10,11 @@ for a deterministic input.
 
 ```harn,ignore
 fn main(harness: Harness) {
-  let user = step.run("load-user", {user_id: harness.event.id}, { input ->
+  const user = step.run("load-user", {user_id: harness.event.id}, { input ->
     return load_user(input.user_id)
   }, {namespace: "signup-workflow"})
 
-  let enriched = step.run("enrich", {user_id: user.id}, { ->
+  const enriched = step.run("enrich", {user_id: user.id}, { ->
     return call_enrichment(user)
   }, {namespace: "signup-workflow"})
 
@@ -44,7 +44,7 @@ Pass `options.namespace` when the same script can run for independent logical
 workflow instances:
 
 ```harn,ignore
-let result = step.run("charge-card", {order_id: order.id}, { input ->
+const result = step.run("charge-card", {order_id: order.id}, { input ->
   return charge_order(input.order_id)
 }, {namespace: "order-" + order.id})
 ```
@@ -59,7 +59,7 @@ order scoped namespace explicitly.
 step log:
 
 ```harn,ignore
-let records = step.inspect({namespace: "order-123"})
+const records = step.inspect({namespace: "order-123"})
 log(json_stringify(records))
 ```
 

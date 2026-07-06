@@ -107,7 +107,7 @@ pipeline default() {
   //       format!("hi {name}")
   //   }
   //
-  let result = edit_apply_node(
+  const result = edit_apply_node(
     {
       path: "src/lib.rs",
       query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
@@ -132,7 +132,7 @@ import "std/edit"
 
 pipeline default() {
   // Rewrite every function body in the file.
-  let all = edit_apply_node(
+  const all = edit_apply_node(
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
@@ -142,7 +142,7 @@ pipeline default() {
   )
 
   // Rewrite the second function only.
-  let second = edit_apply_node(
+  const second = edit_apply_node(
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
@@ -164,7 +164,7 @@ import "std/edit"
 
 pipeline default() {
   // Intentional syntax error.
-  let result = edit_apply_node(
+  const result = edit_apply_node(
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
@@ -191,9 +191,9 @@ staged writes, and the working tree is only touched on
 import "std/edit"
 
 pipeline default() {
-  let session = harness.session_id()
-  let _ = hostlib_fs_set_mode({session_id: session, mode: "staged"})
-  let result = edit_apply_node(
+  const session = harness.session_id()
+  const _ = hostlib_fs_set_mode({session_id: session, mode: "staged"})
+  const result = edit_apply_node(
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
@@ -204,7 +204,7 @@ pipeline default() {
   )
   __io_println(result.applied)
   // The working tree only changes on commit.
-  let _ = hostlib_fs_commit_staged({session_id: session})
+  const _ = hostlib_fs_commit_staged({session_id: session})
 }
 ```
 
@@ -295,7 +295,7 @@ pipeline default() {
   //       fn one() {}
   //   }
   //
-  let result = edit_insert_at_anchor({
+  const result = edit_insert_at_anchor({
     path: "src/lib.rs",
     query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
     position: "last_child",
@@ -316,7 +316,7 @@ The new `#[test] fn two() {}` lands at the right depth inside the
 import "std/edit"
 
 pipeline default() {
-  let result = edit_insert_at_anchor({
+  const result = edit_insert_at_anchor({
     path: "src/index.ts",
     // Anchor on the last existing import. `select` is not exposed —
     // tighten the query if you need a specific one.
@@ -334,7 +334,7 @@ pipeline default() {
 import "std/edit"
 
 pipeline default() {
-  let result = edit_insert_at_anchor({
+  const result = edit_insert_at_anchor({
     path: "src/lib.rs",
     query: "(function_item) @anchor",       // matches every top-level fn
     position: "after",
@@ -418,11 +418,11 @@ via the `dry_run` field on the result, mirroring `edit_apply_node`.
 import { edit_safe_text_patch } from "std/edit"
 
 pipeline default() {
-  let path = "src/lib.rs"
+  const path = "src/lib.rs"
   // 1) Snapshot the pre-image hash through the same overlay.
-  let snapshot = hostlib_fs_read_text({path: path})
+  const snapshot = hostlib_fs_read_text({path: path})
   // 2) Compose a patch off the snapshot.
-  let result = edit_safe_text_patch(
+  const result = edit_safe_text_patch(
     {
       path: path,
       expected_hash: snapshot.sha256,
@@ -451,17 +451,17 @@ turns the race into a deterministic `stale_base` outcome:
 import { edit_safe_text_patch } from "std/edit"
 
 pipeline default() {
-  let session = "demo"
+  const session = "demo"
   hostlib_enable("tools:deterministic")
   hostlib_fs_set_mode({session_id: session, mode: "staged"})
-  let pre = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
+  const pre = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
 
   // Sibling agent stages a competing write — overlay diverges.
   hostlib_tools_write_file(
     {session_id: session, path: "src/main.rs", content: "// sibling won\n"},
   )
 
-  let losing = edit_safe_text_patch(
+  const losing = edit_safe_text_patch(
     {
       path: "src/main.rs",
       expected_hash: pre.sha256,
@@ -472,8 +472,8 @@ pipeline default() {
   __io_println(losing.result)                 // "stale_base"
 
   // Retry against the now-current overlay hash.
-  let refreshed = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
-  let winner = edit_safe_text_patch(
+  const refreshed = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
+  const winner = edit_safe_text_patch(
     {
       path: "src/main.rs",
       expected_hash: refreshed.sha256,
@@ -495,11 +495,11 @@ conflict to the caller rather than spinning forever.
 import { edit_safe_text_patch } from "std/edit"
 
 fn rewrite(path, hunks, session_id) {
-  var attempt = 0
-  let max_attempts = 3
+  let attempt = 0
+  const max_attempts = 3
   while attempt < max_attempts {
-    let snapshot = hostlib_fs_read_text({path: path, session_id: session_id})
-    let result = edit_safe_text_patch(
+    const snapshot = hostlib_fs_read_text({path: path, session_id: session_id})
+    const result = edit_safe_text_patch(
       {
         path: path,
         expected_hash: snapshot.sha256,
@@ -527,9 +527,9 @@ write" — same convention as `edit_apply_node`.
 import { edit_safe_text_patch } from "std/edit"
 
 pipeline default() {
-  let path = "src/lib.rs"
-  let snapshot = hostlib_fs_read_text({path: path})
-  let preview = edit_safe_text_patch(
+  const path = "src/lib.rs"
+  const snapshot = hostlib_fs_read_text({path: path})
+  const preview = edit_safe_text_patch(
     {
       path: path,
       expected_hash: snapshot.sha256,
@@ -609,7 +609,7 @@ max_tokens = 12000
 Per-call `llm_options` still win:
 
 ```harn,ignore
-let result = edit_fast_apply({
+const result = edit_fast_apply({
   path: "src/lib.rs",
   intent: "Rename the local variable to make the intent clearer.",
   llm_options: {provider: "mock", model: "mock"},
@@ -668,7 +668,7 @@ import { edit_fast_apply } from "std/edit"
 
 pipeline default() {
   hostlib_enable("tools:deterministic")
-  let preview = edit_fast_apply({
+  const preview = edit_fast_apply({
     path: "src/lib.rs",
     intent: "Change answer() to return 42 and keep the rest of the file untouched.",
     dry_run: true,
@@ -677,7 +677,7 @@ pipeline default() {
   __io_println(preview.per_file_unified_diff[0].diff)
 
   if user_approves(preview.per_file_unified_diff[0].diff) {
-    let applied = edit_fast_apply({
+    const applied = edit_fast_apply({
       path: "src/lib.rs",
       intent: "Change answer() to return 42 and keep the rest of the file untouched.",
     })
@@ -738,7 +738,7 @@ passes, so a clean run is all-or-nothing modulo mid-call disk failures.
 ```harn,ignore
 import { edit_rename_symbol } from "std/edit"
 
-let result = edit_rename_symbol({
+const result = edit_rename_symbol({
   symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
   new_name: "Gadget",
   scope: "workspace",
@@ -813,7 +813,7 @@ files use `+++ /dev/null`.
 import "std/edit"
 
 pipeline default() {
-  let bundle = edit_dry_run(
+  const bundle = edit_dry_run(
     {
       plan: [
         {
@@ -846,7 +846,7 @@ fully-rejected case.
 import "std/edit"
 
 pipeline default() {
-  let bundle = edit_dry_run(
+  const bundle = edit_dry_run(
     {
       plan: [
         // Applied.
@@ -907,7 +907,7 @@ import "std/edit"
 
 pipeline default() {
   // Whole matrix, or pass {language: "yaml"} to filter to one row.
-  let caps = edit_capabilities()
+  const caps = edit_capabilities()
   for row in caps.languages {
     __io_println("${row.language}: rename=${row.rename_symbol}")
   }

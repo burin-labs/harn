@@ -14,7 +14,7 @@ the handle (which, for OS resources, may be never).
 
 ```harn
 fn open_log() -> channel {
-  let ch: owned<channel> = channel("log", 64)
+  const ch: owned<channel> = channel("log", 64)
   return ch    // HARN-OWN-003: `ch` escapes; auto-drop is bypassed
 }
 ```
@@ -27,7 +27,7 @@ fn open_log() -> channel {
 
   ```harn
   fn open_log() -> owned<channel> {
-    let ch: owned<channel> = channel("log", 64)
+    const ch: owned<channel> = channel("log", 64)
     return ch    // OK — ownership flows to the caller
   }
   ```
@@ -38,7 +38,7 @@ fn open_log() -> channel {
   ```harn
   fn write_log(msg: string) -> nil {
     {
-      let ch: owned<channel> = channel("log", 64)
+      const ch: owned<channel> = channel("log", 64)
       send(ch, msg)
     }   // `ch` drops here, before the function returns
     nil

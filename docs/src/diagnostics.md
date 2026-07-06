@@ -560,7 +560,7 @@ match exactly.
 fn pair<T>(a: T, b: T) -> [T; 2] { [a, b] }
 
 // HARN-TYP-014: pair takes 1 type parameter, not 2
-let xs = pair::<int, string>(1, "two")
+const xs = pair::<int, string>(1, "two")
 ```
 
 #### How to fix
@@ -3469,7 +3469,7 @@ the handle (which, for OS resources, may be never).
 
 ```harn
 fn open_log() -> channel {
-  let ch: owned<channel> = channel("log", 64)
+  const ch: owned<channel> = channel("log", 64)
   return ch    // HARN-OWN-003: `ch` escapes; auto-drop is bypassed
 }
 ```
@@ -3482,7 +3482,7 @@ fn open_log() -> channel {
 
   ```harn
   fn open_log() -> owned<channel> {
-    let ch: owned<channel> = channel("log", 64)
+    const ch: owned<channel> = channel("log", 64)
     return ch    // OK — ownership flows to the caller
   }
   ```
@@ -3493,7 +3493,7 @@ fn open_log() -> channel {
   ```harn
   fn write_log(msg: string) -> nil {
     {
-      let ch: owned<channel> = channel("log", 64)
+      const ch: owned<channel> = channel("log", 64)
       send(ch, msg)
     }   // `ch` drops here, before the function returns
     nil
@@ -3687,7 +3687,7 @@ const NS: list = [1, 2, X]
 const COUNT: int = len([1, 2, 3])
 
 // reads to silence the unused-variable lint in the example
-let _ = [X, Y, NS, COUNT]
+const _ = [X, Y, NS, COUNT]
 ```
 
 #### How to fix

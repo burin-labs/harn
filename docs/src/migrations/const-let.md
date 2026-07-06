@@ -37,8 +37,8 @@ expects.
 ### Before
 
 ```harn,ignore
-let name = "ada"       // immutable
-var count = 0          // mutable
+const name = "ada"       // immutable
+let count = 0          // mutable
 count = count + 1
 ```
 
@@ -46,7 +46,7 @@ count = count + 1
 
 ```harn,ignore
 const name = "ada"     // immutable
-let count = 0          // mutable
+const count = 0          // mutable
 count = count + 1
 ```
 

@@ -331,13 +331,13 @@ fn render_union(union: &Union, schema: &Schema) -> Result<String, String> {
     ));
     out.push_str("    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>\n");
     out.push_str("    where\n        D: Deserializer<'de>,\n    {\n");
-    out.push_str("        const value = JsonValue::deserialize(deserializer)?;\n");
-    out.push_str("        const kind = value\n");
+    out.push_str("        let value = JsonValue::deserialize(deserializer)?;\n");
+    out.push_str("        let kind = value\n");
     out.push_str("            .get(\"event\")\n");
     out.push_str("            .and_then(JsonValue::as_str)\n");
     out.push_str("            .unwrap_or(\"\")\n");
     out.push_str("            .to_string();\n");
-    out.push_str("        const payload = match kind.as_str() {\n");
+    out.push_str("        let payload = match kind.as_str() {\n");
     for (variant, _payload, event) in &variants {
         let Some(event) = event else { continue };
         out.push_str(&format!(

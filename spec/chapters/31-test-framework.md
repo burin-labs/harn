@@ -21,7 +21,7 @@ pipeline test_addition() {
 }
 
 pipeline test_string_concat() {
-  let result = "hello" + " " + "world"
+  const result = "hello" + " " + "world"
   assert_eq(result, "hello world")
 }
 ```

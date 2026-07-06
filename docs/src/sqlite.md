@@ -7,14 +7,14 @@ local, portable relational store without running a database server.
 import "std/sqlite"
 
 pipeline default() {
-  let db = sqlite_open(".harn/events.sqlite", {
+  const db = sqlite_open(".harn/events.sqlite", {
     create: true,
     busy_timeout_ms: 5000,
     journal_mode: "wal",
     foreign_keys: true,
   })
 
-  let rows = sqlite_query(
+  const rows = sqlite_query(
     db,
     "select topic, id, payload from events where topic = ? order by id desc limit ?",
     ["agent_events", 50],
@@ -64,7 +64,7 @@ Extension loading is not exposed by `std/sqlite`.
 Always pass dynamic values through the `params` list:
 
 ```harn
-let row = sqlite_query_one(
+const row = sqlite_query_one(
   db,
   "select id, payload from events where topic = ? and id > ?",
   ["agent_events", 100],
@@ -106,7 +106,7 @@ been recorded in the ledger. Files are sorted lexicographically. `.down.sql`
 siblings are ignored.
 
 ```harn
-let result = sqlite_migrate(db, {
+const result = sqlite_migrate(db, {
   dir: "./migrations/sqlite",
   table: "harn_sqlite_migrations",
 })
@@ -122,12 +122,12 @@ Mocks match exact SQL text after trimming plus exact params when `params` is
 provided:
 
 ```harn
-let db = sqlite_mock_db([
+const db = sqlite_mock_db([
   {sql: "select id from events where topic = ?", params: ["agent_events"], rows: [{id: 1}]},
 ])
 
-let rows = sqlite_query(db, "select id from events where topic = ?", ["agent_events"])
-let calls = sqlite_mock_calls(db)
+const rows = sqlite_query(db, "select id from events where topic = ?", ["agent_events"])
+const calls = sqlite_mock_calls(db)
 ```
 
 ## SQLite vs Postgres

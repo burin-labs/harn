@@ -20,7 +20,7 @@ explicit, imperative builtins. Unknown inputs are hard errors.
 ```harn
 pipeline main(task) {
   // Open (or resume) a session. `nil` mints a UUIDv7.
-  let s = agent_session_open()
+  const s = agent_session_open()
 
   // Seed the conversation.
   agent_session_inject(s, {role: "user", content: "Hello!"})
@@ -28,24 +28,24 @@ pipeline main(task) {
   // Run an agent loop against the session — prior messages are
   // automatically loaded as prefix, the final transcript is persisted
   // back under `s`.
-  let first = agent_loop("continue the greeting", nil, {
+  const first = agent_loop("continue the greeting", nil, {
     session_id: s,
     provider: "mock",
   })
 
   // A second call sees `first`'s assistant reply as prior history.
-  let second = agent_loop("what do you remember?", nil, {
+  const second = agent_loop("what do you remember?", nil, {
     session_id: s,
     provider: "mock",
   })
 
   // Fork to explore a counterfactual without touching `s`.
-  let branch = agent_session_fork(s)
+  const branch = agent_session_fork(s)
   agent_session_inject(branch, {role: "user", content: "what if …"})
 
   // Or branch from a scrubber-rebuilt prefix.
-  let replay_branch = agent_session_fork_at(s, 1)
-  let ancestry = agent_session_ancestry(replay_branch)
+  const replay_branch = agent_session_fork_at(s, 1)
+  const ancestry = agent_session_ancestry(replay_branch)
   assert(ancestry["root_id"] == s, "fork ancestry resolves back to the root session")
 
   // Release a session immediately.
@@ -108,7 +108,7 @@ message whose metadata contains `live_session.client_id`, so transcript replay
 preserves the fact that an attached controller supplied the prompt.
 
 ```harn
-let s = agent_session_open("incident-debug")
+const s = agent_session_open("incident-debug")
 agent_session_attach(s, "portal", {mode: "observer"})
 agent_session_attach(s, "tui", {mode: "controller"})
 
@@ -144,7 +144,7 @@ from an LLM transcript sidecar and creates a new session preloaded with those
 messages:
 
 ```harn
-let seeded = agent_session_seed_from_jsonl(
+const seeded = agent_session_seed_from_jsonl(
   ".harn-runs/audit/agent-llm/llm_transcript.jsonl",
   {
     truncate_to_last: 40,

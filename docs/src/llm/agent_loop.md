@@ -18,12 +18,12 @@ converted_from?}]`).
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let turn_opts: AgentLoopOptions = {
+const turn_opts: AgentLoopOptions = {
   system: "Be concise and cite concrete evidence.",
   provider: "openai",
   model: "gpt-5-mini",
 }
-let result = agent_turn("Summarize the current project risks.", turn_opts)
+const result = agent_turn("Summarize the current project risks.", turn_opts)
 log(result.visible_text)
 log(result.judge_decisions[0].verdict)
 ```
@@ -45,8 +45,8 @@ documented path: option typos surface at `harn check` time, and the
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let opts: AgentLoopOptions = {loop_until_done: true}
-let result = agent_loop(
+const opts: AgentLoopOptions = {loop_until_done: true}
+const result = agent_loop(
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
   opts,
@@ -161,7 +161,7 @@ import {
   user_tools,
 } from "std/agent/user"
 
-let answerer = agentic_user(
+const answerer = agentic_user(
   "Provide a simple prompt to create ./index.test.ts with full edge coverage.",
   "Research the codebase only if needed. Answer clarification questions with plausible user preferences. If the agent is done, stop.",
   simulated_user_read_tools(),
@@ -169,7 +169,7 @@ let answerer = agentic_user(
   {max_replies: 4, max_llm_calls: 8, max_iterations: 4},
 )
 
-let opts: AgentLoopOptions = {
+const opts: AgentLoopOptions = {
   provider: "openai",
   model: "gpt-5-mini",
   tools: user_tools(answerer, coding_tools),
@@ -177,7 +177,7 @@ let opts: AgentLoopOptions = {
   loop_until_done: true,
   max_iterations: 20,
 }
-let result = agent_loop(task, system, opts)
+const result = agent_loop(task, system, opts)
 ```
 
 For deterministic eval fixtures, use `scripted_user(...)` or its alias
@@ -188,12 +188,12 @@ For deterministic eval fixtures, use `scripted_user(...)` or its alias
 import { AgentLoopOptions } from "std/agent/options"
 import { scripted_user, user_tools } from "std/agent/user"
 
-let answerer = scripted_user([
+const answerer = scripted_user([
   {match: "*test runner*", reply: "Use Vitest and cover empty, invalid, and boundary inputs."},
   {match: "*done*", action: "stop", reason: "complete"},
 ], {max_replies: 2})
 
-let opts: AgentLoopOptions = {
+const opts: AgentLoopOptions = {
   tools: user_tools(answerer),
   tool_format: "native",
   loop_until_done: true,
@@ -227,14 +227,14 @@ unless `close_session: false` is set.
 import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
 import { read_line } from "std/io"
 
-let result = agent_chat_loop({
+const result = agent_chat_loop({
   session_id: "review-chat",
   provider: "ollama",
   model: "devstral-small-2",
   tools: coding_tools,
   tool_format: "native",
   on_user_input: { state ->
-    let line = read_line()
+    const line = read_line()
     if !line.ok {
       return {kind: "exit", reason: line.status ?? "closed"}
     }
@@ -263,7 +263,7 @@ so the loop's first (and every subsequent) provider request presents them
 exactly as `llm_call`'s `messages` array would.
 
 ```harn,ignore
-let result = agent_loop(
+const result = agent_loop(
   "What is the codeword?",
   nil,
   {
@@ -447,7 +447,7 @@ use a different provider or model:
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let scratchpad_opts: AgentLoopOptions = {
+const scratchpad_opts: AgentLoopOptions = {
   loop_until_done: true,
   scratchpad: {
     reorganize_every: 2,
@@ -492,15 +492,15 @@ route every turn through it:
 import { AgentLoopOptions } from "std/agent/options"
 import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
 
-let caller = compose([
+const caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),
 ])(default_llm_caller())
 
-let opts: AgentLoopOptions = {
+const opts: AgentLoopOptions = {
   loop_until_done: true,
   llm_caller: caller,
 }
-let result = agent_loop(task, system, opts)
+const result = agent_loop(task, system, opts)
 ```
 
 Caller contract: `fn(call) -> {ok, value | status, error?}` where
@@ -523,12 +523,12 @@ still exceeds the hard limit.
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let compaction_opts: AgentLoopOptions = {
+const compaction_opts: AgentLoopOptions = {
   provider: "openai",
   model: "gpt-4o",
   compaction: {strategy: "hybrid", keep_last_n: 10},
 }
-let result = agent_loop(task, system, compaction_opts)
+const result = agent_loop(task, system, compaction_opts)
 ```
 
 Available strategies:
@@ -561,7 +561,7 @@ the next model-visible summary unless `scope` is `"model_visible"`,
 import {compact_for_bug_fix_resumption} from "std/agent/autocompact"
 import { AgentLoopOptions } from "std/agent/options"
 
-let auto_compact_opts: AgentLoopOptions = {
+const auto_compact_opts: AgentLoopOptions = {
   provider: "mock",
   compact_threshold: 1,
   compact_strategy: "custom",
@@ -572,7 +572,7 @@ let auto_compact_opts: AgentLoopOptions = {
     {summary: "resume with " + policy.mode + " over " + to_string(len(archived)) + " messages"}
   },
 }
-let result = agent_loop(task, system, auto_compact_opts)
+const result = agent_loop(task, system, auto_compact_opts)
 ```
 
 Stdlib helpers cover common host commands:
@@ -597,9 +597,9 @@ single number.
 ```harn
 import { AgentLoopOptions, IterationBudget } from "std/agent/options"
 
-let budget: IterationBudget = {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
-let budget_opts: AgentLoopOptions = {iteration_budget: budget}
-let result = agent_loop(prompt, system, budget_opts)
+const budget: IterationBudget = {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
+const budget_opts: AgentLoopOptions = {iteration_budget: budget}
+const result = agent_loop(prompt, system, budget_opts)
 ```
 
 Fields:
@@ -689,8 +689,8 @@ All decisions are recorded:
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let adaptive_opts: AgentLoopOptions = {iteration_budget: {mode: "adaptive", initial: 4, max: 12}}
-let result = agent_loop(prompt, system, adaptive_opts)
+const adaptive_opts: AgentLoopOptions = {iteration_budget: {mode: "adaptive", initial: 4, max: 12}}
+const result = agent_loop(prompt, system, adaptive_opts)
 log(result.adaptive_budget.extensions_used)
 log(result.adaptive_budget.final_limit)
 for decision in result.adaptive_budget.decisions {
@@ -754,8 +754,8 @@ agent_preset_register("triage", {
   family: "captain",
   pack: {provider: "openai", timeout_ms: 90000, budget: {total_budget_usd: 5.0}},
 })
-let opts = agent_preset("triage", {tools: triage_tools})
-let run = agent_loop("Triage the queue.", opts?.system, opts)
+const opts = agent_preset("triage", {tools: triage_tools})
+const run = agent_loop("Triage the queue.", opts?.system, opts)
 ```
 
 ```harn
@@ -763,34 +763,34 @@ import {agent_preset} from "std/agent/presets"
 
 // Inspect / read-only audit. Native completion, no done sentinel,
 // adaptive budget {initial: 4, max: 12}, max_nudges: 1.
-let audit_opts = agent_preset("audit", {
+const audit_opts = agent_preset("audit", {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: release_tools,
   require_successful_tools: ["release_run"],
 })
-let audit = agent_loop("Audit the release", audit_opts?.system, audit_opts)
+const audit = agent_loop("Audit the release", audit_opts?.system, audit_opts)
 
 // Tool-using repair. Wider budget {initial: 4, max: 16}, max_nudges: 2.
 // Customize before passing to agent_loop:
-let opts = agent_preset("repair", {
+const opts = agent_preset("repair", {
   tools: repair_tools,
   iteration_budget: {mode: "adaptive", initial: 6, max: 20},
 })
-let result = agent_loop(prompt, system, opts)
+const result = agent_loop(prompt, system, opts)
 
 // Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
-let summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-4o-mini"})
-let summary = agent_loop("Summarize the audit findings.", nil, summary_opts)
+const summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-4o-mini"})
+const summary = agent_loop("Summarize the audit findings.", nil, summary_opts)
 
 // Local/configured route. The audit preset keeps its audit behavior,
 // budget, timeout, and retry defaults, but it does not mix in the built-in
 // Anthropic provider or frontier ladder once the route is supplied.
-let local_opts = agent_preset("audit", {
+const local_opts = agent_preset("audit", {
   llm_options: {provider: "llamacpp", model: "gemma4-local"},
   tools: release_tools,
 })
-let local_audit = agent_loop("Audit with the configured local model.", local_opts?.system, local_opts)
+const local_audit = agent_loop("Audit with the configured local model.", local_opts?.system, local_opts)
 ```
 
 Preset roles, defaults summarized:
@@ -822,28 +822,28 @@ import {agent_preset} from "std/agent/presets"
 // Merge Captain: long adaptive budget; default consent layer auto-
 // approves tools annotated `read`/`search`/`fetch`/`think` and denies
 // everything else unless the caller passes a `consent` callable.
-let sweep_opts = agent_preset("merge_captain", {
+const sweep_opts = agent_preset("merge_captain", {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: github_tools,
   consent: { call -> approval_bridge.prompt(call) },     // HITL bridge
   audit_sink: { record -> receipts.append(record) },     // captain ledger
 })
-let sweep = agent_loop("Sweep open PRs.", sweep_opts?.system, sweep_opts)
+const sweep = agent_loop("Sweep open PRs.", sweep_opts?.system, sweep_opts)
 
 // Oncall Captain: defaults `with_rate_limit({max_calls: 50})` so an
 // alert-storm loop can't fan out unbounded. Override via `rate_limit`.
-let triage_opts = agent_preset("oncall_captain", {
+const triage_opts = agent_preset("oncall_captain", {
   provider: "openai",
   model: "gpt-5.4",
   tools: oncall_tools,
   rate_limit: {max_calls: 100, message: "alert-loop cap"},
 })
-let triaged = agent_loop("Triage paging alerts.", triage_opts?.system, triage_opts)
+const triaged = agent_loop("Triage paging alerts.", triage_opts?.system, triage_opts)
 
 // Release Captain: long checkpointed budget; pass `dry_run: true` (or
 // a `with_dry_run` opts dict) to layer a shadow-run gate.
-let ship_opts = agent_preset("release_captain", {
+const ship_opts = agent_preset("release_captain", {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: release_tools,
@@ -853,7 +853,7 @@ let ship_opts = agent_preset("release_captain", {
   escalate_predicate: { call -> call?.opts?.task_kind == "judge" },
   logging_sink: { record -> receipts.llm_call(record) },
 })
-let shipping = agent_loop("Cut v0.9.0.", ship_opts?.system, ship_opts)
+const shipping = agent_loop("Cut v0.9.0.", ship_opts?.system, ship_opts)
 ```
 
 Captain layers are opt-in: the preset only adds an `audit_sink` /
@@ -938,7 +938,7 @@ event carries `trigger: "stalled"`.
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let judged_opts: AgentLoopOptions = {
+const judged_opts: AgentLoopOptions = {
   loop_until_done: true,
   done_judge: {
     cadence: {every: 5, when: "always", max_invocations: 3},
@@ -964,7 +964,7 @@ stops the loop with `status: "input_guardrail"` and
 ```harn,ignore
 import { agent_input_guardrail } from "std/agent/guardrails"
 
-let guardrail_opts = agent_input_guardrail(
+const guardrail_opts = agent_input_guardrail(
   { payload -> return cheap_policy_classifier(payload.user_message) },
   {confidence_threshold: 0.8},
 )
@@ -1061,7 +1061,7 @@ etc.) plus `event_queue_capacity`, which bounds the durable FIFO trigger queue
 used by `daemon_trigger`.
 
 ```harn
-let daemon = daemon_spawn({
+const daemon = daemon_spawn({
   name: "reviewer",
   task: "Watch for trigger events and summarize the latest change.",
   system: "You are a careful reviewer.",
@@ -1071,10 +1071,10 @@ let daemon = daemon_spawn({
 })
 
 daemon_trigger(daemon, {kind: "file_changed", path: "src/lib.rs"})
-let snap = daemon_snapshot(daemon)
+const snap = daemon_snapshot(daemon)
 log(snap.pending_event_count)
 daemon_stop(daemon)
-let resumed = daemon_resume(".harn/daemons/reviewer")
+const resumed = daemon_resume(".harn/daemons/reviewer")
 ```
 
 These wrappers preserve queued trigger events across stop/resume. If a daemon is
@@ -1120,8 +1120,8 @@ tool results, and the latest assistant turn.
 import { AgentLoopOptions } from "std/agent/options"
 
 fn hide_old_assistant_turns(ctx) {
-  var kept = []
-  var latest_assistant = nil
+  let kept = []
+  let latest_assistant = nil
   for msg in ctx.visible_messages {
     if msg?.role == "assistant" {
       latest_assistant = msg
@@ -1135,11 +1135,11 @@ fn hide_old_assistant_turns(ctx) {
   return {messages: kept}
 }
 
-let callback_opts: AgentLoopOptions = {
+const callback_opts: AgentLoopOptions = {
   loop_until_done: true,
   context_callback: hide_old_assistant_turns,
 }
-let result = agent_loop(task, "You are a coding assistant.", callback_opts)
+const result = agent_loop(task, "You are a coding assistant.", callback_opts)
 ```
 
 ### Post-turn callback
@@ -1203,7 +1203,7 @@ fn finalize_after_read(turn) {
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let retry_opts: AgentLoopOptions = {
+const retry_opts: AgentLoopOptions = {
   loop_until_done: true,
   max_iterations: 30,
   max_nudges: 5,
@@ -1211,7 +1211,7 @@ let retry_opts: AgentLoopOptions = {
   model: "claude-sonnet-5",
 }
 retry 3 {
-  let result = agent_loop(task, "You are a coding assistant.", retry_opts)
+  const result = agent_loop(task, "You are a coding assistant.", retry_opts)
   log(result.text)
 }
 ```
@@ -1309,13 +1309,13 @@ skill ship {
   prompt "Follow the deploy runbook. One command at a time."
 }
 
-let ship_opts: AgentLoopOptions = {
+const ship_opts: AgentLoopOptions = {
   provider: "anthropic",
   tools: tools(),
   skills: ship,
   working_files: ["infra/terraform/cluster.tf"],
 }
-let result = agent_loop(
+const result = agent_loop(
   "Ship the new release to production",
   "You are a staff deploy engineer.",
   ship_opts,
@@ -1349,7 +1349,7 @@ For long-running or parallel orchestration, Harn exposes a worker/task
 lifecycle directly in the runtime.
 
 ```harn
-let worker = spawn_agent({
+const worker = spawn_agent({
   name: "research-pass",
   task: "Draft a summary",
   node: {
@@ -1360,7 +1360,7 @@ let worker = spawn_agent({
   }
 })
 
-let done = wait_agent(worker)
+const done = wait_agent(worker)
 log(done.status)
 ```
 
@@ -1376,7 +1376,7 @@ subset of the parent's current execution ceiling, or a top-level
 `tools: ["name", ...]` shorthand:
 
 ```harn,ignore
-let worker = spawn_agent({
+const worker = spawn_agent({
   task: "Read project files only",
   tools: ["read", "search"],
   node: {
@@ -1454,7 +1454,7 @@ the Harn-authored request normalization when callers need to inspect the tool
 selection and child options before execution.
 
 ```harn,ignore
-let result = sub_agent_run("Find the config entrypoints.", {
+const result = sub_agent_run("Find the config entrypoints.", {
   provider: "mock",
   tools: repo_tools(),
   allowed_tools: ["search", "read"],
@@ -1555,7 +1555,7 @@ the worker request, provenance, execution profile, result text/status, and
 produced artifact ids available for routing and audit.
 
 ```harn
-let worker = spawn_agent({
+const worker = spawn_agent({
   task: "Run the repo-local verification pass",
   graph: some_graph,
   carry: {transcript_mode: "compact", artifact_mode: "inherit"},

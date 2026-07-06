@@ -31,19 +31,19 @@ import {
   graphql_page_info,
 } from "std/graphql"
 
-let issues = graphql_operation(
+const issues = graphql_operation(
   "ListIssues",
   "query ListIssues($first: Int, $after: String) { issues(first: $first, after: $after) { nodes { id identifier title } pageInfo { hasNextPage endCursor } } }",
   {root_field: "issues"},
 )
 
 pipeline default() {
-  let envelope = graphql_execute_operation(
+  const envelope = graphql_execute_operation(
     {endpoint: "https://api.linear.app/graphql", auth: {access_token: secret_get("linear/token")}},
     issues,
     {first: 25},
   )
-  let page = graphql_page_info(envelope.result)
+  const page = graphql_page_info(envelope.result)
   log(page.end_cursor)
 }
 ```

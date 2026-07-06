@@ -48,7 +48,7 @@ it, instead of forcing the caller to manually convert thrown errors
 into a `Result` and then `guard is_ok / unwrap`. The lowered form is:
 
 ```harn,ignore
-{ let _r = try { EXPR }
+{ const _r = try { EXPR }
   guard is_ok(_r) else { throw unwrap_err(_r) }
   unwrap(_r) }
 ```
@@ -61,12 +61,12 @@ site and the innermost catch handler exactly once, matching the
 ```harn,ignore
 fn fetch(prompt) {
   // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
-  let response = try* llm_call(prompt)
+  const response = try* llm_call(prompt)
   return parse(response)
 }
 
-let outcome = try {
-  let result = fetch(prompt)
+const outcome = try {
+  const result = fetch(prompt)
   Ok(result)
 } catch (e: ApiError) {
   Err(e.code)

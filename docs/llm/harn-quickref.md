@@ -269,7 +269,7 @@ For long terminal artifacts, import `std/tui`:
 ```harn
 import { page, rule, terminal_width, clear } from "std/tui"
 
-let result = page({title: "Audit", body: markdown, format: "markdown"})
+const result = page({title: "Audit", body: markdown, format: "markdown"})
 ```
 
 `page(...)` uses `$PAGER` when stdout is a TTY, adds `-R -F -X` for `less`,
@@ -294,15 +294,15 @@ when you only need one synchronous subprocess capture record:
 ```harn,ignore
 import { command_json, command_json_step, command_try } from "std/command"
 
-let repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
   capture: {max_inline_bytes: 65536},
 })
 
-let step = command_json_step("repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+const step = command_json_step("repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
   retry: {max_attempts: 2, delay_ms: 0},
 })
 
-let fallback = command_try(
+const fallback = command_try(
   [
     {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
     {source: "cli", run: fn() { return command_json(["gh", "api", "repos/burin-labs/harn"]) }},
@@ -347,14 +347,14 @@ let fallback = command_try(
 ## Strings
 
 ```harn
-let plain = "hello\n"
-let interp = "Hello, ${name}!"
-let multi = """
+const plain = "hello\n"
+const interp = "Hello, ${name}!"
+const multi = """
 This is a triple-quoted multiline string.
 It keeps line breaks verbatim and is the preferred way to declare
 long system prompts in source code.
 """
-let raw = r"C:\path\does\no\escapes"
+const raw = r"C:\path\does\no\escapes"
 ```
 
 Heredoc-style `<<TAG ... TAG` is **only** valid inside LLM tool-call
@@ -365,11 +365,11 @@ argument JSON. In source code, use `"""..."""`.
 End-exclusive slicing works on strings and lists:
 
 ```harn
-let s = "hello world"
+const s = "hello world"
 log(s[0:5])        // "hello"
 log(s[6:11])       // "world"
 
-let xs = [1, 2, 3, 4, 5]
+const xs = [1, 2, 3, 4, 5]
 log(xs[1:4])       // [2, 3, 4]
 ```
 
@@ -390,10 +390,10 @@ access is O(1) and `chars(...)` interns ASCII characters so the
 materialization does not allocate per character:
 
 ```harn
-let cs = chars(src)       // one linear pass; ASCII chars are interned
-let n = cs.count          // O(1) on a list
-var i = 0
-var braces = 0
+const cs = chars(src)       // one linear pass; ASCII chars are interned
+const n = cs.count          // O(1) on a list
+let i = 0
+let braces = 0
 while i < n {
   if cs[i] == "{" { braces = braces + 1 }   // O(1) list index
   i = i + 1
@@ -410,13 +410,13 @@ when line- or token-oriented scanning suffices, and reach for `regex_*`
 to functions, or `return` it:
 
 ```harn
-let body = if len(content) > 2400 {
+const body = if len(content) > 2400 {
   head_slice + "..." + tail_slice
 } else {
   content
 }
 
-let grade = if score >= 90 { "A" } else if score >= 80 { "B" } else { "C" }
+const grade = if score >= 90 { "A" } else if score >= 80 { "B" } else { "C" }
 ```
 
 ## Iteration
@@ -440,10 +440,10 @@ for [a, b] in xs.zip(ys) { ... }
 for {key, value} in my_dict.entries() { ... }
 
 // Ranges:
-let first_5 = range(5)         // [0, 1, 2, 3, 4] — half-open, Python-style
-let middle  = range(3, 7)      // [3, 4, 5, 6]
-let inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
-let exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
+const first_5 = range(5)         // [0, 1, 2, 3, 4] — half-open, Python-style
+const middle  = range(3, 7)      // [3, 4, 5, 6]
+const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
+const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
 ```
 
 Note: `for (a, b) in ...` with parentheses is NOT supported — only list
@@ -473,25 +473,25 @@ unless the name is a sink such as `collect`, `fold`, or `first`.
 
 ```harn
 // LLM token feed -> tap to log, then keep a bounded transcript.
-let chunks = stream.collect(
+const chunks = stream.collect(
   stream.tap(llm_stream_call("Summarize logs", nil, {provider: "mock"}), { chunk -> log(chunk.visible_delta) }),
   {max: 200}
 )
 
 // Parallel or channel results -> take the first three.
-let first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
+const first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
 
 // Agent events -> filter by topic.
-let tool_events = stream.collect(
+const tool_events = stream.collect(
   stream.filter(agent_events, { ev -> ev?.topic == "tool_call" }),
   {max: 100}
 )
 
 // Two streams -> race; the first source to emit wins.
-let winner = stream.first(stream.race(primary_stream, fallback_stream))
+const winner = stream.first(stream.race(primary_stream, fallback_stream))
 
 // Combine streams and fold to a result.
-let total = stream.fold(
+const total = stream.fold(
   stream.merge(worker_a, worker_b, worker_c),
   0,
   { acc, item -> acc + item.cost }
@@ -522,7 +522,7 @@ For app-facing chat UIs with private model scratchpads, use
 ```harn,ignore
 import {agent_stream_call} from "std/agent/stream"
 
-let result = agent_stream_call(prompt, system, {
+const result = agent_stream_call(prompt, system, {
   provider: "openai",
   model: "gpt-5-mini",
   private: {open_tag: "<secret>", close_tag: "</secret>"},
@@ -550,7 +550,7 @@ Top-level `let` / `var` and `fn` declarations are visible inside
 functions defined in the same file:
 
 ```harn
-let GRADER_SYSTEM = """
+const GRADER_SYSTEM = """
 You are a strict grader...
 """
 
@@ -706,7 +706,7 @@ type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
 fn process_create(a: "create") { … }
 fn process_edit(a: "edit")     { … }
 
-let containers: list<ActionContainer<Action>> = [
+const containers: list<ActionContainer<Action>> = [
   {action: "create", process_action: process_create},
   {action: "edit",   process_action: process_edit},
 ]
@@ -771,8 +771,8 @@ does not flow into `list<float>`.
   (`Result<int, string>` binds `v: int`, `e: string`).
 
 ```harn
-let r = try { llm_call("hi", nil, opts) }
-let text = r?.text ?? "no response"
+const r = try { llm_call("hi", nil, opts) }
+const text = r?.text ?? "no response"
 ```
 
 `try { body } catch (e) { handler }` is also an expression: its value is
@@ -781,7 +781,7 @@ catch that doesn't match the thrown type rethrows past the expression. A
 trailing `finally { ... }` runs once for effect only.
 
 ```harn
-let parsed = try { json_parse(raw) } catch (e) { default_config() }
+const parsed = try { json_parse(raw) } catch (e) { default_config() }
 ```
 
 Optional chaining works for properties, methods, and subscripts:
@@ -801,11 +801,11 @@ the verbose `try { foo() } / guard is_ok else / unwrap` boilerplate:
 ```harn
 fn fetch(prompt) {
   // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
-  let response = try* llm_call(prompt)
+  const response = try* llm_call(prompt)
   return parse(response)
 }
 
-let outcome = try {
+const outcome = try {
   fetch(user_prompt)
 } catch (e: ApiError) {
   fallback(e)
@@ -833,10 +833,10 @@ Supported v1 forms include `.`, `.foo.bar`, `.[2]`, `.[2:5]`,
 object construction, and recursive descent `..`.
 
 ```harn
-let api = json_parse(response.body)
-let first_email = json_pointer(api, "/users/0/email")
-let active = jq(api, ".users[] | select(.active == true) | .email")
-let summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
+const api = json_parse(response.body)
+const first_email = json_pointer(api, "/users/0/email")
+const active = jq(api, ".users[] | select(.active == true) | .email")
+const summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
 ```
 
 For schema-first code, `schema_report(value, schema, apply_defaults?)` returns
@@ -852,16 +852,16 @@ Import `std/slug` for human-readable non-secret identifiers:
 
 ```harn
 // Spawn a background task.
-let h = spawn { long_work() }
-let value = await(h)
+const h = spawn { long_work() }
+const value = await(h)
 
 // parallel each: concurrent map. Fail-fast: the first branch error
 // cancels in-flight siblings and propagates.
-let results = parallel each paths { p -> process(p) }
+const results = parallel each paths { p -> process(p) }
 
 // parallel settle: like `each` but collects per-item Ok/Err and never
 // cancels — use it when every branch must run regardless of failures.
-let outcome = parallel settle paths { p -> grade(p) }
+const outcome = parallel settle paths { p -> grade(p) }
 log(outcome.succeeded)  // count
 log(outcome.failed)
 for r in outcome.results {
@@ -869,10 +869,10 @@ for r in outcome.results {
 }
 
 // parallel N: fan-out with an index. Fail-fast like `parallel each`.
-let indices = parallel 8 { i -> fetch(i) }
+const indices = parallel 8 { i -> fetch(i) }
 
 // Cap in-flight work to avoid overwhelming downstream services.
-let results = parallel settle paths with { max_concurrent: 4 } { p ->
+const results = parallel settle paths with { max_concurrent: 4 } { p ->
   llm_call(p, nil, opts)
 }
 ```
@@ -887,7 +887,7 @@ For quotas shared across Harn processes, use
 and returns `{ok, timed_out, waited_ms, retry_after_ms, buckets}`:
 
 ```harn
-let admitted = durable_rate_limit_acquire({
+const admitted = durable_rate_limit_acquire({
   buckets: [
     {key: "provider:cerebras:rpm", limit: 5, units: 1, window_ms: 60s},
     {
@@ -918,8 +918,8 @@ about those has changed — use them when you just want a list/dict back.
 Lazy iteration is opt-in via `.iter()`:
 
 ```harn
-let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-let first_three_doubled_evens = xs
+const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+const first_three_doubled_evens = xs
   .iter()
   .filter({ x -> x % 2 == 0 })
   .map({ x -> x * 2 })
@@ -990,17 +990,17 @@ because only 5 elements flow through the pipeline.
 ## Regex
 
 ```harn
-let matches  = regex_match("[0-9]+", "abc 42 def 7")   // ["42", "7"] or nil
-let swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+const matches  = regex_match("[0-9]+", "abc 42 def 7")   // ["42", "7"] or nil
+const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 //           -> "world hello"
-let same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+const same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 //           -> alias of regex_replace; every match replaced.
-let captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
-let words    = regex_split("a, b, c", ",\\s*")
-let ci       = regex_match("hello", "HeLLo", "i")
-let fixed_ci = regex_replace("hello", "hi", "HeLLo", "i")
-let body     = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
-let body2    = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
+const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
+const words    = regex_split("a, b, c", ",\\s*")
+const ci       = regex_match("hello", "HeLLo", "i")
+const fixed_ci = regex_replace("hello", "hi", "HeLLo", "i")
+const body     = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
+const body2    = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
 ```
 
 `regex_replace` and `regex_replace_all` both replace every match and
@@ -1016,42 +1016,42 @@ named capture groups as top-level keys.
 Use byte helpers when content may not be UTF-8:
 
 ```harn
-let bytes = bytes_from_string("hello")
-let text = bytes_to_string(bytes)
-let hex = bytes_to_hex(bytes)
-let same = bytes_from_hex(hex)
+const bytes = bytes_from_string("hello")
+const text = bytes_to_string(bytes)
+const hex = bytes_to_hex(bytes)
+const same = bytes_from_hex(hex)
 ```
 
 Compression is in-memory and returns `bytes`. Encoders accept `bytes`
 or `string`; decoders always return `bytes`.
 
 ```harn
-let gz = gzip_encode("hello", 6)       // level 0..9, default 6
-let zst = zstd_encode(bytes, 3)        // zstd level, default 3
-let br = brotli_encode("hello", 11)    // quality 0..11, default 11
+const gz = gzip_encode("hello", 6)       // level 0..9, default 6
+const zst = zstd_encode(bytes, 3)        // zstd level, default 3
+const br = brotli_encode("hello", 11)    // quality 0..11, default 11
 
-let hello = bytes_to_string(gzip_decode(gz))
+const hello = bytes_to_string(gzip_decode(gz))
 
-let tar = tar_create([
+const tar = tar_create([
   {path: "README.md", content: "# Hi\n", mode: 420},
 ])
-let tar_entries = tar_extract(tar)     // [{path, content: bytes, mode}]
+const tar_entries = tar_extract(tar)     // [{path, content: bytes, mode}]
 
-let zip = zip_create([{path: "a.txt", content: "alpha"}])
-let zip_entries = zip_extract(zip)     // [{path, content: bytes}]
+const zip = zip_create([{path: "a.txt", content: "alpha"}])
+const zip_entries = zip_extract(zip)     // [{path, content: bytes}]
 ```
 
 ## Scripting helpers
 
 ```harn
-let rng = rng_seed(42)
-let roll = random_int(rng, 1, 6)
-let shuffled = random_shuffle(rng, [1, 2, 3, 4])
-let grouped = group_by(["a", "bb", "c"], { s -> len(s) })
-let parts = partition([1, 2, 3, 4], { x -> x % 2 == 0 })
-let padded = str_pad("é", 3, ".", "both")
-let graphemes = unicode_graphemes("éx")
-let parsed = uuid_parse(uuid_v7())
+const rng = rng_seed(42)
+const roll = random_int(rng, 1, 6)
+const shuffled = random_shuffle(rng, [1, 2, 3, 4])
+const grouped = group_by(["a", "bb", "c"], { s -> len(s) })
+const parts = partition([1, 2, 3, 4], { x -> x % 2 == 0 })
+const padded = str_pad("é", 3, ".", "both")
+const graphemes = unicode_graphemes("éx")
+const parsed = uuid_parse(uuid_v7())
 ```
 
 ### Postgres query helpers
@@ -1087,8 +1087,8 @@ LIMIT {limit}
   )
 }
 
-let rows = run(db, list_receipts_query(tenant_id, 50))
-let direct = many(db, sql("SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10}))
+const rows = run(db, list_receipts_query(tenant_id, 50))
+const direct = many(db, sql("SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10}))
 ```
 
 Helpers: `one(handle, query)`, `many(handle, query)`, `exec(handle, query)`,
@@ -1111,7 +1111,7 @@ for source-controlled fragments no typed helper covers.
 ## LLM surface
 
 ```harn
-let response = llm_call(prompt, system, options)
+const response = llm_call(prompt, system, options)
 log(response.prose)          // unwrapped prose (text minus tags)
 log(response.text)           // raw provider text (may include tags)
 log(response.canonical_text) // canonical tagged reconstruction
@@ -1181,7 +1181,7 @@ OpenAI-native hosted tools, remote MCP, previous-response chaining,
 background mode, or provider-side truncation/compaction:
 
 ```harn
-let r = llm_call(prompt, sys, {
+const r = llm_call(prompt, sys, {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
@@ -1228,13 +1228,13 @@ routes such as OpenRouter remain OpenAI-wire routes and use OpenAI-style
 ```harn
 import { pairwise_rerank, self_certainty } from "std/llm/rerank"
 
-let ranked = pairwise_rerank(candidates, {
+const ranked = pairwise_rerank(candidates, {
   task: "Pick the most relevant search result.",
   criteria: "Prefer primary sources with direct evidence.",
   provider: "mock",
 })
 
-let confidence = self_certainty(
+const confidence = self_certainty(
   "ignored",
   {logprobs: [{token: "answer", logprob: -0.1}]},
 )
@@ -1306,7 +1306,7 @@ harn.mcp.configure({
   experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}},
 })
 
-let image = harn.mcp.upload_file(mcp.image_server, "photo.png", {
+const image = harn.mcp.upload_file(mcp.image_server, "photo.png", {
   accept: ["image/png", "image/jpeg"],
   max_size: 5242880,
 })
@@ -1327,7 +1327,7 @@ Mark tools that the model rarely needs with `defer_loading: true` and
 opt the call into progressive disclosure with `tool_search: "bm25"`:
 
 ```harn
-var registry = tool_registry()
+let registry = tool_registry()
 registry = tool_define(registry, "look", "Read files", {
   parameters: {path: {type: "string"}},
   handler: { args -> read_file(args.path) },
@@ -1338,7 +1338,7 @@ registry = tool_define(registry, "deploy", "Deploy to production", {
   handler: { args -> shell("deploy " + args.env) },
 })
 
-let r = llm_call(prompt, sys, {
+const r = llm_call(prompt, sys, {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: registry,
@@ -1432,7 +1432,7 @@ thinking_modes = ["effort"]
 Query the effective matrix at runtime:
 
 ```harn
-let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider: "anthropic", model: "claude-opus-4-7",
 //   native_tools: true, text_tool_wire_format_supported: true,
@@ -1570,7 +1570,7 @@ defaults (`output_format: {kind: "json_schema", schema, strict: true}`,
 failure:
 
 ```harn
-let schema = {
+const schema = {
   type: "object",
   required: ["verdict"],
   properties: {
@@ -1578,7 +1578,7 @@ let schema = {
     improvement: {type: "string"},
   },
 }
-let verdict = llm_call_structured(prompt, schema, {
+const verdict = llm_call_structured(prompt, schema, {
   provider: "auto",
   model: "local-gemma4-e4b",
   system: "You are a strict grader.",
@@ -1591,7 +1591,7 @@ options?)` returns `{ok, data, error}` (same envelope as
 `llm_call_safe`, but with the validated `.data` pre-unwrapped):
 
 ```harn
-let r = llm_call_structured_safe(prompt, schema, {provider: "auto"})
+const r = llm_call_structured_safe(prompt, schema, {provider: "auto"})
 if !r.ok {
   log("structured call failed:", r.error.category, r.error.message)
   return nil
@@ -1606,7 +1606,7 @@ error_category, attempts, repaired, extracted_json, usage, model,
 provider}`. Never throws; dispatch on `ok` / `error_category`:
 
 ```harn
-let r = llm_call_structured_result(prompt, schema, {
+const r = llm_call_structured_result(prompt, schema, {
   provider: "auto",
   schema_retries: 2,
   // Optional repair pass — runs only when the main call's JSON is
@@ -1652,8 +1652,8 @@ error_category, attempts, stage, repaired}` envelope shape:
 | `llm_repair` | Earlier stages failed and `llm_repair` is enabled (default). | Single shot, `schema_retries: 0`. Set `{llm_repair: false}` for fully deterministic recovery. |
 
 ```harn
-let raw = llm_call(prompt, sys, {provider: "auto"}).text
-let r = schema_recover(raw, schema)
+const raw = llm_call(prompt, sys, {provider: "auto"}).text
+const r = schema_recover(raw, schema)
 if r.ok {
   process(r.data)                  // narrowed-shape dict
 } else {
@@ -1668,7 +1668,7 @@ a structured re-call. The `llm_repair` block accepts the same
 overrides as `llm_call_structured_result`'s `repair`:
 
 ```harn
-let r = schema_recover(raw, schema, {
+const r = schema_recover(raw, schema, {
   apply_defaults: true,            // schema defaults during validation
   llm_repair: {
     enabled: true,
@@ -1689,7 +1689,7 @@ If you need the raw response (token counts, transcript, thinking
 trace) alongside the parsed data, call `llm_call` directly:
 
 ```harn
-let r = llm_call(prompt, sys, {
+const r = llm_call(prompt, sys, {
   provider: "auto",
   model: "local-gemma4-e4b",
   output_schema: schema,
@@ -1712,7 +1712,7 @@ type GraderOut = {
   summary: string,
 }
 
-let out: GraderOut = llm_call_structured(prompt, GraderOut, {
+const out: GraderOut = llm_call_structured(prompt, GraderOut, {
   provider: "auto",
   system: sys,
 })
@@ -1727,14 +1727,14 @@ fn grade<T>(prompt: string, schema: Schema<T>) -> T {
   return llm_call_structured(prompt, schema, {provider: "auto"})
 }
 
-let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+const out: GraderOut = grade("Grade this", schema_of(GraderOut))
 log(out.verdict)
 ```
 
 Batch grading at bounded concurrency:
 
 ```harn
-let outcome = parallel settle paths with { max_concurrent: 4 } { path ->
+const outcome = parallel settle paths with { max_concurrent: 4 } { path ->
   llm_call(read_file(path), GRADER_SYSTEM, {
     provider: "auto",
     model: "local-gemma4-e4b",
@@ -1753,7 +1753,7 @@ token-budgeted slice of chunks for the next prompt. Complements
 `transcript_auto_compact` (which shrinks the ongoing conversation).
 
 ```harn
-let packed = assemble_context({
+const packed = assemble_context({
   artifacts: [skill_a, skill_b, fetched_docs],
   budget_tokens: 8000,
   dedup: "chunked",                 // none | chunked | semantic
@@ -1788,12 +1788,12 @@ import {compact_preserving_test_failures} from "std/agent/autocompact"
 // archived-message count) to tell whether compaction happened -- never infer
 // it from a length delta, since archiving one message and inserting one
 // summary leaves the length unchanged.
-let result = transcript_auto_compact(messages, {
+const result = transcript_auto_compact(messages, {
   keep_last: 1,
   token_threshold: 1,
   policy: compact_preserving_test_failures({author: "host"})
 })
-let compacted = result.messages
+const compacted = result.messages
 ```
 
 Omitting `extend_default_instructions` or setting it to `true` appends the
@@ -1844,7 +1844,7 @@ ask the user. Every transition emits a `stance_transition` event
 ```harn,ignore
 import { AgentLoopOptions } from "std/agent/options"
 
-let stance_opts: AgentLoopOptions = {
+const stance_opts: AgentLoopOptions = {
   tools: tools,
   read_only_stance: {
     enabled: true,
@@ -1875,7 +1875,7 @@ reminder and returns `{transcript, reminder_id, deduped_count}`. The
 input transcript is unchanged.
 
 ```harn
-let injected = transcript.inject_reminder(transcript(), {
+const injected = transcript.inject_reminder(transcript(), {
   body: "Approaching context window cap.",
   tags: ["token_pressure"],
   dedupe_key: "token_pressure",
@@ -1884,7 +1884,7 @@ let injected = transcript.inject_reminder(transcript(), {
   propagate: "session",
   role_hint: "developer",
 })
-let t = injected.transcript
+const t = injected.transcript
 ```
 
 `body` is required and must be non-empty. Optional `tags`,
@@ -1900,7 +1900,7 @@ reminders and returns `{transcript, removed_count}`. Select by `id`,
 match.
 
 ```harn
-let cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
+const cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
 log(cleared.removed_count)
 ```
 
@@ -1941,7 +1941,7 @@ Opt out per loop:
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let reminder_opts: AgentLoopOptions = {
+const reminder_opts: AgentLoopOptions = {
   reminders: {providers: ["-token_pressure", "-idle_nudge"]},
 }
 agent_loop(task, system, reminder_opts)
@@ -2014,7 +2014,7 @@ The result is the normal `agent_loop` dict plus:
   `judge_duration_ms`, plus optional `trigger`.
 
 ```harn
-let result = agent_turn("Review this patch and fix obvious issues.", {
+const result = agent_turn("Review this patch and fix obvious issues.", {
   system: "Be direct and keep changes narrowly scoped.",
   provider: "openai",
   model: "gpt-5-mini",
@@ -2102,7 +2102,7 @@ agent step:
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let stop_opts: AgentLoopOptions = {
+const stop_opts: AgentLoopOptions = {
   tools: registry,
   stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
 }
@@ -2185,7 +2185,7 @@ instead of firing on every completion candidate:
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let cadence_opts: AgentLoopOptions = {
+const cadence_opts: AgentLoopOptions = {
   loop_until_done: true,
   done_judge: {
     cadence: {
@@ -2221,7 +2221,7 @@ Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 import { AgentLoopOptions } from "std/agent/options"
 import { path_scope } from "std/tools"
 
-let scoped_opts: AgentLoopOptions = {
+const scoped_opts: AgentLoopOptions = {
   permissions: {
     allow: {read_note: path_scope(), write_note: path_scope({mount_modes: ["extend"]})},
     deny: ["dangerous_*"],
@@ -2275,7 +2275,7 @@ cold-restores it with `harn run --resume <snapshot_path>`.
 // Self-park mid-loop until a review approval lands or 30 minutes pass.
 import { agent_await_resumption } from "std/agent/workers"
 
-let result = agent_loop("Wait for the maintainer's review.", nil, {
+const result = agent_loop("Wait for the maintainer's review.", nil, {
   provider: "openai",
   model: "gpt-5",
   tool_format: "native",
@@ -2289,14 +2289,14 @@ if result.status == "suspended" {
 
 ```harn,ignore
 // Parent-driven pause/resume of a background child.
-let handle = sub_agent_run("Draft the changelog.", {
+const handle = sub_agent_run("Draft the changelog.", {
   background: true,
   provider: "openai",
 })
 suspend_agent(handle, "operator pulled context")
 // ... other work ...
 resume_agent(handle, "Pick up where you left off.")
-let final = wait_agent(handle)
+const final = wait_agent(handle)
 ```
 
 ```harn,ignore
@@ -2377,7 +2377,7 @@ resolver also returns `HARN-CHN-001` for `pipeline:` outside a pipeline,
 context.
 
 ```harn
-let receipt = emit_channel("session:worker.ready", {worker: "lint"}, {
+const receipt = emit_channel("session:worker.ready", {worker: "lint"}, {
   id: "worker-ready-lint",
   ttl: 10m,
 })
@@ -2419,21 +2419,21 @@ import {
   coord_subscribe,
 } from "std/coordination"
 
-let receipt = coord_post(
+const receipt = coord_post(
   "session",
   "release",
   {kind: "claim", subject: "release ownership", body: "Codex-2 owns v0.8.167"},
   {id: "release-claim", session_id: "agent-session-1"},
 )
-let messages = coord_read("session", "release", {session_id: "agent-session-1"})
-let stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
-let memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
-let request = coord_send("workspace", "release", "build-agent", {
+const messages = coord_read("session", "release", {session_id: "agent-session-1"})
+const stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
+const memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+const request = coord_send("workspace", "release", "build-agent", {
   kind: "request",
   subject: "verify release",
   body: "Please audit the new patch release.",
 })
-let inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
+const inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
 coord_ack("workspace", "release", "build-agent", inbox.next_cursor)
 ```
 
@@ -2527,7 +2527,7 @@ to `act_with_approval`:
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
 
-let budgeted_opts: AgentLoopOptions = {
+const budgeted_opts: AgentLoopOptions = {
   autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
 }
 agent_loop(task, system, budgeted_opts)
@@ -2582,10 +2582,10 @@ Because `session_id` is exposed, the closure can call any
 "every-N-turns judge" pattern:
 
 ```harn
-let judge = { info ->
+const judge = { info ->
   if info.iteration % 3 != 0 { return nil }       // skip 2/3 turns
-  let snapshot = agent_session_snapshot(info.session_id)
-  let verdict = llm_call("...grade this transcript...", {
+  const snapshot = agent_session_snapshot(info.session_id)
+  const verdict = llm_call("...grade this transcript...", {
     provider: "openai", model: "gpt-5-mini",      // cheaper reflection model
     messages: [{role: "user", content: json_encode(snapshot)}],
     schema: {approved: "bool", feedback: "string"},
@@ -2604,7 +2604,7 @@ Hooks can also shape the next model turn. For example, once the required tool
 evidence exists, ask the provider to stop calling tools and synthesize:
 
 ```harn
-let finalize_after_evidence = { info ->
+const finalize_after_evidence = { info ->
   if info?.session_successful_tools?.contains("read_file") {
     return {
       message: "Use the gathered evidence and produce the final answer now.",
@@ -2629,11 +2629,11 @@ mechanics required:
   in-flight tool dispatches.
 
   ```harn
-  let s = agent_session_open()
-  let main = agent_loop(task, sys, {session_id: s, tools: registry,
+  const s = agent_session_open()
+  const main = agent_loop(task, sys, {session_id: s, tools: registry,
     post_turn_callback: { info ->
       if judge_says_redo_from(info) {
-        let branch = agent_session_fork_at(info.session_id, judged_k)
+        const branch = agent_session_fork_at(info.session_id, judged_k)
         agent_session_inject(branch, {role: "system",
           content: "Redo from turn ${judged_k} with: ${redirection}"})
         // Stash the branch id so the caller can pick it up.
@@ -2653,18 +2653,18 @@ mechanics required:
   scaffolding lives in `agent_loop`:
 
   ```harn
-  let base = agent_session_open()
-  let branch = agent_session_fork(base)
+  const base = agent_session_open()
+  const branch = agent_session_fork(base)
   agent_session_inject(branch, {role: "system",
     content: "Try the brute-force approach."})
 
-  let outcomes = parallel settle [base, branch]
+  const outcomes = parallel settle [base, branch]
     with { max_concurrent: 2 } { sess ->
       agent_loop(task, sys, {
         session_id: sess, tools: registry, max_iterations: 10,
       })
     }
-  let winner = pick_first_done(outcomes.results)
+  const winner = pick_first_done(outcomes.results)
   ```
 
   Use `parallel settle` (vs. `parallel each`) so a failure on one
@@ -2693,7 +2693,7 @@ without spawning a worker.
 ```harn
 import { parse_resume_conditions, spawn_agent } from "std/agent/workers"
 
-let resume_when = parse_resume_conditions({
+const resume_when = parse_resume_conditions({
   trigger: {
     kind: "review.approved",
     provider: "github",
@@ -2703,7 +2703,7 @@ let resume_when = parse_resume_conditions({
   on_event: "operator.resume",
 })
 
-let worker_node = {
+const worker_node = {
   kind: "subagent",
   mode: "llm",
   model_policy: {provider: "mock"},
@@ -2733,12 +2733,12 @@ without a `session_id` (or with an empty string) mint an anonymous id
 and never touch the store — the one-shot call shape is preserved.
 
 ```harn
-let s = agent_session_open()                       // mint UUIDv7
+const s = agent_session_open()                       // mint UUIDv7
 agent_session_inject(s, {role: "user", content: "hi"})
-let a = agent_loop("continue", nil, {session_id: s, provider: "mock"})
-let b = agent_loop("remember me?", nil, {session_id: s, provider: "mock"})
-let branch = agent_session_fork(s)                 // counterfactual
-let replay = agent_session_fork_at(s, 1)           // branch from a rebuilt prefix
+const a = agent_loop("continue", nil, {session_id: s, provider: "mock"})
+const b = agent_loop("remember me?", nil, {session_id: s, provider: "mock"})
+const branch = agent_session_fork(s)                 // counterfactual
+const replay = agent_session_fork_at(s, 1)           // branch from a rebuilt prefix
 agent_session_close(branch)
 agent_session_close(replay)
 ```
@@ -2969,7 +2969,7 @@ Package authors should prefer `std/connectors/shared` for provider API calls:
 ```harn
 import { connector_http_json } from "std/connectors/shared"
 
-let response = connector_http_json("POST", url, {
+const response = connector_http_json("POST", url, {
   headers: {Authorization: "Bearer " + token, Accept: "application/json"},
   body: json_stringify(payload),
   idempotency_key: "create:" + payload.id,
@@ -2997,10 +2997,10 @@ required for deterministic signing, and temporary credentials use
 `session_token` / `X-Amz-Security-Token`.
 
 ```harn
-let body = "{\"TableName\":\"Items\"}"
-let url = "https://dynamodb.us-east-1.amazonaws.com/"
+const body = "{\"TableName\":\"Items\"}"
+const url = "https://dynamodb.us-east-1.amazonaws.com/"
 http_mock("POST", url, {status: 200, body: "{\"ok\":true}", headers: {}})
-let signed = aws_sigv4_headers({
+const signed = aws_sigv4_headers({
   method: "POST",
   url: url,
   service: "dynamodb",
@@ -3012,7 +3012,7 @@ let signed = aws_sigv4_headers({
   headers: {"Content-Type": "application/x-amz-json-1.0"},
   timestamp: "20260429T120000Z",
 })
-let response = harness.net.request("POST", url, {body: body, headers: signed.headers})
+const response = harness.net.request("POST", url, {body: body, headers: signed.headers})
 ```
 
 ### Human-in-the-loop primitives
@@ -3027,12 +3027,12 @@ Each primitive accepts named arguments (preferred) or the legacy
 positional form. Both lower to the same VM-enforced runtime.
 
 ```harn,ignore
-let answer  = ask_user(prompt: "choose A or B", schema: schema_of(Choice))
-let record  = request_approval(action: "merge_pr", args: {pr: 123}, quorum: 2,
+const answer  = ask_user(prompt: "choose A or B", schema: schema_of(Choice))
+const record  = request_approval(action: "merge_pr", args: {pr: 123}, quorum: 2,
                                reviewers: ["alice", "bob", "carol"])
-let result  = dual_control(n: 2, m: 3, action: destructive_step,
+const result  = dual_control(n: 2, m: 3, action: destructive_step,
                            approvers: ["alice", "bob", "carol"])
-let handle  = escalate_to(role: "oncall", reason: "deploy failed")
+const handle  = escalate_to(role: "oncall", reason: "deploy failed")
 ```
 
 - `ask_user<T>(prompt, schema?, timeout?, default?) -> T`
@@ -3105,7 +3105,7 @@ Current caveats:
 import "std/triggers"
 
 fn about_outages(event: TriggerEvent) -> bool {
-  let result = llm_call(
+  const result = llm_call(
     "Is this message about outages? " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -3113,7 +3113,7 @@ fn about_outages(event: TriggerEvent) -> bool {
   return contains(result.text.lower(), "yes")
 }
 
-let handle = trigger_register({
+const handle = trigger_register({
   id: "slack-outage-gate",
   kind: "slack.message",
   provider: "slack",
@@ -3148,8 +3148,8 @@ audit:
 ```harn
 import { triage_start_my_day } from "std/triage"
 
-let connector_events = []
-let feed = triage_start_my_day(connector_events, {emit: true})
+const connector_events = []
+const feed = triage_start_my_day(connector_events, {emit: true})
 for event in feed.events {
   log(event.summary)
 }
@@ -3175,14 +3175,14 @@ MCP Apps hosts while keeping text/structured fallbacks first-class:
 ```harn
 import { ui_resource, ui_select_for_host, ui_structured_fallback, ui_tool_result } from "std/ui_resource"
 
-let resource = ui_resource(
+const resource = ui_resource(
   "ui://harn-dashboard/kpis@v1",
   "Weekly KPIs",
   weekly_kpi_html,
   {permissions: ["tools/call"], capabilities: ["tools/call", "context/read"]},
 )
-let result = ui_tool_result(resource, {structured_fallback: ui_structured_fallback({signups: 42, churn: 3})})
-let rendered = ui_select_for_host(result, host_capabilities)
+const result = ui_tool_result(resource, {structured_fallback: ui_structured_fallback({signups: 42, churn: 3})})
+const rendered = ui_select_for_host(result, host_capabilities)
 ```
 
 - `ui_resource(uri, name, html, options?: UiResourceOptions)` produces
@@ -3229,7 +3229,7 @@ trail is replayable:
 ```harn
 import { bulletin_propose, bulletin_emit, bulletin_accept, bulletin_render_for_prompt } from "std/personas/bulletins"
 
-let bulletin = bulletin_propose(
+const bulletin = bulletin_propose(
   {
     scope: "user",
     scope_key: "kenneth@example.com",
@@ -3242,8 +3242,8 @@ let bulletin = bulletin_propose(
     privacy: {sync: "local_only"},
   },
 )
-let _proposal = bulletin_emit(bulletin)
-let _accepted = bulletin_accept(bulletin, {decided_by: "user"})
+const _proposal = bulletin_emit(bulletin)
+const _accepted = bulletin_accept(bulletin, {decided_by: "user"})
 ```
 
 - `bulletin_propose(input, options?)` returns `harn.profile_bulletin.v1` with
@@ -3277,8 +3277,8 @@ import { memory_open, memory_store, memory_recall, memory_summarize, memory_forg
 memory_open("workspace/acme", {backend: "hybrid", embed_dim: 1024, embed_model_hint: "voyage-2"})
 
 memory_store("workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"])
-let hits = memory_recall("workspace/acme", "rust", 5, {mode: "semantic"})
-let summary = memory_summarize("workspace/acme", {limit: 10})
+const hits = memory_recall("workspace/acme", "rust", 5, {mode: "semantic"})
+const summary = memory_summarize("workspace/acme", {limit: 10})
 memory_forget("workspace/acme", {tag: "stale"})
 ```
 
@@ -3306,7 +3306,7 @@ in the active EventLog. On replay, the script runs from the top but matching
 steps return the persisted result without invoking the handler:
 
 ```harn,ignore
-let loaded = step.run("load-user", {user_id: id}, { input ->
+const loaded = step.run("load-user", {user_id: id}, { input ->
   return load_user(input.user_id)
 }, {namespace: "signup-" + id})
 ```
@@ -3620,20 +3620,20 @@ needs a local cap.
 ```harn
 import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
 
-let backpressure = Backpressure()
-let pool = pool_create({
+const backpressure = Backpressure()
+const pool = pool_create({
   name: "reviews",
   max_concurrent: 2,
   queue: fair_round_robin("tenant_id"),
   backpressure: backpressure.queue(100, "fail_submitter"),
 })
 
-let handle = pool.submit({ -> agent_loop("review", "You are a reviewer.") }, {
+const handle = pool.submit({ -> agent_loop("review", "You are a reviewer.") }, {
   tenant_id: "acme",
   priority: 10,
   idempotency_key: "review-pr-1984",
 })
-let result = pool_wait(handle)
+const result = pool_wait(handle)
 ```
 
 Pick-the-right-primitive:
@@ -3807,7 +3807,7 @@ without string-sniffing:
 
 ```harn
 try {
-  let r = llm_call(user_prompt, nil, opts)
+  const r = llm_call(user_prompt, nil, opts)
 } catch (e) {
   // e is {kind, reason, category, message, status?, retry_after_ms?, provider, model}
   if e.kind == "transient" && e.reason == "rate_limit" {
@@ -3823,30 +3823,30 @@ Three helpers flatten the common recovery boilerplate:
 ```harn
 // Non-throwing envelope: the ok/response/error shape eliminates the
 // try/guard/unwrap/?.data boilerplate at every callsite.
-let r = llm_call_safe(user_prompt, nil, opts)
+const r = llm_call_safe(user_prompt, nil, opts)
 if !r.ok {
   log("llm_call failed:", r.error.category, r.error.message)
   return nil
 }
-let data = r.response.data
+const data = r.response.data
 
 // When the call is a JSON-against-schema extraction, prefer
 // `llm_call_structured` / `*_safe` instead: `.data` is
 // pre-unwrapped and the schema-validated-JSON options are forced
 // by default (no boilerplate `output_validation` / `schema_retries`
 // / `output_format` keys at each callsite).
-let verdict = llm_call_structured(user_prompt, schema, {provider: "auto"})
+const verdict = llm_call_structured(user_prompt, schema, {provider: "auto"})
 // ...or non-throwing:
-let r = llm_call_structured_safe(user_prompt, schema, {provider: "auto"})
+const r = llm_call_structured_safe(user_prompt, schema, {provider: "auto"})
 if !r.ok { log("structured call failed:", r.error.category); return nil }
-let data = r.data
+const data = r.data
 
 // Scoped permit acquisition + backoff for flaky providers. Retries on
 // rate_limit / overloaded / transient_network / timeout categories with
 // exponential backoff (capped at 30s). Composes with
 // HARN_RATE_LIMIT_<PROVIDER>_RPM/_TPM and provider/model catalog
 // `rate_limits` fields.
-let r = with_rate_limit("openai", fn() {
+const r = with_rate_limit("openai", fn() {
   llm_call(user_prompt, nil, {provider: "openai"})
 }, {max_retries: 5, backoff_ms: 500})
 ```
@@ -3885,12 +3885,12 @@ try {
 }
 
 llm_mock({error: {category: "rate_limit", message: "429"}})
-let r = llm_call_safe("hi", nil, {provider: "mock"})
+const r = llm_call_safe("hi", nil, {provider: "mock"})
 assert(!r.ok)
 assert(r.error.category == "rate_limit")
 
 llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
-let recovered = llm_call_safe("hi", nil, {provider: "mock"})
+const recovered = llm_call_safe("hi", nil, {provider: "mock"})
 assert(!recovered.ok)
 assert(recovered.error.status == 503)
 assert(recovered.error.kind == "transient")
@@ -3908,12 +3908,12 @@ budget behavior without forking the loop:
 import { AgentLoopOptions } from "std/agent/options"
 import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
 
-let caller = compose([
+const caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),
   with_fallback,    // pseudo: with_fallback expects a list of callers
 ])(default_llm_caller())
 
-let resilient_opts: AgentLoopOptions = {loop_until_done: true, llm_caller: caller}
+const resilient_opts: AgentLoopOptions = {loop_until_done: true, llm_caller: caller}
 agent_loop(task, system, resilient_opts)
 ```
 
@@ -3931,11 +3931,11 @@ For role/env model resolution, use `agent_model_options` from
 ```harn,ignore
 import {agent_model_options} from "std/agent/options"
 
-let route = agent_model_options({
+const route = agent_model_options({
   role: "planner",
   defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
 })
-let caller = with_retry(default_llm_caller(), {max_attempts: 3})
+const caller = with_retry(default_llm_caller(), {max_attempts: 3})
 agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
 ```
 
@@ -3951,13 +3951,13 @@ deterministic budget enforcement, and receipt-grade structured logs.
 budget and logging compose over it.
 
 ```harn,ignore
-let router = with_routing({
+const router = with_routing({
   default: cheap,                                // fast inexpensive model
   routes: [{name: "frontier",
             when: { call -> call?.opts?.escalate ?? false },
             caller: strong}],                    // longer retries + fallback
 })
-let persona_caller = compose([
+const persona_caller = compose([
   with_logging({sink: receipts_sink}),
   with_budget({max_total_tokens: 250000, max_calls: 200}),
 ])(router)
@@ -3974,7 +3974,7 @@ replace ad-hoc `with_routing` + `with_retry` + `with_fallback`
 compositions with a single typed primitive.
 
 ```harn,ignore
-let policy = routing_policy({
+const policy = routing_policy({
   chain: [
     {provider: "anthropic", model: "claude-opus-4-20250514"},
     {provider: "openai",    model: "gpt-4o"},
@@ -4004,7 +4004,7 @@ let policy = routing_policy({
   max_refines_per_link: 1,                            // optional, default 1
 })
 
-let result = llm_call("Summarize this PR.", nil, {routing: policy})
+const result = llm_call("Summarize this PR.", nil, {routing: policy})
 // result.routing = {policy, attempts: [{provider, model, status, duration_ms, cost_usd, error?, verifier_outcome?, verifier_signals?}], selected, session_cost_usd}
 ```
 
@@ -4072,7 +4072,7 @@ the schema-retry composition described above.
 
 ```harn,ignore
 // Inline ladder: ordered steps, cheapest first.
-let result = llm_call("Summarize this PR.", nil, {
+const result = llm_call("Summarize this PR.", nil, {
   models: [
     "haiku",                                          // string sugar for {model: "haiku"}
     {model: "sonnet", label: "mid"},
@@ -4082,7 +4082,7 @@ let result = llm_call("Summarize this PR.", nil, {
 })
 
 // Named ladder resolved from the catalog ([model_ladders.<name>]).
-let result = llm_call("Summarize this PR.", nil, {ladder: "frugal"})
+const result = llm_call("Summarize this PR.", nil, {ladder: "frugal"})
 ```
 
 Each step is `{model, provider?, options?, label?}`; a bare string is sugar for
@@ -4144,16 +4144,16 @@ import {
   compose_tool_callers, tools_use_middleware,
 } from "std/llm/tool_middleware"
 
-let mw = with_required_reason({schema_required: false})
-let registry = tools_use_middleware(my_registry, mw.schema_transform)
+const mw = with_required_reason({schema_required: false})
+const registry = tools_use_middleware(my_registry, mw.schema_transform)
 
-let caller = compose_tool_callers([
+const caller = compose_tool_callers([
   with_audit_log({sink: "both", redact: ["token", "content"]}),
   with_consent({ call -> ask_human(call) }),
   mw.caller,
 ])
 
-let audited_opts: AgentLoopOptions = {tools: registry, tool_caller: caller}
+const audited_opts: AgentLoopOptions = {tools: registry, tool_caller: caller}
 agent_loop(task, system, audited_opts)
 ```
 
@@ -4205,7 +4205,7 @@ wrapper that turns a registry into a tool handler.
 ```harn
 import { preset_run_command, tool_hooks_mode_rewrite_with_audit } from "std/tool_hooks"
 
-let rust_cat = catalogue({
+const rust_cat = catalogue({
   id: "harn-canon/rust",
   stack: "rust",
   rules: [
@@ -4219,9 +4219,9 @@ let rust_cat = catalogue({
     }),
   ],
 })
-let registry = tool_hooks_register(tool_hooks_registry(), rust_cat)
+const registry = tool_hooks_register(tool_hooks_registry(), rust_cat)
 
-let run_command = preset_run_command({
+const run_command = preset_run_command({
   stacks: ["rust"],
   registry: registry,
   custom_rules: [],                                 // matched before the registry
@@ -4341,8 +4341,8 @@ Content-addressed cache with three backends and a composable wrapper:
 ```harn
 import { mem_cache, fs_cache, sqlite_cache, with_cache } from "std/cache"
 
-let store = sqlite_cache(state_path("evals.sqlite"), {ttl: "1h"})
-let answer = with_cache("key", { -> heavy_work() }, {store: store})
+const store = sqlite_cache(state_path("evals.sqlite"), {ttl: "1h"})
+const answer = with_cache("key", { -> heavy_work() }, {store: store})
 ```
 
 - `mem_cache(opts?)` — thread-local LRU. Does not survive `harn run`.
@@ -4374,7 +4374,7 @@ mutating shared state. Tracked through harn#1913 / epic #1765.
 ```harn,ignore
 import { create, domain, domain_wildcard, cidr, host } from "std/net_policy"
 
-let policy = create({
+const policy = create({
   allow: [
     domain("github.com"),
     domain_wildcard("*.github.com"),
@@ -4386,7 +4386,7 @@ let policy = create({
   on_violation: "error",                              // or "audit_only", "quarantine",
                                                       // or a fn(req) returning one of those
 })
-let restricted = harness.with_net_policy(policy)
+const restricted = harness.with_net_policy(policy)
 restricted.net.get("https://github.com/foo")          // allowed
 restricted.net.get("https://example.test/blocked")    // throws NetPolicyViolation
 restricted.is_quarantined()                           // sticky after a quarantine deny
@@ -4443,7 +4443,7 @@ import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 import { client, exchange_code, request, start_authorization, token, token_exchange } from "std/oauth/client"
 
-let cli = client(
+const cli = client(
   providers().github,
   {
     client_id: env("GH_CLIENT_ID"),
@@ -4455,14 +4455,14 @@ let cli = client(
 )
 
 // One-shot authorization-code dance (host drives the browser):
-let pkce = start_authorization(cli)            // pkce.url, pkce.state, pkce.code_verifier
-let token_set = exchange_code(cli, pkce, code, state)
+const pkce = start_authorization(cli)            // pkce.url, pkce.state, pkce.code_verifier
+const token_set = exchange_code(cli, pkce, code, state)
 
 // Subsequent calls auto-refresh past 75% TTL:
-let access = token(cli)                        // -> string, valid access token
+const access = token(cli)                        // -> string, valid access token
 
 // Or let the client own HTTP, with 1x retry on 401:
-let response = request(cli, "GET", "https://api.github.com/user")
+const response = request(cli, "GET", "https://api.github.com/user")
 ```
 
 - **PKCE always enforced.** `start_authorization` generates a fresh
@@ -4503,7 +4503,7 @@ claim helpers.
 import { token_exchange } from "std/oauth/client"
 import { delegated_claims, token_type } from "std/oauth/token_exchange"
 
-let delegated = token_exchange(cli, {
+const delegated = token_exchange(cli, {
   subject_token: human_token,
   subject_token_type: token_type("access_token"),
   actor_token: agent_jwt,
@@ -4513,7 +4513,7 @@ let delegated = token_exchange(cli, {
   scope: ["employee:read"],
 })
 
-let claims = delegated_claims(
+const claims = delegated_claims(
   {sub: "user@example.com"},
   [{sub: "https://service16.example.com"}, {sub: "https://service77.example.com"}],
 )
@@ -4535,14 +4535,14 @@ encrypted file, a cloud platform, or a vault.
 ```harn
 import { memory, file, harn_cloud_session, harn_cloud_org, custom } from "std/oauth/storage"
 
-let mem = memory()                                       // ephemeral
-let disk = file("/var/lib/harn/oauth.bin", env("KEY"))   // AES-256-GCM
-let cloud = harn_cloud_session()                          // per-session
-let shared = harn_cloud_org()                             // org-scoped
-let vault = custom({get: my_get, set: my_set, delete: my_delete})
+const mem = memory()                                       // ephemeral
+const disk = file("/var/lib/harn/oauth.bin", env("KEY"))   // AES-256-GCM
+const cloud = harn_cloud_session()                          // per-session
+const shared = harn_cloud_org()                             // org-scoped
+const vault = custom({get: my_get, set: my_set, delete: my_delete})
 
 mem.set("github", {access_token: "abc"}, 3600)
-let token = mem.get("github")                            // -> TokenSet | nil
+const token = mem.get("github")                            // -> TokenSet | nil
 mem.delete("github")
 ```
 
@@ -4573,7 +4573,7 @@ import { device_flow } from "std/oauth/device_flow"
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-let token_set = device_flow(providers().github, {
+const token_set = device_flow(providers().github, {
   client_id: env("GH_CLIENT_ID"),
   scopes: ["read:user", "repo"],
   storage: file("/var/lib/harn/ci.bin", env("HARN_OAUTH_KEY")),
@@ -4610,12 +4610,12 @@ import {
   register_client, validate_metadata, well_known_paths, well_known_response,
 } from "std/oauth/dynamic_registration"
 
-let paths = well_known_paths()  // {client_metadata, authorization_server_metadata, registration}
-let oas = authorization_server_metadata(providers().github, {registration_endpoint: paths.registration})
-let envelope = well_known_response(oas)  // {status, content_type, headers, body}
+const paths = well_known_paths()  // {client_metadata, authorization_server_metadata, registration}
+const oas = authorization_server_metadata(providers().github, {registration_endpoint: paths.registration})
+const envelope = well_known_response(oas)  // {status, content_type, headers, body}
 
-let store = dynamic_registration_store()
-let result = register_client(store, {redirect_uris: ["https://app.example/cb"]})
+const store = dynamic_registration_store()
+const result = register_client(store, {redirect_uris: ["https://app.example/cb"]})
 // result.client_id, result.client_secret (returned ONCE), result.client_id_issued_at
 ```
 
@@ -4644,7 +4644,7 @@ underlying tool — redaction is display-only.
 import { default_patterns, drain_audit, redact, register_pattern } from "std/oauth/redaction"
 
 register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
-let display = redact("Bearer ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+const display = redact("Bearer ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 for entry in drain_audit() {
   // entry.code == "HARN-OAU-001"
   // entry.pattern, entry.match_count, entry.bytes_redacted

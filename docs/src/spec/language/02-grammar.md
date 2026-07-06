@@ -273,7 +273,7 @@ list type: `...nums: int` accepts only integer extras and binds `nums` as
 
 ```harn
 fn sum(...nums) {
-  var total = 0
+  let total = 0
   for n in nums {
     total = total + n
   }

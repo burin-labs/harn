@@ -8,7 +8,7 @@ Harn files can contain top-level code without a `pipeline` block. The
 runtime wraps it in an implicit pipeline automatically:
 
 ```harn
-let x = 1 + 2
+const x = 1 + 2
 log(x)
 
 fn double(n) {
@@ -43,8 +43,8 @@ always available.
 `let` creates immutable bindings. `var` creates mutable ones.
 
 ```harn
-let name = "Alice"
-var counter = 0
+const name = "Alice"
+let counter = 0
 
 counter = counter + 1  // ok
 name = "Bob"           // error: immutable assignment
@@ -55,10 +55,10 @@ explicit `{ ... }` block gets its own scope, so inner bindings can shadow outer
 names without colliding:
 
 ```harn
-let status = "outer"
+const status = "outer"
 
 if true {
-  let status = "inner"
+  const status = "inner"
   log(status)  // inner
 }
 
@@ -90,9 +90,9 @@ Harn is dynamically typed with optional type annotations.
 Annotations are optional and checked at compile time:
 
 ```harn
-let x: int = 42
-let name: string = "hello"
-let nums: list<int> = [1, 2, 3]
+const x: int = 42
+const name: string = "hello"
+const nums: list<int> = [1, 2, 3]
 
 fn add(a: int, b: int) -> int {
   return a + b
@@ -115,9 +115,9 @@ another decimal. Unlike `to_int`/`to_float`, `decimal` **throws** on an
 un-parseable value rather than returning `nil`, so a bad money string fails loud.
 
 ```harn
-let price = decimal("19.99")
-let total = price * 3            // 59.97 — int operands promote exactly
-let half  = decimal("1") / decimal("2")  // 0.5
+const price = decimal("19.99")
+const total = price * 3            // 59.97 — int operands promote exactly
+const half  = decimal("1") / decimal("2")  // 0.5
 ```
 
 Decimal is a distinct type. It arithmetic-promotes `int` operands, but
@@ -148,8 +148,8 @@ that required fields are present with compatible types. Extra fields are allowed
 (width subtyping).
 
 ```harn
-let user: {name: string, age: int} = {name: "Alice", age: 30}
-let config: {host: string, port?: int} = {host: "localhost"}
+const user: {name: string, age: int} = {name: "Alice", age: 30}
+const config: {host: string, port?: int} = {host: "localhost"}
 
 fn greet(u: {name: string}) -> string {
   return "hi ${u["name"]}"
@@ -161,7 +161,7 @@ Use `type` aliases for reusable shape definitions:
 
 ```harn
 type Config = {model: string, max_tokens: int}
-let cfg: Config = {model: "gpt-4", max_tokens: 100}
+const cfg: Config = {model: "gpt-4", max_tokens: 100}
 ```
 
 ### Truthiness
@@ -173,7 +173,7 @@ These values are falsy: `false`, `nil`, `0`, `0.0`, `""`, `[]`, `{}`. Everything
 ### Interpolation
 
 ```harn
-let name = "world"
+const name = "world"
 log("Hello, ${name}!")
 log("2 + 2 = ${2 + 2}")
 ```
@@ -187,8 +187,8 @@ is performed -- backslashes and dollar signs are taken literally. Useful for
 regex patterns and file paths:
 
 ```harn
-let pattern = r"\d+\.\d+"
-let path = r"C:\Users\alice\docs"
+const pattern = r"\d+\.\d+"
+const path = r"C:\Users\alice\docs"
 ```
 
 Raw strings cannot span multiple lines.
@@ -196,7 +196,7 @@ Raw strings cannot span multiple lines.
 ### Multi-line strings
 
 ```harn
-let doc = """
+const doc = """
   This is a multi-line string.
   Common leading whitespace is stripped.
 """
@@ -206,8 +206,8 @@ Multi-line strings support `${expression}` interpolation with automatic
 indent stripping:
 
 ```harn
-let name = "world"
-let greeting = """
+const name = "world"
+const greeting = """
   Hello, ${name}!
   Welcome to Harn.
 """
@@ -270,12 +270,12 @@ Access properties, indexes, or call methods on values that might be nil. Returns
 nil instead of erroring when the receiver is nil:
 
 ```harn
-let user = nil
+const user = nil
 log(user?.name)           // nil (no error)
 log(user?.greet("hi"))    // nil (method not called)
 log(user?.["name"])       // nil (subscript not evaluated)
 
-let d = {name: "Alice"}
+const d = {name: "Alice"}
 log(d?.name)              // Alice
 log(d?.["name"])          // Alice
 ```
@@ -287,13 +287,13 @@ Chains propagate nil: `a?.b?.[0]?.c` returns nil if any step is nil.
 Extract sublists or substrings using slice syntax:
 
 ```harn
-let items = [10, 20, 30, 40, 50]
+const items = [10, 20, 30, 40, 50]
 log(items[1:3])   // [20, 30]
 log(items[:2])    // [10, 20]
 log(items[3:])    // [40, 50]
 log(items[-2:])   // [40, 50]
 
-let s = "hello world"
+const s = "hello world"
 log(s[0:5])       // hello
 log(s[-5:])       // world
 ```
@@ -316,12 +316,12 @@ fn divide(a, b) {
 }
 
 fn compute(x) {
-  let result = divide(x, 2)?   // unwraps Ok, or returns Err early
+  const result = divide(x, 2)?   // unwraps Ok, or returns Err early
   return Ok(result + 10)
 }
 
 fn compute_zero(x) {
-  let result = divide(x, 0)?   // divide returns Err, ? propagates it
+  const result = divide(x, 0)?   // divide returns Err, ? propagates it
   return Ok(result + 10)
 }
 
@@ -346,12 +346,12 @@ log("world" in "hello world") // true
 log("xyz" not in "hello")     // true
 
 // Dicts (key membership)
-let data = {name: "Alice", age: 30}
+const data = {name: "Alice", age: 30}
 log("name" in data)           // true
 log("email" not in data)      // true
 
 // Sets
-let s = set(1, 2, 3)
+const s = set(1, 2, 3)
 log(2 in s)                   // true
 log(5 not in s)               // true
 ```
@@ -388,7 +388,7 @@ for entry in {a: 1, b: 2} {
 ### while
 
 ```harn
-var i = 0
+let i = 0
 while i < 10 {
   log(i)
   i = i + 1
@@ -495,7 +495,7 @@ a list:
 
 ```harn
 fn sum(...nums) {
-  var total = 0
+  let total = 0
   for n in nums {
     total = total + n
   }
@@ -517,8 +517,8 @@ only integer extras and binds `nums` as `list<int>`.
 ### Closures
 
 ```harn
-let square = { x -> x * x }
-let add = { a, b -> a + b }
+const square = { x -> x * x }
+const add = { a, b -> a + b }
 
 log(square(4))     // 16
 log(add(2, 3))     // 5
@@ -529,7 +529,7 @@ Closures capture their lexical environment at definition time. Parameters are im
 ### Higher-order functions
 
 ```harn
-let nums = [1, 2, 3, 4, 5]
+const nums = [1, 2, 3, 4, 5]
 
 nums.map({ x -> x * 2 })           // [2, 4, 6, 8, 10]
 nums.filter({ x -> x > 3 })        // [4, 5]
@@ -554,8 +554,8 @@ an `Iter` return a new `Iter` without running any work. Sinks drain
 the iter and return an eager value.
 
 ```harn,ignore
-let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-let first_three_doubled_evens = xs
+const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+const first_three_doubled_evens = xs
   .iter()
   .filter({ x -> x % 2 == 0 })
   .map({ x -> x * 2 })
@@ -567,7 +567,7 @@ log(first_three_doubled_evens)  // [4, 8, 12]
 Use `.enumerate()` to get `(index, value)` pairs in a for-loop:
 
 ```harn,ignore
-let items = ["a", "b", "c"]
+const items = ["a", "b", "c"]
 for (i, x) in items.iter().enumerate() {
   log("${i}: ${x}")
 }
@@ -619,7 +619,7 @@ don't round-trip through iter.
 The pipe operator `|>` passes the left side as the argument to the right side:
 
 ```harn
-let result = data
+const result = data
   |> { list -> list.filter({ x -> x > 0 }) }
   |> { list -> list.map({ x -> x * 2 }) }
   |> json_stringify
@@ -644,22 +644,22 @@ function name.
 Binary operators, method chains, and pipes can span multiple lines:
 
 ```harn,ignore
-let message = "hello"
+const message = "hello"
   + " "
   + "world"
 
-let result = items
+const result = items
   .filter({ x -> x > 0 })
   .map({ x -> x * 2 })
 
-let valid = check_a()
+const valid = check_a()
   && check_b()
   || fallback()
 
-let name = nil
+const name = nil
   ?? "unknown"
 
-let same = 1
+const same = 1
   == 1
 ```
 
@@ -671,7 +671,7 @@ A backslash at the end of a line forces the next line to continue the
 current expression, even when no operator is present:
 
 ```harn,ignore
-let long_value = some_function( \
+const long_value = some_function( \
   arg1, arg2, arg3 \
 )
 ```
@@ -685,24 +685,24 @@ real variable.
 ### Dict destructuring
 
 ```harn
-let person = {name: "Alice", age: 30}
-let {name, age} = person
+const person = {name: "Alice", age: 30}
+const {name, age} = person
 log(name)  // "Alice"
 log(age)   // 30
 
-let {name, debug: _} = {name: "Alice", debug: true}
+const {name, debug: _} = {name: "Alice", debug: true}
 log(name)  // "Alice"
 ```
 
 ### List destructuring
 
 ```harn
-let items = [1, 2, 3, 4, 5]
-let [first, ...rest] = items
+const items = [1, 2, 3, 4, 5]
+const [first, ...rest] = items
 log(first)  // 1
 log(rest)   // [2, 3, 4, 5]
 
-let [_, second, _] = [10, 20, 30]
+const [_, second, _] = [10, 20, 30]
 log(second)  // 20
 ```
 
@@ -711,15 +711,15 @@ log(second)  // 20
 Use `:` to bind a dict field to a different variable name:
 
 ```harn
-let data = {name: "Alice"}
-let {name: user_name} = data
+const data = {name: "Alice"}
+const {name: user_name} = data
 log(user_name)  // "Alice"
 ```
 
 ### Destructuring in for-in loops
 
 ```harn
-let entries = [{key: "a", value: 1}, {key: "b", value: 2}]
+const entries = [{key: "a", value: 1}, {key: "b", value: 2}]
 for {key, value} in entries {
   log("${key}: ${value}")
 }
@@ -735,15 +735,15 @@ Pattern fields can specify defaults with `= expr`. The default is used when
 the value would otherwise be `nil`:
 
 ```harn
-let { name = "anon", role = "user" } = { name: "Alice" }
+const { name = "anon", role = "user" } = { name: "Alice" }
 log(name)  // Alice
 log(role)  // user
 
-let [a = 0, b = 0, c = 0] = [1, 2]
+const [a = 0, b = 0, c = 0] = [1, 2]
 log(c)     // 0
 
 // Combine with renaming
-let { name: display = "Unknown" } = {}
+const { name: display = "Unknown" } = {}
 log(display)  // Unknown
 ```
 
@@ -753,10 +753,10 @@ Missing keys destructure to `nil` (unless a default is specified). A rest
 pattern with no remaining items gives an empty collection:
 
 ```harn
-let {name, email} = {name: "Alice"}
+const {name, email} = {name: "Alice"}
 log(email)  // nil
 
-let [only, ...rest] = [42]
+const [only, ...rest] = [42]
 log(rest)   // []
 ```
 
@@ -765,7 +765,7 @@ log(rest)   // []
 ### Lists
 
 ```harn
-let nums = [1, 2, 3]
+const nums = [1, 2, 3]
 nums.count          // 3
 nums.first          // 1
 nums.last           // 3
@@ -779,7 +779,7 @@ Assigning to an out-of-bounds index throws an error.
 ### Dicts
 
 ```harn
-let user = {name: "Alice", age: 30}
+const user = {name: "Alice", age: 30}
 user.name           // "Alice" (property access)
 user["age"]         // 30 (subscript access)
 user.missing        // nil (missing keys return nil)
@@ -812,16 +812,16 @@ Sets are unordered collections of unique values. Duplicates are
 automatically removed.
 
 ```harn
-let s = set(1, 2, 3)          // create from individual values
-let s2 = set([4, 5, 5, 6])   // create from a list (deduplicates)
-let tags = set("a", "b", "c") // works with any value type
+const s = set(1, 2, 3)          // create from individual values
+const s2 = set([4, 5, 5, 6])   // create from a list (deduplicates)
+const tags = set("a", "b", "c") // works with any value type
 ```
 
 Set operations are provided as builtin functions:
 
 ```harn
-let a = set(1, 2, 3)
-let b = set(3, 4, 5)
+const a = set(1, 2, 3)
+const b = set(3, 4, 5)
 
 set_contains(a, 2)       // true
 set_contains(a, 99)      // false
@@ -837,7 +837,7 @@ set_remove(a, 2)         // set(1, 3)
 Sets support iteration with `for..in`:
 
 ```harn
-var sum = 0
+let sum = 0
 for item in set(10, 20, 30) {
   sum = sum + item
 }
@@ -847,7 +847,7 @@ log(sum)  // 60
 Convert a set to a list with `to_list()`:
 
 ```harn
-let items = to_list(set(10, 20))
+const items = to_list(set(10, 20))
 type_of(items)  // "list"
 ```
 
@@ -863,7 +863,7 @@ enum Status {
   Failed(code, message)
 }
 
-let s = Status.Pending("waiting")
+const s = Status.Pending("waiting")
 match s.variant {
   "Pending" -> { log(s.fields[0]) }
   "Active" -> { log("ok") }
@@ -880,7 +880,7 @@ struct Point {
   y: int
 }
 
-let p = {x: 10, y: 20}
+const p = {x: 10, y: 20}
 log(p.x)
 ```
 
@@ -893,7 +893,7 @@ struct Point {
   y: int
 }
 
-let p = Point { x: 10, y: 20 }
+const p = Point { x: 10, y: 20 }
 log(p.x)  // 10
 ```
 
@@ -905,7 +905,7 @@ struct Pair<A, B> {
   second: B
 }
 
-let pair: Pair<int, string> = Pair { first: 1, second: "two" }
+const pair: Pair<int, string> = Pair { first: 1, second: "two" }
 log(pair.second)  // two
 ```
 
@@ -928,7 +928,7 @@ impl Point {
   }
 }
 
-let p = Point { x: 3, y: 4 }
+const p = Point { x: 3, y: 4 }
 log(p.distance())       // 5.0
 log(p.translate(10, 20)) // Point({x: 13, y: 24})
 ```
@@ -998,7 +998,7 @@ struct Cat {
 
 impl Cat {
   fn display(self) -> string {
-    let status = if self.indoor { "indoor" } else { "outdoor" }
+    const status = if self.indoor { "indoor" } else { "outdoor" }
     return "${self.name} (${status} cat)"
   }
 }
@@ -1016,8 +1016,8 @@ fn introduce(animal: Displayable) {
   log("Meet: ${animal.display()}")
 }
 
-let d = Dog({name: "Rex", breed: "Labrador"})
-let c = Cat({name: "Whiskers", indoor: true})
+const d = Dog({name: "Rex", breed: "Labrador"})
+const c = Cat({name: "Whiskers", indoor: true})
 
 introduce(d)  // Meet: Rex the Labrador
 introduce(c)  // Meet: Whiskers (indoor cat)
@@ -1109,7 +1109,7 @@ fn add(a, b, c) {
   return a + b + c
 }
 
-let nums = [1, 2, 3]
+const nums = [1, 2, 3]
 log(add(...nums))  // 6
 ```
 
@@ -1120,16 +1120,16 @@ fn add(a, b, c) {
   return a + b + c
 }
 
-let rest = [2, 3]
+const rest = [2, 3]
 log(add(1, ...rest))  // 6
 ```
 
 Spread works in method calls too:
 
 ```harn,ignore
-let point = Point({x: 0, y: 0})
-let deltas = [10, 20]
-let moved = point.translate(...deltas)
+const point = Point({x: 0, y: 0})
+const deltas = [10, 20]
+const moved = point.translate(...deltas)
 ```
 
 ## Try-expression
@@ -1138,7 +1138,7 @@ The `try` keyword without a `catch` block is a try-expression. It
 evaluates its body and wraps the outcome in a `Result`:
 
 ```harn
-let result = try { json_parse(raw_input) }
+const result = try { json_parse(raw_input) }
 // Result.Ok(parsed_data)  -- if parsing succeeds
 // Result.Err("invalid JSON: ...") -- if parsing throws
 ```
@@ -1153,7 +1153,7 @@ fn safe_divide(a, b) {
 }
 
 fn compute(x) {
-  let half = safe_divide(x, 2)?  // unwrap Ok or propagate Err
+  const half = safe_divide(x, 2)?  // unwrap Ok or propagate Err
   return Ok(half + 10)
 }
 ```
@@ -1167,7 +1167,7 @@ The `ask` expression is syntactic sugar for making an LLM call. It takes
 a set of key-value fields and returns the LLM response as a string:
 
 ```harn,ignore
-let answer = ask {
+const answer = ask {
   system: "You are a helpful assistant.",
   user: "What is 2 + 2?"
 }
@@ -1181,10 +1181,10 @@ to building a dict and passing it to `llm_call`.
 ## Duration literals
 
 ```harn
-let d1 = 500ms   // 500 milliseconds
-let d2 = 5s      // 5 seconds
-let d3 = 2m      // 2 minutes
-let d4 = 1h      // 1 hour
+const d1 = 500ms   // 500 milliseconds
+const d2 = 5s      // 5 seconds
+const d3 = 2m      // 2 minutes
+const d4 = 1h      // 1 hour
 ```
 
 Durations can be passed to `sleep()` and used in `deadline` blocks.
@@ -1197,7 +1197,7 @@ Durations can be passed to `sleep()` and used in `deadline` blocks.
 log(pi)    // 3.141592653589793
 log(e)     // 2.718281828459045
 
-let area = pi * r * r
+const area = pi * r * r
 ```
 
 ## Named format placeholders
@@ -1217,7 +1217,7 @@ For simple cases, string interpolation with `${}` is usually more
 convenient:
 
 ```harn
-let name = "Alice"
+const name = "Alice"
 log("Hello, ${name}!")
 ```
 

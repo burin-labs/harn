@@ -122,14 +122,14 @@ Sets are iterable with `for ... in` and support `len()`.
 | `multipart_form_data(fields, opts?)` | Deterministically builds `{content_type, boundary, body}` multipart fixtures for tests; field content may be bytes or string |
 
 ```harn
-let encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
-let decoded = base64_decode(encoded)        // "hello world"
-let jwt = base64url_encode("{\"alg\":\"HS256\"}") // no `=` padding
-let text = hex_decode("68656c6c6f")         // "hello"
-let hash = sha256("hello")                  // hex string
-let md5hash = md5("hello")                  // hex string
-let gz = gzip_encode("hello")               // bytes
-let hello = bytes_to_string(gzip_decode(gz)) // "hello"
+const encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
+const decoded = base64_decode(encoded)        // "hello world"
+const jwt = base64url_encode("{\"alg\":\"HS256\"}") // no `=` padding
+const text = hex_decode("68656c6c6f")         // "hello"
+const hash = sha256("hello")                  // hex string
+const md5hash = md5("hello")                  // hex string
+const gz = gzip_encode("hello")               // bytes
+const hello = bytes_to_string(gzip_decode(gz)) // "hello"
 ```
 
 `multipart_parse` returns `{boundary, fields, field_count, total_bytes}`.
@@ -137,7 +137,7 @@ Each field is `{name, filename, content_type, headers, bytes, text}`. `text`
 is `nil` for non-UTF-8 uploads so binary data remains lossless in `bytes`.
 
 ```harn
-let fixture = multipart_form_data([
+const fixture = multipart_form_data([
   {name: "title", content: "Quarterly report"},
   {
     name: "upload",
@@ -147,14 +147,14 @@ let fixture = multipart_form_data([
   },
 ])
 
-let form = multipart_parse(fixture.body, fixture.content_type, {
+const form = multipart_parse(fixture.body, fixture.content_type, {
   max_total_bytes: 1048576,
   max_field_bytes: 262144,
   max_fields: 8,
 })
 
-let title = multipart_field_text(form.fields[0])
-let uploaded = multipart_field_bytes(form.fields[1])
+const title = multipart_field_text(form.fields[0])
+const uploaded = multipart_field_bytes(form.fields[1])
 log(title)
 log(bytes_to_hex(uploaded))
 ```
@@ -233,17 +233,17 @@ and returns a list of dicts, one per match. Each dict contains:
 - Any named capture groups (from `(?P<name>...)`) as additional keys
 
 ```harn
-let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
+const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // results == [
 //   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
 //   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
 // ]
 
-let named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
 // named == [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
 
-let body = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
-let also_body = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
+const body = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
+const also_body = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
 ```
 
 Returns an empty list if there are no matches.

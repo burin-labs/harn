@@ -6,7 +6,7 @@
 <p class="tagline">A pipeline-oriented language for AI agent orchestration. LLM calls, tool use, concurrency, retries, and replay are built into the runtime.</p>
 
 ```harn
-let response = llm_call(
+const response = llm_call(
   "Explain quicksort in two sentences.",
   "You are a computer science tutor."
 )
@@ -27,10 +27,10 @@ Harn is a small language built around one observation: when you write an AI agen
 
 ```harn
 pipeline review(task) {
-  let files = ["src/main.rs", "src/lib.rs"]
+  const files = ["src/main.rs", "src/lib.rs"]
 
-  let reviews = parallel each files { file ->
-    let code = read_file(file)
+  const reviews = parallel each files { file ->
+    const code = read_file(file)
     retry 3 {
       llm_call(code, "Review this Rust file and list any issues.")
     }

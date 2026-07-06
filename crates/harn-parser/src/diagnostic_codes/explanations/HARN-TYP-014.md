@@ -13,7 +13,7 @@ match exactly.
 fn pair<T>(a: T, b: T) -> [T; 2] { [a, b] }
 
 // HARN-TYP-014: pair takes 1 type parameter, not 2
-let xs = pair::<int, string>(1, "two")
+const xs = pair::<int, string>(1, "two")
 ```
 
 ## How to fix

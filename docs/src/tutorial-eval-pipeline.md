@@ -17,7 +17,7 @@ that you can inspect failures by eye:
 
 ```harn
 pipeline main(task) {
-  let cases = [
+  const cases = [
     {id: "case-1", input: "What is 2 + 2?", expected: "4"},
     {id: "case-2", input: "Capital of France?", expected: "Paris"},
     {id: "case-3", input: "Color of grass?", expected: "green"},
@@ -33,14 +33,14 @@ If each case is independent, use `parallel each` so the slow parts overlap.
 
 ```harn
 pipeline main(task) {
-  let cases = [
+  const cases = [
     {id: "case-1", input: "What is 2 + 2?", expected: "4"},
     {id: "case-2", input: "Capital of France?", expected: "Paris"},
     {id: "case-3", input: "Color of grass?", expected: "green"},
   ]
 
-  let results = parallel each cases { tc ->
-    let answer = llm_call(tc.input, "Answer in one word or short phrase.", {
+  const results = parallel each cases { tc ->
+    const answer = llm_call(tc.input, "Answer in one word or short phrase.", {
       temperature: 0.0,
       max_tokens: 64,
     })
@@ -67,22 +67,22 @@ The important part of an eval pipeline is the metric trail. Use
 
 ```harn
 pipeline main(task) {
-  let cases = [
+  const cases = [
     {id: "case-1", input: "What is 2 + 2?", expected: "4"},
     {id: "case-2", input: "Capital of France?", expected: "Paris"},
   ]
 
-  var passed = 0
+  let passed = 0
   for tc in cases {
-    let answer = llm_call(tc.input, "Answer in one word.", {temperature: 0.0})
-    let correct = answer.text.contains(tc.expected)
+    const answer = llm_call(tc.input, "Answer in one word.", {temperature: 0.0})
+    const correct = answer.text.contains(tc.expected)
     if correct {
       passed = passed + 1
     }
     eval_metric("case_correct", correct, {case_id: tc.id})
   }
 
-  let accuracy = passed / cases.count
+  const accuracy = passed / cases.count
   eval_metric("accuracy", accuracy, {passed: passed, total: cases.count})
   eval_metric("run_id", uuid())
   eval_metric("generated_at", timestamp())
@@ -96,7 +96,7 @@ the results.
 
 ```harn
 pipeline main(task) {
-  let summary = {
+  const summary = {
     run_id: uuid(),
     generated_at: timestamp(),
     accuracy: 0.83,

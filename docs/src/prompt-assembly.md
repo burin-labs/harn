@@ -91,7 +91,7 @@ provenance record for every fragment — included or excluded, with the reason a
 byte count:
 
 ```harn
-let explained = prompt_explain({
+const explained = prompt_explain({
   system: "You are a pragmatic engineering partner.",
   tools: [
     { name: "todo", description: "Track plan items", guidance: "Always update the TODO tracker." },

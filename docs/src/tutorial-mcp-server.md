@@ -17,7 +17,7 @@ schemas:
 
 ```harn
 pipeline main(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
 
   tools = tool_define(tools, "greet", "Greet someone by name", {
     params: { name: "string" },
@@ -94,7 +94,7 @@ pipeline main(task) {
       }
     ],
     handler: { args ->
-      let lang = args.language ?? "unknown"
+      const lang = args.language ?? "unknown"
       "Please review this " + lang + " code for correctness, bugs, and tests:\n\n" + args.code
     }
   })

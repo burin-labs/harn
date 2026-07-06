@@ -28,7 +28,7 @@ seam config.
 ```harn
 import { agent_completion_gate } from "std/agent/judge"
 
-let gate = agent_completion_gate({
+const gate = agent_completion_gate({
   facts: { ctx -> {source_write_count: 1, verify: {ok: true}} },
   max_vetoes: 3,
 })

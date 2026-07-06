@@ -21,7 +21,7 @@ fn search_workspace(_args) {
 }
 
 pipeline answer_identity_questions(task) {
-  var reg = tool_registry()
+  let reg = tool_registry()
   reg = runtime_introspection_tools(reg)
   reg = tool_define(
     reg,
@@ -34,7 +34,7 @@ pipeline answer_identity_questions(task) {
     },
   )
 
-  let result = agent_loop(
+  const result = agent_loop(
     task,
     "You are a helpful coding assistant.",
     {tools: reg, model: "claude-opus-4-7"},
@@ -85,7 +85,7 @@ tests, observability, and scripts that need the data without going
 through a tool call:
 
 ```harn
-let snap = runtime_introspection()
+const snap = runtime_introspection()
 log("provider=" + to_string(snap?.provider))
 log("model=" + to_string(snap?.model))
 log("harn=" + to_string(snap.harn_version))

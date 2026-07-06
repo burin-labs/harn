@@ -26,13 +26,13 @@ id through every layer manually.
 ## Example
 
 ```harn
-let session = "support-thread"
+const session = "support-thread"
 
 agent_subscribe(
   session,
   { ev ->
   if ev?.type == "iteration_end" {
-    let current = agent_session_current_id()
+    const current = agent_session_current_id()
     if current != nil {
       agent_inject_feedback(current, "iteration_marker", "just finished an iteration")
     }

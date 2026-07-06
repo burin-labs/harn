@@ -234,7 +234,7 @@ catalog without rebuilding the binary:
 
 ```harn
 fn main(harness: Harness) {
-  let report = harness.llm.catalog_refresh()
+  const report = harness.llm.catalog_refresh()
   harness.stdio.println(to_string(report.status))
 }
 ```

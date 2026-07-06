@@ -36,9 +36,9 @@ impl Point {
   }
 }
 
-let p = Point { x: 3, y: 4 }
+const p = Point { x: 3, y: 4 }
 log(p.distance())           // 5.0
-let p2 = p.translate(10, 20)
+const p2 = p.translate(10, 20)
 log(p2.x)                   // 13
 ```
 

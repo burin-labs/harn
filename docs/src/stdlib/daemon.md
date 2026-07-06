@@ -34,7 +34,7 @@ Useful optional config:
 Example:
 
 ```harn
-let reviewer = daemon_spawn({
+const reviewer = daemon_spawn({
   name: "reviewer",
   task: "Watch for trigger events and summarize the change.",
   system: "You are a careful code reviewer.",

@@ -1917,8 +1917,7 @@ fn scan_node_preflight(
                 );
             }
         }
-        Node::LetBinding { value, .. }
-        | Node::ConstBinding { value, .. } => {
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
             scan_node_preflight(
                 value,
                 file_path,

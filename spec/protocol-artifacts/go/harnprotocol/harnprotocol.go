@@ -55,7 +55,7 @@ const MCPUnsupportedProtocolVersionErrorCode = -32004
 type ACPAgentMethod = string
 
 // ACPAgentMethods enumerates every wire value Harn currently emits for ACPAgentMethod.
-let ACPAgentMethods = []ACPAgentMethod{
+var ACPAgentMethods = []ACPAgentMethod{
 	"initialize",
 	"session/inject",
 	"session/new",
@@ -79,7 +79,7 @@ let ACPAgentMethods = []ACPAgentMethod{
 type ACPClientMethod = string
 
 // ACPClientMethods enumerates every wire value Harn currently emits for ACPClientMethod.
-let ACPClientMethods = []ACPClientMethod{
+var ACPClientMethods = []ACPClientMethod{
 	"fs/read_text_file",
 	"fs/write_text_file",
 	"terminal/create",
@@ -91,7 +91,7 @@ let ACPClientMethods = []ACPClientMethod{
 type ACPAgentNotification = string
 
 // ACPAgentNotifications enumerates every wire value Harn currently emits for ACPAgentNotification.
-let ACPAgentNotifications = []ACPAgentNotification{
+var ACPAgentNotifications = []ACPAgentNotification{
 	"session/message",
 	"session/update",
 	"terminal/output",
@@ -101,7 +101,7 @@ let ACPAgentNotifications = []ACPAgentNotification{
 type ACPSessionUpdate = string
 
 // ACPSessionUpdates enumerates every wire value Harn currently emits for ACPSessionUpdate.
-let ACPSessionUpdates = []ACPSessionUpdate{
+var ACPSessionUpdates = []ACPSessionUpdate{
 	"user_message",
 	"user_message_chunk",
 	"agent_message_chunk",
@@ -140,7 +140,7 @@ let ACPSessionUpdates = []ACPSessionUpdate{
 type HarnACPSessionUpdateExtension = string
 
 // HarnACPSessionUpdateExtensions enumerates every wire value Harn currently emits for HarnACPSessionUpdateExtension.
-let HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
+var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 	"artifact",
 	"available_commands_update",
 	"fs_watch",
@@ -166,7 +166,7 @@ let HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 type HarnAgentEventKind = string
 
 // HarnAgentEventKinds enumerates every wire value Harn currently emits for HarnAgentEventKind.
-let HarnAgentEventKinds = []HarnAgentEventKind{
+var HarnAgentEventKinds = []HarnAgentEventKind{
 	"budget_circuit_breaker",
 	"budget_exhausted",
 	"composition_child_call",
@@ -202,7 +202,7 @@ let HarnAgentEventKinds = []HarnAgentEventKind{
 type ACPContentBlockType = string
 
 // ACPContentBlockTypes enumerates every wire value Harn currently emits for ACPContentBlockType.
-let ACPContentBlockTypes = []ACPContentBlockType{
+var ACPContentBlockTypes = []ACPContentBlockType{
 	"text",
 	"resource_link",
 	"resource",
@@ -214,7 +214,7 @@ let ACPContentBlockTypes = []ACPContentBlockType{
 type ACPToolKind = string
 
 // ACPToolKinds enumerates every wire value Harn currently emits for ACPToolKind.
-let ACPToolKinds = []ACPToolKind{
+var ACPToolKinds = []ACPToolKind{
 	"read",
 	"edit",
 	"delete",
@@ -230,7 +230,7 @@ let ACPToolKinds = []ACPToolKind{
 type ACPToolCallStatus = string
 
 // ACPToolCallStatuses enumerates every wire value Harn currently emits for ACPToolCallStatus.
-let ACPToolCallStatuses = []ACPToolCallStatus{
+var ACPToolCallStatuses = []ACPToolCallStatus{
 	"pending",
 	"in_progress",
 	"completed",
@@ -241,7 +241,7 @@ let ACPToolCallStatuses = []ACPToolCallStatus{
 type HarnToolCallErrorCategory = string
 
 // HarnToolCallErrorCategories enumerates every wire value Harn currently emits for HarnToolCallErrorCategory.
-let HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
+var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 	"schema_validation",
 	"tool_error",
 	"mcp_server_error",
@@ -259,7 +259,7 @@ let HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 type HarnSideEffectLevel = string
 
 // HarnSideEffectLevels enumerates every wire value Harn currently emits for HarnSideEffectLevel.
-let HarnSideEffectLevels = []HarnSideEffectLevel{
+var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"none",
 	"read_only",
 	"workspace_write",
@@ -272,7 +272,7 @@ let HarnSideEffectLevels = []HarnSideEffectLevel{
 type HarnWorkerStatus = string
 
 // HarnWorkerStatuses enumerates every wire value Harn currently emits for HarnWorkerStatus.
-let HarnWorkerStatuses = []HarnWorkerStatus{
+var HarnWorkerStatuses = []HarnWorkerStatus{
 	"running",
 	"progressed",
 	"awaiting_input",
@@ -287,7 +287,7 @@ let HarnWorkerStatuses = []HarnWorkerStatus{
 type ToolCallReceiptStatus = string
 
 // ToolCallReceiptStatuses enumerates every wire value Harn currently emits for ToolCallReceiptStatus.
-let ToolCallReceiptStatuses = []ToolCallReceiptStatus{
+var ToolCallReceiptStatuses = []ToolCallReceiptStatus{
 	"ok",
 	"schema_violation",
 	"consent_denied",
@@ -299,7 +299,7 @@ let ToolCallReceiptStatuses = []ToolCallReceiptStatus{
 type ToolCallReceiptExecutor = string
 
 // ToolCallReceiptExecutors enumerates every wire value Harn currently emits for ToolCallReceiptExecutor.
-let ToolCallReceiptExecutors = []ToolCallReceiptExecutor{
+var ToolCallReceiptExecutors = []ToolCallReceiptExecutor{
 	"harn",
 	"host_bridge",
 	"mcp_server",
@@ -310,7 +310,7 @@ let ToolCallReceiptExecutors = []ToolCallReceiptExecutor{
 type A2ATaskState = string
 
 // A2ATaskStates enumerates every wire value Harn currently emits for A2ATaskState.
-let A2ATaskStates = []A2ATaskState{
+var A2ATaskStates = []A2ATaskState{
 	"submitted",
 	"working",
 	"completed",
@@ -326,7 +326,7 @@ let A2ATaskStates = []A2ATaskState{
 type A2ATaskEventType = string
 
 // A2ATaskEventTypes enumerates every wire value Harn currently emits for A2ATaskEventType.
-let A2ATaskEventTypes = []A2ATaskEventType{
+var A2ATaskEventTypes = []A2ATaskEventType{
 	"status",
 	"message",
 	"worker_update",
@@ -336,7 +336,7 @@ let A2ATaskEventTypes = []A2ATaskEventType{
 type MCPProtocolVersionValue = string
 
 // MCPProtocolVersions enumerates every wire value Harn currently emits for MCPProtocolVersionValue.
-let MCPProtocolVersions = []MCPProtocolVersionValue{
+var MCPProtocolVersions = []MCPProtocolVersionValue{
 	"DRAFT-2026-v1",
 	"2025-11-25",
 	"2025-06-18",
@@ -346,7 +346,7 @@ let MCPProtocolVersions = []MCPProtocolVersionValue{
 type MCPMethod = string
 
 // MCPMethods enumerates every wire value Harn currently emits for MCPMethod.
-let MCPMethods = []MCPMethod{
+var MCPMethods = []MCPMethod{
 	"server/discover",
 	"initialize",
 	"tools/list",
@@ -368,7 +368,7 @@ let MCPMethods = []MCPMethod{
 type MCPCacheScope = string
 
 // MCPCacheScopes enumerates every wire value Harn currently emits for MCPCacheScope.
-let MCPCacheScopes = []MCPCacheScope{
+var MCPCacheScopes = []MCPCacheScope{
 	"private",
 	"public",
 }
@@ -377,7 +377,7 @@ let MCPCacheScopes = []MCPCacheScope{
 type MCPResultType = string
 
 // MCPResultTypes enumerates every wire value Harn currently emits for MCPResultType.
-let MCPResultTypes = []MCPResultType{
+var MCPResultTypes = []MCPResultType{
 	"complete",
 	"input_required",
 }
@@ -386,7 +386,7 @@ let MCPResultTypes = []MCPResultType{
 type MCPLoggingLevel = string
 
 // MCPLoggingLevels enumerates every wire value Harn currently emits for MCPLoggingLevel.
-let MCPLoggingLevels = []MCPLoggingLevel{
+var MCPLoggingLevels = []MCPLoggingLevel{
 	"debug",
 	"info",
 	"notice",
@@ -398,7 +398,7 @@ let MCPLoggingLevels = []MCPLoggingLevel{
 }
 
 // HarnToolLifecycleExtensionFields enumerates the wire values Harn currently emits.
-let HarnToolLifecycleExtensionFields = []string{
+var HarnToolLifecycleExtensionFields = []string{
 	"audit",
 	"durationMs",
 	"error",
@@ -410,13 +410,13 @@ let HarnToolLifecycleExtensionFields = []string{
 }
 
 // HarnContentExtensionFields enumerates the wire values Harn currently emits.
-let HarnContentExtensionFields = []string{
+var HarnContentExtensionFields = []string{
 	"visible_delta",
 	"visible_text",
 }
 
 // A2AMethods enumerates the wire values Harn currently emits.
-let A2AMethods = []string{
+var A2AMethods = []string{
 	"message/send",
 	"message/stream",
 	"tasks/get",
@@ -430,14 +430,14 @@ let A2AMethods = []string{
 }
 
 // MCPRequiredMetadataKeys enumerates the wire values Harn currently emits.
-let MCPRequiredMetadataKeys = []string{
+var MCPRequiredMetadataKeys = []string{
 	"io.modelcontextprotocol/protocolVersion",
 	"io.modelcontextprotocol/clientInfo",
 	"io.modelcontextprotocol/clientCapabilities",
 }
 
 // MCPMetadataKeys enumerates the wire values Harn currently emits.
-let MCPMetadataKeys = []string{
+var MCPMetadataKeys = []string{
 	"io.modelcontextprotocol/protocolVersion",
 	"io.modelcontextprotocol/clientInfo",
 	"io.modelcontextprotocol/clientCapabilities",
@@ -449,14 +449,14 @@ let MCPMetadataKeys = []string{
 }
 
 // MCPStandardHTTPHeaders enumerates the wire values Harn currently emits.
-let MCPStandardHTTPHeaders = []string{
+var MCPStandardHTTPHeaders = []string{
 	"MCP-Protocol-Version",
 	"Mcp-Method",
 	"Mcp-Name",
 }
 
 // MCPCacheResultFields enumerates the wire values Harn currently emits.
-let MCPCacheResultFields = []string{
+var MCPCacheResultFields = []string{
 	"ttlMs",
 	"cacheScope",
 }

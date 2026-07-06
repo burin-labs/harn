@@ -7,7 +7,7 @@ instruction against an eval set:
 import { optimize_prompt } from "std/llm/optimize"
 
 pipeline default() {
-  let result = optimize_prompt({
+  const result = optimize_prompt({
     base_prompt: "Answer the question.",
     eval_set: [
       {id: "add", input: "2 + 2", expected: "4"},

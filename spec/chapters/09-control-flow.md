@@ -64,8 +64,8 @@ If no arm matches, a runtime error is thrown (`No match arm matched the value`).
 This makes non-exhaustive matches a hard failure rather than a silent `nil`.
 
 ```harn
-let x = 5
-let label = match x {
+const x = 5
+const label = match x {
   1 -> { "one" }
   n if n > 3 -> { "big: ${n}" }
   _ -> { "other" }

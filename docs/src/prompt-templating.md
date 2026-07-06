@@ -22,7 +22,7 @@ assets. These render without touching the filesystem and report stable
 `std://...` provenance URIs:
 
 ```harn,ignore
-let tool_contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+const tool_contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
 ```
 
 Protected Rust orchestration paths are checked by `make lint-no-rust-prompt-prose`;

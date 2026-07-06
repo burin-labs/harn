@@ -15,12 +15,12 @@ that lane's allowed tools for the whole `agent_loop` run:
 ```harn,ignore
 import { default_lane_rows, lane_policy } from "std/agent/lanes"
 
-let opts = lane_policy(
+const opts = lane_policy(
   default_lane_rows(),
   task,
   {provider: "anthropic", tools: my_tools},
 )
-let result = agent_loop(task, nil, opts)
+const result = agent_loop(task, nil, opts)
 ```
 
 `default_lane_rows()` ports burin-code's `agent_lane_for_task` decision table:
@@ -104,8 +104,8 @@ alias with the old `rows`-first order.
 ```harn,ignore
 import { default_overlay_rows, with_overlay } from "std/agent/overlays"
 
-let opts = with_overlay({provider: "anthropic"}, default_overlay_rows(), "agent")
-let result = agent_loop(task, nil, opts)
+const opts = with_overlay({provider: "anthropic"}, default_overlay_rows(), "agent")
+const result = agent_loop(task, nil, opts)
 ```
 
 Rows are data (`{mode, lane?, lines, enabled?}`); a row whose `lane` matches
@@ -137,8 +137,8 @@ with_overlay(opts, rows, "agent", {overrides: {agent: ["Custom nudge instead of 
 it nil, and a consumer explicitly lowers it —
 
 ```harn,ignore
-let opts = agent_preset("repair", {tools: my_tools})
-let lane_pack = opts?.lane_policy
+const opts = agent_preset("repair", {tools: my_tools})
+const lane_pack = opts?.lane_policy
 if lane_pack != nil {
   opts = lane_policy(lane_pack.rows, task, opts, lane_pack)
 }

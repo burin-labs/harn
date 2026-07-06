@@ -15,19 +15,19 @@ pub(super) fn generate_swift() -> String {
     out.push_str("import Foundation\n\n");
     out.push_str("public enum HarnProtocolConstants {\n");
     out.push_str(&format!(
-        "    public static const artifactVersion = {}\n",
+        "    public static let artifactVersion = {}\n",
         json_string_literal(env!("CARGO_PKG_VERSION"))
     ));
     out.push_str(&format!(
-        "    public static const acpSchemaCompatibility = {}\n",
+        "    public static let acpSchemaCompatibility = {}\n",
         json_string_literal(ACP_SCHEMA_COMPATIBILITY)
     ));
     out.push_str(&format!(
-        "    public static const harnAgentEventMethod = {}\n",
+        "    public static let harnAgentEventMethod = {}\n",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
     ));
     out.push_str(&format!(
-        "    public static const harnProviderCatalogMethod = {}\n",
+        "    public static let harnProviderCatalogMethod = {}\n",
         json_string_literal(HARN_PROVIDER_CATALOG_METHOD)
     ));
     for (name, value) in [
@@ -48,15 +48,15 @@ pub(super) fn generate_swift() -> String {
         ),
     ] {
         out.push_str(&format!(
-            "    public static const {name} = {}\n",
+            "    public static let {name} = {}\n",
             json_string_literal(value)
         ));
     }
     out.push_str(&format!(
-        "    public static const mcpUnsupportedProtocolVersionErrorCode = {MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE}\n"
+        "    public static let mcpUnsupportedProtocolVersionErrorCode = {MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE}\n"
     ));
     out.push_str(&format!(
-        "    public static const mcpUnsupportedProtocolVersionErrorMessage = {}\n",
+        "    public static let mcpUnsupportedProtocolVersionErrorMessage = {}\n",
         json_string_literal(MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE)
     ));
     out.push_str(&swift_string_array(
@@ -202,23 +202,23 @@ pub(super) fn generate_swift() -> String {
     case object([String: HarnACPValue])
 
     public init?(jsonEncodable value: Encodable) {
-        const encoder = JSONEncoder()
-        guard const data = try? encoder.encode(HarnAnyEncodable(value)),
-              const object = try? JSONSerialization.jsonObject(with: data),
-              const converted = HarnACPValue(jsonObject: object) else {
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(HarnAnyEncodable(value)),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let converted = HarnACPValue(jsonObject: object) else {
             return nil
         }
         self = converted
     }
 
     public init?(jsonObject: Any) {
-        if const scalar = Self.jsonScalar(jsonObject) {
+        if let scalar = Self.jsonScalar(jsonObject) {
             self = scalar
-        } else if const values = jsonObject as? [Any] {
-            guard const array = Self.jsonArray(values) else { return nil }
+        } else if let values = jsonObject as? [Any] {
+            guard let array = Self.jsonArray(values) else { return nil }
             self = array
-        } else if const values = jsonObject as? [String: Any] {
-            guard const object = Self.jsonDictionary(values) else { return nil }
+        } else if let values = jsonObject as? [String: Any] {
+            guard let object = Self.jsonDictionary(values) else { return nil }
             self = object
         } else {
             return nil
@@ -226,20 +226,20 @@ pub(super) fn generate_swift() -> String {
     }
 
     public init(from decoder: Decoder) throws {
-        const container = try decoder.singleValueContainer()
+        let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             self = .null
-        } else if const value = try? container.decode(Bool.self) {
+        } else if let value = try? container.decode(Bool.self) {
             self = .bool(value)
-        } else if const value = try? container.decode(Int.self) {
+        } else if let value = try? container.decode(Int.self) {
             self = .int(value)
-        } else if const value = try? container.decode(Double.self) {
+        } else if let value = try? container.decode(Double.self) {
             self = .double(value)
-        } else if const value = try? container.decode(String.self) {
+        } else if let value = try? container.decode(String.self) {
             self = .string(value)
-        } else if const value = try? container.decode([HarnACPValue].self) {
+        } else if let value = try? container.decode([HarnACPValue].self) {
             self = .array(value)
-        } else if const value = try? container.decode([String: HarnACPValue].self) {
+        } else if let value = try? container.decode([String: HarnACPValue].self) {
             self = .object(value)
         } else {
             self = .null
@@ -247,7 +247,7 @@ pub(super) fn generate_swift() -> String {
     }
 
     public func encode(to encoder: Encoder) throws {
-        let container = encoder.singleValueContainer()
+        var container = encoder.singleValueContainer()
         switch self {
         case .null: try container.encodeNil()
         case .bool(let value): try container.encode(value)
@@ -259,7 +259,7 @@ pub(super) fn generate_swift() -> String {
         }
     }
 
-    public let displayString: String {
+    public var displayString: String {
         switch self {
         case .null: return "nil"
         case .bool(let value): return value ? "true" : "false"
@@ -268,34 +268,34 @@ pub(super) fn generate_swift() -> String {
         case .string(let value): return value
         case .array(let value): return "[\(value.map(\.displayString).joined(separator: ", "))]"
         case .object(let value):
-            const pairs = value.sorted(by: { $0.key < $1.key })
+            let pairs = value.sorted(by: { $0.key < $1.key })
                 .map { "\($0.key): \($0.value.displayString)" }
             return "{\(pairs.joined(separator: ", "))}"
         }
     }
 
-    public let stringValue: String? {
+    public var stringValue: String? {
         if case .string(let value) = self { return value }
         return nil
     }
 
-    public let intValue: Int? {
+    public var intValue: Int? {
         if case .int(let value) = self { return value }
         if case .double(let value) = self, value.rounded() == value { return Int(value) }
         return nil
     }
 
-    public let boolValue: Bool? {
+    public var boolValue: Bool? {
         if case .bool(let value) = self { return value }
         return nil
     }
 
-    public let arrayValue: [HarnACPValue]? {
+    public var arrayValue: [HarnACPValue]? {
         if case .array(let value) = self { return value }
         return nil
     }
 
-    public let objectValue: [String: HarnACPValue]? {
+    public var objectValue: [String: HarnACPValue]? {
         if case .object(let value) = self { return value }
         return nil
     }
@@ -331,7 +331,7 @@ pub(super) fn generate_swift() -> String {
             return .double(value.doubleValue)
         }
         #endif
-        const objCType = String(cString: value.objCType)
+        let objCType = String(cString: value.objCType)
         #if !canImport(Darwin)
         if objCType == "c" || objCType == "B" {
             return .bool(value.boolValue)
@@ -350,20 +350,20 @@ pub(super) fn generate_swift() -> String {
     }
 
     private static func jsonArray(_ values: [Any]) -> HarnACPValue? {
-        let items: [HarnACPValue] = []
+        var items: [HarnACPValue] = []
         items.reserveCapacity(values.count)
         for value in values {
-            guard const item = HarnACPValue(jsonObject: value) else { return nil }
+            guard let item = HarnACPValue(jsonObject: value) else { return nil }
             items.append(item)
         }
         return .array(items)
     }
 
     private static func jsonDictionary(_ values: [String: Any]) -> HarnACPValue? {
-        let fields: [String: HarnACPValue] = [:]
+        var fields: [String: HarnACPValue] = [:]
         fields.reserveCapacity(values.count)
         for (key, value) in values {
-            guard const item = HarnACPValue(jsonObject: value) else { return nil }
+            guard let item = HarnACPValue(jsonObject: value) else { return nil }
             fields[key] = item
         }
         return .object(fields)
@@ -373,7 +373,7 @@ pub(super) fn generate_swift() -> String {
 public typealias HarnACPObject = [String: HarnACPValue]
 
 private struct HarnAnyEncodable: Encodable {
-    const value: Encodable
+    let value: Encodable
 
     init(_ value: Encodable) {
         self.value = value
@@ -398,12 +398,12 @@ public enum HarnJsonRpcId: Codable, Sendable, Hashable, ExpressibleByIntegerLite
     }
 
     public init(from decoder: Decoder) throws {
-        const container = try decoder.singleValueContainer()
+        let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             self = .null
-        } else if const value = try? container.decode(Int.self) {
+        } else if let value = try? container.decode(Int.self) {
             self = .int(value)
-        } else if const value = try? container.decode(String.self) {
+        } else if let value = try? container.decode(String.self) {
             self = .string(value)
         } else {
             throw DecodingError.typeMismatch(
@@ -417,7 +417,7 @@ public enum HarnJsonRpcId: Codable, Sendable, Hashable, ExpressibleByIntegerLite
     }
 
     public func encode(to encoder: Encoder) throws {
-        let container = encoder.singleValueContainer()
+        var container = encoder.singleValueContainer()
         switch self {
         case .null: try container.encodeNil()
         case .int(let value): try container.encode(value)
@@ -425,22 +425,22 @@ public enum HarnJsonRpcId: Codable, Sendable, Hashable, ExpressibleByIntegerLite
         }
     }
 
-    public let intValue: Int? {
+    public var intValue: Int? {
         if case .int(let value) = self { return value }
         return nil
     }
 
-    public let stringValue: String? {
+    public var stringValue: String? {
         if case .string(let value) = self { return value }
         return nil
     }
 }
 
 public struct HarnACPRequest: Codable, Sendable, Equatable {
-    public const jsonrpc: String
-    public let id: HarnJsonRpcId
-    public let method: String
-    public let params: HarnACPValue?
+    public let jsonrpc: String
+    public var id: HarnJsonRpcId
+    public var method: String
+    public var params: HarnACPValue?
 
     public init(id: HarnJsonRpcId, method: String, params: HarnACPValue? = nil) {
         self.jsonrpc = "2.0"
@@ -459,9 +459,9 @@ public struct HarnACPRequest: Codable, Sendable, Equatable {
 }
 
 public struct HarnACPError: Codable, Sendable, Equatable {
-    public let code: Int
-    public let message: String
-    public let data: HarnACPValue?
+    public var code: Int
+    public var message: String
+    public var data: HarnACPValue?
 
     public init(code: Int, message: String, data: HarnACPValue? = nil) {
         self.code = code
@@ -471,10 +471,10 @@ public struct HarnACPError: Codable, Sendable, Equatable {
 }
 
 public struct HarnACPResponse: Codable, Sendable, Equatable {
-    public const jsonrpc: String
-    public let id: HarnJsonRpcId
-    public let result: HarnACPValue?
-    public let error: HarnACPError?
+    public let jsonrpc: String
+    public var id: HarnJsonRpcId
+    public var result: HarnACPValue?
+    public var error: HarnACPError?
 
     public init(
         jsonrpc: String = "2.0",
@@ -516,9 +516,9 @@ public struct HarnACPResponse: Codable, Sendable, Equatable {
 }
 
 public struct HarnACPNotification: Codable, Sendable, Equatable {
-    public const jsonrpc: String
-    public let method: String
-    public let params: HarnACPValue?
+    public let jsonrpc: String
+    public var method: String
+    public var params: HarnACPValue?
 
     public init(method: String, params: HarnACPValue? = nil) {
         self.jsonrpc = "2.0"
@@ -528,13 +528,13 @@ public struct HarnACPNotification: Codable, Sendable, Equatable {
 }
 
 public struct HarnACPExtensionMeta: Codable, Sendable, Equatable {
-    public let harn: HarnACPObject?
+    public var harn: HarnACPObject?
 }
 
 public struct HarnACPContentBlock: Codable, Sendable, Equatable {
-    public let type: String
-    public let text: String?
-    public let meta: HarnACPExtensionMeta?
+    public var type: String
+    public var text: String?
+    public var meta: HarnACPExtensionMeta?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -556,7 +556,7 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
     }
 
     public init(from decoder: Decoder) throws {
-        if const raw = try? decoder.singleValueContainer().decode(String.self) {
+        if let raw = try? decoder.singleValueContainer().decode(String.self) {
             switch raw {
             case "harn_builtin": self = .harnBuiltin
             case "host_bridge": self = .hostBridge
@@ -565,8 +565,8 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
             }
             return
         }
-        const object = try decoder.container(keyedBy: ObjectKey.self)
-        const kind = try object.decode(String.self, forKey: .kind)
+        let object = try decoder.container(keyedBy: ObjectKey.self)
+        let kind = try object.decode(String.self, forKey: .kind)
         if kind == "mcp_server" {
             self = .mcpServer(name: try object.decode(String.self, forKey: .serverName))
         } else {
@@ -577,25 +577,25 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .harnBuiltin:
-            let container = encoder.singleValueContainer()
+            var container = encoder.singleValueContainer()
             try container.encode("harn_builtin")
         case .hostBridge:
-            let container = encoder.singleValueContainer()
+            var container = encoder.singleValueContainer()
             try container.encode("host_bridge")
         case .providerNative:
-            let container = encoder.singleValueContainer()
+            var container = encoder.singleValueContainer()
             try container.encode("provider_native")
         case .mcpServer(let name):
-            let container = encoder.container(keyedBy: ObjectKey.self)
+            var container = encoder.container(keyedBy: ObjectKey.self)
             try container.encode("mcp_server", forKey: .kind)
             try container.encode(name, forKey: .serverName)
         case .unknown(let raw):
-            let container = encoder.singleValueContainer()
+            var container = encoder.singleValueContainer()
             try container.encode(raw)
         }
     }
 
-    public let displayLabel: String {
+    public var displayLabel: String {
         switch self {
         case .harnBuiltin: return "harn_builtin"
         case .hostBridge: return "host_bridge"
@@ -607,37 +607,37 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
 }
 
 public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
-    public let audit: HarnACPValue?
-    public let durationMs: Double?
-    public let error: String?
-    public let errorCategory: HarnToolCallErrorCategory?
-    public let executionDurationMs: Double?
-    public let executor: HarnACPToolExecutor?
-    public let parsing: Bool?
-    public let rawInputPartial: String?
+    public var audit: HarnACPValue?
+    public var durationMs: Double?
+    public var error: String?
+    public var errorCategory: HarnToolCallErrorCategory?
+    public var executionDurationMs: Double?
+    public var executor: HarnACPToolExecutor?
+    public var parsing: Bool?
+    public var rawInputPartial: String?
 }
 
 public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
-    public let schemaVersion: Int
-    public let sessionId: String
-    public let runId: String?
-    public let toolCallId: String
-    public let toolName: String
-    public let iteration: Int
-    public let turnIndex: Int?
-    public let emitOrder: Int
-    public let reason: String?
-    public let kind: String?
-    public let executor: HarnToolCallReceiptExecutor?
-    public let status: HarnToolCallReceiptStatus
-    public let errorCategory: String?
-    public let durationMs: Int
-    public let argsHash: String
-    public let resultHash: String?
-    public let audit: HarnACPValue
-    public let emittedAt: String
-    public let model: String?
-    public let provider: String?
+    public var schemaVersion: Int
+    public var sessionId: String
+    public var runId: String?
+    public var toolCallId: String
+    public var toolName: String
+    public var iteration: Int
+    public var turnIndex: Int?
+    public var emitOrder: Int
+    public var reason: String?
+    public var kind: String?
+    public var executor: HarnToolCallReceiptExecutor?
+    public var status: HarnToolCallReceiptStatus
+    public var errorCategory: String?
+    public var durationMs: Int
+    public var argsHash: String
+    public var resultHash: String?
+    public var audit: HarnACPValue
+    public var emittedAt: String
+    public var model: String?
+    public var provider: String?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -664,16 +664,16 @@ public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
 }
 
 public struct HarnACPToolCall: Codable, Sendable, Equatable {
-    public let sessionUpdate: HarnACPSessionUpdate
-    public let toolCallId: String
-    public let title: String
-    public let kind: HarnACPToolKind?
-    public let status: HarnACPToolCallStatus?
-    public let content: [HarnACPContentBlock]?
-    public let locations: [HarnACPValue]?
-    public let rawInput: HarnACPValue?
-    public let rawOutput: HarnACPValue?
-    public let meta: HarnACPExtensionMeta?
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var toolCallId: String
+    public var title: String
+    public var kind: HarnACPToolKind?
+    public var status: HarnACPToolCallStatus?
+    public var content: [HarnACPContentBlock]?
+    public var locations: [HarnACPValue]?
+    public var rawInput: HarnACPValue?
+    public var rawOutput: HarnACPValue?
+    public var meta: HarnACPExtensionMeta?
 
     enum CodingKeys: String, CodingKey {
         case sessionUpdate
@@ -690,21 +690,21 @@ public struct HarnACPToolCall: Codable, Sendable, Equatable {
 }
 
 public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
-    public let sessionUpdate: HarnACPSessionUpdate
-    public let content: HarnACPValue?
-    public let messageId: String?
-    public let entries: [HarnACPValue]?
-    public let keptTurnCount: Int?
-    public let removedTurnCount: Int?
-    public let newTipTurnId: String?
-    public let reason: String?
-    public let toolCallId: String?
-    public let title: String?
-    public let kind: HarnACPToolKind?
-    public let status: HarnACPToolCallStatus?
-    public let rawInput: HarnACPValue?
-    public let rawOutput: HarnACPValue?
-    public let meta: HarnACPExtensionMeta?
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var content: HarnACPValue?
+    public var messageId: String?
+    public var entries: [HarnACPValue]?
+    public var keptTurnCount: Int?
+    public var removedTurnCount: Int?
+    public var newTipTurnId: String?
+    public var reason: String?
+    public var toolCallId: String?
+    public var title: String?
+    public var kind: HarnACPToolKind?
+    public var status: HarnACPToolCallStatus?
+    public var rawInput: HarnACPValue?
+    public var rawOutput: HarnACPValue?
+    public var meta: HarnACPExtensionMeta?
 
     enum CodingKeys: String, CodingKey {
         case sessionUpdate
@@ -726,35 +726,35 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
 }
 
 public struct HarnACPSessionUpdateParams: Codable, Sendable, Equatable {
-    public let sessionId: String
-    public let update: HarnACPSessionUpdateEnvelope
+    public var sessionId: String
+    public var update: HarnACPSessionUpdateEnvelope
 }
 
 public struct HarnACPSessionUpdateNotification: Codable, Sendable, Equatable {
-    public const jsonrpc: String
-    public let method: String
-    public let params: HarnACPSessionUpdateParams
+    public let jsonrpc: String
+    public var method: String
+    public var params: HarnACPSessionUpdateParams
 }
 
 public struct HarnAgentEventNotification: Codable, Sendable, Equatable {
-    public const jsonrpc: String
-    public let method: String
-    public let params: HarnACPObject
+    public let jsonrpc: String
+    public var method: String
+    public var params: HarnACPObject
 }
 
 public struct HarnPromptCapabilities: Codable, Sendable, Equatable {
-    public let image: Bool?
-    public let audio: Bool?
-    public let embeddedContext: Bool?
+    public var image: Bool?
+    public var audio: Bool?
+    public var embeddedContext: Bool?
 }
 
 public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
-    public let meta: HarnACPExtensionMeta?
-    public let loadSession: Bool?
-    public let session: HarnACPObject?
-    public let promptCapabilities: HarnPromptCapabilities?
-    public let mcpCapabilities: HarnACPObject?
-    public let sessionCapabilities: HarnACPObject?
+    public var meta: HarnACPExtensionMeta?
+    public var loadSession: Bool?
+    public var session: HarnACPObject?
+    public var promptCapabilities: HarnPromptCapabilities?
+    public var mcpCapabilities: HarnACPObject?
+    public var sessionCapabilities: HarnACPObject?
 
     enum CodingKeys: String, CodingKey {
         case meta = "_meta"
@@ -767,9 +767,9 @@ public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
 }
 
 public struct HarnToolArgSchema: Codable, Sendable, Equatable {
-    public let pathParams: [String]
-    public let argAliases: [String: String]
-    public let required: [String]
+    public var pathParams: [String]
+    public var argAliases: [String: String]
+    public var required: [String]
 
     enum CodingKeys: String, CodingKey {
         case pathParams = "path_params"
@@ -779,13 +779,13 @@ public struct HarnToolArgSchema: Codable, Sendable, Equatable {
 }
 
 public struct HarnToolAnnotations: Codable, Sendable, Equatable {
-    public let kind: HarnACPToolKind
-    public let sideEffectLevel: HarnSideEffectLevel
-    public let argSchema: HarnToolArgSchema
-    public let capabilities: [String: [String]]
-    public let emitsArtifacts: Bool
-    public let resultReaders: [String]
-    public let inlineResult: Bool
+    public var kind: HarnACPToolKind
+    public var sideEffectLevel: HarnSideEffectLevel
+    public var argSchema: HarnToolArgSchema
+    public var capabilities: [String: [String]]
+    public var emitsArtifacts: Bool
+    public var resultReaders: [String]
+    public var inlineResult: Bool
 
     enum CodingKeys: String, CodingKey {
         case kind
@@ -799,39 +799,39 @@ public struct HarnToolAnnotations: Codable, Sendable, Equatable {
 }
 
 public struct HarnA2ATaskStatus: Codable, Sendable, Equatable {
-    public let state: HarnA2ATaskState
-    public let message: HarnACPValue?
-    public let timestamp: String?
+    public var state: HarnA2ATaskState
+    public var message: HarnACPValue?
+    public var timestamp: String?
 }
 
 public struct HarnA2ATask: Codable, Sendable, Equatable {
-    public let id: String
-    public let contextId: String?
-    public let status: HarnA2ATaskStatus
-    public let history: [HarnACPValue]?
-    public let artifacts: [HarnACPValue]?
-    public let metadata: HarnACPObject?
+    public var id: String
+    public var contextId: String?
+    public var status: HarnA2ATaskStatus
+    public var history: [HarnACPValue]?
+    public var artifacts: [HarnACPValue]?
+    public var metadata: HarnACPObject?
 }
 
 public typealias HarnMCPJsonSchema202012 = HarnACPObject
 
 public struct HarnMCPImplementation: Codable, Sendable, Equatable {
-    public let name: String
-    public let version: String
-    public let title: String?
-    public let description: String?
-    public let websiteUrl: String?
+    public var name: String
+    public var version: String
+    public var title: String?
+    public var description: String?
+    public var websiteUrl: String?
 }
 
 public struct HarnMCPRequestMeta: Codable, Sendable, Equatable {
-    public let protocolVersion: String
-    public let clientInfo: HarnMCPImplementation
-    public let clientCapabilities: HarnACPObject
-    public let logLevel: HarnMCPLoggingLevel?
-    public let progressToken: HarnACPValue?
-    public let traceparent: String?
-    public let tracestate: String?
-    public let baggage: String?
+    public var protocolVersion: String
+    public var clientInfo: HarnMCPImplementation
+    public var clientCapabilities: HarnACPObject
+    public var logLevel: HarnMCPLoggingLevel?
+    public var progressToken: HarnACPValue?
+    public var traceparent: String?
+    public var tracestate: String?
+    public var baggage: String?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "io.modelcontextprotocol/protocolVersion"
@@ -846,9 +846,9 @@ public struct HarnMCPRequestMeta: Codable, Sendable, Equatable {
 }
 
 public struct HarnMCPHTTPHeaders: Codable, Sendable, Equatable {
-    public let protocolVersion: String
-    public let method: String
-    public let name: String?
+    public var protocolVersion: String
+    public var method: String
+    public var name: String?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "MCP-Protocol-Version"
@@ -858,17 +858,17 @@ public struct HarnMCPHTTPHeaders: Codable, Sendable, Equatable {
 }
 
 public struct HarnMCPCacheHints: Codable, Sendable, Equatable {
-    public let ttlMs: Int
-    public let cacheScope: HarnMCPCacheScope
+    public var ttlMs: Int
+    public var cacheScope: HarnMCPCacheScope
 }
 
 public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
-    public let resultType: HarnMCPResultType
-    public let supportedVersions: [String]
-    public let capabilities: HarnACPObject
-    public let serverInfo: HarnMCPImplementation
-    public let instructions: String?
-    public let meta: HarnACPObject?
+    public var resultType: HarnMCPResultType
+    public var supportedVersions: [String]
+    public var capabilities: HarnACPObject
+    public var serverInfo: HarnMCPImplementation
+    public var instructions: String?
+    public var meta: HarnACPObject?
 
     enum CodingKeys: String, CodingKey {
         case resultType
@@ -881,10 +881,10 @@ public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
 }
 
 public struct HarnMCPInputRequiredResult: Codable, Sendable, Equatable {
-    public let resultType: HarnMCPResultType
-    public let inputRequests: HarnACPObject?
-    public let requestState: String?
-    public let meta: HarnACPObject?
+    public var resultType: HarnMCPResultType
+    public var inputRequests: HarnACPObject?
+    public var requestState: String?
+    public var meta: HarnACPObject?
 
     enum CodingKeys: String, CodingKey {
         case resultType
@@ -895,53 +895,53 @@ public struct HarnMCPInputRequiredResult: Codable, Sendable, Equatable {
 }
 
 public struct HarnMCPUnsupportedProtocolVersionErrorData: Codable, Sendable, Equatable {
-    public let requested: String
-    public let supported: [String]
+    public var requested: String
+    public var supported: [String]
 }
 
 public struct HarnMCPUnsupportedProtocolVersionError: Codable, Sendable, Equatable {
-    public let jsonrpc: String
-    public let id: HarnJsonRpcId?
-    public let error: HarnACPError
+    public var jsonrpc: String
+    public var id: HarnJsonRpcId?
+    public var error: HarnACPError
 }
 
 public struct HarnMCPTool: Codable, Sendable, Equatable {
-    public let name: String
-    public let title: String?
-    public let description: String?
-    public let inputSchema: HarnMCPJsonSchema202012
-    public let outputSchema: HarnMCPJsonSchema202012?
-    public let annotations: HarnACPObject?
+    public var name: String
+    public var title: String?
+    public var description: String?
+    public var inputSchema: HarnMCPJsonSchema202012
+    public var outputSchema: HarnMCPJsonSchema202012?
+    public var annotations: HarnACPObject?
 }
 
 public struct HarnMCPResource: Codable, Sendable, Equatable {
-    public let uri: String
-    public let name: String
-    public let title: String?
-    public let description: String?
-    public let mimeType: String?
+    public var uri: String
+    public var name: String
+    public var title: String?
+    public var description: String?
+    public var mimeType: String?
 }
 
 public struct HarnMCPResourceTemplate: Codable, Sendable, Equatable {
-    public let uriTemplate: String
-    public let name: String
-    public let title: String?
-    public let description: String?
-    public let mimeType: String?
+    public var uriTemplate: String
+    public var name: String
+    public var title: String?
+    public var description: String?
+    public var mimeType: String?
 }
 
 public struct HarnMCPPrompt: Codable, Sendable, Equatable {
-    public let name: String
-    public let title: String?
-    public let description: String?
-    public let arguments: [HarnACPObject]?
+    public var name: String
+    public var title: String?
+    public var description: String?
+    public var arguments: [HarnACPObject]?
 }
 
 public struct HarnMCPOAuthProtectedResourceMetadata: Codable, Sendable, Equatable {
-    public let resource: String?
-    public let authorizationServers: [String]
-    public let scopesSupported: [String]?
-    public let bearerMethodsSupported: [String]?
+    public var resource: String?
+    public var authorizationServers: [String]
+    public var scopesSupported: [String]?
+    public var bearerMethodsSupported: [String]?
 
     enum CodingKeys: String, CodingKey {
         case resource
@@ -952,15 +952,15 @@ public struct HarnMCPOAuthProtectedResourceMetadata: Codable, Sendable, Equatabl
 }
 
 public struct HarnMCPOAuthAuthorizationServerMetadata: Codable, Sendable, Equatable {
-    public let issuer: String
-    public let authorizationEndpoint: String
-    public let tokenEndpoint: String
-    public let registrationEndpoint: String?
-    public let tokenEndpointAuthMethodsSupported: [String]?
-    public let codeChallengeMethodsSupported: [String]?
-    public let scopesSupported: [String]?
-    public let clientIdMetadataDocumentSupported: Bool?
-    public let authorizationResponseIssParameterSupported: Bool?
+    public var issuer: String
+    public var authorizationEndpoint: String
+    public var tokenEndpoint: String
+    public var registrationEndpoint: String?
+    public var tokenEndpointAuthMethodsSupported: [String]?
+    public var codeChallengeMethodsSupported: [String]?
+    public var scopesSupported: [String]?
+    public var clientIdMetadataDocumentSupported: Bool?
+    public var authorizationResponseIssParameterSupported: Bool?
 
     enum CodingKeys: String, CodingKey {
         case issuer
@@ -976,29 +976,29 @@ public struct HarnMCPOAuthAuthorizationServerMetadata: Codable, Sendable, Equata
 }
 
 public struct HarnMCPOAuthWwwAuthenticateChallenge: Codable, Sendable, Equatable {
-    public let scheme: String
-    public let params: [String: String]
+    public var scheme: String
+    public var params: [String: String]
 }
 
 public struct HarnMCPOAuthDiscoveryResult: Codable, Sendable, Equatable {
-    public let protectedResourceMetadataUrl: String
-    public let protectedResourceMetadata: HarnMCPOAuthProtectedResourceMetadata
-    public let authorizationServerIssuer: String
-    public let authorizationServerMetadataUrl: String
-    public let authorizationServerMetadataKind: String
-    public let authorizationServerMetadata: HarnMCPOAuthAuthorizationServerMetadata
-    public let challenge: HarnMCPOAuthWwwAuthenticateChallenge?
-    public let scopes: [String]
+    public var protectedResourceMetadataUrl: String
+    public var protectedResourceMetadata: HarnMCPOAuthProtectedResourceMetadata
+    public var authorizationServerIssuer: String
+    public var authorizationServerMetadataUrl: String
+    public var authorizationServerMetadataKind: String
+    public var authorizationServerMetadata: HarnMCPOAuthAuthorizationServerMetadata
+    public var challenge: HarnMCPOAuthWwwAuthenticateChallenge?
+    public var scopes: [String]
 }
 
 public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, Equatable {
-    public let clientName: String
-    public let redirectUris: [String]
-    public let grantTypes: [String]
-    public let responseTypes: [String]
-    public let tokenEndpointAuthMethod: String
-    public let applicationType: HarnMCPOAuthApplicationType
-    public let scope: String?
+    public var clientName: String
+    public var redirectUris: [String]
+    public var grantTypes: [String]
+    public var responseTypes: [String]
+    public var tokenEndpointAuthMethod: String
+    public var applicationType: HarnMCPOAuthApplicationType
+    public var scope: String?
 
     enum CodingKeys: String, CodingKey {
         case clientName = "client_name"
@@ -1038,7 +1038,7 @@ pub(super) fn swift_enum_with_deprecations(
         out.push_str(&json_string_literal(value));
         out.push('\n');
     }
-    out.push_str("\n    public static const allCases: [Self] = [\n");
+    out.push_str("\n    public static let allCases: [Self] = [\n");
     for value in values {
         out.push_str("        ");
         out.push_str(&json_string_literal(value));
@@ -1050,7 +1050,7 @@ pub(super) fn swift_enum_with_deprecations(
 }
 
 pub(super) fn swift_string_array(name: &str, values: &[&str]) -> String {
-    let mut out = format!("    public static const {name}: [String] = [\n");
+    let mut out = format!("    public static let {name}: [String] = [\n");
     for value in values {
         out.push_str("        ");
         out.push_str(&json_string_literal(value));

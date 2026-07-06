@@ -13,9 +13,9 @@ import {
   xdg_data_home,
 } from "std/cli/paths"
 
-let config_dir = xdg_config_home("harn")
-let data_dir = xdg_data_home("harn")
-let cache_dir = xdg_cache_home("harn")
+const config_dir = xdg_config_home("harn")
+const data_dir = xdg_data_home("harn")
+const cache_dir = xdg_cache_home("harn")
 ```
 
 ## Surface

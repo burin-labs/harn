@@ -57,22 +57,22 @@ import {
 } from "std/agent/completions"
 
 pipeline default() {
-  let context = completion_context({
+  const context = completion_context({
     surface: "editor",
     file_path: "src/main.rs",
     language: "rust",
-    prefix: "let result = client.",
+    prefix: "const result = client.",
     suffix: "\nprintln!(\"{result:?}\");",
     symbols: [{name: "client", kind: "variable"}],
   })
 
-  let policy = completion_policy({
+  const policy = completion_policy({
     disabled_languages: ["markdown"],
     allow_remote_models: false,
     prompt_recording: "metadata",
   })
 
-  let decision = completion_policy_decision(
+  const decision = completion_policy_decision(
     context,
     {provider: "ollama", model_id: "qwen2.5-coder"},
     policy,
@@ -81,7 +81,7 @@ pipeline default() {
     return decision.reason
   }
 
-  let shown = completion_shown_event(
+  const shown = completion_shown_event(
     completion_proposal({
       kind: "inline_insert",
       provider: "ollama",

@@ -50,7 +50,7 @@ enforce them automatically:
 import { StageSpec } from "std/workflow/options"
 
 fn review_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "read", "Read a file", {
     parameters: {path: {type: "string"}},
     returns: {type: "string"},
@@ -89,11 +89,11 @@ fn review_tools() {
 // Build each node through the typed `StageSpec` alias (or the
 // `workflow_stage_spec(...)` constructor) from `std/workflow/options`
 // so stage-spec typos fail at check time.
-let act: StageSpec = {kind: "stage", mode: "agent", tools: review_tools()}
-let verify: StageSpec = {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])}
-let repair: StageSpec = {kind: "stage", mode: "agent", tools: tool_select(review_tools(), ["edit", "run"])}
+const act: StageSpec = {kind: "stage", mode: "agent", tools: review_tools()}
+const verify: StageSpec = {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])}
+const repair: StageSpec = {kind: "stage", mode: "agent", tools: tool_select(review_tools(), ["edit", "run"])}
 
-let graph = workflow_graph({
+const graph = workflow_graph({
   name: "repair_loop",
   entry: "act",
   nodes: {act: act, verify: verify, repair: repair},
@@ -104,7 +104,7 @@ let graph = workflow_graph({
   ]
 })
 
-let report = workflow_validate(graph)
+const report = workflow_validate(graph)
 assert(report.valid)
 ```
 
@@ -134,7 +134,7 @@ should still see a canonical schedule.
 ```harn
 import "std/agents"
 
-let raw_plan = {
+const raw_plan = {
   steps: [
     {id: "inspect", kind: "research", title: "Inspect parser", tools: ["read", "search"]},
     {id: "patch", title: "Patch diagnostics", tools: ["edit"]},
@@ -142,8 +142,8 @@ let raw_plan = {
   ]
 }
 
-let plan = action_graph(raw_plan, {task: "Fix parser diagnostics"})
-let run = action_graph_run("Fix parser diagnostics", plan, {
+const plan = action_graph(raw_plan, {task: "Fix parser diagnostics"})
+const run = action_graph_run("Fix parser diagnostics", plan, {
   research: {mode: "llm", model_policy: {provider: "mock"}},
   execute: {mode: "llm", model_policy: {provider: "mock"}},
   verify: {command: "cargo test --workspace --quiet", expect_status: 0}
@@ -183,7 +183,7 @@ Artifacts carry provenance fields such as:
 Example:
 
 ```harn
-let selection = artifact({
+const selection = artifact({
   kind: "resource",
   title: "Selected code",
   text: read_file("src/parser.rs"),
@@ -191,11 +191,11 @@ let selection = artifact({
   relevance: 0.95
 })
 
-let plan = artifact_derive(selection, "plan", {
+const plan = artifact_derive(selection, "plan", {
   text: "Update the parser diagnostic wording and preserve spans."
 })
 
-let context = artifact_context([selection, plan], {
+const context = artifact_context([selection, plan], {
   include_kinds: ["resource", "plan"],
   max_tokens: 1200
 })
@@ -213,8 +213,8 @@ flagged by the `unnormalized-options` lint):
 ```harn
 import { WorkflowExecuteOptions } from "std/workflow/options"
 
-let run_options: WorkflowExecuteOptions = {max_steps: 8}
-let run = workflow_execute(
+const run_options: WorkflowExecuteOptions = {max_steps: 8}
+const run = workflow_execute(
   "Fix the diagnostic regression and verify the tests.",
   graph,
   [selection, plan],
@@ -260,7 +260,7 @@ goal: {
   kind: "subagent",
   retry_policy: {max_attempts: 3, feedback: true},
   verify: { result ->
-    let text = to_string(result?.artifacts[0]?.text)
+    const text = to_string(result?.artifacts[0]?.text)
     return {ok: contains(text, "SUMMARY:"), findings: ["output is missing a SUMMARY: section"]}
   },
 }
@@ -346,7 +346,7 @@ with feedback until it settles.
 that pattern for you — the run→validate→repair loop as a first-class helper:
 
 ```harn,ignore
-let out = workflow_run_repair({
+const out = workflow_run_repair({
   task: "Write the release notes for v1.2.",
   model_policy: {provider: "anthropic", model: "claude-sonnet"},
   verify: {command: "scripts/lint_release_notes.sh", expect_status: 0},
@@ -378,7 +378,7 @@ retry, feedback threading, and fn-verify gate for free.
   kind: "stage",
   retry_policy: {max_attempts: 3, feedback: true},
   executor: { ctx ->
-    let patched = my_patch_step(ctx.task, ctx.prior_findings)
+    const patched = my_patch_step(ctx.task, ctx.prior_findings)
     return {text: patched.summary, artifacts: patched.artifacts}
   },
 }
@@ -448,7 +448,7 @@ byte-identical to the hand-authored equivalent, so there is no new node shape
 or runtime concept to learn.
 
 ```harn,ignore
-let graph = workflow_stages({
+const graph = workflow_stages({
   name: "implement",
   stages: [
     {id: "act", kind: "stage", mode: "agent", model_policy: {provider: "mock"}},
@@ -607,12 +607,12 @@ Use signals for one-way notifications, queries for last-known published state,
 and updates when the caller needs a response:
 
 ```harn
-let workflow_id = "customer-journey-42"
+const workflow_id = "customer-journey-42"
 
 workflow.signal(workflow_id, "customer_joined", {customer_id: 7})
 workflow.publish_query(workflow_id, "progress_pct", 25)
 
-let next = workflow.receive(workflow_id)
+const next = workflow.receive(workflow_id)
 log(next?.kind == "signal")
 log(workflow.query(workflow_id, "progress_pct"))
 ```
@@ -622,7 +622,7 @@ log(workflow.query(workflow_id, "progress_pct"))
 `request_id`:
 
 ```harn
-let response = workflow.update(
+const response = workflow.update(
   "review-42",
   "approve_budget",
   {max_usd: 10},

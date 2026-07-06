@@ -4297,7 +4297,7 @@ in Harn.
     capability surface without vendor-specific knowledge:
 
     ```harn
-    let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+    const caps = provider_capabilities("anthropic", "claude-opus-4-7")
     if "bm25" in caps.tool_search { ... }
     ```
 
@@ -5180,13 +5180,13 @@ in Harn.
 
   ```harn
   fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-    let r = llm_call(prompt, nil,
+    const r = llm_call(prompt, nil,
       {output_schema: schema, output_validation: "error",
        response_format: "json"})
     return r.data
   }
 
-  let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+  const out: GraderOut = grade("Grade this", schema_of(GraderOut))
   // out.verdict / out.summary narrow without schema_is guards.
   ```
 

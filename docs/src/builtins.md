@@ -65,8 +65,8 @@ and `unwrap_or` pass the value through unchanged.
 Example:
 
 ```harn
-let good = Ok(42)
-let bad = Err("something went wrong")
+const good = Ok(42)
+const bad = Err("something went wrong")
 
 log(is_ok(good))             // true
 log(is_err(bad))             // true
@@ -147,7 +147,7 @@ Supported canonical keys:
 Example:
 
 ```harn
-let schema = {
+const schema = {
   type: "dict",
   required: ["name", "age"],
   properties: {
@@ -179,7 +179,7 @@ The schema builtins support these additional keys:
 Example:
 
 ```harn
-let user_schema = {
+const user_schema = {
   type: "dict",
   required: ["name", "age"],
   properties: {
@@ -189,7 +189,7 @@ let user_schema = {
   }
 }
 
-let parsed = schema_parse({name: "Ada", age: 36}, user_schema)
+const parsed = schema_parse({name: "Ada", age: 36}, user_schema)
 log(is_ok(parsed))
 log(unwrap(parsed).role)
 log(schema_to_json_schema(user_schema).type)
@@ -207,9 +207,9 @@ The lazy `std/schema` module provides ergonomic builders such as
 Composition helpers:
 
 ```harn
-let public_user = schema_pick(user_schema, ["name", "role"])
-let patch_schema = schema_partial(user_schema)
-let admin_user = schema_extend(user_schema, {
+const public_user = schema_pick(user_schema, ["name", "role"])
+const patch_schema = schema_partial(user_schema)
+const admin_user = schema_extend(user_schema, {
   properties: {
     name: {type: "string", min_length: 1},
     age: {type: "int", min: 0},
@@ -226,9 +226,9 @@ and bare JSON with surrounding text. Uses balanced bracket matching to
 correctly extract nested objects and arrays from mixed prose.
 
 ```harn
-let result = llm_call("Return JSON with name and age")
-let data = json_extract(result.text)         // parse, stripping fences
-let name = json_extract(result.text, "name") // extract just one key
+const result = llm_call("Return JSON with name and age")
+const data = json_extract(result.text)         // parse, stripping fences
+const name = json_extract(result.text, "name") // extract just one key
 ```
 
 ### JSON pointer and jq-like queries
@@ -247,10 +247,10 @@ recursive descent. It always returns the emitted stream as a list;
 `jq_first` is the convenience form for single-result queries.
 
 ```harn
-let api = json_parse(response.body)
-let email = json_pointer(api, "/users/0/email")
-let active_emails = jq(api, ".users[] | select(.active == true) | .email")
-let summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
+const api = json_parse(response.body)
+const email = json_pointer(api, "/users/0/email")
+const active_emails = jq(api, ".users[] | select(.active == true) | .email")
+const summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
 ```
 
 ## Multipart forms
@@ -268,7 +268,7 @@ is `nil` when the uploaded bytes are not valid UTF-8; use
 `multipart_field_text(field)` when invalid UTF-8 should be an error.
 
 ```harn
-let fixture = multipart_form_data([
+const fixture = multipart_form_data([
   {name: "title", content: "Quarterly report"},
   {
     name: "upload",
@@ -278,14 +278,14 @@ let fixture = multipart_form_data([
   },
 ])
 
-let form = multipart_parse(fixture.body, fixture.content_type, {
+const form = multipart_parse(fixture.body, fixture.content_type, {
   max_total_bytes: 1048576,
   max_field_bytes: 262144,
   max_fields: 8,
 })
 
-let title = multipart_field_text(form.fields[0])
-let uploaded = multipart_field_bytes(form.fields[1])
+const title = multipart_field_text(form.fields[0])
+const uploaded = multipart_field_bytes(form.fields[1])
 log(title)
 log(bytes_to_hex(uploaded))
 ```
@@ -449,9 +449,9 @@ the list — list access is O(1), and `chars` interns ASCII characters so
 the materialization does not allocate per character:
 
 ```harn
-let cs = chars(src)
-var i = 0
-var braces = 0
+const cs = chars(src)
+let i = 0
+let braces = 0
 while i < cs.count {
   if cs[i] == "{" { braces = braces + 1 }
   i = i + 1
@@ -672,7 +672,7 @@ Returns a list of dicts, one per match. Each dict contains:
 - Named capture groups (from `(?P<name>...)`) appear as additional keys
 
 ```harn
-let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
+const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // [
 //   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
 //   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
@@ -682,7 +682,7 @@ let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 Named capture groups are added as top-level keys on each result dict:
 
 ```harn
-let named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
 // [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
 ```
 
@@ -706,7 +706,7 @@ Returns an empty list if there are no matches. Throws on invalid regex.
 Example:
 
 ```harn
-let encoded = base64_encode("Hello, World!")
+const encoded = base64_encode("Hello, World!")
 log(encoded)                  // SGVsbG8sIFdvcmxkIQ==
 log(base64_decode(encoded))   // Hello, World!
 ```
@@ -759,7 +759,7 @@ fn main(harness: Harness) {
 Example (GitHub-style webhook signature verification):
 
 ```harn
-let signature = "sha256=" + hmac_sha256(secret, raw_body)
+const signature = "sha256=" + hmac_sha256(secret, raw_body)
 if !constant_time_eq(signature, request_signature) {
   throw "invalid signature"
 }
@@ -768,11 +768,11 @@ if !constant_time_eq(signature, request_signature) {
 Example (one AWS REST/JSON request against `http_mock`):
 
 ```harn
-let body = "{\"TableName\":\"Items\"}"
-let url = "https://dynamodb.us-east-1.amazonaws.com/"
+const body = "{\"TableName\":\"Items\"}"
+const url = "https://dynamodb.us-east-1.amazonaws.com/"
 http_mock("POST", url, {status: 200, body: "{\"ok\":true}", headers: {}})
 
-let signed = aws_sigv4_headers({
+const signed = aws_sigv4_headers({
   method: "POST",
   url: url,
   service: "dynamodb",
@@ -788,7 +788,7 @@ let signed = aws_sigv4_headers({
   timestamp: date_format(date_now().timestamp, "%Y%m%dT%H%M%SZ"),
 })
 
-let response = harness.net.request("POST", url, {
+const response = harness.net.request("POST", url, {
   body: body,
   headers: signed.headers,
 })
@@ -808,8 +808,8 @@ headers. Normal transcript and `http_mock_calls()` redaction treat
 Example (short-lived receipt or artifact link):
 
 ```harn
-let expires_at = timestamp() + 300
-let link = signed_url(
+const expires_at = timestamp() + 300
+const link = signed_url(
   "https://portal.example.test/receipts/r_123",
   {artifact: "transcript.json"},
   receipt_secret,
@@ -817,7 +817,7 @@ let link = signed_url(
   {kid: "v2"},
 )
 
-let verified = verify_signed_url(
+const verified = verify_signed_url(
   link,
   {v1: old_receipt_secret, v2: receipt_secret},
   timestamp(),
@@ -848,7 +848,7 @@ PKCS#8 private keys. Invalid algorithms, non-dict claims, and malformed PEM
 keys throw runtime errors.
 
 ```harn
-let token = jwt_sign(
+const token = jwt_sign(
   "ES256",
   {iss: app_id, iat: timestamp(), exp: timestamp() + 600},
   read_file("github-app-private-key.pem"),
@@ -877,7 +877,7 @@ than once, `cookies[name]` keeps the first value and `duplicates[name]` contains
 all observed values in wire order.
 
 ```harn
-let parsed = cookie_parse("sid=abc; theme=light; sid=old")
+const parsed = cookie_parse("sid=abc; theme=light; sid=old")
 log(parsed.cookies.sid)       // abc
 log(parsed.duplicates.sid[1]) // old
 ```
@@ -887,7 +887,7 @@ header. `SameSite=None` requires `Secure` so insecure cross-site cookies are
 rejected early.
 
 ```harn
-let header = cookie_serialize("theme", "dark", {
+const header = cookie_serialize("theme", "dark", {
   path: "/",
   max_age: 3600,
   http_only: true,
@@ -902,9 +902,9 @@ the cookie and store the mutable server-side state with `store_*`,
 `shared_map_*`, or an application database.
 
 ```harn
-let set_cookie = session_cookie("harn_session", {user: "alice"}, secret)
-let next_request = cookie_round_trip(set_cookie)
-let session = session_from_cookies(next_request.cookie_header, "harn_session", secret)
+const set_cookie = session_cookie("harn_session", {user: "alice"}, secret)
+const next_request = cookie_round_trip(set_cookie)
+const session = session_from_cookies(next_request.cookie_header, "harn_session", secret)
 if !session.ok {
   throw "invalid session"
 }
@@ -957,7 +957,7 @@ Example:
 ```harn
 import "std/vision"
 
-let text = ocr("fixtures/receipt.png", {language: "eng"})
+const text = ocr("fixtures/receipt.png", {language: "eng"})
 log(text.text)
 log(text.tokens[0]?.text)
 log(text.source.sha256)
@@ -993,9 +993,9 @@ cargo-nextest's JUnit dialect. Each returned dict has the shape:
 
 ```harn
 pipeline summarize() {
-  let xml = read_file("build/test-results/test-results.xml")
-  let cases = parse_junit_xml(xml)
-  let failed = cases.filter({ case -> case.status == "failed" || case.status == "errored" })
+  const xml = read_file("build/test-results/test-results.xml")
+  const cases = parse_junit_xml(xml)
+  const failed = cases.filter({ case -> case.status == "failed" || case.status == "errored" })
   log("failures: ${len(failed)} of ${len(cases)}")
   for case in failed {
     log("  ${case.name}: ${case.message}")
@@ -1120,7 +1120,7 @@ pipeline main(task) {
     default: "deny",
   })
 
-  let response = http_get("https://api.example.com/v1/status")
+  const response = http_get("https://api.example.com/v1/status")
   log(response.status)
 }
 ```
@@ -1199,15 +1199,15 @@ Allow/Disallow decisions use longest-prefix matching with Allow winning ties.
 import { mem_cache } from "std/cache"
 import { verify_imports, web_fetch, web_parse_html, web_search, robots_allowed, sitemap_urls } from "std/web"
 
-let store = mem_cache({namespace: "weekly-doc-monitor"})
-let page = web_fetch("https://docs.example.com/models", {store: store})
+const store = mem_cache({namespace: "weekly-doc-monitor"})
+const page = web_fetch("https://docs.example.com/models", {store: store})
 if page.cache_status != "not_modified" && robots_allowed(page.final_url) {
-  let parsed = web_parse_html(page.body, page.final_url)
+  const parsed = web_parse_html(page.body, page.final_url)
   log(parsed.title)
   log(sitemap_urls(page.final_url))
 }
 
-let docs = web_search("fastapi dependency injection", {
+const docs = web_search("fastapi dependency injection", {
   index: [
     {
       title: "FastAPI Dependencies",
@@ -1217,7 +1217,7 @@ let docs = web_search("fastapi dependency injection", {
     },
   ],
 })
-let imports = verify_imports("app.py", {
+const imports = verify_imports("app.py", {
   registry: [{ecosystem: "python", name: "fastapi", symbols: ["FastAPI"]}],
 })
 ```
@@ -1256,17 +1256,17 @@ Minimal inbound echo:
 
 ```harn
 pipeline websocket_echo() {
-  let server = websocket_server("127.0.0.1:8787", {})
+  const server = websocket_server("127.0.0.1:8787", {})
   websocket_route(server, "/acp", {auth: {bearer: env("ACP_TOKEN")}})
 
   while true {
-    let accepted = websocket_accept(server, 30000)
+    const accepted = websocket_accept(server, 30000)
     if accepted == nil || accepted?.type == "timeout" {
       continue
     }
-    let conn = accepted ?? {}
+    const conn = accepted ?? {}
 
-    let frame = websocket_receive(conn, 30000) ?? {}
+    const frame = websocket_receive(conn, 30000) ?? {}
     if frame?.type == "text" {
       websocket_send(conn, frame.data, {})
     }
@@ -1297,7 +1297,7 @@ Minimal webhook example:
 
 ```harn
 pipeline default() {
-  let server = http_server({max_body_bytes: 1048576, retain_raw_body: true})
+  const server = http_server({max_body_bytes: 1048576, retain_raw_body: true})
 
   http_server_before(server, { req ->
     if http_header(req, "origin") != nil {
@@ -1315,13 +1315,13 @@ pipeline default() {
   })
 
   http_server_route(server, "POST", "/hooks/{tenant}/{trigger}", { req ->
-    let signature = http_header(req, "x-hub-signature-256")
-    let expected = "sha256=" + hmac_sha256(secret_get("github/webhook-secret"), req.body)
+    const signature = http_header(req, "x-hub-signature-256")
+    const expected = "sha256=" + hmac_sha256(secret_get("github/webhook-secret"), req.body)
     if signature != expected {
       return http_response_text("invalid signature", {status: 401})
     }
 
-    let payload = json_parse(req.body)
+    const payload = json_parse(req.body)
     trigger_fire("github-webhook", {
       tenant: req.path_params.tenant,
       trigger: req.path_params.trigger,
@@ -1332,7 +1332,7 @@ pipeline default() {
     http_response_json({accepted: true}, {status: 202, headers: {["retry-after"]: "0"}})
   })
 
-  let probe = http_server_test(server, {
+  const probe = http_server_test(server, {
     method: "POST",
     path: "/hooks/acme/push",
     headers: {["x-hub-signature-256"]: "sha256=..."},
@@ -1360,7 +1360,7 @@ and `sse_server_cancelled()` to observe shutdown state.
 
 ```harn
 pipeline progress_stream(task) {
-  let stream = sse_server_response({max_event_bytes: 4096})
+  const stream = sse_server_response({max_event_bytes: 4096})
   sse_server_send(stream, {event: "progress", id: "1", data: "queued"})
   sse_server_heartbeat(stream, "still working")
   sse_server_send(stream, {event: "progress", id: "2", data: "done"})
@@ -1390,7 +1390,7 @@ http_mock("GET", "https://api.example.com/users", {
     {status: 200, body: "{\"users\": [\"alice\"]}", headers: {}},
   ]
 })
-let resp = http_get("https://api.example.com/users", {
+const resp = http_get("https://api.example.com/users", {
   retry: {max: 1, backoff_ms: 0}
 })
 assert_eq(resp.status, 200)
@@ -1404,19 +1404,19 @@ http_get("https://api.example.com/users", {
   headers: {Authorization: "Bearer test-token"},
   query: {limit: 2},
 })
-let call = http_mock_calls({redact_sensitive: false})[0]
+const call = http_mock_calls({redact_sensitive: false})[0]
 assert_eq(call.url, "https://api.example.com/users?limit=2")
 assert_eq(call.headers.authorization, "Bearer test-token")
 ```
 
 ```harn
-let stream = http_stream_open("https://example.com/archive.tar.gz", {
+const stream = http_stream_open("https://example.com/archive.tar.gz", {
   decompress: false,
   connect_timeout_ms: 5000,
   read_timeout_ms: 30000,
 })
-let meta = http_stream_info(stream)
-let chunk = http_stream_read(stream, 65536)
+const meta = http_stream_info(stream)
+const chunk = http_stream_read(stream, 65536)
 http_stream_close(stream)
 ```
 
@@ -1452,7 +1452,7 @@ connections are skipped so in-flight queries are not interrupted.
 Use `params` for every dynamic value:
 
 ```harn
-let rows = pg_query(
+const rows = pg_query(
   db,
   "select id, payload from receipts where tenant_id = $1 and id = $2::uuid",
   [tenant_id, receipt_id],
@@ -1587,7 +1587,7 @@ assert_eq(host_call("project.metadata_get", {dir: ".", namespace: "facts"}), "he
 assert_host_called("project", "metadata_get", {dir: ".", namespace: "facts"}, nil)
 
 mock_host_error("project", "scan", "scan failed", nil)
-let result = try { host_call("project.scan", {}) }
+const result = try { host_call("project.scan", {}) }
 assert(is_err(result))
 ```
 
@@ -1894,7 +1894,7 @@ llm_mock({
   text: "Let me check that.",
   tool_calls: [{name: "read_file", arguments: {path: "main.rs"}}],
 })
-let r = llm_call("question", nil, {provider: "mock"})
+const r = llm_call("question", nil, {provider: "mock"})
 assert_eq(r.text, "The answer is 42.")
 
 // Pattern-matched mocks (reusable, not consumed)
@@ -1910,7 +1910,7 @@ llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
 llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
 
 // Inspect what was sent
-let calls = llm_mock_calls()
+const calls = llm_mock_calls()
 llm_mock_clear()
 ```
 
@@ -2019,7 +2019,7 @@ for i in 0 to 5 exclusive {
     log("circuit open, skipping call")
   } else {
     try {
-      let resp = http_get("https://api.example.com/data")
+      const resp = http_get("https://api.example.com/data")
       circuit_record_success("api")
     } catch e {
       circuit_record_failure("api")
@@ -2062,7 +2062,7 @@ Distributed tracing primitives for instrumenting pipeline execution.
 Example:
 
 ```harn
-let span = trace_start("fetch_data")
+const span = trace_start("fetch_data")
 // ... do work ...
 trace_end(span)
 
@@ -2083,8 +2083,8 @@ after the loop completes.
 Example:
 
 ```harn,ignore
-let result = agent_loop("summarize this file", tools: [read_file])
-let summary = agent_trace_summary()
+const result = agent_loop("summarize this file", tools: [read_file])
+const summary = agent_trace_summary()
 log("LLM calls: " + str(summary.llm_calls))
 log("Tools used: " + str(summary.tools_used))
 ```
@@ -2308,11 +2308,11 @@ MCP servers.
 Example:
 
 ```harn
-let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
-let tools = mcp_list_tools(client)
+const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const tools = mcp_list_tools(client)
 log(tools)
 
-let result = mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
+const result = mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
 log(result)
 
 mcp_disconnect(client)
@@ -2396,10 +2396,10 @@ The connected clients are available as properties on the `mcp` global dict:
 
 ```harn
 pipeline default() {
-  let tools = mcp_list_tools(mcp.filesystem)
+  const tools = mcp_list_tools(mcp.filesystem)
   log(tools)
 
-  let result = mcp_call(mcp.github, "list_issues", {repo: "harn"})
+  const result = mcp_call(mcp.github, "list_issues", {repo: "harn"})
   log(result)
 }
 ```
@@ -2486,7 +2486,7 @@ validates required arguments and returns a structured preview, but does not hit
 external systems.
 
 ```harn
-let calendar = tool_synthesize({
+const calendar = tool_synthesize({
   description: "fetch the user's calendar for a given date range",
   name: "calendar_fetch",
   parameters: {
@@ -2497,7 +2497,7 @@ let calendar = tool_synthesize({
   capabilities: ["http", "oauth:google"],
 })
 
-let preview = calendar({start: "2026-04-29", end: "2026-05-06"})
+const preview = calendar({start: "2026-04-29", end: "2026-05-06"})
 ```
 
 To dispatch for real, the synthesis must declare an explicit backend:
@@ -2605,7 +2605,7 @@ and denial transcript events carry the same receipt under
 Example profiles:
 
 ```harn
-let local_dev_policy = {
+const local_dev_policy = {
   rules: [
     {allow: {tool_kind: ["read", "search"]}},
     {ask: {tool_kind: ["edit", "move"], path: "src/**"}, reason: "workspace mutation"},
@@ -2614,7 +2614,7 @@ let local_dev_policy = {
   repeat_limit: 3
 }
 
-let ci_headless_policy = {
+const ci_headless_policy = {
   rules: [
     {allow: {tool_kind: ["read", "search"]}},
     {allow: {tool: "run_command", command_identity: ["cargo", "npm", "make"]}},
@@ -2625,7 +2625,7 @@ let ci_headless_policy = {
   repeat_action: "deny"
 }
 
-let managed_enterprise_policy = {
+const managed_enterprise_policy = {
   rules: [
     {ask: {side_effect: ["workspace_write", "process_exec", "network"]}, reason: "managed approval"},
     {deny: {domain: ["*.pastebin.com", "*.ngrok.io"]}},
@@ -2645,7 +2645,7 @@ Example (`agent.harn`):
 
 ```harn
 pipeline main(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "greet", "Greet someone", {
     parameters: { name: {type: "string"} },
     returns: {type: "string"},

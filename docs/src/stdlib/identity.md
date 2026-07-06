@@ -9,7 +9,7 @@ receipt needs the same current-actor-through-origin view that Harn's Rust
 import { actor_chain_format, actor_chain_report } from "std/identity"
 
 pipeline default() {
-  let chain = {
+  const chain = {
     sub: "user:owner",
     scopes: ["repo:read", "repo:write"],
     may_act: {sub: "agent:delegate"},
@@ -20,8 +20,8 @@ pipeline default() {
     },
   }
 
-  let report = actor_chain_report(chain)
-  let display = actor_chain_format(chain)
+  const report = actor_chain_report(chain)
+  const display = actor_chain_format(chain)
 }
 ```
 

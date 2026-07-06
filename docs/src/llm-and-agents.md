@@ -41,7 +41,7 @@ structured `data` when JSON mode is enabled, tool calls, thinking blocks, and a
 transcript.
 
 ```harn
-let result = llm_call("Translate to French: Hello, world", nil, {
+const result = llm_call("Translate to French: Hello, world", nil, {
   provider: "openai",
   model: "gpt-4o",
   max_tokens: 1024,
@@ -83,7 +83,7 @@ sentinel, a budget or iteration limit is reached, daemon state idles, or a tool
 policy fails.
 
 ```harn
-let result = agent_loop(
+const result = agent_loop(
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
   {loop_until_done: true, profile: "tool_using"}

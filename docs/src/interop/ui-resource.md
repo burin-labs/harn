@@ -15,20 +15,20 @@ import {
   ui_tool_result_validate,
 } from "std/ui_resource"
 
-let resource = ui_resource(
+const resource = ui_resource(
   "ui://harn-dashboard/kpis@v1",
   "Weekly KPIs",
   weekly_kpi_html,
   {permissions: ["tools/call"], capabilities: ["tools/call", "context/read"]},
 )
 
-let result = ui_tool_result(
+const result = ui_tool_result(
   resource,
   {structured_fallback: ui_structured_fallback({signups: 42, churn: 3})},
 )
 
 ui_tool_result_validate(result)
-let rendered = ui_select_for_host(result, host_capabilities)
+const rendered = ui_select_for_host(result, host_capabilities)
 ```
 
 ## Resource envelope

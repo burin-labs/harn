@@ -70,7 +70,7 @@ correlation key.
 ```harn,ignore
 import { with_telemetry } from "std/llm/tool_middleware"
 
-let captain_caller = compose_tool_callers([
+const captain_caller = compose_tool_callers([
   with_audit_log(receipts_sink),
   with_telemetry({sink: "langfuse", project: "harn-dev"}),
   // ...rest of the captain stack
@@ -150,7 +150,7 @@ backends not covered by the built-ins, write a sink that POSTs to the
 backend's API and pass it directly:
 
 ```harn,ignore
-let prom_sink = { span ->
+const prom_sink = { span ->
   http_request("POST", "http://prom.local/observe", {
     headers: {"content-type": "application/json"},
     body: json_stringify({

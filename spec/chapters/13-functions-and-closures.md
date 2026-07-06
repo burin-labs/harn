@@ -29,7 +29,7 @@ fn config(host = "localhost", port = 8080, debug = false) {
   // all params optional
 }
 
-let add = { x, y = 10 -> x + y }  // closures support defaults too
+const add = { x, y = 10 -> x + y }  // closures support defaults too
 ```
 
 Explicit `nil` counts as a provided argument (does NOT trigger the default).
@@ -95,7 +95,7 @@ the bound registry has no executable backend. The error message names
 the offending tool and the documented set of executors.
 
 ```harn
-let registry = tool_registry()
+const registry = tool_registry()
 registry = tool_define(registry, "ask_user", "Ask the user", {
   parameters: {prompt: "string"},
   executor: "host_bridge",
@@ -301,7 +301,7 @@ context on each LLM call until a tool-search call surfaces them.
 ```harn
 fn admin(token) { log(token) }
 
-let registry = tool_registry()
+const registry = tool_registry()
 registry = tool_define(registry, "rare_admin_action", "...", {
   parameters: {token: {type: "string"}},
   defer_loading: true,
@@ -352,7 +352,7 @@ is a shipped TOML matrix overridable per-project via
 effective matrix at runtime with:
 
 ```harn
-let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
@@ -430,8 +430,8 @@ variable.
 #### Skill registry operations
 
 ```harn
-let reg = skill_registry()
-let reg = skill_define(reg, "review", {
+const reg = skill_registry()
+const reg = skill_define(reg, "review", {
   description: "Code review",
   invocation: "auto",
   paths: ["src/**"],
@@ -466,8 +466,8 @@ error.
 ### Closures
 
 ```harn
-let f = { x -> x * 2 }
-let g = { a, b -> a + b }
+const f = { x -> x * 2 }
+const g = { a, b -> a + b }
 ```
 
 First-class values. When invoked, a child environment is created from the *captured*
@@ -483,7 +483,7 @@ fn add(a, b, c) {
   return a + b + c
 }
 
-let args = [1, 2, 3]
+const args = [1, 2, 3]
 add(...args)           // equivalent to add(1, 2, 3)
 ```
 
@@ -492,7 +492,7 @@ Spread arguments can be mixed with regular arguments:
 ```harn
 fn add(a, b, c) { return a + b + c }
 
-let rest = [2, 3]
+const rest = [2, 3]
 add(1, ...rest)        // equivalent to add(1, 2, 3)
 ```
 
@@ -502,8 +502,8 @@ position:
 ```harn
 fn add(a, b, c) { return a + b + c }
 
-let first = [1]
-let last = [3]
+const first = [1]
+const last = [3]
 add(...first, 2, ...last)   // equivalent to add(1, 2, 3)
 ```
 

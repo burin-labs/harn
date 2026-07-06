@@ -37,13 +37,13 @@ type TokenSet = {
 import { memory } from "std/oauth/storage"
 
 pipeline default() {
-  let store = memory()
+  const store = memory()
   store.set(
     "github",
     {access_token: "abc", refresh_token: "rfr", expires_at_unix: 17000000000},
     3600,
   )
-  let token = store.get("github")              // -> TokenSet | nil
+  const token = store.get("github")              // -> TokenSet | nil
   if token != nil {
     log("auth: Bearer " + token.access_token)
   }
@@ -58,7 +58,7 @@ handles unchanged:
 import { Providers } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
-let client = OAuth.client(Providers.github, {
+const client = OAuth.client(Providers.github, {
   client_id: env("GITHUB_OAUTH_CLIENT_ID"),
   scopes: ["repo"],
   storage: harn_cloud_org(),
@@ -137,7 +137,7 @@ fn vault_with_lock(_path, body) {
   return body()
 }
 
-let store = custom({
+const store = custom({
   get: { key -> vault_get("oauth/" + key) },
   set: { key, token_set, ttl_seconds = nil ->
     vault_put("oauth/" + key, token_set, {ttl: ttl_seconds})

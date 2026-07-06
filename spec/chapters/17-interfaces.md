@@ -60,7 +60,7 @@ fn show(item: Displayable) {
   log(item.display())
 }
 
-let d = Dog({name: "Rex"})
+const d = Dog({name: "Rex"})
 show(d)  // OK: Dog satisfies Displayable
 ```
 
@@ -153,11 +153,11 @@ accepts a wider input or produces a narrower output is always a valid
 substitute.
 
 ```harn,ignore
-let wide = fn(x: float) { return 0 }
-let cb: fn(int) -> int = wide   // OK: float-accepting closure stands in for int-accepting
+const wide = fn(x: float) { return 0 }
+const cb: fn(int) -> int = wide   // OK: float-accepting closure stands in for int-accepting
 
-let narrow = fn(x: int) { return 0 }
-let bad: fn(float) -> int = narrow   // ERROR: narrow cannot accept the float a caller may pass
+const narrow = fn(x: int) { return 0 }
+const bad: fn(float) -> int = narrow   // ERROR: narrow cannot accept the float a caller may pass
 ```
 
 #### Declaration-site checking

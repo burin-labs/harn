@@ -36,15 +36,15 @@ negation prefix. Keyword operators `in`, `not in`, and `to` also require an
 explicit backslash continuation.
 
 ```harn,ignore
-let result = items
+const result = items
   .filter({ x -> x > 0 })
   .map({ x -> x * 2 })
 
-let msg = "hello"
+const msg = "hello"
   + " "
   + "world"
 
-let ok = check_a()
+const ok = check_a()
   && check_b()
   || fallback()
 ```

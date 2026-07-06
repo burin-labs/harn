@@ -88,7 +88,7 @@ Typical pattern:
 
 ```harn
 pub fn about_outages(event: TriggerEvent) -> bool {
-  let result = llm_call(
+  const result = llm_call(
     "Is this Slack message about a production outage?",
     nil,
     {provider: "openai", model: "gpt-4o-mini"},

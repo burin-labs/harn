@@ -20,7 +20,7 @@ You have a bug report and you want a fast read on it. Nothing to edit yet, no
 tools, no loop. One request:
 
 ```harn
-let hint = llm_call(
+const hint = llm_call(
   "Bug: add(2,2) returned 5. One sentence: what's the likely cause?",
   "You are a careful Rust engineer.",
   {provider: "mock"},
@@ -41,7 +41,7 @@ schema instead and get back typed data, validated, with a retry on the model's
 first malformed attempt:
 
 ```harn
-let triage = llm_call_structured(
+const triage = llm_call_structured(
   "Triage this bug: add(2,2) returned 5 in src/math.rs.",
   {
     type: "object",
@@ -78,8 +78,8 @@ transport retry already set.
 ```harn
 import { agent_preset } from "std/agent/presets"
 
-let opts = agent_preset("repair", {provider: "mock"})
-let run = agent_loop(
+const opts = agent_preset("repair", {provider: "mock"})
+const run = agent_loop(
   "Fix the failing test test_add in src/math.rs, then run it to confirm.",
   opts?.system,
   opts,
@@ -115,7 +115,7 @@ import { lane_policy } from "std/agent/lanes"
 import { with_overlay } from "std/agent/overlays"
 
 // Start from the preset, then layer control onto it.
-var opts = agent_preset("repair", {provider: "ollama", model: "qwen3-coder", tools: repair_tools})
+let opts = agent_preset("repair", {provider: "ollama", model: "qwen3-coder", tools: repair_tools})
 
 // Bound cost and cadence; add a stall detector that fires when the agent
 // keeps editing but nothing verifies as progress.
@@ -134,7 +134,7 @@ opts = {...opts, ...agent_completion_gate({
 opts = lane_policy(lane_rows, task, opts)
 opts = with_overlay(opts, overlay_rows, "repair")
 
-let run = agent_loop(task, opts?.system, opts)
+const run = agent_loop(task, opts?.system, opts)
 ```
 
 Every one of those lines is opt-in. Governors bound spend
@@ -169,7 +169,7 @@ retry. You own what happens inside a try:
   retry_policy: {max_attempts: 3, feedback: true},
   executor: { ctx ->
     // ctx = {task, attempt, prior_findings, prior_verification, prior_text, artifacts}
-    let patched = my_patch_step(ctx.task, ctx.prior_findings)
+    const patched = my_patch_step(ctx.task, ctx.prior_findings)
     return {text: patched.summary, artifacts: patched.artifacts}
   },
 }
@@ -183,7 +183,7 @@ loop supplies the payload; you return the one number that matters:
 ```harn,ignore
 // "Writes are not progress." Return the turn's best verify-state — say, the
 // count of passing tests. nil means "no verification evidence this turn."
-let opts = {...base, stall_diagnostics: {
+const opts = {...base, stall_diagnostics: {
   progress_signal: { payload -> host_passing_test_count() },
 }}
 ```
@@ -198,7 +198,7 @@ verify stage, retry threading, replay, and audit, and you have the full machine.
 ```harn,ignore
 import { workflow_stages } from "std/workflow/patterns"
 
-let graph = workflow_stages({
+const graph = workflow_stages({
   name: "fix-the-test",
   stages: [
     {id: "act", kind: "stage", mode: "agent",
@@ -208,7 +208,7 @@ let graph = workflow_stages({
       verify: {command: "cargo test test_add --quiet", expect_status: 0}},
   ],
 })
-let run = workflow_execute("Fix the failing test.", graph)
+const run = workflow_execute("Fix the failing test.", graph)
 ```
 
 ## The through-line

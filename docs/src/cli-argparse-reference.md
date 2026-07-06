@@ -32,7 +32,7 @@ Out of scope by design:
 ```harn
 import { parser, parse, render_help } from "std/cli/argparse"
 
-let spec = parser({
+const spec = parser({
   name:  "eval-prompt",
   about: "Render and run a .harn.prompt across a fleet of models.",
   args: [
@@ -52,14 +52,14 @@ let spec = parser({
   ],
 })
 
-let result = parse(spec, argv)
-let err = result.err
+const result = parse(spec, argv)
+const err = result.err
 if err != nil {
   __io_eprintln(render_help(spec))
   __io_eprintln("error: " + (err.hint ?? ""))
   exit(2)
 }
-let parsed = result.ok
+const parsed = result.ok
 // parsed.prompt: string, parsed.model: list<string>, parsed.fixture: string?,
 // parsed.json: bool, parsed.rest: list<string>
 ```

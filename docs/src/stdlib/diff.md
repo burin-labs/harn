@@ -14,13 +14,13 @@ format; apply and staging flows should keep using unified line diffs.
 ```harn,ignore
 import { structural_diff } from "std/diff"
 
-let result = structural_diff("before.rs", "after.rs", "rust")
+const result = structural_diff("before.rs", "after.rs", "rust")
 ```
 
 or a dict:
 
 ```harn,ignore
-let result = structural_diff(
+const result = structural_diff(
   "before.rs",
   "after.rs",
   {language: "rust", max_bytes: 1048576, max_nodes: 20000, max_graph_edges: 20000000},
