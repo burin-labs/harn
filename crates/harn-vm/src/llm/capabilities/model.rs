@@ -123,6 +123,20 @@ pub struct ProviderDefaults {
     #[serde(default)]
     pub batch_turnaround_hours: Option<u32>,
     #[serde(default)]
+    pub batch_max_requests: Option<u64>,
+    #[serde(default)]
+    pub batch_max_input_bytes: Option<u64>,
+    #[serde(default)]
+    pub batch_result_retention_days: Option<u32>,
+    #[serde(default)]
+    pub batch_result_ordering: Option<String>,
+    #[serde(default)]
+    pub batch_partial_failure: Option<String>,
+    #[serde(default)]
+    pub batch_cancellation: Option<String>,
+    #[serde(default)]
+    pub batch_security_notes: Option<Vec<String>>,
+    #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
     pub top_k_supported: Option<bool>,
@@ -181,6 +195,16 @@ macro_rules! merge_provider_defaults {
             &mut $dst.batch_turnaround_hours,
             &$src.batch_turnaround_hours,
         );
+        $op(&mut $dst.batch_max_requests, &$src.batch_max_requests);
+        $op(&mut $dst.batch_max_input_bytes, &$src.batch_max_input_bytes);
+        $op(
+            &mut $dst.batch_result_retention_days,
+            &$src.batch_result_retention_days,
+        );
+        $op(&mut $dst.batch_result_ordering, &$src.batch_result_ordering);
+        $op(&mut $dst.batch_partial_failure, &$src.batch_partial_failure);
+        $op(&mut $dst.batch_cancellation, &$src.batch_cancellation);
+        $op(&mut $dst.batch_security_notes, &$src.batch_security_notes);
         $op(&mut $dst.seed_supported, &$src.seed_supported);
         $op(&mut $dst.top_k_supported, &$src.top_k_supported);
         $op(&mut $dst.temperature_supported, &$src.temperature_supported);
@@ -217,6 +241,13 @@ impl ProviderDefaults {
             || self.batch_input_mode.is_some()
             || self.batch_discount_percent.is_some()
             || self.batch_turnaround_hours.is_some()
+            || self.batch_max_requests.is_some()
+            || self.batch_max_input_bytes.is_some()
+            || self.batch_result_retention_days.is_some()
+            || self.batch_result_ordering.is_some()
+            || self.batch_partial_failure.is_some()
+            || self.batch_cancellation.is_some()
+            || self.batch_security_notes.is_some()
             || self.seed_supported.is_some()
             || self.top_k_supported.is_some()
             || self.temperature_supported.is_some()
@@ -341,6 +372,13 @@ pub struct Capabilities {
     pub batch_input_mode: Option<String>,
     pub batch_discount_percent: Option<u32>,
     pub batch_turnaround_hours: Option<u32>,
+    pub batch_max_requests: Option<u64>,
+    pub batch_max_input_bytes: Option<u64>,
+    pub batch_result_retention_days: Option<u32>,
+    pub batch_result_ordering: Option<String>,
+    pub batch_partial_failure: Option<String>,
+    pub batch_cancellation: Option<String>,
+    pub batch_security_notes: Vec<String>,
     pub tool_approval_policy: Option<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
@@ -461,6 +499,13 @@ impl Default for Capabilities {
             batch_input_mode: None,
             batch_discount_percent: None,
             batch_turnaround_hours: None,
+            batch_max_requests: None,
+            batch_max_input_bytes: None,
+            batch_result_retention_days: None,
+            batch_result_ordering: None,
+            batch_partial_failure: None,
+            batch_cancellation: None,
+            batch_security_notes: Vec::new(),
             tool_approval_policy: None,
             max_tools: None,
             prompt_caching: false,

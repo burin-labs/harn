@@ -207,6 +207,7 @@ pub fn schema_value() -> Value {
                     "format_preferences": {"$ref": "#/$defs/format_preferences"},
                     "reasoning": {"$ref": "#/$defs/reasoning"},
                     "prompt_cache": {"type": "boolean"},
+                    "batch": {"$ref": "#/$defs/model_batch_support"},
                     "pricing": {"$ref": "#/$defs/pricing"},
                     "deprecation": {"$ref": "#/$defs/deprecation"},
                     "availability": {"enum": ["serverless", "dedicated", "unknown"]},
@@ -269,6 +270,54 @@ pub fn schema_value() -> Value {
                     "native_pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
                     "text_pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
                     "verifier_divergence_rate": {"type": "number", "minimum": 0, "maximum": 1}
+                },
+                "additionalProperties": false
+            },
+            "model_batch_support": {
+                "type": "object",
+                "required": [
+                    "wire_format",
+                    "input_mode",
+                    "result_ordering",
+                    "partial_failure",
+                    "cancellation"
+                ],
+                "properties": {
+                    "wire_format": {
+                        "enum": [
+                            "openai",
+                            "anthropic_messages",
+                            "gemini",
+                            "mistral",
+                            "fireworks",
+                            "xai"
+                        ]
+                    },
+                    "input_mode": {
+                        "enum": [
+                            "jsonl_file",
+                            "inline_requests",
+                            "jsonl_or_inline"
+                        ]
+                    },
+                    "result_ordering": {
+                        "enum": ["custom_id_rejoin", "provider_ordered", "unknown"]
+                    },
+                    "partial_failure": {
+                        "enum": ["per_request", "whole_batch", "unknown"]
+                    },
+                    "cancellation": {
+                        "enum": ["supported", "not_supported", "unknown"]
+                    },
+                    "discount_percent": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "turnaround_hours": {"type": "integer", "minimum": 1},
+                    "max_requests": {"type": "integer", "minimum": 1},
+                    "max_input_bytes": {"type": "integer", "minimum": 1},
+                    "result_retention_days": {"type": "integer", "minimum": 1},
+                    "security_notes": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1}
+                    }
                 },
                 "additionalProperties": false
             },

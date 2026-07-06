@@ -133,6 +133,8 @@ pub struct CatalogModel {
     pub reasoning: ModelReasoning,
     pub prompt_cache: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch: Option<ModelBatchSupport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<ModelPricing>,
     pub deprecation: ModelDeprecation,
     pub availability: ModelAvailabilityStatus,
@@ -213,6 +215,56 @@ pub struct ModelToolEmpiricalParity {
     pub native_pass_rate: f64,
     pub text_pass_rate: f64,
     pub verifier_divergence_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelBatchSupport {
+    pub wire_format: String,
+    pub input_mode: String,
+    pub result_ordering: BatchResultOrdering,
+    pub partial_failure: BatchPartialFailure,
+    pub cancellation: BatchCancellationSupport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount_percent: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turnaround_hours: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_requests: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_input_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_retention_days: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub security_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchResultOrdering {
+    /// Results carry caller-supplied stable ids/keys; consumers must rejoin by
+    /// that id instead of trusting response order.
+    CustomIdRejoin,
+    /// Provider documents that result order matches request order.
+    ProviderOrdered,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchPartialFailure {
+    /// One request can fail without making the entire batch unusable.
+    PerRequest,
+    /// Provider treats the batch as an all-or-nothing job.
+    WholeBatch,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchCancellationSupport {
+    Supported,
+    NotSupported,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

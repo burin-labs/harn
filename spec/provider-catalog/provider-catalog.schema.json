@@ -494,6 +494,9 @@
           },
           "type": "array"
         },
+        "batch": {
+          "$ref": "#/$defs/model_batch_support"
+        },
         "benchmarks": {
           "additionalProperties": {
             "type": "number"
@@ -640,6 +643,85 @@
         "family",
         "lineage",
         "tier"
+      ],
+      "type": "object"
+    },
+    "model_batch_support": {
+      "additionalProperties": false,
+      "properties": {
+        "cancellation": {
+          "enum": [
+            "supported",
+            "not_supported",
+            "unknown"
+          ]
+        },
+        "discount_percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_mode": {
+          "enum": [
+            "jsonl_file",
+            "inline_requests",
+            "jsonl_or_inline"
+          ]
+        },
+        "max_input_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_requests": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "partial_failure": {
+          "enum": [
+            "per_request",
+            "whole_batch",
+            "unknown"
+          ]
+        },
+        "result_ordering": {
+          "enum": [
+            "custom_id_rejoin",
+            "provider_ordered",
+            "unknown"
+          ]
+        },
+        "result_retention_days": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "security_notes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "turnaround_hours": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "wire_format": {
+          "enum": [
+            "openai",
+            "anthropic_messages",
+            "gemini",
+            "mistral",
+            "fireworks",
+            "xai"
+          ]
+        }
+      },
+      "required": [
+        "wire_format",
+        "input_mode",
+        "result_ordering",
+        "partial_failure",
+        "cancellation"
       ],
       "type": "object"
     },

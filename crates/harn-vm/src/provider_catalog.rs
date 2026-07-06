@@ -488,7 +488,12 @@ fn catalog_model(
         .cloned()
         .unwrap_or_default();
     let quality_tags = model_quality_tags(&model, &aliases);
-    let capability_tags = llm_config::capability_tags_from_capabilities(&caps);
+    let batch_api = effective_batch_api_supported_for_config(config, &model.provider, &caps);
+    let mut capability_tags = llm_config::capability_tags_from_capabilities(&caps);
+    if batch_api && !capability_tags.iter().any(|tag| tag == "batch") {
+        capability_tags.push("batch".to_string());
+    }
+    let batch = catalog_batch_support(batch_api, &caps);
     CatalogModel {
         aliases,
         logical_model: model.logical_model.clone(),
@@ -541,6 +546,7 @@ fn catalog_model(
             preserve_thinking: caps.preserve_thinking,
         },
         prompt_cache: caps.prompt_caching,
+        batch,
         pricing: model.pricing.clone(),
         deprecation: ModelDeprecation {
             status: if model.deprecated {
@@ -577,6 +583,64 @@ fn catalog_model(
         context_window: model.context_window,
         runtime_context_window: model.runtime_context_window,
         stream_timeout: model.stream_timeout,
+    }
+}
+
+fn effective_batch_api_supported_for_config(
+    config: &llm_config::ProvidersConfig,
+    provider: &str,
+    caps: &llm::capabilities::Capabilities,
+) -> bool {
+    caps.batch_api
+        || config
+            .providers
+            .get(provider)
+            .is_some_and(|provider| provider.features.iter().any(|feature| feature == "batch"))
+}
+
+fn catalog_batch_support(
+    batch_api: bool,
+    caps: &llm::capabilities::Capabilities,
+) -> Option<ModelBatchSupport> {
+    if !batch_api {
+        return None;
+    }
+    Some(ModelBatchSupport {
+        wire_format: caps.batch_wire_format.clone()?,
+        input_mode: caps.batch_input_mode.clone()?,
+        result_ordering: batch_result_ordering(caps.batch_result_ordering.as_deref()),
+        partial_failure: batch_partial_failure(caps.batch_partial_failure.as_deref()),
+        cancellation: batch_cancellation(caps.batch_cancellation.as_deref()),
+        discount_percent: caps.batch_discount_percent,
+        turnaround_hours: caps.batch_turnaround_hours,
+        max_requests: caps.batch_max_requests,
+        max_input_bytes: caps.batch_max_input_bytes,
+        result_retention_days: caps.batch_result_retention_days,
+        security_notes: caps.batch_security_notes.clone(),
+    })
+}
+
+fn batch_result_ordering(value: Option<&str>) -> BatchResultOrdering {
+    match value {
+        Some("custom_id_rejoin") => BatchResultOrdering::CustomIdRejoin,
+        Some("provider_ordered") => BatchResultOrdering::ProviderOrdered,
+        _ => BatchResultOrdering::Unknown,
+    }
+}
+
+fn batch_partial_failure(value: Option<&str>) -> BatchPartialFailure {
+    match value {
+        Some("per_request") => BatchPartialFailure::PerRequest,
+        Some("whole_batch") => BatchPartialFailure::WholeBatch,
+        _ => BatchPartialFailure::Unknown,
+    }
+}
+
+fn batch_cancellation(value: Option<&str>) -> BatchCancellationSupport {
+    match value {
+        Some("supported") => BatchCancellationSupport::Supported,
+        Some("not_supported") => BatchCancellationSupport::NotSupported,
+        _ => BatchCancellationSupport::Unknown,
     }
 }
 
@@ -755,6 +819,69 @@ fn validate_pricing(
             result.errors.push(format!(
                 "model {} pricing.{} must be non-negative",
                 model.id, field
+            ));
+        }
+    }
+}
+
+fn validate_batch_support(
+    model: &CatalogModel,
+    batch: &ModelBatchSupport,
+    result: &mut ProviderCatalogValidation,
+) {
+    if !matches!(
+        batch.wire_format.as_str(),
+        "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai"
+    ) {
+        result.errors.push(format!(
+            "model {} batch.wire_format {:?} is not one of openai|anthropic_messages|gemini|mistral|fireworks|xai",
+            model.id, batch.wire_format
+        ));
+    }
+    if !matches!(
+        batch.input_mode.as_str(),
+        "jsonl_file" | "inline_requests" | "jsonl_or_inline"
+    ) {
+        result.errors.push(format!(
+            "model {} batch.input_mode {:?} is not one of jsonl_file|inline_requests|jsonl_or_inline",
+            model.id, batch.input_mode
+        ));
+    }
+    if batch
+        .discount_percent
+        .is_some_and(|discount| discount > 100)
+    {
+        result.errors.push(format!(
+            "model {} batch.discount_percent must be <= 100",
+            model.id
+        ));
+    }
+    for (field, value) in [
+        ("turnaround_hours", batch.turnaround_hours.map(u64::from)),
+        ("max_requests", batch.max_requests),
+        ("max_input_bytes", batch.max_input_bytes),
+        (
+            "result_retention_days",
+            batch.result_retention_days.map(u64::from),
+        ),
+    ] {
+        if value.is_some_and(|value| value == 0) {
+            result
+                .errors
+                .push(format!("model {} batch.{field} must be positive", model.id));
+        }
+    }
+    for note in &batch.security_notes {
+        if note.trim().is_empty() {
+            result.errors.push(format!(
+                "model {} batch.security_notes cannot contain empty notes",
+                model.id
+            ));
+        }
+        if note.contains("API_KEY") || note.contains("sk-") {
+            result.errors.push(format!(
+                "model {} batch.security_notes must not include credential-looking values",
+                model.id
             ));
         }
     }

@@ -207,6 +207,84 @@ fn generated_catalog_exports_provider_healthcheck_metadata() {
 }
 
 #[test]
+fn generated_catalog_exports_typed_batch_lifecycle_metadata() {
+    llm_config::clear_user_overrides();
+    let catalog = artifact();
+
+    let openai = catalog
+        .models
+        .iter()
+        .find(|model| model.provider == "openai" && model.id == "gpt-4o-mini")
+        .expect("openai gpt-4o-mini catalog row");
+    assert!(
+        openai.capability_tags.iter().any(|tag| tag == "batch"),
+        "legacy capability tags should still advertise batch"
+    );
+    let openai_batch = openai.batch.as_ref().expect("openai batch metadata");
+    assert_eq!(openai_batch.wire_format, "openai");
+    assert_eq!(openai_batch.input_mode, "jsonl_file");
+    assert_eq!(
+        openai_batch.result_ordering,
+        BatchResultOrdering::CustomIdRejoin
+    );
+    assert_eq!(
+        openai_batch.partial_failure,
+        BatchPartialFailure::PerRequest
+    );
+    assert_eq!(
+        openai_batch.cancellation,
+        BatchCancellationSupport::Supported
+    );
+    assert_eq!(openai_batch.discount_percent, Some(50));
+    assert_eq!(openai_batch.turnaround_hours, Some(24));
+    assert_eq!(openai_batch.max_requests, Some(50_000));
+    assert_eq!(openai_batch.max_input_bytes, Some(209_715_200));
+    assert_eq!(openai_batch.result_retention_days, Some(30));
+    assert!(
+        openai_batch
+            .security_notes
+            .iter()
+            .any(|note| note.contains("separate provider pool")),
+        "OpenAI batch notes should explain the separate rate-limit pool"
+    );
+
+    let anthropic = catalog
+        .models
+        .iter()
+        .find(|model| model.provider == "anthropic" && model.id == "claude-opus-4-6")
+        .expect("anthropic claude-opus-4-6 catalog row");
+    let anthropic_batch = anthropic.batch.as_ref().expect("anthropic batch metadata");
+    assert_eq!(anthropic_batch.wire_format, "anthropic_messages");
+    assert_eq!(anthropic_batch.input_mode, "inline_requests");
+    assert_eq!(anthropic_batch.max_requests, Some(100_000));
+    assert_eq!(anthropic_batch.max_input_bytes, Some(268_435_456));
+    assert_eq!(anthropic_batch.result_retention_days, Some(29));
+    assert_eq!(
+        anthropic_batch.result_ordering,
+        BatchResultOrdering::CustomIdRejoin
+    );
+    assert_eq!(
+        anthropic_batch.cancellation,
+        BatchCancellationSupport::Supported
+    );
+
+    let gemini = catalog
+        .models
+        .iter()
+        .find(|model| model.provider == "gemini" && model.id == "gemini-2.5-flash")
+        .expect("gemini-2.5-flash catalog row");
+    let gemini_batch = gemini.batch.as_ref().expect("gemini batch metadata");
+    assert_eq!(gemini_batch.wire_format, "gemini");
+    assert_eq!(gemini_batch.input_mode, "jsonl_or_inline");
+    assert_eq!(gemini_batch.max_input_bytes, Some(2_147_483_648));
+    assert_eq!(
+        gemini_batch.partial_failure,
+        BatchPartialFailure::PerRequest
+    );
+    assert_eq!(gemini_batch.cancellation, BatchCancellationSupport::Unknown);
+}
+
+#[test]
 fn generated_catalog_exports_routing_routes() {
     llm_config::clear_user_overrides();
     let catalog = artifact();
