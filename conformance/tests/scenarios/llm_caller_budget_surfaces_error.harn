@@ -18,12 +18,18 @@ pipeline default() {
     opts: {provider: "mock", model: "m"},
     turn: {iteration: 0, session_id: "s", attempt: 1},
   }
-  with_llm_mocks([{error: {reason: "budget_exceeded", message: "over budget"}}], { ->
-    let env = caller(call)
-    __io_println("caller ok=${env.ok} status=${env.status} has_error=${env.error != nil}")
-  })
-  with_llm_mocks([{error: {reason: "budget_exceeded", message: "over budget"}}], { ->
-    let s = safe_call("hi", "", {provider: "mock", model: "m"})
-    __io_println("safe   ok=${s.ok} status=${s.status} has_error=${s.error != nil}")
-  })
+  with_llm_mocks(
+    [{error: {reason: "budget_exceeded", message: "over budget"}}],
+    { ->
+      let env = caller(call)
+      __io_println("caller ok=${env.ok} status=${env.status} has_error=${env.error != nil}")
+    },
+  )
+  with_llm_mocks(
+    [{error: {reason: "budget_exceeded", message: "over budget"}}],
+    { ->
+      let s = safe_call("hi", "", {provider: "mock", model: "m"})
+      __io_println("safe   ok=${s.ok} status=${s.status} has_error=${s.error != nil}")
+    },
+  )
 }
