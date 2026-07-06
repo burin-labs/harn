@@ -55,6 +55,18 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
         anchor_score: 0.5,
     },
     ProjectCatalogEntry {
+        id: "php",
+        languages: &["php"],
+        frameworks: &[],
+        build_systems: &["composer"],
+        anchors: &["composer.json"],
+        lockfiles: &["composer.lock"],
+        source_globs: &["*.php", "app/**/*.php", "src/**/*.php", "tests/**/*.php"],
+        default_build_cmd: None,
+        default_test_cmd: Some("composer test"),
+        anchor_score: 0.5,
+    },
+    ProjectCatalogEntry {
         id: "typescript",
         languages: &["typescript"],
         frameworks: &[],

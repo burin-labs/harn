@@ -593,14 +593,31 @@ fn project_fingerprint_detects_php_composer_profile() {
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
     std::fs::write(
         dir.path().join("composer.json"),
-        "{\n  \"name\": \"acme/app\"\n}\n",
+        r#"{
+  "name": "acme/app",
+  "require": {
+    "laravel/framework": "^12.0"
+  },
+  "require-dev": {
+    "pestphp/pest": "^3.0",
+    "phpunit/phpunit": "^11.0"
+  },
+  "scripts": {
+    "test": "php artisan test"
+  }
+}
+"#,
     )
     .unwrap();
     std::fs::write(dir.path().join("src/index.php"), "<?php\necho \"hi\";\n").unwrap();
 
     let fingerprint = detect_project_fingerprint(dir.path());
     assert_eq!(fingerprint.primary_language, "php");
+    assert!(fingerprint.frameworks.contains(&"laravel".to_string()));
     assert_eq!(fingerprint.package_manager.as_deref(), Some("composer"));
+    assert_eq!(fingerprint.test_runner.as_deref(), Some("pest"));
+    assert_eq!(fingerprint.build_tool.as_deref(), Some("composer"));
+    assert!(fingerprint.has_tests);
 }
 
 #[test]
