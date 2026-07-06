@@ -161,12 +161,7 @@ fn provider_choice(
 ) -> Option<ProviderChoice> {
     let def = harn_vm::llm_config::provider_config(name)?;
     let auth_envs = harn_vm::llm_config::auth_env_names(&def.auth_env);
-    let auth_available = auth_envs.is_empty()
-        || auth_envs.iter().any(|name| {
-            env::var(name)
-                .ok()
-                .is_some_and(|value| !value.trim().is_empty())
-        });
+    let auth_available = harn_vm::llm_config::provider_key_available(name);
     Some(ProviderChoice {
         name: name.to_string(),
         model: default_model_for_choice(name, model, ollama),

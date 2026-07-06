@@ -97,9 +97,9 @@ static AUTO_PROVIDER_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// True when any of the provider's auth env vars holds a non-empty value.
 fn provider_has_credentials(def: &ProviderDef) -> bool {
-    auth_env_names(&def.auth_env)
-        .iter()
-        .any(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()))
+    auth_env_names(&def.auth_env).iter().any(|name| {
+        std::env::var(name).is_ok_and(|value| super::catalog::auth_env_value_available(&value))
+    })
 }
 
 /// True when the provider can serve without cloud credentials — a managed

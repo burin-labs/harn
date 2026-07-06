@@ -15,6 +15,8 @@ pub use keyring::KeyringSecretProvider;
 
 pub const DEFAULT_SECRET_PROVIDER_CHAIN: &str = "env,keyring";
 pub const SECRET_PROVIDER_CHAIN_ENV: &str = "HARN_SECRET_PROVIDERS";
+pub const SECRET_REF_SCHEME: &str = "harn-secret://";
+pub const SECRET_REF_CHAIN_NAMESPACE: &str = "harn.provider_auth";
 const RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "provenance";
 const SCOPED_RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "harn.provenance";
 
@@ -60,6 +62,55 @@ impl fmt::Display for SecretId {
             SecretVersion::Exact(version) => write!(f, "@{version}"),
         }
     }
+}
+
+pub fn parse_secret_ref(raw: &str) -> Result<Option<SecretId>, SecretError> {
+    let trimmed = raw.trim();
+    let Some(rest) = trimmed.strip_prefix(SECRET_REF_SCHEME) else {
+        return Ok(None);
+    };
+    let (base, version) = match rest.rsplit_once('@') {
+        Some((base, version_text)) => {
+            let version = version_text.parse::<u64>().map_err(|_| {
+                SecretError::InvalidInput(format!(
+                    "invalid secret reference version in '{trimmed}'"
+                ))
+            })?;
+            (base, SecretVersion::Exact(version))
+        }
+        None => (rest, SecretVersion::Latest),
+    };
+    let (namespace, name) = base.split_once('/').ok_or_else(|| {
+        SecretError::InvalidInput(format!(
+            "invalid secret reference '{trimmed}': expected {SECRET_REF_SCHEME}<namespace>/<name>"
+        ))
+    })?;
+    if namespace.trim().is_empty() || name.trim().is_empty() {
+        return Err(SecretError::InvalidInput(format!(
+            "invalid secret reference '{trimmed}': namespace and name must be non-empty"
+        )));
+    }
+    Ok(Some(
+        SecretId::new(namespace.trim(), name.trim()).with_version(version),
+    ))
+}
+
+pub fn resolve_secret_ref_to_string(raw: &str) -> Result<Option<String>, SecretError> {
+    let Some(id) = parse_secret_ref(raw)? else {
+        return Ok(None);
+    };
+    let chain = configured_default_chain(SECRET_REF_CHAIN_NAMESPACE)?;
+    let secret = futures::executor::block_on(chain.get(&id))?;
+    let rendered = secret.with_exposed(|bytes| {
+        std::str::from_utf8(bytes)
+            .map(str::to_string)
+            .map_err(|error| {
+                SecretError::InvalidInput(format!(
+                    "secret reference '{id}' resolved to non-UTF-8 bytes: {error}"
+                ))
+            })
+    })?;
+    Ok(Some(rendered))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -748,6 +799,27 @@ mod tests {
     fn secret_bytes_debug_is_redacted() {
         let secret = SecretBytes::from("abcd");
         assert_eq!(format!("{secret:?}"), "SecretBytes { redacted: 4 bytes }");
+    }
+
+    #[test]
+    fn parse_secret_ref_accepts_namespace_name_and_version() {
+        let id = parse_secret_ref("harn-secret://provider/anthropic-api-key@7")
+            .expect("parse should succeed")
+            .expect("secret ref should be detected");
+        assert_eq!(id.namespace, "provider");
+        assert_eq!(id.name, "anthropic-api-key");
+        assert_eq!(id.version, SecretVersion::Exact(7));
+    }
+
+    #[test]
+    fn parse_secret_ref_ignores_non_refs_and_rejects_malformed_refs() {
+        assert!(parse_secret_ref("plain-api-key")
+            .expect("non-ref should be accepted")
+            .is_none());
+        assert!(parse_secret_ref("harn-secret://missing-name")
+            .expect_err("missing slash should fail")
+            .to_string()
+            .contains("invalid secret reference"));
     }
 
     #[test]

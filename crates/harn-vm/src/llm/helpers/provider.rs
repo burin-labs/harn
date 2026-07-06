@@ -411,8 +411,10 @@ pub fn no_credentials_message() -> String {
         envs.join(", ")
     };
     format!(
-        "No LLM providers configured. Set one of these env vars: {env_list} (or run a local Ollama). \
-         For diagnostics: `harn doctor`. For a recommended setup: `harn models recommend` (when available)."
+        "No LLM providers configured. Set one of these env vars to an API key or \
+         harn-secret://namespace/name reference: {env_list} (or run a local Ollama). \
+         For diagnostics: `harn doctor`. For a recommended setup: `harn models recommend` \
+         (when available)."
     )
 }
 
@@ -456,17 +458,18 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
         let aggregate_hint = no_credentials_message();
         match &pdef.auth_env {
             llm_config::AuthEnv::Single(env) => {
-                return std::env::var(env).map_err(|_| {
+                let raw = std::env::var(env).map_err(|_| {
                     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                         "Missing API key: set {env} environment variable{selection_hint}\n{aggregate_hint}"
                     ))))
-                });
+                })?;
+                return resolve_auth_env_value(env, &raw);
             }
             llm_config::AuthEnv::Multiple(envs) => {
                 for env in envs {
                     if let Ok(val) = std::env::var(env) {
                         if !val.is_empty() {
-                            return Ok(val);
+                            return resolve_auth_env_value(env, &val);
                         }
                     }
                 }
@@ -484,6 +487,16 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
             "Missing API key: set ANTHROPIC_API_KEY environment variable{selection_hint}\n{aggregate_hint}"
         ))))
     })
+}
+
+fn resolve_auth_env_value(env_name: &str, raw: &str) -> Result<String, VmError> {
+    match crate::secrets::resolve_secret_ref_to_string(raw) {
+        Ok(Some(secret)) => Ok(secret),
+        Ok(None) => Ok(raw.to_string()),
+        Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            format!("Failed to resolve API key secret reference from {env_name}: {error}"),
+        )))),
+    }
 }
 
 pub(crate) struct ResolvedProvider {
@@ -560,6 +573,7 @@ mod no_credentials_tests {
         assert!(msg.contains("harn doctor"));
         assert!(msg.contains("harn models recommend"));
         assert!(msg.contains("local Ollama"));
+        assert!(msg.contains("harn-secret://namespace/name"));
     }
 }
 
@@ -624,5 +638,91 @@ mod platform_managed_credential_resolution_tests {
             result.is_err(),
             "expected azure_openai to require one of its declared env vars"
         );
+    }
+}
+
+#[cfg(test)]
+mod secret_reference_auth_tests {
+    use std::sync::Mutex;
+
+    use crate::value::{VmError, VmValue};
+
+    use super::{provider_key_available, reset_provider_key_cache, resolve_api_key};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn error_message(error: VmError) -> String {
+        match error {
+            VmError::Thrown(VmValue::String(message)) => message.to_string(),
+            other => format!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_api_key_accepts_harn_secret_refs() {
+        let _lock = ENV_LOCK.lock().expect("env lock poisoned");
+        let _provider_chain = ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+        let _provider_key = ScopedEnvVar::set(
+            "ANTHROPIC_API_KEY",
+            "harn-secret://provider/anthropic-api-key",
+        );
+        let _secret = ScopedEnvVar::set("HARN_SECRET_PROVIDER_ANTHROPIC_API_KEY", "sk-from-ref");
+        reset_provider_key_cache();
+
+        assert_eq!(resolve_api_key("anthropic").unwrap(), "sk-from-ref");
+        reset_provider_key_cache();
+        assert!(provider_key_available("anthropic"));
+        assert!(crate::llm_config::provider_key_available("anthropic"));
+    }
+
+    #[test]
+    fn missing_harn_secret_ref_fails_without_leaking_values() {
+        let _lock = ENV_LOCK.lock().expect("env lock poisoned");
+        let _provider_chain = ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+        let _provider_key = ScopedEnvVar::set(
+            "ANTHROPIC_API_KEY",
+            "harn-secret://provider/anthropic-api-key",
+        );
+        let _secret = ScopedEnvVar::unset("HARN_SECRET_PROVIDER_ANTHROPIC_API_KEY");
+        reset_provider_key_cache();
+
+        let message = error_message(resolve_api_key("anthropic").unwrap_err());
+        assert!(
+            message.contains("Failed to resolve API key secret reference from ANTHROPIC_API_KEY")
+        );
+        assert!(message.contains("provider/anthropic-api-key"));
+        assert!(!message.contains("sk-from-ref"));
+        reset_provider_key_cache();
+        assert!(!provider_key_available("anthropic"));
+        assert!(!crate::llm_config::provider_key_available("anthropic"));
     }
 }

@@ -43,11 +43,7 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         };
         let base_url = llm_config::resolve_base_url(&def);
         let auth_envs = auth_env_names(&def.auth_env);
-        let auth_configured = auth_envs.iter().any(|env_name| {
-            std::env::var(env_name)
-                .ok()
-                .is_some_and(|value| !value.is_empty())
-        });
+        let auth_configured = llm_config::provider_key_available(&name);
         let viable = def.auth_style == "none" || auth_configured;
         let local = is_local_provider(&base_url);
         let aliases = config
