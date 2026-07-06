@@ -666,7 +666,10 @@ mod ladder_step_tests {
             r#"{"model":"mock-cheap","provider":"mock","label":null}"#
         );
         for absent in ["family", "capabilities", "when", "options"] {
-            assert!(!json.contains(absent), "unexpected key {absent:?} in {json}");
+            assert!(
+                !json.contains(absent),
+                "unexpected key {absent:?} in {json}"
+            );
         }
     }
 

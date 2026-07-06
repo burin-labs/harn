@@ -8,3 +8,4 @@ inline `models:` steps (previously the catalog path silently discarded them),
 and `family`/`capabilities` let downstreams such as harn-cloud's
 `FreeTierRoute` adopt the canonical ladder-step type instead of maintaining
 their own copy.
+
