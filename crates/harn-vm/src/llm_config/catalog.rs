@@ -537,8 +537,19 @@ pub fn provider_key_available(provider: &str) -> bool {
     auth_env_names(&pdef.auth_env).into_iter().any(|env_name| {
         std::env::var(env_name)
             .ok()
-            .is_some_and(|value| !value.trim().is_empty())
+            .is_some_and(|value| auth_env_value_available(&value))
     })
+}
+
+pub(crate) fn auth_env_value_available(value: &str) -> bool {
+    if value.trim().is_empty() {
+        return false;
+    }
+    match crate::secrets::resolve_secret_ref_to_string(value) {
+        Ok(Some(secret)) => !secret.trim().is_empty(),
+        Ok(None) => true,
+        Err(_) => false,
+    }
 }
 
 pub fn available_provider_names() -> Vec<String> {
