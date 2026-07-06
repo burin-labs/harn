@@ -21,6 +21,15 @@
 //   2. Within the overlay's own content, an explicit `options.overrides`
 //      entry for a `(mode, lane)` slot wins over that slot's row default —
 //      the row only fills the slot when the caller left it nil.
+//
+// Fold-family naming: prompt-fragment folds take `agent_options` FIRST and are
+// named `with_<x>` (`with_goal`, `with_governance`, `with_overlay`) — they only
+// ADD a fragment and never narrow a surface. The `_policy` suffix is reserved
+// for genuine surface-narrowing lowerings (e.g. `lane_policy`, which prunes
+// `agent_options.tools`). `overlay_policy` is retained as a deprecated alias
+// for the pre-rename call sites; new code should prefer `with_overlay`.
+import { __with_prompt_fragment } from "std/agent/preflight"
+
 /**
  * A single overlay row: `lines` render for `mode` (and, when `lane` is set,
  * only when the active lane also matches). `enabled: false` disables a row
@@ -158,15 +167,36 @@ pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
 }
 
 /**
- * overlay_policy(rows, mode, agent_options?, options?) — layer a
- * mode/lane-specific prompt-nudge overlay onto `agent_options` via the
- * existing `context_profile.prompt_fragments` channel, preserving any
- * fragments the caller already set. `rows` is DATA (see `OverlayRow`);
- * `options.lane` narrows matching to a `(mode, lane)` row (see
- * `std/agent/lanes`); `options.overrides` supplies caller lines that fill
- * (and win over) a row's slot — see `overlay_context_fragment`. Never
- * touches `agent_options.system` or any other explicit system-prompt
- * option; it only adds a fragment alongside them.
+ * with_overlay(agent_options, rows, mode, options?) — layer a mode/lane-specific
+ * prompt-nudge overlay onto `agent_options` via the existing
+ * `context_profile.prompt_fragments` channel, preserving any fragments the
+ * caller already set. `rows` is DATA (see `OverlayRow`); `options.lane` narrows
+ * matching to a `(mode, lane)` row (see `std/agent/lanes`); `options.overrides`
+ * supplies caller lines that fill (and win over) a row's slot — see
+ * `overlay_context_fragment`. Never touches `agent_options.system` or any other
+ * explicit system-prompt option; it only adds a fragment alongside them.
+ *
+ * Options-first arg order matches the rest of the fold family (`with_goal`,
+ * `with_governance`).
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, with_overlay({provider: "anthropic"}, default_overlay_rows(), "agent"))
+ */
+pub fn with_overlay(agent_options, rows, mode, options = nil) {
+  let validated = __overlay_validate_rows(rows)
+  let extra = options ?? {}
+  let fragment = overlay_context_fragment(validated, mode, extra?.lane, extra?.overrides)
+  return __with_prompt_fragment(agent_options, fragment)
+}
+
+/**
+ * overlay_policy(rows, mode, agent_options?, options?) — DEPRECATED alias for
+ * `with_overlay`, kept (with the pre-rename `rows`-first arg order) so existing
+ * call sites keep working. Prefer `with_overlay(agent_options, rows, mode,
+ * options?)`: it is a fold, not a surface-narrowing `_policy`, and takes
+ * `agent_options` first like the rest of the fold family.
  *
  * @effects: []
  * @errors: [runtime]
@@ -174,26 +204,5 @@ pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
  * @example: agent_loop(task, nil, overlay_policy(default_overlay_rows(), "agent", {provider: "anthropic"}))
  */
 pub fn overlay_policy(rows, mode, agent_options = nil, options = nil) {
-  let validated = __overlay_validate_rows(rows)
-  let opts = if type_of(agent_options) == "dict" {
-    agent_options
-  } else {
-    {}
-  }
-  let extra = options ?? {}
-  let fragment = overlay_context_fragment(validated, mode, extra?.lane, extra?.overrides)
-  if fragment == nil {
-    return opts
-  }
-  let profile = if type_of(opts?.context_profile) == "dict" {
-    opts.context_profile
-  } else {
-    {}
-  }
-  let existing = if type_of(profile?.prompt_fragments) == "list" {
-    profile.prompt_fragments
-  } else {
-    []
-  }
-  return opts + {context_profile: profile + {prompt_fragments: existing + [fragment]}}
+  return with_overlay(agent_options, rows, mode, options)
 }

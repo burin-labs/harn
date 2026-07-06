@@ -1,3 +1,4 @@
+import { pick_keys } from "std/collections"
 import { command_run } from "std/command"
 import "std/hitl"
 
@@ -220,22 +221,23 @@ fn __stage_command_options(node) {
   let args = metadata?.command_args
   var options = {capture: {max_inline_bytes: 65536}}
   if type_of(args) == "dict" {
-    for key in [
-      "cwd",
-      "env",
-      "env_mode",
-      "stdin",
-      "timeout_ms",
-      "background",
-      "background_after_ms",
-      "capture",
-      "max_inline_bytes",
-      "policy_context",
-    ] {
-      if args?[key] != nil {
-        options = options + {[key]: args[key]}
-      }
-    }
+    options = options
+      + pick_keys(
+      args,
+      [
+        "cwd",
+        "env",
+        "env_mode",
+        "stdin",
+        "timeout_ms",
+        "background",
+        "background_after_ms",
+        "capture",
+        "max_inline_bytes",
+        "policy_context",
+      ],
+      {drop_nil: true},
+    )
   }
   return options
 }
@@ -348,11 +350,7 @@ fn __stage_prepare_manual_gate(node_id, node, artifacts) {
       task_plan_purpose: metadata?.task_plan_purpose,
     },
   }
-  for key in ["reviewers", "quorum", "deadline"] {
-    if metadata[key] != nil {
-      options = options + {[key]: metadata[key]}
-    }
-  }
+  options = options + pick_keys(metadata, ["reviewers", "quorum", "deadline"], {drop_nil: true})
   let requested = try {
     request_approval(prompt, options)
   }

@@ -1,0 +1,35 @@
+/**
+ * L1 regression: default_llm_caller (std/llm/handlers) and safe_call
+ * (std/llm/safe) now share one envelope wrapper (__wrap_llm_result). On a
+ * budget-exceeded throw BOTH classify status="budget_exhausted" AND attach the
+ * underlying `error` so budget context is not dropped. This pins the
+ * previously-divergent handlers path, which used to drop `error` on the budget
+ * branch.
+ */
+import { default_llm_caller } from "std/llm/handlers"
+import { safe_call } from "std/llm/safe"
+import { with_llm_mocks } from "std/testing"
+
+pipeline default() {
+  let caller = default_llm_caller()
+  let call = {
+    prompt: "hi",
+    system: "",
+    opts: {provider: "mock", model: "m"},
+    turn: {iteration: 0, session_id: "s", attempt: 1},
+  }
+  with_llm_mocks(
+    [{error: {reason: "budget_exceeded", message: "over budget"}}],
+    { ->
+      let env = caller(call)
+      __io_println("caller ok=${env.ok} status=${env.status} has_error=${env.error != nil}")
+    },
+  )
+  with_llm_mocks(
+    [{error: {reason: "budget_exceeded", message: "over budget"}}],
+    { ->
+      let s = safe_call("hi", "", {provider: "mock", model: "m"})
+      __io_println("safe   ok=${s.ok} status=${s.status} has_error=${s.error != nil}")
+    },
+  )
+}

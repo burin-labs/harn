@@ -3,10 +3,9 @@ import {
   __completion_gate_classify_writes,
   __completion_gate_combine_verify,
   __completion_gate_ladder,
-  __judge_apply_llm_overrides,
   __judge_classify_verdict,
+  __judge_run_checkpoint,
 } from "std/agent/judge_internals"
-import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import {
   agent_emit_event,
@@ -98,21 +97,18 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     },
     required: ["verdict"],
   }
-  let base = opts?.llm_options ?? {}
-  let llm_opts = __judge_apply_llm_overrides(
-    base
-      + {
-      model: judge_cfg?.model ?? opts?.model,
-      provider: judge_cfg?.provider ?? opts?.provider,
-      output_schema: schema,
-      session_id: payload.session_id,
-      system: system,
-    },
+  let ran = __judge_run_checkpoint(
+    harness,
     judge_cfg,
+    opts,
+    payload,
+    "agent.completion_judge",
+    system,
+    user,
+    schema,
   )
-  let started = harness.clock.monotonic_ms()
-  let checkpoint = agent_typed_output_checkpoint("agent.completion_judge", user, schema, llm_opts)
-  let duration_ms = harness.clock.monotonic_ms() - started
+  let checkpoint = ran.checkpoint
+  let duration_ms = ran.duration_ms
   if !checkpoint.ok {
     if judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? false {
       return {

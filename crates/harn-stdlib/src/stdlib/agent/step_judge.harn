@@ -1,5 +1,4 @@
-import { __judge_apply_llm_overrides, __judge_classify_verdict } from "std/agent/judge_internals"
-import { agent_typed_output_checkpoint } from "std/agent/primitives"
+import { __judge_classify_verdict, __judge_run_checkpoint } from "std/agent/judge_internals"
 import { step_judge_system_prompt, step_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
 import { estimate_call_cost } from "std/llm/economics"
@@ -72,21 +71,9 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   let system = step_judge_system_prompt({rubric: judge_cfg?.rubric ?? "default"})
   let user = step_judge_user_prompt(payload)
   let schema = __step_judge_schema()
-  let base = opts?.llm_options ?? {}
-  let llm_opts = __judge_apply_llm_overrides(
-    base
-      + {
-      model: judge_cfg?.model ?? opts?.model,
-      provider: judge_cfg?.provider ?? opts?.provider,
-      output_schema: schema,
-      session_id: payload.session_id,
-      system: system,
-    },
-    judge_cfg,
-  )
-  let started = harness.clock.monotonic_ms()
-  let checkpoint = agent_typed_output_checkpoint("agent.step_judge", user, schema, llm_opts)
-  let duration_ms = harness.clock.monotonic_ms() - started
+  let ran = __judge_run_checkpoint(harness, judge_cfg, opts, payload, "agent.step_judge", system, user, schema)
+  let checkpoint = ran.checkpoint
+  let duration_ms = ran.duration_ms
   if !checkpoint.ok {
     let fail_open = judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? true
     if fail_open {

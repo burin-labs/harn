@@ -8,6 +8,7 @@
 // never a hand-written loop. Generalizes Burin's `session_goal` + `goal-judge`
 // (design-only there; built here).
 import { pin } from "std/agent/pins"
+import { __with_prompt_fragment } from "std/agent/preflight"
 import { system_prompt_part } from "std/llm/prompts"
 
 // Bounded re-loop cap: if the goal is not met at loop end, re-enter with
@@ -184,22 +185,7 @@ pub fn goal_context_fragment(g) {
  * @example: agent_loop(task, nil, with_goal({provider: "anthropic"}, g))
  */
 pub fn with_goal(agent_options, g) {
-  let opts = if type_of(agent_options) == "dict" {
-    agent_options
-  } else {
-    {}
-  }
-  let profile = if type_of(opts?.context_profile) == "dict" {
-    opts.context_profile
-  } else {
-    {}
-  }
-  let existing = if type_of(profile?.prompt_fragments) == "list" {
-    profile.prompt_fragments
-  } else {
-    []
-  }
-  return opts + {context_profile: profile + {prompt_fragments: existing + [goal_context_fragment(g)]}}
+  return __with_prompt_fragment(agent_options, goal_context_fragment(g))
 }
 
 /**

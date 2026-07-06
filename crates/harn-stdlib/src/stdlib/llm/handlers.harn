@@ -9,14 +9,17 @@
 //   result  = {ok: true, value: <llm dict>}
 //           | {ok: false, status: <reserved>, error?, retryable?}
 //
-// Reserved statuses: "budget_exhausted", "transport_error", "caller_aborted",
+// Reserved statuses: "budget_exhausted", "transient", "caller_aborted",
 // "caller_skipped", "exception", "schema_validation", "rate_limited",
 // "timeout", "network", "provider_5xx", "stream_interrupt",
 // "context_window_exceeded", "auth", "policy_blocked", "circuit_open".
+// "context_overflow" (the tag `std/llm/safe` emits for the same
+// context-window condition) is treated as an alias of
+// "context_window_exceeded" by the default retry predicate.
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
 import { llm_call_options } from "std/llm/options"
-import { repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
+import { __wrap_llm_result, repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
 
 /**
  * default_llm_caller returns a closure with the canonical (call) -> result
@@ -38,22 +41,11 @@ pub fn default_llm_caller() {
         __pop_llm_render_context()
       }
     }
-    let result = try {
-      llm_call(call.prompt, call.system, llm_call_options(call.opts))
-    }
-    if !is_err(result) {
-      return {ok: true, value: unwrap(result)}
-    }
-    let err = unwrap_err(result)
-    let reason = if type_of(err) == "dict" {
-      err?.reason ?? ""
-    } else {
-      ""
-    }
-    if reason == "budget_exceeded" {
-      return {ok: false, status: "budget_exhausted"}
-    }
-    return {ok: false, status: "exception", error: err}
+    return __wrap_llm_result(
+      try {
+        llm_call(call.prompt, call.system, llm_call_options(call.opts))
+      },
+    )
   }
 }
 
@@ -207,6 +199,8 @@ fn __retry_default_predicate(envelope) {
     "auth",
     "budget_exhausted",
     "context_window_exceeded",
+    // `std/llm/safe` emits "context_overflow" for the same condition; alias it.
+    "context_overflow",
     "policy_blocked",
     "caller_aborted",
     "caller_skipped",
@@ -300,8 +294,9 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
  *   provider_5xx, stream_interrupt
  *
  * The default predicate NEVER retries:
- *   schema_validation, auth, budget_exhausted,
- *   context_window_exceeded, policy_blocked
+ *   schema_validation, auth, budget_exhausted, context_window_exceeded,
+ *   context_overflow, policy_blocked, caller_aborted, caller_skipped,
+ *   circuit_open
  *
  * `opts.predicate(envelope) -> bool` overrides the default.
  * Honors `error.retry_after_ms` and case-insensitive `Retry-After` header

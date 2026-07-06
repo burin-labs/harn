@@ -88,7 +88,8 @@ Import the home module instead of re-deriving the behavior inline in a loop body
 - Progress / stall detectors (unified) → `std/agent/stall`
   (`agent_stall_initial_state` + `agent_stall_observe_tool_calls`).
 - Tool-surface narrowing (lanes) → `std/agent/lanes` (`lane_policy`).
-- Prompt overlays (data-driven nudges) → `std/agent/overlays` (`overlay_policy`).
+- Prompt overlays (data-driven nudges) → `std/agent/overlays` (`with_overlay`;
+  `overlay_policy` is a deprecated alias).
 - Auto-compaction → `std/agent/autocompact` (`agent_autocompact_if_needed`).
 - Goal recitation / scratchpad → `std/agent/scratchpad`.
 - Preset packs bundle several of the above → `std/agent/presets` (`agent_preset`);
