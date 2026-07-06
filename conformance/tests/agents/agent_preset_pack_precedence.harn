@@ -4,7 +4,7 @@
  * override explicit caller input. This is the data-over-code default layer —
  * defaults are data rows one lower-priority seam under the caller.
  */
-import { agent_preset } from "std/agent/presets"
+import { agent_preset, agent_preset_register } from "std/agent/presets"
 
 pipeline default() {
   // Pack fills absent keys.
@@ -26,4 +26,36 @@ pipeline default() {
   let summary = agent_preset("summary")
   __io_println(summary.provider)
   __io_println(summary.timeout_ms)
+  // Routing is an ownership group: a local/configured route must not inherit a
+  // conflicting preset provider or model ladder from the role pack.
+  let provider_only = agent_preset("audit", {provider: "llamacpp"})
+  __io_println(provider_only.provider)
+  __io_println(provider_only?.model_ladder == nil)
+  let configured_pair = agent_preset("audit", {provider: "llamacpp", model: "gemma4-local"})
+  __io_println(configured_pair.model_ladder[0].provider)
+  __io_println(configured_pair.model_ladder[0].model)
+  let nested_route = agent_preset("audit", {llm_options: {provider: "llamacpp", model: "gemma4-local"}})
+  __io_println(nested_route?.provider == nil)
+  __io_println(nested_route?.model_ladder == nil)
+  // User-defined route pack rows move as the same group.
+  agent_preset_register(
+    "route_pack",
+    {
+      pack: {
+        fallback_chain: ["frontier"],
+        provider: "anthropic",
+        model_ladder: ["claude-opus-4-8"],
+        timeout_ms: 11,
+      },
+    },
+  )
+  let defaulted_route_pack = agent_preset("route_pack")
+  __io_println(defaulted_route_pack.provider)
+  __io_println(defaulted_route_pack.fallback_chain[0])
+  __io_println(defaulted_route_pack.model_ladder[0])
+  let local_route_pack = agent_preset("route_pack", {provider: "llamacpp"})
+  __io_println(local_route_pack.provider)
+  __io_println(local_route_pack?.fallback_chain == nil)
+  __io_println(local_route_pack?.model_ladder == nil)
+  __io_println(local_route_pack.timeout_ms)
 }

@@ -8,3 +8,16 @@ true
 only-mine
 openai
 60000
+llamacpp
+true
+llamacpp
+gemma4-local
+true
+true
+anthropic
+frontier
+claude-opus-4-8
+llamacpp
+true
+true
+11

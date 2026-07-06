@@ -2053,6 +2053,14 @@ disables all, `providers: ["-id"]` opts out by id, `config` carries
 provider-specific knobs). For Claude Opus 4.6/4.7, `thinking: true` is
 enough to enable the interleaved-thinking beta header for the whole loop.
 
+When using `agent_preset(kind, options)`, preset pack rows fill only absent
+keys. Model routing is grouped: any explicit route at top level or under
+`llm_options` (`provider`, `model`, `models`, `ladder`, `model_ladder`,
+`routing`, or related policy keys) prevents the preset from mixing in its
+built-in provider or model ladder. Supplying both top-level `provider` and
+`model` without a ladder exposes a single-step `model_ladder` for downstream
+policy code.
+
 Profiles preload common loop budgets and retry counts. Explicit keys
 override the profile:
 
