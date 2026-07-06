@@ -1,0 +1,24 @@
+/**
+ * Regression guard for harn#4147: content-producing filesystem writes must
+ * recreate missing ancestor directories (`mkdir -p`). Before the fix, writing
+ * into a not-yet-created directory failed with "No such file or directory".
+ * Covers the exact shape that broke qmode's exit_plan_mode (harness.fs.write_text
+ * into a fresh state dir) plus the stdlib write_file / append_file builtins.
+ */
+pipeline default() {
+  let root = path_join(harness.fs.temp_dir(), "harn-scoped-parent-" + uuid())
+  // harness.fs.write_text into a not-yet-created nested dir (the qmode case).
+  let plan_p = path_join(root, "qmode/task-1/plan.json")
+  harness.fs.write_text(plan_p, "{\"plan\":\"Redis-backed\"}")
+  __io_println(contains(harness.fs.read_text(plan_p), "Redis-backed"))
+  // stdlib write_file into a deeper missing chain.
+  let cfg_p = path_join(root, "a/b/c/config.json")
+  write_file(cfg_p, "cfg-ok")
+  __io_println(read_file(cfg_p))
+  // append_file creates the file and its parents when absent.
+  let log_p = path_join(root, "logs/deep/qa.jsonl")
+  append_file(log_p, "line1\n")
+  append_file(log_p, "line2\n")
+  __io_println(read_file(log_p) == "line1\nline2\n")
+  harness.fs.delete(root)
+}

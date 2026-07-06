@@ -534,6 +534,13 @@ fn scoped_mutation_target(
 fn atomic_write_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
     let dir = parent.unwrap_or_else(|| Path::new("."));
+    // Restore the pre-hardening `mkdir -p` contract for content-producing
+    // writes: an unrestricted (no active sandbox scope) write into a
+    // not-yet-created directory recreates its ancestor chain, matching the
+    // scoped path's `ensure_parent_dirs_scoped`.
+    if let Some(parent) = parent {
+        std::fs::create_dir_all(parent)?;
+    }
     let tmp_path = dir.join(scoped_tmp_name(path));
     let write_result = (|| -> io::Result<()> {
         let mut file = std::fs::File::create(&tmp_path)?;
@@ -554,6 +561,11 @@ fn atomic_write_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
 }
 
 fn append_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
+    // Match the `append_file` contract: appending to a new log in a
+    // not-yet-created directory recreates the parent chain.
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -576,6 +588,11 @@ fn scoped_tmp_name(path: &Path) -> String {
 fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
     use std::os::fd::AsRawFd;
 
+    // Content-producing writes recreate their parent chain (`mkdir -p`),
+    // restoring the pre-hardening `write_file`/`http_download` contract that
+    // downstream `.harn` relies on. The creation stays inside the scope root
+    // and reuses the same symlink-safe parent-fd walk as the write itself.
+    ensure_parent_dirs_scoped(target)?;
     let (parent, file_name) = open_parent_dir_scoped(target)?;
     let tmp_name = scoped_tmp_name(Path::new(&file_name));
     let mut file = openat_file(
@@ -609,13 +626,20 @@ fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) ->
 
 #[cfg(not(unix))]
 fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
-    atomic_write_unscoped(&target.root.join(&target.relative), contents)
+    let full = target.root.join(&target.relative);
+    if let Some(parent) = full.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    atomic_write_unscoped(&full, contents)
 }
 
 #[cfg(unix)]
 fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
     use std::os::fd::AsRawFd;
 
+    // Append creates the file (and its parent chain) when absent, matching the
+    // pre-hardening `append_file` contract (append-to-a-new-log-in-a-new-dir).
+    ensure_parent_dirs_scoped(target)?;
     let (parent, file_name) = open_parent_dir_scoped(target)?;
     let mut file = openat_file(
         parent.as_raw_fd(),
@@ -628,7 +652,11 @@ fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::R
 
 #[cfg(not(unix))]
 fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
-    append_unscoped(&target.root.join(&target.relative), contents)
+    let full = target.root.join(&target.relative);
+    if let Some(parent) = full.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    append_unscoped(&full, contents)
 }
 
 #[cfg(unix)]
@@ -720,6 +748,49 @@ fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()>
 }
 
 #[cfg(unix)]
+/// Create the ancestor directory chain of a scoped write/append target,
+/// mirroring the pre-hardening `mkdir -p` behavior of the content-producing
+/// filesystem builtins (`write_file`, `write_file_bytes`, `append_file`) and
+/// `http_download`. Only the ancestors are created — the final path component
+/// is the file the caller writes. Traversal stays scoped to `target.root` and
+/// symlink-safe (each level is opened with `O_NOFOLLOW` via `open_dir_at`), so
+/// this preserves the security properties #4147 added while restoring the
+/// directory-autovivification contract downstream code depends on. Concurrent
+/// creators are tolerated (a losing `mkdirat` that sees `EEXIST` is ignored).
+///
+/// Structural operations (copy destination, rename, remove, single `mkdir`)
+/// intentionally do NOT call this — they keep `open_parent_dir_scoped`'s
+/// "parent must already exist" semantics.
+#[cfg(unix)]
+fn ensure_parent_dirs_scoped(target: &ScopedMutationTarget) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let mut components = clean_relative_components(&target.relative)?;
+    // Drop the file-name component; only the ancestor directories are created.
+    // An empty remainder means the parent is the (already-existing) scope root.
+    if components.pop().is_none() || components.is_empty() {
+        return Ok(());
+    }
+    let mut current = open_dir_absolute(&target.root)?;
+    for component in components {
+        match open_dir_at(current.as_raw_fd(), &component) {
+            Ok(next) => current = next,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if let Err(mkerr) = mkdirat_name(current.as_raw_fd(), &component) {
+                    // A concurrent writer may have created it between our
+                    // failed open and this mkdir; that is a success for us.
+                    if mkerr.kind() != io::ErrorKind::AlreadyExists {
+                        return Err(mkerr);
+                    }
+                }
+                current = open_dir_at(current.as_raw_fd(), &component)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 fn open_parent_dir_scoped(
     target: &ScopedMutationTarget,
 ) -> io::Result<(std::os::fd::OwnedFd, String)> {
@@ -2165,6 +2236,116 @@ mod tests {
         assert!(
             !outside.path().join("state.json").exists(),
             "scoped write must not follow swapped parent symlink; error={error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_write_creates_missing_parent_dirs() {
+        // Regression guard for #4147: the scoped-write hardening dropped the
+        // `mkdir -p` contract that `write_file` / `write_text` / `http_download`
+        // relied on, surfacing downstream as "No such file or directory" when a
+        // tool wrote into a not-yet-created state dir. A write to a path whose
+        // ancestors are missing must recreate them (scoped) and succeed.
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("a/b/c/plan.json");
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+        let target = scoped_mutation_target("write_file", &path, FsAccess::Write)
+            .unwrap()
+            .expect("restricted policy yields scoped target");
+        let result = atomic_write_scoped_target(&target, b"{\"plan\":\"Redis-backed\"}");
+        pop_execution_policy();
+
+        assert!(
+            result.is_ok(),
+            "write must create missing parents: {result:?}"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"{\"plan\":\"Redis-backed\"}".to_vec()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_append_creates_missing_parent_dirs() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("logs/deep/qa.jsonl");
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+        let target = scoped_mutation_target("append_file", &path, FsAccess::Write)
+            .unwrap()
+            .expect("restricted policy yields scoped target");
+        append_scoped_target(&target, b"line1\n").unwrap();
+        append_scoped_target(&target, b"line2\n").unwrap();
+        pop_execution_policy();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"line1\nline2\n".to_vec());
+    }
+
+    #[test]
+    fn unscoped_write_creates_missing_parent_dirs() {
+        // With no active sandbox scope (`scoped_mutation_target` returns None),
+        // writes flow through `atomic_write_unscoped`. That path must honor the
+        // same `mkdir -p` contract, otherwise a trusted-context write (CLI
+        // scripts, `harn run`, conformance) into a fresh directory fails.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x/y/z/plan.json");
+        atomic_write_unscoped(&path, b"{\"plan\":\"Redis-backed\"}").unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"{\"plan\":\"Redis-backed\"}".to_vec()
+        );
+    }
+
+    #[test]
+    fn unscoped_append_creates_missing_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("logs/deep/qa.jsonl");
+        append_unscoped(&path, b"line1\n").unwrap();
+        append_unscoped(&path, b"line2\n").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"line1\nline2\n".to_vec());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_write_parent_autocreate_refuses_symlinked_intermediate() {
+        // Auto-creating parents must stay symlink-safe: the create walk opens
+        // each level with O_NOFOLLOW, so a symlinked intermediate directory
+        // cannot be used to escape the workspace root.
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("escape")).unwrap();
+        let path = workspace.path().join("escape/sub/plan.json");
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+        // The escape is refused at whichever layer sees it first: path
+        // resolution (`scoped_mutation_target` canonicalizes and rejects a
+        // target outside `workspace_roots`) or, for a symlink swapped in after
+        // resolution, the auto-create walk itself (`O_NOFOLLOW` on each level).
+        let escaped = match scoped_mutation_target("write_file", &path, FsAccess::Write) {
+            Ok(Some(target)) => atomic_write_scoped_target(&target, b"escape").is_ok(),
+            Ok(None) | Err(_) => false,
+        };
+        pop_execution_policy();
+
+        assert!(
+            !escaped,
+            "must not write through a symlinked intermediate dir"
+        );
+        assert!(
+            !outside.path().join("sub/plan.json").exists(),
+            "scoped write escaped the workspace via a symlinked parent"
         );
     }
 
