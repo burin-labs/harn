@@ -1,0 +1,48 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * A `models:` ladder step may carry the optional `family` and `capabilities`
+ * fields (informational metadata for downstream capability-aware routing such
+ * as harn-cloud's free-tier pool). They are accepted by option normalization
+ * — not rejected — and the ladder still advances on transport failure exactly
+ * as it would without them. The cheap rung returns HTTP 429 and the frontier
+ * rung, also carrying family/capabilities, serves the answer.
+ */
+pipeline test(task) {
+  with_llm_script(
+    [
+      {
+        error: {category: "rate_limit", message: "HTTP 429 rate limit", retry_after_ms: 10},
+        model: "mock",
+        provider: "mock",
+      },
+      {text: "served by frontier", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      let result = llm_call(
+        "hi",
+        nil,
+        {
+          models: [
+            {model: "mock", provider: "mock", label: "cheap", family: "haiku", capabilities: ["tools"]},
+            {
+              model: "mock-strong",
+              provider: "mock",
+              label: "frontier",
+              family: "sonnet",
+              capabilities: ["vision", "tools"],
+            },
+          ],
+        },
+      )
+      __io_println(result.text)
+      __io_println(result.model)
+      let attempts = result.routing.attempts
+      __io_println(len(attempts))
+      __io_println(attempts[0].label)
+      __io_println(attempts[0].status)
+      __io_println(attempts[1].label)
+      __io_println(attempts[1].status)
+    },
+  )
+}

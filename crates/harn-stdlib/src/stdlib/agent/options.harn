@@ -157,7 +157,7 @@ pub type AgentLoopOptions = {
   fallback_strategy?: string,
   strategy?: string,
   equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
-  models?: list<string | {provider?: string, model?: string, options?: dict, label?: string}>,
+  models?: list<string | {provider?: string, model?: string, options?: dict, label?: string, family?: string, capabilities?: list}>,
   ladder?: string,
   api_mode?: string,
   max_tokens?: int,

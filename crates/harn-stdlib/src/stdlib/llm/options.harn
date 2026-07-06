@@ -41,6 +41,8 @@ pub type ModelLadderStep = {
   when?: string,
   options?: dict,
   label?: string,
+  family?: string,
+  capabilities?: list,
 }
 
 /**
