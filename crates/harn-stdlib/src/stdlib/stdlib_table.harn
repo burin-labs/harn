@@ -16,7 +16,7 @@ fn __table_text(value) -> string {
   if value == nil {
     return ""
   }
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "dict" || kind == "list" || kind == "set" {
     return json_stringify(value)
   }
@@ -24,7 +24,7 @@ fn __table_text(value) -> string {
 }
 
 fn __table_cell(value, max_width) -> string {
-  let normalized = replace(replace(__table_text(value), "\r", " "), "\n", "\\n")
+  const normalized = replace(replace(__table_text(value), "\r", " "), "\n", "\\n")
   if max_width != nil && max_width > 0 {
     return ansi_truncate(normalized, max_width)
   }
@@ -35,9 +35,9 @@ fn __table_column_from(raw, idx, headers) {
   if type_of(raw) == "string" {
     return {key: raw, header: raw, align: "left", index: idx}
   }
-  let col = raw ?? {}
-  let key = col?.key ?? col?.name ?? col?.header ?? to_string(idx)
-  let header = col?.header ?? (headers?.[idx] ?? key)
+  const col = raw ?? {}
+  const key = col?.key ?? col?.name ?? col?.header ?? to_string(idx)
+  const header = col?.header ?? (headers?.[idx] ?? key)
   return {
     key: key,
     header: header,
@@ -49,11 +49,11 @@ fn __table_column_from(raw, idx, headers) {
 }
 
 fn __table_columns(rows, opts) {
-  let options = opts ?? {}
-  let headers = options?.headers ?? []
-  var cols = []
+  const options = opts ?? {}
+  const headers = options?.headers ?? []
+  let cols = []
   if type_of(options?.columns) == "list" && len(options.columns) > 0 {
-    var idx = 0
+    let idx = 0
     for raw in options.columns {
       cols = cols.push(__table_column_from(raw, idx, headers))
       idx += 1
@@ -61,14 +61,14 @@ fn __table_columns(rows, opts) {
     return cols
   }
   if len(headers) > 0 {
-    var hidx = 0
+    let hidx = 0
     for header in headers {
       cols = cols.push({key: to_string(hidx), header: header, align: "left", index: hidx})
       hidx += 1
     }
     return cols
   }
-  let first = rows?.[0]
+  const first = rows?.[0]
   if type_of(first) == "dict" {
     for key in keys(first).sort() {
       cols = cols.push({key: key, header: key, align: "left", index: len(cols)})
@@ -76,7 +76,7 @@ fn __table_columns(rows, opts) {
     return cols
   }
   if type_of(first) == "list" {
-    var i = 0
+    let i = 0
     while i < len(first) {
       cols = cols.push({key: to_string(i), header: to_string(i), align: "left", index: i})
       i += 1
@@ -99,12 +99,12 @@ fn __table_value(row, col) {
 }
 
 fn __table_matrix(rows, cols, opts) {
-  let default_max = opts?.max_cell_width
-  var matrix = []
+  const default_max = opts?.max_cell_width
+  let matrix = []
   for row in rows ?? [] {
-    var rendered = []
+    let rendered = []
     for col in cols {
-      let max_width = col?.max_width ?? default_max
+      const max_width = col?.max_width ?? default_max
       rendered = rendered.push(__table_cell(__table_value(row, col), max_width))
     }
     matrix = matrix.push(rendered)
@@ -113,16 +113,16 @@ fn __table_matrix(rows, cols, opts) {
 }
 
 fn __table_widths(cols, matrix) {
-  var widths = []
-  var i = 0
+  let widths = []
+  let i = 0
   while i < len(cols) {
-    let fixed = cols[i]?.width
+    const fixed = cols[i]?.width
     if fixed != nil && fixed > 0 {
       widths = widths.push(fixed)
       i += 1
       continue
     }
-    var width = ansi_visible_len(cols[i]?.header ?? "")
+    let width = ansi_visible_len(cols[i]?.header ?? "")
     for row in matrix {
       width = max(width, ansi_visible_len(row[i] ?? ""))
     }
@@ -133,8 +133,8 @@ fn __table_widths(cols, matrix) {
 }
 
 fn __table_pad(value, width, align) -> string {
-  let text = value ?? ""
-  let missing = width - ansi_visible_len(text)
+  const text = value ?? ""
+  const missing = width - ansi_visible_len(text)
   if missing <= 0 {
     return text
   }
@@ -142,16 +142,16 @@ fn __table_pad(value, width, align) -> string {
     return " ".repeat(missing) + text
   }
   if align == "center" {
-    let left = floor(missing / 2)
-    let right = missing - left
+    const left = floor(missing / 2)
+    const right = missing - left
     return " ".repeat(left) + text + " ".repeat(right)
   }
   return text + " ".repeat(missing)
 }
 
 fn __table_render_row(cells, cols, widths) -> string {
-  var out = []
-  var i = 0
+  let out = []
+  let i = 0
   while i < len(cols) {
     out = out.push(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left"))
     i += 1
@@ -160,7 +160,7 @@ fn __table_render_row(cells, cols, widths) -> string {
 }
 
 fn __table_plain_separator(widths) -> string {
-  var parts = []
+  let parts = []
   for width in widths {
     parts = parts.push("-".repeat(max(width, 3)))
   }
@@ -172,8 +172,8 @@ fn __table_markdown_escape(value) -> string {
 }
 
 fn __table_markdown_row(cells, cols, widths) -> string {
-  var out = []
-  var i = 0
+  let out = []
+  let i = 0
   while i < len(cols) {
     out = out.push(__table_markdown_escape(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left")))
     i += 1
@@ -182,12 +182,12 @@ fn __table_markdown_row(cells, cols, widths) -> string {
 }
 
 fn __table_markdown_separator(cols, widths) -> string {
-  var out = []
-  var i = 0
+  let out = []
+  let i = 0
   while i < len(cols) {
-    let marks = "-".repeat(max(widths[i], 3))
-    let align = cols[i]?.align ?? "left"
-    let cell = if align == "right" {
+    const marks = "-".repeat(max(widths[i], 3))
+    const align = cols[i]?.align ?? "left"
+    const cell = if align == "right" {
       marks + ":"
     } else if align == "center" {
       ":" + marks + ":"
@@ -201,9 +201,9 @@ fn __table_markdown_separator(cols, widths) -> string {
 }
 
 fn __table_render_plain(cols, matrix, widths, show_header) -> string {
-  var lines = []
+  let lines = []
   if show_header {
-    let header_cells = cols.map({ col -> col?.header ?? col?.key ?? "" })
+    const header_cells = cols.map({ col -> col?.header ?? col?.key ?? "" })
     lines = lines.push(__table_render_row(header_cells, cols, widths))
     lines = lines.push(__table_plain_separator(widths))
   }
@@ -214,8 +214,8 @@ fn __table_render_plain(cols, matrix, widths, show_header) -> string {
 }
 
 fn __table_render_markdown(cols, matrix, widths, show_header) -> string {
-  var lines = []
-  let header_cells = if show_header {
+  let lines = []
+  const header_cells = if show_header {
     cols.map({ col -> col?.header ?? col?.key ?? "" })
   } else {
     cols.map({ _col -> "" })
@@ -235,18 +235,18 @@ fn __table_render_markdown(cols, matrix, widths, show_header) -> string {
  * @errors: []
  */
 pub fn render_table(rows: list, options: TableOptions = {}) -> string {
-  let items = rows ?? []
+  const items = rows ?? []
   if len(items) == 0 {
     return options.empty ?? ""
   }
-  let cols = __table_columns(items, options)
+  const cols = __table_columns(items, options)
   if len(cols) == 0 {
     return options.empty ?? ""
   }
-  let matrix = __table_matrix(items, cols, options ?? {})
-  let widths = __table_widths(cols, matrix)
-  let format = lowercase(options.format ?? "plain")
-  let show_header = options.header ?? true
+  const matrix = __table_matrix(items, cols, options ?? {})
+  const widths = __table_widths(cols, matrix)
+  const format = lowercase(options.format ?? "plain")
+  const show_header = options.header ?? true
   if format == "markdown" || format == "md" {
     return __table_render_markdown(cols, matrix, widths, show_header)
   }
@@ -260,7 +260,7 @@ pub fn render_table(rows: list, options: TableOptions = {}) -> string {
  * @errors: []
  */
 pub fn render_markdown_table(rows: list, options: TableOptions = {}) -> string {
-  let base = options ?? {}
+  const base = options ?? {}
   return render_table(rows, base + {format: "markdown"})
 }
 
@@ -271,12 +271,12 @@ pub fn render_markdown_table(rows: list, options: TableOptions = {}) -> string {
  * @errors: []
  */
 pub fn render_kv_table(data: dict, options: TableOptions = {}) -> string {
-  var rows = []
+  let rows = []
   for key in keys(data ?? {}).sort() {
     rows = rows.push({key: key, value: data[key]})
   }
-  let base = options ?? {}
-  let opts = base
+  const base = options ?? {}
+  const opts = base
     + {
     columns: [
       {key: "key", header: base?.key_header ?? "Key"},

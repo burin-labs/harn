@@ -11,11 +11,11 @@
 // runs a configured set of adapters, hands the observations here, and
 // emits a markdown drift report plus a candidate TOML fragment under
 // `.harn-runs/provider_catalog/`. It never mutates shipped catalogs.
-let CONFIDENCE_RANK = {high: 3, medium: 2, low: 1}
+const CONFIDENCE_RANK = {high: 3, medium: 2, low: 1}
 
-let PRICING_KEYS = ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"]
+const PRICING_KEYS = ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"]
 
-let CAPABILITY_KEYS = [
+const CAPABILITY_KEYS = [
   "native_tools",
   "tool_search",
   "prompt_caching",
@@ -28,7 +28,7 @@ let CAPABILITY_KEYS = [
   "thinking_modes",
 ]
 
-let PRICING_EPSILON = 0.0001
+const PRICING_EPSILON = 0.0001
 
 fn __confidence_rank(value) {
   return CONFIDENCE_RANK[value] ?? 0
@@ -75,11 +75,11 @@ fn __observation_key(obs) {
 }
 
 fn __merge_field(base, incoming, key, base_owner, incoming_owner) {
-  let incoming_value = incoming[key]
+  const incoming_value = incoming[key]
   if incoming_value == nil {
     return {value: base[key], conflict: nil}
   }
-  let base_value = base[key]
+  const base_value = base[key]
   if base_value == nil {
     return {value: incoming_value, conflict: nil}
   }
@@ -96,15 +96,15 @@ fn __merge_field(base, incoming, key, base_owner, incoming_owner) {
 }
 
 fn __merge_keyed(base_obs, incoming_obs, field, keys_list) {
-  let base = base_obs[field] ?? {}
-  let incoming = incoming_obs[field] ?? {}
+  const base = base_obs[field] ?? {}
+  const incoming = incoming_obs[field] ?? {}
   if len(base) == 0 && len(incoming) == 0 {
     return {value: nil, conflicts: []}
   }
-  var merged = {}
-  var conflicts = []
+  let merged = {}
+  let conflicts = []
   for key in keys_list {
-    let outcome = __merge_field(base, incoming, key, base_obs.source_owner, incoming_obs.source_owner)
+    const outcome = __merge_field(base, incoming, key, base_obs.source_owner, incoming_obs.source_owner)
     if outcome.value != nil {
       merged = merged + {[key]: outcome.value}
     }
@@ -123,8 +123,8 @@ fn __merge_keyed(base_obs, incoming_obs, field, keys_list) {
 }
 
 fn __pick_primary(existing, incoming) {
-  let prefer_existing = existing.source_owner == "provider" && incoming.source_owner != "provider"
-  let prefer_incoming = incoming.source_owner == "provider" && existing.source_owner != "provider"
+  const prefer_existing = existing.source_owner == "provider" && incoming.source_owner != "provider"
+  const prefer_incoming = incoming.source_owner == "provider" && existing.source_owner != "provider"
   if prefer_existing {
     return {primary: existing, secondary: incoming}
   }
@@ -150,16 +150,16 @@ fn __source_entry(obs) {
 }
 
 fn __merge_observations(base, incoming) {
-  let pricing_outcome = __merge_keyed(base, incoming, "pricing", PRICING_KEYS)
-  let capabilities_outcome = __merge_keyed(base, incoming, "capabilities", CAPABILITY_KEYS)
-  let name_outcome = __merge_field(base, incoming, "name", base.source_owner, incoming.source_owner)
-  let context_outcome = __merge_field(base, incoming, "context_window", base.source_owner, incoming.source_owner)
-  let picked = __pick_primary(base, incoming)
-  let primary = picked.primary
-  let secondary = picked.secondary
-  let prior_sources = primary?.sources ?? [__source_entry(primary)]
-  let new_sources = prior_sources + [__source_entry(secondary)]
-  let merged = primary
+  const pricing_outcome = __merge_keyed(base, incoming, "pricing", PRICING_KEYS)
+  const capabilities_outcome = __merge_keyed(base, incoming, "capabilities", CAPABILITY_KEYS)
+  const name_outcome = __merge_field(base, incoming, "name", base.source_owner, incoming.source_owner)
+  const context_outcome = __merge_field(base, incoming, "context_window", base.source_owner, incoming.source_owner)
+  const picked = __pick_primary(base, incoming)
+  const primary = picked.primary
+  const secondary = picked.secondary
+  const prior_sources = primary?.sources ?? [__source_entry(primary)]
+  const new_sources = prior_sources + [__source_entry(secondary)]
+  const merged = primary
     + {
     name: name_outcome.value,
     context_window: context_outcome.value,
@@ -167,7 +167,7 @@ fn __merge_observations(base, incoming) {
     capabilities: capabilities_outcome.value,
     sources: new_sources,
   }
-  var conflicts = pricing_outcome.conflicts + capabilities_outcome.conflicts
+  let conflicts = pricing_outcome.conflicts + capabilities_outcome.conflicts
   if name_outcome.conflict != nil {
     conflicts = conflicts + [name_outcome.conflict + {field: "name"}]
   }
@@ -185,24 +185,24 @@ fn __merge_observations(base, incoming) {
  * the markdown report.
  */
 pub fn normalize_observations(raw: list<dict>) -> dict {
-  var grouped: dict = {}
-  var order: list<string> = []
-  var conflicts: list<dict> = []
+  let grouped: dict = {}
+  let order: list<string> = []
+  let conflicts: list<dict> = []
   for obs in raw {
-    let key = __observation_key(obs)
+    const key = __observation_key(obs)
     if grouped[key] == nil {
       grouped = grouped + {[key]: obs}
       order = order + [key]
     } else {
-      let outcome = __merge_observations(grouped[key], obs)
+      const outcome = __merge_observations(grouped[key], obs)
       grouped = grouped + {[key]: outcome.observation}
       for c in outcome.conflicts {
         conflicts = conflicts + [c + {provider: obs.provider, model_id: obs.model_id}]
       }
     }
   }
-  let sorted_keys = order.sort_by({ k -> k })
-  var canonical: list<dict> = []
+  const sorted_keys = order.sort_by({ k -> k })
+  let canonical: list<dict> = []
   for k in sorted_keys {
     canonical = canonical + [grouped[k]]
   }
@@ -210,7 +210,7 @@ pub fn normalize_observations(raw: list<dict>) -> dict {
 }
 
 fn __catalog_model_by_id(catalog) {
-  var by_id: dict = {}
+  let by_id: dict = {}
   for model in catalog?.models ?? [] {
     by_id = by_id + {[model.id]: model}
   }
@@ -218,7 +218,7 @@ fn __catalog_model_by_id(catalog) {
 }
 
 fn __abs_diff(left, right) {
-  let diff = left - right
+  const diff = left - right
   if diff < 0 {
     return 0 - diff
   }
@@ -226,10 +226,10 @@ fn __abs_diff(left, right) {
 }
 
 fn __pricing_change(catalog_pricing, observed_pricing) {
-  var changes: list<dict> = []
+  let changes: list<dict> = []
   for key in PRICING_KEYS {
-    let cat = catalog_pricing?.[key]
-    let obs = observed_pricing?.[key]
+    const cat = catalog_pricing?.[key]
+    const obs = observed_pricing?.[key]
     if cat == nil && obs == nil {
       continue
     }
@@ -248,7 +248,7 @@ fn __dict_to_pairs(value) -> list<dict> {
   if type_of(value) != "dict" {
     return []
   }
-  var pairs: list<dict> = []
+  let pairs: list<dict> = []
   for k in keys(value) {
     pairs = pairs + [{key: k, value: value[k]}]
   }
@@ -256,8 +256,8 @@ fn __dict_to_pairs(value) -> list<dict> {
 }
 
 fn __values_equal(left, right) {
-  let lt = type_of(left)
-  let rt = type_of(right)
+  const lt = type_of(left)
+  const rt = type_of(right)
   if lt != rt {
     return false
   }
@@ -265,7 +265,7 @@ fn __values_equal(left, right) {
     if len(left) != len(right) {
       return false
     }
-    var i = 0
+    let i = 0
     while i < len(left) {
       if !__values_equal(left[i], right[i]) {
         return false
@@ -290,10 +290,10 @@ fn __capability_changes(catalog_caps, observed_caps) {
   if type_of(catalog_caps) != "dict" || type_of(observed_caps) != "dict" {
     return []
   }
-  var changes: list<dict> = []
+  let changes: list<dict> = []
   for key in CAPABILITY_KEYS {
-    let cat = catalog_caps?.[key]
-    let obs = observed_caps?.[key]
+    const cat = catalog_caps?.[key]
+    const obs = observed_caps?.[key]
     if cat == nil && obs == nil {
       continue
     }
@@ -305,7 +305,7 @@ fn __capability_changes(catalog_caps, observed_caps) {
 }
 
 fn __observed_providers(observations) {
-  var providers: dict = {}
+  let providers: dict = {}
   for obs in observations {
     providers = providers + {[obs.provider]: true}
   }
@@ -320,13 +320,13 @@ fn __observed_providers(observations) {
  * plus low-confidence and key-required diagnostics.
  */
 pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
-  let by_id = __catalog_model_by_id(catalog)
-  var added: list<dict> = []
-  var changed: list<dict> = []
-  var seen: dict = {}
-  var unknown_pricing: list<dict> = []
-  var low_confidence: list<dict> = []
-  var requires_key: list<dict> = []
+  const by_id = __catalog_model_by_id(catalog)
+  let added: list<dict> = []
+  let changed: list<dict> = []
+  let seen: dict = {}
+  let unknown_pricing: list<dict> = []
+  let low_confidence: list<dict> = []
+  let requires_key: list<dict> = []
   for obs in observations {
     seen = seen + {[obs.model_id]: true}
     if __confidence_rank(obs.confidence) < __confidence_rank("high") {
@@ -341,15 +341,15 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
     if by_id[obs.model_id] == nil {
       added = added + [obs]
     } else {
-      let cat = by_id[obs.model_id]
-      let pricing_changes = __pricing_change(cat.pricing, obs.pricing)
-      let capability_changes = __capability_changes(cat?.capabilities, obs?.capabilities)
-      var ctx_change: dict? = nil
+      const cat = by_id[obs.model_id]
+      const pricing_changes = __pricing_change(cat.pricing, obs.pricing)
+      const capability_changes = __capability_changes(cat?.capabilities, obs?.capabilities)
+      let ctx_change: dict? = nil
       if obs.context_window != nil && obs.context_window != cat.context_window {
         ctx_change = {from: cat.context_window, to: obs.context_window}
       }
       if len(pricing_changes) > 0 || len(capability_changes) > 0 || ctx_change != nil {
-        let entry = {
+        const entry = {
           observation: obs,
           catalog: cat,
           pricing_changes: pricing_changes,
@@ -362,8 +362,8 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   }
   // Removals are restricted to providers the run actually observed,
   // otherwise a missing API key would look like a removal.
-  let observed_providers = __observed_providers(observations)
-  var removed: list<dict> = []
+  const observed_providers = __observed_providers(observations)
+  let removed: list<dict> = []
   for model in catalog?.models ?? [] {
     if !seen[model.id] && observed_providers[model.provider] {
       removed = removed + [model]
@@ -392,12 +392,12 @@ fn __format_change_line(change) -> string {
 }
 
 fn __format_capability_change(change) -> string {
-  let from_text = if change.from == nil {
+  const from_text = if change.from == nil {
     "—"
   } else {
     json_stringify(change.from)
   }
-  let to_text = if change.to == nil {
+  const to_text = if change.to == nil {
     "—"
   } else {
     json_stringify(change.to)
@@ -406,16 +406,16 @@ fn __format_capability_change(change) -> string {
 }
 
 fn __sources_summary(adapter_runs) -> list<string> {
-  var lines: list<string> = []
+  let lines: list<string> = []
   for run in adapter_runs {
-    let badge = if run.status == "ok" {
+    const badge = if run.status == "ok" {
       "✓"
     } else if run.status == "skipped" {
       "⊘"
     } else {
       "✗"
     }
-    var line = "- " + badge + " " + run.id + " (" + run.kind + ", " + run.source_owner + ")"
+    let line = "- " + badge + " " + run.id + " (" + run.kind + ", " + run.source_owner + ")"
     if run.url != nil {
       line = line + " — " + run.url
     }
@@ -440,16 +440,16 @@ fn __section(title, lines) -> list<string> {
 }
 
 fn __added_lines(added) -> list<string> {
-  var lines: list<string> = []
+  let lines: list<string> = []
   for obs in added {
-    let pricing = obs.pricing ?? {}
-    let price_summary = if pricing?.input_per_mtok != nil || pricing?.output_per_mtok != nil {
+    const pricing = obs.pricing ?? {}
+    const price_summary = if pricing?.input_per_mtok != nil || pricing?.output_per_mtok != nil {
       " — in " + __format_currency(pricing?.input_per_mtok) + " / out "
         + __format_currency(pricing?.output_per_mtok)
     } else {
       ""
     }
-    let context_text = if obs.context_window != nil {
+    const context_text = if obs.context_window != nil {
       " — ctx " + to_string(obs.context_window)
     } else {
       ""
@@ -462,7 +462,7 @@ fn __added_lines(added) -> list<string> {
 }
 
 fn __removed_lines(removed) -> list<string> {
-  var lines: list<string> = []
+  let lines: list<string> = []
   for model in removed {
     lines = lines + ["- `" + model.id + "` (" + model.provider + ")"]
   }
@@ -470,9 +470,9 @@ fn __removed_lines(removed) -> list<string> {
 }
 
 fn __changed_lines(changed) -> list<string> {
-  var lines: list<string> = []
+  let lines: list<string> = []
   for c in changed {
-    let obs = c.observation
+    const obs = c.observation
     lines = lines + ["- `" + obs.model_id + "` (" + obs.provider + ")"]
     lines = lines
       + ["  source: " + obs.source + " (" + obs.source_kind + ", confidence: " + obs.confidence + ")"]
@@ -494,7 +494,7 @@ fn __changed_lines(changed) -> list<string> {
 }
 
 fn __obs_summary_lines(items, label) -> list<string> {
-  var lines: list<string> = []
+  let lines: list<string> = []
   for obs in items {
     lines = lines + ["- `" + obs.model_id + "` (" + obs.provider + ") — " + label + ": " + obs.source]
   }
@@ -502,10 +502,10 @@ fn __obs_summary_lines(items, label) -> list<string> {
 }
 
 fn __conflict_lines(conflicts) -> list<string> {
-  var lines: list<string> = []
+  let lines: list<string> = []
   for c in conflicts {
-    let kept_text = json_stringify(c.kept)
-    let dropped_text = json_stringify(c.dropped)
+    const kept_text = json_stringify(c.kept)
+    const dropped_text = json_stringify(c.dropped)
     lines = lines
       + [
       "- `" + c.model_id + "` (" + c.provider + ") `" + c.field + "`: kept " + kept_text
@@ -528,7 +528,7 @@ pub fn render_markdown_report(
   adapter_runs: list<dict>,
   meta: dict,
 ) -> string {
-  let header = [
+  const header = [
     "# Provider catalog refresh — drift report",
     "",
     "_Generated by `scripts/update_provider_catalog.harn` at " + (meta?.generated_at ?? "?") + "._",
@@ -538,8 +538,8 @@ pub fn render_markdown_report(
     "Adapter runs reflect what actually fetched — skipped sources never silently downgrade drift.",
     "",
   ]
-  let sources_section = ["## Adapter runs", ""] + __sources_summary(adapter_runs) + [""]
-  let parts = header
+  const sources_section = ["## Adapter runs", ""] + __sources_summary(adapter_runs) + [""]
+  const parts = header
     + sources_section
     + __section("Added models", __added_lines(drift.added))
     + __section("Removed models", __removed_lines(drift.removed))
@@ -569,7 +569,7 @@ fn __toml_list_of_strings(items) -> string {
   if len(items) == 0 {
     return "[]"
   }
-  var rendered: list<string> = []
+  let rendered: list<string> = []
   for item in items {
     rendered = rendered + [__toml_string(item)]
   }
@@ -577,8 +577,8 @@ fn __toml_list_of_strings(items) -> string {
 }
 
 fn __format_model_section(obs) -> list<string> {
-  let id_text = __toml_string(obs.model_id)
-  var lines: list<string> = ["[models." + id_text + "]"]
+  const id_text = __toml_string(obs.model_id)
+  let lines: list<string> = ["[models." + id_text + "]"]
   if obs.name != nil {
     lines = lines + ["name = " + __toml_string(obs.name)]
   }
@@ -586,15 +586,15 @@ fn __format_model_section(obs) -> list<string> {
   if obs.context_window != nil {
     lines = lines + ["context_window = " + to_string(obs.context_window)]
   }
-  let caps = obs.capabilities ?? {}
-  let cap_names = caps?.tool_search ?? []
+  const caps = obs.capabilities ?? {}
+  const cap_names = caps?.tool_search ?? []
   if len(cap_names) > 0 {
     lines = lines + ["capabilities = " + __toml_list_of_strings(cap_names)]
   }
   if obs.pricing != nil {
     lines = lines + ["", "[models." + id_text + ".pricing]"]
     for key in PRICING_KEYS {
-      let value = obs.pricing?.[key]
+      const value = obs.pricing?.[key]
       if value != nil {
         lines = lines + [key + " = " + to_string(value)]
       }
@@ -614,7 +614,7 @@ fn __format_model_section(obs) -> list<string> {
  * `crates/harn-vm/src/llm_config.rs` / `harn.toml` before landing.
  */
 pub fn render_candidate_toml(drift: dict, meta: dict) -> string {
-  var lines = [
+  let lines = [
     "# Candidate provider catalog patch",
     "# Generated at " + (meta?.generated_at ?? "?") + " by scripts/update_provider_catalog.harn.",
     "# Run mode: " + (meta?.run_mode ?? "fixtures") + ".",

@@ -90,8 +90,8 @@ fn __overlay_row_enabled(row) {
 }
 
 fn __overlay_row_key(mode, lane) {
-  let mode_text = to_string(mode ?? "")
-  let lane_text = to_string(lane ?? "")
+  const mode_text = to_string(mode ?? "")
+  const lane_text = to_string(lane ?? "")
   if lane_text == "" {
     return mode_text
   }
@@ -109,9 +109,9 @@ fn __overlay_row_key(mode, lane) {
  * @api_stability: experimental
  */
 pub fn agent_overlay_match(rows, mode, lane = nil) {
-  let mode_text = to_string(mode ?? "")
-  let lane_text = to_string(lane ?? "")
-  var mode_only = nil
+  const mode_text = to_string(mode ?? "")
+  const lane_text = to_string(lane ?? "")
+  let mode_only = nil
   for row in rows {
     if !__overlay_row_enabled(row) {
       continue
@@ -119,7 +119,7 @@ pub fn agent_overlay_match(rows, mode, lane = nil) {
     if to_string(row?.mode ?? "") != mode_text {
       continue
     }
-    let row_lane = row?.lane
+    const row_lane = row?.lane
     if row_lane != nil && lane_text != "" && to_string(row_lane) == lane_text {
       return row
     }
@@ -143,14 +143,14 @@ pub fn agent_overlay_match(rows, mode, lane = nil) {
  * @api_stability: experimental
  */
 pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
-  let key = __overlay_row_key(mode, lane)
-  let override_table = if type_of(overrides) == "dict" {
+  const key = __overlay_row_key(mode, lane)
+  const override_table = if type_of(overrides) == "dict" {
     overrides
   } else {
     {}
   }
-  let override_lines = override_table?.[key] ?? override_table?.[to_string(mode ?? "")]
-  let lines = if type_of(override_lines) == "list" {
+  const override_lines = override_table?.[key] ?? override_table?.[to_string(mode ?? "")]
+  const lines = if type_of(override_lines) == "list" {
     override_lines
   } else {
     let row = agent_overlay_match(rows, mode, lane)
@@ -159,7 +159,7 @@ pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
   if type_of(lines) != "list" || len(lines) == 0 {
     return nil
   }
-  let body = trim(join(lines, "\n"))
+  const body = trim(join(lines, "\n"))
   if body == "" {
     return nil
   }
@@ -185,9 +185,9 @@ pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
  * @example: agent_loop(task, nil, with_overlay({provider: "anthropic"}, default_overlay_rows(), "agent"))
  */
 pub fn with_overlay(agent_options, rows, mode, options = nil) {
-  let validated = __overlay_validate_rows(rows)
-  let extra = options ?? {}
-  let fragment = overlay_context_fragment(validated, mode, extra?.lane, extra?.overrides)
+  const validated = __overlay_validate_rows(rows)
+  const extra = options ?? {}
+  const fragment = overlay_context_fragment(validated, mode, extra?.lane, extra?.overrides)
   return __with_prompt_fragment(agent_options, fragment)
 }
 

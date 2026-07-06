@@ -114,7 +114,7 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
   // calls and usage are preserved, so tool dispatch downstream is unaffected.
   // A custom `llm_caller` short-circuits before this default path, so a
   // non-streaming caller simply never fires `on_delta`.
-  let on_delta = llm_opts?._on_delta
+  const on_delta = llm_opts?._on_delta
   // `output_schema` is a TERMINAL-answer contract on `agent_loop`, not a
   // per-turn one: forcing every mid-loop turn into structured (json_schema)
   // mode fights tool-calling, since the model must choose between emitting a
@@ -126,12 +126,12 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
   // and (2) when the caller set `output_validation` (e.g. the `verifier`
   // profile), which explicitly opts into per-turn schema enforcement at the
   // llm_call layer — stripping `output_schema` would silently disable it.
-  let call_opts = if (llm_opts?._output_schema_repair ?? false) || llm_opts?.output_validation != nil {
+  const call_opts = if (llm_opts?._output_schema_repair ?? false) || llm_opts?.output_validation != nil {
     llm_opts
   } else {
     omit(llm_opts, ["output_schema"])
   }
-  let result = try {
+  const result = try {
     if type_of(on_delta) == "closure" {
       __host_llm_stream_collect(message, turn_system, llm_call_options(call_opts), on_delta)
     } else {
@@ -141,9 +141,9 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
   if !is_err(result) {
     return {ok: true, value: unwrap(result)}
   }
-  let err = unwrap_err(result)
-  let normalized = __llm_provider_error(err, llm_opts)
-  let reason = if type_of(err) == "dict" {
+  const err = unwrap_err(result)
+  const normalized = __llm_provider_error(err, llm_opts)
+  const reason = if type_of(err) == "dict" {
     err?.reason ?? ""
   } else {
     ""
@@ -159,7 +159,7 @@ fn __messages_include_tool_result(messages) {
     return false
   }
   for msg in messages {
-    let role = to_string(msg?.role ?? "")
+    const role = to_string(msg?.role ?? "")
     if role == "tool" || role == "tool_result" {
       return true
     }
@@ -169,7 +169,7 @@ fn __messages_include_tool_result(messages) {
 
 fn __llm_error_field(err, key, fallback) {
   if type_of(err) == "dict" {
-    let value = err[key]
+    const value = err[key]
     if value != nil {
       return to_string(value)
     }
@@ -178,12 +178,12 @@ fn __llm_error_field(err, key, fallback) {
 }
 
 fn __llm_provider_error(err, llm_opts) {
-  let message = __llm_error_field(err, "message", to_string(err))
-  let category = __llm_error_field(err, "category", error_category(err))
-  let reason = __llm_error_field(err, "reason", "")
-  let kind = __llm_error_field(err, "kind", "")
-  let provider = __llm_error_field(err, "provider", to_string(llm_opts?.provider ?? ""))
-  let model = __llm_error_field(err, "model", to_string(llm_opts?.model ?? ""))
+  const message = __llm_error_field(err, "message", to_string(err))
+  const category = __llm_error_field(err, "category", error_category(err))
+  const reason = __llm_error_field(err, "reason", "")
+  const kind = __llm_error_field(err, "kind", "")
+  const provider = __llm_error_field(err, "provider", to_string(llm_opts?.provider ?? ""))
+  const model = __llm_error_field(err, "model", to_string(llm_opts?.model ?? ""))
   return {
     category: category,
     reason: reason,
@@ -198,11 +198,11 @@ fn __llm_provider_error(err, llm_opts) {
 }
 
 fn __agent_loop_emit_llm_call_start(llm_opts) {
-  let session_id = to_string(llm_opts?.session_id ?? "")
+  const session_id = to_string(llm_opts?.session_id ?? "")
   if session_id == "" {
     return nil
   }
-  let checkpoint = {
+  const checkpoint = {
     kind: "llm_call_start",
     phase: "llm_call",
     iteration: to_int(llm_opts?._iteration ?? 0),
@@ -234,23 +234,23 @@ fn __validate_caller_result(r) {
 
 fn __invoke_llm(message, turn_system, llm_opts) {
   __agent_loop_emit_llm_call_start(llm_opts)
-  let caller = llm_opts?._llm_caller
+  const caller = llm_opts?._llm_caller
   if caller == nil {
     return __default_invoke_llm(message, turn_system, llm_opts)
   }
-  let call = {
+  const call = {
     prompt: message,
     system: turn_system,
     opts: llm_opts,
     turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
   }
-  let result = try {
+  const result = try {
     caller(call)
   }
   if is_err(result) {
     throw unwrap_err(result)
   }
-  let r = unwrap(result)
+  const r = unwrap(result)
   __validate_caller_result(r)
   return r
 }
@@ -283,7 +283,7 @@ fn __invoke_llm(message, turn_system, llm_opts) {
 // -------------------------------------------------------------------------------------------------
 
 fn __autocontinue_max_continuations(llm_opts) {
-  let configured = llm_opts?.truncation_auto_continue_max
+  const configured = llm_opts?.truncation_auto_continue_max
   if type_of(configured) == "int" && configured >= 0 {
     return configured
   }
@@ -297,19 +297,19 @@ fn __autocontinue_max_continuations(llm_opts) {
  * misconfigured model can't request an unbounded body.
  */
 fn __autocontinue_raised_cap(current, llm_opts) {
-  let base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
+  const base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
     && llm_opts.truncation_auto_continue_base > 0 {
     llm_opts.truncation_auto_continue_base
   } else {
     16384
   }
-  let ceiling = if type_of(llm_opts?.truncation_auto_continue_ceiling) == "int"
+  const ceiling = if type_of(llm_opts?.truncation_auto_continue_ceiling) == "int"
     && llm_opts.truncation_auto_continue_ceiling > 0 {
     llm_opts.truncation_auto_continue_ceiling
   } else {
     32768
   }
-  let raised = if type_of(current) == "int" && current > 0 {
+  const raised = if type_of(current) == "int" && current > 0 {
     current * 2
   } else {
     base
@@ -321,7 +321,7 @@ fn __autocontinue_raised_cap(current, llm_opts) {
 }
 
 fn __autocontinue_is_length_stop(stop_reason) {
-  let normalized = lowercase(trim(to_string(stop_reason ?? "")))
+  const normalized = lowercase(trim(to_string(stop_reason ?? "")))
   return normalized == "length" || normalized == "max_tokens"
 }
 
@@ -335,8 +335,8 @@ fn __autocontinue_hidden_reasoning_truncated(llm_result, tool_call_count) {
   if trim(to_string(llm_result?.text ?? "")) != "" {
     return false
   }
-  let thinking = trim(to_string(llm_result?.thinking ?? ""))
-  let summary = trim(to_string(llm_result?.thinking_summary ?? ""))
+  const thinking = trim(to_string(llm_result?.thinking ?? ""))
+  const summary = trim(to_string(llm_result?.thinking_summary ?? ""))
   if thinking != "" || summary != "" {
     return true
   }
@@ -352,14 +352,14 @@ fn __autocontinue_should_continue(call, turn_opts) {
   if !(call?.ok ?? false) {
     return false
   }
-  let llm_result = call?.value
+  const llm_result = call?.value
   if type_of(llm_result) != "dict" {
     return false
   }
-  let raw_text = llm_result?.text ?? ""
-  let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
-  let tool_calls = __resolve_tool_calls(llm_result, parsed)
-  let has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
+  const raw_text = llm_result?.text ?? ""
+  const parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
+  const tool_calls = __resolve_tool_calls(llm_result, parsed)
+  const has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
   if __host_agent_truncated_tool_call(
     llm_result?.stop_reason,
     raw_text,
@@ -387,12 +387,12 @@ fn __invoke_llm_with_autocontinue(
   session_id,
   iteration_index,
 ) {
-  var call = __invoke_llm(message, turn_system, llm_opts)
-  let max_continuations = __autocontinue_max_continuations(llm_opts)
-  var attempts = 0
-  var cap = llm_opts?.max_tokens ?? 0
+  let call = __invoke_llm(message, turn_system, llm_opts)
+  const max_continuations = __autocontinue_max_continuations(llm_opts)
+  let attempts = 0
+  let cap = llm_opts?.max_tokens ?? 0
   while attempts < max_continuations && __autocontinue_should_continue(call, turn_opts) {
-    let raised = __autocontinue_raised_cap(cap, llm_opts)
+    const raised = __autocontinue_raised_cap(cap, llm_opts)
     // No headroom left to raise — re-issuing would just truncate again at the
     // same cap, so stop and let parse-guidance take the turn.
     if type_of(cap) == "int" && cap > 0 && raised <= cap {
@@ -412,7 +412,7 @@ fn __invoke_llm_with_autocontinue(
       },
     )
     cap = raised
-    let retry_opts = llm_opts + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
+    const retry_opts = llm_opts + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
     call = __invoke_llm(message, turn_system, retry_opts)
   }
   return call
@@ -441,19 +441,19 @@ fn __agent_loop_is_context_overflow(error) {
   if type_of(error) != "dict" {
     return false
   }
-  let reason = to_string(error?.reason ?? "")
+  const reason = to_string(error?.reason ?? "")
   if reason == "context_overflow" {
     return true
   }
   // Defensive fallback: some routes surface the condition only in the message
   // text (uncataloged provider, no structured `reason`). Match the canonical
   // classifier tag the Rust LLM layer stamps onto the error string.
-  let message = to_string(error?.message ?? "")
+  const message = to_string(error?.message ?? "")
   return contains(message, "[context_overflow]")
 }
 
 fn __agent_loop_context_overflow_max_recoveries(llm_opts) {
-  let configured = llm_opts?.context_overflow_recover_max
+  const configured = llm_opts?.context_overflow_recover_max
   if type_of(configured) == "int" && configured >= 0 {
     return configured
   }
@@ -475,13 +475,13 @@ fn __agent_loop_recover_context_overflow(
   session,
   iteration_index,
 ) {
-  let max_recoveries = __agent_loop_context_overflow_max_recoveries(llm_opts)
-  var current = call
-  var attempt = 0
+  const max_recoveries = __agent_loop_context_overflow_max_recoveries(llm_opts)
+  let current = call
+  let attempt = 0
   while attempt < max_recoveries && !current.ok
     && __agent_loop_is_context_overflow(current?.error) {
     attempt = attempt + 1
-    let archived = agent_emergency_compact(session, llm_opts, attempt)
+    const archived = agent_emergency_compact(session, llm_opts, attempt)
     agent_emit_event(
       session.session_id,
       "context_overflow_recovery",
@@ -500,8 +500,8 @@ fn __agent_loop_recover_context_overflow(
       break
     }
     // Rebuild the turn prompt against the now-compacted transcript and re-issue.
-    let turn_prompt = __agent_loop_build_turn_prompt(session, llm_opts, iteration_index)
-    let retry_opts = llm_opts
+    const turn_prompt = __agent_loop_build_turn_prompt(session, llm_opts, iteration_index)
+    const retry_opts = llm_opts
       + {
       messages: turn_prompt.messages,
       _system_fragments: turn_prompt.fragments,
@@ -547,7 +547,7 @@ fn __tool_registry_entry(tools, tool_name) {
   if tools == nil {
     return nil
   }
-  let entries = tools?.tools
+  const entries = tools?.tools
   if type_of(entries) != "list" {
     return nil
   }
@@ -555,7 +555,7 @@ fn __tool_registry_entry(tools, tool_name) {
     if type_of(entry) != "dict" {
       continue
     }
-    let entry_name = if entry?.name != nil {
+    const entry_name = if entry?.name != nil {
       to_string(entry.name)
     } else {
       let func = entry?.function
@@ -577,21 +577,21 @@ fn __tool_resource_annotations(entry, policy, tool_name) {
 }
 
 fn __tool_envelope(call, tools, options) {
-  let tool_name = to_string(call?.name ?? call?.tool_name ?? "")
-  let tool_args_raw = call?.arguments ?? call?.tool_args
-  let tool_args = if type_of(tool_args_raw) == "dict" {
+  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_args_raw = call?.arguments ?? call?.tool_args
+  const tool_args = if type_of(tool_args_raw) == "dict" {
     tool_args_raw
   } else {
     {}
   }
-  let raw_call_id = to_string(call?.id ?? call?.tool_call_id ?? "")
-  let call_id = if raw_call_id == "" {
+  const raw_call_id = to_string(call?.id ?? call?.tool_call_id ?? "")
+  const call_id = if raw_call_id == "" {
     "tool_call_" + uuid()
   } else {
     raw_call_id
   }
-  let entry = __tool_registry_entry(tools, tool_name)
-  let declared_executor = if entry == nil {
+  const entry = __tool_registry_entry(tools, tool_name)
+  const declared_executor = if entry == nil {
     nil
   } else {
     let direct = entry?.executor
@@ -606,13 +606,13 @@ fn __tool_envelope(call, tools, options) {
       }
     }
   }
-  let schema = if entry == nil {
+  const schema = if entry == nil {
     nil
   } else {
     entry?.parameters ?? entry?.input_schema ?? entry?.inputSchema
   }
-  let annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
-  let description = if entry == nil {
+  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  const description = if entry == nil {
     ""
   } else {
     let direct = entry?.description
@@ -649,7 +649,7 @@ fn __tool_envelope(call, tools, options) {
 }
 
 fn __default_invoke_tool(envelope, original_call, tools, options) {
-  let next_call = original_call
+  const next_call = original_call
     + {
     id: envelope.call_id,
     tool_call_id: envelope.call_id,
@@ -664,15 +664,15 @@ fn __validate_tool_caller_result(r) {
   if type_of(r) != "dict" {
     throw "agent_loop: tool_caller must return a dict; got " + type_of(r)
   }
-  let name = r?.tool_name ?? r?.name
+  const name = r?.tool_name ?? r?.name
   if name == nil || to_string(name) == "" {
     throw "agent_loop: tool_caller result missing `tool_name`"
   }
-  let ok = r?.ok
+  const ok = r?.ok
   if ok == nil {
-    let success = r?.success
+    const success = r?.success
     if success == nil {
-      let status = r?.status
+      const status = r?.status
       if status == nil {
         throw "agent_loop: tool_caller result missing `ok`/`success`/`status`"
       }
@@ -683,8 +683,8 @@ fn __validate_tool_caller_result(r) {
 }
 
 fn __middleware_exception_result(envelope, err) {
-  let err_text = to_string(err)
-  let observation = "[error from " + envelope.tool_name + "]\n" + err_text
+  const err_text = to_string(err)
+  const observation = "[error from " + envelope.tool_name + "]\n" + err_text
     + "\n[end of "
     + envelope.tool_name
     + " error]\n"
@@ -738,7 +738,7 @@ fn __run_structural_validator(
   if caller == nil {
     return {configured: false, vetoed: false, skipped: true, reason: "not_configured"}
   }
-  let envelope = {
+  const envelope = {
     tool_name: __structural_validator_tool_name(),
     tool_args: {
       session_id: session_id,
@@ -776,18 +776,18 @@ fn __run_structural_validator(
       prefetch_next_turn: false,
     },
   }
-  let next = { env_in -> __structural_validator_pass_result(env_in) }
-  let outcome = try {
+  const next = { env_in -> __structural_validator_pass_result(env_in) }
+  const outcome = try {
     caller(envelope, next)
   }
   if is_err(outcome) {
-    let err = unwrap_err(outcome)
+    const err = unwrap_err(outcome)
     if error_category(err) == "cancelled" {
       throw err
     }
     throw "agent_loop: structural validator failed: " + to_string(err)
   }
-  let result = unwrap(outcome)
+  const result = unwrap(outcome)
   if type_of(result) != "dict" {
     throw "agent_loop: structural validator must return a dict; got " + type_of(result)
   }
@@ -803,11 +803,11 @@ fn __tool_lifecycle_session_id(envelope) -> string {
 }
 
 fn __emit_tool_lifecycle_start(envelope) {
-  let session_id = __tool_lifecycle_session_id(envelope)
+  const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
   }
-  let _ = agent_emit_event(
+  const _ = agent_emit_event(
     session_id,
     "tool_call",
     {
@@ -817,7 +817,7 @@ fn __emit_tool_lifecycle_start(envelope) {
       raw_input: envelope.tool_args,
     },
   )
-  let _ = agent_emit_event(
+  const _ = agent_emit_event(
     session_id,
     "tool_call_update",
     {
@@ -836,7 +836,7 @@ fn __tool_terminal_status(result) -> string {
   if result?.ok || result?.success {
     return "completed"
   }
-  let status = to_string(result?.status ?? "")
+  const status = to_string(result?.status ?? "")
   if status == "ok" || status == "success" {
     return "completed"
   }
@@ -847,7 +847,7 @@ fn __tool_lifecycle_error_category(raw) {
   if raw == nil {
     return nil
   }
-  let category = to_string(raw)
+  const category = to_string(raw)
   if category == "" {
     return nil
   }
@@ -894,23 +894,23 @@ fn __tool_lifecycle_error_category(raw) {
 }
 
 fn __emit_tool_lifecycle_finish(envelope, result) {
-  let session_id = __tool_lifecycle_session_id(envelope)
+  const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
   }
-  let result_tool_call_id = to_string(result?.tool_call_id ?? "")
-  let tool_call_id = if result_tool_call_id != "" {
+  const result_tool_call_id = to_string(result?.tool_call_id ?? "")
+  const tool_call_id = if result_tool_call_id != "" {
     result_tool_call_id
   } else {
     envelope.call_id
   }
-  let tool_name = to_string(result?.tool_name ?? result?.name ?? envelope.tool_name)
-  let raw_output = if result?.result != nil {
+  const tool_name = to_string(result?.tool_name ?? result?.name ?? envelope.tool_name)
+  const raw_output = if result?.result != nil {
     result.result
   } else {
     result?.rendered_result ?? result?.output ?? result
   }
-  let payload = {
+  const payload = {
     tool_call_id: tool_call_id,
     tool_name: tool_name,
     status: __tool_terminal_status(result),
@@ -921,11 +921,11 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
     error_category: __tool_lifecycle_error_category(result?.error_category),
     executor: result?.executor,
   }
-  let _ = agent_emit_event(session_id, "tool_call_update", payload)
+  const _ = agent_emit_event(session_id, "tool_call_update", payload)
 }
 
 fn __emit_synthetic_tool_lifecycle_finish(call, result, tools, options) {
-  let envelope = __tool_envelope(call, tools, options)
+  const envelope = __tool_envelope(call, tools, options)
   __emit_tool_lifecycle_finish(envelope, result)
 }
 
@@ -941,16 +941,16 @@ fn __emit_synthetic_tool_lifecycle_finish(call, result, tools, options) {
  * outer `agent_loop` wrapper surfaces the fault loudly.
  */
 fn __agent_error_must_propagate(err) -> bool {
-  let category = error_category(err)
+  const category = error_category(err)
   return category == "cancelled" || category == "internal"
 }
 
 fn __invoke_tool(call, tools, options) {
-  let caller = options?._tool_caller
-  let envelope = __tool_envelope(call, tools, options)
+  const caller = options?._tool_caller
+  const envelope = __tool_envelope(call, tools, options)
   __emit_tool_lifecycle_start(envelope)
   if caller == nil {
-    let direct = agent_dispatch_tool_call(
+    const direct = agent_dispatch_tool_call(
       call + {id: envelope.call_id, tool_call_id: envelope.call_id},
       tools,
       options,
@@ -958,12 +958,12 @@ fn __invoke_tool(call, tools, options) {
     __emit_tool_lifecycle_finish(envelope, direct)
     return direct
   }
-  let next = { env_in -> __default_invoke_tool(env_in, call, tools, options) }
-  let outcome = try {
+  const next = { env_in -> __default_invoke_tool(env_in, call, tools, options) }
+  const outcome = try {
     caller(envelope, next)
   }
   if is_err(outcome) {
-    let err = unwrap_err(outcome)
+    const err = unwrap_err(outcome)
     if __agent_error_must_propagate(err) {
       throw err
     }
@@ -972,11 +972,11 @@ fn __invoke_tool(call, tools, options) {
       envelope,
       {layer: "tool_caller", status: "exception", error: to_string(err)},
     )
-    let result = __middleware_exception_result(envelope, err)
+    const result = __middleware_exception_result(envelope, err)
     __emit_tool_lifecycle_finish(envelope, result)
     return result
   }
-  let r = unwrap(outcome)
+  const r = unwrap(outcome)
   __validate_tool_caller_result(r)
   __maybe_emit_tool_audit(envelope.turn.session_id, envelope, r?.audit, r?.receipt)
   __emit_tool_lifecycle_finish(envelope, r)
@@ -990,7 +990,7 @@ fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
   if session_id == "" {
     return
   }
-  let payload = if receipt == nil {
+  const payload = if receipt == nil {
     {tool_call_id: envelope.call_id, tool_name: envelope.tool_name, audit: audit}
   } else {
     {
@@ -1000,13 +1000,13 @@ fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
       receipt: receipt,
     }
   }
-  let _ = try {
+  const _ = try {
     agent_emit_event(session_id, "tool_call_audit", payload)
   }
 }
 
 fn __visible_text(parsed, raw_text) {
-  var text = raw_text
+  let text = raw_text
   if parsed?.user_response != nil && parsed.user_response != "" {
     text = parsed.user_response
   } else if parsed?.prose != nil && parsed.prose != "" {
@@ -1019,18 +1019,18 @@ fn __internal_verdict_object(value) -> bool {
   if type_of(value) != "dict" {
     return false
   }
-  let verdict = lowercase(trim(to_string(value?.verdict ?? "")))
+  const verdict = lowercase(trim(to_string(value?.verdict ?? "")))
   if verdict == "" {
     return false
   }
-  let completion = contains(["done", "continue"], verdict)
+  const completion = contains(["done", "continue"], verdict)
     && __dict_has_any(value, ["reasoning", "reason", "next_step", "nextStep"])
-  let judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
+  const judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
     && __dict_has_any(value, ["critique", "confidence", "category", "error"])
   if !(completion || judged) {
     return false
   }
-  let allowed = [
+  const allowed = [
     "verdict",
     "reasoning",
     "reason",
@@ -1059,7 +1059,7 @@ fn __dict_has_any(value, keys) -> bool {
 }
 
 fn __internal_verdict_json(text) -> bool {
-  let parsed = try {
+  const parsed = try {
     json_parse(trim(to_string(text ?? "")))
   }
   if is_err(parsed) {
@@ -1069,16 +1069,16 @@ fn __internal_verdict_json(text) -> bool {
 }
 
 fn __strip_internal_verdict_json(text) {
-  let raw = to_string(text ?? "")
+  const raw = to_string(text ?? "")
   if __internal_verdict_json(raw) {
     return ""
   }
-  let trimmed = trim(raw)
-  let start = trimmed.last_index_of("{")
+  const trimmed = trim(raw)
+  const start = trimmed.last_index_of("{")
   if start < 0 {
     return raw
   }
-  let suffix = trimmed[start:len(trimmed)]
+  const suffix = trimmed[start:len(trimmed)]
   if !__internal_verdict_json(suffix) {
     return raw
   }
@@ -1105,8 +1105,8 @@ fn __tool_call_name_is_blank(call) -> bool {
  * is preserved so order-sensitive parsers/parallel dispatch stay correct.
  */
 fn __filter_blank_name_tool_calls(calls) {
-  var kept = []
-  var dropped = 0
+  let kept = []
+  let dropped = 0
   for call in calls ?? [] {
     if __tool_call_name_is_blank(call) {
       dropped = dropped + 1
@@ -1118,7 +1118,7 @@ fn __filter_blank_name_tool_calls(calls) {
 }
 
 fn __resolve_tool_calls(llm_result, parsed) {
-  let native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
+  const native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
   if len(native_calls) > 0 {
     return __filter_blank_name_tool_calls(native_calls).calls
   }
@@ -1135,7 +1135,7 @@ fn __agent_await_resumption_call(tool_calls) {
 }
 
 fn __agent_await_resumption_args(call) {
-  let args = __tool_call_args(call)
+  const args = __tool_call_args(call)
   return agent_await_resumption(args?.reason ?? "", args?.conditions ?? nil, args?.resume_by ?? nil)
 }
 
@@ -1147,7 +1147,7 @@ fn __agent_await_resumption_args(call) {
  * (HTTP 400 on the first post-resume LLM call).
  */
 fn __agent_loop_record_await_tool_results(session, await_call, tool_calls, reason) {
-  let await_reason = if type_of(reason) == "string" && reason != "" {
+  const await_reason = if type_of(reason) == "string" && reason != "" {
     "agent suspended awaiting resumption: " + reason
   } else {
     "agent suspended awaiting resumption"
@@ -1158,8 +1158,8 @@ fn __agent_loop_record_await_tool_results(session, await_call, tool_calls, reaso
     "awaiting_resumption",
     await_reason,
   )
-  let await_id = to_string(await_call?.id ?? await_call?.tool_call_id ?? "")
-  var siblings = []
+  const await_id = to_string(await_call?.id ?? await_call?.tool_call_id ?? "")
+  let siblings = []
   for call in tool_calls ?? [] {
     if to_string(call?.id ?? call?.tool_call_id ?? "") != await_id {
       siblings = siblings.push(call)
@@ -1174,7 +1174,7 @@ fn __agent_loop_record_await_tool_results(session, await_call, tool_calls, reaso
 }
 
 fn __agent_loop_await_resumption(session, iteration, call, parsed, opts) {
-  let worker = __agent_loop_current_worker()
+  const worker = __agent_loop_current_worker()
   if worker == nil {
     return __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opts)
   }
@@ -1195,7 +1195,7 @@ fn __agent_loop_await_resumption(session, iteration, call, parsed, opts) {
     },
   )
   suspend_agent(worker, parsed.reason, {initiator: "self", conditions: parsed.conditions})
-  let checkpoint = __agent_loop_suspend_checkpoint(session, iteration)
+  const checkpoint = __agent_loop_suspend_checkpoint(session, iteration)
   if checkpoint == nil {
     throw "agent_await_resumption: suspend checkpoint did not yield"
   }
@@ -1216,7 +1216,7 @@ fn __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opt
       },
     ),
   )
-  let handle = __host_top_level_agent_suspend(
+  const handle = __host_top_level_agent_suspend(
     session.session_id,
     session.task,
     session.system,
@@ -1268,7 +1268,7 @@ fn __tool_call_name(call) {
 }
 
 fn __tool_call_args(call) {
-  let raw = call?.arguments ?? call?.tool_args
+  const raw = call?.arguments ?? call?.tool_args
   if type_of(raw) == "dict" {
     return raw
   }
@@ -1296,7 +1296,7 @@ fn __native_fallback_feedback(policy, fallback_index) {
  * repair only fires on the exact escalation/native-fallback shape that orphans.
  */
 fn __inject_feedback_with_tool_repair(session_id, kind, content) {
-  let _ = agent_session_pair_orphaned_tool_use(session_id, content)
+  const _ = agent_session_pair_orphaned_tool_use(session_id, content)
   agent_session_inject_feedback(session_id, kind, content)
 }
 
@@ -1309,13 +1309,13 @@ fn __parse_feedback_annotation_enabled(value) -> bool {
 }
 
 fn __parse_feedback_tool_is_structural(entry) -> bool {
-  let annotations = __parse_feedback_tool_annotations(entry)
+  const annotations = __parse_feedback_tool_annotations(entry)
   return __parse_feedback_annotation_enabled(annotations?.structural)
     || __parse_feedback_annotation_enabled(annotations?.agent_lifecycle)
 }
 
 fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
-  let entries = turn_opts?.tools?.tools ?? []
+  const entries = turn_opts?.tools?.tools ?? []
   for entry in entries {
     if type_of(entry) == "dict" && !__parse_feedback_tool_is_structural(entry) {
       return true
@@ -1354,8 +1354,8 @@ fn __parse_feedback_protocol_violations(parsed, turn_opts) {
 }
 
 fn __parse_feedback_diagnostics(parsed, turn_opts) {
-  let parse_errors = parsed?.tool_parse_errors ?? []
-  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  const parse_errors = parsed?.tool_parse_errors ?? []
+  const protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
   return parse_errors + protocol_violations
 }
 
@@ -1367,12 +1367,12 @@ fn __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts) {
   if agent_tool_call_paradigm(turn_opts).kind != "text" {
     return nil
   }
-  let recovered_count = to_int(parsed?.recovered_from_stray_count ?? 0) ?? 0
-  let cap = __recovered_text_call_dispatch_cap(turn_opts)
+  const recovered_count = to_int(parsed?.recovered_from_stray_count ?? 0) ?? 0
+  const cap = __recovered_text_call_dispatch_cap(turn_opts)
   if recovered_count <= cap || len(tool_calls) == 0 {
     return nil
   }
-  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  const protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
   if len(protocol_violations) == 0 {
     return nil
   }
@@ -1386,7 +1386,7 @@ fn __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts) {
 }
 
 fn __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts) {
-  let feedback = __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts)
+  const feedback = __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts)
   if feedback == nil {
     return {tool_calls: tool_calls, feedback: nil}
   }
@@ -1400,23 +1400,23 @@ fn __maybe_inject_parse_error_feedback(
   turn_opts,
   feedback_override = nil,
 ) -> bool {
-  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
-  let diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
-  let override_summary = to_string(feedback_override?.error_summary ?? "")
+  const protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  const diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
+  const override_summary = to_string(feedback_override?.error_summary ?? "")
   if len(diagnostics) == 0 && override_summary == "" {
     return false
   }
   // Some calls parsed AND at least one was dropped: the good calls already
   // dispatched, so flag the note as partial success and report how many landed
   // so the model only re-emits the malformed call.
-  let parsed_count = len(tool_calls)
-  let has_partial_success = parsed_count > 0
-  let error_summary = if override_summary != "" {
+  const parsed_count = len(tool_calls)
+  const has_partial_success = parsed_count > 0
+  const error_summary = if override_summary != "" {
     override_summary
   } else {
     to_string(diagnostics[0])
   }
-  let feedback = parse_guidance_prompt(
+  const feedback = parse_guidance_prompt(
     {
       error_summary: error_summary,
       has_partial_success: has_partial_success,
@@ -1455,8 +1455,8 @@ fn __maybe_inject_parse_error_feedback(
  * loop terminating on the malformed sibling.
  */
 fn __blank_name_dropped_count(llm_result, parsed) -> int {
-  let native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
-  let source = if len(native_calls) > 0 {
+  const native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
+  const source = if len(native_calls) > 0 {
     native_calls
   } else {
     parsed?.calls ?? []
@@ -1472,12 +1472,12 @@ fn __blank_name_dropped_count(llm_result, parsed) -> int {
  * stall accounting stays consistent with the parse-error path).
  */
 fn __maybe_inject_blank_name_feedback(session_id, llm_result, parsed, dispatched_count, turn_opts) -> bool {
-  let dropped = __blank_name_dropped_count(llm_result, parsed)
+  const dropped = __blank_name_dropped_count(llm_result, parsed)
   if dropped == 0 {
     return false
   }
-  let has_partial_success = dispatched_count > 0
-  let feedback = parse_guidance_prompt(
+  const has_partial_success = dispatched_count > 0
+  const feedback = parse_guidance_prompt(
     {
       error_summary: "Dropped "
         + to_string(dropped)
@@ -1511,15 +1511,15 @@ fn __detect_native_fallback(
   session_id,
   iteration_index,
 ) {
-  let native_calls = llm_result?.native_tool_calls ?? []
-  let parsed_calls = parsed?.calls ?? []
-  let format = turn_opts?.tool_format ?? ""
+  const native_calls = llm_result?.native_tool_calls ?? []
+  const parsed_calls = parsed?.calls ?? []
+  const format = turn_opts?.tool_format ?? ""
   if format != "native" || len(native_calls) > 0 || len(parsed_calls) == 0 {
     return {triggered: false, accepted: false, fallback_index: fallback_index, calls: nil}
   }
-  let new_index = fallback_index + 1
-  let policy = turn_opts?.native_tool_fallback ?? "reject"
-  let accepted = if policy == "allow" {
+  const new_index = fallback_index + 1
+  const policy = turn_opts?.native_tool_fallback ?? "reject"
+  const accepted = if policy == "allow" {
     true
   } else if policy == "allow_once" {
     new_index == 1
@@ -1543,7 +1543,7 @@ fn __detect_native_fallback(
       __native_fallback_feedback(policy, new_index),
     )
   }
-  let resolved_calls = if accepted {
+  const resolved_calls = if accepted {
     parsed_calls
   } else {
     []
@@ -1552,7 +1552,7 @@ fn __detect_native_fallback(
 }
 
 fn __resolve_max_concurrent_tools(turn_opts) {
-  let raw = turn_opts?.max_concurrent_tools
+  const raw = turn_opts?.max_concurrent_tools
   if type_of(raw) == "int" && raw > 1 {
     return raw
   }
@@ -1578,7 +1578,7 @@ fn __resolve_max_concurrent_tools(turn_opts) {
  * behavior end-to-end.
  */
 fn __resolve_intra_turn_failure_fanout_cap(turn_opts) {
-  let raw = turn_opts?.intra_turn_failure_fanout_cap
+  const raw = turn_opts?.intra_turn_failure_fanout_cap
   if type_of(raw) == "int" && raw > 0 {
     return raw
   }
@@ -1586,7 +1586,7 @@ fn __resolve_intra_turn_failure_fanout_cap(turn_opts) {
 }
 
 fn __resolve_intra_turn_resource_fail_fast(turn_opts) -> bool {
-  let raw = turn_opts?.intra_turn_resource_fail_fast
+  const raw = turn_opts?.intra_turn_resource_fail_fast
   if type_of(raw) == "bool" {
     return raw
   }
@@ -1608,9 +1608,9 @@ fn __intra_turn_failure_signature(result) {
   if __tool_result_ok(result) {
     return nil
   }
-  let name = to_string(result?.tool_name ?? result?.name ?? "")
-  let args = result?.arguments ?? {}
-  let failure_text = to_string(result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "")
+  const name = to_string(result?.tool_name ?? result?.name ?? "")
+  const args = result?.arguments ?? {}
+  const failure_text = to_string(result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "")
   return sha256(json_stringify({name: name, args: args, failure: failure_text}))
 }
 
@@ -1625,15 +1625,15 @@ fn __intra_turn_call_signature(call) {
   if type_of(call) != "dict" {
     return nil
   }
-  let name = to_string(call?.name ?? call?.tool_name ?? "")
-  let args = call?.arguments ?? {}
+  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const args = call?.arguments ?? {}
   return sha256(json_stringify({name: name, args: args}))
 }
 
 const __INTRA_TURN_RESOURCE_MUTATING_KINDS = ["edit", "write", "scaffold", "delete", "move", "mutation", "mutate"]
 
 fn __intra_turn_call_args(call) {
-  let raw = call?.arguments ?? call?.tool_args
+  const raw = call?.arguments ?? call?.tool_args
   if type_of(raw) == "dict" {
     return raw
   }
@@ -1648,18 +1648,18 @@ fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
   if type_of(annotations) != "dict" {
     return false
   }
-  let kind = __intra_turn_annotation_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  const kind = __intra_turn_annotation_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
   if contains(__INTRA_TURN_RESOURCE_MUTATING_KINDS, kind) {
     return true
   }
-  let side_effect = __intra_turn_annotation_text(
+  const side_effect = __intra_turn_annotation_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
       ?? annotations?.sideEffect,
   )
   if side_effect == "workspace_write" {
     return true
   }
-  let mutation = __intra_turn_annotation_text(
+  const mutation = __intra_turn_annotation_text(
     annotations?.mutation_classification ?? annotations?.mutationClassification
       ?? annotations?.mutation,
   )
@@ -1670,7 +1670,7 @@ fn __intra_turn_annotation_path_params(annotations) {
   if type_of(annotations) != "dict" {
     return []
   }
-  let direct = annotations?.path_params ?? annotations?.pathParams ?? annotations?.resource_path_params
+  const direct = annotations?.path_params ?? annotations?.pathParams ?? annotations?.resource_path_params
     ?? annotations?.resourcePathParams
   if type_of(direct) == "list" {
     return direct
@@ -1678,8 +1678,8 @@ fn __intra_turn_annotation_path_params(annotations) {
   if type_of(direct) == "string" {
     return [direct]
   }
-  let schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
-  let params = schema?.path_params ?? schema?.pathParams ?? []
+  const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  const params = schema?.path_params ?? schema?.pathParams ?? []
   if type_of(params) == "list" {
     return params
   }
@@ -1690,7 +1690,7 @@ fn __intra_turn_annotation_path_params(annotations) {
 }
 
 fn __intra_turn_normalize_resource_path(raw) -> string {
-  var path = trim(to_string(raw ?? ""))
+  let path = trim(to_string(raw ?? ""))
   while starts_with(path, "./") {
     path = substring(path, 2)
   }
@@ -1698,11 +1698,11 @@ fn __intra_turn_normalize_resource_path(raw) -> string {
 }
 
 fn __intra_turn_push_resource_key(keys, value) {
-  let path = __intra_turn_normalize_resource_path(value)
+  const path = __intra_turn_normalize_resource_path(value)
   if path == "" {
     return keys
   }
-  let key = "workspace_path:" + path
+  const key = "workspace_path:" + path
   if contains(keys, key) {
     return keys
   }
@@ -1711,7 +1711,7 @@ fn __intra_turn_push_resource_key(keys, value) {
 
 fn __intra_turn_push_resource_value(keys, value) {
   if type_of(value) == "list" {
-    var out = keys
+    let out = keys
     for item in value {
       out = __intra_turn_push_resource_key(out, item)
     }
@@ -1735,7 +1735,7 @@ const __INTRA_TURN_FALLBACK_PATH_ARGS = [
 ]
 
 fn __intra_turn_fallback_resource_keys(args) {
-  var keys = []
+  let keys = []
   for name in __INTRA_TURN_FALLBACK_PATH_ARGS {
     if args?.[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
@@ -1745,16 +1745,16 @@ fn __intra_turn_fallback_resource_keys(args) {
 }
 
 fn __intra_turn_resource_keys(call, tools, options = {}) {
-  let tool_name = to_string(call?.name ?? call?.tool_name ?? "")
-  let entry = __tool_registry_entry(tools, tool_name)
-  let annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const entry = __tool_registry_entry(tools, tool_name)
+  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   if !__intra_turn_annotations_mutate_resource(annotations) {
     return []
   }
-  let args = __intra_turn_call_args(call)
-  var keys = []
+  const args = __intra_turn_call_args(call)
+  let keys = []
   for param in __intra_turn_annotation_path_params(annotations) {
-    let name = to_string(param)
+    const name = to_string(param)
     if name != "" && args?.[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
     }
@@ -1775,7 +1775,7 @@ fn __intra_turn_intersects(keys, failed_keys) -> bool {
 }
 
 fn __intra_turn_add_failed_keys(failed_keys, keys) {
-  var out = failed_keys
+  let out = failed_keys
   for key in keys {
     if !contains(out, key) {
       out = out.push(key)
@@ -1794,7 +1794,7 @@ fn __intra_turn_add_failed_keys(failed_keys, keys) {
  * DID land, so a later same-resource sibling could be stale.
  */
 fn __intra_turn_failure_text_is_nonmutating(text: string) -> bool {
-  let lower = lowercase(trim(text))
+  const lower = lowercase(trim(text))
   if lower == "" {
     return false
   }
@@ -1856,7 +1856,7 @@ fn __intra_turn_failure_poisons_resource(result) -> bool {
   // other than an affirmative `false`. Only a host-confirmed pre-apply rejection
   // (view unchanged) skips poisoning. Guards the safety property: unknown stays
   // conservative, exactly like today.
-  let mutated = __intra_turn_result_mutated(result)
+  const mutated = __intra_turn_result_mutated(result)
   if type_of(mutated) == "bool" && !mutated {
     return false
   }
@@ -1879,8 +1879,8 @@ fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options = {}) -> boo
  * call rather than executing N more.
  */
 fn __intra_turn_collapsed_result(call, sample_result) {
-  let name = to_string(call?.name ?? sample_result?.tool_name ?? "")
-  let observation = "[collapsed remaining identical failing `" + name + "` call(s) "
+  const name = to_string(call?.name ?? sample_result?.tool_name ?? "")
+  const observation = "[collapsed remaining identical failing `" + name + "` call(s) "
     + "from this turn]\n"
     + "These calls had byte-identical arguments and produced the byte-identical "
     + "error already shown above, so they were NOT executed. Repeating the same "
@@ -1903,9 +1903,9 @@ fn __intra_turn_collapsed_result(call, sample_result) {
 }
 
 fn __intra_turn_resource_blocked_result(call, keys) {
-  let name = to_string(call?.name ?? call?.tool_name ?? "")
-  let rendered_keys = join(keys, ", ")
-  let observation = "[skipped dependent `" + name + "` call from this turn]\n"
+  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const rendered_keys = join(keys, ", ")
+  const observation = "[skipped dependent `" + name + "` call from this turn]\n"
     + "A previous mutating tool call in the same assistant response failed after "
     + "changing, or possibly changing, the same workspace resource ("
     + rendered_keys
@@ -1932,17 +1932,17 @@ fn __intra_turn_resource_blocked_result(call, keys) {
 }
 
 fn __callable(value) {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
 }
 
 fn __audit_flushes_from_result(result) {
-  var flushes = []
-  let single = result?._audit_flush
+  let flushes = []
+  const single = result?._audit_flush
   if __callable(single) {
     flushes = flushes.push(single)
   }
-  let many = result?._audit_flushes
+  const many = result?._audit_flushes
   if type_of(many) == "list" {
     for flush in many {
       if __callable(flush) {
@@ -1954,7 +1954,7 @@ fn __audit_flushes_from_result(result) {
 }
 
 fn __collect_audit_flushes(dispatch) {
-  var flushes = []
+  let flushes = []
   for result in __dispatch_results_list(dispatch) {
     for flush in __audit_flushes_from_result(result) {
       flushes = flushes.push(flush)
@@ -1967,7 +1967,7 @@ fn __strip_internal_tool_result(result) {
   if type_of(result) != "dict" {
     return result
   }
-  var clean = {}
+  let clean = {}
   for key in result.keys() {
     if !starts_with(key, "_") {
       clean = clean + {[key]: result[key]}
@@ -1978,7 +1978,7 @@ fn __strip_internal_tool_result(result) {
 
 fn __strip_internal_dispatch(dispatch) {
   if type_of(dispatch) == "list" {
-    var clean_results = []
+    let clean_results = []
     for result in dispatch {
       clean_results = clean_results.push(__strip_internal_tool_result(result))
     }
@@ -1987,14 +1987,14 @@ fn __strip_internal_dispatch(dispatch) {
   if type_of(dispatch) != "dict" {
     return dispatch
   }
-  var clean_dispatch = {}
+  let clean_dispatch = {}
   for key in dispatch.keys() {
     if !starts_with(key, "_") {
       clean_dispatch = clean_dispatch + {[key]: dispatch[key]}
     }
   }
   if type_of(dispatch?.results) == "list" {
-    var clean_results = []
+    let clean_results = []
     for result in dispatch.results {
       clean_results = clean_results.push(__strip_internal_tool_result(result))
     }
@@ -2004,9 +2004,9 @@ fn __strip_internal_dispatch(dispatch) {
 }
 
 fn __spawn_audit_flushes(tasks, flushes) {
-  var out = tasks
+  let out = tasks
   for flush in flushes {
-    let task = spawn {
+    const task = spawn {
       let _ = try {
         flush()
       }
@@ -2018,7 +2018,7 @@ fn __spawn_audit_flushes(tasks, flushes) {
 
 fn __drain_audit_flushes(tasks) {
   for task in tasks {
-    let _ = try {
+    const _ = try {
       await(task)
     }
   }
@@ -2029,14 +2029,14 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     return {dispatch: nil, turn_opts: turn_opts, audit_flushes: []}
   }
   agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
-  let tools = turn_opts?.tools
-  let cap = __resolve_max_concurrent_tools(turn_opts)
+  const tools = turn_opts?.tools
+  const cap = __resolve_max_concurrent_tools(turn_opts)
   // `_stop_reason` is the turn's provider stop reason
   // (`stop`/`length`/`tool_calls`/...). The dispatch host primitive uses it
   // to cause-name empty-args tool calls: finish_reason=length means the
   // arguments were TRUNCATED by the output cap, anything else means the
   // provider dropped them (an IDE host bug report).
-  let dispatch_options = {
+  const dispatch_options = {
     session_id: session_id,
     tool_format: turn_opts.tool_format,
     policy: turn_opts?.policy,
@@ -2052,10 +2052,10 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
     _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
   }
-  let caller = turn_opts?._tool_caller
-  let raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
-  let audit_flushes = __collect_audit_flushes(raw_dispatch)
-  let dispatch = __strip_internal_dispatch(raw_dispatch)
+  const caller = turn_opts?._tool_caller
+  const raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
+  const audit_flushes = __collect_audit_flushes(raw_dispatch)
+  const dispatch = __strip_internal_dispatch(raw_dispatch)
   agent_session_record_tool_results(session_id, dispatch)
   return {
     dispatch: dispatch,
@@ -2076,8 +2076,8 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   // requested cap; results come back in source order regardless of
   // completion order so text tool-call parsers that key on
   // declaration order still match.
-  let resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
-  let keyed_mutating_batch = resource_fail_fast
+  const resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
+  const keyed_mutating_batch = resource_fail_fast
     && __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options)
   if cap <= 1 || len(tool_calls) <= 1 || keyed_mutating_batch {
     // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
@@ -2090,22 +2090,22 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     // unchanged unless the flag is set. A success, or any failure/call with a
     // DIFFERENT signature, resets the streak, so a batch of distinct or
     // non-failing calls is never capped.
-    let fanout_cap = options?._intra_turn_failure_fanout_cap ?? 0
-    var results = []
-    var streak_signature = nil
-    var streak_count = 0
-    var capped_call_signature = nil
-    var capped_sample = nil
-    var collapsed_emitted = false
-    var failed_resource_keys = []
+    const fanout_cap = options?._intra_turn_failure_fanout_cap ?? 0
+    let results = []
+    let streak_signature = nil
+    let streak_count = 0
+    let capped_call_signature = nil
+    let capped_sample = nil
+    let collapsed_emitted = false
+    let failed_resource_keys = []
     for (index, call) in iter(tool_calls).enumerate() {
-      let resource_keys = if resource_fail_fast {
+      const resource_keys = if resource_fail_fast {
         __intra_turn_resource_keys(call, tools, options)
       } else {
         []
       }
       if len(resource_keys) > 0 && __intra_turn_intersects(resource_keys, failed_resource_keys) {
-        let blocked = __intra_turn_resource_blocked_result(call, resource_keys)
+        const blocked = __intra_turn_resource_blocked_result(call, resource_keys)
         __emit_synthetic_tool_lifecycle_finish(call, blocked, tools, options)
         results = results.push(blocked)
         continue
@@ -2114,14 +2114,14 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         && __intra_turn_call_signature(call) == capped_call_signature {
         // Same failing call as the one that tripped the cap — skip dispatch.
         if !collapsed_emitted {
-          let collapsed = __intra_turn_collapsed_result(call, capped_sample)
+          const collapsed = __intra_turn_collapsed_result(call, capped_sample)
           __emit_synthetic_tool_lifecycle_finish(call, collapsed, tools, options)
           results = results.push(collapsed)
           collapsed_emitted = true
         }
         continue
       }
-      let result = __invoke_tool_with_index(call, index, tools, options)
+      const result = __invoke_tool_with_index(call, index, tools, options)
       results = results.push(result)
       // Poison this resource for later same-resource siblings only when the
       // failure could have left it mutated. A host-confirmed no-op failure
@@ -2133,14 +2133,14 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         failed_resource_keys = __intra_turn_add_failed_keys(failed_resource_keys, resource_keys)
       }
       if fanout_cap > 0 {
-        let signature = __intra_turn_failure_signature(result)
+        const signature = __intra_turn_failure_signature(result)
         if signature == nil {
           streak_signature = nil
           streak_count = 0
         } else if signature == streak_signature {
           streak_count = streak_count + 1
           if streak_count >= fanout_cap {
-            let new_capped = __intra_turn_call_signature(call)
+            const new_capped = __intra_turn_call_signature(call)
             // A DISTINCT fan-out group tripped the cap: reset the
             // collapse-emitted latch so this group gets its OWN single
             // synthetic "collapsed" result. Without this reset the latch
@@ -2161,14 +2161,14 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     }
     return results
   }
-  var indexed = []
+  let indexed = []
   for (index, call) in iter(tool_calls).enumerate() {
     indexed = indexed.push({index: index, call: call})
   }
-  let settled = parallel settle indexed with { max_concurrent: cap } { entry ->
+  const settled = parallel settle indexed with { max_concurrent: cap } { entry ->
     __invoke_tool_with_index(entry.call, entry.index, tools, options)
   }
-  var results = []
+  let results = []
   for r in settled.results {
     if is_ok(r) {
       results = results.push(unwrap(r))
@@ -2177,7 +2177,7 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       // value here is a VM-level bug (e.g. parallel-task plumbing). Surface a
       // recoverable one as a synthetic error result rather than tear down the
       // loop — but a cancellation or an internal engine bug must propagate.
-      let err = unwrap_err(r)
+      const err = unwrap_err(r)
       if __agent_error_must_propagate(err) {
         throw err
       }
@@ -2229,7 +2229,7 @@ fn __tool_result_ok(result) {
   if result?.success != nil {
     return result.success ? true : false
   }
-  let status = result?.status ?? ""
+  const status = result?.status ?? ""
   return status == "ok" || status == "success"
 }
 
@@ -2246,7 +2246,7 @@ fn __tool_result_ok(result) {
 const __PRODUCT_ERROR_WRITE_TOOL_NAMES = ["edit", "scaffold", "run_codemod", "write"]
 
 fn __tool_result_write_product_tool(result) -> bool {
-  let name = lowercase(trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")))
+  const name = lowercase(trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")))
   return contains(__PRODUCT_ERROR_WRITE_TOOL_NAMES, name)
 }
 
@@ -2260,7 +2260,7 @@ fn __tool_result_dispatch_rejection_text(lower: string) -> bool {
 }
 
 fn __tool_result_write_product_error_text(text: string) -> bool {
-  let lower = lowercase(trim(text))
+  const lower = lowercase(trim(text))
   if lower == "" {
     return false
   }
@@ -2281,10 +2281,10 @@ fn __tool_result_product_error(result) -> bool {
   if type_of(result) != "dict" {
     return false
   }
-  let write_tool = __tool_result_write_product_tool(result)
+  const write_tool = __tool_result_write_product_tool(result)
   for key in ["error", "observation", "rendered_result", "result", "output"] {
     if result[key] != nil {
-      let text = trim(to_string(result[key]))
+      const text = trim(to_string(result[key]))
       if starts_with(text, "Error:") {
         return true
       }
@@ -2304,10 +2304,10 @@ fn __tool_result_name(result) {
 }
 
 fn __tool_names_by_status(dispatch, want_ok) {
-  let results = __dispatch_results_list(dispatch)
-  var names = []
+  const results = __dispatch_results_list(dispatch)
+  let names = []
   for result in results {
-    let name = __tool_result_name(result)
+    const name = __tool_result_name(result)
     if name != "" && __tool_result_ok(result) == want_ok {
       names = names.push(name)
     }
@@ -2332,9 +2332,9 @@ fn __turn_made_edit(dispatch, tools) -> bool {
     return false
   }
   for name in __tool_names_by_status(dispatch, true) {
-    let entry = __tool_registry_entry(tools, name)
-    let annotations = agent_tool_entry_annotations(entry)
-    let kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
+    const entry = __tool_registry_entry(tools, name)
+    const annotations = agent_tool_entry_annotations(entry)
+    const kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
     if contains(__REPAIR_EDIT_KINDS, kind) {
       return true
     }
@@ -2347,7 +2347,7 @@ fn __agent_loop_verify_closure_exists(turn_opts) -> bool {
 }
 
 fn __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, tools) -> bool {
-  let has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
+  const has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
   return repair_cfg.post_edit_reverify
     && __agent_loop_verify_closure_exists(turn_opts)
     && has_live_failure
@@ -2394,8 +2394,8 @@ fn __agent_loop_should_spend_reserve(
 }
 
 fn __merge_tool_names(existing, additions) {
-  var merged = existing ?? []
-  let values = additions ?? []
+  let merged = existing ?? []
+  const values = additions ?? []
   for name in values {
     if name != "" && !contains(merged, name) {
       merged = merged.push(name)
@@ -2421,7 +2421,7 @@ fn __strip_internal_keys(patch) {
   if type_of(patch) != "dict" {
     return patch
   }
-  var clean = {}
+  let clean = {}
   for key in patch.keys() {
     if !starts_with(key, "_") {
       clean = clean + {[key]: patch[key]}
@@ -2431,10 +2431,10 @@ fn __strip_internal_keys(patch) {
 }
 
 fn __apply_post_turn_options(opts, outcome) {
-  var updated = opts
-  let next_patch = __strip_internal_keys(outcome?.next_options)
+  let updated = opts
+  const next_patch = __strip_internal_keys(outcome?.next_options)
   updated = __merge_hook_dict(updated, next_patch, "next_options")
-  let narrowing = outcome?.narrowing
+  const narrowing = outcome?.narrowing
   if narrowing != nil {
     updated = updated
       + {
@@ -2442,15 +2442,15 @@ fn __apply_post_turn_options(opts, outcome) {
       _tool_surface_narrowed_tools: narrowing?.narrowed_tools,
     }
   }
-  let llm_patch = outcome?.llm_options
+  const llm_patch = outcome?.llm_options
   if llm_patch != nil {
     if type_of(llm_patch) != "dict" {
       throw "agent_loop: post_turn_callback `llm_options` must be a dict"
     }
-    let base_llm_options = updated?.llm_options ?? {}
-    let route_patch_has_provider = contains(llm_patch.keys(), "provider")
-    let route_patch_has_model = contains(llm_patch.keys(), "model")
-    let route_patch_seen = route_patch_has_provider || route_patch_has_model
+    const base_llm_options = updated?.llm_options ?? {}
+    const route_patch_has_provider = contains(llm_patch.keys(), "provider")
+    const route_patch_has_model = contains(llm_patch.keys(), "model")
+    const route_patch_seen = route_patch_has_provider || route_patch_has_model
     updated = updated
       + {
       llm_options: base_llm_options + llm_patch,
@@ -2462,7 +2462,7 @@ fn __apply_post_turn_options(opts, outcome) {
 }
 
 fn __agent_loop_llm_overrides(opts) {
-  let overrides = opts?.llm_options
+  const overrides = opts?.llm_options
   if type_of(overrides) == "dict" {
     return overrides
   }
@@ -2470,7 +2470,7 @@ fn __agent_loop_llm_overrides(opts) {
 }
 
 fn __agent_loop_effective_llm_options(opts) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return agent_sanitize_model_options(base + __agent_loop_llm_overrides(base))
 }
 
@@ -2483,10 +2483,10 @@ fn __agent_loop_route_options(provider, model, tool_format) {
 }
 
 fn __agent_loop_route_differs_from_primary(llm_opts, primary_provider, primary_model) {
-  let provider = to_string(llm_opts?.provider ?? "")
-  let model = to_string(llm_opts?.model ?? "")
-  let has_primary = primary_provider != "" || primary_model != ""
-  let has_current = provider != "" || model != ""
+  const provider = to_string(llm_opts?.provider ?? "")
+  const model = to_string(llm_opts?.model ?? "")
+  const has_primary = primary_provider != "" || primary_model != ""
+  const has_current = provider != "" || model != ""
   return has_primary && has_current && (provider != primary_provider || model != primary_model)
 }
 
@@ -2521,10 +2521,10 @@ fn __agent_loop_enable_escalation_failover(llm_opts, primary_provider, primary_m
 }
 
 fn __agent_loop_with_llm_render_context(opts, render) {
-  let effective = __agent_loop_effective_llm_options(opts)
-  let provider = to_string(effective?.provider ?? "")
-  let model = to_string(effective?.model ?? "")
-  let pushed = __push_llm_render_context(provider, model)
+  const effective = __agent_loop_effective_llm_options(opts)
+  const provider = to_string(effective?.provider ?? "")
+  const model = to_string(effective?.model ?? "")
+  const pushed = __push_llm_render_context(provider, model)
   defer {
     if pushed {
       __pop_llm_render_context()
@@ -2537,8 +2537,8 @@ fn __agent_loop_build_turn_prompt(session, opts, iteration) {
   return __agent_loop_with_llm_render_context(
     opts,
     { effective ->
-      let fragments = agent_build_turn_system_fragments(session, effective, iteration)
-      var parts = []
+      const fragments = agent_build_turn_system_fragments(session, effective, iteration)
+      let parts = []
       for fragment in fragments {
         parts = parts.push(fragment.body)
       }
@@ -2593,7 +2593,7 @@ fn __next_progress_count(made_progress, turns_since_progress) {
  * @api_stability: experimental
  */
 pub fn __progress_nudge_text(depth, has_tools, tool_mode = "text", made_tool_calls = false) {
-  let action = if has_tools {
+  const action = if has_tools {
     if tool_mode == "native" {
       "Call exactly one native tool through the provider tool channel now, or give your final answer and stop."
     } else {
@@ -2640,14 +2640,14 @@ pub fn __progress_nudge_text(depth, has_tools, tool_mode = "text", made_tool_cal
  * stays small for providers that don't report telemetry.
  */
 fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates = nil) {
-  let telemetry = llm_result?.provider_telemetry ?? {}
-  let thinking = llm_result?.thinking ?? ""
-  let thinking_chars = if type_of(thinking) == "string" {
+  const telemetry = llm_result?.provider_telemetry ?? {}
+  const thinking = llm_result?.thinking ?? ""
+  const thinking_chars = if type_of(thinking) == "string" {
     len(thinking)
   } else {
     0
   }
-  let extra = aggregates ?? {}
+  const extra = aggregates ?? {}
   return {
     tool_count: tool_count,
     text: visible_text,
@@ -2662,7 +2662,7 @@ fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates = n
 }
 
 fn __agent_loop_elapsed_ms(start_ms) {
-  let elapsed = __agent_loop_clock_now_ms() - start_ms
+  const elapsed = __agent_loop_clock_now_ms() - start_ms
   if elapsed < 0 {
     return 0
   }
@@ -2670,7 +2670,7 @@ fn __agent_loop_elapsed_ms(start_ms) {
 }
 
 fn __agent_loop_cost_usd(totals) {
-  let value = to_float(totals?.cost_usd ?? 0.0)
+  const value = to_float(totals?.cost_usd ?? 0.0)
   if value == nil {
     return 0.0
   }
@@ -2678,7 +2678,7 @@ fn __agent_loop_cost_usd(totals) {
 }
 
 fn __agent_loop_budget_aggregates(session_id, totals, loop_start_ms) {
-  let resolved_totals = totals ?? agent_session_totals(session_id)
+  const resolved_totals = totals ?? agent_session_totals(session_id)
   return {
     cost_usd: __agent_loop_cost_usd(resolved_totals),
     wall_clock_ms: __agent_loop_elapsed_ms(loop_start_ms),
@@ -2709,7 +2709,7 @@ fn __agent_loop_budget_exhaustion(
   loop_start_ms,
   max_iterations,
 ) {
-  let aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
+  const aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
   if budget?.wall_clock_ms != nil && aggregates.wall_clock_ms >= budget.wall_clock_ms {
     return aggregates
       + {exhausted: true, kind: "wall_clock", iteration: iteration, max_iterations: max_iterations}
@@ -2770,8 +2770,8 @@ fn __agent_loop_state_budget_fields(
   budget,
   consecutive_failure_count,
 ) {
-  let aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
-  let failure_config = __agent_loop_consecutive_failure_config(budget)
+  const aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
+  const failure_config = __agent_loop_consecutive_failure_config(budget)
   return {
     wall_clock_ms: aggregates.wall_clock_ms,
     wall_clock_limit_ms: budget?.wall_clock_ms,
@@ -2783,10 +2783,10 @@ fn __agent_loop_state_budget_fields(
 }
 
 fn __agent_loop_failure_matches_kind(error, wanted) {
-  let category = to_string(error?.category ?? "")
-  let reason = to_string(error?.reason ?? "")
-  let kind = to_string(error?.kind ?? "")
-  let status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
+  const category = to_string(error?.category ?? "")
+  const reason = to_string(error?.reason ?? "")
+  const kind = to_string(error?.kind ?? "")
+  const status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
   if wanted == "transient" {
     return kind == "transient" || category == "transient_network" || category == "timeout"
       || reason == "timeout"
@@ -2805,7 +2805,7 @@ fn __agent_loop_failure_matches_kind(error, wanted) {
 }
 
 fn __agent_loop_consecutive_failure_config(budget) {
-  let config = budget?.consecutive_failures
+  const config = budget?.consecutive_failures
   if type_of(config) != "dict" {
     return nil
   }
@@ -2825,13 +2825,13 @@ fn __agent_loop_tracks_failure(error, config) {
 }
 
 fn __agent_loop_is_escalation_transport_failure(error) {
-  let status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
+  const status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
   if status >= 400 && status < 500 && status != 429 {
     return false
   }
-  let category = to_string(error?.category ?? "")
-  let reason = to_string(error?.reason ?? "")
-  let kind = to_string(error?.kind ?? "")
+  const category = to_string(error?.category ?? "")
+  const reason = to_string(error?.reason ?? "")
+  const kind = to_string(error?.kind ?? "")
   if category == "circuit_open" || reason == "circuit_open" || kind == "circuit_open" {
     return true
   }
@@ -2864,8 +2864,8 @@ fn __agent_loop_emit_provider_error(
   escalation_fallback,
   skip_reason_override,
 ) {
-  let aggregates = __agent_loop_budget_aggregates(session_id, nil, loop_start_ms)
-  let skip_reason = if skip_reason_override != "" {
+  const aggregates = __agent_loop_budget_aggregates(session_id, nil, loop_start_ms)
+  const skip_reason = if skip_reason_override != "" {
     skip_reason_override
   } else if escalation_fallback {
     "escalation_provider_failure"
@@ -2905,8 +2905,8 @@ fn __agent_loop_finalize_failed(session, iteration) {
 }
 
 fn __agent_loop_current_worker() {
-  let ctx = runtime_context()
-  let worker_id = ctx?.worker_id
+  const ctx = runtime_context()
+  const worker_id = ctx?.worker_id
   if type_of(worker_id) != "string" || worker_id == "" {
     return nil
   }
@@ -2926,7 +2926,7 @@ fn __agent_loop_suspend_reminder_body(reason) {
 }
 
 fn __agent_loop_suspend_initiator(value) {
-  let text = to_string(value ?? "operator")
+  const text = to_string(value ?? "operator")
   if text == "self_initiated" {
     return "self"
   }
@@ -2934,15 +2934,15 @@ fn __agent_loop_suspend_initiator(value) {
 }
 
 fn __agent_loop_suspend_checkpoint(session, iteration) {
-  let worker = __agent_loop_current_worker()
+  const worker = __agent_loop_current_worker()
   if worker == nil || worker?.status != "suspended" {
     return nil
   }
-  let suspension = worker?.suspension ?? {}
-  let reason = to_string(suspension?.reason ?? "")
-  let initiator = __agent_loop_suspend_initiator(suspension?.initiator)
-  let conditions = suspension?.conditions
-  let payload = {
+  const suspension = worker?.suspension ?? {}
+  const reason = to_string(suspension?.reason ?? "")
+  const initiator = __agent_loop_suspend_initiator(suspension?.initiator)
+  const conditions = suspension?.conditions
+  const payload = {
     status: "suspended",
     handle: worker,
     worker: worker,
@@ -3026,31 +3026,31 @@ fn __agent_loop_checkpoint_modes(kind) {
  * stalled-done-judge and post-turn paths rely on.
  */
 fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
-  let modes = __agent_loop_checkpoint_modes(kind)
-  var delivered = 0
+  const modes = __agent_loop_checkpoint_modes(kind)
+  let delivered = 0
   if modes.immediate {
-    let result = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
+    const result = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
     delivered = delivered + (result?.delivered ?? 0)
   }
-  let immediate_count = delivered
+  const immediate_count = delivered
   if modes.finish_step {
-    let result = agent_session_drain_bridge_injections(session_id, "finish_step")
+    const result = agent_session_drain_bridge_injections(session_id, "finish_step")
     delivered = delivered + (result?.delivered ?? 0)
   }
   if modes.audit_only {
-    let result = agent_session_drain_bridge_injections(session_id, "audit_only")
+    const result = agent_session_drain_bridge_injections(session_id, "audit_only")
     delivered = delivered + (result?.delivered ?? 0)
   }
-  var inbox_delivered = 0
+  let inbox_delivered = 0
   if modes.inbox {
-    let pending = agent_session_drain_feedback(session_id)
+    const pending = agent_session_drain_feedback(session_id)
     for note in pending {
       agent_session_inject_feedback(session_id, note.kind, note.content)
       inbox_delivered = inbox_delivered + 1
     }
   }
-  let dispatch_skipped = kind == "pre_tool_dispatch" && immediate_count > 0
-  let iteration = to_int(opts?.iteration ?? 0)
+  const dispatch_skipped = kind == "pre_tool_dispatch" && immediate_count > 0
+  const iteration = to_int(opts?.iteration ?? 0)
   agent_emit_event(
     session_id,
     "loop_checkpoint",
@@ -3082,11 +3082,11 @@ fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
 }
 
 fn __agent_loop_fire_resume_continuity(session, opts) {
-  let payload = opts?._resume_continuity
+  const payload = opts?._resume_continuity
   if type_of(payload) != "dict" {
     return opts
   }
-  let _ = agent_reminder_providers_fire(
+  const _ = agent_reminder_providers_fire(
     session.session_id,
     "worker_resumed",
     payload
@@ -3105,20 +3105,20 @@ fn __scope_classifier_recent_context(messages, limit) {
   if type_of(messages) != "list" {
     return []
   }
-  let cap = if type_of(limit) == "int" && limit > 0 {
+  const cap = if type_of(limit) == "int" && limit > 0 {
     limit
   } else {
     3
   }
-  let total = len(messages)
-  var start = total - cap
+  const total = len(messages)
+  let start = total - cap
   if start < 0 {
     start = 0
   }
-  var out = []
-  var i = start
+  let out = []
+  let i = start
   while i < total {
-    let msg = messages[i]
+    const msg = messages[i]
     out = out
       .push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
     i = i + 1
@@ -3127,7 +3127,7 @@ fn __scope_classifier_recent_context(messages, limit) {
 }
 
 fn __scope_classifier_confidence(value, fallback) {
-  let parsed = to_float(value ?? fallback)
+  const parsed = to_float(value ?? fallback)
   if parsed == nil {
     return fallback
   }
@@ -3141,7 +3141,7 @@ fn __scope_classifier_confidence(value, fallback) {
 }
 
 fn __scope_classifier_label(value) {
-  let label = lowercase(trim(to_string(value ?? "")))
+  const label = lowercase(trim(to_string(value ?? "")))
   if label == "in_scope" || label == "inscope" || label == "in-scope" {
     return "in_scope"
   }
@@ -3170,15 +3170,15 @@ fn __scope_classifier_normalize(raw, session_id, iteration) {
       skip_main_turn: false,
     }
   }
-  let threshold = __scope_classifier_confidence(raw?.confidence_threshold ?? raw?.threshold, 0.65)
-  let original_label = __scope_classifier_label(raw?.original_label ?? raw?.label)
-  let confidence = __scope_classifier_confidence(raw?.confidence, 0.0)
-  let label = if original_label != "escalate" && confidence < threshold {
+  const threshold = __scope_classifier_confidence(raw?.confidence_threshold ?? raw?.threshold, 0.65)
+  const original_label = __scope_classifier_label(raw?.original_label ?? raw?.label)
+  const confidence = __scope_classifier_confidence(raw?.confidence, 0.0)
+  const label = if original_label != "escalate" && confidence < threshold {
     "escalate"
   } else {
     original_label
   }
-  let evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
+  const evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
   return raw
     + {
     label: label,
@@ -3214,9 +3214,9 @@ fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_index
   if guardrail == nil || iteration_index != 0 {
     return nil
   }
-  let iteration = iteration_index + 1
-  let messages = agent_session_messages(session.session_id)
-  let payload = {
+  const iteration = iteration_index + 1
+  const messages = agent_session_messages(session.session_id)
+  const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
     iteration: iteration,
@@ -3227,10 +3227,10 @@ fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_index
     provider: turn_opts?.provider ?? "",
     model: turn_opts?.model ?? "",
   }
-  let outcome = try {
+  const outcome = try {
     guardrail(payload)
   }
-  let verdict = if is_err(outcome) {
+  const verdict = if is_err(outcome) {
     let err = unwrap_err(outcome)
     if __agent_error_must_propagate(err) {
       throw err
@@ -3248,7 +3248,7 @@ fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_index
 }
 
 fn __input_guardrail_assistant_text(verdict) {
-  let reason = trim(to_string(verdict?.reason ?? ""))
+  const reason = trim(to_string(verdict?.reason ?? ""))
   if reason == "" {
     return "Input guardrail stopped this request before the agent loop."
   }
@@ -3256,7 +3256,7 @@ fn __input_guardrail_assistant_text(verdict) {
 }
 
 fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
-  let text = __input_guardrail_assistant_text(verdict)
+  const text = __input_guardrail_assistant_text(verdict)
   agent_session_record_assistant(
     session.session_id,
     {
@@ -3289,7 +3289,7 @@ fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
         + {dispatch_skipped: true, skip_reason: "input_guardrail_tripwire", input_guardrail_verdict: verdict},
     },
   )
-  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  const _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
   return text
 }
 
@@ -3297,10 +3297,10 @@ fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iter
   if classifier == nil {
     return nil
   }
-  let iteration = iteration_index + 1
-  let messages = agent_session_messages(session.session_id)
-  let anchor = agent_session_workspace_anchor(session.session_id)
-  let payload = {
+  const iteration = iteration_index + 1
+  const messages = agent_session_messages(session.session_id)
+  const anchor = agent_session_workspace_anchor(session.session_id)
+  const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
     iteration: iteration,
@@ -3312,10 +3312,10 @@ fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iter
     provider: turn_opts?.provider ?? "",
     model: turn_opts?.model ?? "",
   }
-  let outcome = try {
+  const outcome = try {
     classifier(payload)
   }
-  let verdict = if is_err(outcome) {
+  const verdict = if is_err(outcome) {
     let err = unwrap_err(outcome)
     if __agent_error_must_propagate(err) {
       throw err
@@ -3336,11 +3336,11 @@ fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iter
  * disable the scope gate).
  */
 fn __scope_classifier_mounted_roots(anchor) {
-  let roots = anchor?.additional_roots ?? []
+  const roots = anchor?.additional_roots ?? []
   if type_of(roots) != "list" || len(roots) == 0 {
     return "  (none)"
   }
-  var lines = []
+  let lines = []
   for root in roots {
     lines = lines
       .push(
@@ -3354,8 +3354,8 @@ fn __scope_classifier_mounted_roots(anchor) {
 }
 
 fn __scope_classifier_alert_body(verdict, session) {
-  let anchor = verdict?.workspace_anchor ?? agent_session_workspace_anchor(session.session_id)
-  let primary = to_string(anchor?.primary ?? "(none)")
+  const anchor = verdict?.workspace_anchor ?? agent_session_workspace_anchor(session.session_id)
+  const primary = to_string(anchor?.primary ?? "(none)")
   return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
     + to_string(verdict?.evidence ?? "")
     + "\n\nCurrent anchor: "
@@ -3370,8 +3370,8 @@ fn __scope_classifier_alert_body(verdict, session) {
 }
 
 fn __scope_classifier_assistant_text(verdict) {
-  let evidence = trim(to_string(verdict?.evidence ?? ""))
-  let suffix = if evidence == "" {
+  const evidence = trim(to_string(verdict?.evidence ?? ""))
+  const suffix = if evidence == "" {
     ""
   } else {
     " " + evidence
@@ -3386,7 +3386,7 @@ fn __scope_classifier_skip_main(verdict) {
 }
 
 fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
-  let text = __scope_classifier_assistant_text(verdict)
+  const text = __scope_classifier_assistant_text(verdict)
   agent_session_record_assistant(
     session.session_id,
     {
@@ -3436,16 +3436,16 @@ fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
       },
     },
   )
-  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  const _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
   return text
 }
 
 fn __agent_loop_pop_structural_veto_turn(session_id) {
-  let messages = agent_session_messages(session_id)
+  const messages = agent_session_messages(session_id)
   if len(messages) == 0 {
     return false
   }
-  let last = messages[len(messages) - 1]
+  const last = messages[len(messages) - 1]
   if last?.role != "assistant" {
     return false
   }
@@ -3459,15 +3459,15 @@ fn __agent_loop_pop_structural_veto_turn(session_id) {
  * configured `done_sentinel` when present.
  */
 fn __agent_loop_wrapup_directive(opts) {
-  let sentinel = opts?.done_sentinel
-  let base = "You have reached your turn/budget limit and cannot call any more tools. "
+  const sentinel = opts?.done_sentinel
+  const base = "You have reached your turn/budget limit and cannot call any more tools. "
     + "Provide your final answer now: briefly summarize what you accomplished and what you "
     + "verified. Do not emit any tool call."
   if sentinel == nil || to_string(sentinel) == "" {
     return base
       + " End with a concise `<user_response>...</user_response>` containing the final answer."
   }
-  let tag = to_string(sentinel)
+  const tag = to_string(sentinel)
   return base
     + " Emit a concise `<user_response>...</user_response>` with the final answer, then end with "
     + "`<done>"
@@ -3496,7 +3496,7 @@ fn __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
 }
 
 fn __agent_loop_terminal_callback_extend_by(budget) {
-  let by = budget?.extend_by ?? 0
+  const by = budget?.extend_by ?? 0
   if type_of(by) == "int" && by > 0 {
     return by
   }
@@ -3514,12 +3514,12 @@ fn __agent_loop_terminal_callback_extend_by(budget) {
  * behavior. Returns true when a wrap-up response was recorded.
  */
 fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration) {
-  let directive = __agent_loop_wrapup_directive(opts)
+  const directive = __agent_loop_wrapup_directive(opts)
   // Disable tools for this turn so the model cannot dispatch: empty tool
   // surface + a system directive forbidding tool calls. Carry the tool format
   // forward so the response protocol still matches what the model was trained
   // on this run.
-  let wrapup_opts = opts
+  const wrapup_opts = opts
     + {
     tools: nil,
     active_skills: nil,
@@ -3527,14 +3527,14 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     _progress_tool_system_prompt_nudge: "",
     transcript_projection: opts?.transcript_projection,
   }
-  let turn_prompt = __agent_loop_build_turn_prompt(session, wrapup_opts, iteration)
-  var turn_system_parts = []
+  const turn_prompt = __agent_loop_build_turn_prompt(session, wrapup_opts, iteration)
+  let turn_system_parts = []
   if trim(turn_prompt.system ?? "") != "" {
     turn_system_parts = turn_system_parts.push(turn_prompt.system)
   }
   turn_system_parts = turn_system_parts.push(directive)
-  let turn_system = join(turn_system_parts, "\n\n")
-  let llm_opts = __agent_loop_effective_llm_options(wrapup_opts)
+  const turn_system = join(turn_system_parts, "\n\n")
+  const llm_opts = __agent_loop_effective_llm_options(wrapup_opts)
     + {
     messages: turn_prompt.messages,
     session_id: session.session_id,
@@ -3543,20 +3543,20 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     _iteration: iteration + 1,
     _final_wrapup: true,
   }
-  let call = __invoke_llm(message, turn_system, llm_opts)
+  const call = __invoke_llm(message, turn_system, llm_opts)
   if !call.ok {
     return false
   }
-  let llm_result = call.value
-  let raw_text = llm_result?.text ?? ""
-  let parsed = agent_parse_tool_calls(raw_text, nil, wrapup_opts?.tool_format)
-  let visible_text = __visible_text(parsed, raw_text)
+  const llm_result = call.value
+  const raw_text = llm_result?.text ?? ""
+  const parsed = agent_parse_tool_calls(raw_text, nil, wrapup_opts?.tool_format)
+  const visible_text = __visible_text(parsed, raw_text)
   if to_string(visible_text) == "" {
     return false
   }
-  let normalized = llm_result + {text: visible_text, visible_text: visible_text}
+  const normalized = llm_result + {text: visible_text, visible_text: visible_text}
   agent_session_record_assistant(session.session_id, normalized)
-  let _ = try {
+  const _ = try {
     agent_emit_event(
       session.session_id,
       "final_wrapup",
@@ -3577,7 +3577,7 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
  * servers, which keeps the flag-off path untouched.
  */
 fn __agent_loop_active_skill_mcp_specs(active_skills) {
-  var specs = []
+  let specs = []
   for active_skill in active_skills ?? [] {
     for spec in active_skill?.mcp ?? [] {
       specs = specs + [spec]
@@ -3596,14 +3596,14 @@ fn __agent_loop_active_skill_mcp_specs(active_skills) {
  * value (nil when nothing parseable was found).
  */
 fn __agent_loop_output_schema_value(text, schema) {
-  let parsed = try {
+  const parsed = try {
     json_extract(text)
   }
   if is_err(parsed) {
     return {ok: false, value: nil}
   }
-  let value = unwrap(parsed)
-  let valid = try {
+  const value = unwrap(parsed)
+  const valid = try {
     schema_is(value, schema)
   }
   if is_err(valid) || !unwrap(valid) {
@@ -3636,13 +3636,13 @@ fn __agent_loop_output_schema_repair_prompt(schema, text) {
  * `output_valid: false`, not a crash).
  */
 fn __agent_loop_apply_output_schema(final_result, opts, session, message, iteration) {
-  let schema = opts?.output_schema
-  let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
-  let direct = __agent_loop_output_schema_value(text, schema)
+  const schema = opts?.output_schema
+  const text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
+  const direct = __agent_loop_output_schema_value(text, schema)
   if direct.ok {
     return final_result + {output: direct.value, output_valid: true}
   }
-  let repair_opts = __agent_loop_effective_llm_options(opts)
+  const repair_opts = __agent_loop_effective_llm_options(opts)
     + {
     session_id: session.session_id,
     tools: nil,
@@ -3651,53 +3651,53 @@ fn __agent_loop_apply_output_schema(final_result, opts, session, message, iterat
     _iteration: iteration + 1,
     _output_schema_repair: true,
   }
-  let repair = try {
+  const repair = try {
     __invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
   }
   if is_err(repair) {
     return final_result + {output: direct.value, output_valid: false}
   }
-  let call = unwrap(repair)
+  const call = unwrap(repair)
   if !(call?.ok ?? false) {
     return final_result + {output: direct.value, output_valid: false}
   }
-  let repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
-  let second = __agent_loop_output_schema_value(repaired_text, schema)
+  const repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
+  const second = __agent_loop_output_schema_value(repaired_text, schema)
   return final_result + {output: second.value, output_valid: second.ok}
 }
 
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
-  var opts = initial_opts
-  var iteration = 0
-  var session_finalized = false
-  var audit_background_tasks = []
-  let run = try {
+  let opts = initial_opts
+  let iteration = 0
+  let session_finalized = false
+  let audit_background_tasks = []
+  const run = try {
     opts = agent_mcp_bootstrap_if_needed(session, opts)
     let primary_llm_opts = __agent_loop_effective_llm_options(opts)
     let primary_provider = to_string(primary_llm_opts?.provider ?? "")
     let primary_model = to_string(primary_llm_opts?.model ?? "")
     let primary_tool_format = to_string(primary_llm_opts?.tool_format ?? "")
-    var escalation_retry_pending = false
-    var stop_reason = nil
-    var final_status = ""
-    var terminal_error = nil
-    var verify_attempts = 0
-    var done_judge_invocations = 0
-    var done_judge_vetoes = 0
-    var verify_completion_judge_invocations = 0
-    var verify_completion_judge_vetoes = 0
-    var step_judge_attempts = 0
-    var structural_validator_attempts = 0
-    var consecutive_text_only = 0
-    var turns_since_progress = 0
-    var fallback_index = 0
-    var successful_tools_seen = []
-    var rejected_tools_seen = []
-    var suspend_result = nil
-    var stall_state = agent_stall_initial_state()
-    var stall_enabled_seen = false
-    var stall_prev_dispatch = nil
+    let escalation_retry_pending = false
+    let stop_reason = nil
+    let final_status = ""
+    let terminal_error = nil
+    let verify_attempts = 0
+    let done_judge_invocations = 0
+    let done_judge_vetoes = 0
+    let verify_completion_judge_invocations = 0
+    let verify_completion_judge_vetoes = 0
+    let step_judge_attempts = 0
+    let structural_validator_attempts = 0
+    let consecutive_text_only = 0
+    let turns_since_progress = 0
+    let fallback_index = 0
+    let successful_tools_seen = []
+    let rejected_tools_seen = []
+    let suspend_result = nil
+    let stall_state = agent_stall_initial_state()
+    let stall_enabled_seen = false
+    let stall_prev_dispatch = nil
     let max_verify_attempts = opts?.max_verify_attempts ?? 20
     let budget = opts?.iteration_budget
       ?? {
@@ -3710,22 +3710,22 @@ fn __agent_loop_run(message, session, initial_opts) {
       total_cost_usd: nil,
       consecutive_failures: nil,
     }
-    var current_max = budget.initial
-    var extensions_used = 0
-    var budget_decisions = []
-    var consecutive_failure_count = 0
-    var budget_exhausted_emitted = false
-    var last_tool_count = 0
+    let current_max = budget.initial
+    let extensions_used = 0
+    let budget_decisions = []
+    let consecutive_failure_count = 0
+    let budget_exhausted_emitted = false
+    let last_tool_count = 0
     let loop_start_ms = __agent_loop_clock_now_ms()
     let __reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
-    var terminal_write_unverified = false
-    var terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify {
+    let terminal_write_unverified = false
+    let terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify {
       __reserve_cfg.reserved_terminal_verify_iterations
     } else {
       0
     }
-    var in_terminal_verify_reserve = false
-    var terminal_callback_continues = 0
+    let in_terminal_verify_reserve = false
+    let terminal_callback_continues = 0
     while true {
       while iteration < current_max {
         let boundary_exhaustion = __agent_loop_budget_exhaustion(
@@ -3774,7 +3774,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           nil
         }
         __agent_loop_checkpoint(session.session_id, "iteration_start", {iteration: iteration_index + 1})
-        var turn_opts = agent_skills_match(session, iteration_opts, iteration_index)
+        let turn_opts = agent_skills_match(session, iteration_opts, iteration_index)
         if turn_opts?._skill_activated_this_turn ?? false {
           opts = agent_reset_tool_surface_narrowing(opts)
           turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
@@ -3838,7 +3838,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           primary_model,
           opts,
         )
-        var call = __invoke_llm_with_autocontinue(
+        let call = __invoke_llm_with_autocontinue(
           message,
           turn_prompt.system,
           llm_opts,
@@ -3967,7 +3967,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           iteration_index,
         )
         fallback_index = fallback_outcome.fallback_index
-        var tool_calls = if fallback_outcome.triggered {
+        let tool_calls = if fallback_outcome.triggered {
           fallback_outcome.calls ?? []
         } else {
           __resolve_tool_calls(llm_result, parsed)
@@ -4505,9 +4505,9 @@ fn __agent_loop_run(message, session, initial_opts) {
         if __turn_made_edit(dispatch, opts?.tools) {
           terminal_write_unverified = true
         }
-        var should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
-        var verdict_record = nil
-        var post_edit_reverify_confirmed = false
+        let should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
+        let verdict_record = nil
+        let post_edit_reverify_confirmed = false
         if should_continue && reverify_mandated && verify_attempts < max_verify_attempts {
           let reverify_opts = turn_opts
             + {
@@ -4878,7 +4878,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     } else {
       agent_required_tools_enforce(result_with_stalls, opts)
     }
-    var final_result = enforced
+    let final_result = enforced
     if opts?.verify_completion_judge != nil {
       final_result = final_result
         + {
@@ -5021,12 +5021,12 @@ fn __agent_loop_run(message, session, initial_opts) {
  * @api_stability: experimental
  */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
-  var opts = agent_loop_options(agent_progress_apply_options(options))
+  let opts = agent_loop_options(agent_progress_apply_options(options))
   opts = opts + {tools: agent_lifecycle_tools(opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {
     opts = opts + {system: system_prompt}
   }
-  let session = agent_session_init(message, system_prompt, opts)
+  const session = agent_session_init(message, system_prompt, opts)
   if session?.done {
     return session.result
   }

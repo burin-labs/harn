@@ -19,7 +19,7 @@ import { with_prompt_rewrite } from "std/llm/handlers"
 import { safe_call } from "std/llm/safe"
 
 fn __copy_llm_option(current, opts, key) {
-  var out = current
+  let out = current
   if contains(opts.keys(), key) {
     out[key] = opts[key]
   }
@@ -27,11 +27,11 @@ fn __copy_llm_option(current, opts, key) {
 }
 
 fn __llm_options(options) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if type_of(opts) != "dict" {
     throw "std/llm/refine: options must be a dict"
   }
-  var out = {}
+  let out = {}
   for key in [
     "provider",
     "model",
@@ -57,9 +57,9 @@ fn __string_values(value) {
   if type_of(value) != "list" {
     throw "propose_instructions: instruction_proposals must be a string or list"
   }
-  var out = []
+  let out = []
   for item in value {
-    let text = trim(to_string(item))
+    const text = trim(to_string(item))
     if text != "" && !contains(out, text) {
       out = out.push(text)
     }
@@ -123,7 +123,7 @@ fn __bullet_list(prefix, items) {
   if type_of(items) != "list" || len(items) == 0 {
     return ""
   }
-  var lines = []
+  let lines = []
   for item in items {
     lines = lines.push("  - " + to_string(item))
   }
@@ -131,11 +131,11 @@ fn __bullet_list(prefix, items) {
 }
 
 fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
-  let style_clause = __style_clause(style)
-  let size_clause = __target_size_clause(target_size)
-  let keep_block = __bullet_list("- Keep verbatim:", keep)
-  let strip_block = __bullet_list("- Remove:", strip)
-  var lines = [
+  const style_clause = __style_clause(style)
+  const size_clause = __target_size_clause(target_size)
+  const keep_block = __bullet_list("- Keep verbatim:", keep)
+  const strip_block = __bullet_list("- Remove:", strip)
+  let lines = [
     "You rewrite prompts for production LLM calls. Rewrite the user prompt below"
       + " into a "
       + style_clause
@@ -170,24 +170,24 @@ fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
 }
 
 fn __split_refined_and_diff(text) {
-  let s = to_string(text)
-  let marker = "DIFF: "
+  const s = to_string(text)
+  const marker = "DIFF: "
   if !contains(s, marker) {
     return {refined: trim(s), diff_summary: ""}
   }
-  let parts = split(s, marker)
+  const parts = split(s, marker)
   if len(parts) < 2 {
     return {refined: trim(s), diff_summary: ""}
   }
-  let refined_part = trim(parts[0])
+  const refined_part = trim(parts[0])
   // Re-join any DIFF: occurrences after the first by joining with the marker.
-  var tail_pieces = []
-  var i = 1
+  let tail_pieces = []
+  let i = 1
   while i < len(parts) {
     tail_pieces = tail_pieces.push(parts[i])
     i = i + 1
   }
-  let diff_part = trim(join(tail_pieces, marker))
+  const diff_part = trim(join(tail_pieces, marker))
   return {refined: refined_part, diff_summary: diff_part}
 }
 
@@ -228,33 +228,33 @@ fn __refine_prompt_dict(opts) {
   if opts?.user_prompt == nil || to_string(opts.user_prompt) == "" {
     throw "refine_prompt: opts.user_prompt is required"
   }
-  let user_prompt = to_string(opts.user_prompt)
-  let {style = "concise", model = ""} = opts ?? {}
-  let provider = opts?.provider
-  let {keep = [], strip = []} = opts ?? {}
-  let est_before = estimate_text_tokens(user_prompt, model)
-  let target_size = if (opts?.target_size ?? "auto") == "auto" {
+  const user_prompt = to_string(opts.user_prompt)
+  const {style = "concise", model = ""} = opts ?? {}
+  const provider = opts?.provider
+  const {keep = [], strip = []} = opts ?? {}
+  const est_before = estimate_text_tokens(user_prompt, model)
+  const target_size = if (opts?.target_size ?? "auto") == "auto" {
     __auto_target_size(est_before)
   } else {
     to_string(opts.target_size)
   }
-  let cache_key = __cache_key(user_prompt, style, target_size)
-  let session = opts?.session
+  const cache_key = __cache_key(user_prompt, style, target_size)
+  const session = opts?.session
   if type_of(session) == "dict" {
-    let cache = session?._refine_cache
+    const cache = session?._refine_cache
     if type_of(cache) == "dict" {
-      let hit = cache?.[cache_key]
+      const hit = cache?.[cache_key]
       if type_of(hit) == "dict" {
         return hit
       }
     }
   }
-  let meta_prompt = if opts?.meta_prompt != nil && to_string(opts.meta_prompt) != "" {
+  const meta_prompt = if opts?.meta_prompt != nil && to_string(opts.meta_prompt) != "" {
     to_string(opts.meta_prompt)
   } else {
     __build_meta_prompt(user_prompt, style, target_size, keep, strip)
   }
-  var call_opts = {}
+  let call_opts = {}
   if model != "" {
     call_opts = call_opts + {model: model}
   }
@@ -263,7 +263,7 @@ fn __refine_prompt_dict(opts) {
   }
   // Force determinism on the meta-call so cached refinements stay stable.
   call_opts = call_opts + {temperature: 0.0}
-  let envelope = safe_call(meta_prompt, "", call_opts)
+  const envelope = safe_call(meta_prompt, "", call_opts)
   if !(envelope?.ok ?? false) {
     return {
       ok: false,
@@ -279,15 +279,15 @@ fn __refine_prompt_dict(opts) {
       status: envelope?.status,
     }
   }
-  let value = envelope.value
-  let raw_text = to_string(value?.text ?? "")
-  let parsed = __split_refined_and_diff(raw_text)
-  let refined = if parsed.refined == "" {
+  const value = envelope.value
+  const raw_text = to_string(value?.text ?? "")
+  const parsed = __split_refined_and_diff(raw_text)
+  const refined = if parsed.refined == "" {
     user_prompt
   } else {
     parsed.refined
   }
-  let est_after = estimate_text_tokens(refined, model)
+  const est_after = estimate_text_tokens(refined, model)
   return {
     ok: true,
     refined: refined,
@@ -315,12 +315,12 @@ pub fn refine_prompt(input, options = nil) {
   if type_of(input) != "string" {
     throw "refine_prompt: base_prompt must be a string"
   }
-  let schema = {
+  const schema = {
     type: "object",
     properties: {prompt: {type: "string"}, notes: {type: "string"}},
     required: ["prompt"],
   }
-  let result = llm_call_structured_result(__legacy_refine_meta_prompt(input), schema, __llm_options(options))
+  const result = llm_call_structured_result(__legacy_refine_meta_prompt(input), schema, __llm_options(options))
   if result?.ok ?? false {
     return result.data.prompt
   }
@@ -342,27 +342,27 @@ pub fn propose_instructions(base_prompt, options = nil) {
   if type_of(base_prompt) != "string" {
     throw "propose_instructions: base_prompt must be a string"
   }
-  let opts = options ?? {}
+  const opts = options ?? {}
   if type_of(opts) != "dict" {
     throw "propose_instructions: options must be a dict"
   }
-  var proposals = __configured_proposals(opts)
+  let proposals = __configured_proposals(opts)
   if len(proposals) > 0 {
     if !contains(proposals, base_prompt) {
       proposals = [base_prompt] + proposals
     }
     return proposals
   }
-  let count = to_int(opts?.proposal_count ?? 4)
-  let schema = {
+  const count = to_int(opts?.proposal_count ?? 4)
+  const schema = {
     type: "object",
     properties: {instructions: {type: "array", items: {type: "string"}}},
     required: ["instructions"],
   }
-  let call_opts = __llm_options(opts) + {system: opts?.system ?? "You improve prompts for reliable task execution."}
-  let result = llm_call_structured_result(__proposal_prompt(base_prompt, count), schema, call_opts)
+  const call_opts = __llm_options(opts) + {system: opts?.system ?? "You improve prompts for reliable task execution."}
+  const result = llm_call_structured_result(__proposal_prompt(base_prompt, count), schema, call_opts)
   if result?.ok ?? false {
-    var generated = __string_values(result.data.instructions)
+    let generated = __string_values(result.data.instructions)
     if !contains(generated, base_prompt) {
       generated = [base_prompt] + generated
     }
@@ -388,7 +388,7 @@ pub fn propose_instructions(base_prompt, options = nil) {
  * @errors: []
  */
 pub fn refine_caller(next, refine_opts = nil) {
-  let base_opts = if type_of(refine_opts) == "dict" {
+  const base_opts = if type_of(refine_opts) == "dict" {
     refine_opts
   } else {
     {}
@@ -396,14 +396,14 @@ pub fn refine_caller(next, refine_opts = nil) {
   return with_prompt_rewrite(
     next,
     { prompt, system, opts ->
-      let merged = base_opts + {user_prompt: to_string(prompt ?? "")}
-      let refined = try {
+      const merged = base_opts + {user_prompt: to_string(prompt ?? "")}
+      const refined = try {
         __refine_prompt_dict(merged)
       }
       if is_err(refined) {
         return {prompt: prompt, system: system, opts: opts}
       }
-      let r = unwrap(refined)
+      const r = unwrap(refined)
       if !(r?.ok ?? false) {
         return {prompt: prompt, system: system, opts: opts}
       }

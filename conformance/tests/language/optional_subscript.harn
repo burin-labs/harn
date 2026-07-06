@@ -4,28 +4,28 @@
  * connector authors safely chain into lists/dicts that may be nil.
  */
 pipeline default() {
-  let xs = [10, 20, 30]
+  const xs = [10, 20, 30]
   __io_println(xs[0])
   __io_println(xs[1])
   __io_println(xs[5])
   // Nil object short-circuits without erroring.
-  let missing = nil
+  const missing = nil
   __io_println(missing?.[0])
   // Mixed chain: optional property + optional subscript + optional property.
-  let payload = {commits: [{timestamp: "2026-01-01T00:00:00Z"}]}
+  const payload = {commits: [{timestamp: "2026-01-01T00:00:00Z"}]}
   __io_println(payload.commits[0].timestamp)
   // Same chain when an intermediate hop is nil.
-  let empty = {}
+  const empty = {}
   __io_println(empty?.commits?.[0]?.timestamp)
   // Dict subscript by string key.
-  let d = {alpha: 1, beta: 2}
+  const d = {alpha: 1, beta: 2}
   __io_println(d["alpha"])
   __io_println(d["missing"])
-  let headers = {"content-type": "text/plain"}
+  const headers = {"content-type": "text/plain"}
   __io_println(headers["content-type"])
-  let dnil = nil
+  const dnil = nil
   __io_println(dnil?.["alpha"])
   // Computed index.
-  let i = 2
+  const i = 2
   __io_println(xs[i])
 }
