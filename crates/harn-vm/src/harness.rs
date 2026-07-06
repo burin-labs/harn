@@ -1556,6 +1556,47 @@ fn main(harness: Harness) {
     }
 
     #[test]
+    fn secrets_sub_handle_denies_runtime_reserved_provenance_namespace() {
+        let provider = RecordingSecretProvider::default();
+        let harness = Harness::real().with_secret_provider(Arc::new(provider.clone()));
+
+        for source in [
+            r#"
+fn main(harness: Harness) {
+  harness.secrets.read("harn-cli.ed25519.seed", {kind: "provenance"})
+}
+"#,
+            r#"
+fn main(harness: Harness) {
+  harness.secrets.write("harn-cli.ed25519.seed", "forged", {kind: "provenance"})
+}
+"#,
+            r#"
+fn main(harness: Harness) {
+  harness.secrets.rotate("harn-cli.ed25519.seed", { -> "forged" }, {kind: "provenance"})
+}
+"#,
+            r#"
+fn main(harness: Harness) {
+  harness.secrets.lease("harn-cli.ed25519.seed", 1000, {kind: "provenance"})
+}
+"#,
+        ] {
+            let error =
+                run_harness_source(source, harness.clone()).expect_err("reserved secret denied");
+            assert!(
+                error.contains("reserved for Harn runtime provenance signing"),
+                "unexpected error: {error}"
+            );
+        }
+
+        assert!(
+            provider.calls().is_empty(),
+            "reserved namespace denial must happen before provider dispatch"
+        );
+    }
+
+    #[test]
     fn mock_harness_replays_canned_responses_and_records_calls() {
         let harness = Harness::mock()
             .clock_at_unix_ms(1_700_000_000_000)

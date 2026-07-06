@@ -705,6 +705,8 @@ impl crate::vm::Vm {
                 let name = secret_name_arg(handle, method, args.first())?;
                 let scope = secret_scope_arg(args.get(1))?;
                 let id = secret_id_for_scope(&name, &scope);
+                crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
+                    .map_err(secret_error_to_vm)?;
                 let secret = provider
                     .read_scoped(crate::secrets::SecretReadRequest {
                         id,
@@ -742,9 +744,12 @@ impl crate::vm::Vm {
                 let scope = secret_scope_arg(args.get(2))?;
                 let ttl =
                     optional_duration_arg(args.get(3), &format!("{}.write", handle.type_name()))?;
+                let id = secret_id_for_scope(&name, &scope);
+                crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
+                    .map_err(secret_error_to_vm)?;
                 let receipt = provider
                     .write_scoped(crate::secrets::SecretWriteRequest {
-                        id: secret_id_for_scope(&name, &scope),
+                        id,
                         scope,
                         value,
                         options: crate::secrets::SecretWriteOptions { ttl },
@@ -771,9 +776,12 @@ impl crate::vm::Vm {
                 };
                 let scope = secret_scope_arg(args.get(2))?;
                 let options = secret_rotation_options_arg(args.get(3))?;
+                let id = secret_id_for_scope(&name, &scope);
+                crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
+                    .map_err(secret_error_to_vm)?;
                 let receipt = provider
                     .rotate_scoped(crate::secrets::SecretRotateRequest {
-                        id: secret_id_for_scope(&name, &scope),
+                        id,
                         scope,
                         value,
                         options,
@@ -796,9 +804,12 @@ impl crate::vm::Vm {
                     &format!("{}.{}", handle.type_name(), method),
                 )?;
                 let scope = secret_scope_arg(args.get(2))?;
+                let id = secret_id_for_scope(&name, &scope);
+                crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
+                    .map_err(secret_error_to_vm)?;
                 let grant = provider
                     .lease_scoped(crate::secrets::SecretLeaseRequest {
-                        id: secret_id_for_scope(&name, &scope),
+                        id,
                         scope,
                         duration,
                         audit: secret_audit_context(),
@@ -2511,6 +2522,10 @@ fn secret_error_to_vm(error: crate::secrets::SecretError) -> VmError {
         SecretError::Unsupported { .. } | SecretError::InvalidInput(_) => {
             VmError::TypeError(error.to_string())
         }
+        SecretError::AccessDenied { .. } => VmError::CategorizedError {
+            message: error.to_string(),
+            category: ErrorCategory::Auth,
+        },
         SecretError::Backend { .. } | SecretError::InvalidConfig(_) | SecretError::All(_) => {
             VmError::CategorizedError {
                 message: error.to_string(),

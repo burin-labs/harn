@@ -15,6 +15,8 @@ pub use keyring::KeyringSecretProvider;
 
 pub const DEFAULT_SECRET_PROVIDER_CHAIN: &str = "env,keyring";
 pub const SECRET_PROVIDER_CHAIN_ENV: &str = "HARN_SECRET_PROVIDERS";
+const RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "provenance";
+const SCOPED_RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "harn.provenance";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum SecretVersion {
@@ -235,6 +237,11 @@ pub enum SecretError {
         provider: String,
         message: String,
     },
+    AccessDenied {
+        operation: String,
+        id: SecretId,
+        message: String,
+    },
     InvalidConfig(String),
     InvalidInput(String),
     NoProviders {
@@ -254,6 +261,11 @@ impl fmt::Display for SecretError {
                 operation,
             } => write!(f, "{provider}: operation '{operation}' is unsupported"),
             Self::Backend { provider, message } => write!(f, "{provider}: {message}"),
+            Self::AccessDenied {
+                operation,
+                id,
+                message,
+            } => write!(f, "secret {operation} denied for '{id}': {message}"),
             Self::InvalidConfig(message) => write!(f, "{message}"),
             Self::InvalidInput(message) => write!(f, "{message}"),
             Self::NoProviders { namespace } => {
@@ -404,6 +416,7 @@ pub trait SecretProvider: Send + Sync {
     async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError>;
 
     async fn read_scoped(&self, request: SecretReadRequest) -> Result<SecretBytes, SecretError> {
+        ensure_scoped_secret_access_allowed("read", &request.id)?;
         self.get(&request.id).await
     }
 
@@ -411,6 +424,7 @@ pub trait SecretProvider: Send + Sync {
         &self,
         request: SecretWriteRequest,
     ) -> Result<SecretWriteReceipt, SecretError> {
+        ensure_scoped_secret_access_allowed("write", &request.id)?;
         if request.options.ttl.is_some() {
             return Err(SecretError::Unsupported {
                 provider: self.namespace().to_string(),
@@ -431,6 +445,7 @@ pub trait SecretProvider: Send + Sync {
         &self,
         request: SecretRotateRequest,
     ) -> Result<SecretRotationReceipt, SecretError> {
+        ensure_scoped_secret_access_allowed("rotate", &request.id)?;
         let _ = request;
         Err(SecretError::Unsupported {
             provider: self.namespace().to_string(),
@@ -442,6 +457,7 @@ pub trait SecretProvider: Send + Sync {
         &self,
         request: SecretLeaseRequest,
     ) -> Result<SecretLeaseGrant, SecretError> {
+        ensure_scoped_secret_access_allowed("lease", &request.id)?;
         let _ = request;
         Err(SecretError::Unsupported {
             provider: self.namespace().to_string(),
@@ -451,6 +467,32 @@ pub trait SecretProvider: Send + Sync {
 
     fn namespace(&self) -> &str;
     fn supports_versions(&self) -> bool;
+}
+
+pub fn ensure_scoped_secret_access_allowed(
+    operation: impl Into<String>,
+    id: &SecretId,
+) -> Result<(), SecretError> {
+    if is_runtime_reserved_secret_namespace(&id.namespace) {
+        return Err(SecretError::AccessDenied {
+            operation: operation.into(),
+            id: id.clone(),
+            message: format!(
+                "namespace `{}` is reserved for Harn runtime provenance signing and is not accessible through agent-scoped secret APIs",
+                id.namespace
+            ),
+        });
+    }
+    Ok(())
+}
+
+pub fn is_runtime_reserved_secret_namespace(namespace: &str) -> bool {
+    let namespace = namespace.trim_matches('.');
+    namespace == RUNTIME_PROVENANCE_SECRET_NAMESPACE
+        || namespace == SCOPED_RUNTIME_PROVENANCE_SECRET_NAMESPACE
+        || namespace
+            .strip_prefix(SCOPED_RUNTIME_PROVENANCE_SECRET_NAMESPACE)
+            .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
 pub struct ChainSecretProvider {
@@ -771,6 +813,38 @@ mod tests {
                 assert!(matches!(errors[1], SecretError::Backend { .. }));
             }
             other => panic!("expected aggregated errors, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn scoped_secret_access_denies_runtime_reserved_namespaces() {
+        let chain = ChainSecretProvider::new(
+            "harn/test",
+            vec![Arc::new(FakeProvider::new("unused", Vec::new()))],
+        );
+
+        for namespace in ["provenance", "harn.provenance", "harn.provenance.agent"] {
+            let id = SecretId::new(namespace, "harn-cli.ed25519.seed");
+            let error = chain
+                .read_scoped(SecretReadRequest {
+                    id: id.clone(),
+                    scope: SecretScope::custom("provenance", None),
+                    audit: SecretAuditContext::default(),
+                })
+                .await
+                .expect_err("reserved namespace should be denied before backend access");
+            match error {
+                SecretError::AccessDenied {
+                    operation,
+                    id: denied_id,
+                    message,
+                } => {
+                    assert_eq!(operation, "read");
+                    assert_eq!(denied_id, id);
+                    assert!(message.contains("reserved for Harn runtime provenance signing"));
+                }
+                other => panic!("expected access-denied error, got {other:?}"),
+            }
         }
     }
 

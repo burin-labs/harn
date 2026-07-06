@@ -79,6 +79,13 @@ one. The VM passes the ambient request id and authenticated principal facts to
 the provider for audit, but the provider owns policy, encryption, rotation,
 lease persistence, and any external KMS or vault adapter.
 
+`harness.secrets` is for agent- and harness-authored application secrets.
+Runtime-owned namespaces `provenance`, `harn.provenance`, and
+`harn.provenance.<...>` are reserved for Harn internals and cannot be read,
+written, rotated, or leased through the scoped harness API. In particular,
+signed run-receipt Ed25519 seeds are loaded through trusted runtime provider
+access and are never exposed to Harn scripts.
+
 ## Provider chain configuration
 
 The provider order is controlled with `HARN_SECRET_PROVIDERS`:
