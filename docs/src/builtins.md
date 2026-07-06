@@ -1563,6 +1563,14 @@ requires the declared `params` subset to match the actual host call
 call. Matched calls are recorded in `host_mock_calls()` as
 `{capability, operation, params}` dictionaries.
 
+Hostlib builtins that take a request dict also consult this registry by their
+schema module/method pair before they run. For example,
+`hostlib_tools_run_command(...)` can be mocked as
+`{capability: "tools", operation: "run_command", ...}`. To support direct
+cutovers from `host_call("process.exec", ...)`, that run-command builtin also
+honors existing `{capability: "process", operation: "exec", ...}` mocks when
+the declared `params` subset matches.
+
 For higher-level test helpers, import `std/testing`:
 
 ```harn

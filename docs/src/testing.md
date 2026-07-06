@@ -165,10 +165,23 @@ Each entry in the host-mock list is a dict shaped like the existing
 ```harn
 {capability: "runtime", operation: "pipeline_input", result: {}, params: {}}
 {capability: "project", operation: "metadata_set", error: "denied"}
+{
+  capability: "tools",
+  operation: "run_command",
+  result: {status: "completed", exit_code: 0, stdout: "ok", stderr: ""},
+  params: {argv: ["echo", "ok"]},
+}
 ```
 
 `error` (if non-nil) takes precedence over `result`, mirroring
 `mock_host_error` / `mock_host_result`.
+
+Hostlib builtins that take a request dict use the same registry under their
+module/method pair, so `hostlib_tools_run_command(...)` can be mocked with
+`{capability: "tools", operation: "run_command"}`. For the `process.exec` to
+hostlib migration, `hostlib_tools_run_command(...)` also honors existing
+`{capability: "process", operation: "exec"}` mocks when the declared `params`
+subset matches the command request.
 
 ```harn,ignore
 import { with_host_mocks, assert_host_called } from "std/testing"

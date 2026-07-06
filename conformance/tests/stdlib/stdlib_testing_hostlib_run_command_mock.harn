@@ -1,0 +1,51 @@
+import { assert_host_called, host_call_count, with_host_mocks } from "std/testing"
+
+fn body_process_exec_alias() {
+  let result = hostlib_tools_run_command({argv: ["echo", "from-mock"], cwd: "/definitely/not/a/harn-test-root"})
+  require result.status == "completed"
+  require result.exit_code == 0
+  require result.stdout == "legacy stdout"
+  assert_host_called("process", "exec", {argv: ["echo", "from-mock"]}, nil)
+  require host_call_count() == 1
+  return result
+}
+
+fn body_tools_run_command() {
+  let result = hostlib_tools_run_command({argv: ["printf", "direct"], cwd: "/definitely/not/a/harn-test-root"})
+  require result.status == "completed"
+  require result.exit_code == 0
+  require result.stdout == "direct stdout"
+  assert_host_called("tools", "run_command", {argv: ["printf", "direct"]}, nil)
+  require host_call_count() == 1
+  return result
+}
+
+pipeline test_hostlib_run_command_host_mocks(task) {
+  let first = with_host_mocks(
+    [
+      {
+        capability: "process",
+        operation: "exec",
+        params: {argv: ["echo", "from-mock"]},
+        result: {status: "completed", exit_code: 0, stdout: "legacy stdout", stderr: "", command_id: "mock-legacy"},
+      },
+    ],
+    body_process_exec_alias,
+  )
+  assert_eq(first.command_id, "mock-legacy")
+  assert_eq(host_call_count(), 0)
+  let second = with_host_mocks(
+    [
+      {
+        capability: "tools",
+        operation: "run_command",
+        params: {argv: ["printf", "direct"]},
+        result: {status: "completed", exit_code: 0, stdout: "direct stdout", stderr: "", command_id: "mock-direct"},
+      },
+    ],
+    body_tools_run_command,
+  )
+  assert_eq(second.command_id, "mock-direct")
+  assert_eq(host_call_count(), 0)
+  __io_println("ok")
+}
