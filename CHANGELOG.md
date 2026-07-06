@@ -9,6 +9,44 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.19
+
+### Added
+
+- Documented the canonical `harn serve acp` launch path for external ACP editor hosts and the Homebrew install channel for registry distribution.
+- Carried caller-provided verification snapshot bindings through background `tools.run_command` handles, progress items, and `tools.wait_command` results.
+- Added a config-declared `tools.toolchain_facts` hostlib builtin for verification profiles to capture toolchain version, cache environment, and state-path facts without hardcoded language adapters.
+- Added `harn models batch cancel`, producing durable provider-neutral cancellation receipts for submitted batch jobs.
+- Added typed provider-catalog batch lifecycle metadata for asynchronous model Batch APIs, including limits, result ordering, partial-failure semantics, cancellation support, retention, and safe storage notes.
+- Added normalized batch receipt lifecycle objects to prepare, submit, status, and download receipts so eval/corpus runners can consume one provider-neutral state-machine contract.
+- **Project scanning now recognizes Composer PHP projects (#4170).** Composer scripts, Laravel, Pest, and PHPUnit facts are surfaced for downstream harnesses and coding-agent workflows.
+
+### Changed
+
+- **Provider catalog route rows.** The provider catalog now exposes Harn-owned `routing_routes` rows for provider/model/family/capability/timeout routing decisions, giving Cloud and Burin a shared catalog contract instead of duplicating route schemas (burin-labs/harn-cloud#1120).
+- Port the PR affected-crate selector from Python to Harn and remove the last repo-owned Python bootstrap exception.
+- Align the binary-size guard's default budget with the release workflow budget.
+
+### Fixed
+
+- Fixed provider tool-probe request shaping and liveness classification so Anthropic and other non-OpenAI dialects use provider-compatible tool schemas and tool choices, and successful Anthropic `tool_use` responses count as parseable native tool calls.
+- **Hook Harn builds now keep Cargo build artifacts inside the isolated hook target directory (#4160).** Local hooks default `CARGO_BUILD_BUILD_DIR` under `CARGO_TARGET_DIR` so warm Harn CLI builds no longer spill into the shared cargo build directory.
+- Reduced the Harn CI audit tail by warming one cached `harn` binary and reusing it across Harn-backed script gates.
+- Clarify same-resource edit fanout feedback so skipped sibling edits point agents toward one current-file recovery edit instead of replaying a stale same-file batch.
+- Cap text-tool dispatch for wrapper-corrupted responses that recover multiple top-level bare calls.
+- Pin intra-Harn workspace crate dependencies exactly in published manifests so downstream crates cannot resolve stale Harn siblings from the same semver line.
+- Let `std/testing` host mocks intercept request-dict hostlib builtins, including `hostlib_tools_run_command` and compatible `process.exec` command mocks.
+- Tighten the artifact manifest JSON Schema to reject unknown manifest and file-spec fields, matching `artifact_emit` validation.
+- **Command artifact retention.** Harn now sweeps old `harn-command-*` temp directories by count as well as age, preventing long agent/eval runs from exhausting temp-dir quotas with thousands of small stdout artifacts.
+- Registered reminder providers and session/lifecycle hooks now resolve sibling module `pub fn`s from inside their closures even after the VM that registered them is torn down. Previously the closure's module function table was held only via a `Weak` owned by that VM's module cache, so a provider/hook fired from a later VM misdispatched the sibling call to the host bridge (`host bridge tool '<fn>' is not implemented`), killing the agent turn. The registered closure now pins its module scope for its retained lifetime.
+- Release tooling now rewrites intra-Harn crate dependencies to exact `=X.Y.Z` pins on every version bump, matching the `check-crate-sibling-versions` gate. Previously it emitted caret `X.Y` pins, so a published crate could resolve an older sibling from the same minor line.
+- A streamed tool call whose native arguments are cut off mid-stream (a `{"__parse_error": "..."}` carrier) is now named as a truncated or malformed call and coached to re-issue smaller, instead of the misdiagnosing "missing required parameter: path" that sent models (observed on llama.cpp qwen3.6-35b) into a 20+ call re-try spin with no visible reply.
+
+### Security
+
+- **Agent subprocess sandboxing now defaults to a required OS sandbox carrier, and Linux seccomp uses a default-deny syscall allowlist (#4127).** Top-level agent loops install an `os_hardened` carrier by default, and Linux subprocesses omit process-introspection, `io_uring`, and addressable socket syscalls unless policy permits them.
+- **Provider auth secret references (#4163).** Provider API-key env vars may now point at Harn secret references such as `harn-secret://provider/anthropic-api-key`; Harn resolves the raw key only inside provider auth construction and catalog availability checks understand the same reference form.
+
 ## v0.9.18
 
 ### Added

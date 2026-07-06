@@ -119,12 +119,12 @@ if ! grep -Fq "run scripts/sync_protocol_fixture_runtime_versions.harn -- --from
   exit 1
 fi
 
-if ! grep -Fq 'tree-sitter-harn = { path = "../../tree-sitter-harn", version = "1.3", optional = true }' "$release_root/crates/example/Cargo.toml"; then
-  echo "release_gate prepare did not update root-level workspace member dependency versions" >&2
+if ! grep -Fq 'tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=1.3.0", optional = true }' "$release_root/crates/example/Cargo.toml"; then
+  echo "release_gate prepare did not update root-level workspace member dependency versions to exact pins" >&2
   cat "$release_root/crates/example/Cargo.toml" >&2
   exit 1
 fi
-if ! grep -Fq 'harn-excluded = { path = "../excluded", version = "1.3" }' "$release_root/crates/example/Cargo.toml"; then
+if ! grep -Fq 'harn-excluded = { path = "../excluded", version = "=1.3.0" }' "$release_root/crates/example/Cargo.toml"; then
   echo "release_gate prepare did not preserve excluded local crate dependency version rewrites" >&2
   cat "$release_root/crates/example/Cargo.toml" >&2
   exit 1

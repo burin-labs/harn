@@ -103,7 +103,6 @@ from pathlib import Path
 import json, re, sys, tomllib
 
 next_version = sys.argv[1]
-major_minor = ".".join(next_version.split(".")[:2])
 
 root = Path("Cargo.toml")
 text = root.read_text()
@@ -115,8 +114,10 @@ if count != 1:
 root.write_text(updated)
 
 # Update inter-crate dep specs across workspace + excluded crates so a
-# major/minor bump keeps local path deps resolvable against the new
-# version line. Patch bumps within a X.Y line are no-ops here.
+# published sibling can only resolve the exact version it was released
+# with. Pins are EXACT (`=X.Y.Z`) to match check-crate-sibling-versions;
+# every bump (patch included) rewrites them so a downstream pinning one
+# Harn crate cannot pull an older sibling from the same semver line.
 workspace = tomllib.loads(root.read_text()).get("workspace", {})
 
 
@@ -149,7 +150,7 @@ def rewrite(match: re.Match) -> str:
     name = match.group(1)
     if name not in local_packages:
         return match.group(0)
-    return f'{name}{match.group(2)}"{major_minor}"'
+    return f'{name}{match.group(2)}"={next_version}"'
 
 
 for manifest in [root, *package_manifests]:
