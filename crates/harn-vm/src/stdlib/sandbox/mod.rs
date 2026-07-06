@@ -36,6 +36,8 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::io;
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -384,6 +386,488 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
 pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
     check_fs_path_scope(path, access)
         .map_err(|violation| sandbox_rejection(violation.message(builtin)))
+}
+
+pub(crate) fn atomic_write_scoped_at_open(
+    builtin: &str,
+    path: &Path,
+    contents: &[u8],
+) -> io::Result<()> {
+    let Some(target) = scoped_mutation_target(builtin, path, FsAccess::Write)? else {
+        return atomic_write_unscoped(path, contents);
+    };
+    atomic_write_scoped_target(&target, contents)
+}
+
+pub(crate) fn append_scoped_at_open(builtin: &str, path: &Path, contents: &[u8]) -> io::Result<()> {
+    let Some(target) = scoped_mutation_target(builtin, path, FsAccess::Write)? else {
+        return append_unscoped(path, contents);
+    };
+    append_scoped_target(&target, contents)
+}
+
+pub(crate) fn copy_scoped_at_open(builtin: &str, src: &Path, dst: &Path) -> io::Result<u64> {
+    let Some(target) = scoped_mutation_target(builtin, dst, FsAccess::Write)? else {
+        return std::fs::copy(src, dst);
+    };
+    copy_scoped_target(src, &target)
+}
+
+pub(crate) fn rename_scoped_at_open(builtin: &str, src: &Path, dst: &Path) -> io::Result<()> {
+    let Some(src_target) = scoped_mutation_target(builtin, src, FsAccess::Delete)? else {
+        return std::fs::rename(src, dst);
+    };
+    let dst_target = scoped_mutation_target(builtin, dst, FsAccess::Write)?.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "sandbox violation: builtin '{builtin}' attempted to rename '{}' without an active destination sandbox scope",
+                dst.display()
+            ),
+        )
+    })?;
+    rename_scoped_targets(&src_target, &dst_target)
+}
+
+pub(crate) fn create_dir_scoped_at_open(
+    builtin: &str,
+    path: &Path,
+    recursive: bool,
+) -> io::Result<()> {
+    let Some(target) = scoped_mutation_target(builtin, path, FsAccess::Write)? else {
+        return if recursive {
+            std::fs::create_dir_all(path)
+        } else {
+            std::fs::create_dir(path)
+        };
+    };
+    if recursive {
+        create_dir_all_scoped_target(&target)
+    } else {
+        create_dir_scoped_target(&target)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ScopedMutationTarget {
+    root: PathBuf,
+    relative: PathBuf,
+}
+
+fn scoped_mutation_target(
+    builtin: &str,
+    path: &Path,
+    access: FsAccess,
+) -> io::Result<Option<ScopedMutationTarget>> {
+    let Some(policy) = crate::orchestration::current_execution_policy() else {
+        return Ok(None);
+    };
+    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+        return Ok(None);
+    }
+    if is_standard_io_device_for_access(&normalize_io_device_path(path), access) {
+        return Ok(None);
+    }
+    check_fs_path_scope(path, access).map_err(|violation| {
+        io::Error::new(io::ErrorKind::PermissionDenied, violation.message(builtin))
+    })?;
+    let candidate = normalize_for_policy(path);
+    let roots = normalized_workspace_roots(&policy);
+    let Some(root) = roots
+        .into_iter()
+        .find(|root| path_is_within(&candidate, root))
+    else {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "sandbox violation: builtin '{builtin}' attempted to {} '{}' outside writable workspace_roots",
+                access.verb(),
+                candidate.display()
+            ),
+        ));
+    };
+    let relative = candidate.strip_prefix(&root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "sandbox violation: builtin '{builtin}' attempted to {} '{}' outside workspace root '{}'",
+                access.verb(),
+                candidate.display(),
+                root.display()
+            ),
+        )
+    })?;
+    if relative.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "sandbox violation: builtin '{builtin}' attempted to {} workspace root '{}'",
+                access.verb(),
+                root.display()
+            ),
+        ));
+    }
+    Ok(Some(ScopedMutationTarget {
+        root,
+        relative: relative.to_path_buf(),
+    }))
+}
+
+fn atomic_write_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let dir = parent.unwrap_or_else(|| Path::new("."));
+    let tmp_path = dir.join(scoped_tmp_name(path));
+    let write_result = (|| -> io::Result<()> {
+        let mut file = std::fs::File::create(&tmp_path)?;
+        file.write_all(contents)?;
+        file.flush()?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(err) = write_result {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+    if let Err(err) = std::fs::rename(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn append_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(contents))
+}
+
+fn scoped_tmp_name(path: &Path) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".to_string());
+    format!(".{file_name}.harn-tmp.{}.{counter}", std::process::id())
+}
+
+#[cfg(unix)]
+fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let (parent, file_name) = open_parent_dir_scoped(target)?;
+    let tmp_name = scoped_tmp_name(Path::new(&file_name));
+    let mut file = openat_file(
+        parent.as_raw_fd(),
+        &tmp_name,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        0o666,
+    )?;
+    let write_result = (|| -> io::Result<()> {
+        file.write_all(contents)?;
+        file.flush()?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(err) = write_result {
+        let _ = unlinkat_name(parent.as_raw_fd(), &tmp_name, 0);
+        return Err(err);
+    }
+    if let Err(err) = renameat_name(
+        parent.as_raw_fd(),
+        &tmp_name,
+        parent.as_raw_fd(),
+        &file_name,
+    ) {
+        let _ = unlinkat_name(parent.as_raw_fd(), &tmp_name, 0);
+        return Err(err);
+    }
+    sync_dir_fd(parent.as_raw_fd());
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
+    atomic_write_unscoped(&target.root.join(&target.relative), contents)
+}
+
+#[cfg(unix)]
+fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let (parent, file_name) = open_parent_dir_scoped(target)?;
+    let mut file = openat_file(
+        parent.as_raw_fd(),
+        &file_name,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        0o666,
+    )?;
+    file.write_all(contents)
+}
+
+#[cfg(not(unix))]
+fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
+    append_unscoped(&target.root.join(&target.relative), contents)
+}
+
+#[cfg(unix)]
+fn copy_scoped_target(src: &Path, target: &ScopedMutationTarget) -> io::Result<u64> {
+    use std::os::fd::AsRawFd;
+
+    let mut source = std::fs::File::open(src)?;
+    let source_metadata = source.metadata().ok();
+    let (parent, file_name) = open_parent_dir_scoped(target)?;
+    let mut destination = openat_file(
+        parent.as_raw_fd(),
+        &file_name,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        0o666,
+    )?;
+    let copied = io::copy(&mut source, &mut destination)?;
+    destination.sync_all()?;
+    if let Some(metadata) = source_metadata {
+        let _ = destination.set_permissions(metadata.permissions());
+    }
+    sync_dir_fd(parent.as_raw_fd());
+    Ok(copied)
+}
+
+#[cfg(not(unix))]
+fn copy_scoped_target(src: &Path, target: &ScopedMutationTarget) -> io::Result<u64> {
+    std::fs::copy(src, target.root.join(&target.relative))
+}
+
+#[cfg(unix)]
+fn rename_scoped_targets(src: &ScopedMutationTarget, dst: &ScopedMutationTarget) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let (src_parent, src_name) = open_parent_dir_scoped(src)?;
+    let (dst_parent, dst_name) = open_parent_dir_scoped(dst)?;
+    renameat_name(
+        src_parent.as_raw_fd(),
+        &src_name,
+        dst_parent.as_raw_fd(),
+        &dst_name,
+    )?;
+    sync_dir_fd(dst_parent.as_raw_fd());
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn rename_scoped_targets(src: &ScopedMutationTarget, dst: &ScopedMutationTarget) -> io::Result<()> {
+    std::fs::rename(src.root.join(&src.relative), dst.root.join(&dst.relative))
+}
+
+#[cfg(unix)]
+fn create_dir_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let (parent, file_name) = open_parent_dir_scoped(target)?;
+    mkdirat_name(parent.as_raw_fd(), &file_name)?;
+    sync_dir_fd(parent.as_raw_fd());
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_dir_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
+    std::fs::create_dir(target.root.join(&target.relative))
+}
+
+#[cfg(unix)]
+fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let root = open_dir_absolute(&target.root)?;
+    let mut current = root;
+    for component in clean_relative_components(&target.relative)? {
+        match open_dir_at(current.as_raw_fd(), &component) {
+            Ok(next) => current = next,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                mkdirat_name(current.as_raw_fd(), &component)?;
+                let next = open_dir_at(current.as_raw_fd(), &component)?;
+                current = next;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
+    std::fs::create_dir_all(target.root.join(&target.relative))
+}
+
+#[cfg(unix)]
+fn open_parent_dir_scoped(
+    target: &ScopedMutationTarget,
+) -> io::Result<(std::os::fd::OwnedFd, String)> {
+    use std::os::fd::AsRawFd;
+
+    let mut components = clean_relative_components(&target.relative)?;
+    let file_name = components.pop().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "sandbox scoped open requires a file name: {}",
+                target.relative.display()
+            ),
+        )
+    })?;
+    let root = open_dir_absolute(&target.root)?;
+    let mut current = root;
+    for component in components {
+        current = open_dir_at(current.as_raw_fd(), &component)?;
+    }
+    Ok((current, file_name))
+}
+
+#[cfg(unix)]
+fn clean_relative_components(path: &Path) -> io::Result<Vec<String>> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut out = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => {
+                let bytes = value.as_bytes();
+                if bytes.contains(&0) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("path component contains NUL: {}", path.display()),
+                    ));
+                }
+                out.push(value.to_string_lossy().into_owned());
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("sandbox scoped path must stay relative: {}", path.display()),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(unix)]
+fn open_dir_absolute(path: &Path) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("path contains NUL: {}", path.display()),
+        )
+    })?;
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_dir_at(parent_fd: libc::c_int, name: &str) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    let c_name = c_name(name)?;
+    let fd = unsafe {
+        libc::openat(
+            parent_fd,
+            c_name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn openat_file(
+    parent_fd: libc::c_int,
+    name: &str,
+    flags: libc::c_int,
+    mode: libc::mode_t,
+) -> io::Result<std::fs::File> {
+    use std::os::fd::FromRawFd;
+
+    let c_name = c_name(name)?;
+    let fd = unsafe { libc::openat(parent_fd, c_name.as_ptr(), flags, mode as libc::c_uint) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn mkdirat_name(parent_fd: libc::c_int, name: &str) -> io::Result<()> {
+    let c_name = c_name(name)?;
+    let rc = unsafe { libc::mkdirat(parent_fd, c_name.as_ptr(), 0o777) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn renameat_name(
+    old_parent_fd: libc::c_int,
+    old_name: &str,
+    new_parent_fd: libc::c_int,
+    new_name: &str,
+) -> io::Result<()> {
+    let old_name = c_name(old_name)?;
+    let new_name = c_name(new_name)?;
+    let rc = unsafe {
+        libc::renameat(
+            old_parent_fd,
+            old_name.as_ptr(),
+            new_parent_fd,
+            new_name.as_ptr(),
+        )
+    };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn unlinkat_name(parent_fd: libc::c_int, name: &str, flags: libc::c_int) -> io::Result<()> {
+    let c_name = c_name(name)?;
+    let rc = unsafe { libc::unlinkat(parent_fd, c_name.as_ptr(), flags) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_dir_fd(fd: libc::c_int) {
+    let _ = unsafe { libc::fsync(fd) };
+}
+
+#[cfg(unix)]
+fn c_name(name: &str) -> io::Result<std::ffi::CString> {
+    std::ffi::CString::new(name).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("path component contains NUL: {name:?}"),
+        )
+    })
 }
 
 pub fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
@@ -1491,6 +1975,94 @@ mod tests {
 
         pop_execution_policy();
         crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_atomic_write_rejects_parent_swapped_to_symlink_after_policy_match() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let safe_parent = workspace.path().join("safe");
+        std::fs::create_dir(&safe_parent).unwrap();
+        let path = safe_parent.join("state.json");
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+        let target = scoped_mutation_target("write_file", &path, FsAccess::Write)
+            .unwrap()
+            .expect("restricted policy yields scoped target");
+
+        std::fs::remove_dir(&safe_parent).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &safe_parent).unwrap();
+        let error = atomic_write_scoped_target(&target, b"escape").unwrap_err();
+        pop_execution_policy();
+
+        assert!(
+            !outside.path().join("state.json").exists(),
+            "scoped write must not follow swapped parent symlink; error={error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_append_rejects_final_symlink_created_after_policy_match() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let safe_parent = workspace.path().join("safe");
+        std::fs::create_dir(&safe_parent).unwrap();
+        let outside_file = outside.path().join("state.log");
+        std::fs::write(&outside_file, b"outside").unwrap();
+        let path = safe_parent.join("state.log");
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+        let target = scoped_mutation_target("append_file", &path, FsAccess::Write)
+            .unwrap()
+            .expect("restricted policy yields scoped target");
+
+        std::os::unix::fs::symlink(&outside_file, &path).unwrap();
+        let error = append_scoped_target(&target, b"\nescape").unwrap_err();
+        pop_execution_policy();
+
+        assert_eq!(std::fs::read(&outside_file).unwrap(), b"outside");
+        assert!(
+            error.raw_os_error() == Some(libc::ELOOP)
+                || error.kind() == io::ErrorKind::PermissionDenied
+                || error.kind() == io::ErrorKind::Other,
+            "expected symlink refusal, got {error:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_create_dir_all_rejects_parent_swapped_to_symlink_after_policy_match() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let safe_parent = workspace.path().join("safe");
+        std::fs::create_dir(&safe_parent).unwrap();
+        let path = safe_parent.join("nested/deeper");
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+        let target = scoped_mutation_target("mkdir", &path, FsAccess::Write)
+            .unwrap()
+            .expect("restricted policy yields scoped target");
+
+        std::fs::remove_dir(&safe_parent).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &safe_parent).unwrap();
+        let error = create_dir_all_scoped_target(&target).unwrap_err();
+        pop_execution_policy();
+
+        assert!(
+            !outside.path().join("nested").exists(),
+            "scoped mkdir must not follow swapped parent symlink; error={error}"
+        );
     }
 
     #[test]

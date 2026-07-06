@@ -1,9 +1,7 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -1209,12 +1207,7 @@ pub(super) async fn vm_http_download(
             }
 
             ensure_response_body_within_limit(mock_response.body.len(), config.max_response_bytes)?;
-            std::fs::write(&resolved, mock_response.body.as_bytes()).map_err(|error| {
-                vm_error(format!(
-                    "http_download: failed to write {}: {error}",
-                    resolved.display()
-                ))
-            })?;
+            write_http_download_bytes(&resolved, mock_response.body.as_bytes())?;
             return Ok(build_http_download_response(
                 mock_response.status,
                 mock_response.headers,
@@ -1321,104 +1314,37 @@ async fn write_http_download_response(
         )));
     }
 
-    let (tmp_path, mut file) = create_http_download_temp(resolved)?;
+    let mut body = Vec::new();
     let mut bytes_written = 0_u64;
-    let write_result = async {
-        while let Some(chunk) = response.chunk().await.map_err(|error| {
-            vm_error(format!(
-                "http_download: failed to read response body: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
-        })? {
-            let next_len = (bytes_written as usize)
-                .checked_add(chunk.len())
-                .ok_or_else(|| vm_error("http_download: response body length overflow"))?;
-            ensure_response_body_within_limit(next_len, max_response_bytes)?;
-            file.write_all(&chunk).map_err(|error| {
-                vm_error(format!(
-                    "http_download: failed to write {}: {error}",
-                    resolved.display()
-                ))
-            })?;
-            bytes_written += chunk.len() as u64;
-        }
-        Ok(bytes_written)
-    }
-    .await;
 
-    match write_result {
-        Ok(bytes_written) => {
-            finalize_http_download_temp(file, &tmp_path, resolved)?;
-            Ok(bytes_written)
-        }
-        Err(error) => {
-            drop(file);
-            let _ = std::fs::remove_file(&tmp_path);
-            Err(error)
-        }
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        vm_error(format!(
+            "http_download: failed to read response body: {}",
+            crate::egress::redact_reqwest_error(&error)
+        ))
+    })? {
+        let next_len = body
+            .len()
+            .checked_add(chunk.len())
+            .ok_or_else(|| vm_error("http_download: response body length overflow"))?;
+        ensure_response_body_within_limit(next_len, max_response_bytes)?;
+        body.extend_from_slice(&chunk);
+        bytes_written += chunk.len() as u64;
     }
+
+    write_http_download_bytes(resolved, &body)?;
+    Ok(bytes_written)
 }
 
-fn create_http_download_temp(resolved: &Path) -> Result<(PathBuf, File), VmError> {
-    let parent = resolved
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty());
-    if let Some(parent) = parent {
-        std::fs::create_dir_all(parent).map_err(|error| {
+fn write_http_download_bytes(resolved: &Path, bytes: &[u8]) -> Result<(), VmError> {
+    crate::stdlib::sandbox::atomic_write_scoped_at_open("http_download", resolved, bytes).map_err(
+        |error| {
             vm_error(format!(
-                "http_download: failed to create parent directory {}: {error}",
-                parent.display()
+                "http_download: failed to write {}: {error}",
+                resolved.display()
             ))
-        })?;
-    }
-
-    let file_name = resolved
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("download");
-    let tmp_name = format!(".{file_name}.{}.tmp", uuid::Uuid::now_v7());
-    let tmp_path = parent
-        .map(|parent| parent.join(&tmp_name))
-        .unwrap_or_else(|| PathBuf::from(tmp_name));
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp_path)
-        .map_err(|error| {
-            vm_error(format!(
-                "http_download: failed to create temp file {}: {error}",
-                tmp_path.display()
-            ))
-        })?;
-    Ok((tmp_path, file))
-}
-
-fn finalize_http_download_temp(
-    mut file: File,
-    tmp_path: &Path,
-    resolved: &Path,
-) -> Result<(), VmError> {
-    file.flush().map_err(|error| {
-        vm_error(format!(
-            "http_download: failed to flush temp file {}: {error}",
-            tmp_path.display()
-        ))
-    })?;
-    file.sync_all().map_err(|error| {
-        vm_error(format!(
-            "http_download: failed to sync temp file {}: {error}",
-            tmp_path.display()
-        ))
-    })?;
-    drop(file);
-    std::fs::rename(tmp_path, resolved).map_err(|error| {
-        let _ = std::fs::remove_file(tmp_path);
-        vm_error(format!(
-            "http_download: failed to finalize {}: {error}",
-            resolved.display()
-        ))
-    })?;
-    Ok(())
+        },
+    )
 }
 
 pub(super) async fn vm_http_stream_open(

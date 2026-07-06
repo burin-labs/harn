@@ -425,7 +425,7 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             &resolved,
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
-        overlay::write(&resolved, content.as_bytes()).map_err(|e| {
+        overlay::write_scoped("write_file", &resolved, content.as_bytes()).map_err(|e| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to write file {}: {e}",
                 resolved.display()
@@ -464,7 +464,7 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
             &resolved,
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
-        overlay::write(&resolved, content).map_err(|e| {
+        overlay::write_scoped("write_file_bytes", &resolved, content).map_err(|e| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to write file {}: {e}",
                 resolved.display()
@@ -575,7 +575,7 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             &resolved,
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
-        overlay::append(&resolved, content.as_bytes()).map_err(|e| {
+        overlay::append_scoped("append_file", &resolved, content.as_bytes()).map_err(|e| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to append to file {}: {e}",
                 resolved.display()
@@ -638,11 +638,7 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
         &resolved,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    let result = if recursive {
-        overlay::create_dir_all(&resolved)
-    } else {
-        overlay::create_dir(&resolved)
-    };
+    let result = overlay::create_dir_scoped("mkdir", &resolved, recursive);
     result.map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "Failed to create directory {}: {e}",
@@ -689,13 +685,14 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             &resolved_dst,
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
-        let bytes = overlay::copy(&resolved_src, &resolved_dst).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Failed to copy {} to {}: {e}",
-                resolved_src.display(),
-                resolved_dst.display()
-            ))))
-        })?;
+        let bytes =
+            overlay::copy_scoped("copy_file", &resolved_src, &resolved_dst).map_err(|e| {
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                    "Failed to copy {} to {}: {e}",
+                    resolved_src.display(),
+                    resolved_dst.display()
+                ))))
+            })?;
         FILE_TEXT_CACHE.with(|cache| {
             cache.borrow_mut().remove(&resolved_dst);
         });
@@ -821,7 +818,7 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         &dst,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    if let Ok(bytes) = overlay::rename(&src, &dst) {
+    if let Ok(bytes) = overlay::rename_scoped("move_file", &src, &dst) {
         FILE_TEXT_CACHE.with(|c| {
             let mut c = c.borrow_mut();
             c.remove(&src);
@@ -831,7 +828,7 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         queue_file_edited_for(&dst, "move", edited_byte_count(bytes));
         return Ok(VmValue::Nil);
     }
-    let bytes = overlay::copy(&src, &dst).map_err(|e| {
+    let bytes = overlay::copy_scoped("move_file", &src, &dst).map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "move_file: copy failed: {e}"
         ))))
