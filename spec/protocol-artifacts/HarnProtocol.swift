@@ -4,7 +4,7 @@
 import Foundation
 
 public enum HarnProtocolConstants {
-    public static const artifactVersion = "0.9.20"
+    public static const artifactVersion = "0.9.21"
     public static const acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static const harnAgentEventMethod = "_harn/agentEvent"
     public static const harnProviderCatalogMethod = "_harn/providerCatalog"
