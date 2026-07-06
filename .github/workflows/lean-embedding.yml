@@ -48,7 +48,7 @@ jobs:
           GATE_NAME: Lean embedding surface
           PATH_PATTERN: '^(crates/harn-vm/Cargo\.toml$|crates/harn-hostlib/Cargo\.toml$|crates/harn-serve/Cargo\.toml$|crates/harn-cli/Cargo\.toml$|crates/harn-hostlib/src/ast/language\.rs$|scripts/measure_lean_embedding\.sh$|\.github/workflows/lean-embedding\.yml$|\.github/scripts/merge-group-path-gate\.sh$)'
         run: .github/scripts/merge-group-path-gate.sh
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
         if: steps.scope.outputs.run_gate == 'true'
       - name: Measure lean vs full embedding surface
         if: steps.scope.outputs.run_gate == 'true'

@@ -53,7 +53,7 @@ jobs:
           GATE_NAME: Ported handler LOC ratchet
           PATH_PATTERN: '^(crates/harn-cli/src/commands/|crates/harn-cli/src/lib\.rs$|scripts/check_ported_handler_loc\.harn$|scripts/ported_handlers\.toml$|\.github/workflows/ported-handler-loc\.yml$|\.github/scripts/merge-group-path-gate\.sh$)'
         run: .github/scripts/merge-group-path-gate.sh
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
         if: steps.scope.outputs.run_gate == 'true'
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         if: steps.scope.outputs.run_gate == 'true'

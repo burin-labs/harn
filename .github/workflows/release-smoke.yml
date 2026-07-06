@@ -245,7 +245,7 @@ jobs:
           chmod +x "$out_dir"/harn*
           "$HARN_BINARY" --version
 
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
         if: needs.resolve.outputs.mode == 'source'
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         if: needs.resolve.outputs.mode == 'source' && matrix.platform != 'windows'

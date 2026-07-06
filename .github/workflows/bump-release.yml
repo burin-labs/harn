@@ -98,7 +98,7 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "Detected bump type: $BUMP"
 
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
         if: steps.bump.outputs.skip != 'true'
         with:
           components: clippy, rustfmt
