@@ -541,6 +541,104 @@ fn secret_error_is_not_found(error: &SecretError) -> bool {
 mod tests {
     use super::*;
     use crate::event_log::{EventLog, MemoryEventLog, Topic};
+    use crate::secrets::{SecretAuditContext, SecretScope};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct MemorySecretProvider {
+        entries: Mutex<HashMap<SecretId, Vec<u8>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl SecretProvider for MemorySecretProvider {
+        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
+            self.entries
+                .lock()
+                .expect("memory secret provider poisoned")
+                .get(id)
+                .map(|bytes| SecretBytes::from(bytes.as_slice()))
+                .ok_or_else(|| SecretError::NotFound {
+                    provider: self.namespace().to_string(),
+                    id: id.clone(),
+                })
+        }
+
+        async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
+            self.entries
+                .lock()
+                .expect("memory secret provider poisoned")
+                .insert(id.clone(), value.with_exposed(|bytes| bytes.to_vec()));
+            Ok(())
+        }
+
+        async fn rotate(
+            &self,
+            _id: &SecretId,
+        ) -> Result<crate::secrets::RotationHandle, SecretError> {
+            Err(SecretError::Unsupported {
+                provider: self.namespace().to_string(),
+                operation: "rotate",
+            })
+        }
+
+        async fn list(
+            &self,
+            _prefix: &SecretId,
+        ) -> Result<Vec<crate::secrets::SecretMeta>, SecretError> {
+            Ok(Vec::new())
+        }
+
+        fn namespace(&self) -> &'static str {
+            "memory"
+        }
+
+        fn supports_versions(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_signing_key_uses_raw_runtime_secret_not_scoped_agent_surface() {
+        let provider = MemorySecretProvider::default();
+
+        let (first_key, first_key_id) =
+            load_or_generate_agent_signing_key(&provider, Some("agent-a"))
+                .await
+                .expect("signing key should be generated");
+        let id = SecretId::new("provenance", "agent-a.ed25519.seed");
+        let stored = provider
+            .get(&id)
+            .await
+            .expect("runtime raw provider access should load the stored seed");
+        let stored_seed = stored
+            .with_exposed(decode_seed_secret)
+            .expect("stored seed should be valid");
+        assert_eq!(
+            SigningKey::from_bytes(&stored_seed).to_bytes(),
+            first_key.to_bytes()
+        );
+
+        let scoped_error = provider
+            .read_scoped(crate::secrets::SecretReadRequest {
+                id: id.clone(),
+                scope: SecretScope::custom("provenance", None),
+                audit: SecretAuditContext::default(),
+            })
+            .await
+            .expect_err("agent-scoped access must not expose provenance seeds");
+        assert!(matches!(
+            scoped_error,
+            SecretError::AccessDenied { operation, id: denied_id, .. }
+                if operation == "read" && denied_id == id
+        ));
+
+        let (second_key, second_key_id) =
+            load_or_generate_agent_signing_key(&provider, Some("agent-a"))
+                .await
+                .expect("signing key should be reloaded");
+        assert_eq!(first_key.to_bytes(), second_key.to_bytes());
+        assert_eq!(first_key_id, second_key_id);
+    }
 
     #[tokio::test]
     async fn receipt_verifies_and_detects_event_tamper() {
