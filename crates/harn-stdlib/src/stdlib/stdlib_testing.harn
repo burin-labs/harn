@@ -1,4 +1,6 @@
 /** std/testing — helpers for writing Harn tests. */
+import { unified_diff } from "std/diff"
+
 var __testing_step_events = []
 
 fn params_subset_match(expected, actual) {
@@ -851,4 +853,164 @@ pub fn with_scenario(config, body) {
     return with_temp_dir({ dir -> with_mocks(mock_config, { _ -> body({dir: dir}) }) })
   }
   return with_mocks(mock_config, { _ -> body({dir: nil}) })
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Golden-file snapshots
+//
+// `assert_snapshot` is the file-backed counterpart to
+// `assert_golden_transcript`: instead of an inline expected value it pins
+// `actual` against a committed golden file, so large or evolving outputs live
+// on disk next to the test. Modeled on Jest's `toMatchSnapshot` and insta —
+// running with `HARN_UPDATE_SNAPSHOTS=1` writes the golden; every other run
+// asserts equality and fails with a unified diff on drift.
+//
+// CI safety is the load-bearing property. The #1 documented snapshot failure
+// mode is a broken output silently rubber-stamping itself green because a
+// golden was auto-created or auto-updated on the CI machine. So writes require
+// an EXPLICIT `HARN_UPDATE_SNAPSHOTS` signal AND are refused whenever a `CI`
+// signal is present (insta and Jest `--ci` enforce the same rule). There is
+// deliberately no programmatic force-write / force-pass option: under CI a
+// missing or drifted golden is always a hard failure, never a write.
+
+// -------------------------------------------------------------------------------------------------
+
+/** Truthy for an env var set to anything other than "", "0", or "false". */
+fn __testing_env_flag(name: string) -> bool {
+  let raw = harness.env.get(name)
+  return raw != nil && raw != "" && raw != "0" && raw != "false"
+}
+
+/**
+ * An update was requested via `HARN_UPDATE_SNAPSHOTS` (the opt-in write
+ * signal; `harn test` exposes no snapshot flag today). Requesting an update
+ * does not by itself permit a write — see `__testing_snapshot_may_write`.
+ */
+fn __testing_snapshot_update_requested() -> bool {
+  return __testing_env_flag("HARN_UPDATE_SNAPSHOTS")
+}
+
+/**
+ * Detect CI via the de-facto-standard `CI` env var (set by GitHub Actions and
+ * every major CI), plus a Harn-specific `HARN_CI` override. In CI the
+ * `HARN_UPDATE_SNAPSHOTS` env trigger is ignored, so a leaked update flag can
+ * never make a broken output silently rewrite its own golden.
+ */
+fn __testing_running_in_ci() -> bool {
+  return __testing_env_flag("CI") || __testing_env_flag("HARN_CI")
+}
+
+/**
+ * A golden may be written when either:
+ *   - the caller passed `options.update = true` — an explicit, in-source
+ *     programmatic seam (used by this module's own tests to drive the write
+ *     path against a temp golden); it is honored even under CI because it is
+ *     deliberate code, not the accidental env-leak vector, or
+ *   - `HARN_UPDATE_SNAPSHOTS` is set AND we are not in CI. The env trigger is
+ *     the convenient local flow; CI suppresses it so an ambient flag can't
+ *     turn the gate into a silent no-op.
+ */
+fn __testing_snapshot_may_write(options) -> bool {
+  if options?.update == true {
+    return true
+  }
+  return __testing_snapshot_update_requested() && !__testing_running_in_ci()
+}
+
+/**
+ * Resolve the golden-file path for `name`. Defaults to a `__snapshots__/`
+ * directory beside the running test file (`source_dir()` reflects the caller
+ * because stdlib closures carry no source dir of their own); override the
+ * directory with `options.dir`. The `.harn.snap` extension tags the file as
+ * owned by this primitive so a future orphan sweep never touches another
+ * tool's goldens.
+ */
+fn __testing_snapshot_path(name: string, options) -> string {
+  let dir = options?.dir ?? (source_dir() + "/__snapshots__")
+  return dir + "/" + name + ".harn.snap"
+}
+
+/**
+ * Apply the optional `options.redact` scrubs to `actual` before it is written
+ * or compared, so callers can mask residual volatile tokens (ids, timestamps)
+ * deterministically. Each entry is `{pattern, replacement?}`; `pattern` is a
+ * regex, `replacement` defaults to "". The same normalization runs on both the
+ * write and the compare path, so the stored golden is always the scrubbed form.
+ */
+fn __testing_snapshot_normalize(actual: string, options) -> string {
+  var out = actual
+  for rule in options?.redact ?? [] {
+    out = regex_replace(rule.pattern, rule.replacement ?? "", out)
+  }
+  return out
+}
+
+/**
+ * Guidance appended to a create/update failure. Under CI it states the env
+ * trigger is ignored and points at the local update flow; otherwise it names
+ * the update env var.
+ */
+fn __testing_snapshot_guidance(action: string) -> string {
+  if __testing_running_in_ci() {
+    return "\nHARN_UPDATE_SNAPSHOTS is ignored in CI. Run the test locally with "
+      + "HARN_UPDATE_SNAPSHOTS=1 to "
+      + action
+      + " and commit the golden."
+  }
+  return "\nRe-run locally with HARN_UPDATE_SNAPSHOTS=1 to " + action + "."
+}
+
+/**
+ * Assert `actual` matches a committed golden snapshot file.
+ *
+ * The golden lives at `<dir>/<name>.harn.snap`, where `dir` defaults to a
+ * `__snapshots__/` directory next to the running test file (override with
+ * `options.dir`). Outside CI, running with `HARN_UPDATE_SNAPSHOTS=1` (re)writes
+ * the golden and passes; every other run compares `actual` against the stored
+ * golden.
+ *
+ * CI safety: when a CI signal (`CI` or `HARN_CI`) is set, the
+ * `HARN_UPDATE_SNAPSHOTS` env trigger is ignored — the primitive compares only
+ * and a missing or drifted golden is a hard failure with guidance to update
+ * locally. A leaked update flag can never make a broken output silently rewrite
+ * its own golden on the CI machine. The explicit `options.update = true` seam
+ * is honored even under CI (deliberate in-source code, not the env-leak
+ * vector); it is how this module's own tests drive the write path.
+ *
+ * `options.redact` is an optional list of `{pattern, replacement?}` regex
+ * scrubs applied to `actual` before write/compare. The primitive only ever
+ * reads or writes its own `<name>.harn.snap` file and never deletes anything.
+ *
+ * Returns `actual` so callers can chain further assertions.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: assert_snapshot("render_home", render_home())
+ */
+pub fn assert_snapshot(name: string, actual: string, options = nil) -> string {
+  let path = __testing_snapshot_path(name, options)
+  let normalized = __testing_snapshot_normalize(actual, options)
+  if __testing_snapshot_may_write(options) {
+    harness.fs.mkdir(dirname(path))
+    harness.fs.write_text(path, normalized)
+    return actual
+  }
+  if !harness.fs.exists(path) {
+    require false, "snapshot '" + name + "' does not exist at " + path + __testing_snapshot_guidance("create it")
+    return actual
+  }
+  let golden = harness.fs.read_text(path)
+  if golden == normalized {
+    return actual
+  }
+  let diff = unified_diff(golden, normalized, {from_label: "snapshot (" + name + ")", to_label: "actual"})
+  require false, "snapshot '"
+    + name
+    + "' mismatch at "
+    + path
+    + __testing_snapshot_guidance("update it if the change is intended")
+    + "\n"
+    + diff
+  return actual
 }

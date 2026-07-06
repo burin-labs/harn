@@ -227,6 +227,51 @@ with_mocks(
 )
 ```
 
+### Golden-file snapshots (`assert_snapshot`)
+
+`assert_snapshot(name, actual, options?)` pins a string against a committed
+golden file, the file-backed counterpart to `assert_golden_transcript`. It
+follows the Jest `toMatchSnapshot` / insta model: the golden lives at
+`__snapshots__/<name>.harn.snap` next to the test file, running with
+`HARN_UPDATE_SNAPSHOTS=1` writes it, and every other run asserts equality and
+fails with a unified diff on drift.
+
+| Behavior | Result |
+|----------|--------|
+| `HARN_UPDATE_SNAPSHOTS=1`, not in CI | (Re)writes the golden and passes |
+| `HARN_UPDATE_SNAPSHOTS=1`, in CI | **Ignored** — compares only; missing/drift is a hard failure |
+| `options.update = true` (any environment) | Writes the golden and passes |
+| `actual` equals the golden | Passes, returns `actual` |
+| `actual` differs from the golden | Fails with a unified diff (golden vs actual) |
+| Golden missing, no write signal | Fails with guidance to update locally |
+
+**CI safety.** In CI (the `CI` or `HARN_CI` env var set) the
+`HARN_UPDATE_SNAPSHOTS` trigger is **ignored** — the primitive compares only and
+never creates or rewrites a golden. So a broken output cannot silently
+rubber-stamp itself green on the CI machine even if the update flag leaks into a
+CI job (the classic snapshot footgun). Goldens are (re)written only through the
+explicit local flow: run with `HARN_UPDATE_SNAPSHOTS=1` locally, review the diff,
+and commit. The `options.update = true` seam is deliberate in-source code (not
+the accidental env-leak vector) and stays honored even under CI — it exists so a
+test can drive the write path against a temp/fixture golden.
+
+`options.dir` overrides the `__snapshots__/` directory (handy for driving a
+golden into a temp workspace). `options.redact` is a list of
+`{pattern, replacement?}` regex scrubs applied to `actual` before write/compare,
+for masking residual volatile tokens. Keep snapshots small and deterministic —
+no wall-clock or random inputs belong in `actual`. The primitive only ever reads
+or writes its own `<name>.harn.snap` file and never deletes anything.
+
+```harn,ignore
+import { assert_snapshot } from "std/testing"
+
+pipeline test_render() {
+  // Run once locally with HARN_UPDATE_SNAPSHOTS=1 to write
+  // __snapshots__/home_page.harn.snap, then commit it; later runs assert.
+  assert_snapshot("home_page", render_home_page())
+}
+```
+
 ## LLM mocking
 
 For testing agent loops without real LLM calls, use `llm_mock()`:
