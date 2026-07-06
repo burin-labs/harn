@@ -25,6 +25,7 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::value::VmValue;
 
@@ -69,28 +70,53 @@ impl LlmRenderContext {
 }
 
 thread_local! {
-    static LLM_RENDER_STACK: RefCell<Vec<LlmRenderContext>> = const { RefCell::new(Vec::new()) };
+    static LLM_RENDER_STACK: RefCell<Vec<LlmRenderContextFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+static NEXT_LLM_RENDER_FRAME_ID: AtomicU64 = AtomicU64::new(1);
+
+/// A stack entry tagged so an RAII guard can clean up the frame it owns without
+/// accidentally popping an unrelated ambient scope when an async task is
+/// cancelled while its task-local stack is swapped out.
+#[derive(Debug, Clone)]
+pub(crate) struct LlmRenderContextFrame {
+    id: u64,
+    context: LlmRenderContext,
+}
+
+fn next_frame_id() -> u64 {
+    NEXT_LLM_RENDER_FRAME_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn push_llm_render_context_frame(ctx: LlmRenderContext) -> u64 {
+    let id = next_frame_id();
+    LLM_RENDER_STACK.with(|stack| {
+        stack
+            .borrow_mut()
+            .push(LlmRenderContextFrame { id, context: ctx });
+    });
+    id
 }
 
 /// Push a frame onto the ambient render-context stack. Pair with
 /// `pop_llm_render_context` (or use `LlmRenderContextGuard`) so the
 /// stack stays balanced even on the unwind path.
 pub fn push_llm_render_context(ctx: LlmRenderContext) {
-    LLM_RENDER_STACK.with(|stack| stack.borrow_mut().push(ctx));
+    push_llm_render_context_frame(ctx);
 }
 
 /// Pop the most recently pushed frame. Returns `None` (rather than
 /// panicking) if the stack was empty, since the host may legitimately
 /// unwind through a balanced push/pop sequence.
 pub fn pop_llm_render_context() -> Option<LlmRenderContext> {
-    LLM_RENDER_STACK.with(|stack| stack.borrow_mut().pop())
+    LLM_RENDER_STACK.with(|stack| stack.borrow_mut().pop().map(|frame| frame.context))
 }
 
 /// Return a clone of the active frame, or `None` if no LLM context is
 /// in scope. Render entry-points use this to decide whether to inject
 /// the `llm` binding.
 pub fn current_llm_render_context() -> Option<LlmRenderContext> {
-    LLM_RENDER_STACK.with(|stack| stack.borrow().last().cloned())
+    LLM_RENDER_STACK.with(|stack| stack.borrow().last().map(|frame| frame.context.clone()))
 }
 
 /// Per-task ambient-scope swap of the LLM render-context stack. See
@@ -98,7 +124,9 @@ pub fn current_llm_render_context() -> Option<LlmRenderContext> {
 /// `llm_call` (held across the model HTTP `.await`), so concurrent fan-out
 /// children each running their own `llm_call` would otherwise render templates
 /// with a sibling's provider/model/capabilities.
-pub(crate) fn swap_llm_render_stack(next: Vec<LlmRenderContext>) -> Vec<LlmRenderContext> {
+pub(crate) fn swap_llm_render_stack(
+    next: Vec<LlmRenderContextFrame>,
+) -> Vec<LlmRenderContextFrame> {
     LLM_RENDER_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
 }
 
@@ -112,6 +140,7 @@ pub(crate) fn reset_llm_render_stack() {
 /// Use this in Rust hosts (e.g. `llm_call_impl`) so the stack stays
 /// balanced across `?`-shortcircuits and panics.
 pub struct LlmRenderContextGuard {
+    frame_id: u64,
     /// Tagged so a misuse (drop-order inversion across nested guards)
     /// surfaces as a `debug_assert` instead of silently popping the
     /// wrong frame. Carries no runtime cost in release builds.
@@ -120,9 +149,10 @@ pub struct LlmRenderContextGuard {
 
 impl LlmRenderContextGuard {
     pub fn enter(ctx: LlmRenderContext) -> Self {
-        push_llm_render_context(ctx);
+        let frame_id = push_llm_render_context_frame(ctx);
         let depth = LLM_RENDER_STACK.with(|stack| stack.borrow().len());
         Self {
+            frame_id,
             expected_depth: depth,
         }
     }
@@ -130,12 +160,23 @@ impl LlmRenderContextGuard {
 
 impl Drop for LlmRenderContextGuard {
     fn drop(&mut self) {
-        let depth = LLM_RENDER_STACK.with(|stack| stack.borrow().len());
-        debug_assert_eq!(
-            depth, self.expected_depth,
-            "LlmRenderContextGuard nested-drop order violated",
-        );
-        pop_llm_render_context();
+        LLM_RENDER_STACK.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if stack.last().is_some_and(|frame| frame.id == self.frame_id) {
+                stack.pop();
+                return;
+            }
+
+            if let Some(index) = stack.iter().position(|frame| frame.id == self.frame_id) {
+                debug_assert_eq!(
+                    stack.len(),
+                    self.expected_depth,
+                    "LlmRenderContextGuard nested-drop order violated",
+                );
+                debug_assert_eq!(index + 1, stack.len(), "nested-drop order violated");
+                stack.remove(index);
+            }
+        });
     }
 }
 
