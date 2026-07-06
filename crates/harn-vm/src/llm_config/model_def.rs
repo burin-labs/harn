@@ -406,7 +406,9 @@ pub struct FastModeDef {
 /// (#4017): a capability/behavior encoded as catalog data rather than
 /// hand-rolled at each downstream call site (harn-bump-fleet,
 /// harn-cloud free_tier_pool, burin-code all shipped their own copy).
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+// NB: `PartialEq` only (no `Eq`): `ModelLadderStepDef::options` holds
+// `toml::Value`, which carries floats and therefore is not `Eq`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ModelLadderDef {
     /// Ordered ladder steps, cheapest/first to most-capable/last.
     #[serde(default)]
@@ -416,21 +418,37 @@ pub struct ModelLadderDef {
     pub label: Option<String>,
 }
 
-/// One rung of a [`ModelLadderDef`]. Mirrors the
-/// `{model, provider?, label?, family?, capabilities?}` shape accepted by the
+/// One rung of a [`ModelLadderDef`]. Full parity with the `.harn`
+/// `ModelLadderStep` alias — `{model, provider?, label?, when?, options?,
+/// family?, capabilities?}` — which is also the shape accepted by the
 /// `models:` option and the `model_ladder(...)` std constructor. Provider is
 /// optional: when omitted it is inferred from the model id (or the call's base
-/// provider) at lowering time. `family`/`capabilities` are optional,
-/// serde-absent-when-unset informational fields carried for downstream
-/// selectors (e.g. harn-cloud free-tier routing); they do not affect Harn's
-/// own transport failover.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+/// provider) at lowering time.
+///
+/// `options` carries per-step sampling/timeout overrides (same whitelist as
+/// inline `models:` steps); catalog ladders honor them identically instead of
+/// silently dropping them. `when`, `family`, and `capabilities` are
+/// informational to Harn's own ladder lowering (they do not affect transport
+/// failover) but are carried through so catalog and inline ladders declare the
+/// same shape and downstream selectors (e.g. harn-cloud free-tier routing) can
+/// read them. All added fields are optional and serde-absent when unset.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ModelLadderStepDef {
     pub model: String,
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
     pub label: Option<String>,
+    /// Conditional-routing predicate hint (e.g. `"transport_failure"`). Mirror
+    /// of the `.harn` alias `when?` field. Informational to lowering today.
+    /// Absent from serialized output when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
+    /// Per-step sampling/timeout overrides (temperature, max_tokens, top_p,
+    /// seed, timeout_ms, fast, ...), same whitelist as inline `models:` steps.
+    /// Absent from serialized output when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<BTreeMap<String, toml::Value>>,
     /// Normalized model-family token (e.g. `"haiku"`, `"sonnet"`) carried for
     /// downstream selectors such as harn-cloud's free-tier routing. Purely
     /// informational to Harn's own ladder lowering — it does not affect
@@ -602,14 +620,19 @@ impl ModelAvailability {
 
 #[cfg(test)]
 mod ladder_step_tests {
-    use super::ModelLadderStepDef;
+    use super::{ModelLadderDef, ModelLadderStepDef};
 
     #[test]
-    fn family_and_capabilities_round_trip() {
+    fn all_added_fields_round_trip() {
+        let mut options = std::collections::BTreeMap::new();
+        options.insert("temperature".to_string(), toml::Value::Float(0.2));
+        options.insert("max_tokens".to_string(), toml::Value::Integer(512));
         let step = ModelLadderStepDef {
             model: "claude-haiku-4-5".to_string(),
             provider: Some("anthropic".to_string()),
             label: Some("cheap".to_string()),
+            when: Some("transport_failure".to_string()),
+            options: Some(options),
             family: Some("haiku".to_string()),
             capabilities: vec!["vision".to_string(), "tools".to_string()],
         };
@@ -618,18 +641,22 @@ mod ladder_step_tests {
         assert_eq!(step, back);
         assert!(json.contains("\"family\":\"haiku\""));
         assert!(json.contains("\"capabilities\":[\"vision\",\"tools\"]"));
+        assert!(json.contains("\"when\":\"transport_failure\""));
+        assert!(json.contains("\"temperature\":0.2"));
     }
 
     #[test]
-    fn unset_family_and_capabilities_are_absent_from_serialized_output() {
-        // A step that sets neither new field must serialize byte-identically
-        // to the pre-existing {model, provider?, label?} shape: the new keys
-        // are entirely absent (not `null`, not `[]`), so already-serialized
-        // catalog bundles/records stay unchanged.
+    fn unset_added_fields_are_absent_from_serialized_output() {
+        // A step that sets none of the added fields must serialize
+        // byte-identically to the pre-existing {model, provider?, label?}
+        // shape: the new keys are entirely absent (not `null`, not `[]`), so
+        // already-serialized catalog bundles/records stay unchanged.
         let step = ModelLadderStepDef {
             model: "mock-cheap".to_string(),
             provider: Some("mock".to_string()),
             label: None,
+            when: None,
+            options: None,
             family: None,
             capabilities: Vec::new(),
         };
@@ -638,17 +665,44 @@ mod ladder_step_tests {
             json,
             r#"{"model":"mock-cheap","provider":"mock","label":null}"#
         );
-        assert!(!json.contains("family"));
-        assert!(!json.contains("capabilities"));
+        for absent in ["family", "capabilities", "when", "options"] {
+            assert!(!json.contains(absent), "unexpected key {absent:?} in {json}");
+        }
     }
 
     #[test]
-    fn deserializes_without_new_fields() {
-        // Records written before this change (no family/capabilities keys)
-        // still deserialize, defaulting the new fields.
+    fn deserializes_without_added_fields() {
+        // Records written before this change (no added keys) still
+        // deserialize, defaulting the new fields.
         let step: ModelLadderStepDef =
             serde_json::from_str(r#"{"model":"mock-cheap"}"#).expect("deserialize legacy");
+        assert_eq!(step.when, None);
         assert_eq!(step.family, None);
+        assert!(step.options.is_none());
         assert!(step.capabilities.is_empty());
+    }
+
+    #[test]
+    fn catalog_toml_row_retains_when_and_options() {
+        // A `[model_ladders.*]` catalog row carrying when/options/family/
+        // capabilities parses WITHOUT silently discarding them — previously
+        // these keys had no home on the DTO and were dropped on the floor.
+        let toml_src = r#"
+label = "with overrides"
+steps = [
+  { model = "haiku", label = "cheap", when = "transport_failure", family = "haiku", capabilities = ["tools"], options = { temperature = 0.1, max_tokens = 256 } },
+  { model = "opus", label = "frontier", family = "opus" },
+]
+"#;
+        let def: ModelLadderDef = toml::from_str(toml_src).expect("parse ladder toml");
+        assert_eq!(def.steps.len(), 2);
+        let cheap = &def.steps[0];
+        assert_eq!(cheap.when.as_deref(), Some("transport_failure"));
+        assert_eq!(cheap.family.as_deref(), Some("haiku"));
+        assert_eq!(cheap.capabilities, vec!["tools".to_string()]);
+        let opts = cheap.options.as_ref().expect("options present");
+        assert_eq!(opts.get("temperature"), Some(&toml::Value::Float(0.1)));
+        assert_eq!(opts.get("max_tokens"), Some(&toml::Value::Integer(256)));
+        assert_eq!(def.steps[1].family.as_deref(), Some("opus"));
     }
 }

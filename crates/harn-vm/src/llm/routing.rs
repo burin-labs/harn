@@ -778,6 +778,45 @@ fn parse_ladder_step_overrides(
     }
 }
 
+/// Convert a catalog `[model_ladders.*]` step's `options` table into the same
+/// per-step override [`DictMap`] that inline `models:` steps produce, running
+/// the identical [`LADDER_STEP_OVERRIDE_KEYS`] whitelist. An unknown key errors
+/// loudly here rather than being silently dropped, so catalog and inline
+/// ladders behave the same way.
+fn catalog_step_overrides(
+    options: Option<&std::collections::BTreeMap<String, toml::Value>>,
+    ladder_name: &str,
+    idx: usize,
+) -> Result<Option<Arc<crate::value::DictMap>>, VmError> {
+    let Some(options) = options.filter(|o| !o.is_empty()) else {
+        return Ok(None);
+    };
+    let mut map = crate::value::DictMap::new();
+    for (key, value) in options {
+        if !LADDER_STEP_OVERRIDE_KEYS.contains(&key.as_str()) {
+            return Err(runtime_error(format!(
+                "model ladder {ladder_name:?} step {idx}: options key {key:?} is not a \
+                 supported per-step override; supported keys are {LADDER_STEP_OVERRIDE_KEYS:?}. \
+                 Put structural options (tools, schema, thinking) on the base call."
+            )));
+        }
+        // toml::Value -> serde_json::Value -> VmValue reuses the canonical
+        // JSON bridge (numbers/bools/strings map cleanly for the scalar
+        // override whitelist).
+        let json = serde_json::to_value(value).map_err(|e| {
+            runtime_error(format!(
+                "model ladder {ladder_name:?} step {idx}: options key {key:?} is not \
+                 representable ({e})"
+            ))
+        })?;
+        map.insert(
+            crate::value::intern_key(key),
+            crate::schema::json_to_vm_value(&json),
+        );
+    }
+    Ok(Some(Arc::new(map)))
+}
+
 /// Resolve a named `[model_ladders.<name>]` catalog ladder into steps.
 fn resolve_named_ladder(value: Option<&VmValue>) -> Result<(Vec<LadderStep>, String), VmError> {
     let name = match value {
@@ -801,16 +840,18 @@ fn resolve_named_ladder(value: Option<&VmValue>) -> Result<(Vec<LadderStep>, Str
             "llm_call: no model ladder named {name:?} in the catalog{hint}"
         )));
     };
-    let steps = def
-        .steps
-        .into_iter()
-        .map(|s| LadderStep {
+    let mut steps = Vec::with_capacity(def.steps.len());
+    for (idx, s) in def.steps.into_iter().enumerate() {
+        // Catalog steps honor per-step `options` overrides identically to
+        // inline `models:` steps (previously they were silently dropped).
+        let overrides = catalog_step_overrides(s.options.as_ref(), &name, idx)?;
+        steps.push(LadderStep {
             model: s.model,
             provider: s.provider,
             label: s.label,
-            overrides: None,
-        })
-        .collect();
+            overrides,
+        });
+    }
     let label = def.label.unwrap_or_else(|| format!("model_ladder:{name}"));
     Ok((steps, label))
 }
@@ -2738,5 +2779,44 @@ mod tests {
         )]);
         let err = build_model_ladder_policy(&options, "anthropic", "base").unwrap_err();
         assert!(format!("{err:?}").contains("no model ladder named"));
+    }
+
+    #[test]
+    fn catalog_step_options_thread_into_overrides() {
+        // A catalog step's `options` table lowers to per-step overrides,
+        // exactly like an inline `models:` step — no longer silently dropped.
+        let mut options = std::collections::BTreeMap::new();
+        options.insert("temperature".to_string(), toml::Value::Float(0.25));
+        options.insert("max_tokens".to_string(), toml::Value::Integer(128));
+        let overrides = super::catalog_step_overrides(Some(&options), "frugal", 0)
+            .expect("ok")
+            .expect("some overrides");
+        assert!(matches!(
+            overrides.get(&crate::value::intern_key("temperature")),
+            Some(VmValue::Float(f)) if (*f - 0.25).abs() < 1e-9
+        ));
+        assert!(matches!(
+            overrides.get(&crate::value::intern_key("max_tokens")),
+            Some(VmValue::Int(128))
+        ));
+    }
+
+    #[test]
+    fn catalog_step_unknown_option_errors_loudly() {
+        let mut options = std::collections::BTreeMap::new();
+        options.insert("tools".to_string(), toml::Value::Boolean(true));
+        let err = super::catalog_step_overrides(Some(&options), "frugal", 1).unwrap_err();
+        assert!(format!("{err:?}").contains("supported per-step override"));
+    }
+
+    #[test]
+    fn catalog_step_absent_options_is_none() {
+        assert!(super::catalog_step_overrides(None, "frugal", 0)
+            .expect("ok")
+            .is_none());
+        let empty = std::collections::BTreeMap::new();
+        assert!(super::catalog_step_overrides(Some(&empty), "frugal", 0)
+            .expect("ok")
+            .is_none());
     }
 }
