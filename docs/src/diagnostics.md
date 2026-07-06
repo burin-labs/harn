@@ -2470,7 +2470,7 @@ unused import lint
 mutable never reassigned lint
 
 - **Repair:** `bindings/make-immutable` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Declare the never-reassigned binding with `let` instead of `var`
+- Declare the never-reassigned binding with `const` instead of `let`
 - **See also:** [`HARN-OWN-002`](#harn-own-002)
 
 #### How to fix
@@ -3426,12 +3426,12 @@ module graph cannot be constructed. Compilation cannot proceed.
 immutable binding is reassigned
 
 - **Repair:** `bindings/make-mutable` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Declare the binding with `var` so it can be reassigned
+- Declare the binding with `let` so it can be reassigned
 - **See also:** [`HARN-OWN-002`](#harn-own-002)
 
 #### How to fix
 
-- Switch the binding kind (`let` ↔ `mut`) to match its actual use.
+- Declare the binding with `let` (mutable) instead of `const` (immutable) if it really needs to be reassigned.
 - Restructure so owned values do not escape their scope.
 
 ### `HARN-OWN-002`
@@ -3441,12 +3441,12 @@ immutable binding is reassigned
 mutable binding is never reassigned
 
 - **Repair:** `bindings/make-immutable` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Declare the never-reassigned binding with `let` instead of `var`
+- Declare the never-reassigned binding with `const` instead of `let`
 - **See also:** [`HARN-LNT-018`](#harn-lnt-018)
 
 #### How to fix
 
-- Switch the binding kind (`let` ↔ `mut`) to match its actual use.
+- Declare the binding with `const` (immutable) instead of `let` (mutable) since it is never reassigned.
 - Restructure so owned values do not escape their scope.
 
 ### `HARN-OWN-003`

@@ -6,7 +6,7 @@
 // older siblings from the same semver line.
 const SIBLING_DEP_RE = r"^\s*((?:harn-[A-Za-z0-9-]+|tree-sitter-harn))\s*=\s*\{(.*)\}\s*$"
 
-let VERSION_RE = r#"version\s*=\s*"([^"]+)""#
+const VERSION_RE = r#"version\s*=\s*"([^"]+)""#
 
 const SECTION_RE = r"^\s*\[([^\]]+)\]\s*$"
 

@@ -247,7 +247,7 @@ fn measure_with_hyperfine(
   const seconds = if first?.median != nil {
     number_or(first.median, 0.0)
   } else {
-    let times = first?.times ?? []
+    const times = first?.times ?? []
     if times.count == 0 {
       throw "hyperfine result lacks both median and times"
     }

@@ -77,18 +77,15 @@ pipeline default() {
     },
   )
   llm_mock({text: "Done. ##DONE##"})
-  const result = agent_loop(
-    "smoke telemetry",
-    nil,
-    {
-      provider: "mock",
-      tools: registry,
-      tool_format: "native",
-      max_iterations: 3,
-      loop_until_done: true,
-      tool_caller: stack,
-    },
-  )
+  const agent_options = {
+    provider: "mock",
+    tools: registry,
+    tool_format: "native",
+    max_iterations: 3,
+    loop_until_done: true,
+    tool_caller: stack,
+  }
+  const result = agent_loop("smoke telemetry", nil, agent_options)
   __io_println("status: " + to_string(result.status))
   __io_println("spans posted: " + to_string(atomic_get(posted)))
   __io_println("errors: " + to_string(atomic_get(errors)))

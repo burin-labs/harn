@@ -1690,7 +1690,7 @@
         {
           "id": "bindings/make-immutable",
           "safety": "behavior-preserving",
-          "summary": "Declare the never-reassigned binding with `let` instead of `var`"
+          "summary": "Declare the never-reassigned binding with `const` instead of `let`"
         }
       ],
       "related": [
@@ -2380,7 +2380,7 @@
         {
           "id": "bindings/make-mutable",
           "safety": "scope-local",
-          "summary": "Declare the binding with `var` so it can be reassigned"
+          "summary": "Declare the binding with `let` so it can be reassigned"
         }
       ],
       "related": [
@@ -2397,7 +2397,7 @@
         {
           "id": "bindings/make-immutable",
           "safety": "behavior-preserving",
-          "summary": "Declare the never-reassigned binding with `let` instead of `var`"
+          "summary": "Declare the never-reassigned binding with `const` instead of `let`"
         }
       ],
       "related": [

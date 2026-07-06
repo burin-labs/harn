@@ -21,7 +21,7 @@ const REFERENCE_LINK_RE = r"^\s{0,3}\[[^\]]+\]:\s+(\S+)"
 // HTML `href="..."` / `src='...'` attributes. The Rust regex engine has no
 // backreferences, so the Python `(['"])(.*?)\1` is split into matched-quote
 // alternatives: group 1 is the double-quoted value, group 2 the single.
-let HTML_ATTR_RE = r#"\b(?:href|src)=(?:"([^"]*)"|'([^']*)')"#
+const HTML_ATTR_RE = r#"\b(?:href|src)=(?:"([^"]*)"|'([^']*)')"#
 
 /**
  * Blank fenced code blocks while preserving line numbers. Each fence line
