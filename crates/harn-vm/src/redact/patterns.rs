@@ -364,7 +364,10 @@ fn scan_secret_patterns_windowed<'a>(
         let mut window_start = 0usize;
         loop {
             let ws = floor_char_boundary(input, window_start);
-            let we = ceil_char_boundary(input, (window_start + MAX_SCAN_INPUT_BYTES).min(input.len()));
+            let we = ceil_char_boundary(
+                input,
+                (window_start + MAX_SCAN_INPUT_BYTES).min(input.len()),
+            );
             for m in pattern.regex.find_iter(&input[ws..we]) {
                 let gs = ws + m.start();
                 let ge = ws + m.end();
@@ -615,7 +618,11 @@ mod tests {
         assert!(input.len() > MAX_SCAN_INPUT_BYTES);
         let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(matches!(out, Cow::Owned(_)), "oversized secret must redact");
-        assert!(!out.contains(AWS_KEY), "secret leaked: {}", &out[out.len().saturating_sub(64)..]);
+        assert!(
+            !out.contains(AWS_KEY),
+            "secret leaked: {}",
+            &out[out.len().saturating_sub(64)..]
+        );
         assert!(out.contains("<redacted:aws_access_key:20>"));
     }
 
@@ -644,7 +651,10 @@ mod tests {
         let blob = "lorem ipsum dolor sit amet ".repeat(MAX_SCAN_INPUT_BYTES / 20);
         assert!(blob.len() > MAX_SCAN_INPUT_BYTES);
         let out = scan_secret_patterns(&blob, crate::redact::REDACTED_PLACEHOLDER);
-        assert!(matches!(out, Cow::Borrowed(_)), "clean blob must not be rewritten");
+        assert!(
+            matches!(out, Cow::Borrowed(_)),
+            "clean blob must not be rewritten"
+        );
         assert_eq!(out.as_ref(), blob);
     }
 
@@ -674,7 +684,10 @@ mod tests {
         let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
         let elapsed = start.elapsed();
         assert!(!out.contains(AWS_KEY));
-        assert!(elapsed < std::time::Duration::from_secs(5), "scan too slow: {elapsed:?}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "scan too slow: {elapsed:?}"
+        );
     }
 
     #[test]

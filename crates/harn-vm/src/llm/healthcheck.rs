@@ -104,7 +104,10 @@ pub async fn run_provider_healthcheck_with_options(
         None => match crate::egress::install_ssrf_guard(
             reqwest::Client::builder()
                 .timeout(Duration::from_secs(DEFAULT_HEALTHCHECK_TIMEOUT_SECS))
-                .redirect(crate::egress::redirect_policy("llm_healthcheck_redirect", 5)),
+                .redirect(crate::egress::redirect_policy(
+                    "llm_healthcheck_redirect",
+                    5,
+                )),
         )
         .build()
         {
