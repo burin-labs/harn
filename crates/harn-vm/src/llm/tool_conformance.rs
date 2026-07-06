@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat, ThinkingConfig};
+use crate::llm::capabilities::WireDialect;
 use crate::llm_config::{self, ProviderDef};
 use crate::value::VmValue;
 
@@ -606,41 +608,104 @@ fn chat_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
 }
 
 fn probe_request_body(provider: &str, model: &str, mode: ToolProbeMode, marker: &str) -> Value {
+    let payload = probe_request_payload(provider, model, mode, marker);
+    provider_compatible_probe_request_body(&payload)
+}
+
+fn probe_request_payload(
+    provider: &str,
+    model: &str,
+    mode: ToolProbeMode,
+    marker: &str,
+) -> LlmRequestPayload {
     let prompt = format!(
         "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. Do not answer in prose."
     );
-    let tool = json!({
-        "type": "function",
-        "function": {
-            "name": TOOL_PROBE_TOOL_NAME,
-            "description": "Echo the probe marker exactly.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "value": {
-                        "type": "string",
-                        "description": "The marker value to echo."
-                    }
-                },
-                "required": ["value"],
-                "additionalProperties": false
-            }
-        }
-    });
-    let mut body = json!({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "tools": [tool],
-        "stream": mode == ToolProbeMode::Streaming,
-        "temperature": 0,
-    });
-    if !crate::llm::provider::provider_uses_ollama_messages(provider, model) {
-        body["tool_choice"] = json!({
+    let native_tools =
+        crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
+            .expect("tool probe registry is static and should convert to native tools");
+    let tool_choice = if crate::llm::provider::provider_uses_ollama_messages(provider, model) {
+        None
+    } else {
+        Some(json!({
             "type": "function",
             "function": {"name": TOOL_PROBE_TOOL_NAME}
-        });
+        }))
+    };
+    LlmRequestPayload {
+        provider: provider.to_string(),
+        model: model.to_string(),
+        region: None,
+        api_key: String::new(),
+        api_mode: LlmApiMode::ChatCompletions,
+        fallback_chain: Vec::new(),
+        route_fallbacks: Vec::new(),
+        messages: vec![json!({"role": "user", "content": prompt})],
+        system: None,
+        max_tokens: 256,
+        temperature: Some(0.0),
+        top_p: None,
+        top_k: None,
+        logprobs: false,
+        top_logprobs: None,
+        stop: None,
+        seed: None,
+        frequency_penalty: None,
+        presence_penalty: None,
+        fast: false,
+        output_format: OutputFormat::Text,
+        response_format: None,
+        json_schema: None,
+        output_schema: None,
+        schema_stream_abort: false,
+        thinking: ThinkingConfig::Disabled,
+        anthropic_beta_features: Vec::new(),
+        vision: false,
+        native_tools: Some(native_tools),
+        provider_tools: Vec::new(),
+        tool_choice,
+        cache: false,
+        timeout: None,
+        stream: mode == ToolProbeMode::Streaming,
+        provider_overrides: None,
+        previous_response_id: None,
+        store: None,
+        background: None,
+        truncation: None,
+        compact: None,
+        include: None,
+        max_tool_calls: None,
+        prefill: None,
+        session_id: None,
+        reminder_lifecycle: Vec::new(),
+        cli_llm_mock_scope: None,
     }
-    body
+}
+
+fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value {
+    match payload.provider.as_str() {
+        "azure_openai" => {
+            return crate::llm::providers::AzureOpenAiProvider::build_request_body(payload);
+        }
+        "bedrock" => {
+            return crate::llm::providers::BedrockProvider::build_request_body(payload);
+        }
+        "vertex" => {
+            return crate::llm::providers::VertexProvider::build_request_body(payload);
+        }
+        _ => {}
+    }
+
+    match crate::llm::capabilities::lookup(&payload.provider, &payload.model).message_wire_format {
+        WireDialect::Anthropic => {
+            crate::llm::providers::AnthropicProvider::build_request_body(payload)
+        }
+        WireDialect::Gemini => crate::llm::providers::GeminiProvider::build_request_body(payload),
+        WireDialect::Ollama => crate::llm::providers::OllamaProvider::build_request_body(payload),
+        WireDialect::OpenAiCompat => {
+            crate::llm::providers::OpenAiCompatibleProvider::build_request_body(payload, false)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -658,6 +723,9 @@ fn extract_native_tool_calls(response: &Value) -> Vec<NativeToolCall> {
 fn visit_native_tool_call_arrays(value: &Value, calls: &mut Vec<NativeToolCall>) {
     match value {
         Value::Object(map) => {
+            if let Some(call) = parse_anthropic_tool_use_object(map) {
+                calls.push(call);
+            }
             if let Some(tool_calls) = map.get("tool_calls").and_then(Value::as_array) {
                 for item in tool_calls {
                     if let Some(call) = parse_native_tool_call(item) {
@@ -676,6 +744,28 @@ fn visit_native_tool_call_arrays(value: &Value, calls: &mut Vec<NativeToolCall>)
         }
         _ => {}
     }
+}
+
+fn parse_anthropic_tool_use_object(
+    object: &serde_json::Map<String, Value>,
+) -> Option<NativeToolCall> {
+    if object.get("type").and_then(Value::as_str) != Some("tool_use") {
+        return None;
+    }
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())?
+        .to_string();
+    let arguments = object
+        .get("input")
+        .or_else(|| object.get("arguments"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    Some(NativeToolCall {
+        name,
+        arguments: Some(arguments),
+    })
 }
 
 fn parse_native_tool_call(item: &Value) -> Option<NativeToolCall> {
@@ -795,6 +885,7 @@ fn collect_stream_content_and_calls(
     content: &mut String,
     calls: &mut BTreeMap<String, PartialStreamCall>,
 ) {
+    collect_anthropic_stream_content_and_calls(frame, content, calls);
     if let Some(text) = frame
         .pointer("/message/content")
         .or_else(|| frame.pointer("/choices/0/delta/content"))
@@ -839,6 +930,71 @@ fn collect_stream_content_and_calls(
                 _ => {}
             }
         }
+    }
+}
+
+fn collect_anthropic_stream_content_and_calls(
+    frame: &Value,
+    content: &mut String,
+    calls: &mut BTreeMap<String, PartialStreamCall>,
+) {
+    match frame.get("type").and_then(Value::as_str) {
+        Some("content_block_start") => {
+            let Some(block) = frame.get("content_block") else {
+                return;
+            };
+            if block.get("type").and_then(Value::as_str) == Some("text") {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    content.push_str(text);
+                }
+                return;
+            }
+            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                return;
+            }
+            let key = frame
+                .get("index")
+                .and_then(Value::as_u64)
+                .map(|index| index.to_string())
+                .unwrap_or_else(|| calls.len().to_string());
+            let slot = calls.entry(key).or_default();
+            if let Some(id) = block.get("id").and_then(Value::as_str) {
+                slot.id = Some(id.to_string());
+            }
+            if let Some(name) = block.get("name").and_then(Value::as_str) {
+                slot.name = Some(name.to_string());
+            }
+            if let Some(input) = block.get("input").filter(|input| !input.is_null()) {
+                if !(input.is_object() && input.as_object().is_some_and(|object| object.is_empty()))
+                {
+                    slot.arguments = input.to_string();
+                }
+            }
+        }
+        Some("content_block_delta") => {
+            let key = frame
+                .get("index")
+                .and_then(Value::as_u64)
+                .map(|index| index.to_string())
+                .unwrap_or_else(|| calls.len().to_string());
+            let Some(delta) = frame.get("delta") else {
+                return;
+            };
+            match delta.get("type").and_then(Value::as_str) {
+                Some("text_delta") => {
+                    if let Some(text) = delta.get("text").and_then(Value::as_str) {
+                        content.push_str(text);
+                    }
+                }
+                Some("input_json_delta") => {
+                    if let Some(partial) = delta.get("partial_json").and_then(Value::as_str) {
+                        calls.entry(key).or_default().arguments.push_str(partial);
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
     }
 }
 
@@ -927,6 +1083,70 @@ mod tests {
     }
 
     #[test]
+    fn probe_request_body_uses_anthropic_tool_dialect() {
+        let body = probe_request_body(
+            "anthropic",
+            "claude-sonnet-4-6",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+        );
+
+        assert_eq!(
+            body["tools"][0]["name"], TOOL_PROBE_TOOL_NAME,
+            "Anthropic tools use root-level names, not OpenAI function wrappers"
+        );
+        assert!(
+            body["tools"][0].get("function").is_none(),
+            "probe must not send OpenAI function-wrapper tools to Anthropic"
+        );
+        assert_eq!(
+            body["tools"][0]["input_schema"]["properties"]["value"]["type"],
+            "string"
+        );
+        assert_eq!(
+            body["tool_choice"],
+            json!({"type": "tool", "name": TOOL_PROBE_TOOL_NAME}),
+            "Anthropic rejects OpenAI-shaped tool_choice objects"
+        );
+    }
+
+    #[test]
+    fn probe_request_body_preserves_openai_tool_dialect() {
+        let body = probe_request_body(
+            "openai",
+            "gpt-5.4-mini",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+        );
+
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
+        assert_eq!(
+            body["tool_choice"],
+            json!({"type": "function", "function": {"name": TOOL_PROBE_TOOL_NAME}})
+        );
+    }
+
+    #[test]
+    fn probe_request_body_maps_gemini_tool_choice_to_tool_config() {
+        let body = probe_request_body(
+            "gemini",
+            "gemini-2.5-pro",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+        );
+        assert_eq!(
+            body["tools"][0]["functionDeclarations"][0]["name"],
+            TOOL_PROBE_TOOL_NAME
+        );
+        assert_eq!(body["toolConfig"]["functionCallingConfig"]["mode"], "ANY");
+        assert_eq!(
+            body["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"],
+            json!([TOOL_PROBE_TOOL_NAME])
+        );
+    }
+
+    #[test]
     fn classify_openai_native_tool_call_as_pass() {
         let report = classify_tool_conformance_fixture(
             "local",
@@ -935,6 +1155,27 @@ mod tests {
             DEFAULT_TOOL_PROBE_MARKER,
             r#"{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo_marker","arguments":"{\"value\":\"harn_tool_probe_marker\"}"}}]}}]}"#,
         );
+        assert_eq!(report.tool_calling.native, ToolProbeStatus::Pass);
+        assert_eq!(
+            report.tool_calling.fallback_mode,
+            ToolProbeFallbackMode::Native
+        );
+        assert_eq!(
+            report.cases[0].classification,
+            ToolProbeClassification::StructuredNativeToolCall
+        );
+    }
+
+    #[test]
+    fn classify_anthropic_tool_use_as_native_pass() {
+        let report = classify_tool_conformance_fixture(
+            "anthropic",
+            "claude-sonnet-4-6",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+            r#"{"content":[{"type":"tool_use","id":"toolu_1","name":"echo_marker","input":{"value":"harn_tool_probe_marker"}}],"stop_reason":"tool_use"}"#,
+        );
+
         assert_eq!(report.tool_calling.native, ToolProbeStatus::Pass);
         assert_eq!(
             report.tool_calling.fallback_mode,
@@ -1045,11 +1286,61 @@ mod tests {
     }
 
     #[test]
+    fn prose_only_response_does_not_satisfy_required_tool_probe() {
+        let report = classify_tool_conformance_fixture(
+            "anthropic",
+            "claude-sonnet-4-6",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+            r#"{"content":[{"type":"text","text":"I can call echo_marker with that value."}],"stop_reason":"end_turn"}"#,
+        );
+
+        assert_eq!(
+            report.cases[0].classification,
+            ToolProbeClassification::ProseOnlyNonTool
+        );
+        assert!(!report_satisfies_required_probe(&report, "tool_probe"));
+        assert_eq!(
+            report.tool_calling.fallback_mode,
+            ToolProbeFallbackMode::Disabled
+        );
+    }
+
+    #[test]
     fn aggregates_openai_streaming_tool_call_deltas() {
         let raw = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"echo_marker\",\"arguments\":\"{\\\"value\\\":\"}}]}}]}\n\
                    data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"harn_tool_probe_marker\\\"}\"}}]}}]}\n\
                    data: [DONE]\n";
         let response = aggregate_stream_text(raw, "local");
+        let case = classify_tool_probe_response(
+            ToolProbeMode::Streaming,
+            &response,
+            DEFAULT_TOOL_PROBE_MARKER,
+            None,
+            None,
+        );
+        assert!(case.ok, "{case:?}");
+        assert_eq!(
+            case.classification,
+            ToolProbeClassification::StructuredNativeToolCall
+        );
+    }
+
+    #[test]
+    fn aggregates_anthropic_streaming_tool_use_deltas() {
+        let raw = "event: message_start\n\
+                   data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\
+                   event: content_block_start\n\
+                   data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"echo_marker\",\"input\":{}}}\n\
+                   event: content_block_delta\n\
+                   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"value\\\":\"}}\n\
+                   event: content_block_delta\n\
+                   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"harn_tool_probe_marker\\\"}\"}}\n\
+                   event: message_delta\n\
+                   data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\
+                   event: message_stop\n\
+                   data: {\"type\":\"message_stop\"}\n";
+        let response = aggregate_stream_text(raw, "anthropic");
         let case = classify_tool_probe_response(
             ToolProbeMode::Streaming,
             &response,
