@@ -5,8 +5,11 @@
 // consume these normalized rows instead of guessing at provider-specific or
 // historical JSONL shapes.
 import { read_jsonl } from "std/jsonl"
+import "std/schema"
 
 const TRANSCRIPT_ROW_SCHEMA = "harn.agent.transcript.row.v1"
+
+const TRANSCRIPT_REPORT_SCHEMA = "harn.agent.transcript.report.v1"
 
 const ERROR_MARKERS = [
   "\\berror\\b",
@@ -31,6 +34,158 @@ fn __first_text(values: list) -> string {
     }
   }
   return ""
+}
+
+fn __number_schema() {
+  return schema_union([schema_int(), schema_float()])
+}
+
+/**
+ * Schema for canonical transcript tool-call rows.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_call_schema() {
+  return schema_object(
+    {
+      id: schema_field(schema_string(), false),
+      name: schema_string(),
+      args: schema_dict(schema_any()),
+      raw: schema_field(schema_any(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __agent_transcript_usage_schema() {
+  return schema_object(
+    {
+      input_tokens: __number_schema(),
+      output_tokens: __number_schema(),
+      cache_read_tokens: __number_schema(),
+      cache_write_tokens: __number_schema(),
+      response_ms: __number_schema(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __agent_transcript_base_row_schema(kind: string, role: string, fields: dict) {
+  return schema_object(
+    {
+      schema: schema_literal(TRANSCRIPT_ROW_SCHEMA),
+      kind: schema_literal(kind),
+      role: schema_literal(role),
+      iteration: schema_int(),
+      index: schema_int(),
+      raw_type: schema_field(schema_any(), false),
+      raw: schema_field(schema_any(), false),
+    }
+      + fields,
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for canonical transcript rows produced by `agent_transcript_normalize`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_row_schema() {
+  return schema_union(
+    [
+      __agent_transcript_base_row_schema(
+        "assistant",
+        "assistant",
+        {
+          text: schema_string(),
+          tool_calls: schema_list(agent_transcript_tool_call_schema()),
+          provider: schema_field(schema_any(), false),
+          model: schema_field(schema_any(), false),
+          usage: __agent_transcript_usage_schema(),
+        },
+      ),
+      __agent_transcript_base_row_schema("user", "user", {text: schema_string()}),
+      __agent_transcript_base_row_schema(
+        "tool_result",
+        "tool",
+        {
+          name: schema_string(),
+          tool_call_id: schema_string(),
+          text: schema_string(),
+          is_error: schema_bool(),
+        },
+      ),
+    ],
+  )
+}
+
+/**
+ * Schema for tool-call event rows returned by `agent_transcript_tool_events`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_event_schema() {
+  return schema_object(
+    {
+      schema: schema_literal("harn.agent.transcript.tool_event.v1"),
+      kind: schema_literal("tool_call"),
+      iteration: schema_int(),
+      row_index: schema_int(),
+      call_index: schema_int(),
+      id: schema_string(),
+      name: schema_string(),
+      args: schema_dict(schema_any()),
+      call: agent_transcript_tool_call_schema(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for transcript diagnostic issues.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_issue_schema() {
+  return schema_object(
+    {
+      code: schema_string(),
+      message: schema_string(),
+      record_index: schema_int(),
+      details: schema_dict(schema_any()),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for `agent_transcript_normalize_report` results.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_report_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(TRANSCRIPT_REPORT_SCHEMA),
+      ok: schema_bool(),
+      rows: schema_list(agent_transcript_row_schema()),
+      issues: schema_list(agent_transcript_issue_schema()),
+      errors: schema_list(schema_string()),
+      invalid_count: schema_int(),
+    },
+    {additional_properties: schema_any()},
+  )
 }
 
 /**
@@ -82,6 +237,14 @@ fn __json_or_raw(raw) {
   return {_raw: raw}
 }
 
+fn __args_dict_or_raw(raw) {
+  let value = __json_or_raw(raw)
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {_raw: value}
+}
+
 /**
  * Return the canonical tool name for Harn, OpenAI, or legacy tool-call dicts.
  *
@@ -111,13 +274,13 @@ pub fn agent_transcript_tool_call_args(call) {
     return {}
   }
   if call?.args != nil {
-    return call.args
+    return __args_dict_or_raw(call.args)
   }
   if call?.arguments != nil {
-    return __json_or_raw(call.arguments)
+    return __args_dict_or_raw(call.arguments)
   }
   if call?.function?.arguments != nil {
-    return __json_or_raw(call.function.arguments)
+    return __args_dict_or_raw(call.function.arguments)
   }
   return {}
 }
@@ -163,6 +326,118 @@ pub fn agent_transcript_tool_calls(calls) -> list {
     }
   }
   return out
+}
+
+fn __issue(code: string, message: string, record_index: int, details = {}) -> dict {
+  return {code: code, message: message, record_index: record_index, details: details ?? {}}
+}
+
+fn __known_record_shape(record) -> bool {
+  if type_of(record) != "dict" {
+    return false
+  }
+  let record_type = record?.type
+  let role = __role(record)
+  return record_type == "response"
+    || record_type == "request"
+    || role == "assistant"
+    || role == "tool"
+    || role == "tool_result"
+    || role == "user"
+}
+
+fn __tool_call_raw_args(call) {
+  if type_of(call) != "dict" {
+    return nil
+  }
+  if call?.args != nil {
+    return call.args
+  }
+  if call?.arguments != nil {
+    return call.arguments
+  }
+  if call?.function?.arguments != nil {
+    return call.function.arguments
+  }
+  return nil
+}
+
+fn __tool_call_record_issues(record, index: int) -> list {
+  if type_of(record) != "dict" {
+    return []
+  }
+  let role = __role(record)
+  if record?.type != "response" && role != "assistant" {
+    return []
+  }
+  let calls = record?.tool_calls ?? record?.message?.tool_calls
+  if calls == nil {
+    return []
+  }
+  if type_of(calls) != "list" {
+    return [__issue("tool_calls_not_list", "assistant tool_calls must be a list", index)]
+  }
+  var issues = []
+  var call_index = 0
+  for call in calls {
+    if type_of(call) != "dict" {
+      issues = issues
+        + [__issue("tool_call_not_object", "tool call must be an object", index, {call_index: call_index})]
+      call_index = call_index + 1
+      continue
+    }
+    if agent_transcript_tool_call_name(call) == "" {
+      issues = issues
+        + [
+        __issue(
+          "tool_call_missing_name",
+          "tool call is missing a canonical name",
+          index,
+          {call_index: call_index},
+        ),
+      ]
+    }
+    let raw_args = __tool_call_raw_args(call)
+    let args = agent_transcript_tool_call_args(call)
+    if args?._raw != nil && type_of(raw_args) == "string" {
+      let parsed = try {
+        json_parse(raw_args)
+      }
+      if is_ok(parsed) {
+        issues = issues
+          + [
+          __issue(
+            "tool_call_args_not_object",
+            "tool call arguments did not normalize to an object",
+            index,
+            {call_index: call_index},
+          ),
+        ]
+      } else {
+        issues = issues
+          + [
+          __issue(
+            "tool_call_args_unparsed",
+            "tool call arguments are not valid JSON",
+            index,
+            {call_index: call_index},
+          ),
+        ]
+      }
+    } else if args?._raw != nil {
+      issues = issues
+        + [
+        __issue(
+          "tool_call_args_not_object",
+          "tool call arguments did not normalize to an object",
+          index,
+          {call_index: call_index},
+        ),
+      ]
+    }
+    call_index = call_index + 1
+  }
+  return issues
 }
 
 fn __role(record) -> string {
@@ -371,14 +646,107 @@ pub fn agent_transcript_normalize(records) -> list {
 }
 
 /**
- * Read a transcript JSONL file and normalize it to canonical rows.
+ * Normalize transcript records and return schema-backed validation diagnostics.
+ *
+ * The `rows` field is identical to `agent_transcript_normalize(records)`.
+ * Malformed or unsupported records are reported under `issues` instead of
+ * being lost as silent defaults.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
+pub fn agent_transcript_normalize_report(records) -> dict {
+  var issues = []
+  let input_records = if type_of(records) == "list" {
+    records
+  } else {
+    if records != nil {
+      issues = issues
+        + [
+        __issue("input_not_list", "transcript records must be a list", -1, {actual_type: type_of(records)}),
+      ]
+    }
+    []
+  }
+  var record_index = 0
+  for record in input_records {
+    if type_of(record) != "dict" {
+      issues = issues
+        + [
+        __issue(
+          "record_not_object",
+          "transcript record must be an object",
+          record_index,
+          {actual_type: type_of(record)},
+        ),
+      ]
+      record_index = record_index + 1
+      continue
+    }
+    if !__known_record_shape(record) {
+      issues = issues
+        + [
+        __issue(
+          "unrecognized_record",
+          "transcript record shape is not recognized",
+          record_index,
+          {record_type: record?.type, role: __role(record)},
+        ),
+      ]
+    }
+    issues = issues + __tool_call_record_issues(record, record_index)
+    record_index = record_index + 1
+  }
+  let rows = agent_transcript_normalize(input_records)
+  var errors = []
+  var row_index = 0
+  for row in rows {
+    let report = get_typed_report(row, agent_transcript_row_schema())
+    if !(report?.ok ?? false) {
+      issues = issues
+        + [
+        __issue(
+          "row_schema_invalid",
+          report?.message ?? "normalized transcript row failed schema validation",
+          row?.index ?? row_index,
+          {row_index: row_index, schema_issues: report?.issues ?? []},
+        ),
+      ]
+      errors = errors + (report?.errors ?? [])
+    }
+    row_index = row_index + 1
+  }
+  return {
+    schema: TRANSCRIPT_REPORT_SCHEMA,
+    ok: len(issues) == 0,
+    rows: rows,
+    issues: issues,
+    errors: errors,
+    invalid_count: len(issues),
+  }
+}
+
+/**
+ * Read a transcript JSONL file and normalize it to canonical rows.
+ *
+ * @effects: ["fs.read"]
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn agent_transcript_read(path: string, options = {}) -> list {
   return agent_transcript_normalize(read_jsonl(path, options ?? {}))
+}
+
+/**
+ * Read a transcript JSONL file and return normalized rows plus diagnostics.
+ *
+ * @effects: ["fs.read"]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_read_report(path: string, options = {}) -> dict {
+  return agent_transcript_normalize_report(read_jsonl(path, options ?? {}))
 }
 
 /**
