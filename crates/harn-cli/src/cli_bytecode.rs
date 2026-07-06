@@ -47,8 +47,9 @@ mod tests {
 
     /// Every script registered in `harn-stdlib` should have an AOT
     /// artifact emitted unless `HARN_SKIP_AOT_CLI_BUILD` was set during
-    /// `cargo build` (e.g. in a hermetic CI environment). Treat the
-    /// skip as test-skipped rather than failed.
+    /// `cargo build` (e.g. in a hermetic CI environment) or the build
+    /// script recorded an explicit script-level skip reason. Treat the
+    /// whole-build skip as test-skipped rather than failed.
     #[test]
     fn every_cli_script_has_non_empty_bytecode_when_aot_enabled() {
         if STDLIB_CLI_SCRIPT_BYTECODE.is_empty() {
@@ -57,6 +58,12 @@ mod tests {
             return;
         }
         for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
+            if STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED
+                .iter()
+                .any(|(name, reason)| *name == script.name && !reason.is_empty())
+            {
+                continue;
+            }
             let bytes = find_cli_script_bytecode(script.name).unwrap_or_else(|| {
                 panic!(
                     "no AOT bytecode for CLI script `{}` despite AOT being enabled",

@@ -20,6 +20,7 @@ pipeline default(task) {
   let path = "src/lib/utils/lib.rs"
   __io_println(path.index_of("lib"))
   __io_println(path.last_index_of("lib"))
+  __io_println(path.rfind("lib"))
   // len method (on string)
   __io_println("cafe".len())
 }

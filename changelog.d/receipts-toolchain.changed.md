@@ -7,3 +7,5 @@
   `harness.fs.mkdtemp_in_workspace(prefix?)` let sandboxed workflows create
   intermediate files inside the active workspace instead of escaping to host
   temp paths.
+- **String scanning ergonomics.** `string.rfind(substr)` is now a typed alias
+  for `string.last_index_of(substr)`.

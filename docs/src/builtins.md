@@ -427,6 +427,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `.char_at(index)` | index: int | string or nil | Character at index (nil if out of bounds) |
 | `.index_of(substr)` | substr: string | int | First character offset of substring (-1 if not found) |
 | `.last_index_of(substr)` | substr: string | int | Last character offset of substring (-1 if not found) |
+| `.rfind(substr)` | substr: string | int | Alias for `.last_index_of(substr)` |
 | `.lower()` / `.to_lower()` | none | string | Lowercase string |
 | `.len()` | none | int | Character count |
 | `.upper()` / `.to_upper()` | none | string | Uppercase string |
