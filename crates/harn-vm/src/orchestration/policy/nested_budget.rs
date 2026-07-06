@@ -15,7 +15,7 @@
 //! child execution, audited consistently, and the error surface is
 //! uniform.
 
-use super::CapabilityPolicy;
+use super::{CapabilityPolicy, SandboxProfile};
 use crate::events::log_debug_meta;
 use crate::orchestration::{current_execution_policy, pop_execution_policy, push_execution_policy};
 use crate::value::{ErrorCategory, VmError, VmValue};
@@ -109,11 +109,11 @@ impl Drop for NestedExecutionGuard {
 /// workspace ceiling the parent had established (e.g., a workflow
 /// stage's restrictive `CapabilityPolicy`) so the child agent's own
 /// `llm_call` and infrastructure builtins continue to see the parent's
-/// restrictions. When there is no parent on the stack, the carrier is
-/// built from `CapabilityPolicy::default()` (empty ceilings) plus the
-/// budget — which is the right thing for a top-level `agent_loop`
-/// whose options.policy scopes its tools but should not gate its own
-/// LLM turn.
+/// restrictions. When there is no parent on the stack, a top-level
+/// `agent_loop` still installs an empty-ceiling `os_hardened` carrier
+/// so its subprocess tools require OS confinement by default; other
+/// top-level nested surfaces keep the historical no-carrier behavior
+/// unless a recursion budget is requested.
 ///
 /// The agent's own `options.policy` (with tool / capability / etc.
 /// ceilings) is intentionally *not* installed by this helper; that
@@ -146,9 +146,16 @@ pub fn enter_nested_execution_policy(
 
     emit_descent_event(kind, label, parent_limit, child_limit, false);
 
-    let pushed = if let Some(limit) = child_limit {
-        let mut carrier = parent.unwrap_or_default();
-        carrier.recursion_limit = Some(limit);
+    let top_level_agent_loop = parent.is_none() && matches!(kind, NestedExecutionKind::AgentLoop);
+    let pushed = if child_limit.is_some() || top_level_agent_loop {
+        let mut carrier = parent.unwrap_or_else(|| {
+            if top_level_agent_loop {
+                top_level_agent_loop_policy()
+            } else {
+                CapabilityPolicy::default()
+            }
+        });
+        carrier.recursion_limit = child_limit;
         push_execution_policy(carrier);
         true
     } else {
@@ -162,6 +169,13 @@ pub fn enter_nested_execution_policy(
         kind,
         label: label.to_string(),
     })
+}
+
+fn top_level_agent_loop_policy() -> CapabilityPolicy {
+    CapabilityPolicy {
+        sandbox_profile: SandboxProfile::OsHardened,
+        ..CapabilityPolicy::default()
+    }
 }
 
 /// Tag an `agent_loop` options dict with the nested-execution kind and
@@ -263,6 +277,10 @@ mod tests {
         assert_eq!(guard.parent_limit, None);
         assert_eq!(guard.child_limit, Some(3));
         assert_eq!(current_execution_policy().unwrap().recursion_limit, Some(3));
+        assert_eq!(
+            current_execution_policy().unwrap().sandbox_profile,
+            crate::orchestration::SandboxProfile::OsHardened
+        );
         drop(guard);
         assert!(current_execution_policy().is_none());
     }
@@ -368,6 +386,24 @@ mod tests {
     }
 
     #[test]
+    fn top_level_agent_loop_pushes_os_hardened_carrier_without_budget() {
+        clear_execution_policy_stacks();
+        let guard =
+            enter_nested_execution_policy(None, NestedExecutionKind::AgentLoop, "session-secure")
+                .unwrap();
+        let pushed = current_execution_policy().unwrap();
+        assert_eq!(pushed.recursion_limit, None);
+        assert_eq!(
+            pushed.sandbox_profile,
+            crate::orchestration::SandboxProfile::OsHardened
+        );
+        assert!(pushed.tools.is_empty());
+        assert!(pushed.capabilities.is_empty());
+        drop(guard);
+        assert!(current_execution_policy().is_none());
+    }
+
+    #[test]
     fn top_level_carrier_does_not_propagate_requested_tools_or_capabilities() {
         // Regression: at the top level (no parent on stack), the carrier
         // intentionally exposes only the budget to subsequent stack
@@ -394,6 +430,10 @@ mod tests {
         .unwrap();
         let pushed = current_execution_policy().unwrap();
         assert_eq!(pushed.recursion_limit, Some(4));
+        assert_eq!(
+            pushed.sandbox_profile,
+            crate::orchestration::SandboxProfile::OsHardened
+        );
         assert!(pushed.tools.is_empty());
         assert!(pushed.capabilities.is_empty());
         assert!(pushed.side_effect_level.is_none());

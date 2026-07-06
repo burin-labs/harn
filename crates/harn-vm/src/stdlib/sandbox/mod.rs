@@ -7,7 +7,7 @@
 //! how to attach the active capability ceiling to the spawn:
 //!
 //! * **Linux** ([`linux::Backend`]): Landlock LSM filesystem scoping
-//!   plus a default-deny seccomp-bpf syscall blocklist installed via
+//!   plus a default-deny seccomp-bpf syscall allowlist installed via
 //!   `pre_exec`, gated behind `PR_SET_NO_NEW_PRIVS`.
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
