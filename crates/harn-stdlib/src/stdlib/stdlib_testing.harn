@@ -166,6 +166,13 @@ pub fn assert_no_host_calls(message = nil) {
 /**
  * Apply a single host-mock fixture entry. Each entry is a dict with:
  *   { capability, operation, result?, error?, params? }
+ *
+ * Hostlib builtins that take a request dict also honor the same mock registry
+ * by module/method, for example `{capability: "tools", operation:
+ * "run_command"}` for `hostlib_tools_run_command(...)`. During the
+ * process-exec migration, `hostlib_tools_run_command` also accepts existing
+ * `{capability: "process", operation: "exec"}` mocks when params match.
+ *
  * `error` (string) takes precedence over `result` so an entry may
  * either mock a successful response or an exception, never both.
  */

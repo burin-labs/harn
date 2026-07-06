@@ -393,6 +393,32 @@ pub(crate) fn dispatch_mock_host_call(
     Some(Ok(matched.result.unwrap_or(VmValue::Nil)))
 }
 
+/// Dispatch a hostlib builtin through the same scoped mock registry used by
+/// `host_call`.
+///
+/// Hostlib builtins are addressed by their schema module/method pair, so a test
+/// can mock `hostlib_tools_run_command(...)` with
+/// `{capability: "tools", operation: "run_command", ...}`. During the
+/// `process.exec` -> hostlib `run_command` migration we also honor existing
+/// `{capability: "process", operation: "exec", ...}` command mocks after the
+/// canonical `tools.run_command` lookup, preserving last-write-wins within each
+/// mock lane and giving explicit hostlib mocks precedence.
+pub fn dispatch_mock_hostlib_call(
+    module: &str,
+    method: &str,
+    params: &crate::value::DictMap,
+) -> Option<Result<VmValue, VmError>> {
+    if let Some(mocked) = dispatch_mock_host_call(module, method, params) {
+        return Some(mocked);
+    }
+
+    if (module, method) == ("tools", "run_command") {
+        return dispatch_mock_host_call("process", "exec", params);
+    }
+
+    None
+}
+
 /// Embedder-supplied bridge for `host_call` ops.
 ///
 /// Embedders (debug adapters, CLIs, IDE hosts) implement this trait to
@@ -1298,8 +1324,8 @@ mod tests {
     use super::{
         build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
         dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
-        dispatch_mock_host_call, push_host_mock, reset_host_state, resolve_process_exec_cwd,
-        set_host_call_bridge, HostCallBridge, HostMock,
+        dispatch_mock_host_call, dispatch_mock_hostlib_call, push_host_mock, reset_host_state,
+        resolve_process_exec_cwd, set_host_call_bridge, HostCallBridge, HostMock,
     };
     use crate::value::VmDictExt;
 
@@ -1520,6 +1546,103 @@ mod tests {
             Err(VmError::Thrown(VmValue::String(message))) => assert_eq!(message.as_str(), "boom"),
             other => panic!("unexpected result: {other:?}"),
         }
+        reset_host_state();
+    }
+
+    #[test]
+    fn hostlib_mock_dispatch_matches_module_method_and_params() {
+        reset_host_state();
+        let mut mock_params = crate::value::DictMap::new();
+        mock_params.put(
+            "argv",
+            VmValue::List(Arc::new(vec![VmValue::string("echo")])),
+        );
+        push_host_mock(HostMock {
+            capability: "tools".to_string(),
+            operation: "run_command".to_string(),
+            params: Some(mock_params),
+            result: Some(VmValue::String(arcstr::ArcStr::from("direct"))),
+            error: None,
+        });
+
+        let mut call_params = crate::value::DictMap::new();
+        call_params.put(
+            "argv",
+            VmValue::List(Arc::new(vec![VmValue::string("echo")])),
+        );
+        call_params.put_str("cwd", "/tmp/not-used");
+        let value = dispatch_mock_hostlib_call("tools", "run_command", &call_params)
+            .expect("expected hostlib mock")
+            .expect("hostlib mock should succeed");
+        assert_eq!(value.display(), "direct");
+        reset_host_state();
+    }
+
+    #[test]
+    fn hostlib_run_command_falls_back_to_process_exec_mocks() {
+        reset_host_state();
+        let mut mock_params = crate::value::DictMap::new();
+        mock_params.put(
+            "argv",
+            VmValue::List(Arc::new(vec![
+                VmValue::string("cargo"),
+                VmValue::string("test"),
+            ])),
+        );
+        push_host_mock(HostMock {
+            capability: "process".to_string(),
+            operation: "exec".to_string(),
+            params: Some(mock_params),
+            result: Some(VmValue::String(arcstr::ArcStr::from("legacy"))),
+            error: None,
+        });
+
+        let mut call_params = crate::value::DictMap::new();
+        call_params.put(
+            "argv",
+            VmValue::List(Arc::new(vec![
+                VmValue::string("cargo"),
+                VmValue::string("test"),
+            ])),
+        );
+        call_params.put_str("cwd", "/tmp/not-used");
+        let value = dispatch_mock_hostlib_call("tools", "run_command", &call_params)
+            .expect("expected legacy process.exec mock")
+            .expect("legacy mock should succeed");
+        assert_eq!(value.display(), "legacy");
+        reset_host_state();
+    }
+
+    #[test]
+    fn hostlib_run_command_prefers_exact_mock_over_process_exec_alias() {
+        reset_host_state();
+        let mut params = crate::value::DictMap::new();
+        params.put(
+            "argv",
+            VmValue::List(Arc::new(vec![
+                VmValue::string("npm"),
+                VmValue::string("test"),
+            ])),
+        );
+        push_host_mock(HostMock {
+            capability: "process".to_string(),
+            operation: "exec".to_string(),
+            params: Some(params.clone()),
+            result: Some(VmValue::String(arcstr::ArcStr::from("legacy"))),
+            error: None,
+        });
+        push_host_mock(HostMock {
+            capability: "tools".to_string(),
+            operation: "run_command".to_string(),
+            params: Some(params.clone()),
+            result: Some(VmValue::String(arcstr::ArcStr::from("direct"))),
+            error: None,
+        });
+
+        let value = dispatch_mock_hostlib_call("tools", "run_command", &params)
+            .expect("expected exact hostlib mock")
+            .expect("exact mock should succeed");
+        assert_eq!(value.display(), "direct");
         reset_host_state();
     }
 

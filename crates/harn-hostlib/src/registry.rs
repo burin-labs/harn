@@ -183,10 +183,19 @@ impl HostlibRegistry {
     /// Wire every registered builtin into the supplied VM.
     pub fn register_into_vm(&mut self, vm: &mut Vm) {
         for builtin in self.builtins.iter().cloned() {
+            let module = builtin.module;
+            let method = builtin.method;
             let handler = builtin.handler.clone();
             vm.register_builtin(
                 builtin.name,
                 move |args, _out| -> Result<VmValue, VmError> {
+                    if let Some(params) = args.first().and_then(VmValue::as_dict) {
+                        if let Some(mocked) = harn_vm::stdlib::host::dispatch_mock_hostlib_call(
+                            module, method, params,
+                        ) {
+                            return mocked;
+                        }
+                    }
                     handler(args).map_err(VmError::from)
                 },
             );
