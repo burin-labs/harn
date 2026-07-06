@@ -722,7 +722,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: stable
-          targets: x86_64-pc-windows-gnu
+      - name: Add windows-gnu target to the repo-pinned toolchain
+        # rust-toolchain.toml pins a specific channel (e.g. 1.95.0), and cargo
+        # respects that override in-repo — NOT the `stable` the action installs.
+        # So the cross target must be added to the PINNED toolchain (rustup reads
+        # the override from the working directory here), otherwise cargo check
+        # fails with `can't find crate for core`. Do not pass the target via the
+        # toolchain action's `targets:` — that adds it to the wrong toolchain.
+        run: rustup target add x86_64-pc-windows-gnu
       - name: Install mingw-w64 cross toolchain
         run: |
           sudo apt-get update
