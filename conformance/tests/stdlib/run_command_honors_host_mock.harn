@@ -1,0 +1,39 @@
+/**
+ * run_command (std/command → hostlib run_command builtin) honors host mocks.
+ *
+ * The hostlib run_command builtin now consults host mocks before spawning:
+ * a `("process", "run_command")` mock matches directly, and a legacy
+ * `("process", "exec")` mock matches as a fallback — so suites that mock the
+ * process.exec host-call seam transparently cover commands routed through
+ * hostlib without being rewritten.
+ */
+import { command_run } from "std/command"
+import { clear_host_mocks, mock_host_result } from "std/testing"
+
+pipeline run_command_honors_run_command_mock() {
+  clear_host_mocks()
+  let _ = mock_host_result(
+    "process",
+    "run_command",
+    {stdout: "MOCKED-RUN-COMMAND\n", stderr: "", exit_code: 0},
+    nil,
+  )
+  let result = command_run({mode: "shell", command: "echo this-would-print-if-not-mocked"})
+  require trim(result.stdout) == "MOCKED-RUN-COMMAND", "command_run should return the run_command host mock, not spawn"
+  clear_host_mocks()
+  __io_println("run_command mock ok")
+}
+
+pipeline run_command_falls_back_to_process_exec_mock() {
+  clear_host_mocks()
+  let _ = mock_host_result(
+    "process",
+    "exec",
+    {stdout: "MOCKED-VIA-PROCESS-EXEC\n", stderr: "", exit_code: 0},
+    nil,
+  )
+  let result = command_run({mode: "shell", command: "echo this-would-print-if-not-mocked"})
+  require trim(result.stdout) == "MOCKED-VIA-PROCESS-EXEC", "command_run should fall back to the legacy process.exec host mock"
+  clear_host_mocks()
+  __io_println("process.exec fallback ok")
+}

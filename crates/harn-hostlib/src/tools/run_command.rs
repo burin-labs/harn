@@ -33,6 +33,18 @@ pub(crate) const NAME: &str = "hostlib_tools_run_command";
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let map = require_dict_arg(NAME, args)?;
+    // Deterministic test mocking: if a host mock is registered for this command
+    // execution — either the `("process", "run_command")` op or the legacy
+    // `("process", "exec")` seam — return it instead of spawning. This lets
+    // embedders mock hostlib-routed commands the same way they mock
+    // `host_call("process", "exec")`, so suites do not need rewriting when
+    // command execution routes through hostlib.
+    if let Some(result) = harn_vm::consult_command_execution_mock(&map) {
+        return result.map_err(|err| HostlibError::Backend {
+            builtin: NAME,
+            message: format!("mocked command execution error: {err:?}"),
+        });
+    }
     let (program, args_tail) = parse_command(&map)?;
     let cwd_raw = optional_string(NAME, &map, "cwd")?;
     let cwd = proc::parse_cwd(NAME, cwd_raw.as_deref())?;

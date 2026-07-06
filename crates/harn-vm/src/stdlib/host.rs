@@ -393,6 +393,23 @@ pub(crate) fn dispatch_mock_host_call(
     Some(Ok(matched.result.unwrap_or(VmValue::Nil)))
 }
 
+/// Consult host mocks for a hostlib command execution (the `run_command`
+/// builtin), so command runs are deterministically mockable in tests the same
+/// way `host_call("process", "exec")` already is.
+///
+/// Matches a `("process", "run_command")` mock first, then falls back to a
+/// `("process", "exec")` mock. The fallback is deliberate: embedders whose test
+/// suites mock the legacy `process.exec` host-call seam transparently cover
+/// commands that now route through hostlib `run_command`, without rewriting
+/// every test. Returns `None` when no mock matches (the caller then spawns for
+/// real). Records the matched call for `host_mock_calls()` assertions.
+pub fn consult_command_execution_mock(
+    params: &crate::value::DictMap,
+) -> Option<Result<VmValue, VmError>> {
+    dispatch_mock_host_call("process", "run_command", params)
+        .or_else(|| dispatch_mock_host_call("process", "exec", params))
+}
+
 /// Embedder-supplied bridge for `host_call` ops.
 ///
 /// Embedders (debug adapters, CLIs, IDE hosts) implement this trait to

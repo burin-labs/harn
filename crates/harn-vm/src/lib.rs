@@ -301,7 +301,9 @@ pub use stdlib::hitl::{
     append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
     HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
-pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
+pub use stdlib::host::{
+    clear_host_call_bridge, consult_command_execution_mock, set_host_call_bridge, HostCallBridge,
+};
 pub use stdlib::http_response::{
     parse_envelope as parse_http_envelope, HttpEnvelope, HttpHeaderValue, WsUpgradeSpec,
     HTTP_RESPONSE_TAG_KEY, HTTP_RESPONSE_TAG_VERSION,
