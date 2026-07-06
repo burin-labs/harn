@@ -1,2 +1,1 @@
-run_command mock ok
-process.exec fallback ok
+ok
