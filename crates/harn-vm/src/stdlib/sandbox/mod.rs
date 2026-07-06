@@ -7,7 +7,7 @@
 //! how to attach the active capability ceiling to the spawn:
 //!
 //! * **Linux** ([`linux::Backend`]): Landlock LSM filesystem scoping
-//!   plus a default-deny seccomp-bpf syscall blocklist installed via
+//!   plus a default-deny seccomp-bpf syscall allowlist installed via
 //!   `pre_exec`, gated behind `PR_SET_NO_NEW_PRIVS`.
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
@@ -77,6 +77,24 @@ pub struct ProcessCommandConfig {
     pub cwd: Option<PathBuf>,
     pub env: Vec<(String, String)>,
     pub stdin_null: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProcessSandboxScope {
+    pub workspace_roots: Vec<String>,
+}
+
+#[must_use]
+pub struct ProcessSandboxScopeGuard {
+    pushed: bool,
+}
+
+impl Drop for ProcessSandboxScopeGuard {
+    fn drop(&mut self) {
+        if self.pushed {
+            crate::orchestration::pop_execution_policy();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -875,6 +893,68 @@ pub fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
         return Ok(());
     };
     enforce_process_cwd_for_policy(path, &policy)
+}
+
+pub fn push_process_sandbox_scope(
+    scope: ProcessSandboxScope,
+) -> Result<ProcessSandboxScopeGuard, VmError> {
+    let Some(mut policy) = crate::orchestration::current_execution_policy() else {
+        return Ok(ProcessSandboxScopeGuard { pushed: false });
+    };
+    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+        return Ok(ProcessSandboxScopeGuard { pushed: false });
+    }
+
+    let requested_roots: Vec<PathBuf> = scope
+        .workspace_roots
+        .iter()
+        .filter_map(|root| {
+            let trimmed = root.trim();
+            (!trimmed.is_empty()).then(|| normalize_for_policy(&resolve_policy_path(trimmed)))
+        })
+        .collect();
+    if requested_roots.is_empty() {
+        return Ok(ProcessSandboxScopeGuard { pushed: false });
+    }
+
+    if !policy.workspace_roots.is_empty() {
+        let ceiling_roots = normalized_workspace_roots(&policy);
+        if let Some(rejected) = requested_roots.iter().find(|root| {
+            !ceiling_roots
+                .iter()
+                .any(|ceiling| path_is_within(root, ceiling))
+        }) {
+            return Err(sandbox_rejection(format!(
+                "sandbox violation: process sandbox workspace root '{}' is outside workspace_roots [{}]",
+                rejected.display(),
+                ceiling_roots
+                    .iter()
+                    .map(|root| root.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+    }
+
+    let mut merged_roots = if policy.workspace_roots.is_empty() {
+        Vec::new()
+    } else {
+        normalized_workspace_roots(&policy)
+    };
+    for requested in requested_roots {
+        if !merged_roots
+            .iter()
+            .any(|existing| path_is_within(&requested, existing))
+        {
+            merged_roots.push(requested);
+        }
+    }
+    policy.workspace_roots = merged_roots
+        .into_iter()
+        .map(|root| root.display().to_string())
+        .collect();
+    crate::orchestration::push_execution_policy(policy);
+    Ok(ProcessSandboxScopeGuard { pushed: true })
 }
 
 fn enforce_process_cwd_for_policy(path: &Path, policy: &CapabilityPolicy) -> Result<(), VmError> {
@@ -1975,6 +2055,89 @@ mod tests {
 
         pop_execution_policy();
         crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    #[test]
+    fn scoped_process_sandbox_roots_concretize_empty_policy_for_command_cwd() {
+        let _env_lock = crate::runtime_paths::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::env::remove_var("HARN_PROJECT_ROOT");
+        let execution_root = tempfile::tempdir().unwrap();
+        let command_root = tempfile::tempdir().unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(execution_root.path().to_string_lossy().into_owned()),
+                source_dir: None,
+                env: Default::default(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+            },
+        ));
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            ..CapabilityPolicy::default()
+        });
+
+        assert!(
+            enforce_process_cwd(command_root.path()).is_err(),
+            "before the scoped overlay the command temp root is outside the execution-root fallback",
+        );
+        {
+            let _guard = push_process_sandbox_scope(ProcessSandboxScope {
+                workspace_roots: vec![command_root.path().to_string_lossy().into_owned()],
+            })
+            .unwrap();
+            assert!(
+                enforce_process_cwd(command_root.path()).is_ok(),
+                "scoped command root must be usable as the process cwd"
+            );
+            assert!(
+                enforce_process_cwd(execution_root.path()).is_err(),
+                "the scoped root must narrow the concrete spawn jail instead of widening it"
+            );
+        }
+        assert!(
+            enforce_process_cwd(command_root.path()).is_err(),
+            "the scoped command root must pop after the command spawn"
+        );
+
+        pop_execution_policy();
+        crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    #[test]
+    fn scoped_process_sandbox_roots_cannot_widen_explicit_workspace_roots() {
+        let workspace = tempfile::tempdir().unwrap();
+        let inside = workspace.path().join("subdir");
+        std::fs::create_dir(&inside).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+
+        assert!(
+            push_process_sandbox_scope(ProcessSandboxScope {
+                workspace_roots: vec![inside.to_string_lossy().into_owned()],
+            })
+            .is_ok(),
+            "a command subroot inside the explicit workspace ceiling is allowed"
+        );
+        assert!(
+            push_process_sandbox_scope(ProcessSandboxScope {
+                workspace_roots: vec![outside.path().to_string_lossy().into_owned()],
+            })
+            .is_err(),
+            "a command root outside the explicit workspace ceiling must be rejected"
+        );
+
+        pop_execution_policy();
     }
 
     #[cfg(unix)]

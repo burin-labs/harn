@@ -29,6 +29,12 @@ default.
 | `os_hardened` | required | **required** | spawn returns `tool_rejected` if the platform mechanism is missing or rejects the call, regardless of `HARN_HANDLER_SANDBOX` |
 | `wasi` | enforced by the WASI runtime | enforced by the WASI runtime | testbench-only; the host spawn path is never reached |
 
+Top-level `agent_loop` sessions install an empty-ceiling `os_hardened`
+carrier by default, so agent subprocess tools require the OS sandbox
+even when the caller did not pass an explicit capability policy. Direct
+scripts and process calls keep the `worktree` default unless their
+caller selects a stricter profile.
+
 The strictness ladder is `unrestricted < worktree < wasi <
 os_hardened`. `CapabilityPolicy::intersect` always picks the strictest
 of the two profiles when a parent ceiling is composed with a child
@@ -250,8 +256,8 @@ small, named kernel feature, never an open-ended escape hatch.
 | `process_sandbox.presets` includes `package_manager_config` | Landlock read-only rules for existing npm, pip, cargo, git, and CA config/cache roots under `$HOME` | package managers can resolve real per-user config without granting Harn file builtin access or write rights |
 | `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when workspace writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
 | standard process devices | Landlock grants read/write on `/dev/null` and read-only access on `/dev/zero`, `/dev/random`, and `/dev/urandom`; ABI ≥ 5 also handles `_IOCTL_DEV` but does not grant it to these device rules | language runtimes and test harnesses can open the devices they normally need without broad `/dev` access or device ioctl rights |
-| `side_effect_level < network` | seccomp-bpf blocklist on `socket`, `connect`, `accept`, `accept4`, `bind`, `listen`, `sendto`, `sendmsg`, `recvfrom`, `recvmsg` (return `EPERM`). `socketpair` is intentionally **allowed**: it creates an anonymous, unaddressable, connected `AF_UNIX` pair with no route off-host, so it cannot exfiltrate, and build tools need it for local IPC (e.g. Cargo's `socketpair`-backed jobserver, without which `cargo build`/`cargo test` cannot spawn `rustc`) | addressable-socket / egress syscalls fail without taking down the process, while purely local IPC keeps working |
-| always | seccomp-bpf blocklist on `bpf`, `mount`, `umount2`, `init_module`, `delete_module`, `finit_module`, `kexec_*`, `ptrace`, `process_vm_readv`/`process_vm_writev`, `perf_event_open`, `swapon`/`swapoff`, `reboot`, `userfaultfd`, `fanotify_init`, `open_by_handle_at` (return `EPERM`) | tier-1 dangerous syscalls are denied unconditionally |
+| `side_effect_level < network` | seccomp-bpf allowlist excludes addressable socket openers: `socket`, `connect`, `accept`, `accept4`, `bind`, `listen`. `socketpair`, `sendto`, `sendmsg`, `recvfrom`, and `recvmsg` stay allowlisted for inherited anonymous local IPC | addressable-socket / egress syscalls fail with `EPERM`, while local IPC keeps working |
+| always | seccomp-bpf default-deny allowlist omits tier-1 dangerous syscalls including `bpf`, mount/module/kexec/sysctl families, `ptrace`, `process_vm_readv`/`process_vm_writev`, `io_uring_*`, `perf_event_open`, `userfaultfd`, `fanotify_init`, and `open_by_handle_at` | unknown and dangerous syscalls fail with `EPERM` |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
 
 The Landlock ruleset is built lazily from `landlock_abi_version()`:

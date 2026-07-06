@@ -1,5 +1,5 @@
 //! Linux sandbox backend — Landlock LSM filesystem scoping plus
-//! seccomp-bpf syscall blocklist installed via `pre_exec`.
+//! seccomp-bpf syscall allowlisting installed via `pre_exec`.
 //!
 //! See `docs/src/sandboxing.md` for the capability → kernel-knob
 //! mapping table.
@@ -72,7 +72,7 @@ impl SandboxBackend for Backend {
 
 struct ProcessProfile {
     landlock: Option<LandlockProfile>,
-    denied_syscalls: Vec<libc::c_long>,
+    allowed_syscalls: Vec<libc::c_long>,
 }
 
 struct LandlockProfile {
@@ -104,15 +104,17 @@ fn profile_setup(
     // than racing the pre_exec callback.
     Ok(ProcessProfile {
         landlock: landlock_profile(policy, profile)?,
-        denied_syscalls: denied_syscalls(policy),
+        allowed_syscalls: allowed_syscalls(policy),
     })
 }
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
-    install_seccomp_filter(&profile.denied_syscalls)?;
     if let Some(landlock) = &profile.landlock {
         install_landlock_ruleset(landlock)?;
     }
+    // Once seccomp is default-deny, the child should not retain sandbox-setup
+    // powers. Install Landlock first, then drop to the runtime syscall ceiling.
+    install_seccomp_filter(&profile.allowed_syscalls)?;
     Ok(())
 }
 
@@ -308,33 +310,13 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
     Ok(())
 }
 
-fn install_seccomp_filter(denied_syscalls: &[libc::c_long]) -> io::Result<()> {
+fn install_seccomp_filter(allowed_syscalls: &[libc::c_long]) -> io::Result<()> {
     unsafe {
         if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
             return Err(io::Error::last_os_error());
         }
     }
-    let mut filter = Vec::with_capacity(denied_syscalls.len() * 2 + 1);
-    filter.push(bpf_stmt(
-        (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
-        0,
-    ));
-    for syscall in denied_syscalls {
-        filter.push(bpf_jump(
-            (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
-            *syscall as u32,
-            0,
-            1,
-        ));
-        filter.push(bpf_stmt(
-            (libc::BPF_RET | libc::BPF_K) as u16,
-            libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
-        ));
-    }
-    filter.push(bpf_stmt(
-        (libc::BPF_RET | libc::BPF_K) as u16,
-        libc::SECCOMP_RET_ALLOW,
-    ));
+    let mut filter = seccomp_allowlist_filter(allowed_syscalls);
     let mut program = libc::sock_fprog {
         len: filter.len() as u16,
         filter: filter.as_mut_ptr(),
@@ -354,6 +336,31 @@ fn install_seccomp_filter(denied_syscalls: &[libc::c_long]) -> io::Result<()> {
     Ok(())
 }
 
+fn seccomp_allowlist_filter(allowed_syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
+    let mut filter = Vec::with_capacity(allowed_syscalls.len() * 2 + 2);
+    filter.push(bpf_stmt(
+        (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+        0,
+    ));
+    for syscall in allowed_syscalls {
+        filter.push(bpf_jump(
+            (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+            *syscall as u32,
+            0,
+            1,
+        ));
+        filter.push(bpf_stmt(
+            (libc::BPF_RET | libc::BPF_K) as u16,
+            libc::SECCOMP_RET_ALLOW,
+        ));
+    }
+    filter.push(bpf_stmt(
+        (libc::BPF_RET | libc::BPF_K) as u16,
+        libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
+    ));
+    filter
+}
+
 fn bpf_stmt(code: u16, k: u32) -> libc::sock_filter {
     libc::sock_filter {
         code,
@@ -367,55 +374,234 @@ fn bpf_jump(code: u16, k: u32, jt: u8, jf: u8) -> libc::sock_filter {
     libc::sock_filter { code, jt, jf, k }
 }
 
-fn denied_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
+fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
     let mut syscalls = vec![
-        libc::SYS_bpf,
-        libc::SYS_delete_module,
-        libc::SYS_fanotify_init,
-        libc::SYS_finit_module,
-        libc::SYS_init_module,
-        libc::SYS_kexec_file_load,
-        libc::SYS_kexec_load,
-        libc::SYS_mount,
-        libc::SYS_open_by_handle_at,
-        libc::SYS_perf_event_open,
-        libc::SYS_process_vm_readv,
-        libc::SYS_process_vm_writev,
-        libc::SYS_ptrace,
-        libc::SYS_reboot,
-        libc::SYS_swapon,
-        libc::SYS_swapoff,
-        libc::SYS_umount2,
-        libc::SYS_userfaultfd,
+        libc::SYS_brk,
+        libc::SYS_capget,
+        libc::SYS_chdir,
+        libc::SYS_clock_getres,
+        libc::SYS_clock_gettime,
+        libc::SYS_clock_nanosleep,
+        libc::SYS_clone,
+        libc::SYS_clone3,
+        libc::SYS_close,
+        libc::SYS_close_range,
+        libc::SYS_copy_file_range,
+        libc::SYS_dup,
+        libc::SYS_dup3,
+        libc::SYS_epoll_create1,
+        libc::SYS_epoll_ctl,
+        libc::SYS_epoll_pwait,
+        libc::SYS_epoll_pwait2,
+        libc::SYS_eventfd2,
+        libc::SYS_execve,
+        libc::SYS_execveat,
+        libc::SYS_exit,
+        libc::SYS_exit_group,
+        libc::SYS_faccessat,
+        libc::SYS_faccessat2,
+        libc::SYS_fallocate,
+        libc::SYS_fchdir,
+        libc::SYS_fchmod,
+        libc::SYS_fchmodat,
+        libc::SYS_fchown,
+        libc::SYS_fchownat,
+        libc::SYS_fcntl,
+        libc::SYS_fdatasync,
+        libc::SYS_fgetxattr,
+        libc::SYS_flistxattr,
+        libc::SYS_flock,
+        libc::SYS_fremovexattr,
+        libc::SYS_fsetxattr,
+        libc::SYS_fstat,
+        libc::SYS_fstatfs,
+        libc::SYS_fsync,
+        libc::SYS_ftruncate,
+        libc::SYS_futex,
+        libc::SYS_futex_waitv,
+        libc::SYS_get_robust_list,
+        libc::SYS_getcpu,
+        libc::SYS_getcwd,
+        libc::SYS_getdents64,
+        libc::SYS_getegid,
+        libc::SYS_geteuid,
+        libc::SYS_getgid,
+        libc::SYS_getgroups,
+        libc::SYS_getitimer,
+        libc::SYS_getpeername,
+        libc::SYS_getpgid,
+        libc::SYS_getpid,
+        libc::SYS_getppid,
+        libc::SYS_getpriority,
+        libc::SYS_getrandom,
+        libc::SYS_getresgid,
+        libc::SYS_getresuid,
+        libc::SYS_getrusage,
+        libc::SYS_getsid,
+        libc::SYS_getsockname,
+        libc::SYS_getsockopt,
+        libc::SYS_gettid,
+        libc::SYS_gettimeofday,
+        libc::SYS_getuid,
+        libc::SYS_getxattr,
+        libc::SYS_inotify_add_watch,
+        libc::SYS_inotify_init1,
+        libc::SYS_inotify_rm_watch,
+        libc::SYS_ioctl,
+        libc::SYS_kill,
+        libc::SYS_linkat,
+        libc::SYS_listxattr,
+        libc::SYS_llistxattr,
+        libc::SYS_lremovexattr,
+        libc::SYS_lseek,
+        libc::SYS_lsetxattr,
+        libc::SYS_lgetxattr,
+        libc::SYS_madvise,
+        libc::SYS_membarrier,
+        libc::SYS_memfd_create,
+        libc::SYS_mincore,
+        libc::SYS_mkdirat,
+        libc::SYS_mknodat,
+        libc::SYS_mlock,
+        libc::SYS_mlock2,
+        libc::SYS_mmap,
+        libc::SYS_mprotect,
+        libc::SYS_mremap,
+        libc::SYS_msync,
+        libc::SYS_munlock,
+        libc::SYS_munmap,
+        libc::SYS_nanosleep,
+        libc::SYS_newfstatat,
+        libc::SYS_openat,
+        libc::SYS_openat2,
+        libc::SYS_pipe2,
+        libc::SYS_pidfd_open,
+        libc::SYS_pidfd_send_signal,
+        libc::SYS_ppoll,
+        libc::SYS_prctl,
+        libc::SYS_pread64,
+        libc::SYS_preadv,
+        libc::SYS_preadv2,
+        libc::SYS_prlimit64,
+        libc::SYS_pselect6,
+        libc::SYS_pwrite64,
+        libc::SYS_pwritev,
+        libc::SYS_pwritev2,
+        libc::SYS_read,
+        libc::SYS_readahead,
+        libc::SYS_readlinkat,
+        libc::SYS_readv,
+        libc::SYS_recvfrom,
+        libc::SYS_recvmmsg,
+        libc::SYS_recvmsg,
+        libc::SYS_removexattr,
+        libc::SYS_renameat2,
+        libc::SYS_restart_syscall,
+        libc::SYS_rseq,
+        libc::SYS_rt_sigaction,
+        libc::SYS_rt_sigpending,
+        libc::SYS_rt_sigprocmask,
+        libc::SYS_rt_sigqueueinfo,
+        libc::SYS_rt_sigreturn,
+        libc::SYS_rt_sigsuspend,
+        libc::SYS_rt_sigtimedwait,
+        libc::SYS_sched_get_priority_max,
+        libc::SYS_sched_get_priority_min,
+        libc::SYS_sched_getaffinity,
+        libc::SYS_sched_getparam,
+        libc::SYS_sched_getscheduler,
+        libc::SYS_sched_rr_get_interval,
+        libc::SYS_sched_setaffinity,
+        libc::SYS_sched_setparam,
+        libc::SYS_sched_setscheduler,
+        libc::SYS_sched_yield,
+        libc::SYS_sendmmsg,
+        libc::SYS_sendmsg,
+        libc::SYS_sendto,
+        libc::SYS_set_robust_list,
+        libc::SYS_set_tid_address,
+        libc::SYS_setitimer,
+        libc::SYS_setpgid,
+        libc::SYS_setsockopt,
+        libc::SYS_setpriority,
+        libc::SYS_setsid,
+        libc::SYS_setxattr,
+        libc::SYS_shutdown,
+        libc::SYS_sigaltstack,
+        libc::SYS_signalfd4,
+        libc::SYS_socketpair,
+        libc::SYS_splice,
+        libc::SYS_statfs,
+        libc::SYS_statx,
+        libc::SYS_symlinkat,
+        libc::SYS_sync,
+        libc::SYS_tee,
+        libc::SYS_tgkill,
+        libc::SYS_timer_create,
+        libc::SYS_timer_delete,
+        libc::SYS_timer_getoverrun,
+        libc::SYS_timer_gettime,
+        libc::SYS_timer_settime,
+        libc::SYS_timerfd_create,
+        libc::SYS_timerfd_gettime,
+        libc::SYS_timerfd_settime,
+        libc::SYS_times,
+        libc::SYS_tkill,
+        libc::SYS_umask,
+        libc::SYS_uname,
+        libc::SYS_unlinkat,
+        libc::SYS_utimensat,
+        libc::SYS_vmsplice,
+        libc::SYS_wait4,
+        libc::SYS_waitid,
+        libc::SYS_write,
+        libc::SYS_writev,
     ];
-    if !policy_allows_network(policy) {
-        // Deny only the syscalls that CREATE or ADDRESS an off-host socket —
-        // `socket` (an addressable AF_INET/AF_INET6 endpoint), `connect`,
-        // `bind`, `listen`, `accept`/`accept4`. Without `socket` and `connect`
-        // there is no addressable fd to route traffic over, so egress is
-        // already foreclosed at the source.
-        //
-        // The send/recv FAMILY (`recvfrom`/`recvmsg`/`sendmsg`/`sendto`) is
-        // deliberately NOT denied. Those operate on an EXISTING fd; with
-        // `socket`/`connect`/`bind` denied the only sockets a sandboxed process
-        // can hold are anonymous `socketpair` pairs (and pipes), so allowing
-        // send/recv buys no egress while it is REQUIRED for local IPC:
-        //   * `socketpair` (kept allowed below the network ceiling) is only
-        //     half the story — modern Cargo's jobserver is a SOCK_SEQPACKET
-        //     `socketpair`, and Cargo acquires/releases build tokens over it
-        //     with `recvfrom`/`sendto`. Denying recvfrom makes the parent's
-        //     token read EPERM, which surfaces as a worker-thread
-        //     `the CLOEXEC pipe failed: Operation not permitted` panic and
-        //     `cargo build`/`cargo test` aborts before any rustc link — i.e.
-        //     un-denying `socketpair` alone (the earlier fix) is necessary but
-        //     NOT sufficient; its send/recv must follow.
-        // Empirically reproduced under this exact seccomp filter: with recvfrom
-        // denied a trivial `cargo build` panics; un-denying the send/recv family
-        // lets it complete, while `socket(AF_INET)`/`connect` stay EPERM.
-        //
-        // `socketpair` itself is also NOT in this list: it creates an
-        // anonymous, connected AF_UNIX pair with no address and no route
-        // off-host, so it cannot exfiltrate.
+
+    #[cfg(target_arch = "x86_64")]
+    syscalls.extend([
+        libc::SYS_access,
+        libc::SYS_alarm,
+        libc::SYS_arch_prctl,
+        libc::SYS_chmod,
+        libc::SYS_chown,
+        libc::SYS_creat,
+        libc::SYS_dup2,
+        libc::SYS_epoll_create,
+        libc::SYS_epoll_wait,
+        libc::SYS_eventfd,
+        libc::SYS_fadvise64,
+        libc::SYS_fork,
+        libc::SYS_futimesat,
+        libc::SYS_getdents,
+        libc::SYS_getpgrp,
+        libc::SYS_getrlimit,
+        libc::SYS_link,
+        libc::SYS_lchown,
+        libc::SYS_lstat,
+        libc::SYS_mkdir,
+        libc::SYS_open,
+        libc::SYS_pause,
+        libc::SYS_pipe,
+        libc::SYS_poll,
+        libc::SYS_readlink,
+        libc::SYS_rename,
+        libc::SYS_renameat,
+        libc::SYS_rmdir,
+        libc::SYS_select,
+        libc::SYS_sendfile,
+        libc::SYS_setrlimit,
+        libc::SYS_stat,
+        libc::SYS_symlink,
+        libc::SYS_sync_file_range,
+        libc::SYS_time,
+        libc::SYS_truncate,
+        libc::SYS_unlink,
+        libc::SYS_utime,
+        libc::SYS_vfork,
+    ]);
+
+    if policy_allows_network(policy) {
         syscalls.extend([
             libc::SYS_accept,
             libc::SYS_accept4,
@@ -424,6 +610,12 @@ fn denied_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
             libc::SYS_listen,
             libc::SYS_socket,
         ]);
+    } else {
+        // Allow only the socket operations that work on existing local FDs.
+        // With socket/connect/bind/listen/accept absent from the allowlist, the
+        // child cannot create or address an off-host endpoint, while Cargo's
+        // socketpair-backed jobserver and other local IPC can still exchange
+        // tokens over inherited anonymous sockets.
     }
     syscalls.sort_unstable();
     syscalls.dedup();
@@ -601,9 +793,9 @@ mod tests {
     }
 
     #[test]
-    fn no_network_denies_addressable_sockets_but_allows_local_socketpair() {
+    fn no_network_excludes_addressable_sockets_but_allows_local_socketpair() {
         // At a sub-network ceiling, the egress-capable socket syscalls are
-        // denied, but `socketpair` (anonymous, unaddressable local IPC) stays
+        // not allowlisted, but `socketpair` (anonymous, unaddressable local IPC) stays
         // allowed so Cargo's socketpair-backed jobserver can spawn rustc.
         let policy = linux_policy_with_workspace_ops(&["read_text"]);
         assert_eq!(
@@ -611,24 +803,23 @@ mod tests {
             Some("read_only"),
             "fixture must be below the network ceiling",
         );
-        let denied = denied_syscalls(&policy);
+        let allowed = allowed_syscalls(&policy);
 
         assert!(
-            denied.contains(&libc::SYS_socket),
-            "addressable socket() must be denied without network",
+            !allowed.contains(&libc::SYS_socket),
+            "addressable socket() must not be allowlisted without network",
         );
         assert!(
-            denied.contains(&libc::SYS_connect),
-            "connect() must be denied without network",
+            !allowed.contains(&libc::SYS_connect),
+            "connect() must not be allowlisted without network",
         );
         assert!(
-            !denied.contains(&libc::SYS_socketpair),
-            "socketpair() (local IPC) must NOT be denied — Cargo's jobserver needs it",
+            allowed.contains(&libc::SYS_socketpair),
+            "socketpair() (local IPC) must be allowlisted — Cargo's jobserver needs it",
         );
         // The socketpair-backed jobserver also drives its pair with the
-        // send/recv family; denying those EPERMs Cargo's token read and aborts
-        // the build with a `CLOEXEC pipe failed` worker panic (RC3). They open
-        // no egress while `socket`/`connect`/`bind` stay denied.
+        // send/recv family. They open no egress while socket/connect/bind
+        // stay absent from the allowlist.
         for call in [
             libc::SYS_recvfrom,
             libc::SYS_recvmsg,
@@ -636,12 +827,12 @@ mod tests {
             libc::SYS_sendto,
         ] {
             assert!(
-                !denied.contains(&call),
-                "send/recv syscall {call} must NOT be denied — local socketpair IPC (Cargo jobserver) needs it",
+                allowed.contains(&call),
+                "send/recv syscall {call} must be allowlisted — local socketpair IPC (Cargo jobserver) needs it",
             );
         }
-        // The egress-capable openers stay denied: no addressable socket can be
-        // created or routed, so send/recv cannot reach the network.
+        // The egress-capable openers stay absent: no addressable socket can be
+        // created or routed, so the inherited-fd send/recv calls cannot reach the network.
         for call in [
             libc::SYS_socket,
             libc::SYS_connect,
@@ -651,8 +842,8 @@ mod tests {
             libc::SYS_accept4,
         ] {
             assert!(
-                denied.contains(&call),
-                "egress opener {call} must stay denied without network",
+                !allowed.contains(&call),
+                "egress opener {call} must stay absent without network",
             );
         }
     }
@@ -660,10 +851,10 @@ mod tests {
     #[test]
     fn network_ceiling_allows_all_socket_syscalls() {
         // When network side effects are permitted, none of the socket family
-        // is denied (socketpair included).
+        // is removed from the allowlist (socketpair included).
         let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
         policy.side_effect_level = Some("network".to_string());
-        let denied = denied_syscalls(&policy);
+        let allowed = allowed_syscalls(&policy);
         for call in [
             libc::SYS_socket,
             libc::SYS_socketpair,
@@ -671,8 +862,43 @@ mod tests {
             libc::SYS_bind,
         ] {
             assert!(
-                !denied.contains(&call),
-                "network ceiling must not deny socket-family syscall {call}",
+                allowed.contains(&call),
+                "network ceiling must allowlist socket-family syscall {call}",
+            );
+        }
+    }
+
+    #[test]
+    fn seccomp_filter_is_default_deny_allowlist() {
+        let filter = seccomp_allowlist_filter(&[libc::SYS_read, libc::SYS_write]);
+        assert_eq!(
+            filter.last().map(|entry| entry.k),
+            Some(libc::SECCOMP_RET_ERRNO | libc::EPERM as u32),
+            "seccomp fallthrough must deny unknown syscalls",
+        );
+        assert!(
+            filter
+                .iter()
+                .any(|entry| entry.k == libc::SECCOMP_RET_ALLOW),
+            "allowlisted syscalls must jump to an allow action",
+        );
+    }
+
+    #[test]
+    fn allowlist_excludes_process_introspection_and_io_uring() {
+        let policy = linux_policy_with_workspace_ops(&["read_text", "write_text"]);
+        let allowed = allowed_syscalls(&policy);
+        for call in [
+            libc::SYS_ptrace,
+            libc::SYS_process_vm_readv,
+            libc::SYS_process_vm_writev,
+            libc::SYS_io_uring_setup,
+            libc::SYS_io_uring_enter,
+            libc::SYS_io_uring_register,
+        ] {
+            assert!(
+                !allowed.contains(&call),
+                "dangerous syscall {call} must stay outside the seccomp allowlist",
             );
         }
     }
