@@ -1407,6 +1407,9 @@ Batches JSON) while the receipt records the stable manifest hash, request-file
 hashes, provider operation, upload/create shape, and result-rejoin ids. It does
 not read credentials or call provider APIs;
 `harn models batch submit` consumes this receipt as its durable input.
+Prepare receipts and job entries also include a provider-neutral `lifecycle`
+object with `phase`, normalized `state`, terminal/result/cancel/retry booleans,
+and per-state counts so consumers do not need to scrape status strings.
 
 ## harn models batch submit
 
@@ -1435,7 +1438,9 @@ submit/status/download also needs `HARN_BATCH_FIREWORKS_ACCOUNT_ID` or
 Subscription-plan
 auth remains out of scope for provider Batch APIs. The submission receipt
 records provider job ids, status, request file hashes, and result handles for
-later poll/download/rejoin work.
+later poll/download/rejoin work. Submission receipts carry the same normalized
+`lifecycle` object as prepare receipts; dry-run jobs remain `ready` while the
+receipt lifecycle state is `dry_run`.
 
 ## harn models batch status
 
@@ -1454,7 +1459,9 @@ compatible `batches/{id}`, Fireworks `batchInferenceJobs/{id}`, Gemini
 `batches/{id}`, Anthropic Message Batches, Mistral batch jobs, and xAI batches
 from the Harn provider adapter boundary, then writes a
 `harn.model_batch_status_receipt` with stable job ids, normalized lifecycle
-state, provider status, and result file pointers.
+state, provider status, and result file pointers. The embedded `lifecycle`
+object is the stable state-machine contract for eval/corpus runners; top-level
+counts remain a human-friendly summary.
 
 ## harn models batch download
 
@@ -1473,7 +1480,8 @@ currently retrieves OpenAI/Groq/Together-compatible, Gemini, and Mistral file
 content plus Fireworks output dataset signed URLs, Anthropic Message Batch
 `results_url`, and xAI result pages, writes provider
 JSONL files under `--out-dir`, and emits a `harn.model_batch_results_receipt`
-containing artifact paths, handles, hashes, and source receipt metadata. Use
+containing artifact paths, handles, hashes, source receipt metadata, and
+normalized download lifecycle counts. Use
 `--max-bytes` to cap each provider file response when working with very large
 batches.
 

@@ -953,6 +953,11 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     assert_eq!(job["provider"], "openai");
     assert_eq!(job["batch"]["wire_format"], "openai");
     assert_eq!(job["batch"]["harn_live_adapter"]["submit"], true);
+    assert_eq!(job["lifecycle"]["phase"], "prepare");
+    assert_eq!(job["lifecycle"]["state"], "prepared");
+    assert_eq!(job["lifecycle"]["terminal"], false);
+    assert_eq!(report["lifecycle"]["state"], "prepared");
+    assert_eq!(report["lifecycle"]["counts"]["prepared"], 1);
     assert_eq!(job["endpoint"], "/v1/chat/completions");
     assert_eq!(job["request_format"], "jsonl");
     assert_eq!(job["submit"]["operation"], "POST /v1/batches");
@@ -975,6 +980,8 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     );
     assert_eq!(receipt["kind"], "harn.model_batch_prepare_receipt");
     assert_eq!(receipt["status"], "prepared");
+    assert_eq!(receipt["lifecycle"]["phase"], "prepare");
+    assert_eq!(receipt["lifecycle"]["counts"]["prepared"], 1);
     assert_eq!(
         receipt["jobs"][0]["request_file_sha256"],
         job["request_file_sha256"]
@@ -1004,6 +1011,12 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     assert_eq!(submission["submitted_count"], 0);
     let submitted_job = &submission["jobs"].as_array().expect("submitted jobs")[0];
     assert_eq!(submitted_job["status"], "ready");
+    assert_eq!(submitted_job["lifecycle"]["phase"], "submit");
+    assert_eq!(submitted_job["lifecycle"]["state"], "ready");
+    assert_eq!(submitted_job["lifecycle"]["dry_run"], true);
+    assert_eq!(submitted_job["lifecycle"]["cancelable"], false);
+    assert_eq!(submission["lifecycle"]["state"], "dry_run");
+    assert_eq!(submission["lifecycle"]["counts"]["ready"], 1);
     assert_eq!(submitted_job["provider"], "openai");
     assert_eq!(
         submitted_job["request_file_sha256"],
@@ -1027,6 +1040,8 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
         "harn.model_batch_submission_receipt"
     );
     assert_eq!(submission_receipt["status"], "dry_run");
+    assert_eq!(submission_receipt["lifecycle"]["phase"], "submit");
+    assert_eq!(submission_receipt["lifecycle"]["counts"]["ready"], 1);
     assert_eq!(submission_receipt["jobs"][0]["status"], "ready");
 
     let status_path = tmp.path().join("status.json");
@@ -1052,8 +1067,12 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     assert_eq!(status_report["job_count"], 1);
     assert_eq!(status_report["ready_count"], 1);
     assert_eq!(status_report["completed_count"], 0);
+    assert_eq!(status_report["lifecycle"]["phase"], "status");
+    assert_eq!(status_report["lifecycle"]["state"], "dry_run");
+    assert_eq!(status_report["lifecycle"]["counts"]["ready"], 1);
     let status_job = &status_report["jobs"].as_array().expect("status jobs")[0];
     assert_eq!(status_job["status"], "ready");
+    assert_eq!(status_job["lifecycle"]["state"], "ready");
     assert_eq!(status_job["status_checked"], false);
     assert_eq!(status_job["provider"], "openai");
     assert_eq!(
@@ -1067,6 +1086,8 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     );
     assert_eq!(status_receipt["kind"], "harn.model_batch_status_receipt");
     assert_eq!(status_receipt["status"], "dry_run");
+    assert_eq!(status_receipt["lifecycle"]["phase"], "status");
+    assert_eq!(status_receipt["lifecycle"]["counts"]["ready"], 1);
     assert_eq!(status_receipt["jobs"][0]["status"], "ready");
 
     status_receipt["status"] = serde_json::Value::String("completed".to_string());
@@ -1113,8 +1134,13 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     assert_eq!(download_report["job_count"], 1);
     assert_eq!(download_report["ready_count"], 1);
     assert_eq!(download_report["artifact_count"], 2);
+    assert_eq!(download_report["lifecycle"]["phase"], "download");
+    assert_eq!(download_report["lifecycle"]["state"], "dry_run");
+    assert_eq!(download_report["lifecycle"]["counts"]["ready"], 1);
     let download_job = &download_report["jobs"].as_array().expect("download jobs")[0];
     assert_eq!(download_job["status"], "ready");
+    assert_eq!(download_job["lifecycle"]["state"], "ready");
+    assert_eq!(download_job["lifecycle"]["result_available"], false);
     let artifacts = download_job["artifacts"]
         .as_array()
         .expect("download artifacts");
@@ -1137,6 +1163,8 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     );
     assert_eq!(results_receipt["kind"], "harn.model_batch_results_receipt");
     assert_eq!(results_receipt["status"], "dry_run");
+    assert_eq!(results_receipt["lifecycle"]["phase"], "download");
+    assert_eq!(results_receipt["lifecycle"]["counts"]["ready"], 1);
     assert_eq!(results_receipt["artifactCount"], 2);
 }
 
