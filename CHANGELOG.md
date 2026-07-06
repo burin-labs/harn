@@ -9,6 +9,38 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.18
+
+### Added
+
+- Added `std/agent/guardrails::agent_input_guardrail`, a pre-loop input guardrail bookend for stopping agent loops before the first main model turn when a cheap classifier trips.
+- The canonical model-ladder step (`ModelLadderStepDef` and the `.harn` `ModelLadderStep` alias) now reach full parity: alongside `model`, `provider?`, and `label?` they carry `when?`, `options?`, `family?`, and `capabilities?`. All added fields are optional and serde-absent-when-unset, so existing catalog bundles and records serialize byte-identically. Catalog `[model_ladders.*]` steps now honor per-step `options` overrides identically to inline `models:` steps (previously the catalog path silently discarded them), and `family`/`capabilities` let downstreams such as harn-cloud's `FreeTierRoute` adopt the canonical ladder-step type instead of maintaining their own copy.
+
+### Changed
+
+- Path-gate reporting-only merge queue workflows so irrelevant speculative diffs skip expensive Rust setup and checks.
+- **ACP/A2A artifact manifest surfaces.** Adapter coverage now pins `artifact_manifest` session and task artifact updates so document bundles keep their manifest specs, MIME type, fallback text, provenance, and metadata intact across protocol bridges (#4134).
+- **Agent stdlib**: consolidated duplicated prompt-fragment folds (`__with_prompt_fragment`), judge checkpoint preambles (`__judge_run_checkpoint`), stall observations/diagnostic trips (`__agent_stall_observation` / `__agent_stall_emit_diagnostic_trip`), and the `verify` node builder shared by the workflow pattern graphs (`__patterns_verify_node`). The prompt-nudge overlay fold is now `with_overlay(agent_options, rows, mode, options?)` — options-first, matching `with_goal` / `with_governance`; `overlay_policy` remains as a deprecated alias with the old argument order. Behavior is unchanged.
+
+### Fixed
+
+- Preserve `repair_prompt_builder` callbacks across `workflow_graph(...)` normalization so `workflow_run_repair` custom retry prompts execute instead of silently falling back to blind retries.
+- Classify GitHub Actions hosted-runner shutdowns separately from code failures and auto-recover first-attempt CI preemptions by rerunning PR jobs or re-arming merge-queue PRs.
+- Fixed a cancellation panic in ambient LLM prompt rendering when an async `llm_call` is aborted while its task-local render context is swapped out.
+- `agent_preset` now treats provider/model routing as an atomic override group, so configured local routes no longer inherit a conflicting built-in provider or model ladder from the preset pack.
+- Fixed generated chat projects to use the structured std/io read_line helper and made Ctrl-C interrupt idle stdin reads during harn run.
+- Honor `output_schema` on `agent_loop`/`agent_turn`: it now gates the loop's final answer instead of being silently ignored. The schema is applied only to the terminal answer (never forced on every mid-loop turn, where it fought tool-calling); off-shape answers are re-asked once through the `llm_caller` seam, and the parsed value is surfaced on `run.output` with `run.output_valid` recording whether validation passed.
+- **LLM caller middleware**: `default_llm_caller` (`std/llm/handlers`) now attaches the underlying `error` on the `budget_exhausted` envelope branch, matching `safe_call` (`std/llm/safe`); both share one `__wrap_llm_result` wrapper so the budget context is no longer dropped on the handlers path. The default retry predicate now also treats `context_overflow` as an alias of `context_window_exceeded` (never retried), and the `with_retry` docs list the full never-retry set.
+
+### Security
+
+- Deny agent-scoped secret access to runtime-reserved provenance namespaces so signed receipt Ed25519 seeds remain Harn-internal signing material.
+- Hardened Harn filesystem and HTTP download writes so restricted workspace mutations resolve parent paths at open time without following symlinks.
+- **Guard all outbound HTTP clients against SSRF.** The rebind-proof connect-time SSRF resolver is now installed on every outbound client — the shared LLM streaming/blocking/utility clients, connector clients, MCP discovery/OAuth/card/HTTP-transport clients, the provider healthcheck, and the remote provider-catalog fetcher — not just the `http_*` builtins. A base URL, connector endpoint, or MCP server URL whose hostname resolves (or DNS-rebinds) to a private / loopback / link-local / metadata (`169.254.169.254`) / denied-CIDR address is now unreachable at connect time on these paths.
+- **Redaction no longer passes secrets in values larger than 256 KB.** Oversized string values were previously returned unredacted; a secret embedded in a large tool result, transcript, or base64 blob under a non-sensitive field name could leak verbatim. Oversized inputs are now scanned in overlapping windows, so a secret anywhere in the value — including one straddling a window boundary — is redacted, while legitimate large content is not over-redacted.
+- **Corrected the `std/session-store` integrity claims.** The keyless SHA-256 hash chain is documented as tamper-EVIDENT (detects accidental corruption, truncation, reordering, and naive edits) rather than tamper-RESISTANT: a writer with filesystem access can rewrite history and recompute the chain, and `actor` / `tenant_id` / `ts_ms` are not part of the digest. Use signed harn-serve session receipts / Ed25519 run-receipt provenance for attribution. The record-hash formula is unchanged (cross-language contract with Burin).
+- **Universal catastrophic-command floor at the process chokepoint.** The never-approvable catastrophic-command floor is now enforced unconditionally at the shared `spawn_process` chokepoint that every hostlib process tool funnels through (`run_command`, `run_test`, `run_build_command`, `manage_packages`, and the long-running background path) — closing a gap where a bare `run_command` (the agent's real shell tool) could run machine/disk/data-destroying commands with no floor. Catastrophic reasons are now split into two categories: the **universal** destruction set (`rm -rf` escaping the workspace, fork bombs, `mkfs`, `dd of=<device>`, `chmod -R 000`, `truncate -s 0` of a source file, redirect-over-source, project-root delete) is blocked everywhere, including with no `command_policy` on the stack, while the recoverable git **workflow** family (`git reset --hard`, `git clean -fd`, force-push) stays enforced only when a policy is pushed — so the stdlib `git.push --force-with-lease` flow and standalone scripts keep working. The same universal backstop also now guards the `process.exec` no-policy path, and the shared classifier is exposed as `harn_vm::orchestration::universal_catastrophic_reason` so embedders no longer need to re-plumb the floor. Policy-present behavior is unchanged.
+
 ## v0.9.17
 
 ### Added
