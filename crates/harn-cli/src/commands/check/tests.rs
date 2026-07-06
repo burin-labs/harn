@@ -921,6 +921,45 @@ pipeline main() {
 }
 
 #[test]
+fn check_file_inner_resolves_stdlib_llm_catalog_routing_routes() {
+    let dir = unique_temp_dir("harn-check-stdlib-llm-catalog");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+import { routing_routes } from "std/llm/catalog"
+
+pipeline main() {
+  let routes = routing_routes()
+  __io_println(len(routes) >= 0)
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let report = check_file_report(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        !report.outcome().has_error,
+        "expected std/llm/catalog routing_routes import to type-check, got {:?}",
+        report.diagnostics
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn check_file_inner_skips_invariants_when_disabled() {
     let dir = unique_temp_dir("harn-check-invariants-off");
     std::fs::create_dir_all(&dir).unwrap();

@@ -2210,6 +2210,11 @@ components:
           items:
             type: object
             additionalProperties: true
+        routing_routes:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
         qc_defaults:
           type: object
           additionalProperties:

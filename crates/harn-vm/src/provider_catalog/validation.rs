@@ -88,6 +88,7 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
 
     let mut model_ids = BTreeSet::new();
     let mut model_pairs = BTreeSet::new();
+    let mut dispatch_pairs = BTreeSet::new();
     for model in &artifact.models {
         if !model_ids.insert(model.id.as_str()) {
             result
@@ -95,6 +96,12 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 .push(format!("duplicate model id {}", model.id));
         }
         model_pairs.insert((model.provider.as_str(), model.id.as_str()));
+        if model.deprecation.status == DeprecationStatus::Active {
+            dispatch_pairs.insert((
+                model.provider.clone(),
+                model.wire_model.clone().unwrap_or_else(|| model.id.clone()),
+            ));
+        }
         if model.name.trim().is_empty() {
             result
                 .errors
@@ -160,6 +167,57 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                         model.id, status
                     ));
                 }
+            }
+        }
+    }
+
+    let mut route_pairs = BTreeSet::new();
+    for route in &artifact.routing_routes {
+        if route.provider.trim().is_empty() {
+            result
+                .errors
+                .push("routing route provider cannot be empty".to_string());
+        }
+        if route.model.trim().is_empty() {
+            result
+                .errors
+                .push("routing route model cannot be empty".to_string());
+        }
+        if !provider_ids.contains(route.provider.as_str()) {
+            result.errors.push(format!(
+                "routing route {}:{} references unknown provider {}",
+                route.provider, route.model, route.provider
+            ));
+        }
+        if !route_pairs.insert((route.provider.as_str(), route.model.as_str())) {
+            result.errors.push(format!(
+                "duplicate routing route {}:{}",
+                route.provider, route.model
+            ));
+        }
+        if !dispatch_pairs.contains(&(route.provider.clone(), route.model.clone())) {
+            result.errors.push(format!(
+                "routing route {}:{} does not match an active catalog model wire route",
+                route.provider, route.model
+            ));
+        }
+        if let Some(timeout_ms) = route.timeout_ms {
+            if timeout_ms == 0 {
+                result.errors.push(format!(
+                    "routing route {}:{} timeout_ms must be positive",
+                    route.provider, route.model
+                ));
+            }
+        }
+        if let Some(family) = route.family.as_deref() {
+            validate_route_token(&route.provider, &route.model, "family", family, &mut result);
+        }
+        for capability in &route.capabilities {
+            if capability.trim().is_empty() {
+                result.errors.push(format!(
+                    "routing route {}:{} capability cannot be empty",
+                    route.provider, route.model
+                ));
             }
         }
     }

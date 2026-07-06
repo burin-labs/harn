@@ -1054,7 +1054,9 @@ catalog v2 artifact returned by `harn provider catalog export`, normalized
 through the runtime's effective overlays. Clients should use that
 catalog for model display names, aliases, auth env names, local/cloud
 classification, context windows, tool-support hints, availability, and
-pricing instead of vendoring picker rows.
+pricing instead of vendoring picker rows. Consumers that need dispatchable
+provider/model route data should read `routing_routes` rather than rebuilding
+that join from provider and model rows.
 
 ```json
 {

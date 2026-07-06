@@ -207,6 +207,61 @@ fn generated_catalog_exports_provider_healthcheck_metadata() {
 }
 
 #[test]
+fn generated_catalog_exports_routing_routes() {
+    llm_config::clear_user_overrides();
+    let catalog = artifact();
+
+    assert!(
+        !catalog.routing_routes.is_empty(),
+        "catalog should expose route-decision rows"
+    );
+    let openrouter = catalog
+        .routing_routes
+        .iter()
+        .find(|route| route.provider == "openrouter")
+        .expect("openrouter route is exported");
+    assert!(
+        openrouter
+            .base_url
+            .as_deref()
+            .is_some_and(|url| url.starts_with("https://")),
+        "routing route should expose the provider base URL name, not a resolved secret"
+    );
+    assert_eq!(
+        openrouter.secret_env.as_deref(),
+        Some("OPENROUTER_API_KEY"),
+        "routing route should carry the credential env var name only"
+    );
+    assert!(
+        openrouter
+            .capabilities
+            .iter()
+            .any(|capability| capability.starts_with("structured_output_mode:")),
+        "routing route should include envelope capability tags"
+    );
+
+    let wire_model = catalog
+        .models
+        .iter()
+        .find(|model| {
+            model.deprecation.status == DeprecationStatus::Active && model.wire_model.is_some()
+        })
+        .expect("catalog has an active wire-model row");
+    let wire_route = catalog
+        .routing_routes
+        .iter()
+        .find(|route| {
+            route.provider == wire_model.provider
+                && route.model == wire_model.wire_model.as_deref().unwrap()
+        })
+        .expect("routing route should use the provider wire model when present");
+    assert_eq!(
+        wire_route.family.as_deref(),
+        Some(wire_model.family.as_str())
+    );
+}
+
+#[test]
 fn catalog_roundtrips_provider_healthcheck_metadata_into_config() {
     llm_config::clear_user_overrides();
     let catalog = artifact();

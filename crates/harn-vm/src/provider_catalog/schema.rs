@@ -24,6 +24,7 @@ pub fn schema_value() -> Value {
             "models": {"type": "array", "items": {"$ref": "#/$defs/model"}},
             "aliases": {"type": "array", "items": {"$ref": "#/$defs/alias"}},
             "variants": {"type": "array", "items": {"$ref": "#/$defs/variant"}},
+            "routing_routes": {"type": "array", "items": {"$ref": "#/$defs/routing_route"}},
             "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}}
         },
         "additionalProperties": false,
@@ -399,6 +400,21 @@ pub fn schema_value() -> Value {
                     "model_id": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
                     "source": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
+            "routing_route": {
+                "type": "object",
+                "required": ["provider", "model"],
+                "properties": {
+                    "provider": {"type": "string", "minLength": 1},
+                    "model": {"type": "string", "minLength": 1},
+                    "base_url": {"type": "string", "minLength": 1},
+                    "secret_env": {"type": "string", "minLength": 1},
+                    "timeout_ms": {"type": "integer", "minimum": 1},
+                    "label": {"type": "string", "minLength": 1},
+                    "family": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+                    "capabilities": {"type": "array", "items": {"type": "string", "minLength": 1}}
                 },
                 "additionalProperties": false
             }

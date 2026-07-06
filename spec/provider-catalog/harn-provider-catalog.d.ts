@@ -10,6 +10,7 @@ export interface HarnProviderCatalog {
   models: HarnCatalogModel[]
   aliases: HarnCatalogAlias[]
   variants: HarnCatalogVariant[]
+  routing_routes?: HarnCatalogRoutingRoute[]
   qc_defaults: Record<string, string>
 }
 
@@ -250,5 +251,16 @@ export interface HarnCatalogVariant {
   model_id: string
   provider: string
   source: string
+}
+
+export interface HarnCatalogRoutingRoute {
+  provider: string
+  model: string
+  base_url?: string
+  secret_env?: string
+  timeout_ms?: number
+  label?: string
+  family?: string
+  capabilities?: string[]
 }
 

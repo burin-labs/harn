@@ -17035,6 +17035,3286 @@
       "source": "catalog"
     }
   ],
+  "routing_routes": [
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Fable 5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Haiku 4.5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-5-20251101",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.8",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5-20250929",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Sonnet 4.5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Sonnet 4.6",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Sonnet 5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "deepseek-ai/DeepSeek-V4-Pro",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "DeepSeek V4 Pro (Baseten)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "moonshotai/Kimi-K2.5",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "Kimi K2.5 (Baseten)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "moonshotai/Kimi-K2.6",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "Kimi K2.6 (Baseten)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "moonshotai/Kimi-K2.7-Code",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "Kimi K2.7 Code (Baseten)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "Nemotron 3 Ultra 550B A55B (Baseten)",
+      "family": "baseten",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "nvidia/Nemotron-120B-A12B",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "Nemotron 3 Super 120B A12B (Baseten)",
+      "family": "baseten",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "openai/gpt-oss-120b",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "GPT-OSS 120B (Baseten)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "zai-org/GLM-4.7",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "GLM 4.7 (Baseten)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "zai-org/GLM-5",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "GLM 5 (Baseten)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "zai-org/GLM-5.1",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "GLM 5.1 (Baseten)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "zai-org/GLM-5.2",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "GLM 5.2 (Baseten)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "cerebras",
+      "model": "gpt-oss-120b",
+      "base_url": "https://api.cerebras.ai/v1",
+      "secret_env": "CEREBRAS_API_KEY",
+      "label": "GPT-OSS 120B (Cerebras)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "cerebras",
+      "model": "zai-glm-4.7",
+      "base_url": "https://api.cerebras.ai/v1",
+      "secret_env": "CEREBRAS_API_KEY",
+      "label": "Z.ai GLM 4.7 (Cerebras)",
+      "family": "glm",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "cohere",
+      "model": "command-a-plus-05-2026",
+      "base_url": "https://api.cohere.ai/compatibility/v1",
+      "secret_env": "COHERE_API_KEY",
+      "label": "Command A+",
+      "family": "cohere",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "dashscope",
+      "model": "qwen3-coder-next",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "secret_env": "DASHSCOPE_API_KEY",
+      "label": "Qwen3 Coder Next (DashScope)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "dashscope",
+      "model": "qwen3-coder-plus",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "secret_env": "DASHSCOPE_API_KEY",
+      "label": "Qwen3 Coder Plus (DashScope)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "dashscope",
+      "model": "qwen3.5-397b-a17b",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "secret_env": "DASHSCOPE_API_KEY",
+      "label": "Qwen3.5 397B A17B (DashScope)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "dashscope",
+      "model": "qwen3.6-35b-a3b",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "secret_env": "DASHSCOPE_API_KEY",
+      "label": "Qwen3.6 35B A3B (DashScope)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "dashscope",
+      "model": "qwen3.7-max",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "secret_env": "DASHSCOPE_API_KEY",
+      "label": "Qwen3.7 Max (DashScope)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "Qwen/Qwen3.6-35B-A3B",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3.6 35B A3B (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "Qwen/Qwen3.7-Max",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3.7 Max (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "deepseek-ai/DeepSeek-V3.2",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "DeepSeek V3.2 (DeepInfra)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "deepseek-ai/DeepSeek-V4-Flash",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "DeepSeek V4 Flash (DeepInfra)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "deepseek-ai/DeepSeek-V4-Pro",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "DeepSeek V4 Pro (DeepInfra)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "moonshotai/Kimi-K2.7-Code",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Kimi K2.7 Code (DeepInfra)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "openai/gpt-oss-120b",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "GPT-OSS 120B (DeepInfra)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "zai-org/GLM-5.2",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "GLM 5.2 (DeepInfra)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "base_url": "https://api.deepseek.com/v1",
+      "secret_env": "DEEPSEEK_API_KEY",
+      "label": "DeepSeek V4 Flash",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "base_url": "https://api.deepseek.com/v1",
+      "secret_env": "DEEPSEEK_API_KEY",
+      "label": "DeepSeek V4 Pro",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/deepseek-v4-pro",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "DeepSeek V4 Pro (Fireworks)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-5p2",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "GLM 5.2 (Fireworks)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/gpt-oss-120b",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "GPT-OSS 120B (Fireworks)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/kimi-k2p6",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "Kimi K2.6 (Fireworks)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/kimi-k2p7-code",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "Kimi K2.7 Code (Fireworks)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/minimax-m3",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "MiniMax M3 (Fireworks)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 2.5 Flash",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-lite",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 2.5 Flash-Lite",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-pro",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 2.5 Pro",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 3.1 Flash-Lite",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3.1-pro-preview",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 3.1 Pro (Preview)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3.5-flash",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 3.5 Flash",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "models/gemma-4-26b-a4b-it",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemma 4 26B MoE (Gemini API)",
+      "family": "gemma",
+      "capabilities": [
+        "files",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "models/gemma-4-31b-it",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemma 4 31B (Gemini API)",
+      "family": "gemma",
+      "capabilities": [
+        "files",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "groq",
+      "model": "openai/gpt-oss-120b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "secret_env": "GROQ_API_KEY",
+      "label": "GPT-OSS 120B (Groq)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "groq",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "secret_env": "GROQ_API_KEY",
+      "label": "GPT-OSS 20B (Groq)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "groq",
+      "model": "llama-3.1-8b-instant",
+      "base_url": "https://api.groq.com/openai/v1",
+      "secret_env": "GROQ_API_KEY",
+      "label": "Llama 3.1 8B Instant (Groq)",
+      "family": "llama",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "groq",
+      "model": "qwen/qwen3.6-27b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "secret_env": "GROQ_API_KEY",
+      "label": "Qwen3.6 27B (Groq)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "llamacpp",
+      "model": "qwen3.6-35b-a3b",
+      "base_url": "http://127.0.0.1:8001",
+      "timeout_ms": 900000,
+      "label": "Qwen3.6 35B (llama.cpp)",
+      "family": "qwen",
+      "capabilities": [
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "llamacpp",
+      "model": "qwen3.6-35b-a3b-ud-q4-k-xl",
+      "base_url": "http://127.0.0.1:8001",
+      "timeout_ms": 900000,
+      "label": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "llamacpp",
+      "model": "qwen3.6-35b-a3b-ud-q5-k-xl",
+      "base_url": "http://127.0.0.1:8001",
+      "timeout_ms": 900000,
+      "label": "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
+      "family": "qwen",
+      "capabilities": [
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "local",
+      "model": "gemma-4-12b-it",
+      "base_url": "http://localhost:8000",
+      "timeout_ms": 300000,
+      "label": "Gemma 4 12B (local)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "local",
+      "model": "gemma-4-26b-a4b-it",
+      "base_url": "http://localhost:8000",
+      "timeout_ms": 600000,
+      "label": "Gemma 4 26B MoE (local)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "local",
+      "model": "gemma-4-31b-it",
+      "base_url": "http://localhost:8000",
+      "timeout_ms": 600000,
+      "label": "Gemma 4 31B (local)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "local",
+      "model": "gemma-4-e2b-it",
+      "base_url": "http://localhost:8000",
+      "timeout_ms": 300000,
+      "label": "Gemma 4 E2B (local)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "local",
+      "model": "gemma-4-e4b-it",
+      "base_url": "http://localhost:8000",
+      "timeout_ms": 300000,
+      "label": "Gemma 4 E4B (local)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "MiniMax-M2",
+      "base_url": "https://api.minimax.io/v1",
+      "secret_env": "MINIMAX_API_KEY",
+      "label": "MiniMax M2",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "MiniMax-M2.5",
+      "base_url": "https://api.minimax.io/v1",
+      "secret_env": "MINIMAX_API_KEY",
+      "label": "MiniMax M2.5",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "MiniMax-M2.5-highspeed",
+      "base_url": "https://api.minimax.io/v1",
+      "secret_env": "MINIMAX_API_KEY",
+      "label": "MiniMax M2.5 (highspeed)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "MiniMax-M2.7",
+      "base_url": "https://api.minimax.io/v1",
+      "secret_env": "MINIMAX_API_KEY",
+      "label": "MiniMax M2.7",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "MiniMax-M2.7-highspeed",
+      "base_url": "https://api.minimax.io/v1",
+      "secret_env": "MINIMAX_API_KEY",
+      "label": "MiniMax M2.7 (highspeed)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "MiniMax-M3",
+      "base_url": "https://api.minimax.io/v1",
+      "secret_env": "MINIMAX_API_KEY",
+      "label": "MiniMax M3",
+      "family": "minimax",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "codestral-2508",
+      "base_url": "https://api.mistral.ai/v1",
+      "secret_env": "MISTRAL_API_KEY",
+      "label": "Codestral 25.08",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "devstral-medium-2512",
+      "base_url": "https://api.mistral.ai/v1",
+      "secret_env": "MISTRAL_API_KEY",
+      "label": "Devstral 2 Medium",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "devstral-small-2512",
+      "base_url": "https://api.mistral.ai/v1",
+      "secret_env": "MISTRAL_API_KEY",
+      "label": "Devstral 2 Small",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-large-2512",
+      "base_url": "https://api.mistral.ai/v1",
+      "secret_env": "MISTRAL_API_KEY",
+      "label": "Mistral Large 3 2512",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-medium-3-5",
+      "base_url": "https://api.mistral.ai/v1",
+      "secret_env": "MISTRAL_API_KEY",
+      "label": "Mistral Medium 3.5",
+      "family": "mistral",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-small-2603",
+      "base_url": "https://api.mistral.ai/v1",
+      "secret_env": "MISTRAL_API_KEY",
+      "label": "Mistral Small 4",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "mlx",
+      "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+      "base_url": "http://127.0.0.1:8002",
+      "timeout_ms": 900000,
+      "label": "Qwen3.6 35B-A3B (MLX 4-bit)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "mlx",
+      "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit",
+      "base_url": "http://127.0.0.1:8002",
+      "timeout_ms": 900000,
+      "label": "Qwen3.6 35B-A3B (MLX 8-bit)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "moonshot",
+      "model": "kimi-k2.6",
+      "base_url": "https://api.moonshot.ai/v1",
+      "secret_env": "MOONSHOT_API_KEY",
+      "label": "Kimi K2.6 (Moonshot direct)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "moonshot",
+      "model": "kimi-k2.7-code",
+      "base_url": "https://api.moonshot.ai/v1",
+      "secret_env": "MOONSHOT_API_KEY",
+      "label": "Kimi K2.7 Code (Moonshot direct)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "moonshot",
+      "model": "kimi-k2.7-code-highspeed",
+      "base_url": "https://api.moonshot.ai/v1",
+      "secret_env": "MOONSHOT_API_KEY",
+      "label": "Kimi K2.7 Code Highspeed (Moonshot direct)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "deepseek-ai/deepseek-v4-flash",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "DeepSeek V4 Flash (NVIDIA NIM)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "DeepSeek V4 Pro (NVIDIA NIM)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "moonshotai/kimi-k2.6",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Kimi K2.6 (NVIDIA NIM)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m2.7",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "MiniMax M2.7 (NVIDIA NIM)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "MiniMax M3 (NVIDIA NIM)",
+      "family": "minimax",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "mistralai/mistral-medium-3.5-128b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Mistral Medium 3.5 128B (NVIDIA NIM)",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3-nano-30b-a3b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Nemotron 3 Nano 30B A3B (NVIDIA NIM)",
+      "family": "nvidia",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Nemotron 3 Nano Omni 30B A3B Reasoning (NVIDIA NIM)",
+      "family": "nvidia",
+      "capabilities": [
+        "audio",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Nemotron 3 Super 120B A12B (NVIDIA NIM)",
+      "family": "nvidia",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Nemotron 3 Ultra 550B A55B (NVIDIA NIM)",
+      "family": "nvidia",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "openai/gpt-oss-120b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "GPT-OSS 120B (NVIDIA NIM)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "GPT-OSS 20B (NVIDIA NIM)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "stepfun-ai/step-3.7-flash",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Step 3.7 Flash (NVIDIA NIM)",
+      "family": "nvidia",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "z-ai/glm-5.1",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "GLM 5.1 (NVIDIA NIM)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "ollama",
+      "model": "devstral-small-2:24b",
+      "base_url": "http://localhost:11434",
+      "timeout_ms": 600000,
+      "label": "Devstral Small 2 24B",
+      "family": "mistral",
+      "capabilities": [
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "ollama",
+      "model": "gemma4:12b-mlx",
+      "base_url": "http://localhost:11434",
+      "timeout_ms": 240000,
+      "label": "Gemma 4 12B (MLX)",
+      "family": "gemma",
+      "capabilities": [
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "ollama",
+      "model": "gemma4:12b-mxfp8",
+      "base_url": "http://localhost:11434",
+      "timeout_ms": 240000,
+      "label": "Gemma 4 12B (MXFP8)",
+      "family": "gemma",
+      "capabilities": [
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "ollama",
+      "model": "gemma4:12b-nvfp4",
+      "base_url": "http://localhost:11434",
+      "timeout_ms": 240000,
+      "label": "Gemma 4 12B (NVFP4)",
+      "family": "gemma",
+      "capabilities": [
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "ollama",
+      "model": "gemma4:26b",
+      "base_url": "http://localhost:11434",
+      "timeout_ms": 300000,
+      "label": "Gemma 4 26B MoE",
+      "family": "gemma",
+      "capabilities": [
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "ollama",
+      "model": "llama3.2",
+      "base_url": "http://localhost:11434",
+      "timeout_ms": 300000,
+      "label": "Llama 3.2",
+      "family": "llama",
+      "capabilities": [
+        "streaming",
+        "structured_output_mode:none",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-4o Mini",
+      "family": "openai-gpt",
+      "capabilities": [
+        "audio",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.3-codex",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-5.3-Codex",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-5.4",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-5.4 Mini",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-nano",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-5.4 Nano",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-5.5",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5-pro",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-5.5 Pro",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "Qwen/Qwen3.5-9B",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.5 9B",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-fable-5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Fable 5 (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-haiku-4-5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Haiku 4.5 (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.8",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Opus 4.8 (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4-6",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Sonnet 4.6 (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Sonnet 5 (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v3.2",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "DeepSeek V3.2",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "DeepSeek V4 Flash (via OpenRouter)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "DeepSeek V4 Pro (via OpenRouter)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemini-2.5-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Gemini 2.5 Flash (via OpenRouter)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemini-3.5-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Gemini 3.5 Flash (via OpenRouter)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemma-4-26b-a4b-it",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Gemma 4 26B MoE (OpenRouter)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemma-4-31b-it",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Gemma 4 31B (OpenRouter)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "kwaipilot/kat-coder-pro-v2",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "KAT-Coder-Pro V2",
+      "family": "openrouter",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "minimax/minimax-m2",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "MiniMax M2 (via OpenRouter)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:none",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "minimax/minimax-m2.5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "MiniMax M2.5 (via OpenRouter)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:none",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "minimax/minimax-m2.7",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "MiniMax M2.7 (via OpenRouter)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:none",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "minimax/minimax-m3",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "MiniMax M3 (via OpenRouter)",
+      "family": "minimax",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "mistralai/mistral-large-2512",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Mistral Large 3 2512",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "mistralai/mistral-medium-3-5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Mistral Medium 3.5 (via OpenRouter)",
+      "family": "mistral",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "mistralai/mistral-small-2603",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Mistral Small 4",
+      "family": "mistral",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.6",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Kimi K2.6",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.7-code",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Kimi K2.7 Code",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-oss-120b",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-OSS 120B",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3-coder",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3 Coder 480B A35B",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3-coder-next",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3 Coder Next",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.5-397b-a17b",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.5 397B A17B",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.6-35b-a3b",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.6 35B A3B (via OpenRouter)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.6-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.6 Flash (via OpenRouter)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.6-plus",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.6 Plus (via OpenRouter)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.7-max",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.7 Max",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.7-plus",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.7 Plus",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "stepfun/step-3.7-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Step 3.7 Flash",
+      "family": "openrouter",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "z-ai/glm-5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GLM 5 (via OpenRouter)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "z-ai/glm-5.1",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GLM 5.1 (via OpenRouter)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "z-ai/glm-5.2",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GLM 5.2 (via OpenRouter)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "z-ai/glm-5v-turbo",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GLM 5V Turbo (via OpenRouter)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "sambanova",
+      "model": "DeepSeek-V3.2",
+      "base_url": "https://api.sambanova.ai/v1",
+      "secret_env": "SAMBANOVA_API_KEY",
+      "label": "DeepSeek V3.2 (SambaNova)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "sambanova",
+      "model": "Meta-Llama-3.3-70B-Instruct",
+      "base_url": "https://api.sambanova.ai/v1",
+      "secret_env": "SAMBANOVA_API_KEY",
+      "label": "Llama 3.3 70B Instruct (SambaNova)",
+      "family": "llama",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "sambanova",
+      "model": "MiniMax-M2.7",
+      "base_url": "https://api.sambanova.ai/v1",
+      "secret_env": "SAMBANOVA_API_KEY",
+      "label": "MiniMax M2.7 (SambaNova)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "sambanova",
+      "model": "gemma-4-31B-it",
+      "base_url": "https://api.sambanova.ai/v1",
+      "secret_env": "SAMBANOVA_API_KEY",
+      "label": "Gemma 4 31B (SambaNova)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "sambanova",
+      "model": "gpt-oss-120b",
+      "base_url": "https://api.sambanova.ai/v1",
+      "secret_env": "SAMBANOVA_API_KEY",
+      "label": "GPT-OSS 120B (SambaNova)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "MiniMaxAI/MiniMax-M2.7",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "MiniMax M2.7 (Together)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "MiniMaxAI/MiniMax-M3",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "MiniMax M3 (Together)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "Qwen/Qwen2.5-7B-Instruct-Turbo",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Qwen2.5 7B Instruct Turbo (Together)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "Qwen/Qwen3-Coder-Next-FP8",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Qwen3 Coder Next FP8 (Together, dedicated)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "Qwen/Qwen3.7-Max",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Qwen3.7 Max (Together)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "deepseek-ai/DeepSeek-V4-Pro",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "DeepSeek V4 Pro (Together)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "google/gemma-4-31B-it",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Gemma 4 31B (Together)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Llama 3.3 70B Instruct Turbo (Together)",
+      "family": "llama",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output_mode:none",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "moonshotai/Kimi-K2.7-Code",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Kimi K2.7 Code (Together)",
+      "family": "kimi",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "zai-org/GLM-5.1",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "GLM 5.1 (Together)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "zai-org/GLM-5.2",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "GLM 5.2 (Together)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.3",
+      "base_url": "https://api.x.ai/v1",
+      "secret_env": "XAI_API_KEY",
+      "label": "Grok 4.3",
+      "family": "xai",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-build-0.1",
+      "base_url": "https://api.x.ai/v1",
+      "secret_env": "XAI_API_KEY",
+      "label": "Grok Build 0.1",
+      "family": "xai",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4.5",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 4.5",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4.5-air",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 4.5 Air",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4.6",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 4.6",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4.7",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 4.7",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 5",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5-turbo",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 5 Turbo",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5.1",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 5.1",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5.2",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 5.2",
+      "family": "glm",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    }
+  ],
   "qc_defaults": {
     "anthropic": "claude-haiku-4-5-20251001",
     "cohere": "command-a-plus-05-2026",

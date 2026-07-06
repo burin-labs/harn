@@ -1432,6 +1432,32 @@ mod tests {
     }
 
     #[test]
+    fn stdlib_llm_catalog_exposes_routing_routes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let entry = write_file(
+            root,
+            "entry.harn",
+            "import { routing_routes } from \"std/llm/catalog\"\nrouting_routes()\n",
+        );
+
+        let graph = build(std::slice::from_ref(&entry));
+        let imported = graph
+            .imported_names_for_file(&entry)
+            .expect("std/llm/catalog should resolve");
+        assert!(imported.contains("routing_routes"));
+        let decls = graph
+            .imported_callable_declarations_for_file(&entry)
+            .expect("std/llm/catalog callable declarations should resolve");
+        let names: HashSet<String> = decls
+            .iter()
+            .filter_map(callable_decl_name)
+            .map(ToString::to_string)
+            .collect();
+        assert!(names.contains("routing_routes"));
+    }
+
+    #[test]
     fn package_export_map_resolves_declared_module() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();

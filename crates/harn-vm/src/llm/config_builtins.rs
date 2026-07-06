@@ -1837,6 +1837,13 @@ fn provider_catalog_to_vm_value() -> VmValue {
         crate::value::intern_key("models"),
         VmValue::List(std::sync::Arc::new(models)),
     );
+    dict.insert(
+        crate::value::intern_key("routing_routes"),
+        json_to_vm_value(
+            &serde_json::to_value(crate::provider_catalog::artifact().routing_routes)
+                .unwrap_or_else(|_| serde_json::json!([])),
+        ),
+    );
     let qc_defaults = llm_config::qc_defaults()
         .into_iter()
         .map(|(provider, model)| {

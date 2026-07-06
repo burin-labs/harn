@@ -111,6 +111,19 @@ pub fn family_of(model_id) {
 }
 
 /**
+ * Return provider/model route-decision rows from the runtime catalog.
+ * Rows carry provider/model/family/capability/timeout metadata and credential
+ * env var names, never resolved secret values.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn routing_routes() {
+  let catalog = llm_provider_catalog()
+  return catalog?.routing_routes ?? []
+}
+
+/**
  * Returns the narrower catalog lineage token used by model-aware option
  * packs. Falls back to family when a catalog row has no lineage.
  *

@@ -885,6 +885,51 @@
       ],
       "type": "object"
     },
+    "routing_route": {
+      "additionalProperties": false,
+      "properties": {
+        "base_url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "capabilities": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "family": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "model": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "secret_env": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "timeout_ms": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "type": "object"
+    },
     "tool_empirical_parity": {
       "additionalProperties": false,
       "properties": {
@@ -1040,6 +1085,12 @@
         "type": "string"
       },
       "type": "object"
+    },
+    "routing_routes": {
+      "items": {
+        "$ref": "#/$defs/routing_route"
+      },
+      "type": "array"
     },
     "schema": {
       "const": "https://harnlang.com/schemas/provider-catalog.v2.json"

@@ -10,6 +10,7 @@ public struct HarnProviderCatalog: Codable, Sendable, Equatable {
     public let models: [HarnCatalogModel]
     public let aliases: [HarnCatalogAlias]
     public let variants: [HarnCatalogVariant]
+    public let routingRoutes: [HarnCatalogRoutingRoute]?
     public let qcDefaults: [String: String]
 
     enum CodingKeys: String, CodingKey {
@@ -20,6 +21,7 @@ public struct HarnProviderCatalog: Codable, Sendable, Equatable {
         case models
         case aliases
         case variants
+        case routingRoutes = "routing_routes"
         case qcDefaults = "qc_defaults"
     }
 }
@@ -560,5 +562,27 @@ public struct HarnCatalogVariant: Codable, Sendable, Equatable {
         case modelID = "model_id"
         case provider
         case source
+    }
+}
+
+public struct HarnCatalogRoutingRoute: Codable, Sendable, Equatable {
+    public let provider: String
+    public let model: String
+    public let baseURL: String?
+    public let secretEnv: String?
+    public let timeoutMs: Int?
+    public let label: String?
+    public let family: String?
+    public let capabilities: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case baseURL = "base_url"
+        case secretEnv = "secret_env"
+        case timeoutMs = "timeout_ms"
+        case label
+        case family
+        case capabilities
     }
 }
