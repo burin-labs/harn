@@ -219,6 +219,14 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
     } else {
         Vec::new()
     };
+    let serving = InspectServingReport {
+        request_model: request_model.clone(),
+        base_model: resolved.id.clone(),
+        provider: provider.clone(),
+        tool_format: tool_format.clone(),
+        lora_module_value_format: provider_lora_module_value_format.clone(),
+        serving_requirements: tool_call_serving_requirements(&resolved.id, &provider, &tool_format),
+    };
     Ok(LoraInspectReport {
         ok,
         base: BaseModelReport {
@@ -248,6 +256,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             structured_output_mode: capabilities.structured_output_mode,
             recommended_endpoint: capabilities.recommended_endpoint,
         },
+        serving,
         launch: LaunchHints {
             request_model,
             max_lora_rank,
@@ -1354,6 +1363,7 @@ fn serving_recipe(
             .to_string(),
     );
     runtime_notes.extend(tool_call_serving_notes(base_model, provider, tool_format));
+    let serving_requirements = tool_call_serving_requirements(base_model, provider, tool_format);
     ServingRecipe {
         request_model: request_model.to_string(),
         adapter_name: adapter_name.to_string(),
@@ -1363,6 +1373,7 @@ fn serving_recipe(
         lora_module_value_format: lora_module_value_format.to_string(),
         tool_format: tool_format.to_string(),
         dataset_format: dataset_format.to_string(),
+        serving_requirements,
         runtime_notes,
         promotion_gates: vec![
             "inspect the adapter against the exact served base model before launch".to_string(),
@@ -1370,6 +1381,159 @@ fn serving_recipe(
                 .to_string(),
             "keep a rollback path to the base route or previous adapter revision".to_string(),
         ],
+    }
+}
+
+fn tool_call_serving_requirements(
+    base_model: &str,
+    provider: &str,
+    tool_format: &str,
+) -> Vec<ServingRequirement> {
+    let mut requirements = Vec::new();
+    if matches!(tool_format, "text" | "json") {
+        requirements.push(serving_requirement(
+            "parser_owner",
+            "tool_call_parser",
+            Some("harn_text_tool_parser"),
+            true,
+            "Harn parses text/json tool calls for this route.",
+        ));
+        requirements.push(serving_requirement(
+            "provider_native_tool_parser",
+            "native_tool_parser_mode",
+            Some("disabled_unless_proxy_maps_to_harn_text"),
+            true,
+            "Provider-native tool parsers must not reinterpret Harn text tool calls.",
+        ));
+        return requirements;
+    }
+
+    if tool_format != "native" {
+        requirements.push(serving_requirement(
+            "parser_owner",
+            "tool_call_parser",
+            Some("catalog_validated_route"),
+            true,
+            "Resolve the effective route before serving.",
+        ));
+        return requirements;
+    }
+
+    requirements.push(serving_requirement(
+        "parser_owner",
+        "tool_call_parser",
+        Some("provider_tokenizer_runtime"),
+        true,
+        "Native tool routes rely on the provider/tokenizer runtime parser.",
+    ));
+
+    if provider == "vllm" {
+        requirements.push(serving_requirement(
+            "server_flag",
+            "--enable-auto-tool-choice",
+            None,
+            true,
+            "vLLM native tool routes need automatic tool-call extraction enabled.",
+        ));
+        if is_functiongemma_route(base_model, "", "") {
+            requirements.push(serving_requirement(
+                "server_flag",
+                "--tool-call-parser",
+                Some("functiongemma"),
+                true,
+                "FunctionGemma native routes need the matching vLLM parser.",
+            ));
+            requirements.push(serving_requirement(
+                "chat_template",
+                "chat_template",
+                Some("functiongemma_control_tokens"),
+                true,
+                "Training and serving must share the FunctionGemma control-token template.",
+            ));
+            requirements.push(serving_requirement(
+                "stop_sequence",
+                "inference_stop_sequence",
+                Some("<start_function_response>"),
+                true,
+                "Function response control tokens must not be generated as ordinary text.",
+            ));
+        } else if is_gemma4_route(base_model, "", "") {
+            requirements.push(serving_requirement(
+                "server_flag",
+                "--tool-call-parser",
+                Some("gemma4"),
+                true,
+                "Gemma 4 native routes need vLLM's Gemma 4 tool-call parser.",
+            ));
+            requirements.push(serving_requirement(
+                "server_flag",
+                "--reasoning-parser",
+                Some("gemma4"),
+                false,
+                "Required when Gemma 4 thinking traces are enabled; keep explicit in launch manifests.",
+            ));
+            requirements.push(serving_requirement(
+                "chat_template",
+                "chat_template",
+                Some("examples/tool_chat_template_gemma4.jinja"),
+                true,
+                "Gemma 4 tool calling depends on the vLLM-compatible tool chat template.",
+            ));
+            requirements.push(serving_requirement(
+                "manifest_metadata",
+                "tool_parser_id",
+                Some("gemma4"),
+                true,
+                "Persist the parser id so inspect can detect serving-route drift.",
+            ));
+            requirements.push(serving_requirement(
+                "manifest_metadata",
+                "chat_template_hash",
+                None,
+                true,
+                "Persist the chat-template hash so training and serving can be compared.",
+            ));
+            requirements.push(serving_requirement(
+                "promotion_gate",
+                "parser_concurrency_policy",
+                Some("serialize_validation_or_pin_parser_version"),
+                true,
+                "Promotion must prove the exact parser/template route used in serving.",
+            ));
+        } else {
+            requirements.push(serving_requirement(
+                "server_flag",
+                "--tool-call-parser",
+                Some("model_family_parser"),
+                true,
+                "vLLM native tool routes need the parser matching the model family.",
+            ));
+            requirements.push(serving_requirement(
+                "chat_template",
+                "chat_template",
+                Some("model_family_tool_template"),
+                true,
+                "Training and serving must share the model-family tool template.",
+            ));
+        }
+    }
+
+    requirements
+}
+
+fn serving_requirement(
+    kind: &str,
+    name: &str,
+    value: Option<&str>,
+    required: bool,
+    reason: &str,
+) -> ServingRequirement {
+    ServingRequirement {
+        kind: kind.to_string(),
+        name: name.to_string(),
+        value: value.map(str::to_string),
+        required,
+        reason: reason.to_string(),
     }
 }
 
@@ -1914,6 +2078,7 @@ struct LoraInspectReport {
     contract: Option<InspectContractReport>,
     compatibility: CompatibilityReport,
     tool_calling: ToolCallingReport,
+    serving: InspectServingReport,
     launch: LaunchHints,
     warnings: Vec<String>,
 }
@@ -2006,6 +2171,16 @@ struct LaunchHints {
     request_model: String,
     max_lora_rank: Option<u64>,
     harn_local_launch: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InspectServingReport {
+    request_model: String,
+    base_model: String,
+    provider: String,
+    tool_format: String,
+    lora_module_value_format: String,
+    serving_requirements: Vec<ServingRequirement>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2206,8 +2381,18 @@ struct ServingRecipe {
     lora_module_value_format: String,
     tool_format: String,
     dataset_format: String,
+    serving_requirements: Vec<ServingRequirement>,
     runtime_notes: Vec<String>,
     promotion_gates: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ServingRequirement {
+    kind: String,
+    name: String,
+    value: Option<String>,
+    required: bool,
+    reason: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -2603,6 +2788,19 @@ mod tests {
 
     #[test]
     fn lora_serving_recipe_keeps_runtime_binding_explicit() {
+        let has_requirement = |recipe: &ServingRecipe,
+                               kind: &str,
+                               name: &str,
+                               value: Option<&str>,
+                               required: bool| {
+            recipe.serving_requirements.iter().any(|requirement| {
+                requirement.kind == kind
+                    && requirement.name == name
+                    && requirement.value.as_deref() == value
+                    && requirement.required == required
+            })
+        };
+
         let supported = serving_recipe(
             "gemma-4-e4b-it",
             "vllm",
@@ -2623,6 +2821,20 @@ mod tests {
             .runtime_notes
             .iter()
             .any(|note| note.contains("Harn owns tool-call parsing")));
+        assert!(has_requirement(
+            &supported,
+            "parser_owner",
+            "tool_call_parser",
+            Some("harn_text_tool_parser"),
+            true,
+        ));
+        assert!(has_requirement(
+            &supported,
+            "provider_native_tool_parser",
+            "native_tool_parser_mode",
+            Some("disabled_unless_proxy_maps_to_harn_text"),
+            true,
+        ));
 
         let external = serving_recipe(
             "gemma-4-e4b-it",
@@ -2661,5 +2873,58 @@ mod tests {
             .runtime_notes
             .iter()
             .any(|note| note.contains("functiongemma parser/chat template")));
+        assert!(has_requirement(
+            &native_functiongemma,
+            "server_flag",
+            "--tool-call-parser",
+            Some("functiongemma"),
+            true,
+        ));
+        assert!(has_requirement(
+            &native_functiongemma,
+            "chat_template",
+            "chat_template",
+            Some("functiongemma_control_tokens"),
+            true,
+        ));
+
+        let native_gemma4 = serving_recipe(
+            "google/gemma-4-e4b-it",
+            "vllm",
+            "ADAPTER_MODEL",
+            "ADAPTER_NAME",
+            "native",
+            "messages_with_tool_calls",
+            true,
+            "json_with_base_model",
+        );
+        assert!(has_requirement(
+            &native_gemma4,
+            "server_flag",
+            "--tool-call-parser",
+            Some("gemma4"),
+            true,
+        ));
+        assert!(has_requirement(
+            &native_gemma4,
+            "server_flag",
+            "--reasoning-parser",
+            Some("gemma4"),
+            false,
+        ));
+        assert!(has_requirement(
+            &native_gemma4,
+            "chat_template",
+            "chat_template",
+            Some("examples/tool_chat_template_gemma4.jinja"),
+            true,
+        ));
+        assert!(has_requirement(
+            &native_gemma4,
+            "manifest_metadata",
+            "chat_template_hash",
+            None,
+            true,
+        ));
     }
 }

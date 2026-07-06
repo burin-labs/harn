@@ -2253,6 +2253,34 @@ fn models_lora_inspect_json_shape_is_stable() {
         "json_with_base_model"
     );
     assert_eq!(report["tool_calling"]["native_tools"], false);
+    assert_eq!(report["serving"]["request_model"], "burin-tools");
+    assert_eq!(report["serving"]["base_model"], "gemma-4-e4b-it");
+    assert_eq!(report["serving"]["provider"], "vllm");
+    assert_eq!(report["serving"]["tool_format"], "json");
+    assert_eq!(
+        report["serving"]["lora_module_value_format"],
+        "json_with_base_model"
+    );
+    let serving_requirements = report["serving"]["serving_requirements"]
+        .as_array()
+        .expect("serving requirements");
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "parser_owner"
+                && requirement["name"] == "tool_call_parser"
+                && requirement["value"] == "harn_text_tool_parser"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
+    );
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "provider_native_tool_parser"
+                && requirement["value"] == "disabled_unless_proxy_maps_to_harn_text"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
+    );
     assert_eq!(report["launch"]["request_model"], "burin-tools");
     assert_eq!(report["launch"]["max_lora_rank"].as_u64(), Some(16));
     let launch = report["launch"]["harn_local_launch"]
@@ -2680,6 +2708,42 @@ fn models_lora_plan_json_shape_is_stable() {
             |text| text.contains("gemma4 tool-call parser and chat-template revision")
         )),
         "serving notes={serving_notes:?}"
+    );
+    let serving_requirements = report["serving"]["serving_requirements"]
+        .as_array()
+        .expect("serving requirements");
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "server_flag"
+                && requirement["name"] == "--enable-auto-tool-choice"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
+    );
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "server_flag"
+                && requirement["name"] == "--tool-call-parser"
+                && requirement["value"] == "gemma4"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
+    );
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "chat_template"
+                && requirement["value"] == "examples/tool_chat_template_gemma4.jinja"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
+    );
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "manifest_metadata"
+                && requirement["name"] == "chat_template_hash"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
     );
     let warnings = report["warnings"].as_array().expect("warnings");
     assert!(
@@ -3298,6 +3362,25 @@ fn models_lora_manifest_json_writes_training_manifest() {
         report["serving"]["lora_module_value_format"],
         "json_with_base_model"
     );
+    let serving_requirements = report["serving"]["serving_requirements"]
+        .as_array()
+        .expect("serving requirements");
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "parser_owner"
+                && requirement["value"] == "harn_text_tool_parser"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
+    );
+    assert!(
+        serving_requirements.iter().any(|requirement| {
+            requirement["kind"] == "provider_native_tool_parser"
+                && requirement["value"] == "disabled_unless_proxy_maps_to_harn_text"
+                && requirement["required"] == true
+        }),
+        "serving requirements={serving_requirements:?}"
+    );
     assert_eq!(report["promotion"]["minimum_trials"], 5);
     assert!(out.is_file(), "manifest file missing");
 
@@ -3309,6 +3392,16 @@ fn models_lora_manifest_json_writes_training_manifest() {
     assert_eq!(manifest_value["contract"]["id"], contract_id);
     assert_eq!(manifest_value["target"]["contract_id"], contract_id);
     assert_eq!(manifest_value["serving"]["request_model"], "burin-tools");
+    assert!(
+        manifest_value["serving"]["serving_requirements"]
+            .as_array()
+            .expect("manifest serving requirements")
+            .iter()
+            .any(|requirement| requirement["kind"] == "parser_owner"
+                && requirement["value"] == "harn_text_tool_parser"),
+        "manifest serving={:?}",
+        manifest_value["serving"]
+    );
 
     let adapter_with_contract = write_lora_adapter_fixture_with_contract(Some(contract_id));
     let inspect = run(
