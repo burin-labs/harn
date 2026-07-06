@@ -31,6 +31,7 @@ fn empty_closure(name: &str) -> VmClosure {
         source_dir: None,
         module_functions: None,
         module_state: None,
+        retained_module_scope: None,
     }
 }
 

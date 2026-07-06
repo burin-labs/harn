@@ -1489,6 +1489,7 @@ impl super::super::Vm {
                 .frames
                 .last()
                 .and_then(|frame| frame.module_state.as_ref().map(Arc::downgrade)),
+            retained_module_scope: None,
         };
         self.stack.push(VmValue::Closure(Arc::new(closure)));
     }

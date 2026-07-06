@@ -32,12 +32,40 @@ pub struct VmClosure {
     /// module's init chunk runs, so the initial values from `var x = ...`
     /// land in it.
     pub module_state: Option<WeakModuleState>,
+    /// Strong owners of this closure's module scope, pinned only when the
+    /// closure is stored in a process/thread-local registry that outlives the
+    /// VM that created it (reminder providers, session/lifecycle hooks). See
+    /// [`RetainedModuleScope`] and [`VmClosure::retained_for_host_registry`].
+    /// `None` for the overwhelmingly common short-lived closure, whose module
+    /// scope stays alive through the live VM's `module_cache`.
+    pub retained_module_scope: Option<Arc<RetainedModuleScope>>,
 }
 
 pub type ModuleFunctionRegistry = Arc<VmMutex<BTreeMap<String, Arc<VmClosure>>>>;
 pub type WeakModuleFunctionRegistry = Weak<VmMutex<BTreeMap<String, Arc<VmClosure>>>>;
 pub type ModuleState = Arc<VmMutex<VmEnv>>;
 pub type WeakModuleState = Weak<VmMutex<VmEnv>>;
+
+/// Strong owners of a closure's module function table and module-level state.
+///
+/// A [`VmClosure`] resolves sibling module `pub fn`s through its module's
+/// function registry, which it references only via a [`Weak`]
+/// ([`VmClosure::module_functions`] / [`module_state`](VmClosure::module_state)).
+/// The sole strong owner of that registry is normally the registering VM's
+/// `module_cache`. When a closure is registered into a process/thread-local
+/// registry (reminder providers, session/lifecycle hooks) it outlives that VM;
+/// once the VM tears down, the `Weak` dangles and a sibling-fn call inside the
+/// invoked closure falls through name resolution to host-bridge dispatch. This
+/// pins strong owners so the `Weak` stays upgradeable for the closure's whole
+/// retained lifetime.
+///
+/// The fields are intentionally unread — their sole purpose is to keep the
+/// referenced `Arc`s alive.
+#[derive(Debug)]
+pub struct RetainedModuleScope {
+    _functions: Option<ModuleFunctionRegistry>,
+    _state: Option<ModuleState>,
+}
 
 impl VmClosure {
     pub(crate) fn module_functions(&self) -> Option<ModuleFunctionRegistry> {
@@ -50,6 +78,39 @@ impl VmClosure {
         self.module_state
             .as_ref()
             .and_then(WeakModuleState::upgrade)
+    }
+
+    /// Return a clone of this closure suitable for storage in a process- or
+    /// thread-local registry that outlives the VM that created it (reminder
+    /// providers, session/lifecycle hooks). The clone pins strong owners of
+    /// this closure's module function table and module-level state
+    /// ([`RetainedModuleScope`]), so its body still resolves sibling module
+    /// `pub fn`s after the registering VM — the only other strong owner, via
+    /// `module_cache` — is dropped.
+    ///
+    /// The owners are pinned on a *clone* (a fresh `Arc<VmClosure>` that is
+    /// never itself a member of any function registry), so retaining a closure
+    /// that IS a module `pub fn` cannot form an `Arc` cycle with its registry.
+    ///
+    /// A no-op refcount bump when there is nothing to pin: the closure is
+    /// already pinned, or its `Weak`s do not upgrade — e.g. an entry-chunk
+    /// closure whose sibling functions live in captured `env` rather than a
+    /// module registry, which resolves without this.
+    pub(crate) fn retained_for_host_registry(self: &Arc<Self>) -> Arc<Self> {
+        if self.retained_module_scope.is_some() {
+            return Arc::clone(self);
+        }
+        let functions = self.module_functions();
+        let state = self.module_state();
+        if functions.is_none() && state.is_none() {
+            return Arc::clone(self);
+        }
+        let mut pinned = (**self).clone();
+        pinned.retained_module_scope = Some(Arc::new(RetainedModuleScope {
+            _functions: functions,
+            _state: state,
+        }));
+        Arc::new(pinned)
     }
 }
 

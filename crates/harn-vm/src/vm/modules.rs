@@ -247,6 +247,7 @@ impl Vm {
                 source_dir: module_source_dir.clone(),
                 module_functions: Some(Arc::downgrade(&registry)),
                 module_state: Some(Arc::downgrade(&module_state)),
+                retained_module_scope: None,
             });
             registry.lock().insert(name.clone(), Arc::clone(&closure));
             self.env

@@ -1262,6 +1262,13 @@ pub fn register_vm_provider(
     evaluate: Arc<VmClosure>,
 ) {
     let id = id.into();
+    // The provider closure is retained in this thread-local past the lifetime
+    // of the VM that registered it, so pin its module scope — otherwise the
+    // sibling `pub fn`s its body calls (e.g. Burin's
+    // `evaluate_burin_user_reminder_rules`) become unresolvable once the
+    // registering VM's `module_cache` drops, and the call falls through to
+    // host-bridge dispatch. See `VmClosure::retained_for_host_registry`.
+    let evaluate = evaluate.retained_for_host_registry();
     USER_PROVIDERS.with(|providers| {
         let mut providers = providers.borrow_mut();
         providers.retain(|provider| provider.id != id);

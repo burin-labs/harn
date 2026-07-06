@@ -505,6 +505,7 @@ fn synthetic_direct_call_closure() -> Arc<VmClosure> {
         source_dir: None,
         module_functions: None,
         module_state: None,
+        retained_module_scope: None,
     })
 }
 
@@ -588,6 +589,7 @@ fn synthetic_closure(name: &str, env: VmEnv) -> VmClosure {
         source_dir: None,
         module_functions: None,
         module_state: None,
+        retained_module_scope: None,
     }
 }
 
