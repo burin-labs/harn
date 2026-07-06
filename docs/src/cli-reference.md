@@ -1356,14 +1356,15 @@ credentials; providers that expose Batch APIs still require provider API
 billing.
 
 Human output marks each route as `live submit` or `dry-run only`. JSON output
-includes `batch.harn_live_adapter.{submit,status,download}` plus Harn's typed
+includes `batch.harn_live_adapter.{submit,status,cancel,download}` plus Harn's typed
 batch lifecycle facts: wire/input mode, published discounts and turnaround,
 request/file ceilings, result ordering, per-request failure semantics,
 cancellation support, retention, and non-secret storage notes. Provider Batch
 API capability stays separate from Harn's current live adapter coverage. Routes
 with `batch_api: true` but no Harn live adapter can still be planned,
-manifested, and prepared for offline adapter work; `submit`, `status`, and
-`download` fail before network calls until that provider adapter exists. Treat
+manifested, and prepared for offline adapter work; `submit`, `status`,
+`cancel`, and `download` fail before network calls until that provider adapter
+exists. Treat
 async batch receipts as offline eval/corpus artifacts, not as live interactive
 agent-loop pass@1 evidence for the meter stick.
 
@@ -1462,6 +1463,29 @@ from the Harn provider adapter boundary, then writes a
 state, provider status, and result file pointers. The embedded `lifecycle`
 object is the stable state-machine contract for eval/corpus runners; top-level
 counts remain a human-friendly summary.
+
+## harn models batch cancel
+
+Cancel submitted model batch jobs and write a durable cancellation receipt:
+
+```bash
+harn models batch cancel --receipt ./.harn/batches/eval-001/submission.json \
+  --out ./.harn/batches/eval-001/cancel.json --dry-run
+harn models batch cancel --receipt ./.harn/batches/eval-001/status.json \
+  --out ./.harn/batches/eval-001/cancel.json --json
+```
+
+`cancel` accepts either a submission receipt or a latest status receipt. In
+`--dry-run` mode it validates provider job ids and records redacted cancellation
+operations without network calls. Live cancellation is implemented only where
+the provider catalog says cancellation is supported and Harn has a known
+adapter: OpenAI batch jobs, Anthropic Message Batches, and Gemini Batch API
+operations. Jobs that are already terminal, missing provider ids, or backed by
+providers with unknown cancellation semantics are skipped with structured
+`skip_reason` values rather than treated as hard failures. The command writes a
+`harn.model_batch_cancel_receipt` with per-job cancel operations, provider
+responses, skipped-job reasons, normalized `canceling`/`canceled` lifecycle
+states, and aggregate lifecycle counts.
 
 ## harn models batch download
 

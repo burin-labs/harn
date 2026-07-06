@@ -10,8 +10,9 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    ModelsBatchArgs, ModelsBatchCommand, ModelsBatchDownloadArgs, ModelsBatchManifestArgs,
-    ModelsBatchPlanArgs, ModelsBatchPrepareArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs,
+    ModelsBatchArgs, ModelsBatchCancelArgs, ModelsBatchCommand, ModelsBatchDownloadArgs,
+    ModelsBatchManifestArgs, ModelsBatchPlanArgs, ModelsBatchPrepareArgs, ModelsBatchStatusArgs,
+    ModelsBatchSubmitArgs,
 };
 use crate::commands::run::RunSandboxOptions;
 use crate::dispatch;
@@ -34,6 +35,8 @@ const BATCH_STATUS_OUT_ENV: &str = "HARN_MODELS_BATCH_STATUS_OUT";
 const BATCH_STATUS_ENV: &str = "HARN_MODELS_BATCH_STATUS";
 const BATCH_RESULTS_OUT_DIR_ENV: &str = "HARN_MODELS_BATCH_RESULTS_OUT_DIR";
 const BATCH_MAX_DOWNLOAD_BYTES_ENV: &str = "HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES";
+const BATCH_CANCEL_RECEIPT_ENV: &str = "HARN_MODELS_BATCH_CANCEL_RECEIPT";
+const BATCH_CANCEL_OUT_ENV: &str = "HARN_MODELS_BATCH_CANCEL_OUT";
 const BATCH_DRY_RUN_ENV: &str = "HARN_MODELS_BATCH_DRY_RUN";
 const BATCH_TOOL_FORMAT_ENV: &str = "HARN_MODELS_BATCH_TOOL_FORMAT";
 const BATCH_ID_PREFIX_ENV: &str = "HARN_MODELS_BATCH_ID_PREFIX";
@@ -42,6 +45,7 @@ static DISPATCH_BATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_n
 
 pub(crate) async fn run(args: ModelsBatchArgs) {
     let exit_code = match args.command {
+        ModelsBatchCommand::Cancel(args) => Box::pin(run_cancel(args)).await,
         ModelsBatchCommand::Download(args) => Box::pin(run_download(args)).await,
         ModelsBatchCommand::Manifest(args) => Box::pin(run_manifest(args)).await,
         ModelsBatchCommand::Plan(args) => Box::pin(run_plan(args)).await,
@@ -52,6 +56,26 @@ pub(crate) async fn run(args: ModelsBatchArgs) {
     if exit_code != 0 {
         std::process::exit(exit_code);
     }
+}
+
+async fn run_cancel(args: ModelsBatchCancelArgs) -> i32 {
+    let _guard = DISPATCH_BATCH_LOCK.lock().await;
+    let receipt_path = absolutize_path(&args.receipt);
+    let out_path = absolutize_path(&args.out);
+    let mut sandbox = RunSandboxOptions::default().with_workspace_root(parent_dir(&out_path));
+    let receipt_root = parent_dir(&receipt_path);
+    if receipt_root != parent_dir(&out_path) {
+        sandbox = sandbox.with_read_only_roots(vec![receipt_root]);
+    }
+
+    let receipt = receipt_path.to_string_lossy().to_string();
+    let out = out_path.to_string_lossy().to_string();
+    let _mode = ScopedEnvVar::set(BATCH_MODE_ENV, "cancel");
+    let _receipt = ScopedEnvVar::set(BATCH_CANCEL_RECEIPT_ENV, receipt.trim());
+    let _out = ScopedEnvVar::set(BATCH_CANCEL_OUT_ENV, out.trim());
+    let _dry_run = ScopedEnvVar::set(BATCH_DRY_RUN_ENV, if args.dry_run { "1" } else { "0" });
+
+    run_batch_script(args.json, Some(sandbox)).await
 }
 
 async fn run_download(args: ModelsBatchDownloadArgs) -> i32 {

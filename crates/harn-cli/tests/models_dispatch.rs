@@ -297,6 +297,7 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     );
     assert_eq!(openai["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(openai["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(openai["batch"]["harn_live_adapter"]["cancel"], true);
     assert_eq!(openai["batch"]["harn_live_adapter"]["download"], true);
 
     let xai = models
@@ -306,6 +307,7 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(xai["batch"]["wire_format"], "xai");
     assert_eq!(xai["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(xai["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(xai["batch"]["harn_live_adapter"]["cancel"], false);
     assert_eq!(xai["batch"]["harn_live_adapter"]["download"], true);
 
     let groq = models
@@ -316,6 +318,7 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(groq["batch"]["discount_percent"], 50);
     assert_eq!(groq["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(groq["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(groq["batch"]["harn_live_adapter"]["cancel"], false);
     assert_eq!(groq["batch"]["harn_live_adapter"]["download"], true);
 
     let together = models
@@ -326,6 +329,7 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(together["batch"]["discount_percent"], 50);
     assert_eq!(together["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(together["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(together["batch"]["harn_live_adapter"]["cancel"], false);
     assert_eq!(together["batch"]["harn_live_adapter"]["download"], true);
 
     let gemini = models
@@ -336,9 +340,10 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(gemini["batch"]["max_input_bytes"], 2_147_483_648_u64);
     assert_eq!(gemini["batch"]["result_ordering"], "custom_id_rejoin");
     assert_eq!(gemini["batch"]["partial_failure"], "per_request");
-    assert_eq!(gemini["batch"]["cancellation"], "unknown");
+    assert_eq!(gemini["batch"]["cancellation"], "supported");
     assert_eq!(gemini["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(gemini["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(gemini["batch"]["harn_live_adapter"]["cancel"], true);
     assert_eq!(gemini["batch"]["harn_live_adapter"]["download"], true);
 
     let fireworks = models
@@ -349,6 +354,7 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(fireworks["batch"]["discount_percent"], 50);
     assert_eq!(fireworks["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(fireworks["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(fireworks["batch"]["harn_live_adapter"]["cancel"], false);
     assert_eq!(fireworks["batch"]["harn_live_adapter"]["download"], true);
 
     let human = run(&["models", "batch", "plan", "--provider", "gemini"], &[]);
@@ -1090,6 +1096,78 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     assert_eq!(status_receipt["lifecycle"]["counts"]["ready"], 1);
     assert_eq!(status_receipt["jobs"][0]["status"], "ready");
 
+    status_receipt["status"] = serde_json::Value::String("running".to_string());
+    status_receipt["runningCount"] = serde_json::Value::from(1);
+    status_receipt["readyCount"] = serde_json::Value::from(0);
+    {
+        let jobs = status_receipt["jobs"]
+            .as_array_mut()
+            .expect("mutable status jobs");
+        jobs[0]["status"] = serde_json::Value::String("running".to_string());
+        jobs[0]["provider_batch_id"] = serde_json::Value::String("batch_test".to_string());
+        jobs[0]["provider_status"] = serde_json::Value::String("in_progress".to_string());
+    }
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status_receipt).expect("serialize running status"),
+    )
+    .expect("write running status receipt");
+
+    let cancel_path = tmp.path().join("cancel.json");
+    let cancel = run(
+        &[
+            "models",
+            "batch",
+            "cancel",
+            "--receipt",
+            status_path.to_str().expect("utf8 status path"),
+            "--out",
+            cancel_path.to_str().expect("utf8 cancel path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(cancel.exit_code, 0, "harn stderr={}", cancel.stderr);
+    let cancel_value = parse_json(&cancel.stdout, "batch cancel");
+    let cancel_report = success_data(&cancel_value);
+    assert_eq!(cancel_report["dry_run"], true);
+    assert_eq!(cancel_report["status"], "dry_run");
+    assert_eq!(cancel_report["job_count"], 1);
+    assert_eq!(cancel_report["cancelable_count"], 1);
+    assert_eq!(cancel_report["skipped_count"], 0);
+    assert_eq!(cancel_report["lifecycle"]["phase"], "cancel");
+    assert_eq!(cancel_report["lifecycle"]["state"], "dry_run");
+    assert_eq!(cancel_report["lifecycle"]["counts"]["running"], 1);
+    let cancel_job = &cancel_report["jobs"].as_array().expect("cancel jobs")[0];
+    assert_eq!(cancel_job["status"], "running");
+    assert_eq!(cancel_job["provider_batch_id"], "batch_test");
+    assert_eq!(cancel_job["cancel_requested"], false);
+    assert_eq!(
+        cancel_job["cancel_operation"]["operation"],
+        "POST https://api.openai.com/v1/batches/batch_test/cancel"
+    );
+    assert_eq!(
+        cancel_job["cancel_operation"]["credential_env"],
+        "OPENAI_API_KEY"
+    );
+    assert_eq!(
+        cancel_job["cancel_operation"]["auth"],
+        "OPENAI_API_KEY=<redacted>"
+    );
+
+    let cancel_receipt = parse_json(
+        &fs::read_to_string(&cancel_path).expect("read cancel receipt"),
+        "cancel receipt",
+    );
+    assert_eq!(cancel_receipt["kind"], "harn.model_batch_cancel_receipt");
+    assert_eq!(cancel_receipt["status"], "dry_run");
+    assert_eq!(cancel_receipt["lifecycle"]["phase"], "cancel");
+    assert_eq!(
+        cancel_receipt["jobs"][0]["cancel_operation"]["credential_env"],
+        "OPENAI_API_KEY"
+    );
+
     status_receipt["status"] = serde_json::Value::String("completed".to_string());
     status_receipt["completedCount"] = serde_json::Value::from(1);
     status_receipt["readyCount"] = serde_json::Value::from(0);
@@ -1108,6 +1186,41 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
         serde_json::to_string_pretty(&status_receipt).expect("serialize completed status"),
     )
     .expect("write completed status receipt");
+
+    let skipped_cancel_path = tmp.path().join("cancel-completed.json");
+    let skipped_cancel = run(
+        &[
+            "models",
+            "batch",
+            "cancel",
+            "--receipt",
+            status_path.to_str().expect("utf8 completed status path"),
+            "--out",
+            skipped_cancel_path
+                .to_str()
+                .expect("utf8 skipped cancel path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(
+        skipped_cancel.exit_code, 0,
+        "harn stderr={}",
+        skipped_cancel.stderr
+    );
+    let skipped_cancel_value = parse_json(&skipped_cancel.stdout, "completed batch cancel");
+    let skipped_cancel_report = success_data(&skipped_cancel_value);
+    assert_eq!(skipped_cancel_report["skipped_count"], 1);
+    assert_eq!(skipped_cancel_report["jobs"][0]["status"], "skipped");
+    assert!(
+        skipped_cancel_report["jobs"][0]["skip_reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("terminal"),
+        "skip reason={}",
+        skipped_cancel_report["jobs"][0]["skip_reason"]
+    );
 
     let results_dir = tmp.path().join("results");
     let download = run(
@@ -1166,6 +1279,57 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     assert_eq!(results_receipt["lifecycle"]["phase"], "download");
     assert_eq!(results_receipt["lifecycle"]["counts"]["ready"], 1);
     assert_eq!(results_receipt["artifactCount"], 2);
+
+    status_receipt["status"] = serde_json::Value::String("canceled".to_string());
+    status_receipt["completedCount"] = serde_json::Value::from(0);
+    status_receipt["canceledCount"] = serde_json::Value::from(1);
+    {
+        let jobs = status_receipt["jobs"]
+            .as_array_mut()
+            .expect("mutable status jobs");
+        jobs[0]["status"] = serde_json::Value::String("canceled".to_string());
+        jobs[0]["provider_status"] = serde_json::Value::String("canceled".to_string());
+    }
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status_receipt).expect("serialize canceled status"),
+    )
+    .expect("write canceled status receipt");
+
+    let canceled_results_dir = tmp.path().join("canceled-results");
+    let canceled_download = run(
+        &[
+            "models",
+            "batch",
+            "download",
+            "--status",
+            status_path.to_str().expect("utf8 canceled status path"),
+            "--out-dir",
+            canceled_results_dir
+                .to_str()
+                .expect("utf8 canceled results dir"),
+            "--max-bytes",
+            "1048576",
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(
+        canceled_download.exit_code, 0,
+        "harn stderr={}",
+        canceled_download.stderr
+    );
+    let canceled_download_value = parse_json(&canceled_download.stdout, "canceled batch download");
+    let canceled_download_report = success_data(&canceled_download_value);
+    assert_eq!(canceled_download_report["dry_run"], true);
+    assert_eq!(canceled_download_report["artifact_count"], 2);
+    let canceled_download_job = &canceled_download_report["jobs"]
+        .as_array()
+        .expect("canceled download jobs")[0];
+    assert_eq!(canceled_download_job["status"], "ready");
+    assert_eq!(canceled_download_job["source_status"], "canceled");
+    assert_eq!(canceled_download_job["artifacts"][0]["label"], "output");
 }
 
 #[test]
