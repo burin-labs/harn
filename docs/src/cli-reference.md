@@ -1359,7 +1359,8 @@ Human output marks each route as `live submit` or `dry-run only`. JSON output
 includes `batch.harn_live_adapter.{submit,status,cancel,download}` plus Harn's typed
 batch lifecycle facts: wire/input mode, published discounts and turnaround,
 request/file ceilings, result ordering, per-request failure semantics,
-cancellation support, retention, and non-secret storage notes. Provider Batch
+cancellation support, retention, non-secret storage notes, and non-secret
+operational notes such as retry and result-rejoin constraints. Provider Batch
 API capability stays separate from Harn's current live adapter coverage. Routes
 with `batch_api: true` but no Harn live adapter can still be planned,
 manifested, and prepared for offline adapter work; `submit`, `status`,

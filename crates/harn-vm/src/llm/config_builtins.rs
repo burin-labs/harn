@@ -1140,6 +1140,10 @@ fn batch_support_to_vm_value(
         crate::value::intern_key("security_notes"),
         optional_batch_string_list(batch_api, &caps.batch_security_notes),
     );
+    dict.insert(
+        crate::value::intern_key("operational_notes"),
+        optional_batch_string_list(batch_api, &caps.batch_operational_notes),
+    );
     VmValue::dict(dict)
 }
 
@@ -1195,6 +1199,10 @@ fn insert_batch_support_fields(
     dict.insert(
         crate::value::intern_key("batch_security_notes"),
         optional_batch_string_list(batch_api, &caps.batch_security_notes),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_operational_notes"),
+        optional_batch_string_list(batch_api, &caps.batch_operational_notes),
     );
     dict.insert(
         crate::value::intern_key("batch"),
@@ -2399,6 +2407,15 @@ mod tests {
             ),
             other => panic!("expected batch security notes list, got {other:?}"),
         }
+        match direct_openai.get("batch_operational_notes") {
+            Some(VmValue::List(notes)) => assert!(
+                notes
+                    .iter()
+                    .any(|note| note.display().contains("one model")),
+                "expected OpenAI batch operational notes to preserve model-grouping policy"
+            ),
+            other => panic!("expected batch operational notes list, got {other:?}"),
+        }
         let direct_openai_batch = direct_openai
             .get("batch")
             .and_then(VmValue::as_dict)
@@ -2411,6 +2428,15 @@ mod tests {
             direct_openai_batch.get("max_requests"),
             Some(VmValue::Int(50_000))
         ));
+        match direct_openai_batch.get("operational_notes") {
+            Some(VmValue::List(notes)) => assert!(
+                notes
+                    .iter()
+                    .any(|note| note.display().contains("custom_id")),
+                "expected nested batch operational notes to preserve result rejoin policy"
+            ),
+            other => panic!("expected nested batch operational notes list, got {other:?}"),
+        }
 
         let openrouter_family = provider_capabilities_builtin(
             &[
@@ -2541,6 +2567,15 @@ mod tests {
             ),
             other => panic!("expected batch security notes list, got {other:?}"),
         }
+        match openai.get("batch_operational_notes") {
+            Some(VmValue::List(notes)) => assert!(
+                notes
+                    .iter()
+                    .any(|note| note.display().contains("custom_id")),
+                "expected batch operational notes in llm catalog row"
+            ),
+            other => panic!("expected batch operational notes list, got {other:?}"),
+        }
         let openai_batch = openai
             .get("batch")
             .and_then(VmValue::as_dict)
@@ -2548,6 +2583,15 @@ mod tests {
         match openai_batch.get("result_ordering") {
             Some(VmValue::String(value)) => assert_eq!(value.as_str(), "custom_id_rejoin"),
             other => panic!("expected nested openai batch ordering, got {other:?}"),
+        }
+        match openai_batch.get("operational_notes") {
+            Some(VmValue::List(notes)) => assert!(
+                notes
+                    .iter()
+                    .any(|note| note.display().contains("one model")),
+                "expected nested batch operational notes in llm catalog row"
+            ),
+            other => panic!("expected nested batch operational notes list, got {other:?}"),
         }
     }
 

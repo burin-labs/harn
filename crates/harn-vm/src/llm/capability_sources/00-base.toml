@@ -80,6 +80,9 @@
 #   batch_security_notes:
 #                     non-secret provider storage/security notes safe to surface
 #                     in catalogs and receipts.
+#   batch_operational_notes:
+#                     non-secret submit/retry/rejoin constraints safe to surface
+#                     in catalogs and receipts.
 #   tool_approval_policy:
 #                     approval policy story for provider-executed tools.
 #   max_tools       : cap on tool-definition count the provider will accept.

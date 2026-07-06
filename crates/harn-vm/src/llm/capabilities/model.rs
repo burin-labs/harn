@@ -137,6 +137,8 @@ pub struct ProviderDefaults {
     #[serde(default)]
     pub batch_security_notes: Option<Vec<String>>,
     #[serde(default)]
+    pub batch_operational_notes: Option<Vec<String>>,
+    #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
     pub top_k_supported: Option<bool>,
@@ -205,6 +207,10 @@ macro_rules! merge_provider_defaults {
         $op(&mut $dst.batch_partial_failure, &$src.batch_partial_failure);
         $op(&mut $dst.batch_cancellation, &$src.batch_cancellation);
         $op(&mut $dst.batch_security_notes, &$src.batch_security_notes);
+        $op(
+            &mut $dst.batch_operational_notes,
+            &$src.batch_operational_notes,
+        );
         $op(&mut $dst.seed_supported, &$src.seed_supported);
         $op(&mut $dst.top_k_supported, &$src.top_k_supported);
         $op(&mut $dst.temperature_supported, &$src.temperature_supported);
@@ -248,6 +254,7 @@ impl ProviderDefaults {
             || self.batch_partial_failure.is_some()
             || self.batch_cancellation.is_some()
             || self.batch_security_notes.is_some()
+            || self.batch_operational_notes.is_some()
             || self.seed_supported.is_some()
             || self.top_k_supported.is_some()
             || self.temperature_supported.is_some()
@@ -379,6 +386,7 @@ pub struct Capabilities {
     pub batch_partial_failure: Option<String>,
     pub batch_cancellation: Option<String>,
     pub batch_security_notes: Vec<String>,
+    pub batch_operational_notes: Vec<String>,
     pub tool_approval_policy: Option<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
@@ -506,6 +514,7 @@ impl Default for Capabilities {
             batch_partial_failure: None,
             batch_cancellation: None,
             batch_security_notes: Vec::new(),
+            batch_operational_notes: Vec::new(),
             tool_approval_policy: None,
             max_tools: None,
             prompt_caching: false,
