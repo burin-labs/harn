@@ -174,6 +174,13 @@ pub type AgentLoopOptions = {
   output_format?: string | dict,
   schema?: any,
   json_schema?: any,
+  // Terminal-answer contract, NOT a per-turn one. When set, the loop does not
+  // force each mid-loop turn into structured mode (that would fight
+  // tool-calling); instead it validates the FINAL answer against this JSON
+  // Schema at finalize, re-asks once through the `llm_caller` seam if it is
+  // off-shape, and surfaces the parsed value on `run.output` with
+  // `run.output_valid` recording whether validation passed. See
+  // `docs/src/llm/agent_loop.md` and `__agent_loop_apply_output_schema`.
   output_schema?: any,
   output_validation?: string,
   schema_retries?: int,

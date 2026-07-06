@@ -111,11 +111,24 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
   // A custom `llm_caller` short-circuits before this default path, so a
   // non-streaming caller simply never fires `on_delta`.
   let on_delta = llm_opts?._on_delta
+  // `output_schema` is a TERMINAL-answer contract on `agent_loop`, not a
+  // per-turn one: forcing every mid-loop turn into structured (json_schema)
+  // mode fights tool-calling, since the model must choose between emitting a
+  // tool call and emitting the schema-shaped final value. So the loop strips
+  // it from ordinary turns and re-applies it only at finalize (see
+  // `__agent_loop_apply_output_schema`). The single exception is the terminal
+  // repair call, tagged `_output_schema_repair`, which DOES want llm_call's
+  // built-in structured enforcement + schema-retry repair.
+  let call_opts = if llm_opts?._output_schema_repair == true {
+    llm_opts
+  } else {
+    omit(llm_opts, ["output_schema"])
+  }
   let result = try {
     if type_of(on_delta) == "closure" {
-      __host_llm_stream_collect(message, turn_system, llm_call_options(llm_opts), on_delta)
+      __host_llm_stream_collect(message, turn_system, llm_call_options(call_opts), on_delta)
     } else {
-      llm_call(message, turn_system, llm_call_options(llm_opts))
+      llm_call(message, turn_system, llm_call_options(call_opts))
     }
   }
   if !is_err(result) {
@@ -3437,6 +3450,87 @@ fn __agent_loop_active_skill_mcp_specs(active_skills) {
   return specs
 }
 
+/**
+ * Validate `text` against `schema` (a JSON Schema dict, the same shape
+ * `output_schema` carries elsewhere). Reuses the language's own schema
+ * validator — `json_extract` (tolerant text→JSON) + `schema_is`
+ * (canonicalize + validate, the machinery `llm_call_structured` also uses) —
+ * so validation is never reimplemented here. Returns `{ok, value}`: `ok`
+ * true only when the extracted value validates; `value` is the best parsed
+ * value (nil when nothing parseable was found).
+ */
+fn __agent_loop_output_schema_value(text, schema) {
+  let parsed = try {
+    json_extract(text)
+  }
+  if is_err(parsed) {
+    return {ok: false, value: nil}
+  }
+  let value = unwrap(parsed)
+  let valid = try {
+    schema_is(value, schema)
+  }
+  if is_err(valid) || !unwrap(valid) {
+    return {ok: false, value: value}
+  }
+  return {ok: true, value: value}
+}
+
+fn __agent_loop_output_schema_repair_prompt(schema, text) {
+  return "Your previous final answer did not satisfy the required output schema.\n"
+    + "Reply with ONLY a JSON value that validates against this JSON Schema:\n\n"
+    + json_stringify_pretty(schema)
+    + "\n\nYour previous final answer was:\n\n"
+    + text
+}
+
+/**
+ * Terminal output-schema gate for `agent_loop`.
+ *
+ * `output_schema` promises the loop's FINAL answer parses against a schema.
+ * The loop deliberately does NOT force every mid-loop turn into structured
+ * mode (that fights tool-calling — see `__default_invoke_llm`); instead the
+ * terminal answer is validated here. If it already satisfies the schema it is
+ * surfaced as-is; otherwise the loop re-asks ONCE — through the same
+ * `llm_caller` seam ordinary turns use, so custom callers and test mocks
+ * intercept it — for a schema-shaped value, mirroring the repair-once
+ * behavior `llm_call_structured` implements. The parsed value lands on
+ * `run.output`; `run.output_valid` records whether validation ultimately
+ * passed (never throws — a persistently off-shape answer yields
+ * `output_valid: false`, not a crash).
+ */
+fn __agent_loop_apply_output_schema(final_result, opts, session, message, iteration) {
+  let schema = opts?.output_schema
+  let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
+  let direct = __agent_loop_output_schema_value(text, schema)
+  log("DBG2 text=[" + text + "] direct.ok=" + to_string(direct.ok) + " direct.value=" + to_string(direct.value))
+  if direct.ok {
+    return final_result + {output: direct.value, output_valid: true}
+  }
+  let repair_opts = __agent_loop_effective_llm_options(opts)
+    + {
+    session_id: session.session_id,
+    tools: nil,
+    tool_choice: nil,
+    tool_format: opts?.tool_format,
+    _iteration: iteration + 1,
+    _output_schema_repair: true,
+  }
+  let repair = try {
+    __invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
+  }
+  if is_err(repair) {
+    return final_result + {output: direct.value, output_valid: false}
+  }
+  let call = unwrap(repair)
+  if !(call?.ok ?? false) {
+    return final_result + {output: direct.value, output_valid: false}
+  }
+  let repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
+  let second = __agent_loop_output_schema_value(repaired_text, schema)
+  return final_result + {output: second.value, output_valid: second.ok}
+}
+
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
@@ -4665,6 +4759,10 @@ fn __agent_loop_run(message, session, initial_opts) {
     }
     if suspend_result != nil {
       final_result = final_result + suspend_result
+    }
+    log("DBG terminated_ok=" + to_string(terminated_ok) + " has_schema=" + to_string(opts?.output_schema != nil) + " final_status=" + to_string(final_status))
+    if terminated_ok && opts?.output_schema != nil {
+      final_result = __agent_loop_apply_output_schema(final_result, opts, session, message, iteration)
     }
     final_result
   }
