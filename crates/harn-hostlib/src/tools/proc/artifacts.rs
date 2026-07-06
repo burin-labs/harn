@@ -13,11 +13,18 @@ static ARTIFACTS: LazyLock<Mutex<BTreeMap<String, CommandArtifacts>>> =
 static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
 
 const RETENTION_ENV: &str = "HARN_COMMAND_ARTIFACT_RETENTION_SECS";
+const MAX_DIRS_ENV: &str = "HARN_COMMAND_ARTIFACT_MAX_DIRS";
 const DEFAULT_RETENTION: Duration = Duration::from_hours(168);
+const DEFAULT_MAX_DIRS: usize = 4096;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
-const SWEEP_MAX_CANDIDATES: usize = 4096;
-const SWEEP_MAX_DELETIONS: usize = 256;
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
+
+#[derive(Clone, Debug)]
+struct ArtifactDir {
+    path: PathBuf,
+    pid: u32,
+    modified: SystemTime,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct CommandArtifacts {
@@ -189,6 +196,8 @@ fn maybe_sweep_stale_artifacts() {
     let Some(retention) = retention_duration() else {
         return;
     };
+    let temp_dir = std::env::temp_dir();
+    let max_dirs = max_artifact_dirs();
     let now = Instant::now();
     {
         let mut last = LAST_RETENTION_SWEEP
@@ -197,12 +206,13 @@ fn maybe_sweep_stale_artifacts() {
         if last
             .map(|last_run| now.duration_since(last_run) < SWEEP_INTERVAL)
             .unwrap_or(false)
+            && !command_artifact_dir_count_exceeds(&temp_dir, max_dirs)
         {
             return;
         }
         *last = Some(now);
     }
-    sweep_command_artifact_dirs(&std::env::temp_dir(), retention, SystemTime::now());
+    sweep_command_artifact_dirs(&temp_dir, retention, max_dirs, SystemTime::now());
 }
 
 fn retention_duration() -> Option<Duration> {
@@ -217,16 +227,49 @@ fn retention_duration() -> Option<Duration> {
     }
 }
 
-fn sweep_command_artifact_dirs(temp_dir: &Path, retention: Duration, now: SystemTime) {
+fn max_artifact_dirs() -> usize {
+    std::env::var(MAX_DIRS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MAX_DIRS)
+}
+
+fn command_artifact_dir_count_exceeds(temp_dir: &Path, max_dirs: usize) -> bool {
+    if max_dirs == 0 {
+        return false;
+    }
     let Ok(entries) = std::fs::read_dir(temp_dir) else {
-        return;
+        return false;
     };
-    let mut candidates = 0;
-    let mut deletions = 0;
+    let mut count = 0;
     for entry in entries.flatten() {
-        if candidates >= SWEEP_MAX_CANDIDATES || deletions >= SWEEP_MAX_DELETIONS {
-            break;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if parse_command_artifact_dir_name(name).is_none() {
+            continue;
         }
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !metadata.file_type().is_dir() {
+            continue;
+        }
+        count += 1;
+        if count > max_dirs {
+            return true;
+        }
+    }
+    false
+}
+
+fn collect_command_artifact_dirs(temp_dir: &Path) -> Vec<ArtifactDir> {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else {
+        return Vec::new();
+    };
+    let mut dirs = Vec::new();
+    for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
@@ -234,7 +277,6 @@ fn sweep_command_artifact_dirs(temp_dir: &Path, retention: Duration, now: System
         let Some(pid) = parse_command_artifact_dir_name(name) else {
             continue;
         };
-        candidates += 1;
         let Ok(metadata) = std::fs::symlink_metadata(&path) else {
             continue;
         };
@@ -244,18 +286,51 @@ fn sweep_command_artifact_dirs(temp_dir: &Path, retention: Duration, now: System
         let Ok(modified) = metadata.modified() else {
             continue;
         };
+        dirs.push(ArtifactDir {
+            path,
+            pid,
+            modified,
+        });
+    }
+    dirs
+}
+
+fn sweep_command_artifact_dirs(
+    temp_dir: &Path,
+    retention: Duration,
+    max_dirs: usize,
+    now: SystemTime,
+) {
+    let mut dirs = collect_command_artifact_dirs(temp_dir);
+    dirs.sort_by_key(|dir| dir.modified);
+    let mut live_count = dirs.len();
+    for dir in &dirs {
         if now
-            .duration_since(modified)
+            .duration_since(dir.modified)
             .map(|age| age < retention)
             .unwrap_or(true)
         {
             continue;
         }
-        if process_is_alive(pid) {
+        if process_is_alive(dir.pid) {
             continue;
         }
-        if std::fs::remove_dir_all(&path).is_ok() {
-            deletions += 1;
+        if std::fs::remove_dir_all(&dir.path).is_ok() {
+            live_count = live_count.saturating_sub(1);
+        }
+    }
+    if max_dirs == 0 || live_count <= max_dirs {
+        return;
+    }
+    for dir in &dirs {
+        if live_count <= max_dirs {
+            break;
+        }
+        if !dir.path.exists() || process_is_alive(dir.pid) {
+            continue;
+        }
+        if std::fs::remove_dir_all(&dir.path).is_ok() {
+            live_count = live_count.saturating_sub(1);
         }
     }
 }
@@ -365,7 +440,7 @@ mod tests {
         let stale = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
         set_dir_mtime(&stale, now - Duration::from_secs(10));
 
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
 
         assert!(!stale.exists());
     }
@@ -377,7 +452,7 @@ mod tests {
         let recent = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
         set_dir_mtime(&recent, now - Duration::from_secs(3));
 
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
 
         assert!(recent.exists());
     }
@@ -389,7 +464,7 @@ mod tests {
         let live = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
         set_dir_mtime(&live, now - Duration::from_secs(10));
 
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
 
         assert!(live.exists());
     }
@@ -402,7 +477,7 @@ mod tests {
         std::fs::create_dir(&malformed).unwrap();
         set_dir_mtime(&malformed, now - Duration::from_secs(10));
 
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
 
         assert!(malformed.exists());
     }
@@ -420,12 +495,31 @@ mod tests {
         let link = artifact_dir(temp.path(), dead_pid(), 100, 1);
         symlink(&target, &link).unwrap();
 
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
 
         assert!(link.exists());
         assert_eq!(
             std::fs::read_to_string(target.join("keep.txt")).unwrap(),
             "keep"
         );
+    }
+
+    #[test]
+    fn command_artifact_pressure_sweep_removes_oldest_dead_dirs_over_limit() {
+        let temp = tempdir().unwrap();
+        let now = SystemTime::now();
+        let pid = dead_pid();
+        let first = create_artifact_dir(temp.path(), pid, 100, 1);
+        let second = create_artifact_dir(temp.path(), pid, 200, 1);
+        let third = create_artifact_dir(temp.path(), pid, 300, 1);
+        set_dir_mtime(&first, now - Duration::from_secs(3));
+        set_dir_mtime(&second, now - Duration::from_secs(2));
+        set_dir_mtime(&third, now - Duration::from_secs(1));
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_mins(1), 2, now);
+
+        assert!(!first.exists());
+        assert!(second.exists());
+        assert!(third.exists());
     }
 }
