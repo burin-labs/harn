@@ -719,7 +719,13 @@ Every preset kind layers three things under your explicit input:
    `budget` (session-cumulative `total_budget_usd`), and `model_ladder`.
    Pack rows fill **only** nil/absent keys at one lower-priority seam; they
    never override explicit caller input. Defaults are data rows, not code
-   branches.
+   branches. The model route rows (`provider`, `model`, `models`, `ladder`,
+   `model_ladder`, `routing`, and related routing-policy keys) are treated as
+   one ownership group: if you provide any route at top level or under
+   `llm_options`, the preset does not add a different built-in provider or
+   ladder. Supplying both top-level `provider` and `model` without a ladder
+   produces a single-step `model_ladder` in the returned options for downstream
+   policy code to inspect.
 3. **Default transport retry** — v0.10 removed the per-call `llm_retries`
    budget, making a bare `agent_loop` fail-fast on transient transport
    errors. Presets bake bounded resilience back in by wrapping the effective
@@ -772,6 +778,15 @@ let result = agent_loop(prompt, system, opts)
 // Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
 let summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-4o-mini"})
 let summary = agent_loop("Summarize the audit findings.", nil, summary_opts)
+
+// Local/configured route. The audit preset keeps its audit behavior,
+// budget, timeout, and retry defaults, but it does not mix in the built-in
+// Anthropic provider or frontier ladder once the route is supplied.
+let local_opts = agent_preset("audit", {
+  llm_options: {provider: "llamacpp", model: "gemma4-local"},
+  tools: release_tools,
+})
+let local_audit = agent_loop("Audit with the configured local model.", local_opts?.system, local_opts)
 ```
 
 Preset roles, defaults summarized:

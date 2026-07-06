@@ -13,9 +13,11 @@ pipeline default() {
   __io_println(opts.provider)
   __io_println(opts.timeout_ms)
   __io_println(opts.max_nudges)
-  // Pack fills everything the caller omitted.
+  // Pack fills non-routing rows the caller omitted. Route rows are atomic: a
+  // caller-owned provider suppresses the preset model ladder instead of mixing
+  // caller and pack routing policy.
   __io_println(opts.budget.total_budget_usd == 25.0)
-  __io_println(len(opts.model_ladder) > 0)
+  __io_println(opts?.model_ladder == nil)
   // The preset's own behavior template still applies.
   __io_println(opts._preset_kind)
   __io_println(opts.profile)
