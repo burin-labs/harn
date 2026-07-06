@@ -791,6 +791,7 @@ fn ensure_parent_dirs_scoped(target: &ScopedMutationTarget) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn open_parent_dir_scoped(
     target: &ScopedMutationTarget,
 ) -> io::Result<(std::os::fd::OwnedFd, String)> {
