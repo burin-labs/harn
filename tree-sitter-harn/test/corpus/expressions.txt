@@ -138,6 +138,35 @@ pipeline test() {
             (string_delimiter)))))))
 
 ==================
+Optional Bracket Subscript
+==================
+
+pipeline test() {
+  let content_type = headers?.["content-type"]
+  let first = items?.[0]
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (subscript_expression
+          object: (identifier)
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter))))
+      (let_binding
+        name: (identifier)
+        value: (subscript_expression
+          object: (identifier)
+          (integer_literal))))))
+
+==================
 Comparison With Identifier LHS
 ==================
 

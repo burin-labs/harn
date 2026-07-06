@@ -4812,11 +4812,11 @@
         },
         {
           "type": "SYMBOL",
-          "name": "property_access"
+          "name": "subscript_expression"
         },
         {
           "type": "SYMBOL",
-          "name": "subscript_expression"
+          "name": "property_access"
         },
         {
           "type": "SYMBOL",
@@ -6025,6 +6025,10 @@
               {
                 "type": "STRING",
                 "value": "?["
+              },
+              {
+                "type": "STRING",
+                "value": "?.["
               }
             ]
           },

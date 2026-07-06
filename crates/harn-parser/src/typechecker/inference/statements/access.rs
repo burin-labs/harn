@@ -242,7 +242,7 @@ impl TypeChecker {
     /// Diagnose a statically-`nil` or `unknown` receiver for any access
     /// form. Returns `true` when a diagnostic was emitted so the caller can
     /// skip the access-kind-specific checks (field existence, etc.) that
-    /// would then be redundant. Optional access (`?.`, `?[]`, `?.()`)
+    /// would then be redundant. Optional access (`?.`, `?.[]`, `?.()`)
     /// suppresses the `nil` diagnostic — that is exactly what those
     /// operators are for — but an `unknown` receiver is still flagged
     /// because `?.` only guards `nil`, not a non-shape concrete value.
@@ -325,7 +325,7 @@ impl TypeChecker {
 
     /// Subscript (`obj[idx]`) nil-safety, mirroring `check_property_access`:
     /// a statically-`nil`, may-be-`nil`, or `unknown` receiver is diagnosed
-    /// with the same guidance, pointing at `?[…]` instead of `?.`.
+    /// with the same guidance, pointing at `?.[…]` instead of `?.`.
     pub(super) fn check_subscript_access(
         &mut self,
         object: &SNode,

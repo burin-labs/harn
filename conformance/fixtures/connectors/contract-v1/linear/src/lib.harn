@@ -204,8 +204,8 @@ fn __secret_ref_with_alias(value, fallback_name, fallback_id) {
 }
 
 fn __metadata_secret_alias(raw, name) {
-  let alias = raw?.metadata?.secret_ids?[name] ?? raw?.metadata?.config?.secret_ids?[name]
-    ?? raw?.config?.secret_ids?[name]
+  let alias = raw?.metadata?.secret_ids?.[name] ?? raw?.metadata?.config?.secret_ids?.[name]
+    ?? raw?.config?.secret_ids?.[name]
   return __secret_get_optional(__secret_id_candidate(alias, name))
 }
 
@@ -533,7 +533,7 @@ fn __missing_http_response(response) {
 }
 
 fn __required_string(args, field) {
-  let value = args?[field]
+  let value = args?.[field]
   if value == nil || trim(to_string(value)) == "" {
     throw {message: "linear " + field + " is required", code: "invalid_args", field: field}
   }

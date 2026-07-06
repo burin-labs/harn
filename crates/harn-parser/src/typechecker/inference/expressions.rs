@@ -1529,7 +1529,7 @@ impl TypeChecker {
         let access = match kind {
             SafeNavigationKind::Property(property) => format!("`?.{property}`"),
             SafeNavigationKind::Method => "safe method call".to_string(),
-            SafeNavigationKind::Subscript => "`?[]`".to_string(),
+            SafeNavigationKind::Subscript => "`?.[]`".to_string(),
         };
         self.lint_warning_at_with_fix(
             Code::LintUnnecessarySafeNavigation,
@@ -1555,7 +1555,13 @@ impl TypeChecker {
             SafeNavigationKind::Property(_) | SafeNavigationKind::Method => {
                 (region.find("?.")?, 2, ".")
             }
-            SafeNavigationKind::Subscript => (region.find("?[")?, 1, ""),
+            SafeNavigationKind::Subscript => {
+                if let Some(start) = region.find("?.[") {
+                    (start, 2, "")
+                } else {
+                    (region.find("?[")?, 1, "")
+                }
+            }
         };
         let start = search_start + relative_start;
         let end = start + len;

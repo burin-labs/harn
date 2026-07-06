@@ -258,7 +258,7 @@ fn __canon_requested_needs_manifest(items) -> bool {
 }
 
 fn __canon_item_file_names(item) {
-  return item?.file_names ?? item?.fileNames ?? item?["file-names"] ?? []
+  return item?.file_names ?? item?.fileNames ?? item?.["file-names"] ?? []
 }
 
 fn __canon_append_manifest_packs(packs, base_dir, manifest) {

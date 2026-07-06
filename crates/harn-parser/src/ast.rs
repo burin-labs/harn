@@ -396,7 +396,7 @@ pub enum Node {
         object: Box<SNode>,
         index: Box<SNode>,
     },
-    /// Optional subscript: `obj?[index]` — returns nil if obj is nil.
+    /// Optional subscript: `obj?.[index]` — returns nil if obj is nil.
     OptionalSubscriptAccess {
         object: Box<SNode>,
         index: Box<SNode>,

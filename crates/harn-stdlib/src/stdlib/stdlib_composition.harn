@@ -96,7 +96,7 @@ fn __composition_execute_options(opts, dispatcher) {
     "call_timeout_ms",
     "retry",
   ] {
-    if opts?[key] != nil {
+    if opts?.[key] != nil {
       out = out + {[key]: opts[key]}
     }
   }

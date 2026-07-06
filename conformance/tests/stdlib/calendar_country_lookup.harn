@@ -13,7 +13,7 @@ pipeline default() {
   }
   __io_println(us.name)
   __io_println(us.default_timezone == nil)
-  __io_println(country_timezones("US")?[0])
+  __io_println(country_timezones("US")?.[0])
   __io_println(default_timezone_for_country("GB"))
   __io_println(default_timezone_for_country("US") == nil)
   __io_println(country_info("ZZ") == nil)

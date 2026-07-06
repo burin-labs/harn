@@ -62,7 +62,7 @@ fn test_no_comparison_to_bool_for_optional_chaining() {
         "d?.enabled == false",
         "false == d?.enabled",
         "d?.flags.strict != true",
-        "d?[\"enabled\"] == false",
+        "d?.[\"enabled\"] == false",
     ] {
         let diags = lint_source(&format!(
             "pipeline default(task) {{\n  let d = {{}}\n  if {expr} {{ log(\"x\") }}\n}}"

@@ -825,7 +825,7 @@ fn __apply_preset_pack(opts, kind) {
     if contains(__preset_pack_route_keys(), key) {
       continue
     }
-    if resolved?[key] == nil {
+    if resolved?.[key] == nil {
       resolved = resolved + {[key]: pack[key]}
     }
   }

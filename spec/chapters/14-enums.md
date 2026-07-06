@@ -108,8 +108,9 @@ to a non-Result value produces a type error at runtime.
 Disambiguation: when the parser sees `expr?`, it distinguishes between the
 postfix `?` (Result propagation) and the ternary `? :` operator by checking
 whether the token following `?` could start a ternary branch expression.
-For `expr?[...]`, optional subscript is used unless the `?` is followed by a
-valid branch expression and a top-level ternary `:`. For example,
+For legacy `expr?[...]`, optional subscript is used unless the `?` is followed
+by a valid branch expression and a top-level ternary `:`. The canonical
+optional subscript spelling is `expr?.[...]`. For example,
 `repo ? ["--repo", repo] : []` parses as a ternary without extra parentheses.
 
 ### Pattern matching on result
@@ -172,4 +173,3 @@ fn fetch_and_parse(url) {
   return Ok(data)
 }
 ```
-

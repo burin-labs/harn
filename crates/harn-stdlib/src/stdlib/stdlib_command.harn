@@ -40,7 +40,7 @@ fn __command_copy_common(req, source) {
     "progress_max_inline_bytes",
     "policy_context",
   ] {
-    if source?[key] != nil {
+    if source?.[key] != nil {
       out = out + {[key]: source[key]}
     }
   }
@@ -70,13 +70,13 @@ fn __command_apply_option_defaults(req, options) {
     "progress_max_inline_bytes",
     "policy_context",
   ] {
-    if out?[key] == nil && opts[key] != nil {
+    if out?.[key] == nil && opts[key] != nil {
       out = out + {[key]: opts[key]}
     }
   }
   if out.mode == "shell" {
     for key in ["shell", "shell_id", "login", "interactive"] {
-      if out?[key] == nil && opts[key] != nil {
+      if out?.[key] == nil && opts[key] != nil {
         out = out + {[key]: opts[key]}
       }
     }
@@ -112,7 +112,7 @@ fn __command_request(spec, options) {
     }
     req = {mode: "shell", command: spec.command}
     for key in ["shell", "shell_id", "login", "interactive"] {
-      if spec?[key] != nil {
+      if spec?.[key] != nil {
         req = req + {[key]: spec[key]}
       }
     }
@@ -501,7 +501,7 @@ fn __command_artifacts(result) {
 
 fn __command_spec_field(spec, key) {
   if type_of(spec) == "dict" {
-    return spec?[key]
+    return spec?.[key]
   }
   if key == "argv" && type_of(spec) == "list" {
     return spec

@@ -701,8 +701,8 @@ module.exports = grammar({
         $.generic_call_expression,
         $.hitl_expression,
         $.method_call,
-        $.property_access,
         $.subscript_expression,
+        $.property_access,
         $.slice_expression,
         $.try_unwrap_expression,
         $.parenthesized_expression,
@@ -869,7 +869,7 @@ module.exports = grammar({
         13,
         seq(
           field("object", $._expression),
-          choice("[", "?["),
+          choice("[", "?[", "?.["),
           $._expression,
           "]"
         )

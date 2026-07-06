@@ -228,8 +228,8 @@ fn __abs_diff(left, right) {
 fn __pricing_change(catalog_pricing, observed_pricing) {
   var changes: list<dict> = []
   for key in PRICING_KEYS {
-    let cat = catalog_pricing?[key]
-    let obs = observed_pricing?[key]
+    let cat = catalog_pricing?.[key]
+    let obs = observed_pricing?.[key]
     if cat == nil && obs == nil {
       continue
     }
@@ -292,8 +292,8 @@ fn __capability_changes(catalog_caps, observed_caps) {
   }
   var changes: list<dict> = []
   for key in CAPABILITY_KEYS {
-    let cat = catalog_caps?[key]
-    let obs = observed_caps?[key]
+    let cat = catalog_caps?.[key]
+    let obs = observed_caps?.[key]
     if cat == nil && obs == nil {
       continue
     }
@@ -594,7 +594,7 @@ fn __format_model_section(obs) -> list<string> {
   if obs.pricing != nil {
     lines = lines + ["", "[models." + id_text + ".pricing]"]
     for key in PRICING_KEYS {
-      let value = obs.pricing?[key]
+      let value = obs.pricing?.[key]
       if value != nil {
         lines = lines + [key + " = " + to_string(value)]
       }

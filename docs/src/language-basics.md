@@ -250,7 +250,7 @@ Ordered by precedence (lowest to highest):
 | 9 | `*` `/` `%` | Multiply, divide, modulo |
 | 10 | `!` `-` | Unary not, negate |
 | 11 | `**` | Exponentiation |
-| 12 | `.` `?.` `[]` `?[]` `[:]` `()` `?` | Member access, optional chaining, subscript, optional subscript, slice, call, try |
+| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` | Member access, optional chaining, subscript, optional subscript, slice, call, try |
 
 Integer division truncates toward zero. Integer division (and any modulo) by
 zero raises a catchable runtime error, while float division by zero follows
@@ -266,19 +266,21 @@ operators.
 
 ### Optional chaining (`?.`)
 
-Access properties or call methods on values that might be nil. Returns
+Access properties, indexes, or call methods on values that might be nil. Returns
 nil instead of erroring when the receiver is nil:
 
 ```harn
 let user = nil
 log(user?.name)           // nil (no error)
 log(user?.greet("hi"))    // nil (method not called)
+log(user?.["name"])       // nil (subscript not evaluated)
 
 let d = {name: "Alice"}
 log(d?.name)              // Alice
+log(d?.["name"])          // Alice
 ```
 
-Chains propagate nil: `a?.b?.c` returns nil if any step is nil.
+Chains propagate nil: `a?.b?.[0]?.c` returns nil if any step is nil.
 
 ### List and string slicing (`[start:end]`)
 

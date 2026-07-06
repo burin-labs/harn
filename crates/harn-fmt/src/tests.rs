@@ -265,11 +265,13 @@ fn test_format_binary_ops() {
 fn test_format_ternary_list_branch() {
     let source = r#"pipeline default() {
   let args = repo ? ["--repo", repo] : []
-  let first = xs?[0]
+  let first = xs?.[0]
+  let legacy_first = xs?[0]
 }"#;
     let result = format_source(source).unwrap();
     assert!(result.contains(r#"repo ? ["--repo", repo] : []"#));
-    assert!(result.contains("xs?[0]"));
+    assert!(result.contains("xs?.[0]"));
+    assert!(result.contains("legacy_first = xs?.[0]"));
     assert_roundtrip(source);
 }
 

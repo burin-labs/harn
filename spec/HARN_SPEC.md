@@ -650,7 +650,8 @@ optional_member_access
                     ::= '?.' IDENTIFIER ['(' arg_list ')']
 subscript_access   ::= '[' expression ']'
 optional_subscript_access
-                    ::= '?[' expression ']'
+                    ::= '?.[' expression ']'
+                       | '?[' expression ']'     (* legacy spelling *)
 slice_access       ::= '[' [expression] ':' [expression] ']'
 call               ::= [type_args] '(' arg_list ')'
                        (* only when postfix base is an identifier *)
@@ -722,7 +723,7 @@ From lowest to highest binding:
 | 9 | `*` `/` `%` | Left | Multiplicative |
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
 | 11 | `**` | Right | Exponentiation |
-| 12 | `.` `?.` `[]` `?[]` `[:]` `()` `?` | Left | Postfix |
+| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` | Left | Postfix |
 
 Exponentiation binds more tightly than a unary prefix on its **left** operand,
 so `-2 ** 2` parses as `-(2 ** 2)` (`-4`), matching Python, Ruby, and ordinary
@@ -3394,8 +3395,9 @@ to a non-Result value produces a type error at runtime.
 Disambiguation: when the parser sees `expr?`, it distinguishes between the
 postfix `?` (Result propagation) and the ternary `? :` operator by checking
 whether the token following `?` could start a ternary branch expression.
-For `expr?[...]`, optional subscript is used unless the `?` is followed by a
-valid branch expression and a top-level ternary `:`. For example,
+For legacy `expr?[...]`, optional subscript is used unless the `?` is followed
+by a valid branch expression and a top-level ternary `:`. The canonical
+optional subscript spelling is `expr?.[...]`. For example,
 `repo ? ["--repo", repo] : []` parses as a ternary without extra parentheses.
 
 ### Pattern matching on result
@@ -4134,7 +4136,7 @@ or is not the kind of value the access expects, so the checker applies one
 consistent set of diagnostics to all three rather than treating property
 access as special:
 
-| Receiver type | `obj.field` / `obj[key]` / `obj.m()` | `obj?.field` / `obj?[key]` / `obj?.m()` |
+| Receiver type | `obj.field` / `obj[key]` / `obj.m()` | `obj?.field` / `obj?.[key]` / `obj?.m()` |
 |---|---|---|
 | statically `nil` | **error** — known nil here | allowed (the `?` short-circuits) |
 | `T \| nil` (nilable) | **error** — may be nil at runtime | allowed |
@@ -4143,7 +4145,7 @@ access as special:
 | concrete (`struct`, shape, `list`, …) | field/index/method checked against the type | unnecessary-`?` lint if the receiver can't be nil |
 
 The fix for a `nil` / nilable receiver is always one of: the matching
-optional operator (`?.`, `?[…]`, or `?.m()`), a `!= nil` guard that
+optional operator (`?.`, `?.[…]`, or `?.m()`), a `!= nil` guard that
 narrows the value, or a `??` default. For an `unknown` receiver, narrow
 with `is_a` / `type_of`, validate with `assert_shape` / `schema_is`, or
 add a shape annotation. `any` is the deliberate escape hatch and is never

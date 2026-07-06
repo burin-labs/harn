@@ -113,7 +113,7 @@ fn __probe_truncate(value, limit) -> string {
 fn __probe_command_options(opts) -> dict {
   var out = {}
   for key in ["cwd", "env", "env_mode", "timeout_ms", "stdin", "max_inline_bytes"] {
-    if opts?[key] != nil {
+    if opts?.[key] != nil {
       out = out + {[key]: opts[key]}
     }
   }
@@ -319,7 +319,7 @@ fn __probe_store_fact(kind, observed, outcome, evidence, opts) {
   }
   var fact_opts = {}
   for key in ["namespace", "scope", "root", "now", "asserted_at", "tags", "embed"] {
-    if opts?[key] != nil {
+    if opts?.[key] != nil {
       fact_opts = fact_opts + {[key]: opts[key]}
     }
   }

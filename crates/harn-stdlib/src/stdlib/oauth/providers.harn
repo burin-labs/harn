@@ -527,7 +527,7 @@ pub fn provider(name, overrides = nil) -> OAuthProvider {
 pub fn provider_catalog(overrides = nil) {
   var out = {}
   for name in provider_names() {
-    out = out + {[name]: provider(name, overrides?[name])}
+    out = out + {[name]: provider(name, overrides?.[name])}
   }
   return out
 }

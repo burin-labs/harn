@@ -37,14 +37,14 @@ fn __patterns_non_empty_string(value) {
 
 fn __patterns_model_policy(config, key) {
   let cfg = __patterns_dict(config)
-  let specific = __patterns_dict(cfg?[key])
+  let specific = __patterns_dict(cfg?.[key])
   let shared = __patterns_dict(cfg?.model_policy)
   return shared + specific
 }
 
 fn __patterns_context_policy(config, key) {
   let cfg = __patterns_dict(config)
-  let specific = __patterns_dict(cfg?[key])
+  let specific = __patterns_dict(cfg?.[key])
   let shared = __patterns_dict(cfg?.context_policy)
   return shared + specific
 }
@@ -59,13 +59,13 @@ fn __patterns_output_contract(default_kind, override_cfg) {
 
 fn __patterns_stage_node(config, key, defaults) {
   let cfg = __patterns_dict(config)
-  let explicit_node = cfg?[key + "_node"]
+  let explicit_node = cfg?.[key + "_node"]
   let override_cfg = if explicit_node != nil {
     __patterns_dict(explicit_node)
   } else if key == "verify" {
     {}
   } else {
-    __patterns_dict(cfg?[key])
+    __patterns_dict(cfg?.[key])
   }
   var node = defaults + override_cfg
   if node?.model_policy == nil {

@@ -2,7 +2,7 @@
 //! (`obj[key]`), and method-call (`obj.m()`) receivers are all held to
 //! the same standard. A statically-`nil` or `T | nil` receiver is an
 //! error; an `unknown` receiver is a warning; `any` opts out; and the
-//! optional forms (`?.`, `?[]`, `?.()`) suppress the nil diagnostic.
+//! optional forms (`?.`, `?.[]`, `?.()`) suppress the nil diagnostic.
 
 use super::*;
 
@@ -51,6 +51,15 @@ fn subscript_on_any_is_silent() {
 
 #[test]
 fn optional_subscript_on_nil_is_allowed() {
+    let errs = errors("pipeline t(task) { let x: list | nil = nil\nlog(x?.[0]) }");
+    assert!(
+        !has(&errs, "cannot access an index"),
+        "?.[ ] should suppress the nil error; got: {errs:?}"
+    );
+}
+
+#[test]
+fn legacy_optional_subscript_on_nil_is_allowed() {
     let errs = errors("pipeline t(task) { let x: list | nil = nil\nlog(x?[0]) }");
     assert!(
         !has(&errs, "cannot access an index"),
@@ -72,11 +81,11 @@ fn subscript_on_intersection_resolves_member_type() {
 
 #[test]
 fn optional_subscript_unknown_shape_key_infers_nil() {
-    // `x?["b"]` on a shape without a `b` field is statically nil, so
+    // `x?.["b"]` on a shape without a `b` field is statically nil, so
     // assigning it to `int` must be a mismatch — same standard as
     // `x?.b` property access. (The Shape subscript arm used to drop the
     // optional flag and infer gradual, silently accepting this.)
-    let errs = errors("pipeline t(task) { let x: {a: int} = {a: 1}\nlet y: int = x?[\"b\"] }");
+    let errs = errors("pipeline t(task) { let x: {a: int} = {a: 1}\nlet y: int = x?.[\"b\"] }");
     assert!(has(&errs, "expected int"), "got: {errs:?}");
 }
 
