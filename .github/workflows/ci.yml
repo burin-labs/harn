@@ -417,10 +417,11 @@ jobs:
     # docs/website/markdown-only PR; forced on for merge_group / push (see the
     # `changes` job). ci-status treats a skip here as PASS.
     if: needs.changes.outputs.rust == 'true'
-    # Mixed audit gates. The first checks are pure Python / shell and stay
-    # first for fast failure. Later targets run Harn scripts through
-    # `cargo run --bin harn`, so restore the Rust cache before those instead
-    # of making this parallel lane pay a cold CLI compile on every PR.
+    # Mixed audit gates. Pure Python / shell checks stay first for fast
+    # failure. Harn-backed targets run after the Rust cache is restored and
+    # through one warm HARN_BIN, so this lane does not cold-compile the CLI
+    # before cache restore and then re-walk cargo's build graph for later
+    # script checks.
     runs-on: ubuntu-latest
     # Linux-only line-tables-only debuginfo, matching rust-builds (see that
     # job's env note). This lane compiles harn through cargo, so it benefits
@@ -452,11 +453,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mold
           mold --version
-      # check-bindings runs the published Python and Go protocol bindings
-      # against the committed JSON fixture. ubuntu-latest ships python3 and
-      # go preinstalled, so no setup action is required.
-      - run: make check-bindings
-      - run: make lint-test-patterns
       # Pure-shell grep gate: agent-facing hostlib paths must be
       # forward-slash-normalized on every platform (see
       # scripts/check_agent_path_normalization.sh). Kept with the other
@@ -476,17 +472,24 @@ jobs:
           shared-key: audit-scripts
           cache-on-failure: true
           cache-bin: false
+      - name: Warm Harn CLI
+        run: ./scripts/ci_warm_harn_bin.sh
+      # These targets invoke Harn, so keep them after cache restore and the
+      # warm HARN_BIN export.
+      - run: make lint-test-patterns
+      # check-bindings also runs the published Python and Go protocol bindings
+      # against the committed JSON fixture.
+      - run: make check-bindings
       - run: make lint-diagnostic-codes
       # Sync guards. check-generated-registry is the meta-guard
       # that keeps scripts/generated_artifacts.toml in agreement with the
-      # Makefile `all:` recipe and the workflows; check-receipt-structs and
-      # check-tree-sitter-keywords are cross-crate sync guards that need no
-      # harn build.
+      # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
+      # warm HARN_BIN; pure shell/Python guards stay cheap either way.
       - run: make check-receipt-structs
       - run: make check-docs-links
       - run: make check-tree-sitter-keywords
       - run: make check-generated-registry
-      - run: cargo run --quiet --bin harn -- run scripts/verify_release_metadata.harn
+      - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
       - name: Check no retroactive CHANGELOG edits
         run: |
           # checkout already fetched full history + tags. Pass the PR base
@@ -495,7 +498,7 @@ jobs:
           if [ -n "$base" ]; then
             export CHANGELOG_GUARD_BASE="$base"
           fi
-          cargo run --quiet --bin harn -- run scripts/check_changelog_no_retroactive_edits.harn
+          "${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn
       # Gracefully stop the sccache daemon so the post-job orphan-cleanup phase
       # has nothing to terminate (see the Stop-sccache note in rust-builds).
       - name: Stop sccache server

@@ -333,6 +333,7 @@ test-pr-gate-scripts:
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/nextest_filters_from_paths_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
+	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/release_prepare_env_test.sh
 	./scripts/tests/publish_script_test.sh
