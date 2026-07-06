@@ -271,9 +271,9 @@ fn dispatched_acp_methods_match_artifact() {
             }
             continue;
         }
-        const arm = trimmed.split("=>").next().unwrap_or("");
+        let arm = trimmed.split("=>").next().unwrap_or("");
         for literal in arm.split('|') {
-            const name = literal.trim().trim_matches('"');
+            let name = literal.trim().trim_matches('"');
             if !name.is_empty() {
                 dispatched.insert(name.to_string());
             }

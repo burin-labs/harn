@@ -142,7 +142,7 @@ mod tests {
             .find_map(|line| line.trim().strip_prefix("built_in: \""))
             .and_then(|line| line.strip_suffix('"'))
             .expect("generated built_in line");
-        const builtins: std::collections::BTreeSet<&str> = builtin_line.split_whitespace().collect();
+        let builtins: std::collections::BTreeSet<&str> = builtin_line.split_whitespace().collect();
         for name in &["println", "prompt_user"] {
             assert!(
                 !builtins.contains(name),
@@ -155,21 +155,21 @@ mod tests {
     /// without regenerating `docs/theme/harn-keywords.js` fail `make test`.
     #[test]
     fn committed_keyword_file_matches_generator() {
-        const manifest_dir = env!("CARGO_MANIFEST_DIR");
-        const path = std::path::Path::new(manifest_dir)
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::Path::new(manifest_dir)
             .join("..")
             .join("..")
             .join("docs")
             .join("theme")
             .join("harn-keywords.js");
-        const on_disk = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        let on_disk = std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(
                 "failed to read {}: {e}\n\
                  hint: run `make gen-highlight` to regenerate.",
                 path.display()
             )
         });
-        const generated = generate_file();
+        let generated = generate_file();
         assert_eq!(
             normalize_line_endings(&on_disk),
             normalize_line_endings(&generated),
@@ -180,8 +180,8 @@ mod tests {
 
     #[test]
     fn generated_file_comparison_ignores_platform_line_endings() {
-        const generated = "window.__HARN_KEYWORDS = {};\n";
-        const on_disk = generated.replace('\n', "\r\n");
+        let generated = "window.__HARN_KEYWORDS = {};\n";
+        let on_disk = generated.replace('\n', "\r\n");
 
         assert_eq!(
             normalize_line_endings(&on_disk),
@@ -191,10 +191,10 @@ mod tests {
 
     #[test]
     fn literals_are_not_also_keywords() {
-        const out = generate_file();
+        let out = generate_file();
         // Literals must live in the literal field, not bleed into the
         // keyword string.
-        const keyword_section_start = out.find("keyword: \"").expect("keyword field");
+        let keyword_section_start = out.find("keyword: \"").expect("keyword field");
         let keyword_section_end = out[keyword_section_start..]
             .find('"')
             .and_then(|i| out[keyword_section_start + i + 1..].find('"'))

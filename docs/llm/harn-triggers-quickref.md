@@ -231,7 +231,7 @@ A connector wires this in well under 30 lines:
 ```harn
 import "std/triggers"
 
-let intake = webhook_intake_register({
+const intake = webhook_intake_register({
   id: "github",
   path: "/hooks/github",
   secret: secret_get("github/webhook-secret"),
@@ -241,7 +241,7 @@ let intake = webhook_intake_register({
 })
 
 // In your inbound HTTP handler:
-let outcome = webhook_intake_feed(intake.id, {
+const outcome = webhook_intake_feed(intake.id, {
   headers: request.headers,
   body: request.body,
   path: request.path,

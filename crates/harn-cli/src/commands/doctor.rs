@@ -1232,7 +1232,7 @@ fn check_protocol_artifacts() -> Vec<DoctorCheck> {
                 .and_then(|rest| rest.split_once('"').map(|(v, _)| v.to_string()))
         })
         .unwrap_or_default();
-    const current = env!("CARGO_PKG_VERSION");
+    let current = env!("CARGO_PKG_VERSION");
     if pinned_version.is_empty() {
         return vec![DoctorCheck {
             id: "protocol-artifacts".to_string(),
@@ -1275,8 +1275,8 @@ fn check_platform_capabilities() -> Vec<DoctorCheck> {
 
     // File watching — `harn run --watch`, `harn test --watch`, and the
     // playground depend on the `notify` crate's recommended backend.
-    const watcher = notify::recommended_watcher(|_res: notify::Result<notify::Event>| {});
-    const watcher_check = match watcher {
+    let watcher = notify::recommended_watcher(|_res: notify::Result<notify::Event>| {});
+    let watcher_check = match watcher {
         Ok(_) => DoctorCheck {
             id: "platform:file-watcher".to_string(),
             status: DoctorStatus::Ok,
@@ -1301,8 +1301,8 @@ fn check_platform_capabilities() -> Vec<DoctorCheck> {
     // Browser opener — `harn portal`, `harn mcp login`, and OAuth flows
     // shell out via the `webbrowser` crate. We don't open a browser here;
     // we just check whether a known opener is on PATH.
-    const opener = browser_opener();
-    const opener_check = if let Some(name) = opener {
+    let opener = browser_opener();
+    let opener_check = if let Some(name) = opener {
         DoctorCheck {
             id: "platform:browser-opener".to_string(),
             status: DoctorStatus::Ok,
@@ -1394,8 +1394,8 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
 
     if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
-        const config_path = PathBuf::from(&path);
-        const status = if config_path.is_file() {
+        let config_path = PathBuf::from(&path);
+        let status = if config_path.is_file() {
             DoctorStatus::Ok
         } else {
             DoctorStatus::Fail
@@ -1410,7 +1410,7 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
     }
 
     if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
-        const status = if llm_config::provider_config(&provider).is_some() {
+        let status = if llm_config::provider_config(&provider).is_some() {
             DoctorStatus::Ok
         } else {
             DoctorStatus::Fail
@@ -1428,8 +1428,8 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
 }
 
 fn check_secret_providers() -> Vec<DoctorCheck> {
-    const namespace = default_secret_namespace();
-    const configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
+    let namespace = default_secret_namespace();
+    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
         .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
     let mut checks = Vec::new();
 
@@ -1468,8 +1468,8 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
     {
         match provider {
             "env" => {
-                const env_provider = EnvSecretProvider::new(namespace.clone());
-                const sample = env_provider.env_var_name(&SecretId::new("sample", "token"));
+                let env_provider = EnvSecretProvider::new(namespace.clone());
+                let sample = env_provider.env_var_name(&SecretId::new("sample", "token"));
                 checks.push(DoctorCheck {
                     id: String::new(),
                     status: DoctorStatus::Ok,
@@ -1479,7 +1479,7 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
                 });
             }
             "keyring" => {
-                const keyring_provider = KeyringSecretProvider::new(namespace.clone());
+                let keyring_provider = KeyringSecretProvider::new(namespace.clone());
                 match keyring_provider.healthcheck() {
                     Ok(detail) => checks.push(DoctorCheck {
                         id: String::new(),
@@ -1521,8 +1521,8 @@ async fn check_manifest() -> Vec<DoctorCheck> {
         }];
     };
 
-    const manifest_result = read_manifest(&path);
-    const manifest = match manifest_result {
+    let manifest_result = read_manifest(&path);
+    let manifest = match manifest_result {
         Ok(manifest) => manifest,
         Err(error) => {
             return vec![DoctorCheck {
@@ -1535,7 +1535,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
         }
     };
 
-    const package_name = manifest
+    let package_name = manifest
         .package
         .as_ref()
         .and_then(|pkg| pkg.name.clone())
@@ -1551,7 +1551,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
 
     let mut seen_names = HashSet::new();
     for server in &manifest.mcp {
-        const name = server.name.clone();
+        let name = server.name.clone();
         if !seen_names.insert(name.clone()) {
             checks.push(DoctorCheck {
                 id: String::new(),
@@ -1585,7 +1585,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
         }
     }
 
-    const extensions = package::load_runtime_extensions(&path);
+    let extensions = package::load_runtime_extensions(&path);
     if !extensions.triggers.is_empty() {
         let mut vm = harn_vm::Vm::new();
         harn_vm::register_vm_stdlib(&mut vm);
@@ -1610,7 +1610,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                         ..Default::default()
                     });
                 }
-                const dispatcher = harn_vm::snapshot_dispatcher_stats();
+                let dispatcher = harn_vm::snapshot_dispatcher_stats();
                 checks.push(DoctorCheck {
                     id: String::new(),
                     status: DoctorStatus::Ok,
@@ -1646,13 +1646,13 @@ fn format_trigger_metrics(metrics: &harn_vm::TriggerMetricsSnapshot) -> String {
 fn check_skills() -> Vec<DoctorCheck> {
     use crate::skill_loader;
 
-    const loaded = skill_loader::load_skills(&skill_loader::SkillLoaderInputs {
+    let loaded = skill_loader::load_skills(&skill_loader::SkillLoaderInputs {
         cli_dirs: Vec::new(),
         source_path: None,
     });
 
     let mut checks = Vec::new();
-    const winners = &loaded.report.winners;
+    let winners = &loaded.report.winners;
     if winners.is_empty() {
         checks.push(DoctorCheck {
             id: String::new(),
@@ -1667,7 +1667,7 @@ fn check_skills() -> Vec<DoctorCheck> {
         for w in winners {
             *by_layer.entry(w.layer.label()).or_default() += 1;
         }
-        const breakdown: Vec<String> = by_layer.iter().map(|(k, v)| format!("{v} {k}")).collect();
+        let breakdown: Vec<String> = by_layer.iter().map(|(k, v)| format!("{v} {k}")).collect();
         checks.push(DoctorCheck {
             id: String::new(),
             status: DoctorStatus::Ok,
@@ -1719,9 +1719,9 @@ fn check_skills() -> Vec<DoctorCheck> {
 }
 
 fn check_metadata_cache() -> Vec<DoctorCheck> {
-    const cwd = std::env::current_dir().unwrap_or_default();
-    const metadata_dir = runtime_paths::metadata_dir(&cwd);
-    const read_dir = match fs::read_dir(&metadata_dir) {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let metadata_dir = runtime_paths::metadata_dir(&cwd);
+    let read_dir = match fs::read_dir(&metadata_dir) {
         Ok(read_dir) => read_dir,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return vec![DoctorCheck {
@@ -1746,7 +1746,7 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
     let mut namespace_summaries = Vec::new();
     let mut saw_legacy_root = false;
     for entry in read_dir.flatten() {
-        const path = entry.path();
+        let path = entry.path();
         if path.is_file() && entry.file_name() == "root.json" {
             saw_legacy_root = true;
             continue;
@@ -1754,7 +1754,7 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
         if !path.is_dir() {
             continue;
         }
-        const shard_path = path.join("entries.json");
+        let shard_path = path.join("entries.json");
         let Ok(text) = fs::read_to_string(&shard_path) else {
             continue;
         };
@@ -1764,7 +1764,7 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
         let Some(namespace) = parsed.get("namespace").and_then(|value| value.as_str()) else {
             continue;
         };
-        const count = parsed
+        let count = parsed
             .get("entries")
             .and_then(|value| value.as_object())
             .map(|entries| entries.len())
@@ -1773,7 +1773,7 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
     }
 
     namespace_summaries.sort();
-    const detail = if namespace_summaries.is_empty() {
+    let detail = if namespace_summaries.is_empty() {
         if saw_legacy_root {
             format!(
                 "legacy metadata shard present at {}",
@@ -1799,10 +1799,10 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
 }
 
 fn check_event_log() -> Vec<DoctorCheck> {
-    const cwd = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
     match harn_vm::event_log::describe_for_base_dir(&cwd) {
         Ok(description) => {
-            const detail = match description.location {
+            let detail = match description.location {
                 Some(path) => format!(
                     "{} ({}, {} B)",
                     description.backend,
@@ -1832,7 +1832,7 @@ fn check_event_log() -> Vec<DoctorCheck> {
 fn find_nearest_manifest(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        const manifest = dir.join("harn.toml");
+        let manifest = dir.join("harn.toml");
         if manifest.is_file() {
             return Some(manifest);
         }
@@ -1849,8 +1849,8 @@ fn default_secret_namespace() -> String {
         }
     }
 
-    const cwd = std::env::current_dir().unwrap_or_default();
-    const leaf = cwd
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let leaf = cwd
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
@@ -1859,7 +1859,7 @@ fn default_secret_namespace() -> String {
 }
 
 fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
-    const content =
+    let content =
         fs::read_to_string(path).map_err(|error| format!("failed to read manifest: {error}"))?;
     toml::from_str::<package::Manifest>(&content)
         .map_err(|error| format!("failed to parse manifest: {error}"))
@@ -1879,11 +1879,11 @@ mod tests {
 
     #[test]
     fn build_healthcheck_url_uses_base_and_path() {
-        const def = ProviderDef {
+        let def = ProviderDef {
             base_url: "https://example.com/api".to_string(),
             ..Default::default()
         };
-        const healthcheck = HealthcheckDef {
+        let healthcheck = HealthcheckDef {
             method: "GET".to_string(),
             path: Some("/health".to_string()),
             url: None,
@@ -1898,8 +1898,8 @@ mod tests {
 
     #[test]
     fn find_nearest_manifest_walks_up() {
-        const root = tempfile::tempdir().expect("tempdir");
-        const nested = root.path().join("a/b/c");
+        let root = tempfile::tempdir().expect("tempdir");
+        let nested = root.path().join("a/b/c");
         std::fs::create_dir_all(&nested).expect("create nested dirs");
         std::fs::write(
             root.path().join("harn.toml"),

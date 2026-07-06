@@ -1,6 +1,22 @@
 use super::*;
 
 impl TypeChecker {
+    /// Walk a property/subscript assignment target to its root identifier,
+    /// e.g. `o.a[i].b` → `o`. Returns `None` for targets not rooted in a
+    /// bare identifier (e.g. `foo().a = x`).
+    fn assignment_root_identifier(target: &SNode) -> Option<&str> {
+        match &target.node {
+            Node::Identifier(name) => Some(name.as_str()),
+            Node::PropertyAccess { object, .. }
+            | Node::OptionalPropertyAccess { object, .. }
+            | Node::SubscriptAccess { object, .. }
+            | Node::OptionalSubscriptAccess { object, .. } => {
+                Self::assignment_root_identifier(object)
+            }
+            _ => None,
+        }
+    }
+
     fn defer_forbidden_transfer(body: &[SNode]) -> Option<(&'static str, Span)> {
         body.iter().find_map(Self::node_defer_forbidden_transfer)
     }
@@ -489,6 +505,24 @@ impl TypeChecker {
                 };
                 let context_checked =
                     self.check_node_with_expected(value, expected_value_type.as_ref(), scope);
+                // A field/subscript write through an immutable binding
+                // (`const o = {}; o.a = 1`) is rejected at runtime — Harn's
+                // immutability is deep. Flag it here so `harn check` agrees
+                // with the runtime instead of green-lighting a program that
+                // crashes; the plain-identifier case is handled below.
+                if !matches!(&target.node, Node::Identifier(_)) {
+                    if let Some(root) = Self::assignment_root_identifier(target) {
+                        if scope.get_var(root).is_some() && !scope.is_mutable(root) {
+                            self.warning_at(
+                                Code::ImmutableAssignment,
+                                format!(
+                                    "Cannot mutate '{root}' through an immutable binding (declared with 'const'); use 'let' for a mutable binding"
+                                ),
+                                span,
+                            );
+                        }
+                    }
+                }
                 if let Node::Identifier(name) = &target.node {
                     let mut widened_slot_type: Option<TypeExpr> = None;
                     // Compile-time immutability check

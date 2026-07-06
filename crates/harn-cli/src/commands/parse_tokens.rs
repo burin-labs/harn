@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn text_token_line_includes_span_kind_and_lexeme() {
-        let source = "const x = 1\n";
+        let source = "let x = 1\n";
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize().expect("tokenize");
 
