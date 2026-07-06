@@ -19,6 +19,32 @@
 //! in first-seen order; the value projection folds `replace`/`clear` to a
 //! single value. This is the substrate for the richer memory surface, the
 //! hypothesis store, and Burin's learned-context pipelines.
+//!
+//! # Integrity guarantee (tamper-EVIDENT, not tamper-RESISTANT)
+//!
+//! The hash chain makes the log **tamper-evident**: `verify` detects accidental
+//! corruption, truncation, reordering, and any edit that did not also recompute
+//! the chain — it confirms the file is an internally consistent, gap-free
+//! sequence of the events it contains.
+//!
+//! It is **not** tamper-*resistant* against a malicious writer. The record hash
+//! is a *keyless, public* SHA-256 over `{session_id, event_id, payload,
+//! prev_hash}` — there is no secret in the digest — and the JSONL file is a
+//! plain append-only file under the agent-writable `<root>/.harn/session-store/`
+//! tree that the `session_store_*` builtins expose to agent code. Anyone with
+//! write access to that file can rewrite history and recompute every downstream
+//! `record_hash`, after which `verify` returns `ok` again. The chain therefore
+//! proves *self-consistency*, not *authenticity*.
+//!
+//! It is also **not an attribution / audit boundary**: `actor`, `tenant_id`, and
+//! `ts_ms` are payload metadata carried alongside each event but are *not part of
+//! the integrity digest*, so they can be changed without breaking the chain and
+//! must not be relied on for non-repudiation.
+//!
+//! For a real audit boundary — attribution and non-repudiation that survives a
+//! writer with filesystem access — use the signed `harn-serve` session receipts
+//! and the Ed25519 run-receipt provenance path, whose signatures are keyed and
+//! cannot be forged by rewriting the local log.
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -128,6 +154,12 @@ fn session_store_project_value_impl(
     Ok(project_value(&mutations, default_value))
 }
 
+/// Tamper-EVIDENCE check over a session's hash chain. Returns
+/// `{ok, count, broken_at?, reason?}`. `ok: true` means the log is internally
+/// consistent (sequential ids, linked `prev_hash`, recomputable `record_hash`)
+/// — it detects accidental corruption / truncation / reordering, NOT a
+/// malicious rewrite by a writer with filesystem access (the chain is keyless).
+/// For attribution / non-repudiation use signed harn-serve session receipts.
 #[harn_builtin(
     sig = "__session_store_verify(session_id: string, options?: dict) -> dict",
     category = "session_store"
@@ -281,6 +313,14 @@ fn append_event(
 /// The map is built via the sorted `DictMap`, so the serialized bytes are
 /// deterministic and match what Burin's Harn pipeline computes for the same
 /// inputs (both go through `vm_value_to_json`).
+///
+/// This is a **keyless, public** digest: it carries no secret, so it makes the
+/// chain tamper-*evident* (a naive edit that forgets to recompute the chain is
+/// caught) but not tamper-*resistant* (a writer with filesystem access can
+/// recompute every hash). `actor` / `tenant_id` / `ts_ms` are deliberately
+/// **outside** the digest — this cross-language shape is a fixed contract shared
+/// with Burin's Swift writer, so the field set must not change here. See the
+/// module docs for the authenticity boundary (signed harn-serve receipts).
 fn compute_record_hash(
     session_id: &str,
     event_id: i64,
@@ -302,6 +342,18 @@ fn compute_record_hash(
     )
 }
 
+/// Verify the hash chain for a session's events and return a
+/// `session_store_verify` report `{ok, count, broken_at?, reason?}`.
+///
+/// `ok: true` means the events form an internally consistent, gap-free chain:
+/// every `event_id` is sequential, every `prev_hash` links to the prior
+/// `record_hash`, and every `record_hash` recomputes. This is a
+/// tamper-*evidence* check — it catches accidental corruption, truncation,
+/// reordering, and edits that did not recompute the keyless chain. It does
+/// **not** prove authenticity: a writer with filesystem access can rewrite the
+/// log and recompute every hash so `ok` returns `true` again (see the module
+/// docs). Do not treat `ok: true` as proof of who wrote the events or that they
+/// are unaltered by a hostile party.
 fn verify_chain(session_id: &str, events: &[VmValue]) -> VmValue {
     let mut result = DictMap::new();
     result.put_str("_type", "session_store_verify");
@@ -681,7 +733,12 @@ mod tests {
     }
 
     #[test]
-    fn verify_detects_tamper() {
+    fn verify_detects_naive_tamper() {
+        // Proves tamper-EVIDENCE only: a naive edit that rewrites a payload but
+        // does NOT recompute the (keyless) chain is caught. It does NOT prove
+        // tamper-resistance — a writer who recomputes `record_hash` for the
+        // edited event and every successor would make `verify` return `ok` again
+        // (see the module-level integrity-guarantee docs).
         let root = temp_root("tamper");
         append_event(&root, "s1", upsert("a", "one"), None).unwrap();
         append_event(&root, "s1", upsert("b", "two"), None).unwrap();

@@ -101,13 +101,12 @@ pub async fn run_provider_healthcheck_with_options(
     let method = Method::from_bytes(healthcheck.method.as_bytes()).unwrap_or(Method::GET);
     let client = match options.client {
         Some(client) => client,
-        None => match reqwest::Client::builder()
-            .timeout(Duration::from_secs(DEFAULT_HEALTHCHECK_TIMEOUT_SECS))
-            .redirect(crate::egress::redirect_policy(
-                "llm_healthcheck_redirect",
-                5,
-            ))
-            .build()
+        None => match crate::egress::install_ssrf_guard(
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(DEFAULT_HEALTHCHECK_TIMEOUT_SECS))
+                .redirect(crate::egress::redirect_policy("llm_healthcheck_redirect", 5)),
+        )
+        .build()
         {
             Ok(client) => client,
             Err(error) => {

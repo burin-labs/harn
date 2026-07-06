@@ -142,9 +142,10 @@ fn load_from_path(source: &str) -> Result<Value, CardError> {
 }
 
 async fn fetch_over_http(url: &str) -> Result<Value, CardError> {
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .redirect(crate::egress::redirect_policy("mcp_card_redirect", 10))
+        .redirect(crate::egress::redirect_policy("mcp_card_redirect", 10));
+    let client = crate::egress::install_ssrf_guard(builder)
         .build()
         .map_err(|e| CardError::Http(format!("client build: {e}")))?;
     let redacted_url = crate::redact::current_policy().redact_url(url);

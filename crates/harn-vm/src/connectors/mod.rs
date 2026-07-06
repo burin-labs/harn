@@ -67,10 +67,11 @@ pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 const OUTBOUND_CONNECTOR_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 
 pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client {
-    reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .user_agent(user_agent)
         .timeout(OUTBOUND_CONNECTOR_HTTP_TIMEOUT)
-        .redirect(crate::egress::redirect_policy("connector_redirect", 10))
+        .redirect(crate::egress::redirect_policy("connector_redirect", 10));
+    crate::egress::install_ssrf_guard(builder)
         .build()
         .expect("connector HTTP client configuration should be valid")
 }

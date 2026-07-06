@@ -42,13 +42,21 @@ pub const TOKEN_REDACTION_DIAGNOSTIC: &str = "HARN-OAU-001";
 /// Event-log topic used for token-redaction audit events.
 pub const TOKEN_REDACTION_AUDIT_TOPIC: &str = "audit.token_redaction";
 
-/// Upper bound on input length scanned by the secret detector. Inputs
-/// above this size short-circuit to "no redaction" so a pathological
-/// caller cannot trigger catastrophic regex behavior on the persistence
-/// hot path. Persisted JSON payloads larger than this are already
-/// abnormal; the receipt/event-log layers already cap message sizes
-/// well below this in practice.
+/// Size of a single regex scan window. Inputs at or below this size are
+/// scanned in one pass; larger inputs are scanned in overlapping windows of
+/// this size (see [`SCAN_WINDOW_OVERLAP_BYTES`]) so no single regex call ever
+/// runs over more than this many bytes — keeping a pathological (custom)
+/// pattern from triggering catastrophic behavior on the persistence hot path
+/// — while a secret embedded anywhere in an oversized value is still redacted.
 const MAX_SCAN_INPUT_BYTES: usize = 256 * 1024;
+
+/// Overlap between consecutive scan windows for oversized inputs. Every window
+/// re-scans this many bytes of its predecessor's tail so a secret straddling a
+/// window boundary is fully contained in — and detected by — at least one
+/// window. It must exceed the longest possible secret match; 8 KiB is far above
+/// any real API key / token / PEM header while staying negligible relative to
+/// the 256 KiB window, so the windowed scan stays linear in the input length.
+const SCAN_WINDOW_OVERLAP_BYTES: usize = 8 * 1024;
 
 /// One redaction pattern with a stable display name.
 #[derive(Clone)]
@@ -230,14 +238,17 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
     if input.is_empty() {
         return Cow::Borrowed(input);
     }
-    // Length cap is defense-in-depth against catastrophic regex
-    // behavior. None of the default patterns have nested
-    // quantifiers, but custom patterns can be arbitrary so the cap
-    // keeps a malicious script from blocking the persistence path.
-    if input.len() > MAX_SCAN_INPUT_BYTES {
-        return Cow::Borrowed(input);
-    }
     let use_named_placeholder = placeholder == crate::redact::REDACTED_PLACEHOLDER;
+
+    // Oversized inputs are scanned in overlapping windows instead of being
+    // passed through unredacted: a secret embedded in a large tool result,
+    // transcript, or base64 blob under a non-sensitive field name must not leak
+    // just because the whole value exceeds the single-pass window. No individual
+    // regex call ever sees more than one window, so a pathological custom
+    // pattern still cannot run over the entire giant string at once.
+    if input.len() > MAX_SCAN_INPUT_BYTES {
+        return scan_secret_patterns_windowed(input, use_named_placeholder, placeholder);
+    }
 
     let mut owned: Option<String> = None;
     let mut audit_events: BTreeMap<&'static str, RedactionEvent> = BTreeMap::new();
@@ -295,6 +306,124 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
     }
 
     result
+}
+
+/// Round `offset` down to the nearest UTF-8 char boundary (or `0`).
+fn floor_char_boundary(s: &str, mut offset: usize) -> usize {
+    if offset >= s.len() {
+        return s.len();
+    }
+    while offset > 0 && !s.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
+/// Round `offset` up to the nearest UTF-8 char boundary (or `s.len()`).
+fn ceil_char_boundary(s: &str, mut offset: usize) -> usize {
+    if offset >= s.len() {
+        return s.len();
+    }
+    while offset < s.len() && !s.is_char_boundary(offset) {
+        offset += 1;
+    }
+    offset
+}
+
+/// Overlapping-window variant of [`scan_secret_patterns`] for inputs larger
+/// than [`MAX_SCAN_INPUT_BYTES`].
+///
+/// Each pattern is scanned over consecutive windows of `MAX_SCAN_INPUT_BYTES`
+/// bytes that overlap their predecessor by [`SCAN_WINDOW_OVERLAP_BYTES`]. Because
+/// the overlap exceeds the longest possible secret, every match is *strictly
+/// interior* to at least one window; a match that touches an artificial
+/// (non-terminal) window edge is dropped there — which also discards the false
+/// `\b` word boundaries that slicing would otherwise create — and picked up
+/// whole in the neighbouring window. Global match ranges are collected in
+/// pattern-priority order (earlier patterns win on overlap, matching the
+/// single-pass path) and spliced once from the end so offsets stay valid.
+fn scan_secret_patterns_windowed<'a>(
+    input: &'a str,
+    use_named_placeholder: bool,
+    placeholder: &str,
+) -> Cow<'a, str> {
+    let step = MAX_SCAN_INPUT_BYTES - SCAN_WINDOW_OVERLAP_BYTES;
+    let custom: Vec<NamedPattern> = CUSTOM_PATTERNS.with(|cell| cell.borrow().clone());
+
+    // Claimed global byte ranges, kept sorted by start. Each range also carries
+    // its replacement text and the pattern that produced it (for audit).
+    struct Claim {
+        start: usize,
+        end: usize,
+        replacement: String,
+        pattern: &'static str,
+    }
+    let mut claims: Vec<Claim> = Vec::new();
+
+    for pattern in DEFAULT_PATTERNS.iter().chain(custom.iter()) {
+        let mut window_start = 0usize;
+        loop {
+            let ws = floor_char_boundary(input, window_start);
+            let we = ceil_char_boundary(input, (window_start + MAX_SCAN_INPUT_BYTES).min(input.len()));
+            for m in pattern.regex.find_iter(&input[ws..we]) {
+                let gs = ws + m.start();
+                let ge = ws + m.end();
+                // Drop matches touching an artificial window edge; the same
+                // secret is strictly interior to the neighbouring window.
+                if (gs == ws && ws != 0) || (ge == we && we != input.len()) {
+                    continue;
+                }
+                // First (highest-priority) pattern wins on overlap; this also
+                // deduplicates a match seen in two overlapping windows.
+                if claims.iter().any(|c| gs < c.end && c.start < ge) {
+                    continue;
+                }
+                let replacement = if use_named_placeholder {
+                    replacement_for(pattern.name, &input[gs..ge])
+                } else {
+                    placeholder.to_string()
+                };
+                claims.push(Claim {
+                    start: gs,
+                    end: ge,
+                    replacement,
+                    pattern: pattern.name,
+                });
+            }
+            if we >= input.len() {
+                break;
+            }
+            window_start += step;
+        }
+    }
+
+    if claims.is_empty() {
+        return Cow::Borrowed(input);
+    }
+
+    claims.sort_by_key(|c| c.start);
+
+    // Audit tallies, grouped by pattern in catalog order.
+    let mut audit_events: BTreeMap<&'static str, RedactionEvent> = BTreeMap::new();
+    for claim in &claims {
+        let event = audit_events
+            .entry(claim.pattern)
+            .or_insert_with(|| RedactionEvent {
+                pattern_name: claim.pattern.to_string(),
+                match_count: 0,
+                bytes_redacted: 0,
+            });
+        event.match_count += 1;
+        event.bytes_redacted += claim.end - claim.start;
+    }
+
+    let mut out = input.to_string();
+    for claim in claims.iter().rev() {
+        out.replace_range(claim.start..claim.end, &claim.replacement);
+    }
+
+    emit_audit(&audit_events.into_values().collect::<Vec<_>>());
+    Cow::Owned(out)
 }
 
 #[cfg(test)]
@@ -473,12 +602,79 @@ mod tests {
         assert!(drain_audit_ring().is_empty());
     }
 
+    const AWS_KEY: &str = "AKIAABCDEFGHIJKLMNOP";
+
     #[test]
-    fn input_above_cap_is_passthrough() {
+    fn secret_past_the_scan_cap_is_redacted() {
+        // A secret placed well beyond MAX_SCAN_INPUT_BYTES must still be scrubbed
+        // — the old behavior passed the whole value through unredacted.
         run_clean();
-        let huge = "AKIAABCDEFGHIJKLMNOP".repeat(MAX_SCAN_INPUT_BYTES / 20 + 1);
-        let out = scan_secret_patterns(&huge, crate::redact::REDACTED_PLACEHOLDER);
-        assert!(matches!(out, Cow::Borrowed(_)));
+        let mut input = " ".repeat(MAX_SCAN_INPUT_BYTES + 4096);
+        input.push_str(AWS_KEY);
+        input.push(' ');
+        assert!(input.len() > MAX_SCAN_INPUT_BYTES);
+        let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(matches!(out, Cow::Owned(_)), "oversized secret must redact");
+        assert!(!out.contains(AWS_KEY), "secret leaked: {}", &out[out.len().saturating_sub(64)..]);
+        assert!(out.contains("<redacted:aws_access_key:20>"));
+    }
+
+    #[test]
+    fn secret_straddling_a_window_boundary_is_redacted() {
+        // Place the 20-byte key so it spans the first window's end
+        // (MAX_SCAN_INPUT_BYTES): half inside window 0, half beyond. The overlap
+        // guarantees it is fully interior to window 1 and thus detected.
+        run_clean();
+        let prefix_len = MAX_SCAN_INPUT_BYTES - (AWS_KEY.len() / 2);
+        let mut input = " ".repeat(prefix_len);
+        input.push_str(AWS_KEY);
+        input.push_str(&" ".repeat(SCAN_WINDOW_OVERLAP_BYTES)); // ensure a 2nd window exists
+        let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(!out.contains(AWS_KEY), "straddling secret leaked");
+        assert!(out.contains("<redacted:aws_access_key:20>"));
+        // Exactly one redaction — the overlap must not double-count it.
+        assert_eq!(out.matches("<redacted:aws_access_key:20>").count(), 1);
+    }
+
+    #[test]
+    fn oversized_non_secret_blob_is_not_over_redacted() {
+        // A large innocuous value (no secret) must pass through untouched, not be
+        // blanket-redacted.
+        run_clean();
+        let blob = "lorem ipsum dolor sit amet ".repeat(MAX_SCAN_INPUT_BYTES / 20);
+        assert!(blob.len() > MAX_SCAN_INPUT_BYTES);
+        let out = scan_secret_patterns(&blob, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(matches!(out, Cow::Borrowed(_)), "clean blob must not be rewritten");
+        assert_eq!(out.as_ref(), blob);
+    }
+
+    #[test]
+    fn oversized_scan_records_audit_event() {
+        run_clean();
+        let mut input = " ".repeat(MAX_SCAN_INPUT_BYTES + 100);
+        input.push_str(AWS_KEY);
+        input.push(' ');
+        let _ = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
+        let ring = drain_audit_ring();
+        assert_eq!(ring.len(), 1);
+        assert_eq!(ring[0].pattern_name, "aws_access_key");
+        assert_eq!(ring[0].match_count, 1);
+        assert_eq!(ring[0].bytes_redacted, 20);
+    }
+
+    #[test]
+    fn oversized_scan_completes_quickly() {
+        // ~5 MiB with a single embedded secret: the windowed scan is linear, so
+        // this must finish well under a second even in a debug build.
+        run_clean();
+        let mut input = "x ".repeat(5 * 1024 * 1024 / 2);
+        input.push_str(AWS_KEY);
+        input.push(' ');
+        let start = std::time::Instant::now();
+        let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
+        let elapsed = start.elapsed();
+        assert!(!out.contains(AWS_KEY));
+        assert!(elapsed < std::time::Duration::from_secs(5), "scan too slow: {elapsed:?}");
     }
 
     #[test]

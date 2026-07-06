@@ -303,12 +303,13 @@ async fn fetch_remote_catalog(
     url: &str,
     metadata: Option<&CatalogCacheMetadata>,
 ) -> Result<FetchedCatalog, String> {
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .redirect(crate::egress::redirect_policy(
             "provider_catalog_redirect",
             5,
-        ))
+        ));
+    let client = crate::egress::install_ssrf_guard(builder)
         .build()
         .map_err(|error| format!("failed to build HTTP client: {error}"))?;
     let mut request = client.get(url);
