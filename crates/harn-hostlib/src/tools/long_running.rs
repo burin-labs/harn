@@ -45,6 +45,7 @@ use std::time::Duration;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::json::vm_dict_to_json;
 use crate::process::{self as process_handle, ProcessHandle, ProcessKiller, SpawnSpec};
 use crate::tools::args::to_agent_path;
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
@@ -85,6 +86,8 @@ struct HandleEntry {
     /// Optional one-shot result channel installed by `cancel_handle` when a
     /// caller wants cancellation to wait until artifacts have been drained.
     result_tx: Option<std::sync::mpsc::SyncSender<VmValue>>,
+    /// Opaque verification snapshot binding provided by the caller.
+    snapshot_binding: Option<harn_vm::value::DictMap>,
 }
 
 #[derive(Default)]
@@ -110,6 +113,8 @@ pub struct LongRunningHandleInfo {
     pub process_group_id: Option<u32>,
     /// Human-readable display form of the argv (space-joined).
     pub command_display: String,
+    /// Opaque verification snapshot binding provided by the caller.
+    pub snapshot_binding: Option<harn_vm::value::DictMap>,
 }
 
 pub(crate) struct LongRunningSpawnOptions {
@@ -118,6 +123,7 @@ pub(crate) struct LongRunningSpawnOptions {
     pub(crate) session_id: String,
     pub(crate) progress_interval: Option<Duration>,
     pub(crate) progress_max_inline_bytes: usize,
+    pub(crate) snapshot_binding: Option<harn_vm::value::DictMap>,
 }
 
 struct WaiterContext {
@@ -129,6 +135,7 @@ struct WaiterContext {
     command_display: String,
     progress_interval: Option<Duration>,
     progress_max_inline_bytes: usize,
+    snapshot_binding: Option<harn_vm::value::DictMap>,
 }
 
 struct ProgressThreadContext {
@@ -147,18 +154,29 @@ struct ProgressThreadContext {
     started: std::time::Instant,
     interval: Duration,
     max_inline_bytes: usize,
+    snapshot_binding: Option<harn_vm::value::DictMap>,
 }
 
 impl LongRunningHandleInfo {
     /// Convert into the standard handle response dict returned to the agent.
     pub fn into_handle_response(self) -> VmValue {
+        let Self {
+            command_id,
+            handle_id,
+            started_at,
+            pid,
+            process_group_id,
+            command_display,
+            snapshot_binding,
+        } = self;
         proc::running_response(
-            self.command_id,
-            self.handle_id,
-            self.pid,
-            self.process_group_id,
-            self.started_at,
-            self.command_display,
+            command_id,
+            handle_id,
+            pid,
+            process_group_id,
+            started_at,
+            command_display,
+            snapshot_binding.as_ref(),
         )
     }
 }
@@ -188,6 +206,7 @@ pub fn spawn_long_running(
             session_id,
             progress_interval: None,
             progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
+            snapshot_binding: None,
         },
     )
 }
@@ -246,6 +265,7 @@ pub(crate) fn spawn_long_running_with_options(
                 cancel_state: cancel_state.clone(),
                 completion_tx: None,
                 result_tx: None,
+                snapshot_binding: options.snapshot_binding.clone(),
             },
         );
     }
@@ -259,6 +279,7 @@ pub(crate) fn spawn_long_running_with_options(
         command_display: command_display.clone(),
         progress_interval: options.progress_interval,
         progress_max_inline_bytes: options.progress_max_inline_bytes,
+        snapshot_binding: options.snapshot_binding.clone(),
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
@@ -279,6 +300,7 @@ pub(crate) fn spawn_long_running_with_options(
         pid,
         process_group_id,
         command_display,
+        snapshot_binding: options.snapshot_binding,
     })
 }
 
@@ -352,6 +374,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
                 started: waiter_start,
                 interval,
                 max_inline_bytes: context.progress_max_inline_bytes,
+                snapshot_binding: context.snapshot_binding.clone(),
             })
         });
 
@@ -490,6 +513,9 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     } else {
         payload.insert("signal".into(), serde_json::Value::Null);
     }
+    if let Some(snapshot_binding) = context.snapshot_binding.as_ref() {
+        payload.insert("snapshot_binding".into(), vm_dict_to_json(snapshot_binding));
+    }
 
     if let Some(tx) = result_tx {
         let value = serde_json::Value::Object(payload.clone());
@@ -567,7 +593,7 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
             };
             let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
             let byte_count = stdout.len().saturating_add(stderr.len());
-            let payload = serde_json::json!({
+            let mut payload = serde_json::json!({
                 "command_id": &context.command_id,
                 "handle_id": &context.handle_id,
                 "status": CommandStatus::Running.as_str(),
@@ -586,6 +612,14 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
                 "process_group_id": context.process_group_id,
             });
+            if let (Some(object), Some(snapshot_binding)) =
+                (payload.as_object_mut(), context.snapshot_binding.as_ref())
+            {
+                object.insert(
+                    "snapshot_binding".to_string(),
+                    vm_dict_to_json(snapshot_binding),
+                );
+            }
             harn_vm::orchestration::agent_inbox::push(
                 &context.session_id,
                 "tool_progress",
@@ -618,6 +652,16 @@ pub fn cancel_handle(handle_id: &str) -> bool {
         },
     )
     .cancelled
+}
+
+pub(crate) fn snapshot_binding_for_handle(handle_id: &str) -> Option<harn_vm::value::DictMap> {
+    let store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    store
+        .entries
+        .get(handle_id)
+        .and_then(|entry| entry.snapshot_binding.clone())
 }
 
 pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {

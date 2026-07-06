@@ -78,6 +78,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 session_id,
                 progress_interval: None,
                 progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
+                snapshot_binding: None,
             },
         )?;
         return Ok(info.into_handle_response());

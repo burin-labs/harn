@@ -113,6 +113,25 @@ fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
     }
 }
 
+fn snapshot_binding_fixture() -> harn_vm::value::DictMap {
+    let mut files = dict();
+    files.insert("src/lib.rs".into(), vstr("sha256:abc123"));
+
+    let mut binding = dict();
+    binding.insert("schema_version".into(), VmValue::Int(1));
+    binding.insert("case_fingerprint".into(), vstr("case-123"));
+    binding.insert("files".into(), VmValue::dict(files));
+    binding
+}
+
+fn assert_snapshot_binding(map: &harn_vm::value::DictMap) {
+    let binding = require_nested_dict(map, "snapshot_binding");
+    assert_eq!(require_int(&binding, "schema_version"), 1);
+    assert_eq!(require_str(&binding, "case_fingerprint"), "case-123");
+    let files = require_nested_dict(&binding, "files");
+    assert_eq!(require_str(&files, "src/lib.rs"), "sha256:abc123");
+}
+
 fn as_dict(value: &VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (**map).clone(),
@@ -934,12 +953,17 @@ fn run_command_background_after_returns_progress_snapshot() {
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background_after_ms".into(), VmValue::Int(50));
     req.insert("progress_max_inline_bytes".into(), VmValue::Int(200));
+    req.insert(
+        "snapshot_binding".into(),
+        VmValue::dict(snapshot_binding_fixture()),
+    );
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "status"), "running");
     assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
     assert_eq!(require_str(&resp, "stdout"), "started\n");
     assert!(require_str(&resp, "output_path").contains("harn-command-"));
+    assert_snapshot_binding(&resp);
     let handle_id = require_str(&resp, "handle_id");
 
     let mut read_req = dict();
@@ -958,6 +982,7 @@ fn run_command_background_after_returns_progress_snapshot() {
     assert_eq!(require_str(&waited, "combined"), "started\n");
     assert_eq!(require_str(&waited, "inline_output"), "started\n");
     assert_eq!(require_int(&waited, "byte_count"), 8);
+    assert_snapshot_binding(&waited);
 
     let completion_rx = register_completion_notifier(&handle_id);
     let mut cancel_req = dict();
@@ -1105,6 +1130,48 @@ fn wait_command_returns_completed_background_result() {
     assert_eq!(require_int(&waited, "exit_code"), 0);
     assert_eq!(require_str(&waited, "stdout"), "done\n");
     assert!(!require_bool(&waited, "timed_out"));
+}
+
+#[test]
+fn wait_command_carries_background_snapshot_binding_to_completion() {
+    let session_id = unique_session_id("test-wait-command-snapshot-binding");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sh", "-c", "echo done"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    req.insert(
+        "snapshot_binding".into(),
+        VmValue::dict(snapshot_binding_fixture()),
+    );
+    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_snapshot_binding(&start);
+    let handle_id = require_str(&start, "handle_id");
+
+    let mut poll_req = dict();
+    poll_req.insert("handle_id".into(), vstr(&handle_id));
+    poll_req.insert("timeout_ms".into(), VmValue::Int(0));
+    let running = require_dict(call("hostlib_tools_wait_command", poll_req).unwrap());
+    assert_eq!(require_str(&running, "status"), "running");
+    assert_snapshot_binding(&running);
+
+    let completion_rx =
+        register_completion_notifier(&handle_id).expect("handle should still be live");
+    controller.append_stdout(b"done\n");
+    controller.complete_with(ExitStatus::from_code(0));
+    completion_rx.recv().expect("waiter completion never fired");
+
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+
+    assert_eq!(require_str(&waited, "status"), "completed");
+    assert_eq!(require_str(&waited, "feedback_kind"), "tool_result");
+    assert_eq!(require_str(&waited, "handle_id"), handle_id);
+    assert_eq!(require_str(&waited, "stdout"), "done\n");
+    assert_snapshot_binding(&waited);
 }
 
 #[test]

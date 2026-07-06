@@ -122,6 +122,26 @@ pub(crate) fn optional_string_map(
     }
 }
 
+/// Optional opaque dict field on a request dict.
+pub(crate) fn optional_dict(
+    builtin: &'static str,
+    map: &harn_vm::value::DictMap,
+    key: &'static str,
+) -> Result<Option<harn_vm::value::DictMap>, HostlibError> {
+    let Some(value) = map.get(key) else {
+        return Ok(None);
+    };
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::Dict(dict) => Ok(Some((**dict).clone())),
+        other => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("expected dict, got {}", describe(other)),
+        }),
+    }
+}
+
 /// Parse the shared process-tool `env_mode` option.
 pub(crate) fn optional_env_mode(
     builtin: &'static str,

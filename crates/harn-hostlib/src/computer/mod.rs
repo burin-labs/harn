@@ -592,7 +592,7 @@ fn permissions_builtin(backend: &dyn ComputerBackend) -> Result<VmValue, Hostlib
 /// neutral action list. Actions are decoded through `serde_json` so the union
 /// stays defined in exactly one place (the `#[serde(tag = "action")]` enum).
 fn parse_actions(dict: &harn_vm::value::DictMap) -> Result<Vec<ComputerAction>, HostlibError> {
-    let json = vm_dict_to_json(dict);
+    let json = crate::json::vm_dict_to_json(dict);
     let obj = json
         .as_object()
         .ok_or_else(|| HostlibError::InvalidParameter {
@@ -631,35 +631,6 @@ fn parse_actions(dict: &harn_vm::value::DictMap) -> Result<Vec<ComputerAction>, 
             })
         })
         .collect()
-}
-
-/// Convert the subset of `VmValue` used by action payloads into
-/// `serde_json::Value`. Dependency-free (does not rely on the feature-gated
-/// `llm` bridge) so the neutral action union stays defined in one place — the
-/// `#[serde(tag = "action")]` enum — while lean hostlib builds still compile.
-fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
-    match value {
-        VmValue::Nil => serde_json::Value::Null,
-        VmValue::Bool(b) => serde_json::Value::Bool(*b),
-        VmValue::Int(n) => serde_json::Value::from(*n),
-        VmValue::Float(n) => serde_json::Number::from_f64(*n)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        VmValue::String(s) => serde_json::Value::String(s.to_string()),
-        VmValue::List(items) => {
-            serde_json::Value::Array(items.iter().map(vm_value_to_json).collect())
-        }
-        VmValue::Dict(dict) => vm_dict_to_json(dict),
-        _ => serde_json::Value::Null,
-    }
-}
-
-fn vm_dict_to_json(dict: &harn_vm::value::DictMap) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    for (key, value) in dict.iter() {
-        map.insert(key.as_str().to_string(), vm_value_to_json(value));
-    }
-    serde_json::Value::Object(map)
 }
 
 /// Split a `+`-separated key chord (e.g. `"ctrl+shift+s"`) into its parts,

@@ -24,8 +24,8 @@ use std::time::Duration;
 
 use crate::error::HostlibError;
 use crate::tools::payload::{
-    optional_bool, optional_env_mode, optional_string, optional_string_list, optional_string_map,
-    optional_timeout, optional_u64, parse_argv_program, require_dict_arg,
+    optional_bool, optional_dict, optional_env_mode, optional_string, optional_string_list,
+    optional_string_map, optional_timeout, optional_u64, parse_argv_program, require_dict_arg,
 };
 use crate::tools::proc::{self, CaptureConfig, SpawnRequest};
 
@@ -50,17 +50,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let progress_max_inline_bytes = optional_u64(NAME, &map, "progress_max_inline_bytes")?
         .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
         .unwrap_or(capture.max_inline_bytes);
-    let policy_context = match map.get("policy_context") {
-        Some(VmValue::Dict(dict)) => Some((**dict).clone()),
-        Some(VmValue::Nil) | None => None,
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: NAME,
-                param: "policy_context",
-                message: format!("expected dict, got {}", other.type_name()),
-            });
-        }
-    };
+    let policy_context = optional_dict(NAME, &map, "policy_context")?;
+    let snapshot_binding = optional_dict(NAME, &map, "snapshot_binding")?;
 
     let _sandbox_guard = harn_vm::process_sandbox::push_process_sandbox_scope(sandbox_scope)
         .map_err(sandbox_scope_error_to_hostlib)?;
@@ -78,6 +69,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 session_id: session_id.clone(),
                 progress_interval: progress_interval_ms.map(Duration::from_millis),
                 progress_max_inline_bytes,
+                snapshot_binding,
             },
         )?;
         if let Some(wait_ms) = background_after_ms.filter(|wait_ms| *wait_ms > 0) {
@@ -174,6 +166,7 @@ fn initial_background_snapshot(
         info.process_group_id,
         info.started_at.clone(),
         info.command_display.clone(),
+        info.snapshot_binding.as_ref(),
     ) {
         VmValue::Dict(map) => (*map).clone(),
         _ => harn_vm::value::DictMap::new(),

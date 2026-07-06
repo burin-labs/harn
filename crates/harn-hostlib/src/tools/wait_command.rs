@@ -53,6 +53,9 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .str("status", "running")
         .bool("completed", false)
         .bool("timed_out", false);
+    if let Some(snapshot_binding) = super::long_running::snapshot_binding_for_handle(&handle_id) {
+        builder = builder.dict("snapshot_binding", snapshot_binding);
+    }
     if let Some(artifacts) = proc::live_artifact_snapshot(None, Some(&handle_id)) {
         builder = builder
             .str("output_path", to_agent_path(&artifacts.output_path))

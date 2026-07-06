@@ -108,6 +108,11 @@
     "policy_context": {
       "type": "object",
       "additionalProperties": true
+    },
+    "snapshot_binding": {
+      "type": "object",
+      "description": "Opaque caller-provided verification snapshot binding, typically the output of hostlib_code_index_file_hash_snapshot captured immediately before launching a background command.",
+      "additionalProperties": true
     }
   },
   "oneOf": [

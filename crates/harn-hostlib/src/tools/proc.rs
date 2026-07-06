@@ -359,6 +359,7 @@ pub(crate) fn running_response(
     process_group_id: Option<u32>,
     started_at: String,
     command_display: String,
+    snapshot_binding: Option<&harn_vm::value::DictMap>,
 ) -> VmValue {
     let artifacts = planned_artifact_paths(&command_id);
     let mut sandbox = harn_vm::value::DictMap::new();
@@ -394,6 +395,9 @@ pub(crate) fn running_response(
         Some(pgid) => builder.int("process_group_id", pgid as i64),
         None => builder.nil("process_group_id"),
     };
+    if let Some(snapshot_binding) = snapshot_binding {
+        builder = builder.dict("snapshot_binding", snapshot_binding.clone());
+    }
     builder.build()
 }
 

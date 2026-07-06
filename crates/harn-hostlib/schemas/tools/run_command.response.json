@@ -40,6 +40,11 @@
       "type": "object",
       "additionalProperties": true
     },
+    "snapshot_binding": {
+      "type": "object",
+      "description": "Opaque verification snapshot binding carried through background handles, progress items, and completion results.",
+      "additionalProperties": true
+    },
     "command": { "type": "string" },
     "command_or_op_descriptor": { "type": "string" }
   },
