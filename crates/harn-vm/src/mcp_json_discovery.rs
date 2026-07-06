@@ -71,12 +71,13 @@ pub fn mcp_json_url_for(input: &str) -> Result<Url, String> {
 /// are surfaced as diagnostics because they usually indicate server setup drift.
 pub async fn discover_mcp_json(input: &str) -> Result<Option<McpJsonDiscovery>, String> {
     let source = mcp_json_url_for(input)?;
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .timeout(MCP_JSON_DISCOVERY_TIMEOUT)
         .redirect(crate::egress::redirect_policy(
             "mcp_json_discovery_redirect",
             10,
-        ))
+        ));
+    let client = crate::egress::install_ssrf_guard(builder)
         .build()
         .map_err(|error| format!("failed to build MCP discovery client: {error}"))?;
     discover_mcp_json_with_client(&client, source).await

@@ -520,6 +520,37 @@ pub fn current_resolved_ip_rules() -> ResolvedIpRules {
         .unwrap_or_default()
 }
 
+/// Install the connect-time SSRF [`GuardedResolver`] on an arbitrary reqwest
+/// client builder, using the same effective egress settings
+/// `crate::http::client::build_http_client` applies to the `http_*` builtins.
+///
+/// Outbound clients built OUTSIDE the `http_*` path — the shared LLM clients,
+/// connector clients, MCP discovery/OAuth/card/transport clients, the provider
+/// healthcheck and remote catalog fetchers — route through here so a hostname
+/// that resolves (or DNS-rebinds) to a private / loopback / link-local /
+/// metadata (`169.254.169.254`) / denied-CIDR address is unreachable at connect
+/// time. The resolver is the unbypassable backstop: reqwest can only open a TCP
+/// connection to an address this resolver returns.
+///
+/// Like the `http_*` path, the resolver is installed only when the private
+/// block is engaged OR NetPolicy deny rules exist; otherwise the builder is
+/// returned untouched (e.g. `block_private:off`). The effective loopback hatch
+/// is honored, so a caller that has opted into loopback (or a local model whose
+/// URL is a literal `127.0.0.1`, which never hits the resolver) keeps working.
+pub fn install_ssrf_guard(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    let (block_private, allow_loopback) = current_ssrf_client_settings();
+    let rules = current_resolved_ip_rules();
+    if block_private || !rules.deny.is_empty() {
+        builder.dns_resolver(std::sync::Arc::new(GuardedResolver::with_policy(
+            block_private,
+            allow_loopback,
+            &rules,
+        )))
+    } else {
+        builder
+    }
+}
+
 /// Resolve the effective SSRF mode + loopback hatch given the (optional)
 /// configured policy. An unset `block_private` axis defaults to
 /// [`SsrfMode::BlockPrivate`] iff the guard scope is active.
@@ -1923,6 +1954,82 @@ mod tests {
         drop(_scope);
         reset_egress_policy_for_tests();
         assert_eq!(current_ssrf_client_settings(), (false, false));
+    }
+
+    /// Accept exactly one TCP connection and answer a minimal HTTP/1.1 200 so a
+    /// non-blocked client gets a real response. Returns the bound loopback port.
+    fn spawn_one_shot_ok_server() -> (u16, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback probe server");
+        let port = listener.local_addr().expect("probe server addr").port();
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                );
+                let _ = stream.flush();
+            }
+        });
+        (port, handle)
+    }
+
+    /// Finding A: a client built through `install_ssrf_guard` under the run's
+    /// SSRF scope must NOT be able to reach a hostname that resolves to a
+    /// loopback/private address (the connect-time backstop drops it), while the
+    /// same hostname stays reachable when the private block is off — proving the
+    /// guard is actually installed and not over-blocking when disabled.
+    #[tokio::test]
+    async fn install_ssrf_guard_blocks_loopback_hostname_and_passes_when_off() {
+        // No process-env mutation here: the guard scope and the block_private
+        // override both go through thread-local test state, so no env lock is
+        // needed (and holding a std mutex across `.await` would trip clippy).
+
+        // Under the guard scope, `localhost` resolves only to loopback, which the
+        // backstop resolver drops → the send fails before any server bytes flow.
+        let (port, server) = spawn_one_shot_ok_server();
+        reset_egress_policy_for_tests();
+        {
+            let _scope = require_ssrf_guard_for_host();
+            let client = install_ssrf_guard(reqwest::Client::builder())
+                .build()
+                .expect("guarded client builds");
+            let result = client
+                .get(format!("http://localhost:{port}/probe"))
+                .send()
+                .await;
+            assert!(
+                result.is_err(),
+                "guarded client must not reach a loopback hostname, got {result:?}"
+            );
+        }
+        // The listener never served anyone; release its accept thread.
+        drop(server);
+
+        // With the private block explicitly off, the guard installs no resolver
+        // and the very same hostname is reachable (no over-blocking).
+        let (port, server) = spawn_one_shot_ok_server();
+        reset_egress_policy_for_tests();
+        install_test_policy(&[(
+            "block_private",
+            VmValue::String(arcstr::ArcStr::from("off")),
+        )]);
+        {
+            let _scope = require_ssrf_guard_for_host();
+            let client = install_ssrf_guard(reqwest::Client::builder())
+                .build()
+                .expect("unguarded client builds");
+            let response = client
+                .get(format!("http://localhost:{port}/probe"))
+                .send()
+                .await
+                .expect("block_private:off permits loopback hostname");
+            assert_eq!(response.status().as_u16(), 200);
+        }
+        server.join().expect("probe server thread");
+        reset_egress_policy_for_tests();
     }
 
     // --- NetPolicy CIDR/IP rules applied to RESOLVED host IPs (#3174). ---

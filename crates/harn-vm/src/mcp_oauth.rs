@@ -114,10 +114,11 @@ fn oauth_http_timeout() -> std::time::Duration {
 /// interactive authorization, so an unbounded request wedges MCP auth
 /// process-wide.
 fn oauth_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .connect_timeout(OAUTH_HTTP_CONNECT_TIMEOUT)
         .timeout(oauth_http_timeout())
-        .redirect(crate::egress::redirect_policy("mcp_oauth_redirect", 10))
+        .redirect(crate::egress::redirect_policy("mcp_oauth_redirect", 10));
+    crate::egress::install_ssrf_guard(builder)
         .build()
         .expect("MCP OAuth HTTP client configuration should be valid")
 }

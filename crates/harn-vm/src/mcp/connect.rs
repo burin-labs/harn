@@ -54,8 +54,9 @@ pub(crate) async fn mcp_connect_stdio_impl(
 pub(crate) async fn mcp_connect_http_impl(
     spec: &McpServerSpec,
 ) -> Result<VmMcpClientHandle, VmError> {
-    let client = reqwest::Client::builder()
-        .redirect(crate::egress::redirect_policy("mcp_http_redirect", 10))
+    let builder = reqwest::Client::builder()
+        .redirect(crate::egress::redirect_policy("mcp_http_redirect", 10));
+    let client = crate::egress::install_ssrf_guard(builder)
         .build()
         .map_err(|e| VmError::Runtime(format!("MCP HTTP client error: {e}")))?;
     let options = resolve_connect_protocol_options(
