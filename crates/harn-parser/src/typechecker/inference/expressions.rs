@@ -897,7 +897,9 @@ impl TypeChecker {
                         Some(result(TypeExpr::Named("bool".into())))
                     }
                     // Shared: int-returning methods
-                    "count" | "index_of" => Some(result(TypeExpr::Named("int".into()))),
+                    "count" | "index_of" | "last_index_of" | "rfind" => {
+                        Some(result(TypeExpr::Named("int".into())))
+                    }
                     // String methods
                     "trim" | "lowercase" | "uppercase" | "replace" | "substring" | "pad_left"
                     | "pad_right" | "repeat" | "join" => {

@@ -2836,8 +2836,14 @@ plain terminal.
   source dir); `**` glob is supported.
 - `harness.fs.glob(pattern, base?)` is the capability-aware form and returns
   the same matches as `glob(...)`.
+- `harness.fs.workspace_temp_dir()` returns the sandbox-visible workspace
+  scratch directory, creating it lazily.
+- `harness.fs.mkdtemp_in_workspace(prefix?)` creates a unique directory under
+  that workspace scratch root. Prefer it for intermediate files used by
+  sandboxed workflows.
 - `harness.fs.mkdtemp(prefix?)` creates a uniquely named directory under the
-  host temp dir; callers own cleanup with `harness.fs.delete(path)`.
+  host temp dir. Use it only for host-temp work that does not need to be
+  sandbox-visible; callers own cleanup with `harness.fs.delete(path)`.
 - `walk_dir(root, opts?)` → list of `{path, is_dir, is_file, depth}`.
   `opts.max_depth: int` and `opts.follow_symlinks: bool` are honored.
 - `move_file(src, dst)` — `rename` with cross-filesystem copy+delete

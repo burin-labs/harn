@@ -20,6 +20,8 @@ surface.
 | `harness.fs.mkdir(path)` | `mkdir(path)` | `workspace.write_text` |
 | `harness.fs.copy(src, dst)` | `copy_file(src, dst)` | `workspace.write_text` |
 | `harness.fs.temp_dir()` | `temp_dir()` | none |
+| `harness.fs.workspace_temp_dir()` | `workspace_temp_dir()` | `workspace.write_text` |
+| `harness.fs.mkdtemp_in_workspace(prefix?)` | `mkdtemp_in_workspace(prefix?)` | `workspace.write_text` |
 | `harness.fs.mkdtemp(prefix?)` | `mkdtemp(prefix?)` | `workspace.write_text` |
 | `harness.fs.stat(path)` | `stat(path)` | `workspace.exists` |
 | `harness.fs.rename(src, dst)` | `move_file(src, dst)` | `workspace.write_text` |
@@ -28,9 +30,20 @@ surface.
 | `harness.fs.glob(pattern, base_or_options?, options?)` | `glob(pattern, base_or_options?, options?)` | `workspace.list` |
 | `harness.fs.find_text(root, pattern, options?)` | `find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
 
+`harness.fs.workspace_temp_dir()` returns a workspace-local scratch directory,
+creating it lazily. Sandboxed runs place the directory inside the active
+workspace root; unsandboxed runs use `.harn-tmp` relative to the script source
+root.
+
+`harness.fs.mkdtemp_in_workspace(prefix?)` creates a uniquely named directory
+under `harness.fs.workspace_temp_dir()`. Prefer this for intermediate files
+that later filesystem or process calls must read under the same sandbox policy.
+
 `harness.fs.mkdtemp(prefix?)` creates a uniquely named directory under the host
-temporary directory and returns its absolute path. The directory is not
-automatically removed; callers own cleanup with `harness.fs.delete(path)`.
+temporary directory and returns its absolute path. Use it only for host-temp
+work that does not need to be visible through workspace sandbox rules. The
+directory is not automatically removed; callers own cleanup with
+`harness.fs.delete(path)`.
 
 `harness.fs.glob(pattern, base_or_options?, options?)` returns the same sorted
 matches as `glob(...)`. Patterns are matched against forward-slash paths

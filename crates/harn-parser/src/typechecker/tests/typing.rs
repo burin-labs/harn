@@ -1296,6 +1296,8 @@ fn test_harness_fs_method_return_type_inference() {
     let errs = errors(
         r#"fn main(harness: Harness) {
   let dir: string = harness.fs.mkdtemp("harn-type-")
+  let workspace_root: string = harness.fs.workspace_temp_dir()
+  let workspace_dir: string = harness.fs.mkdtemp_in_workspace("harn-type-")
   let matches: list = harness.fs.glob("*.toml", dir)
 }"#,
     );

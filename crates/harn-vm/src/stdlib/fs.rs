@@ -33,7 +33,9 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PATH_JOIN_BUILTIN_DEF,
     &COPY_FILE_BUILTIN_DEF,
     &TEMP_DIR_BUILTIN_DEF,
+    &WORKSPACE_TEMP_DIR_BUILTIN_DEF,
     &MKDTEMP_BUILTIN_DEF,
+    &MKDTEMP_IN_WORKSPACE_BUILTIN_DEF,
     &STAT_BUILTIN_DEF,
     &MOVE_FILE_BUILTIN_DEF,
     &READ_LINES_BUILTIN_DEF,
@@ -713,31 +715,23 @@ fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    sig = "workspace_temp_dir() -> string",
+    category = "fs",
+    doc = "Return a sandbox-writable workspace-local temporary directory path, creating it lazily."
+)]
+fn workspace_temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        workspace_temp_root()?.to_string_lossy().into_owned(),
+    )))
+}
+
+#[harn_builtin(
     sig = "mkdtemp(prefix?: string) -> string",
     category = "fs",
     doc = "Create a new uniquely-named directory under the host temp dir and return its absolute path. The caller owns the directory lifecycle."
 )]
 fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let raw_prefix = args
-        .first()
-        .map(|v| v.display())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "harn-".to_string());
-    // Strip any path separators from the prefix so callers cannot
-    // smuggle their own subdirectory tree past `std::env::temp_dir()`.
-    // We keep this defensive rather than throwing because most callers
-    // pass a simple identifier like `"harn-doctor-"` and a slip-through
-    // shouldn't blow up the script.
-    let sanitized_prefix: String = raw_prefix
-        .chars()
-        .filter(|c| !matches!(c, '/' | '\\'))
-        .collect();
-    // 8 hex chars from the v7 uuid suffix gives 32 bits of distinctness,
-    // more than enough for typical short-lived scratch dirs and short
-    // enough to keep the absolute path readable.
-    let suffix = uuid::Uuid::now_v7().simple().to_string();
-    let short_suffix = &suffix[suffix.len().saturating_sub(12)..];
-    let dir_name = format!("{sanitized_prefix}{short_suffix}");
+    let dir_name = unique_temp_dir_name(args, "harn-");
     let path = std::env::temp_dir().join(dir_name);
     crate::stdlib::sandbox::enforce_fs_path(
         "mkdtemp",
@@ -753,6 +747,76 @@ fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::String(arcstr::ArcStr::from(
         path.to_string_lossy().into_owned(),
     )))
+}
+
+#[harn_builtin(
+    sig = "mkdtemp_in_workspace(prefix?: string) -> string",
+    category = "fs",
+    doc = "Create a new uniquely-named directory under workspace_temp_dir() and return its path."
+)]
+fn mkdtemp_in_workspace_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let root = workspace_temp_root()?;
+    let path = root.join(unique_temp_dir_name(args, "harn-"));
+    crate::stdlib::sandbox::enforce_fs_path(
+        "mkdtemp_in_workspace",
+        &path,
+        crate::stdlib::sandbox::FsAccess::Write,
+    )?;
+    std::fs::create_dir(&path).map_err(|error| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "mkdtemp_in_workspace: failed to create {}: {error}",
+            path.display()
+        ))))
+    })?;
+    queue_file_edited_for(&path, "mkdtemp_in_workspace", 0);
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        path.to_string_lossy().into_owned(),
+    )))
+}
+
+fn workspace_temp_root() -> Result<PathBuf, VmError> {
+    if let Some(policy) = crate::orchestration::current_execution_policy() {
+        if !matches!(
+            policy.sandbox_profile,
+            crate::orchestration::SandboxProfile::Unrestricted
+        ) {
+            if let Some(path) = crate::stdlib::sandbox::workspace_local_tmpdir(&policy) {
+                return Ok(path);
+            }
+        }
+    }
+    let path = resolve_fs_path(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME);
+    crate::stdlib::sandbox::enforce_fs_path(
+        "workspace_temp_dir",
+        &path,
+        crate::stdlib::sandbox::FsAccess::Write,
+    )?;
+    std::fs::create_dir_all(&path).map_err(|error| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "workspace_temp_dir: failed to create {}: {error}",
+            path.display()
+        ))))
+    })?;
+    let ignore = path.join(".gitignore");
+    if !ignore.exists() {
+        let _ = std::fs::write(&ignore, "# Created by Harn; safe to delete.\n*\n");
+    }
+    Ok(path)
+}
+
+fn unique_temp_dir_name(args: &[VmValue], default_prefix: &str) -> String {
+    let raw_prefix = args
+        .first()
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| default_prefix.to_string());
+    let sanitized_prefix: String = raw_prefix
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\'))
+        .collect();
+    let suffix = uuid::Uuid::now_v7().simple().to_string();
+    let short_suffix = &suffix[suffix.len().saturating_sub(12)..];
+    format!("{sanitized_prefix}{short_suffix}")
 }
 
 #[harn_builtin(

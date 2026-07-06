@@ -5084,6 +5084,8 @@ are not required to be present.
 | `lowercase()` | (none) | string |
 | `uppercase()` | (none) | string |
 | `substring(start, end?)` | int, int? | string -- character range |
+| `index_of(substr)` | string | int -- first character offset, or -1 |
+| `last_index_of(substr)` / `rfind(substr)` | string | int -- last character offset, or -1 |
 | `chars()` | (none) | list of single-character strings |
 
 `chars()` (also the `chars(text)` builtin) materializes a string into a list of

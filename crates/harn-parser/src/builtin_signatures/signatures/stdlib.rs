@@ -489,6 +489,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("prefix", TY_STRING)],
         TY_STRING,
     ),
+    BuiltinSignature::simple("workspace_temp_dir", &[], TY_STRING),
+    BuiltinSignature::simple(
+        "mkdtemp_in_workspace",
+        &[Param::optional("prefix", TY_STRING)],
+        TY_STRING,
+    ),
     BuiltinSignature::simple(
         "len",
         &[Param::new(

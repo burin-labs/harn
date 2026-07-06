@@ -96,6 +96,19 @@ written, rotated, or leased through the scoped harness API. In particular,
 signed run-receipt Ed25519 seeds are loaded through trusted runtime provider
 access and are never exposed to Harn scripts.
 
+When `harn run` executes a package script, the default `harness.secrets`
+provider is scoped from the nearest `harn.toml`, matching the namespace used by
+`harn connect`. This lets package scripts read canonical connector ids such as
+`google_workspace/access-token` without knowing the host keyring namespace.
+
+Automated tests and CI should not touch the OS credential store. Use
+`HARN_SECRET_PROVIDERS=env` plus test-only `HARN_SECRET_*` variables for
+secret-dependent smokes, or inject a mock `Harness`. On macOS, Keychain
+“Always Allow” grants are tied to a stable application identity; unsigned debug
+binaries rebuilt in different worktrees can still prompt again. Long-running
+automation should use a stable signed helper, broker, or external vault instead
+of relying on per-build Keychain prompts.
+
 ## Provider chain configuration
 
 The provider order is controlled with `HARN_SECRET_PROVIDERS`:

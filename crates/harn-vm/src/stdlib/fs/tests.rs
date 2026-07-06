@@ -115,6 +115,47 @@ fn file_exists_outside_sandbox_reads_as_absent_not_error() {
 }
 
 #[test]
+fn workspace_temp_dir_is_inside_sandbox_workspace() {
+    use crate::orchestration::{
+        clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
+        CapabilityPolicy, SandboxProfile,
+    };
+
+    clear_execution_policy_stacks();
+    let workspace = tempfile::tempdir().unwrap();
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    let mut vm = vm();
+    let root = call(&mut vm, "workspace_temp_dir", vec![])
+        .unwrap()
+        .display();
+    let child = call(&mut vm, "mkdtemp_in_workspace", vec![s("receipts/")])
+        .unwrap()
+        .display();
+
+    pop_execution_policy();
+    clear_execution_policy_stacks();
+
+    let root = PathBuf::from(root);
+    let child = PathBuf::from(child);
+    let workspace_root = workspace.path().canonicalize().unwrap();
+    assert!(root.starts_with(&workspace_root));
+    assert!(root.ends_with(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME));
+    assert!(root.is_dir());
+    assert!(root.join(".gitignore").is_file());
+    assert!(child.starts_with(&root));
+    assert!(child.is_dir());
+    assert!(child
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("receipts")));
+}
+
+#[test]
 fn read_file_loads_embedded_stdlib_prompt_source() {
     let mut vm = vm();
     let source = call(
