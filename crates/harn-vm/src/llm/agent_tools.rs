@@ -108,12 +108,8 @@ pub(super) fn embedded_call_repair_result(
     tool_args: &serde_json::Value,
 ) -> Option<serde_json::Value> {
     let tag = crate::llm::tools::TEXT_TOOL_CALL_TAG;
-    if !crate::llm::tools::is_generic_wrapper_name(tool_name)
-        && tool_name != crate::llm::tools::TEXT_TOOL_CALL_TAG_COMPACT
-    {
-        return None;
-    }
-    let payload = embedded_call_payload_text(tool_args)?;
+    let wrapper_named = crate::llm::tools::is_generic_wrapper_name(tool_name)
+        || tool_name == crate::llm::tools::TEXT_TOOL_CALL_TAG_COMPACT;
     // The text parser only recognizes calls to KNOWN tools; project the active
     // policy's allowlist into a minimal tool catalog so the embedded call is
     // validated against exactly the set the model may use. A ToolCeiling
@@ -123,6 +119,15 @@ pub(super) fn embedded_call_repair_result(
     if allowed.is_empty() {
         return None;
     }
+    let name_field_payload = call_shaped_tool_name_payload(tool_name, &allowed);
+    if !wrapper_named && name_field_payload.is_none() {
+        return None;
+    }
+    let payload = if let Some(payload) = name_field_payload.as_ref() {
+        payload.clone()
+    } else {
+        embedded_call_payload_text(tool_args)?
+    };
     let tools_json = serde_json::Value::Array(
         allowed
             .iter()
@@ -132,6 +137,12 @@ pub(super) fn embedded_call_repair_result(
     let tools_val = crate::stdlib::json_to_vm_value(&tools_json);
     let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(&payload, Some(&tools_val));
     if !parsed.errors.is_empty() || parsed.calls.len() != 1 {
+        if name_field_payload.is_some() {
+            return Some(call_shaped_tool_name_repair_result(
+                tool_name,
+                parsed.errors.first().map(String::as_str),
+            ));
+        }
         return None;
     }
     let call = &parsed.calls[0];
@@ -155,11 +166,18 @@ pub(super) fn embedded_call_repair_result(
     } else {
         format!("{inner_name}({{ ...the same arguments you already wrote... }})")
     };
-    let reason = format!(
-        "`{tool_name}` is not a tool name — `<{tag}>` is the wrapper tag of the text \
-         tool-call format, and this call's arguments contain a complete call to \
-         `{inner_name}`."
-    );
+    let reason = if name_field_payload.is_some() {
+        format!(
+            "`{tool_name}` is not a tool name — it contains a complete text-format call \
+             to `{inner_name}` in the tool-name field."
+        )
+    } else {
+        format!(
+            "`{tool_name}` is not a tool name — `<{tag}>` is the wrapper tag of the text \
+             tool-call format, and this call's arguments contain a complete call to \
+             `{inner_name}`."
+        )
+    };
     let next_step = format!(
         "Your call was understood but mis-addressed. Re-issue the embedded call directly, \
          using `{inner_name}` as the tool name and no wrapper tags: {corrected_invocation}"
@@ -170,6 +188,47 @@ pub(super) fn embedded_call_repair_result(
         "reason": reason,
         "next_step": next_step,
     }))
+}
+
+fn call_shaped_tool_name_payload(tool_name: &str, allowed: &[String]) -> Option<String> {
+    let trimmed = tool_name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let unwrapped = trimmed.strip_prefix('<').unwrap_or(trimmed).trim_start();
+    for name in allowed {
+        let Some(rest) = unwrapped.strip_prefix(name) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if rest.starts_with('(') {
+            return Some(unwrapped.to_string());
+        }
+    }
+    None
+}
+
+fn call_shaped_tool_name_repair_result(
+    tool_name: &str,
+    parser_error: Option<&str>,
+) -> serde_json::Value {
+    let reason = if let Some(error) = parser_error {
+        format!(
+            "`{tool_name}` is not a tool name — it is a malformed text-format call in \
+             the tool-name field. Parser diagnostic: {error}"
+        )
+    } else {
+        format!(
+            "`{tool_name}` is not a tool name — it looks like a text-format call in \
+             the tool-name field."
+        )
+    };
+    serde_json::json!({
+        "error": "invalid_arguments",
+        "tool": tool_name,
+        "reason": reason,
+        "next_step": "Move the call expression out of the tool-name field. Re-emit a real tool name with its arguments object, or emit one complete text-format `<tool_call>name({ ... })</tool_call>` block.",
+    })
 }
 
 /// Extract the text a wrapper-named call most plausibly smuggled its real
@@ -1030,6 +1089,54 @@ mod tests {
             !next.to_lowercase().contains("permission"),
             "repair feedback must not use permission framing: {next}"
         );
+    }
+
+    #[test]
+    fn call_shaped_tool_name_gets_parse_repair_feedback() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["look".to_string(), "search".to_string()],
+            ..Default::default()
+        });
+        let result = embedded_call_repair_result(
+            "look({ file: \"src/main.rs\", intent: \"read\" })",
+            &serde_json::json!({}),
+        );
+        pop_execution_policy();
+        let result = result.expect("call-shaped tool name should be repairable");
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        let reason = result["reason"].as_str().expect("reason");
+        assert!(
+            reason.contains("tool-name field") && reason.contains("`look`"),
+            "reason should classify this as a name-field parse slip: {reason}"
+        );
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            next.contains("look(") && !next.to_lowercase().contains("permission"),
+            "repair should show the corrected invocation with no permission framing: {next}"
+        );
+    }
+
+    #[test]
+    fn malformed_call_shaped_tool_name_is_not_unknown_tool_feedback() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["look".to_string(), "search".to_string()],
+            ..Default::default()
+        });
+        let result =
+            embedded_call_repair_result("look({ file: \"src/main.rs\"", &serde_json::json!({}));
+        pop_execution_policy();
+        let result = result.expect("malformed call-shaped name should still be parse repair");
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        let reason = result["reason"].as_str().expect("reason");
+        assert!(
+            reason.contains("tool-name field"),
+            "reason should name the tool-name parse slip: {reason}"
+        );
+        assert_ne!(result["error"], serde_json::json!("unknown_tool"));
     }
 
     // The streamed-arguments fallback rewraps non-JSON arguments as

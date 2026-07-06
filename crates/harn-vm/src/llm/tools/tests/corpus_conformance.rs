@@ -165,27 +165,22 @@ fn corpus_done_block_adjacent_to_wrapper_block() {
 
 // ── Class 2: stray prose alongside a well-formed call ───────────────────────
 
-/// DELIBERATE STRICTNESS, pinned: untagged prose before a well-formed
-/// `<tool_call>` block. The call MUST dispatch (partial success — the turn is
-/// not killed), and the stray-prose violation MUST be retained so the model
-/// keeps getting the wrap-your-prose signal. Dropping the violation entirely
-/// would remove the only pressure that teaches the tagged protocol; the agent
-/// loop already flags this feedback `has_partial_success` so the model knows
-/// the call landed.
+/// Untagged prose before a well-formed `<tool_call>` block is harmless
+/// envelope drift. The call dispatches and the prose is canonicalized into an
+/// assistant-prose block so the agent does not spend another turn on
+/// parse-guidance after useful work already landed.
 #[test]
-fn corpus_prose_before_wrapper_block_dispatches_call_and_keeps_violation() {
+fn corpus_prose_before_wrapper_block_dispatches_call_without_violation() {
     let tools = corpus_tool_registry();
     let text = "We need to create BatteryProvider.swift and wire it into LiveSystemProvider.\n\n<tool_call>\nlook({ file: \"Sources/SysMonCore/Providers.swift\" })\n</tool_call>";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert_eq!(call_names(&result.calls), vec!["look"]);
     assert!(
-        result
-            .violations
-            .iter()
-            .any(|violation| violation.contains("Stray text outside response tags")),
-        "stray-prose violation should be retained: {:?}",
+        result.violations.is_empty(),
+        "stray-prose should not trigger parse guidance after dispatch: {:?}",
         result.violations
     );
+    assert!(result.canonical.contains("<assistant_prose>"));
 }
 
 /// A bare call embedded in stray prose at line start is recovered and
