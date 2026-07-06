@@ -1696,12 +1696,14 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
             })
         })
         .collect();
+    let routing_routes = harn_vm::provider_catalog::artifact().routing_routes;
     serde_json::json!({
         "providers": providers,
         "known_model_names": harn_vm::llm_config::known_model_names(),
         "available_providers": harn_vm::llm_config::available_provider_names(),
         "aliases": aliases,
         "models": models,
+        "routing_routes": routing_routes,
         "qc_defaults": harn_vm::llm_config::qc_defaults(),
     })
 }

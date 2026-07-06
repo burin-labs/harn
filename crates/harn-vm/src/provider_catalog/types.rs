@@ -16,6 +16,8 @@ pub struct ProviderCatalogArtifact {
     pub models: Vec<CatalogModel>,
     pub aliases: Vec<CatalogAlias>,
     pub variants: Vec<CatalogVariant>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routing_routes: Vec<CatalogRoutingRoute>,
     pub qc_defaults: BTreeMap<String, String>,
 }
 
@@ -280,6 +282,30 @@ pub struct CatalogVariant {
     pub model_id: String,
     pub provider: String,
     pub source: String,
+}
+
+/// Provider/model route-decision row derived from the catalog.
+///
+/// This mirrors the cloud routing-policy row shape: it carries dispatch data
+/// and credential *names*, never resolved secret values. VM-facing snapshots
+/// must redact `base_url` and `secret_env` when tenant code only needs the
+/// selected provider/model/family/capability envelope.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CatalogRoutingRoute {
+    pub provider: String,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

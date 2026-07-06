@@ -22,6 +22,7 @@ pipeline test(task) {
   assert(len(catalog.providers) >= 6, "catalog exposes providers")
   assert(len(catalog.aliases) >= 1, "catalog exposes alias mappings")
   assert(len(catalog.models) >= 1, "catalog exposes model metadata")
+  assert(len(catalog.routing_routes) >= 1, "catalog exposes routing routes")
   assert(catalog.qc_defaults.ollama != nil, "catalog exposes QC defaults")
   let mid = llm_model_info("mid")
   assert_eq(mid.id, "qwen/qwen3-coder-next")
@@ -35,6 +36,15 @@ pipeline test(task) {
   assert_eq(mid.catalog.pricing.input_per_mtok, 0.11)
   assert_eq(mid.catalog.family, "qwen")
   assert(mid.capabilities.native_tools != nil, "capability lookup is present")
+  let mid_route_model = mid.catalog?.wire_model ?? mid.id
+  let mid_routes = catalog.routing_routes
+    .filter({ route -> route.provider == mid.provider && route.model == mid_route_model })
+  assert_eq(len(mid_routes), 1)
+  assert_eq(mid_routes[0].family, mid.family)
+  assert(
+    mid_routes[0].capabilities.contains("text_tools"),
+    "routing route exposes tool envelope capability",
+  )
   let reviewer = llm_complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
   assert_eq(reviewer.fallback, false)
   assert(reviewer.reviewer.family != reviewer.author.family, "reviewer uses a different family")

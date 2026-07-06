@@ -237,7 +237,7 @@ fn artifact_from_config(
         .map(|(name, alias)| (name.clone(), alias.clone()))
         .collect::<Vec<_>>();
     let aliases_by_model = aliases_by_model(&alias_entries);
-    let providers = config
+    let providers: Vec<_> = config
         .providers
         .iter()
         .map(|(id, provider)| catalog_provider(id.clone(), provider.clone()))
@@ -262,6 +262,7 @@ fn artifact_from_config(
         })
         .collect::<Vec<_>>();
     let variants = catalog_variants(&models, &aliases);
+    let routing_routes = catalog_routing_routes(&models, &providers);
 
     ProviderCatalogArtifact {
         schema_version: PROVIDER_CATALOG_SCHEMA_VERSION,
@@ -271,6 +272,7 @@ fn artifact_from_config(
         models,
         aliases,
         variants,
+        routing_routes,
         qc_defaults: config.qc_defaults.clone(),
     }
 }
@@ -358,6 +360,75 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
             .filter(|performance| !performance.is_empty()),
         id,
     }
+}
+
+fn catalog_routing_routes(
+    models: &[CatalogModel],
+    providers: &[CatalogProvider],
+) -> Vec<CatalogRoutingRoute> {
+    let providers_by_id = providers
+        .iter()
+        .map(|provider| (provider.id.as_str(), provider))
+        .collect::<BTreeMap<_, _>>();
+    models
+        .iter()
+        .filter(|model| model.deprecation.status == DeprecationStatus::Active)
+        .filter_map(|model| {
+            let provider = providers_by_id.get(model.provider.as_str())?;
+            Some(CatalogRoutingRoute {
+                provider: model.provider.clone(),
+                model: model.wire_model.clone().unwrap_or_else(|| model.id.clone()),
+                base_url: Some(provider.endpoint.base_url.clone()),
+                secret_env: provider.auth.env.first().cloned(),
+                timeout_ms: model.stream_timeout.and_then(stream_timeout_ms),
+                label: Some(model.name.clone()),
+                family: Some(model.family.clone()),
+                capabilities: routing_capabilities(model),
+            })
+        })
+        .collect()
+}
+
+fn stream_timeout_ms(seconds: f64) -> Option<u64> {
+    if seconds.is_finite() && seconds > 0.0 {
+        Some((seconds * 1000.0).ceil() as u64)
+    } else {
+        None
+    }
+}
+
+fn routing_capabilities(model: &CatalogModel) -> Vec<String> {
+    let mut capabilities = model
+        .capability_tags
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if model.tool_support.native {
+        capabilities.insert("native_tools".to_string());
+    }
+    if model.tool_support.text {
+        capabilities.insert("text_tools".to_string());
+    }
+    if model.prompt_cache {
+        capabilities.insert("prompt_caching".to_string());
+    }
+    if model.reasoning.effort_supported {
+        capabilities.insert("reasoning_effort".to_string());
+    }
+    if model.reasoning.interleaved_supported {
+        capabilities.insert("interleaved_thinking".to_string());
+    }
+    if model.format_preferences.prefers_markdown_scaffolding {
+        capabilities.insert("prefers_markdown_scaffolding".to_string());
+    }
+    if model.format_preferences.prefers_xml_scaffolding {
+        capabilities.insert("prefers_xml_scaffolding".to_string());
+    }
+    capabilities.insert(format!(
+        "structured_output_mode:{}",
+        model.format_preferences.structured_output_mode
+    ));
+    capabilities.into_iter().collect()
 }
 
 fn catalog_provider_healthcheck(healthcheck: HealthcheckDef) -> CatalogProviderHealthcheck {
@@ -1067,6 +1138,20 @@ fn validate_token_field(
         result.errors.push(format!(
             "model {} {field} must be a lowercase catalog token, got {:?}",
             model.id, value
+        ));
+    }
+}
+
+fn validate_route_token(
+    provider: &str,
+    model: &str,
+    field: &str,
+    value: &str,
+    result: &mut ProviderCatalogValidation,
+) {
+    if !is_catalog_token(value) {
+        result.errors.push(format!(
+            "routing route {provider}:{model} {field} must be a lowercase catalog token, got {value:?}"
         ));
     }
 }
