@@ -963,6 +963,85 @@ async fn artifact_session_update_keeps_payload_under_harn_meta() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn artifact_manifest_session_update_keeps_bundle_spec_under_harn_meta() {
+    let spec = serde_json::json!({
+        "schema_version": "harn.artifacts.v1",
+        "kind": "artifact_manifest",
+        "title": "Code findings report",
+        "artifact_count": 2,
+        "total_size_bytes": 42,
+        "artifacts": [
+            {
+                "name": "findings.pdf",
+                "relative_path": "artifacts/findings.pdf",
+                "uri": "file:///tmp/findings.pdf",
+                "mime_type": "application/pdf",
+                "size_bytes": 40,
+                "sha256": format!("sha256:{}", "a".repeat(64)),
+            },
+            {
+                "name": "chart.png",
+                "relative_path": "artifacts/chart.png",
+                "uri": "file:///tmp/chart.png",
+                "mime_type": "image/png",
+                "size_bytes": 2,
+                "sha256": format!("sha256:{}", "b".repeat(64)),
+            },
+        ],
+        "metadata": {
+            "contract_package": "@harn/documents",
+            "contract_version": "0.1.3",
+        },
+    });
+    let actual = collect_notifications(vec![AgentEvent::Artifact {
+        session_id: "session-1".to_string(),
+        artifact_id: "artifact-manifest-1".to_string(),
+        kind: "artifact_manifest".to_string(),
+        title: Some("Code findings report".to_string()),
+        mime_type: "application/vnd.harn.artifact-manifest+json".to_string(),
+        spec,
+        fallback: "Code findings report: findings.pdf, chart.png".to_string(),
+        size_bytes: 512,
+        provenance: serde_json::json!({"generator": "artifact_emit"}),
+        metadata: serde_json::json!({"scope": "bundle"}),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], "session/update");
+    assert_eq!(notification["params"]["sessionId"], "session-1");
+    let update = &notification["params"]["update"];
+    assert_eq!(update["sessionUpdate"], "artifact");
+    assert!(
+        update.get("spec").is_none(),
+        "artifact extension fields must not leak onto the ACP update root"
+    );
+    let harn_meta = update_harn_meta(notification);
+    assert_eq!(harn_meta["artifactId"], "artifact-manifest-1");
+    assert_eq!(harn_meta["kind"], "artifact_manifest");
+    assert_eq!(harn_meta["title"], "Code findings report");
+    assert_eq!(
+        harn_meta["mimeType"],
+        "application/vnd.harn.artifact-manifest+json"
+    );
+    assert_eq!(harn_meta["spec"]["schema_version"], "harn.artifacts.v1");
+    assert_eq!(harn_meta["spec"]["kind"], "artifact_manifest");
+    assert_eq!(harn_meta["spec"]["artifact_count"], 2);
+    assert_eq!(
+        harn_meta["spec"]["artifacts"][0]["mime_type"],
+        "application/pdf"
+    );
+    assert_eq!(harn_meta["spec"]["artifacts"][1]["mime_type"], "image/png");
+    assert_eq!(
+        harn_meta["fallback"],
+        "Code findings report: findings.pdf, chart.png"
+    );
+    assert_eq!(harn_meta["sizeBytes"], 512);
+    assert_eq!(harn_meta["provenance"]["generator"], "artifact_emit");
+    assert_eq!(harn_meta["metadata"]["scope"], "bundle");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn structured_plan_extension_fixture_is_pinned() {
     let plan = harn_vm::llm::plan::normalize_plan_tool_call(
         harn_vm::llm::plan::EMIT_PLAN_TOOL,
