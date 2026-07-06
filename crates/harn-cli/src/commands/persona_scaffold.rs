@@ -103,8 +103,8 @@ const SMOKE_TEST_TEMPLATE: &str = r#"import { {{persona_ident}} } from "../src/{
 pipeline test_{{persona_ident}}_smoke(task) {
   llm_mock_clear()
 {{llm_mocks}}
-  let fixture = json_parse(read_file("../fixtures/happy_path.json"))
-  let result = {{persona_ident}}({
+  const fixture = json_parse(read_file("../fixtures/happy_path.json"))
+  const result = {{persona_ident}}({
     fixture: fixture,
     started_at: "2026-05-05T00:00:00Z",
     completed_at: "2026-05-05T00:00:00Z",
@@ -366,7 +366,7 @@ impl TemplateShape {
                 triggers: r#"["github.issue_opened"]"#,
                 budget: "{ daily_usd = 3.0, run_usd = 0.10, frontier_escalations = 1, max_tokens = 16000, max_runtime_seconds = 180 }",
                 model_policy: r#"{ default_model = "mock", escalation_model = "mock", fallback_models = ["mock"], reasoning_effort = "medium" }"#,
-                persona_body: "  let classified = classify_request(task)\n  return act_on_classification(classified)",
+                persona_body: "  const classified = classify_request(task)\n  return act_on_classification(classified)",
                 steps: HYBRID_STEPS,
                 llm_mocks: "",
                 smoke_assertions: "  assert_eq(result.status, \"success\")\n  assert_eq(result.result.action, \"draft_plan\")",
@@ -390,8 +390,8 @@ impl TemplateShape {
 
 const DETERMINISTIC_STEPS: &str = r#"@step(name: "drain_queue", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
 fn drain_queue(task) {
-  let fixture = task?.fixture ?? {items: []}
-  let prompt = render_prompt("../prompts/system.harn.prompt", {
+  const fixture = task?.fixture ?? {items: []}
+  const prompt = render_prompt("../prompts/system.harn.prompt", {
     persona_name: "{{persona_name}}",
     template_kind: "{{template_kind}}",
     request: fixture?.request ?? "drain queued work",
@@ -402,8 +402,8 @@ fn drain_queue(task) {
       if len(state.remaining) == 0 {
         return {state: state, progress: false, done: true}
       }
-      let item = state.remaining[0]
-      let rest = state.remaining[1:]
+      const item = state.remaining[0]
+      const rest = state.remaining[1:]
       return {
         state: {remaining: rest, processed: state.processed + [item]},
         progress: true,
@@ -424,8 +424,8 @@ fn drain_queue(task) {
 
 const HYBRID_STEPS: &str = r#"@step(name: "classify_request", model: "mock", receipt: audit, error_boundary: escalate, budget: {max_tokens: 2000})
 fn classify_request(task) {
-  let fixture = task?.fixture ?? {}
-  let prompt = render_prompt("../prompts/system.harn.prompt", {
+  const fixture = task?.fixture ?? {}
+  const prompt = render_prompt("../prompts/system.harn.prompt", {
     persona_name: "{{persona_name}}",
     template_kind: "{{template_kind}}",
     request: fixture?.request ?? "classify requested work",
@@ -448,7 +448,7 @@ fn classify_request(task) {
 
 @step(name: "act_on_classification", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
 fn act_on_classification(classified) {
-  let wrapped = with_audit_receipt(
+  const wrapped = with_audit_receipt(
     fn() {
       return {
         action: classified.result.label,
@@ -463,8 +463,8 @@ fn act_on_classification(classified) {
 
 const FRONTIER_STEPS: &str = r#"@step(name: "judge_until_confident", model: "mock", receipt: audit, error_boundary: escalate, retry: {max_attempts: 2}, budget: {max_tokens: 4000})
 fn judge_until_confident(task) {
-  let fixture = task?.fixture ?? {}
-  let schema = {
+  const fixture = task?.fixture ?? {}
+  const schema = {
     type: "object",
     required: ["decision", "confidence", "rationale"],
     properties: {
@@ -476,12 +476,12 @@ fn judge_until_confident(task) {
   return bounded_loop(
     {decision: nil, confidence: 0.0, attempts: 0},
     fn(state) {
-      let prompt = render_prompt("../prompts/system.harn.prompt", {
+      const prompt = render_prompt("../prompts/system.harn.prompt", {
         persona_name: "{{persona_name}}",
         template_kind: "{{template_kind}}",
         request: fixture?.request ?? "review",
       },)
-      let result = llm_call_structured_safe(prompt, schema, {
+      const result = llm_call_structured_safe(prompt, schema, {
         provider: "mock",
         model: "mock",
         retries: 0,

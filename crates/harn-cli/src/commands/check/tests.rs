@@ -63,7 +63,7 @@ fn preflight_reports_template_syntax_error() {
     std::fs::write(dir.join("broken.prompt"), "{{ for x in xs }}oops\n").unwrap();
     let source = r#"
 pipeline main() {
-  let text = render("broken.prompt")
+  const text = render("broken.prompt")
   __io_println(text)
 }
 "#;
@@ -87,7 +87,7 @@ fn preflight_reports_missing_literal_render_target() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let text = render("missing.txt")
+  const text = render("missing.txt")
   __io_println(text)
 }
 "#;
@@ -111,7 +111,7 @@ fn preflight_reports_missing_literal_render_prompt_target() {
     let file = dir.join("chat.harn");
     let source = r#"
 pub fn chat() -> string {
-  let trimmed = "hello"
+  const trimmed = "hello"
   return render_prompt("lane-classifier.harn.prompt", {task: trimmed})
 }
 "#;
@@ -175,10 +175,10 @@ fn preflight_skips_non_literal_render_prompt_target() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let path = "missing.harn.prompt"
-  let prompt = render_prompt(path, {})
-  let key = "1"
-  let interp = render_prompt("missing_${key}.prompt", {})
+  const path = "missing.harn.prompt"
+  const prompt = render_prompt(path, {})
+  const key = "1"
+  const interp = render_prompt("missing_${key}.prompt", {})
   __io_println(prompt + interp)
 }
 "#;
@@ -207,14 +207,14 @@ fn preflight_reports_prompt_tool_reference_outside_literal_surface() {
     .unwrap();
     let source = r#"
 pipeline main() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_file",
     "Read a file",
     {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
   )
-  let system = render_prompt("agent.harn.prompt", {})
+  const system = render_prompt("agent.harn.prompt", {})
   agent_loop("task", system, {tools: tools})
 }
 "#;
@@ -243,14 +243,14 @@ fn preflight_honors_prompt_tool_surface_suppression() {
     .unwrap();
     let source = r#"
 pipeline main() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_file",
     "Read a file",
     {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
   )
-  let system = render_prompt("agent.harn.prompt", {})
+  const system = render_prompt("agent.harn.prompt", {})
   agent_loop("task", system, {tools: tools})
 }
 "#;
@@ -276,7 +276,7 @@ fn preflight_reports_missing_render_prompt_target_for_raw_string() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let prompt = render_prompt(r"missing.prompt", {})
+  const prompt = render_prompt(r"missing.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -304,7 +304,7 @@ fn preflight_render_prompt_diagnostic_spans_literal_argument() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let prompt = render_prompt("missing.prompt", {})
+  const prompt = render_prompt("missing.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -334,7 +334,7 @@ fn preflight_reports_missing_project_root_asset_path() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let prompt = render_prompt("@/prompts/missing.harn.prompt", {})
+  const prompt = render_prompt("@/prompts/missing.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -367,7 +367,7 @@ fn preflight_reports_unknown_asset_alias() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let prompt = render_prompt("@unknown/foo.harn.prompt", {})
+  const prompt = render_prompt("@unknown/foo.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -401,7 +401,7 @@ fn preflight_reports_missing_aliased_asset_path() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let prompt = render_prompt("@partials/missing.harn.prompt", {})
+  const prompt = render_prompt("@partials/missing.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -475,7 +475,7 @@ fn preflight_omits_did_you_mean_when_no_near_miss() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let prompt = render_prompt("nowhere.harn.prompt", {})
+  const prompt = render_prompt("nowhere.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -662,7 +662,7 @@ fn preflight_reports_tool_define_unknown_host_capability() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let r = tool_registry()
+  const r = tool_registry()
   tool_define(
     r,
     "ask_user",
@@ -696,7 +696,7 @@ fn preflight_accepts_tool_define_known_host_capability() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let r = tool_registry()
+  const r = tool_registry()
   tool_define(
     r,
     "ask_user",
@@ -729,7 +729,7 @@ fn preflight_reports_tool_define_host_bridge_missing_capability() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let r = tool_registry()
+  const r = tool_registry()
   tool_define(
     r,
     "ask_user",
@@ -758,7 +758,7 @@ fn preflight_reports_tool_define_unknown_executor_value() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let r = tool_registry()
+  const r = tool_registry()
   tool_define(
     r,
     "fly",
@@ -815,7 +815,7 @@ fn preflight_accepts_process_spawn_lifecycle_ops() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  var h = host_call("process.spawn", {mode: "argv", argv: ["echo", "hi"]})
+  let h = host_call("process.spawn", {mode: "argv", argv: ["echo", "hi"]})
   host_call("process.poll", {handle_id: h.handle_id})
   host_call("process.wait", {handle_id: h.handle_id, timeout_ms: 1000})
   host_call("process.kill", {handle_id: h.handle_id})
@@ -931,7 +931,7 @@ fn check_file_inner_resolves_stdlib_llm_catalog_routing_routes() {
 import { routing_routes } from "std/llm/catalog"
 
 pipeline main() {
-  let routes = routing_routes()
+  const routes = routing_routes()
   __io_println(len(routes) >= 0)
 }
 "#,
@@ -1058,7 +1058,7 @@ fn capability_policy_approval_matches_replay_oracle_fixture() {
   require_approval: "fs.write",
 )
 fn _handler() {
-  let _approval = request_approval("write_file", {capabilities_requested: ["fs.write"]})
+  const _approval = request_approval("write_file", {capabilities_requested: ["fs.write"]})
   write_file("notes/triage.md", "approved")
 }
 "#,
@@ -1283,7 +1283,7 @@ fn preflight_accepts_render_target_from_bundle_root() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let text = render("shared.prompt")
+  const text = render("shared.prompt")
   __io_println(text)
 }
 "#;
@@ -1361,9 +1361,9 @@ pub fn helper() -> string {
 import "lib/helper.harn"
 
 pipeline main() {
-  let review = render_prompt("prompts/review.harn.prompt")
-  let snippet = render("shared/snippet.prompt")
-  let contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt")
+  const review = render_prompt("prompts/review.harn.prompt")
+  const snippet = render("shared/snippet.prompt")
+  const contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt")
   host_call("project.scan", {})
   exec_at("shared", "pwd")
   spawn_agent({
@@ -1674,7 +1674,7 @@ fn lint_file_inner_reports_type_aware_lint_rules() {
         r#"
 type User = {name: string}
 pipeline main(task) {
-  let user: User = {name: "Ada"}
+  const user: User = {name: "Ada"}
   __io_println(user?.name)
 }
 "#,
@@ -1711,7 +1711,7 @@ fn check_and_lint_json_share_typecheck_cache() {
         &file,
         r"
 pipeline main() {
-  let x = 1
+  const x = 1
   log(x)
 }
 ",
@@ -1814,7 +1814,7 @@ fn preflight_flags_child_net_when_parent_has_no_net() {
     let file = dir.join("main.harn");
     let source = r#"
 fn parent(harness: Harness) {
-  let body = harness.fs.read_file("/workspace/in.txt")
+  const body = harness.fs.read_file("/workspace/in.txt")
   spawn_agent({
     name: "leak-net",
     task: "exfiltrate",
@@ -1858,8 +1858,8 @@ fn preflight_allows_child_effects_that_are_subset_of_parent() {
     let file = dir.join("main.harn");
     let source = r#"
 fn parent(harness: Harness) {
-  let body = harness.net.get("https://allowed.test/api")
-  let workspace = harness.fs.read_file("/workspace/notes")
+  const body = harness.net.get("https://allowed.test/api")
+  const workspace = harness.fs.read_file("/workspace/notes")
   spawn_agent({
     name: "subset-child",
     task: "read",

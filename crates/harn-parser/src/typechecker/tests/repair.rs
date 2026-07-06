@@ -72,7 +72,7 @@ fn immutable_assignment_attaches_scope_local_repair() {
     let diag = first_with_code(
         r"
             pipeline main() {
-                let x = 1
+                const x = 1
                 x = 2
             }
         ",

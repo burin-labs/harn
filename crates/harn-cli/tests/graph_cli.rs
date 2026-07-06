@@ -31,8 +31,8 @@ fn write_fixture(root: &Path) {
 import { format_title } from "util"
 
 pub fn main() -> string {
-  let title = format_title("Graph")
-  let body = read_file("README.md")
+  const title = format_title("Graph")
+  const body = read_file("README.md")
   return title + body
 }
 "#,
@@ -44,8 +44,8 @@ pub fn main() -> string {
 import { Thing } from "types"
 
 pub fn format_title(value: string) -> string {
-  let prompt = "Title: " + value
-  let _response = llm_call(prompt, {provider: "auto"})
+  const prompt = "Title: " + value
+  const _response = llm_call(prompt, {provider: "auto"})
   return value
 }
 "#,
@@ -207,7 +207,7 @@ pub fn count_lines(text: string) -> int {
     assert!(count_lines_sym["metadata"]["example"].is_null());
     assert_eq!(
         count_lines_sym["derived_example"],
-        "let out = count_lines(text)"
+        "const out = count_lines(text)"
     );
 }
 
@@ -218,11 +218,11 @@ fn graph_json_attributes_harness_sub_handle_calls_to_capabilities() {
         temp.path().join("main.harn"),
         r#"
 fn main(harness: Harness) {
-  let body = harness.fs.read_text("README.md")
-  let digest = harness.crypto.sha256(body)
+  const body = harness.fs.read_text("README.md")
+  const digest = harness.crypto.sha256(body)
   harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
-  let columns = harness.term.width()
+  const columns = harness.term.width()
   harness.term.read_password("password: ")
   harness.llm.catalog()
   harness.llm.providers()

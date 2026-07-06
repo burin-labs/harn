@@ -462,7 +462,7 @@ fn arithmetic_after_assignment_narrowing_is_clean() {
     let errs = errors(
         r"
 fn g() -> int {
-  var x: int? = nil
+  let x: int? = nil
   x = 5
   return x + 1
 }
@@ -492,13 +492,13 @@ fn g(x: int?) -> int {
 
 #[test]
 fn property_access_after_assignment_narrowing_is_clean() {
-    // Path narrowing: a nilable field/var assigned a concrete value reads as
+    // Path narrowing: a nilable field/let assigned a concrete value reads as
     // non-nil afterward.
     let errs = errors(
         r"
 struct Foo { v: int }
 fn g() -> int {
-  var f: Foo? = nil
+  let f: Foo? = nil
   f = Foo {v: 3}
   return f.v
 }
@@ -540,7 +540,7 @@ fn arithmetic_without_assert_guard_still_flagged() {
 fn test_list_subscript_write_checks_element_type() {
     let errs = errors(
         r#"fn f() -> int {
-  var xs: list<int> = [1, 2]
+  let xs: list<int> = [1, 2]
   xs[0] = "not an int"
   return xs[0]
 }"#,
@@ -556,7 +556,7 @@ fn test_list_subscript_write_checks_element_type() {
 fn test_dict_subscript_write_checks_value_and_key_types() {
     let errs = errors(
         r#"fn f() -> int {
-  var d: dict<string, int> = {a: 1}
+  let d: dict<string, int> = {a: 1}
   d["b"] = "nope"
   d[0] = 2
   return 0
@@ -578,7 +578,7 @@ fn test_dict_subscript_write_checks_value_and_key_types() {
 fn test_shape_field_write_checks_field_type() {
     let errs = errors(
         r#"fn f() -> int {
-  var s: {n: int} = {n: 1}
+  let s: {n: int} = {n: 1}
   s.n = "nope"
   return s.n
 }"#,
@@ -596,7 +596,7 @@ fn test_struct_field_write_checks_type_and_existence() {
         r#"struct Point { x: int, y: int }
 
 fn f() -> int {
-  var p = Point({x: 1, y: 2})
+  let p = Point({x: 1, y: 2})
   p.x = "nope"
   p.z = 1
   return p.x
@@ -617,7 +617,7 @@ fn f() -> int {
 fn test_optional_shape_field_write_accepts_nil() {
     let errs = errors(
         r#"fn f() -> int {
-  var s: {n: int, m?: string} = {n: 1}
+  let s: {n: int, m?: string} = {n: 1}
   s.m = nil
   s.m = "ok"
   return s.n
@@ -632,10 +632,10 @@ fn test_unannotated_dict_literal_writes_stay_lenient() {
     // heterogeneous writes, matching read-side leniency.
     let errs = errors(
         r#"pipeline t(task) {
-  var d = {a: 1}
+  let d = {a: 1}
   d.b = "hello"
   d["c"] = true
-  var xs = [1, 2]
+  let xs = [1, 2]
   xs[0] = "loose"
 }"#,
     );
@@ -646,7 +646,7 @@ fn test_unannotated_dict_literal_writes_stay_lenient() {
 fn test_compound_assignment_to_list_element_type_checks() {
     let errs = errors(
         r"fn f() -> int {
-  var xs: list<int> = [1, 2]
+  let xs: list<int> = [1, 2]
   xs[0] += 1
   return xs[0]
 }",

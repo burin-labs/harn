@@ -246,7 +246,7 @@ fn init_chat_dispatch_is_deterministic() {
         "chat scaffold should use std/io.read_line structured result"
     );
     assert!(
-        main_harn.contains("let raw = read_line()"),
+        main_harn.contains("const raw = read_line()"),
         "chat scaffold should call std/io.read_line"
     );
     assert!(

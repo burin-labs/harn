@@ -108,7 +108,7 @@ fn built_in_destructure_defaults_pack_folds_harn_alias_runs() {
     let file = dir.join("src/main.harn");
     std::fs::write(
         &file,
-        "fn f() {\n  let ready = intake?.ready ?? false\n  let metadata = intake?.metadata_ready_state ?? \"<none>\"\n}\n",
+        "fn f() {\n  const ready = intake?.ready ?? false\n  const metadata = intake?.metadata_ready_state ?? \"<none>\"\n}\n",
     )
     .unwrap();
 
@@ -126,7 +126,7 @@ fn built_in_destructure_defaults_pack_folds_harn_alias_runs() {
     );
 
     let on_disk = std::fs::read_to_string(&file).unwrap();
-    assert!(on_disk.contains("let ready = intake?.ready ?? false"));
+    assert!(on_disk.contains("const ready = intake?.ready ?? false"));
 
     let applied = built_in_codemod(&dir.join("src"), &["--apply", "--json"]);
     assert_eq!(applied.code, 0, "stderr={}", applied.stderr);

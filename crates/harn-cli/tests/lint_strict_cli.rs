@@ -28,9 +28,9 @@ fn run(dir: &Path, args: &[&str]) -> (String, String, i32) {
 
 // `x == false` triggers HARN-LNT-032 (comparison-to-bool), a warning with an
 // autofix. Enough to exercise the warning-only path.
-const WARNING_SOURCE: &str = "pipeline default(_) {\n  let x = true\n  return x == false\n}\n";
+const WARNING_SOURCE: &str = "pipeline default(_) {\n  const x = true\n  return x == false\n}\n";
 
-const CLEAN_SOURCE: &str = "pipeline default(_) {\n  let x = true\n  return !x\n}\n";
+const CLEAN_SOURCE: &str = "pipeline default(_) {\n  const x = true\n  return !x\n}\n";
 
 #[test]
 fn warning_is_advisory_without_strict() {

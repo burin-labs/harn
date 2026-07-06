@@ -440,7 +440,7 @@ fn build_playground_source(
 
     format!(
         r#"pipeline main() {{
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {{
     name: "portal_playground",
     entry: "act",
@@ -455,14 +455,14 @@ fn build_playground_source(
     edges: [],
   }},
   )
-  let seed = artifact({{kind: "summary", text: "Playground seed context", relevance: 0.5}})
-  let workspace_note = artifact({{
+  const seed = artifact({{kind: "summary", text: "Playground seed context", relevance: 0.5}})
+  const workspace_note = artifact({{
     kind: "workspace_file",
     title: "task.txt",
     text: {task:?},
     relevance: 0.9,
   }})
-  let result = workflow_execute(
+  const result = workflow_execute(
     {task:?},
     flow,
     [seed, workspace_note],

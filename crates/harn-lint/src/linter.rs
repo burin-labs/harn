@@ -1937,11 +1937,19 @@ impl<'a> Linter<'a> {
     }
 
     fn check_let_then_return(&mut self, node: &SNode, next: &SNode) {
-        let Node::LetBinding {
+        // Applies to either binding form — the simplification `X x = expr;
+        // return x` → `return expr` is valid whether `x` is a mutable `let`
+        // or an immutable `const`.
+        let (Node::LetBinding {
             pattern: BindingPattern::Identifier(name),
             type_ann: None,
             value,
-        } = &node.node
+        }
+        | Node::ConstBinding {
+            pattern: BindingPattern::Identifier(name),
+            type_ann: None,
+            value,
+        }) = &node.node
         else {
             return;
         };
@@ -2161,28 +2169,28 @@ impl<'a> Linter<'a> {
             if !self.assignments.contains(&decl.name) {
                 let fix = self.source.and_then(|src| {
                     let region = src.get(decl.span.start..decl.span.end)?;
-                    let var_off = region.find("var")?;
-                    let abs = decl.span.start + var_off;
+                    let kw_off = region.find("let")?;
+                    let abs = decl.span.start + kw_off;
                     Some(vec![FixEdit {
                         span: Span::with_offsets(
                             abs,
                             abs + 3,
                             decl.span.line,
-                            decl.span.column + var_off,
+                            decl.span.column + kw_off,
                         ),
-                        replacement: "let".to_string(),
+                        replacement: "const".to_string(),
                     }])
                 });
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintMutableNeverReassigned,
                     rule: "mutable-never-reassigned".into(),
                     message: format!(
-                        "variable `{}` is declared as `var` but never reassigned",
+                        "variable `{}` is declared as `let` but never reassigned",
                         decl.name
                     ),
                     span: decl.span,
                     severity: LintSeverity::Warning,
-                    suggestion: Some("use `let` instead of `var`".to_string()),
+                    suggestion: Some("use `const` instead of `let`".to_string()),
                     fix,
                 });
             }

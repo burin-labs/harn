@@ -1410,7 +1410,19 @@
         "required": true,
         "types": [
           {
+            "type": "dict_pattern",
+            "named": true
+          },
+          {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "list_pattern",
+            "named": true
+          },
+          {
+            "type": "pair_pattern",
             "named": true
           }
         ]

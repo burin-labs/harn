@@ -72,7 +72,7 @@ fn codemod_discovery_skips_lints_and_applies_codemods() {
 #[test]
 fn inline_pattern_still_works_with_lang() {
     let dir = project("inline");
-    write(&dir, "src/a.ts", "let x = a?.b ?? 1;\n");
+    write(&dir, "src/a.ts", "const x = a?.b ?? 1;\n");
 
     // `--lang` present → inline mode: the first positional is the pattern.
     let (stdout, _stderr, code) = run(

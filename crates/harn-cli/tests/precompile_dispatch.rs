@@ -104,7 +104,7 @@ fn precompiles_call_to_builtin_colliding_stdlib_import() {
         r#"import { render } from "std/disclosure"
 
 pipeline default(task) {
-  let chain = {sub: "user:k", act: {sub: "agent:b"}}
+  const chain = {sub: "user:k", act: {sub: "agent:b"}}
   log(render(chain, "git", {project: false, env: false, config: {}}))
 }
 "#,

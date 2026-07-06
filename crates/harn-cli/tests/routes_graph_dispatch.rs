@@ -115,8 +115,8 @@ import "std/triggers"
 import { post_message } from "std/connectors/slack"
 
 pub fn on_review(event: TriggerEvent) -> dict {
-  let body = read_file("README.md")
-  let prompt = render_prompt("prompts/review.harn.prompt", {body: body})
+  const body = read_file("README.md")
+  const prompt = render_prompt("prompts/review.harn.prompt", {body: body})
   http_post("https://example.test/hook", prompt)
   return {ok: true}
 }
@@ -309,8 +309,8 @@ fn write_graph_fixture(root: &Path) {
 import { format_title } from "util"
 
 pub fn main() -> string {
-  let title = format_title("Graph")
-  let body = read_file("README.md")
+  const title = format_title("Graph")
+  const body = read_file("README.md")
   return title + body
 }
 "#,
@@ -322,8 +322,8 @@ pub fn main() -> string {
 import { Thing } from "types"
 
 pub fn format_title(value: string) -> string {
-  let prompt = "Title: " + value
-  let _response = llm_call(prompt, {provider: "auto"})
+  const prompt = "Title: " + value
+  const _response = llm_call(prompt, {provider: "auto"})
   return value
 }
 "#,
@@ -373,7 +373,7 @@ fn write_graph_harness_fixture(root: &Path) {
         root.join("main.harn"),
         r#"
 fn main(harness: Harness) {
-  let body = harness.fs.read_text("README.md")
+  const body = harness.fs.read_text("README.md")
   harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
   harness.term.width()
@@ -442,7 +442,7 @@ fn graph_metadata_round_trips_byte_identical_across_runs() {
     // round-trip identically in repeated runs.
     assert_eq!(
         count_lines["derived_example"],
-        "let out = count_lines(text)"
+        "const out = count_lines(text)"
     );
     let read_file = &harn_value["data"]["modules"][0]["public_symbols"][1];
     assert_eq!(read_file["metadata"]["api_stability"], "experimental");

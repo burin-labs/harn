@@ -25,7 +25,7 @@ pipeline default() {
     __io_println("${label}=${v}")
   }
   // Var destructuring
-  var {x, y} = {x: 1, y: 2}
+  let {x, y} = {x: 1, y: 2}
   __io_println(x + y)
   x = 10
   y = 20

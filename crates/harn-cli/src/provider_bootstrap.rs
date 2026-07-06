@@ -573,7 +573,7 @@ mod tests {
             r#"__io_println("llm_call(\"x\")")"#
         ));
         assert!(source_text_uses_provider_llm(
-            r#"let response = llm_call("prompt", "system")"#
+            r#"const response = llm_call("prompt", "system")"#
         ));
         assert!(source_text_uses_provider_llm(
             r#"agent_loop("task", "system", {})"#
@@ -593,7 +593,7 @@ mod tests {
             "llm_stream",
             "llm_stream_call",
         ] {
-            let source = format!("let result = {builtin}(\"prompt\")");
+            let source = format!("const result = {builtin}(\"prompt\")");
             assert!(source_text_uses_provider_llm(&source), "{builtin}");
         }
     }
@@ -610,7 +610,7 @@ __io_println(llm_call("prompt", "system"))
         ));
         assert!(!source_text_uses_provider_llm(
             r#"
-let llm_call = { prompt, system -> "local" }
+const llm_call = { prompt, system -> "local" }
 __io_println(llm_call("prompt", "system"))
 "#
         ));

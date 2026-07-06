@@ -37,12 +37,12 @@ fn write_fixture(temp: &TempDir) {
         "acp_fixture.harn",
         r#"
 pub pipeline main() {
-  let sid = agent_session_current_id()
+  const sid = agent_session_current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
   if prompt != "snapshot" {
     agent_session_inject(sid, {role: "user", content: prompt})
   }
-  let snap = agent_session_snapshot(sid)
+  const snap = agent_session_snapshot(sid)
   __io_println(
     json_stringify({
       session_id: sid,
@@ -352,9 +352,9 @@ fn acp_session_set_config_option_model_pins_for_next_prompt() {
         "pin_fixture.harn",
         r#"
 pub pipeline main() {
-  let sid = agent_session_current_id()
+  const sid = agent_session_current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
-  let snap = agent_session_snapshot(sid)
+  const snap = agent_session_snapshot(sid)
   __io_println(
     json_stringify({
       session_id: sid,

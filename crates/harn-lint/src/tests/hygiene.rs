@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn test_redundant_clone_passed_by_value_autofix() {
-    let source = "pipeline default(task) {\n  let data = [1, 2]\n  log(data.clone())\n}";
+    let source = "pipeline default(task) {\n  const data = [1, 2]\n  log(data.clone())\n}";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "redundant-clone"),
@@ -20,7 +20,7 @@ fn test_redundant_clone_passed_by_value_autofix() {
 
 #[test]
 fn test_redundant_clone_dropped_autofix() {
-    let source = "pipeline default(task) {\n  let data = [1, 2]\n  drop(data.clone())\n}";
+    let source = "pipeline default(task) {\n  const data = [1, 2]\n  drop(data.clone())\n}";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "redundant-clone"),
@@ -38,8 +38,8 @@ fn test_redundant_clone_ignores_named_clone_binding() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let data = [1, 2]
-  let copied = data.clone()
+  const data = [1, 2]
+  const copied = data.clone()
   log(copied)
   log(data)
 }
@@ -55,7 +55,7 @@ pipeline default(task) {
 fn test_pointless_self_comparison_autofix_for_nan_free_operand() {
     // String/int/bool/nil operands cannot be NaN, so the self-comparison is a
     // genuine constant and the autofix is sound.
-    let source = "pipeline default(task) {\n  let always = \"x\" == \"x\"\n  log(always)\n}";
+    let source = "pipeline default(task) {\n  const always = \"x\" == \"x\"\n  log(always)\n}";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "pointless-comparison"),
@@ -63,7 +63,7 @@ fn test_pointless_self_comparison_autofix_for_nan_free_operand() {
     );
     let fixed = apply_fixes(source, &diags);
     assert!(
-        fixed.contains("let always = true"),
+        fixed.contains("const always = true"),
         "expected self-comparison to become true, got: {fixed}"
     );
 }
@@ -75,7 +75,7 @@ fn test_self_comparison_warns_but_does_not_autofix_possible_float() {
     // linter must warn but leave the source untouched. Mirrors the `!=` (NaN
     // test) direction, which is `true` for NaN and must not fold to `false`.
     for (op, label) in [("==", "eq"), ("!=", "ne")] {
-        let source = format!("pipeline default(task) {{\n  let v = task {op} task\n  log(v)\n}}");
+        let source = format!("pipeline default(task) {{\n  const v = task {op} task\n  log(v)\n}}");
         let diags = lint_source(&source);
         assert!(
             has_rule(&diags, "pointless-comparison"),
@@ -119,8 +119,8 @@ fn test_pointless_comparison_ignores_different_expressions() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-  let other = "x"
-  let same = task == other
+  const other = "x"
+  const same = task == other
   log(same)
 }
 "#,
@@ -136,7 +136,7 @@ fn test_unused_pattern_binding_for_destructuring() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let { a, b } = { a: 1, b: 2 }
+  const { a, b } = { a: 1, b: 2 }
   log(a)
 }
 ",
@@ -156,7 +156,7 @@ fn test_unused_pattern_binding_underscore_ignored() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let { a, b: _b } = { a: 1, b: 2 }
+  const { a, b: _b } = { a: 1, b: 2 }
   log(a)
 }
 ",
@@ -169,7 +169,7 @@ pipeline default(task) {
 
 #[test]
 fn test_let_then_return_autofix() {
-    let source = "pipeline default(task) {\n  fn answer() {\n    let value = 1 + 2\n    return value\n  }\n  log(answer())\n}";
+    let source = "pipeline default(task) {\n  fn answer() {\n    const value = 1 + 2\n    return value\n  }\n  log(answer())\n}";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "let-then-return"),
@@ -181,7 +181,7 @@ fn test_let_then_return_autofix() {
         "expected direct return fix, got: {fixed}"
     );
     assert!(
-        !fixed.contains("let value = 1 + 2"),
+        !fixed.contains("const value = 1 + 2"),
         "expected temporary binding to be removed, got: {fixed}"
     );
 }
@@ -192,7 +192,7 @@ fn test_let_then_return_ignores_typed_binding() {
         r"
 pipeline default(task) {
   fn answer() {
-    let value: int = 1 + 2
+    const value: int = 1 + 2
     return value
   }
   log(answer())

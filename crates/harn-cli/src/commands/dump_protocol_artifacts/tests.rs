@@ -105,11 +105,11 @@ fn generated_types_include_harn_wire_vocabularies() {
     assert!(swift.contains("case protocolVersion = \"MCP-Protocol-Version\""));
     assert!(swift.contains("case sessionClose = \"session/close\""));
     assert!(swift.contains("@available(*, deprecated"));
-    assert!(swift.contains("public static let allCases: [Self]"));
+    assert!(swift.contains("public static const allCases: [Self]"));
     assert!(swift.contains("public enum HarnACPClientMethod"));
     assert!(swift.contains("public enum HarnACPAgentNotification"));
     assert!(swift.contains("public enum HarnJsonRpcId"));
-    assert!(swift.contains("public var id: HarnJsonRpcId"));
+    assert!(swift.contains("public let id: HarnJsonRpcId"));
     assert!(swift.contains("public init?(jsonObject: Any)"));
     assert!(swift.contains("case let value as NSNumber: return jsonNumber(value)"));
     assert!(swift.contains("CFGetTypeID(value) == CFBooleanGetTypeID()"));
@@ -271,9 +271,9 @@ fn dispatched_acp_methods_match_artifact() {
             }
             continue;
         }
-        let arm = trimmed.split("=>").next().unwrap_or("");
+        const arm = trimmed.split("=>").next().unwrap_or("");
         for literal in arm.split('|') {
-            let name = literal.trim().trim_matches('"');
+            const name = literal.trim().trim_matches('"');
             if !name.is_empty() {
                 dispatched.insert(name.to_string());
             }
@@ -391,9 +391,9 @@ fn generated_go_includes_harn_wire_vocabularies() {
     assert!(go.contains("type ACPSessionUpdateNotification struct"));
     assert!(go.contains("func IsRequest(envelope map[string]json.RawMessage)"));
     assert!(go.contains("type HarnWorkerStatus = string"));
-    assert!(go.contains("var HarnWorkerStatuses = []HarnWorkerStatus"));
+    assert!(go.contains("let HarnWorkerStatuses = []HarnWorkerStatus"));
     assert!(go.contains("type ToolCallReceipt struct"));
-    assert!(go.contains("var ToolCallReceiptStatuses = []ToolCallReceiptStatus"));
+    assert!(go.contains("let ToolCallReceiptStatuses = []ToolCallReceiptStatus"));
     for value in HARN_SESSION_UPDATE_EXTENSIONS
         .iter()
         .chain(HARN_AGENT_EVENT_KINDS.iter())

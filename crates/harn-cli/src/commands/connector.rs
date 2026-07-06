@@ -1761,7 +1761,7 @@ expect_kind = "echo.received"
 expect_event_count = 1
 "#,
             r#"
-var active_bindings = []
+let active_bindings = []
 
 pub fn provider_id() {
   return "echo"
@@ -1797,8 +1797,8 @@ pub fn shutdown() {
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
-  let token = secret_get("echo/api-token")
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const token = secret_get("echo/api-token")
   event_log_emit("connectors.echo.contract", "normalize", {
     token: token,
   })
@@ -1963,7 +1963,7 @@ fn read_indirect() {
 }
 
 pub fn normalize_inbound(raw) {
-  let _body = raw.body_json
+  const _body = raw.body_json
   read_indirect()
   return {type: "reject", status: 400}
 }

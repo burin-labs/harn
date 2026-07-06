@@ -337,7 +337,7 @@ fn summarize_node(node: &SNode) -> String {
     match &node.node {
         Node::LetBinding { pattern, value, .. } => {
             format!(
-                "let {} = {}",
+                "const {} = {}",
                 binding_pattern_label(pattern),
                 inline_label(value)
             )
@@ -624,7 +624,7 @@ mod tests {
     fn renders_pipeline_with_branches_and_parallel_blocks() {
         let source = r#"
 pipeline main(task) {
-  let items = [1, 2]
+  const items = [1, 2]
   if ready {
     __io_println("go")
   } else {
@@ -647,7 +647,7 @@ pipeline main(task) {
     fn renders_match_and_try_catch_nodes() {
         let source = r#"
 pipeline main(task) {
-  let value = 1
+  const value = 1
   match value {
     1 -> { __io_println("one") }
     _ -> { __io_println("other") }

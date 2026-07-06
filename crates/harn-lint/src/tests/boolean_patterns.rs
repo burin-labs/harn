@@ -9,7 +9,7 @@ fn test_comparison_to_bool_true() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let x = true
+const x = true
 if x == true { log("yes") }
 }
 "#,
@@ -25,7 +25,7 @@ fn test_comparison_to_bool_false() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let x = true
+const x = true
 if x == false { log("no") }
 }
 "#,
@@ -41,7 +41,7 @@ fn test_no_comparison_to_bool_for_normal() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let x = 1
+const x = 1
 if x == 1 { log("one") }
 }
 "#,
@@ -65,7 +65,7 @@ fn test_no_comparison_to_bool_for_optional_chaining() {
         "d?.[\"enabled\"] == false",
     ] {
         let diags = lint_source(&format!(
-            "pipeline default(task) {{\n  let d = {{}}\n  if {expr} {{ log(\"x\") }}\n}}"
+            "pipeline default(task) {{\n  const d = {{}}\n  if {expr} {{ log(\"x\") }}\n}}"
         ));
         assert!(
             !has_rule(&diags, "comparison-to-bool"),
@@ -76,19 +76,19 @@ fn test_no_comparison_to_bool_for_optional_chaining() {
 
 #[test]
 fn test_constant_logical_operand_autofix() {
-    let source = "pipeline default(task) {\n  let x = true\n  let a = x || true\n  let b = x && false\n  log(a)\n  log(b)\n}";
+    let source = "pipeline default(task) {\n  const x = true\n  const a = x || true\n  const b = x && false\n  log(a)\n  log(b)\n}";
     let diags = lint_source(source);
     assert_eq!(count_rule(&diags, "constant-logical-operand"), 2);
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let a = true") && result.contains("let b = false"),
+        result.contains("const a = true") && result.contains("const b = false"),
         "expected constants, got: {result}"
     );
 }
 
 #[test]
 fn test_constant_logical_operand_does_not_drop_impure_left_side() {
-    let source = "pipeline default(task) {\n  let a = expensive() || true\n  let b = expensive() && false\n  log(a)\n  log(b)\n}";
+    let source = "pipeline default(task) {\n  const a = expensive() || true\n  const b = expensive() && false\n  log(a)\n  log(b)\n}";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "constant-logical-operand"),
@@ -99,12 +99,12 @@ fn test_constant_logical_operand_does_not_drop_impure_left_side() {
 
 #[test]
 fn test_leading_logical_constants_autofix_even_with_impure_right_side() {
-    let source = "pipeline default(task) {\n  let a = true || expensive()\n  let b = false && expensive()\n  log(a)\n  log(b)\n}";
+    let source = "pipeline default(task) {\n  const a = true || expensive()\n  const b = false && expensive()\n  log(a)\n  log(b)\n}";
     let diags = lint_source(source);
     assert_eq!(count_rule(&diags, "constant-logical-operand"), 2);
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let a = true") && result.contains("let b = false"),
+        result.contains("const a = true") && result.contains("const b = false"),
         "right sides are unreachable, got: {result}"
     );
 }
@@ -114,7 +114,7 @@ fn test_unnecessary_else_return() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let x = 1
+const x = 1
 if x == 1 {
     return "one"
 } else {
@@ -134,7 +134,7 @@ fn test_no_unnecessary_else_return_when_no_return() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let x = 1
+const x = 1
 if x == 1 {
     log("one")
 } else {
@@ -154,7 +154,7 @@ fn test_duplicate_match_arm() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let x = 1
+const x = 1
 match x {
     1 -> { log("one") }
     1 -> { log("also one") }
@@ -171,13 +171,13 @@ match x {
 
 #[test]
 fn test_fix_comparison_to_bool_true() {
-    let source = "pipeline default(task) {\n  let x = true\n  let y = x == true\n  log(y)\n}";
+    let source = "pipeline default(task) {\n  const x = true\n  const y = x == true\n  log(y)\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "comparison-to-bool");
     assert!(fix.is_some(), "expected fix for comparison-to-bool");
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let y = x"),
+        result.contains("const y = x"),
         "expected simplified comparison, got: {result}"
     );
     assert!(
@@ -188,26 +188,26 @@ fn test_fix_comparison_to_bool_true() {
 
 #[test]
 fn test_fix_comparison_to_bool_false() {
-    let source = "pipeline default(task) {\n  let x = true\n  let y = x == false\n  log(y)\n}";
+    let source = "pipeline default(task) {\n  const x = true\n  const y = x == false\n  log(y)\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "comparison-to-bool");
     assert!(fix.is_some(), "expected fix for comparison-to-bool");
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let y = !x"),
+        result.contains("const y = !x"),
         "expected negated, got: {result}"
     );
 }
 
 #[test]
 fn test_fix_comparison_to_bool_ne_true() {
-    let source = "pipeline default(task) {\n  let x = true\n  let y = x != true\n  log(y)\n}";
+    let source = "pipeline default(task) {\n  const x = true\n  const y = x != true\n  log(y)\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "comparison-to-bool");
     assert!(fix.is_some(), "expected fix for comparison-to-bool");
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let y = !x"),
+        result.contains("const y = !x"),
         "!= true should become !x, got: {result}"
     );
 }

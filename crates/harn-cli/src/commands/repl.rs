@@ -108,7 +108,7 @@ impl reedline::Highlighter for HarnHighlighter {
                 }
                 remaining = &remaining[end..];
             } else if remaining.starts_with('"') {
-                let end = remaining[1..]
+                const end = remaining[1..]
                     .find('"')
                     .map(|i| i + 2)
                     .unwrap_or(remaining.len());

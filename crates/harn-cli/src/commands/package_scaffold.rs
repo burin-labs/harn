@@ -421,8 +421,8 @@ async fn generate_sdk_source(
         r#"import {{ codegen_module, parse }} from {import_path}
 
 fn _load_doc(path: string) {{
-  let raw = read_file(path)
-  let decoded = try {{
+  const raw = read_file(path)
+  const decoded = try {{
     json_parse(raw)
   }} catch (e) {{
     yaml_parse(raw)
@@ -431,8 +431,8 @@ fn _load_doc(path: string) {{
 }}
 
 pipeline default() {{
-  let doc = _load_doc(argv[0])
-  var options = {{
+  const doc = _load_doc(argv[0])
+  let options = {{
     module_name: argv[2],
     client_name: argv[3],
   }}
@@ -597,8 +597,8 @@ fn regen_script_source(
         r#"import {{ codegen_module, parse }} from "harn-openapi/default"
 
 fn _load_doc(path: string) {{
-  let raw = read_file(path)
-  let decoded = try {{
+  const raw = read_file(path)
+  const decoded = try {{
     json_parse(raw)
   }} catch (e) {{
     yaml_parse(raw)
@@ -607,10 +607,10 @@ fn _load_doc(path: string) {{
 }}
 
 pipeline default() {{
-  let root = source_dir() + "/.."
-  let spec_path = if len(argv) > 0 {{ argv[0] }} else {{ root + "/" + {spec_path} }}
-  let out_path = if len(argv) > 1 {{ argv[1] }} else {{ root + "/src/lib.harn" }}
-  let doc = _load_doc(spec_path)
+  const root = source_dir() + "/.."
+  const spec_path = if len(argv) > 0 {{ argv[0] }} else {{ root + "/" + {spec_path} }}
+  const out_path = if len(argv) > 1 {{ argv[1] }} else {{ root + "/src/lib.harn" }}
+  const doc = _load_doc(spec_path)
   write_file(
     out_path,
     codegen_module(
@@ -644,9 +644,9 @@ pipeline test_generated_sdk_smoke(task) {{
     body: "{{}}",
     headers: {{"content-type": "application/json"}},
   }})
-  let client = new_client()
+  const client = new_client()
   {fn_name}(client)
-  let calls = http_mock_calls()
+  const calls = http_mock_calls()
   assert_eq(len(calls), 1)
   assert_eq(calls[0].method, {method})
 }}
@@ -663,7 +663,7 @@ pipeline test_generated_sdk_smoke(task) {{
     r#"import { new_client, pagination_plans } from "../src/lib"
 
 pipeline test_generated_sdk_smoke(task) {
-  let client = new_client()
+  const client = new_client()
   assert_eq(type_of(client), "dict")
   assert_eq(type_of(pagination_plans()), "list")
 }
@@ -1153,7 +1153,7 @@ pub fn codegen_module(doc, options) -> string {
     + "}\n\n"
     + "/** ping */\n"
     + "pub fn ping(client: dict) -> nil {\n"
-    + "  let resp = http_get(client.base_url + \"/ping\", {headers: {}})\n"
+    + "  const resp = http_get(client.base_url + \"/ping\", {headers: {}})\n"
     + "  if resp.status >= 400 { throw \"ping failed\" }\n"
     + "  return nil\n"
     + "}\n"

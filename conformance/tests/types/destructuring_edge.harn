@@ -27,7 +27,7 @@ pipeline default() {
   __io_println(b)
   __io_println(rest)
   // Var destructuring allows reassignment
-  var {m, n} = {m: 1, n: 2}
+  let {m, n} = {m: 1, n: 2}
   m = 100
   n = 200
   __io_println(m)

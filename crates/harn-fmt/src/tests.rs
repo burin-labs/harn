@@ -240,14 +240,14 @@ fn test_format_hello() {
 }
 
 #[test]
-fn test_format_let_var() {
+fn test_format_const_let() {
     let source = r#"pipeline default(task) {
-  let x = 42
-  var y = "hello"
+  const x = 42
+  let y = "hello"
 }"#;
     let result = format_source(source).unwrap();
-    assert!(result.contains("let x = 42"));
-    assert!(result.contains("var y = \"hello\""));
+    assert!(result.contains("const x = 42"));
+    assert!(result.contains("let y = \"hello\""));
 }
 
 #[test]

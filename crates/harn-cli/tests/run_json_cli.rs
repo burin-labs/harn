@@ -70,7 +70,7 @@ pipeline main(_) {
       output_tokens: 5,
       model: "mock",
     })
-    let response = llm_call("ping", nil, {provider: "mock"})
+    const response = llm_call("ping", nil, {provider: "mock"})
     __io_println(response.text)
 }
 "#,

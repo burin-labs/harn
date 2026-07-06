@@ -622,8 +622,8 @@ fn planner_script(
     // explicit plural). See discussion on #1698.
     format!(
         "pipeline main() {{\n\
-  let tools = json_parse({tools_lit})\n\
-  let response = llm_call(\n\
+  const tools = json_parse({tools_lit})\n\
+  const response = llm_call(\n\
     {prompt_lit},\n\
     nil,\n\
     {{\n\
@@ -652,8 +652,8 @@ fn binder_script(
     let model_lit = json_string_literal(&binder.model);
     format!(
         "pipeline main() {{\n\
-  let schema = json_parse({schema_lit})\n\
-  let response = llm_call(\n\
+  const schema = json_parse({schema_lit})\n\
+  const response = llm_call(\n\
     {prompt_lit},\n\
     nil,\n\
     {{\n\
@@ -683,8 +683,8 @@ fn predicate_judge_script(
     let model_lit = json_string_literal(&judge.model);
     format!(
         "pipeline main() {{\n\
-  let schema = json_parse({schema_lit})\n\
-  let response = llm_call(\n\
+  const schema = json_parse({schema_lit})\n\
+  const response = llm_call(\n\
     {prompt_lit},\n\
     nil,\n\
     {{\n\

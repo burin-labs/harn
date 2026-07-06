@@ -42,7 +42,7 @@ let r: list<int> = rest }
 #[test]
 fn test_match_list_rest_type_is_refined_not_gradual() {
     // Assigning the rest binding to a non-list type must error — proving the
-    // rest var is refined to a `list<…>` (not left untyped/gradual). Likewise
+    // rest let is refined to a `list<…>` (not left untyped/gradual). Likewise
     // the leading binding is refined to the element type `int`.
     let errs = errors(
         r"pipeline t(task) {
@@ -202,7 +202,7 @@ fn test_generic_rest_return_type_binds_from_all_rest_args() {
 fn test_transcript_append_builtins_preserve_input_container_type() {
     let errs = errors(
         r#"pipeline t(task) {
-  var built = transcript({workflow: "demo"})
+  let built = transcript({workflow: "demo"})
   built = add_user(built, [{type: "text", text: "hello", visibility: "public"}])
   built = add_assistant(built, [{type: "output_text", text: "done", visibility: "public"}])
   let messages = transcript_messages(built)
@@ -936,7 +936,7 @@ fn test_union_type_mismatch() {
 fn test_var_nil_widens_on_first_concrete_assignment() {
     let errs = errors(
         r#"pipeline t(task) {
-  var hit = nil
+  let hit = nil
   hit = {name: "b", score: 2}
   let widened: {name: string, score: int} | nil = hit
   hit = nil
@@ -949,7 +949,7 @@ fn test_var_nil_widens_on_first_concrete_assignment() {
 fn test_var_nil_widens_inside_nil_guard() {
     let errs = errors(
         r#"pipeline t(task) {
-  var hit = nil
+  let hit = nil
   if hit == nil {
     hit = {name: "b", score: 2}
   }
@@ -962,7 +962,7 @@ fn test_var_nil_widens_inside_nil_guard() {
 fn test_explicit_nullable_var_annotation_still_accepts_nil_and_concrete() {
     let errs = errors(
         r#"pipeline t(task) {
-  var hit: {name: string, score: int} | nil = nil
+  let hit: {name: string, score: int} | nil = nil
   hit = {name: "b", score: 2}
   hit = nil
 }"#,
@@ -974,7 +974,7 @@ fn test_explicit_nullable_var_annotation_still_accepts_nil_and_concrete() {
 fn test_explicit_nil_var_does_not_widen() {
     let errs = errors(
         r#"pipeline t(task) {
-  var hit: nil = nil
+  let hit: nil = nil
   hit = {name: "b", score: 2}
 }"#,
     );
@@ -1676,7 +1676,7 @@ fn test_type_alias_mismatch() {
 fn test_assignment_type_check() {
     let errs = errors(
         r#"pipeline t(task) {
-  var x: int = 0
+  let x: int = 0
   x = "hello"
 }"#,
     );
@@ -1944,7 +1944,7 @@ fn test_contextual_closure_typing_checks_annotated_binding_body() {
 fn test_contextual_closure_typing_checks_assignment_body() {
     let errs = errors(
         r#"pipeline t(task) {
-            var f: fn(int) -> int = { x -> x + 1 }
+            let f: fn(int) -> int = { x -> x + 1 }
             f = { x -> x + "oops" }
         }"#,
     );

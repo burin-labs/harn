@@ -290,7 +290,7 @@ fn test_reassignment_invalidates_narrowing() {
     let errs = errors(
         r"pipeline t(task) {
   fn check(x: string | nil) {
-var y: string | nil = x
+let y: string | nil = x
 if y != nil {
   let s: string = y
   y = nil
@@ -312,7 +312,7 @@ if y != nil {
 fn test_let_immutable_warning() {
     let all = check_source(
         r"pipeline t(task) {
-  let x = 42
+  const x = 42
   x = 43
 }",
     );
@@ -1169,7 +1169,7 @@ fn test_path_narrowing_invalidated_by_base_reassignment() {
     let errs = errors(
         r#"pipeline t(task) {
   fn check(entry: {arguments: list?}, other: {arguments: list?}) {
-    var e = entry
+    let e = entry
     if type_of(e.arguments) == "list" {
       e = other
       let bad: list = e.arguments
@@ -1371,13 +1371,13 @@ fn test_unknown_exhaustiveness_warns_on_path() {
 
 #[test]
 fn test_assignment_in_nested_scope_checks_against_declared_type() {
-    // `x = nil` on a `string?` var must be legal even when the assignment
+    // `x = nil` on a `string?` let must be legal even when the assignment
     // sits in a loop body nested inside the narrowing branch — the check
     // target is the declared (pre-narrowing) type from the scope chain,
     // not the branch-narrowed `string`.
     let errs = errors(
         r"fn f(start: string?) -> int {
-  var x: string? = start
+  let x: string? = start
   if x != nil {
     for i in [1, 2] {
       x = nil
@@ -1395,8 +1395,8 @@ fn test_loop_body_reassignment_invalidates_pre_loop_narrowing() {
     // the body reassigns the variable: `x.upper()` must be rejected.
     let errs = errors(
         r#"fn f(start: string?) -> string {
-  var x: string? = start
-  var out = ""
+  let x: string? = start
+  let out = ""
   if x != nil {
     for i in [1, 2] {
       out = x.upper()
@@ -1420,8 +1420,8 @@ fn test_while_condition_narrowing_survives_body_reassignment() {
         r"fn next_val() -> string? { return nil }
 
 fn f(start: string?) -> int {
-  var x: string? = start
-  var n = 0
+  let x: string? = start
+  let n = 0
   while x != nil {
     n = n + x.len()
     x = next_val()
@@ -1436,7 +1436,7 @@ fn f(start: string?) -> int {
 fn test_post_loop_read_sees_invalidated_narrowing() {
     let errs = errors(
         r#"fn f(start: string?) -> string {
-  var x: string? = start
+  let x: string? = start
   if x != nil {
     for i in [1] {
       x = nil

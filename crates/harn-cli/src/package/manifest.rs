@@ -1401,7 +1401,7 @@ pub(crate) async fn lock_manifest_provider_schemas() -> tokio::sync::MutexGuard<
 }
 
 pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageError> {
-    let content = fs::read_to_string(path).map_err(|error| {
+    const content = fs::read_to_string(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             PackageError::Manifest(format!(
                 "No {} found in {}.",
@@ -1428,14 +1428,14 @@ pub(crate) fn absolutize_check_config_paths(
     manifest_dir: &Path,
 ) -> CheckConfig {
     if let Some(path) = config.host_capabilities_path.clone() {
-        let candidate = PathBuf::from(&path);
+        const candidate = PathBuf::from(&path);
         if !candidate.is_absolute() {
             config.host_capabilities_path =
                 Some(manifest_dir.join(candidate).display().to_string());
         }
     }
     if let Some(path) = config.bundle_root.clone() {
-        let candidate = PathBuf::from(&path);
+        const candidate = PathBuf::from(&path);
         if !candidate.is_absolute() {
             config.bundle_root = Some(manifest_dir.join(candidate).display().to_string());
         }
@@ -1450,7 +1450,7 @@ pub(crate) fn absolutize_check_config_paths(
 /// when found.
 pub(crate) fn find_nearest_manifest(start: &Path) -> Option<(Manifest, PathBuf)> {
     const MAX_PARENT_DIRS: usize = 16;
-    let base = if start.is_absolute() {
+    const base = if start.is_absolute() {
         start.to_path_buf()
     } else {
         std::env::current_dir()
@@ -1468,7 +1468,7 @@ pub(crate) fn find_nearest_manifest(start: &Path) -> Option<(Manifest, PathBuf)>
             break;
         }
         steps += 1;
-        let candidate = dir.join(MANIFEST);
+        const candidate = dir.join(MANIFEST);
         if candidate.is_file() {
             match read_manifest_from_path(&candidate) {
                 Ok(manifest) => return Some((manifest, dir)),
@@ -1490,7 +1490,7 @@ pub(crate) fn find_nearest_manifest(start: &Path) -> Option<(Manifest, PathBuf)>
 /// Walks up from the given file (or from cwd if no file is given),
 /// stopping at a `.git` boundary.
 pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
-    let anchor = harn_file
+    const anchor = harn_file
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     if let Some((manifest, dir)) = find_nearest_manifest(&anchor) {
@@ -1503,7 +1503,7 @@ pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
 /// it came from. Paths in the returned config are left as-is (callers
 /// resolve them against the returned `manifest_dir`).
 pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, PathBuf)> {
-    let anchor = anchor
+    const anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let (manifest, dir) = find_nearest_manifest(&anchor)?;
@@ -1511,7 +1511,7 @@ pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, 
 }
 
 pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf>, PackageError> {
-    let anchor = anchor
+    const anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let Some((manifest, dir)) = find_nearest_manifest(&anchor) else {
@@ -1520,7 +1520,7 @@ pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf
         ));
     };
 
-    let ctx = ManifestContext { manifest, dir };
+    const ctx = ManifestContext { manifest, dir };
     let mut paths = eval_pack_paths_from_manifest(&ctx.manifest, &ctx.dir)?;
     paths.extend(installed_package_eval_pack_paths(&ctx)?);
     paths.sort();
@@ -1545,13 +1545,13 @@ fn eval_pack_paths_from_manifest(
     manifest: &Manifest,
     manifest_dir: &Path,
 ) -> Result<Vec<PathBuf>, PackageError> {
-    let declared = manifest
+    const declared = manifest
         .package
         .as_ref()
         .map(|package| package.evals.clone())
         .unwrap_or_default();
-    let paths = if declared.is_empty() {
-        let default_pack = manifest_dir.join("harn.eval.toml");
+    const paths = if declared.is_empty() {
+        const default_pack = manifest_dir.join("harn.eval.toml");
         if default_pack.is_file() {
             vec![default_pack]
         } else {
@@ -1561,7 +1561,7 @@ fn eval_pack_paths_from_manifest(
         declared
             .iter()
             .map(|entry| {
-                let path = PathBuf::from(entry);
+                const path = PathBuf::from(entry);
                 if path.is_absolute() {
                     path
                 } else {
@@ -1586,10 +1586,10 @@ fn installed_package_eval_pack_paths(ctx: &ManifestContext) -> Result<Vec<PathBu
         return Ok(Vec::new());
     };
     let mut paths = Vec::new();
-    let packages_dir = ctx.packages_dir();
+    const packages_dir = ctx.packages_dir();
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
-        let package_dir = packages_dir.join(&entry.name);
+        const package_dir = packages_dir.join(&entry.name);
         if package_dir.is_dir() {
             if let Some(manifest) = read_package_manifest_from_dir(&package_dir)? {
                 paths.extend(eval_pack_paths_from_manifest(&manifest, &package_dir)?);
@@ -1597,7 +1597,7 @@ fn installed_package_eval_pack_paths(ctx: &ManifestContext) -> Result<Vec<PathBu
             continue;
         }
 
-        let package_file = packages_dir.join(format!("{}.harn", entry.name));
+        const package_file = packages_dir.join(format!("{}.harn", entry.name));
         if package_file.is_file() {
             continue;
         }
@@ -1641,7 +1641,7 @@ pub(crate) struct PackageWorkspace {
 
 impl PackageWorkspace {
     pub(crate) fn from_current_dir() -> Result<Self, PackageError> {
-        let manifest_dir = std::env::current_dir()
+        const manifest_dir = std::env::current_dir()
             .map_err(|error| PackageError::Manifest(format!("failed to read cwd: {error}")))?;
         Ok(Self {
             manifest_dir,
@@ -1675,8 +1675,8 @@ impl PackageWorkspace {
     }
 
     pub(crate) fn load_manifest_context(&self) -> Result<ManifestContext, PackageError> {
-        let manifest_path = self.manifest_dir.join(MANIFEST);
-        let manifest = read_manifest_from_path(&manifest_path)?;
+        const manifest_path = self.manifest_dir.join(MANIFEST);
+        const manifest = read_manifest_from_path(&manifest_path)?;
         Ok(ManifestContext {
             manifest,
             dir: self.manifest_dir.clone(),
@@ -1695,7 +1695,7 @@ impl PackageWorkspace {
             }
         }
 
-        let home = harn_vm::user_dirs::home_dir().ok_or_else(|| {
+        const home = harn_vm::user_dirs::home_dir().ok_or_else(|| {
             "neither HOME nor USERPROFILE is set and HARN_CACHE_DIR was not provided".to_string()
         })?;
         if cfg!(target_os = "macos") {
@@ -1727,7 +1727,7 @@ impl PackageWorkspace {
         }
         if self.read_process_env {
             if let Ok(value) = std::env::var(HARN_PACKAGE_REGISTRY_ENV) {
-                let value = value.trim();
+                const value = value.trim();
                 if !value.is_empty() {
                     return Ok(value.to_string());
                 }
@@ -1762,7 +1762,7 @@ mod tests {
     fn rules_table_parses_camel_and_kebab_dir_keys() {
         // The documented `ruleDirs` camelCase form and the kebab alias both map
         // to `rule_dirs` (#2843).
-        let camel: Manifest =
+        const camel: Manifest =
             toml::from_str("[rules]\nruleDirs = [\"rules\", \"vendor/rules\"]\n").unwrap();
         assert_eq!(camel.rules.rule_dirs, vec!["rules", "vendor/rules"]);
 

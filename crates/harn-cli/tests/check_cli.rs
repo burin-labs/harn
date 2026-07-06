@@ -19,7 +19,7 @@ use tempfile::TempDir;
 fn check_reports_unknown_struct_type_with_precise_location() {
     let temp = TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
-    let source = "let p = Point { x: 3, y: 4 }\n";
+    let source = "const p = Point { x: 3, y: 4 }\n";
     fs::write(&script, source).unwrap();
 
     let (_program, diagnostics) = match check_source(source) {

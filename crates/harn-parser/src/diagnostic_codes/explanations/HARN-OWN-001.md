@@ -2,5 +2,5 @@
 
 ## How to fix
 
-- Switch the binding kind (`let` ↔ `mut`) to match its actual use.
+- Declare the binding with `let` (mutable) instead of `const` (immutable) if it really needs to be reassigned.
 - Restructure so owned values do not escape their scope.

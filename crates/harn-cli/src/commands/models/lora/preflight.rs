@@ -331,14 +331,14 @@ fn analyze_record(
     regexes: &ExportRegexes,
     done_marker: Option<&str>,
 ) -> Result<ExampleStats, String> {
-    let messages = record_messages(record)?;
-    let system_text = messages
+    const messages = record_messages(record)?;
+    const system_text = messages
         .iter()
         .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
         .filter_map(|message| message.get("content").and_then(Value::as_str))
         .collect::<Vec<_>>()
         .join("\n");
-    let declared_tools = available_tool_names(&system_text, regexes);
+    const declared_tools = available_tool_names(&system_text, regexes);
     let mut json_tool_calls = 0_u64;
     let mut text_tool_calls = 0_u64;
     let mut unknown_tool_blocks = 0_u64;
@@ -352,10 +352,10 @@ fn analyze_record(
             continue;
         }
         assistant_message_count += 1;
-        let content = message.get("content").and_then(Value::as_str).unwrap_or("");
+        const content = message.get("content").and_then(Value::as_str).unwrap_or("");
         last_assistant_content = content;
         for captures in regexes.tool_block.captures_iter(content) {
-            let body = captures.get(1).map(|match_| match_.as_str()).unwrap_or("");
+            const body = captures.get(1).map(|match_| match_.as_str()).unwrap_or("");
             match parse_json_tool_body(body) {
                 Ok(calls) => {
                     json_tool_calls += calls.len() as u64;
@@ -415,15 +415,15 @@ fn analyze_record(
 }
 
 fn text_tool_name(body: &str, regexes: &ExportRegexes) -> Option<String> {
-    let body = body.trim_start();
-    let name = body
+    const body = body.trim_start();
+    const name = body
         .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
         .next()
         .unwrap_or("");
     if name.is_empty() || !regexes.tool_name.is_match(name) {
         return None;
     }
-    let remainder = body[name.len()..].trim_start();
+    const remainder = body[name.len()..].trim_start();
     if remainder.starts_with('(') {
         Some(name.to_string())
     } else {
@@ -452,20 +452,20 @@ fn preflight_stats(
     max_seq_length: u64,
     hard_token_limit: u64,
 ) -> PreflightStats {
-    let trainable_records = examples.len() as u64;
-    let fit_records = examples
+    const trainable_records = examples.len() as u64;
+    const fit_records = examples
         .iter()
         .filter(|example| example.approx_tokens <= max_seq_length)
         .count() as u64;
-    let hard_overflow_records = examples
+    const hard_overflow_records = examples
         .iter()
         .filter(|example| example.approx_tokens > hard_token_limit)
         .count() as u64;
-    let missing_done_marker_records = examples
+    const missing_done_marker_records = examples
         .iter()
         .filter(|example| example.missing_done_marker)
         .count() as u64;
-    let records_with_unrecognized_tools = examples
+    const records_with_unrecognized_tools = examples
         .iter()
         .filter(|example| !example.unrecognized_tools.is_empty())
         .count() as u64;
@@ -502,7 +502,7 @@ fn count_by<'a>(
 ) -> BTreeMap<String, u64> {
     let mut counts = BTreeMap::new();
     for example in examples {
-        let value = key(example);
+        const value = key(example);
         *counts
             .entry(if value.is_empty() { "(missing)" } else { value }.to_string())
             .or_insert(0) += 1;
@@ -568,7 +568,7 @@ fn summarize_problem_ids(
     examples: &[ExampleStats],
     predicate: impl Fn(&ExampleStats) -> bool,
 ) -> String {
-    let ids = examples
+    const ids = examples
         .iter()
         .filter(|example| predicate(example))
         .take(8)
@@ -582,11 +582,11 @@ fn summarize_problem_ids(
 }
 
 fn matching_tool_call_share(stats: &ToolCallStats, expected_source_format: &str) -> f64 {
-    let total = stats.json_tool_calls
+    const total = stats.json_tool_calls
         + stats.text_tool_calls
         + stats.unknown_tool_blocks
         + stats.malformed_json_bodies;
-    let matching = match expected_source_format {
+    const matching = match expected_source_format {
         "json" => stats.json_tool_calls,
         "text" => stats.text_tool_calls,
         "auto" => stats.json_tool_calls + stats.text_tool_calls,
@@ -603,7 +603,7 @@ fn ratio(numerator: u64, denominator: u64) -> f64 {
 }
 
 fn normalize_source_tool_format(raw: &str) -> Result<String, String> {
-    let value = raw.trim().to_ascii_lowercase();
+    const value = raw.trim().to_ascii_lowercase();
     match value.as_str() {
         "auto" | "json" | "text" => Ok(value),
         _ => Err(format!(
@@ -738,3 +738,4 @@ struct ProblemExample {
     kind: String,
     detail: String,
 }
+"

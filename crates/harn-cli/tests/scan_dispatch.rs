@@ -45,9 +45,9 @@ fn inline_pattern_search_reports_matches_and_skips_other_languages() {
         "a.ts",
         "const a = cfg?.timeout ?? 30;\nconst b = opts?.retries ?? 3;\nconst c = plain;\n",
     );
-    write(&dir, "b.ts", "let x = o?.count ?? 0;\n");
+    write(&dir, "b.ts", "const x = o?.count ?? 0;\n");
     // A Rust file with the same textual shape must be ignored (language filter).
-    write(&dir, "c.rs", "let y = o.count;\n");
+    write(&dir, "c.rs", "const y = o.count;\n");
 
     let out = scan(&[
         "$X?.$K ?? $D",
@@ -76,7 +76,7 @@ fn inline_pattern_search_supports_harn_sources() {
     write(
         &dir,
         "rule_targets.harn",
-        "fn main() {\n  let timeout = cfg?.timeout ?? 30\n  let retries = opts?.retries ?? 3\n}\n",
+        "fn main() {\n  const timeout = cfg?.timeout ?? 30\n  const retries = opts?.retries ?? 3\n}\n",
     );
     write(&dir, "other.ts", "const timeout = cfg?.timeout ?? 30;\n");
 
@@ -163,8 +163,8 @@ fn saved_harn_rule_surfaces_resolved_capture_metadata() {
 #[test]
 fn report_only_emits_per_file_counts() {
     let dir = fixture_dir("report");
-    write(&dir, "a.ts", "let p = a?.x ?? 1;\nlet q = b?.y ?? 2;\n");
-    write(&dir, "b.ts", "let r = c?.z ?? 3;\n");
+    write(&dir, "a.ts", "const p = a?.x ?? 1;\nlet q = b?.y ?? 2;\n");
+    write(&dir, "b.ts", "const r = c?.z ?? 3;\n");
 
     let out = scan(&[
         "$X?.$K ?? $D",
@@ -209,7 +209,7 @@ fn rule_file_runs_a_saved_rule() {
 #[test]
 fn inline_pattern_without_lang_is_an_error() {
     let dir = fixture_dir("nolang");
-    write(&dir, "a.ts", "let p = a?.x ?? 1;\n");
+    write(&dir, "a.ts", "const p = a?.x ?? 1;\n");
     let out = scan(&["$X?.$K ?? $D", dir.to_str().unwrap()]);
     assert_ne!(out.code, 0, "missing --lang should fail");
     assert!(

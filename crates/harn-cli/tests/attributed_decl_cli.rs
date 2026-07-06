@@ -104,7 +104,7 @@ fn route_decorated_fn_can_be_called_from_main() {
 pub fn hello(req: dict) -> dict { return { status: 200 } }
 
 fn main(harness: Harness) {
-    let resp = hello({})
+    const resp = hello({})
     if resp.status == 200 {
         __io_println("ok")
     }

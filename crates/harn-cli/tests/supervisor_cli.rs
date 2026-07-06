@@ -72,7 +72,7 @@ retry = { max = 1, backoff = "immediate", retention_days = 7 }
             r#"
 import "std/triggers"
 
-let marker = "{}"
+const marker = "{}"
 
 pub fn on_ok(event: TriggerEvent) -> dict {{
   write_file(marker, event.kind)

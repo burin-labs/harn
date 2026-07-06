@@ -46,7 +46,7 @@ fn parse_json_emits_program_root_and_tagged_ast_nodes() {
 fn tokens_json_emits_kinds_lexemes_and_byte_spans() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let script = temp.path().join("main.harn");
-    let source = "let x = \"é\"\n// hi\n";
+    let source = "const x = \"é\"\n// hi\n";
     std::fs::write(&script, source).expect("write script");
 
     let output = Command::new(binary_path())

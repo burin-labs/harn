@@ -82,7 +82,7 @@ pipeline default(task) {
 fn transformer(x) {
     return x * 2
 }
-let f = transformer
+const f = transformer
 log(f(5))
 }
 ",
@@ -143,7 +143,7 @@ impl Point {
         return self.x + self.y
     }
 }
-let p = Point({x: 3, y: 4})
+const p = Point({x: 3, y: 4})
 log(p)
 }
 ",

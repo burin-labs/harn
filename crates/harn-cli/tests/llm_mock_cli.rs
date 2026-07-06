@@ -285,8 +285,8 @@ fn llm_mock_record_replays_identical_output() {
         "script.harn",
         r#"
 pipeline default() {
-  let provider = env_or("TEST_PROVIDER", "mock")
-  let result = llm_call("hello world", nil, {provider: provider})
+  const provider = env_or("TEST_PROVIDER", "mock")
+  const result = llm_call("hello world", nil, {provider: provider})
   __io_println(transcript_render_full(result.transcript))
 }
 "#,
@@ -350,7 +350,7 @@ pub fn build_prompt(task) {
         "pipeline.harn",
         r#"
 pipeline default() {
-  let result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {
+  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {
     provider: env_or("TEST_PROVIDER", "mock"),
   })
   __io_println(result.text)
@@ -399,8 +399,8 @@ pub fn build_prompt(task) {
         "pipeline.harn",
         r#"
 pipeline default() {
-  let provider = env_or("TEST_PROVIDER", "mock")
-  let result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {provider: provider})
+  const provider = env_or("TEST_PROVIDER", "mock")
+  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {provider: provider})
   __io_println(transcript_render_full(result.transcript))
 }
 "#,
@@ -459,7 +459,7 @@ pub fn read_workspace(path) {
 }
 
 pub fn write_workspace(path, content) {
-  let resolved = path_join(workspace_root(), path)
+  const resolved = path_join(workspace_root(), path)
   write_file(resolved, content)
   return resolved
 }
@@ -470,7 +470,7 @@ pub fn write_workspace(path, content) {
         "pipeline.harn",
         r#"
 fn tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write",
@@ -488,7 +488,7 @@ fn tools() {
 }
 
 pipeline default() {
-  let result = sub_agent_run(
+  const result = sub_agent_run(
     "Write note.txt with the text hello from fixture.",
     {
       provider: env_or("TEST_PROVIDER", "mock"),
@@ -549,7 +549,7 @@ pub fn read_workspace(path) {
 }
 
 pub fn write_workspace(path, content) {
-  let resolved = path_join(workspace_root(), path)
+  const resolved = path_join(workspace_root(), path)
   write_file(resolved, content)
   return resolved
 }
@@ -560,7 +560,7 @@ pub fn write_workspace(path, content) {
         "pipeline.harn",
         r#"
 fn tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read",
@@ -588,7 +588,7 @@ fn tools() {
 }
 
 pipeline default() {
-  let result = sub_agent_run(
+  const result = sub_agent_run(
     "Read seed.txt and then write note.txt with hello from fixture.",
     {
       provider: env_or("TEST_PROVIDER", "mock"),
@@ -644,7 +644,7 @@ pub fn workspace_root() {
 }
 
 pub fn write_workspace(path, content) {
-  let resolved = path_join(workspace_root(), path)
+  const resolved = path_join(workspace_root(), path)
   write_file(resolved, content)
   return resolved
 }
@@ -655,7 +655,7 @@ pub fn write_workspace(path, content) {
         "pipeline.harn",
         r#"
 fn tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write",
@@ -673,7 +673,7 @@ fn tools() {
 }
 
 pipeline default() {
-  let result = sub_agent_run(
+  const result = sub_agent_run(
     "[demo][token=write-note]",
     {
       provider: env_or("TEST_PROVIDER", "mock"),
