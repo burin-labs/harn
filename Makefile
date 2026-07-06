@@ -102,7 +102,7 @@ AFFECTED_BASE ?= origin/main
 test-affected:
 	@command -v cargo-nextest >/dev/null 2>&1 || { \
 		echo "test-affected requires cargo-nextest; run 'make setup'"; exit 1; }
-	@args="$$(python3 scripts/affected-crates.py --base "$(AFFECTED_BASE)" --output args)"; \
+	@args="$$($(HARN_CMD) run scripts/affected-crates.harn -- --base "$(AFFECTED_BASE)" --output args)"; \
 	if [ -z "$$args" ]; then \
 		echo "make test-affected: no affected crates; skipping Rust tests."; \
 		exit 0; \
