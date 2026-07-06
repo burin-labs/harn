@@ -20,7 +20,7 @@
       "items": { "$ref": "#/$defs/file_artifact_spec" }
     }
   },
-  "additionalProperties": true,
+  "additionalProperties": false,
   "$defs": {
     "file_artifact_spec": {
       "type": "object",
@@ -58,7 +58,7 @@
           { "required": ["text"] }
         ]
       },
-      "additionalProperties": true
+      "additionalProperties": false
     }
   }
 }
