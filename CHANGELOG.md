@@ -9,6 +9,14 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.20
+
+### Fixed
+
+- Salvage harmless tagged-response envelope drift by canonicalizing stray prose,
+  default done-sentinel text, single recovered bare tool calls, and call-shaped
+  native tool names into repairable transcript state.
+
 ## v0.9.19
 
 ### Added
