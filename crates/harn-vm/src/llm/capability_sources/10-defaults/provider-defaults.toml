@@ -75,7 +75,7 @@ batch_turnaround_hours = 24
 batch_max_input_bytes = 2147483648
 batch_result_ordering = "custom_id_rejoin"
 batch_partial_failure = "per_request"
-batch_cancellation = "unknown"
+batch_cancellation = "supported"
 
 [provider_defaults.mistral]
 batch_wire_format = "mistral"

@@ -789,6 +789,42 @@ fn test_parses_models_batch_status_args() {
 }
 
 #[test]
+fn test_parses_models_batch_cancel_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "batch",
+        "cancel",
+        "--receipt",
+        ".harn/batches/status.json",
+        "--out",
+        ".harn/batches/cancel.json",
+        "--dry-run",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Batch(args) = args.command else {
+        panic!("expected models batch command");
+    };
+    let ModelsBatchCommand::Cancel(args) = args.command else {
+        panic!("expected models batch cancel command");
+    };
+    assert_eq!(
+        args.receipt,
+        std::path::PathBuf::from(".harn/batches/status.json")
+    );
+    assert_eq!(
+        args.out,
+        std::path::PathBuf::from(".harn/batches/cancel.json")
+    );
+    assert!(args.dry_run);
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_batch_download_args() {
     let cli = Cli::parse_from([
         "harn",

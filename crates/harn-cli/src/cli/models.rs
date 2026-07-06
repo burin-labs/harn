@@ -34,6 +34,8 @@ pub(crate) struct ModelsBatchArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ModelsBatchCommand {
+    /// Cancel submitted batch jobs and write a cancellation receipt.
+    Cancel(ModelsBatchCancelArgs),
     /// Download provider result files for completed batch jobs.
     Download(ModelsBatchDownloadArgs),
     /// Write a durable provider-neutral manifest for offline batch requests.
@@ -46,6 +48,22 @@ pub(crate) enum ModelsBatchCommand {
     Status(ModelsBatchStatusArgs),
     /// Submit prepared provider-native batch jobs and write a submission receipt.
     Submit(ModelsBatchSubmitArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchCancelArgs {
+    /// Submission or status receipt containing provider batch ids.
+    #[arg(long, value_name = "PATH")]
+    pub receipt: std::path::PathBuf,
+    /// Write the cancellation receipt JSON to this path.
+    #[arg(long, value_name = "PATH")]
+    pub out: std::path::PathBuf,
+    /// Validate and render provider operations without calling provider APIs.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
