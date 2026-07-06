@@ -213,6 +213,55 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "models batch plan",
+            schema_version: 1,
+            description:
+                "Provider Batch API candidates plus Harn live-adapter support for offline workloads.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models batch manifest",
+            schema_version: 1,
+            description:
+                "Provider-neutral offline batch manifest summary and request groups.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models batch prepare",
+            schema_version: 1,
+            description:
+                "Provider-native batch request files, deterministic prepare receipt, and lifecycle state.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models batch submit",
+            schema_version: 1,
+            description:
+                "Batch submission receipt with provider job ids, dry-run operations, and lifecycle state.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models batch status",
+            schema_version: 1,
+            description:
+                "Provider batch status receipt with cached/dry-run validation and lifecycle counts.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models batch cancel",
+            schema_version: 1,
+            description:
+                "Batch cancellation receipt with redacted cancel operations, skipped-job reasons, and lifecycle counts.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models batch download",
+            schema_version: 1,
+            description:
+                "Provider result-file download receipt with artifact paths, hashes, and lifecycle counts.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "models lora plan",
             schema_version: 1,
             description: "Portable LoRA/QLoRA route plan: base model, tool-call format, trainer, data, eval, and launch contract.",
@@ -475,6 +524,26 @@ mod tests {
             "models lora export",
             "models lora manifest",
             "models lora preflight",
+        ] {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.command == command)
+                .unwrap_or_else(|| panic!("{command} schema should be registered"));
+            assert_eq!(entry.schema_version, 1);
+        }
+    }
+
+    #[test]
+    fn catalog_includes_models_batch_commands() {
+        let entries = catalog();
+        for command in [
+            "models batch plan",
+            "models batch manifest",
+            "models batch prepare",
+            "models batch submit",
+            "models batch status",
+            "models batch cancel",
+            "models batch download",
         ] {
             let entry = entries
                 .iter()
