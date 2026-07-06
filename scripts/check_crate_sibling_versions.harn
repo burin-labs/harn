@@ -8,6 +8,8 @@ let SIBLING_DEP_RE = r"^\s*((?:harn-[A-Za-z0-9-]+|tree-sitter-harn))\s*=\s*\{(.*
 
 let VERSION_RE = r#"version\s*=\s*"([^"]+)""#
 
+let SECTION_RE = r"^\s*\[([^\]]+)\]\s*$"
+
 let MANIFEST_GLOBS = ["crates/*/Cargo.toml", "tree-sitter-harn/Cargo.toml"]
 
 pub fn workspace_version_from_text(text: string) -> string {
@@ -23,11 +25,41 @@ pub fn expected_dependency_version(workspace_version: string) -> string {
   return "=" + workspace_version
 }
 
-pub fn sibling_dep_errors_from_line(
+pub fn manifest_package_name_from_text(text: string) -> string {
+  let doc = toml_parse(text)
+  let name = doc.get("package")?.get("name")
+  if type_of(name) != "string" || name == "" {
+    throw "missing [package] name in Cargo.toml"
+  }
+  return name
+}
+
+pub fn manifest_is_publishable_from_text(text: string) -> bool {
+  let doc = toml_parse(text)
+  let publish = doc.get("package")?.get("publish")
+  return !(type_of(publish) == "bool" && !publish)
+}
+
+pub fn dependency_section_from_line(line: string) -> string {
+  let section_match = regex_captures(SECTION_RE, line)
+  if section_match.count == 0 {
+    return ""
+  }
+  return section_match[0].groups[0]
+}
+
+fn is_dev_dependency_section(section: string) -> bool {
+  return section == "dev-dependencies" || section.ends_with(".dev-dependencies")
+}
+
+pub fn sibling_dep_errors_from_line_with_context(
   path: string,
   line_no: int,
   line: string,
   expected_version: string,
+  section: string,
+  unpublished_sibling_names: list<string>,
+  manifest_is_publishable: bool,
 ) -> list<string> {
   let dep_match = regex_captures(SIBLING_DEP_RE, line)
   if dep_match.count == 0 {
@@ -36,6 +68,14 @@ pub fn sibling_dep_errors_from_line(
   let name = dep_match[0].groups[0]
   let body = dep_match[0].groups[1]
   if !body.contains("path") {
+    return []
+  }
+  if unpublished_sibling_names.contains(name) {
+    if manifest_is_publishable && !is_dev_dependency_section(section) {
+      return [
+        "${path}:${line_no}: ${name} is publish = false; publishable manifests may only use it as a dev-dependency",
+      ]
+    }
     return []
   }
   let version_match = regex_captures(VERSION_RE, body)
@@ -51,15 +91,48 @@ pub fn sibling_dep_errors_from_line(
   return []
 }
 
-pub fn sibling_dep_errors_from_text(path: string, text: string, workspace_version: string) -> list<string> {
+pub fn sibling_dep_errors_from_line(
+  path: string,
+  line_no: int,
+  line: string,
+  expected_version: string,
+) -> list<string> {
+  return sibling_dep_errors_from_line_with_context(path, line_no, line, expected_version, "", [], true)
+}
+
+pub fn sibling_dep_errors_from_text_with_context(
+  path: string,
+  text: string,
+  workspace_version: string,
+  unpublished_sibling_names: list<string>,
+  manifest_is_publishable: bool,
+) -> list<string> {
   let expected = expected_dependency_version(workspace_version)
   var errors: list<string> = []
   var line_no = 1
+  var section = ""
   for line in text.lines() {
-    errors = errors + sibling_dep_errors_from_line(path, line_no, line, expected)
+    let next_section = dependency_section_from_line(line)
+    if next_section != "" {
+      section = next_section
+    }
+    errors = errors
+      + sibling_dep_errors_from_line_with_context(
+      path,
+      line_no,
+      line,
+      expected,
+      section,
+      unpublished_sibling_names,
+      manifest_is_publishable,
+    )
     line_no = line_no + 1
   }
   return errors
+}
+
+pub fn sibling_dep_errors_from_text(path: string, text: string, workspace_version: string) -> list<string> {
+  return sibling_dep_errors_from_text_with_context(path, text, workspace_version, [], true)
 }
 
 pub fn manifest_globs() -> list<string> {
@@ -76,12 +149,32 @@ fn checked_manifest_paths() -> list<string> {
   return paths.sort()
 }
 
+fn unpublished_workspace_package_names(paths: list<string>) -> list<string> {
+  var names: list<string> = []
+  for path in paths {
+    let text = harness.fs.read_text(path)
+    if !manifest_is_publishable_from_text(text) {
+      names = names + [manifest_package_name_from_text(text)]
+    }
+  }
+  return names.sort()
+}
+
 pipeline main(task) {
   let workspace_version = workspace_version_from_text(harness.fs.read_text("Cargo.toml"))
+  let paths = checked_manifest_paths()
+  let unpublished_sibling_names = unpublished_workspace_package_names(paths)
   var errors: list<string> = []
-  for path in checked_manifest_paths() {
+  for path in paths {
+    let text = harness.fs.read_text(path)
     errors = errors
-      + sibling_dep_errors_from_text(path, harness.fs.read_text(path), workspace_version)
+      + sibling_dep_errors_from_text_with_context(
+      path,
+      text,
+      workspace_version,
+      unpublished_sibling_names,
+      manifest_is_publishable_from_text(text),
+    )
   }
   if errors.count > 0 {
     __io_eprintln("Harn sibling crate dependency pin check failed:")

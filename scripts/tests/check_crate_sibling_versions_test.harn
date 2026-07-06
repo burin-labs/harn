@@ -9,6 +9,16 @@ pipeline test_workspace_version_from_text(task) {
 }
 
 @test
+pipeline test_manifest_metadata_helpers(task) {
+  let published = "[package]\nname = \"harn-vm\"\n"
+  let private = "[package]\nname = \"harn-mcp-rc-compat\"\npublish = false\n"
+  assert_eq(manifest_package_name_from_text(published), "harn-vm")
+  assert_eq(manifest_is_publishable_from_text(published), true)
+  assert_eq(manifest_package_name_from_text(private), "harn-mcp-rc-compat")
+  assert_eq(manifest_is_publishable_from_text(private), false)
+}
+
+@test
 pipeline test_accepts_exact_path_dependency(task) {
   let text = "harn-vm = { path = \"../harn-vm\", version = \"=0.9.18\" }\n"
   assert_eq(sibling_dep_errors_from_text("Cargo.toml", text, "0.9.18"), [])
@@ -42,6 +52,33 @@ pipeline test_checks_tree_sitter_workspace_sibling(task) {
 pipeline test_ignores_registry_and_third_party_dependencies(task) {
   let text = "harn-vm = { version = \"0.9\" }\nsqlx-core = { version = \"0.9\" }\n"
   assert_eq(sibling_dep_errors_from_text("Cargo.toml", text, "0.9.18"), [])
+}
+
+@test
+pipeline test_allows_private_harness_crate_as_dev_dependency(task) {
+  let text = "[dev-dependencies]\nharn-mcp-rc-compat = { path = \"../harn-mcp-rc-compat\" }\n"
+  let errors = sibling_dep_errors_from_text_with_context(
+    "crates/harn-cli/Cargo.toml",
+    text,
+    "0.9.18",
+    ["harn-mcp-rc-compat"],
+    true,
+  )
+  assert_eq(errors, [])
+}
+
+@test
+pipeline test_rejects_private_harness_crate_as_publish_dependency(task) {
+  let text = "[dependencies]\nharn-mcp-rc-compat = { path = \"../harn-mcp-rc-compat\" }\n"
+  let errors = sibling_dep_errors_from_text_with_context(
+    "crates/harn-cli/Cargo.toml",
+    text,
+    "0.9.18",
+    ["harn-mcp-rc-compat"],
+    true,
+  )
+  assert_eq(errors.count, 1)
+  assert_eq(errors[0].contains("publish = false"), true)
 }
 
 @test
