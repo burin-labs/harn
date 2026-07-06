@@ -1859,17 +1859,16 @@ fn __intra_turn_resource_blocked_result(call, keys) {
   let name = to_string(call?.name ?? call?.tool_name ?? "")
   let rendered_keys = join(keys, ", ")
   let observation = "[skipped dependent `" + name + "` call from this turn]\n"
-    + "A previous mutating tool call in the same assistant response failed for "
-    + "the same workspace resource ("
+    + "A previous mutating tool call in the same assistant response failed after "
+    + "changing, or possibly changing, the same workspace resource ("
     + rendered_keys
-    + "), so this call was NOT executed (its anchor may now be stale).\n"
-    + "Recover in ONE next turn: (1) read the failure feedback from that earlier "
-    + "call just above; (2) re-issue THIS `"
+    + "). This same-resource sibling was NOT executed for stale-anchor safety.\n"
+    + "Recover in ONE next turn: read the current file or the earlier failure "
+    + "feedback if needed, then issue exactly ONE `"
     + name
-    + "` call now — re-anchor its "
-    + "`old_string` against the file's CURRENT contents (look at the resource first "
-    + "if the earlier call may have changed it). Do not wait extra turns and do not "
-    + "re-send the call that already failed unchanged."
+    + "` call re-anchored against the resource's CURRENT contents. Do not replay "
+    + "a same-file edit batch, and do not re-send the call that already failed "
+    + "unchanged."
   return {
     ok: false,
     status: "blocked_by_prior_same_resource_failure",

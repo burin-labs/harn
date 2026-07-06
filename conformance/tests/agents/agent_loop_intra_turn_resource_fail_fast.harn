@@ -230,6 +230,18 @@ pipeline main() {
   __io_println(!contains(defaulted.transcript, "applied src/a.zig second"))
   __io_println(contains(defaulted.transcript, "applied src/b.zig other"))
   assert(
+    contains(defaulted.transcript, "stale-anchor safety"),
+    "same-resource skips should explain the stale-anchor safety reason",
+  )
+  assert(
+    contains(defaulted.transcript, "issue exactly ONE `edit` call"),
+    "same-resource skips should steer to one current-file recovery edit",
+  )
+  assert(
+    !contains(defaulted.transcript, "same assistant response failed for the same workspace resource"),
+    "same-resource skip wording should not imply every skipped sibling failed",
+  )
+  assert(
     has_tool_update(defaulted.events, "failed", "rejected_loop", "skipped dependent `edit` call"),
     "synthetic same-resource skip must emit a terminal tool_call_update for the skipped call",
   )
@@ -310,6 +322,10 @@ pipeline main() {
   assert(
     contains(applied_failure.transcript, "skipped dependent `edit` call"),
     "a post-apply (applied-then-flagged) failure must STILL skip a later same-file edit",
+  )
+  assert(
+    contains(applied_failure.transcript, "stale-anchor safety"),
+    "post-apply same-resource skips should explain the stale-anchor safety reason",
   )
   assert(
     !contains(applied_failure.transcript, "applied src/a.zig second"),
