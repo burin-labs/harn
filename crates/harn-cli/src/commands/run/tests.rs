@@ -1,6 +1,6 @@
 use super::harnpack::HarnpackRunOptions;
 use super::{
-    default_run_workspace_root, execute_explain_cost, execute_run,
+    default_run_workspace_root, eval_source_for_code, execute_explain_cost, execute_run,
     execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation, split_eval_header,
     CliLlmMockMode, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
@@ -39,6 +39,26 @@ fn split_eval_header_does_not_lift_imports_after_other_statements() {
     let (header, body) = split_eval_header(code);
     assert_eq!(header, "");
     assert_eq!(body, "let a = 1\nimport \"./lib\"");
+}
+
+#[test]
+fn eval_source_wraps_pipeline_body_snippets() {
+    assert_eq!(
+        eval_source_for_code("let x = 1\n__io_println(x)"),
+        "pipeline main(task) {\nlet x = 1\n__io_println(x)\n}"
+    );
+}
+
+#[test]
+fn eval_source_keeps_full_harn_programs_unnested() {
+    let code = "pipeline default() {\n  __io_println(\"ok\")\n}\n";
+    assert_eq!(eval_source_for_code(code), code);
+}
+
+#[test]
+fn eval_source_keeps_imported_full_harn_programs_unnested() {
+    let code = "import { x } from \"./lib\"\n\npipeline default() {\n  __io_println(x)\n}\n";
+    assert_eq!(eval_source_for_code(code), code);
 }
 
 #[test]

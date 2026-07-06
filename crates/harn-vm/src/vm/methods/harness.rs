@@ -706,7 +706,7 @@ impl crate::vm::Vm {
                 }
                 let name = secret_name_arg(handle, method, args.first())?;
                 let scope = secret_scope_arg(args.get(1))?;
-                let id = secret_id_for_scope(&name, &scope);
+                let id = secret_id_for_scope(&name, &scope)?;
                 crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
                     .map_err(secret_error_to_vm)?;
                 let secret = provider
@@ -746,7 +746,7 @@ impl crate::vm::Vm {
                 let scope = secret_scope_arg(args.get(2))?;
                 let ttl =
                     optional_duration_arg(args.get(3), &format!("{}.write", handle.type_name()))?;
-                let id = secret_id_for_scope(&name, &scope);
+                let id = secret_id_for_scope(&name, &scope)?;
                 crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
                     .map_err(secret_error_to_vm)?;
                 let receipt = provider
@@ -778,7 +778,7 @@ impl crate::vm::Vm {
                 };
                 let scope = secret_scope_arg(args.get(2))?;
                 let options = secret_rotation_options_arg(args.get(3))?;
-                let id = secret_id_for_scope(&name, &scope);
+                let id = secret_id_for_scope(&name, &scope)?;
                 crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
                     .map_err(secret_error_to_vm)?;
                 let receipt = provider
@@ -806,7 +806,7 @@ impl crate::vm::Vm {
                     &format!("{}.{}", handle.type_name(), method),
                 )?;
                 let scope = secret_scope_arg(args.get(2))?;
-                let id = secret_id_for_scope(&name, &scope);
+                let id = secret_id_for_scope(&name, &scope)?;
                 crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
                     .map_err(secret_error_to_vm)?;
                 let grant = provider
@@ -2350,8 +2350,11 @@ fn parse_secret_scope_string(raw: &str) -> Result<crate::secrets::SecretScope, V
 fn secret_id_for_scope(
     name: &str,
     scope: &crate::secrets::SecretScope,
-) -> crate::secrets::SecretId {
-    crate::secrets::SecretId::new(scope.namespace(), name)
+) -> Result<crate::secrets::SecretId, VmError> {
+    if name.trim().starts_with(crate::secrets::SECRET_REF_SCHEME) || name.contains('/') {
+        return crate::secrets::parse_secret_id(name).map_err(secret_error_to_vm);
+    }
+    Ok(crate::secrets::SecretId::new(scope.namespace(), name))
 }
 
 fn optional_duration_arg(

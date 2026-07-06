@@ -1,3 +1,4 @@
+use super::store::load_connect_index;
 use super::*;
 use crate::cli::ConnectGithubArgs;
 use crate::package::ProviderOAuthManifest;
@@ -12,7 +13,6 @@ use std::time::Duration;
 use harn_vm::connectors::testkit::{
     http_content_length_from_header_lines, TEST_HTTP_MAX_BODY_BYTES,
 };
-use harn_vm::secrets::SecretId;
 use url::Url;
 
 fn status_config(
@@ -192,13 +192,34 @@ async fn status_reports_missing_auth_without_credentials() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn status_reports_missing_auth_for_missing_required_secret_chain() {
+    let secrets = harn_vm::secrets::ChainSecretProvider::new(
+        "test-chain",
+        vec![Arc::new(
+            harn_vm::connectors::testkit::MemorySecretProvider::empty(),
+        )],
+    );
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.required_secrets = vec!["github/access-token".to_string()];
+    let config = status_config(setup);
+    let status =
+        connector_status("github", Some(&config), &secrets, &index, 100, false, None).await;
+
+    assert_eq!(status.status, "missing_auth");
+    assert_eq!(status.missing_secrets, vec!["github/access-token"]);
+    assert_eq!(status.health_checks[0].detail, "missing secret");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn status_reports_expired_credentials_before_scope_checks() {
     let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
     let index = ConnectIndex {
         providers: vec![ConnectIndexEntry {
             provider: "github".to_string(),
             kind: "oauth".to_string(),
-            secret_id: "github/access-token".to_string(),
+            secret_id: harn_vm::secrets::connector_access_token_id("github").to_string(),
+            secret_ids: Vec::new(),
             expires_at_unix: Some(99),
             scopes: Some("issues:read".to_string()),
             connected_at_unix: 1,
@@ -219,7 +240,8 @@ async fn status_reports_revoked_credentials_when_index_secret_is_missing() {
         providers: vec![ConnectIndexEntry {
             provider: "github".to_string(),
             kind: "oauth".to_string(),
-            secret_id: "github/access-token".to_string(),
+            secret_id: harn_vm::secrets::connector_access_token_id("github").to_string(),
+            secret_ids: Vec::new(),
             expires_at_unix: None,
             scopes: Some("issues:read pull_requests:read".to_string()),
             connected_at_unix: 1,
@@ -235,13 +257,16 @@ async fn status_reports_revoked_credentials_when_index_secret_is_missing() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn status_reports_missing_scopes_after_secret_checks_pass() {
-    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty()
-        .with_secret(SecretId::new("github", "access-token"), "token");
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty().with_secret(
+        harn_vm::secrets::connector_access_token_id("github"),
+        "token",
+    );
     let index = ConnectIndex {
         providers: vec![ConnectIndexEntry {
             provider: "github".to_string(),
             kind: "oauth".to_string(),
-            secret_id: "github/access-token".to_string(),
+            secret_id: harn_vm::secrets::connector_access_token_id("github").to_string(),
+            secret_ids: Vec::new(),
             expires_at_unix: None,
             scopes: Some("issues:read".to_string()),
             connected_at_unix: 1,
@@ -254,6 +279,21 @@ async fn status_reports_missing_scopes_after_secret_checks_pass() {
 
     assert_eq!(status.status, "missing_scopes");
     assert_eq!(status.missing_scopes, vec!["pull_requests:read"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn missing_connect_index_in_provider_chain_is_empty() {
+    let secrets = harn_vm::secrets::ChainSecretProvider::new(
+        "test-chain",
+        vec![Arc::new(
+            harn_vm::connectors::testkit::MemorySecretProvider::empty(),
+        )],
+    );
+    let index = load_connect_index(&secrets)
+        .await
+        .expect("missing connector index should be an empty index");
+
+    assert!(index.providers.is_empty());
 }
 
 #[test]

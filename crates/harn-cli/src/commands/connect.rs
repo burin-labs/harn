@@ -93,6 +93,8 @@ struct ConnectIndexEntry {
     kind: String,
     secret_id: String,
     #[serde(default)]
+    secret_ids: Vec<String>,
+    #[serde(default)]
     expires_at_unix: Option<i64>,
     #[serde(default)]
     scopes: Option<String>,
@@ -143,6 +145,8 @@ struct ConnectorStatus {
     missing_secrets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     secret_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    secret_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at_unix: Option<i64>,
     health_checks: Vec<ConnectorHealthStatus>,

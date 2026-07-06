@@ -17,6 +17,9 @@ pub const DEFAULT_SECRET_PROVIDER_CHAIN: &str = "env,keyring";
 pub const SECRET_PROVIDER_CHAIN_ENV: &str = "HARN_SECRET_PROVIDERS";
 pub const SECRET_REF_SCHEME: &str = "harn-secret://";
 pub const SECRET_REF_CHAIN_NAMESPACE: &str = "harn.provider_auth";
+pub const CONNECTOR_OAUTH_TOKEN_SECRET_NAME: &str = "oauth-token";
+pub const CONNECTOR_ACCESS_TOKEN_SECRET_NAME: &str = "access-token";
+pub const CONNECTOR_REFRESH_TOKEN_SECRET_NAME: &str = "refresh-token";
 const RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "provenance";
 const SCOPED_RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "harn.provenance";
 
@@ -93,6 +96,48 @@ pub fn parse_secret_ref(raw: &str) -> Result<Option<SecretId>, SecretError> {
     Ok(Some(
         SecretId::new(namespace.trim(), name.trim()).with_version(version),
     ))
+}
+
+pub fn parse_secret_id(raw: &str) -> Result<SecretId, SecretError> {
+    if let Some(id) = parse_secret_ref(raw)? {
+        return Ok(id);
+    }
+    parse_secret_id_body(raw.trim(), raw)
+}
+
+fn parse_secret_id_body(body: &str, original: &str) -> Result<SecretId, SecretError> {
+    let (base, version) = match body.rsplit_once('@') {
+        Some((base, version_text)) => {
+            let version = version_text.parse::<u64>().map_err(|_| {
+                SecretError::InvalidInput(format!("invalid secret id version in '{original}'"))
+            })?;
+            (base, SecretVersion::Exact(version))
+        }
+        None => (body, SecretVersion::Latest),
+    };
+    let (namespace, name) = base.split_once('/').ok_or_else(|| {
+        SecretError::InvalidInput(format!(
+            "invalid secret id '{original}': expected <namespace>/<name>"
+        ))
+    })?;
+    if namespace.trim().is_empty() || name.trim().is_empty() {
+        return Err(SecretError::InvalidInput(format!(
+            "invalid secret id '{original}': namespace and name must be non-empty"
+        )));
+    }
+    Ok(SecretId::new(namespace.trim(), name.trim()).with_version(version))
+}
+
+pub fn connector_oauth_token_id(provider: &str) -> SecretId {
+    SecretId::new(provider, CONNECTOR_OAUTH_TOKEN_SECRET_NAME)
+}
+
+pub fn connector_access_token_id(provider: &str) -> SecretId {
+    SecretId::new(provider, CONNECTOR_ACCESS_TOKEN_SECRET_NAME)
+}
+
+pub fn connector_refresh_token_id(provider: &str) -> SecretId {
+    SecretId::new(provider, CONNECTOR_REFRESH_TOKEN_SECRET_NAME)
 }
 
 pub fn resolve_secret_ref_to_string(raw: &str) -> Result<Option<String>, SecretError> {
@@ -820,6 +865,27 @@ mod tests {
             .expect_err("missing slash should fail")
             .to_string()
             .contains("invalid secret reference"));
+    }
+
+    #[test]
+    fn parse_secret_id_accepts_canonical_and_ref_forms() {
+        let canonical = parse_secret_id("google_workspace/access-token@2").expect("canonical id");
+        assert_eq!(canonical.namespace, "google_workspace");
+        assert_eq!(canonical.name, "access-token");
+        assert_eq!(canonical.version, SecretVersion::Exact(2));
+
+        let reference =
+            parse_secret_id("harn-secret://google_workspace/refresh-token").expect("ref id");
+        assert_eq!(reference, connector_refresh_token_id("google_workspace"));
+
+        assert_eq!(
+            connector_oauth_token_id("google_workspace").name,
+            CONNECTOR_OAUTH_TOKEN_SECRET_NAME
+        );
+        assert_eq!(
+            connector_access_token_id("google_workspace").name,
+            CONNECTOR_ACCESS_TOKEN_SECRET_NAME
+        );
     }
 
     #[test]

@@ -94,6 +94,7 @@ pub(super) async fn run_connect_github(args: &ConnectGithubArgs) -> Result<(), S
             provider: "github".to_string(),
             kind: "github-app".to_string(),
             secret_id: format!("github/installation-{installation_id}"),
+            secret_ids: vec![format!("github/installation-{installation_id}")],
             expires_at_unix: None,
             scopes: None,
             connected_at_unix: current_unix_timestamp(),

@@ -51,6 +51,10 @@ Hosts can attach a managed provider to `Harness::real()` with
 `harness.secrets` sub-handle:
 
 ```harn
+// Canonical connector/runtime secret ids are first-class.
+let google = harness.secrets.read("google_workspace/access-token")
+
+// Application secrets may be scoped when they belong to a tenant/workspace.
 let scope = {kind: "workspace", id: "workspace-123"}
 let receipt = harness.secrets.write("github.token", "token-v1", scope, 3600000)
 let token = harness.secrets.read("github.token", scope)
@@ -78,6 +82,12 @@ Omitted tenant scope uses the ambient `harness.tenant` id when the host bound
 one. The VM passes the ambient request id and authenticated principal facts to
 the provider for audit, but the provider owns policy, encryption, rotation,
 lease persistence, and any external KMS or vault adapter.
+
+Secret names in `namespace/name` or `harn-secret://namespace/name[@version]`
+form are treated as canonical secret ids and are not rewritten into the
+ambient tenant or workspace scope. Use this form for connector credentials
+registered by `harn connect`, package manifests, and runtime integration
+secrets. Use scoped names for tenant/workspace application data.
 
 `harness.secrets` is for agent- and harness-authored application secrets.
 Runtime-owned namespaces `provenance`, `harn.provenance`, and

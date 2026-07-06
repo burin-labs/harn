@@ -131,6 +131,74 @@ connector = { rust = "builtin" }
 }
 
 #[test]
+fn installed_package_provider_connectors_are_available_to_consumers() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(PKG_DIR).join("google")).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        r#"
+[dependencies]
+google = { path = "./vendor/google" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(LOCK_FILE),
+        r#"
+version = 4
+generator_version = "0.9.19"
+protocol_artifact_version = "0.9.19"
+
+[[package]]
+name = "google"
+source = "path+file:///vendor/google"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(PKG_DIR).join("google").join(MANIFEST),
+        r#"
+[[providers]]
+id = "google_workspace"
+connector = { harn = "src/lib.harn" }
+oauth = { resource = "https://www.googleapis.com/", token_endpoint = "https://oauth2.googleapis.com/token" }
+
+[providers.setup]
+auth_type = "oauth"
+required_secrets = ["google_workspace/access-token"]
+"#,
+    )
+    .unwrap();
+
+    let root_manifest = read_package_manifest_from_dir(root)
+        .unwrap()
+        .expect("root manifest");
+    let connectors = installed_package_provider_connectors(&ManifestContext {
+        manifest: root_manifest,
+        dir: root.to_path_buf(),
+    })
+    .expect("dependency connectors");
+
+    assert_eq!(connectors.len(), 1);
+    assert_eq!(connectors[0].id.as_str(), "google_workspace");
+    assert_eq!(
+        connectors[0]
+            .setup
+            .as_ref()
+            .and_then(|setup| setup.auth_type.as_deref()),
+        Some("oauth")
+    );
+    assert_eq!(
+        connectors[0]
+            .setup
+            .as_ref()
+            .map(|setup| setup.required_secrets.as_slice()),
+        Some(&["google_workspace/access-token".to_string()][..])
+    );
+}
+
+#[test]
 fn trigger_manifest_entries_round_trip_through_toml() {
     let source = r#"
 [[triggers]]

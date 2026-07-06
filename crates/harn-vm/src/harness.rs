@@ -1556,6 +1556,34 @@ fn main(harness: Harness) {
     }
 
     #[test]
+    fn secrets_sub_handle_accepts_absolute_connector_secret_ids() {
+        let provider = RecordingSecretProvider::default();
+        let harness = Harness::real().with_secret_provider(Arc::new(provider.clone()));
+
+        let source = r#"
+fn main(harness: Harness) {
+  harness.secrets.write("google_workspace/access-token", "token-v1")
+  __io_println(harness.secrets.read("google_workspace/access-token"))
+  harness.secrets.write("harn-secret://google_workspace/refresh-token", "refresh-v1")
+  __io_println(harness.secrets.read("harn-secret://google_workspace/refresh-token"))
+}
+"#;
+        let output = run_harness_source(source, harness).expect("dispatch succeeds");
+        assert_eq!(output, "token-v1\nrefresh-v1\n");
+
+        let calls = provider.calls();
+        assert_eq!(
+            calls.iter().map(|call| call.id.clone()).collect::<Vec<_>>(),
+            vec![
+                crate::secrets::connector_access_token_id("google_workspace"),
+                crate::secrets::connector_access_token_id("google_workspace"),
+                crate::secrets::connector_refresh_token_id("google_workspace"),
+                crate::secrets::connector_refresh_token_id("google_workspace"),
+            ]
+        );
+    }
+
+    #[test]
     fn secrets_sub_handle_denies_runtime_reserved_provenance_namespace() {
         let provider = RecordingSecretProvider::default();
         let harness = Harness::real().with_secret_provider(Arc::new(provider.clone()));

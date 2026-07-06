@@ -452,15 +452,32 @@ fn typecheck_with_imports(
 pub(crate) fn prepare_eval_temp_file(
     code: &str,
 ) -> Result<(String, tempfile::NamedTempFile), String> {
+    let wrapped = eval_source_for_code(code);
+    let tmp = create_eval_temp_file()?;
+    Ok((wrapped, tmp))
+}
+
+fn eval_source_for_code(code: &str) -> String {
+    if eval_code_parses_as_program(code) {
+        return code.to_string();
+    }
     let (header, body) = split_eval_header(code);
-    let wrapped = if header.is_empty() {
+    if header.is_empty() {
         format!("pipeline main(task) {{\n{body}\n}}")
     } else {
         format!("{header}\npipeline main(task) {{\n{body}\n}}")
-    };
+    }
+}
 
-    let tmp = create_eval_temp_file()?;
-    Ok((wrapped, tmp))
+fn eval_code_parses_as_program(code: &str) -> bool {
+    harn_parser::parse_source(code)
+        .map(|program| {
+            program.iter().any(|node| {
+                let (_, inner) = harn_parser::peel_attributes(node);
+                matches!(&inner.node, harn_parser::Node::Pipeline { .. })
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Try to place the `-e` temp file in the current working directory so
@@ -1517,7 +1534,30 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // Install the script's `Harness` capability handle so the auto-call
     // emitted by `Compiler::compile()` for `fn main(harness: Harness)`
     // entrypoints can read it.
-    vm.set_harness(harn_vm::Harness::real());
+    let runtime_harness = match crate::default_harness_for_base_dir(store_base) {
+        Ok(harness) => harness,
+        Err(error) => {
+            stderr.push_str(&format!(
+                "error: failed to configure harness secret provider: {error}\n"
+            ));
+            return finalize_run_error(
+                stdout,
+                stderr,
+                json_session,
+                summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
+                run_started,
+                None,
+                timing.as_deref(),
+                0,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                "harness_secret_provider",
+                error,
+            );
+        }
+    };
+    vm.set_harness(runtime_harness);
 
     let extensions = package::load_runtime_extensions(Path::new(path));
     package::install_runtime_extensions(&extensions);
