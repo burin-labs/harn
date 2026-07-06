@@ -281,7 +281,10 @@ fn generated_catalog_exports_typed_batch_lifecycle_metadata() {
         gemini_batch.partial_failure,
         BatchPartialFailure::PerRequest
     );
-    assert_eq!(gemini_batch.cancellation, BatchCancellationSupport::Unknown);
+    assert_eq!(
+        gemini_batch.cancellation,
+        BatchCancellationSupport::Supported
+    );
 }
 
 #[test]
