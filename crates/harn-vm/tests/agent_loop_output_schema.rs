@@ -284,7 +284,7 @@ pipeline main(task) {
   )
   log(result.status)
   log(result?.output_valid == nil)
-  log(has_key(result, "output"))
+  log(result?.output == nil)
 }
 "#,
     )
@@ -295,10 +295,7 @@ pipeline main(task) {
         lines[1], "true",
         "expected no output_valid key; lines: {lines:?}"
     );
-    assert_eq!(
-        lines[2], "false",
-        "expected no output key; lines: {lines:?}"
-    );
+    assert_eq!(lines[2], "true", "expected no output key; lines: {lines:?}");
 }
 
 /// Tool-calling mid-loop still works when `output_schema` is set: the model

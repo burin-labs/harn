@@ -119,7 +119,7 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
   // `__agent_loop_apply_output_schema`). The single exception is the terminal
   // repair call, tagged `_output_schema_repair`, which DOES want llm_call's
   // built-in structured enforcement + schema-retry repair.
-  let call_opts = if llm_opts?._output_schema_repair == true {
+  let call_opts = if llm_opts?._output_schema_repair ?? false {
     llm_opts
   } else {
     omit(llm_opts, ["output_schema"])
@@ -3503,7 +3503,6 @@ fn __agent_loop_apply_output_schema(final_result, opts, session, message, iterat
   let schema = opts?.output_schema
   let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
   let direct = __agent_loop_output_schema_value(text, schema)
-  log("DBG2 text=[" + text + "] direct.ok=" + to_string(direct.ok) + " direct.value=" + to_string(direct.value))
   if direct.ok {
     return final_result + {output: direct.value, output_valid: true}
   }
@@ -4760,7 +4759,6 @@ fn __agent_loop_run(message, session, initial_opts) {
     if suspend_result != nil {
       final_result = final_result + suspend_result
     }
-    log("DBG terminated_ok=" + to_string(terminated_ok) + " has_schema=" + to_string(opts?.output_schema != nil) + " final_status=" + to_string(final_status))
     if terminated_ok && opts?.output_schema != nil {
       final_result = __agent_loop_apply_output_schema(final_result, opts, session, message, iteration)
     }
