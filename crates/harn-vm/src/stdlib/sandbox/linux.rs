@@ -109,10 +109,12 @@ fn profile_setup(
 }
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
-    install_seccomp_filter(&profile.allowed_syscalls)?;
     if let Some(landlock) = &profile.landlock {
         install_landlock_ruleset(landlock)?;
     }
+    // Once seccomp is default-deny, the child should not retain sandbox-setup
+    // powers. Install Landlock first, then drop to the runtime syscall ceiling.
+    install_seccomp_filter(&profile.allowed_syscalls)?;
     Ok(())
 }
 
