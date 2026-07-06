@@ -57,6 +57,8 @@ mod openbsd;
 mod windows;
 
 const HANDLER_SANDBOX_ENV: &str = "HARN_HANDLER_SANDBOX";
+#[cfg(unix)]
+const MAX_SCOPED_PATH_COMPONENTS: usize = 256;
 
 thread_local! {
     static WARNED_KEYS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
@@ -592,8 +594,7 @@ fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) ->
     // restoring the pre-hardening `write_file`/`http_download` contract that
     // downstream `.harn` relies on. The creation stays inside the scope root
     // and reuses the same symlink-safe parent-fd walk as the write itself.
-    ensure_parent_dirs_scoped(target)?;
-    let (parent, file_name) = open_parent_dir_scoped(target)?;
+    let (parent, file_name) = ensure_parent_dirs_scoped(target)?;
     let tmp_name = scoped_tmp_name(Path::new(&file_name));
     let mut file = openat_file(
         parent.as_raw_fd(),
@@ -639,8 +640,7 @@ fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::R
 
     // Append creates the file (and its parent chain) when absent, matching the
     // pre-hardening `append_file` contract (append-to-a-new-log-in-a-new-dir).
-    ensure_parent_dirs_scoped(target)?;
-    let (parent, file_name) = open_parent_dir_scoped(target)?;
+    let (parent, file_name) = ensure_parent_dirs_scoped(target)?;
     let mut file = openat_file(
         parent.as_raw_fd(),
         &file_name,
@@ -758,27 +758,36 @@ fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()>
 /// directory-autovivification contract downstream code depends on. Concurrent
 /// creators are tolerated (a losing `mkdirat` that sees `EEXIST` is ignored).
 ///
+/// The returned parent fd is the one content-producing callers must use for
+/// their final `openat`/`renameat`, so the path is not resolved again between
+/// mkdir-p and the write.
+///
 /// Structural operations (copy destination, rename, remove, single `mkdir`)
 /// intentionally do NOT call this — they keep `open_parent_dir_scoped`'s
 /// "parent must already exist" semantics.
 #[cfg(unix)]
-fn ensure_parent_dirs_scoped(target: &ScopedMutationTarget) -> io::Result<()> {
+fn ensure_parent_dirs_scoped(
+    target: &ScopedMutationTarget,
+) -> io::Result<(std::os::fd::OwnedFd, String)> {
     use std::os::fd::AsRawFd;
 
     let mut components = clean_relative_components(&target.relative)?;
-    // Drop the file-name component; only the ancestor directories are created.
-    // An empty remainder means the parent is the (already-existing) scope root.
-    if components.pop().is_none() || components.is_empty() {
-        return Ok(());
-    }
-    let mut current = open_dir_absolute(&target.root)?;
+    let file_name = components.pop().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "sandbox scoped open requires a file name: {}",
+                target.relative.display()
+            ),
+        )
+    })?;
+    let root = open_dir_absolute(&target.root)?;
+    let mut current = root;
     for component in components {
         match open_dir_at(current.as_raw_fd(), &component) {
             Ok(next) => current = next,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 if let Err(mkerr) = mkdirat_name(current.as_raw_fd(), &component) {
-                    // A concurrent writer may have created it between our
-                    // failed open and this mkdir; that is a success for us.
                     if mkerr.kind() != io::ErrorKind::AlreadyExists {
                         return Err(mkerr);
                     }
@@ -788,7 +797,7 @@ fn ensure_parent_dirs_scoped(target: &ScopedMutationTarget) -> io::Result<()> {
             Err(error) => return Err(error),
         }
     }
-    Ok(())
+    Ok((current, file_name))
 }
 
 #[cfg(unix)]
@@ -831,6 +840,15 @@ fn clean_relative_components(path: &Path) -> io::Result<Vec<String>> {
                     ));
                 }
                 out.push(value.to_string_lossy().into_owned());
+                if out.len() > MAX_SCOPED_PATH_COMPONENTS {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "sandbox scoped path exceeds {MAX_SCOPED_PATH_COMPONENTS} components: {}",
+                            path.display()
+                        ),
+                    ));
+                }
             }
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
@@ -2268,6 +2286,71 @@ mod tests {
         assert_eq!(
             std::fs::read(&path).unwrap(),
             b"{\"plan\":\"Redis-backed\"}".to_vec()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_parent_autocreate_refuses_preexisting_symlink_component() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(workspace.path().join("a")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("a/b")).unwrap();
+        let target = ScopedMutationTarget {
+            root: workspace.path().to_path_buf(),
+            relative: PathBuf::from("a/b/c/plan.json"),
+        };
+
+        let error = ensure_parent_dirs_scoped(&target).unwrap_err();
+
+        assert!(
+            !outside.path().join("c/plan.json").exists(),
+            "parent creation must not follow a symlinked component; error={error}"
+        );
+        assert!(
+            !workspace.path().join("a/b/c").exists(),
+            "symlinked components must not be treated as satisfied parents"
+        );
+    }
+
+    #[test]
+    fn scoped_read_check_does_not_create_missing_parent_dirs() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("a/b/c/plan.json");
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+        let result = enforce_fs_path("read_file", &path, FsAccess::Read);
+        pop_execution_policy();
+
+        assert!(
+            result.is_ok(),
+            "read path inside workspace should be in scope"
+        );
+        assert!(
+            !workspace.path().join("a").exists(),
+            "read/list/stat/delete scope checks must not create ancestors"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_paths_refuse_excessive_component_depth() {
+        let mut relative = PathBuf::new();
+        for index in 0..=MAX_SCOPED_PATH_COMPONENTS {
+            relative.push(format!("d{index}"));
+        }
+
+        let error = clean_relative_components(&relative).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(
+            error
+                .to_string()
+                .contains("sandbox scoped path exceeds 256 components"),
+            "unexpected error: {error}"
         );
     }
 
