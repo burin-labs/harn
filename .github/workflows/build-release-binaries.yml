@@ -70,6 +70,7 @@ on:
         default: false
 
 permissions:
+  actions: read
   contents: read
   packages: read
 
@@ -161,6 +162,51 @@ jobs:
               "use_sccache": "false"
             }
           ]'
+
+          active_release_binary_runs() {
+            local status
+            for status in queued in_progress; do
+              gh run list \
+                --repo "$GITHUB_REPOSITORY" \
+                --workflow build-release-binaries.yml \
+                --status "$status" \
+                --limit 50 \
+                --json databaseId,event,headBranch,url \
+                --jq '.[] |
+                  select((.databaseId | tostring) != env.GITHUB_RUN_ID) |
+                  select(
+                    (.event == "workflow_dispatch") or
+                    (.event == "push" and ((.headBranch // "") | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+                  ) |
+                  "\(.databaseId)\t\(.event)\t\(.headBranch // "<unknown>")\t\(.url)"'
+            done
+          }
+
+          skip_warm_cache_if_release_active() {
+            local active_runs
+            active_runs="$(active_release_binary_runs || true)"
+            if [[ -z "$active_runs" ]]; then
+              return 1
+            fi
+
+            echo "::notice::Skipping warm-cache binary matrix because release binary workflow run(s) are already queued/in progress."
+            {
+              echo "### Warm-cache overlap guard"
+              echo
+              echo "Skipped this warm-cache binary matrix because release-mode build-release-binaries run(s) are already active."
+              echo
+              echo "| Run | Event | Ref | URL |"
+              echo "| --- | --- | --- | --- |"
+            } >> "$GITHUB_STEP_SUMMARY"
+            while IFS=$'\t' read -r run_id event head url; do
+              [[ -n "$run_id" ]] || continue
+              echo "::notice::  active release binary run $run_id ($event $head): $url"
+              echo "| $run_id | $event | $head | $url |" >> "$GITHUB_STEP_SUMMARY"
+            done <<<"$active_runs"
+            echo "::notice::A later push/scheduled warm can refresh the default-branch cache after the release lane clears."
+            return 0
+          }
+
           BUILD_MATRIX="[]"
           if [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
             IS_RELEASE=true
@@ -170,17 +216,24 @@ jobs:
             fi
             VERSION="${REF#v}"
           elif [[ "$EVENT_NAME" == "schedule" ]]; then
-            # Cron-driven warm-cache run. Always proceed — the whole point
-            # is to refresh the cache against GitHub's 7-day eviction.
-            SHOULD_BUILD_BINARIES=true
-            BUILD_MATRIX="$FULL_BUILD_MATRIX"
+            # Cron-driven warm-cache run. Normally proceed — the whole point
+            # is to refresh the cache against GitHub's 7-day eviction — but
+            # do not contend with an active release binary build.
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-            echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+            if skip_warm_cache_if_release_active; then
+              echo "::notice::Warm-cache-only run (schedule) suppressed while release binaries are already building."
+            else
+              SHOULD_BUILD_BINARIES=true
+              BUILD_MATRIX="$FULL_BUILD_MATRIX"
+              echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+            fi
           elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
             if [[ "$COMMIT_SUBJECT" =~ ^Release[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
               echo "::notice::Push to main is a release merge commit ('$COMMIT_SUBJECT'). The tag release builds the same source state, and an overlapping warm-cache run cannot help that active release. Skipping build matrix; the daily schedule will refresh the main cache."
+            elif skip_warm_cache_if_release_active; then
+              echo "::notice::Push-to-main warm-cache run suppressed while release binaries are already building."
             else
               # Push-to-main warm-cache run, but only when this push actually
               # changed something that rotates Swatinem's exact cache key.
@@ -456,6 +509,7 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.os }}
           HARN_RELEASE_SCCACHE_REQUESTED: ${{ matrix.use_sccache }}
+          HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
           HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule') && 'true' || 'false' }}
         run: |
           set -euo pipefail
@@ -469,6 +523,7 @@ jobs:
             echo "| Event | $GITHUB_EVENT_NAME |"
             echo "| Ref | $GITHUB_REF |"
             echo "| Swatinem cache save enabled | $HARN_RELEASE_CACHE_SAVE_ENABLED |"
+            echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
             echo "| sccache requested | $HARN_RELEASE_SCCACHE_REQUESTED |"
             echo "| sccache path | ${SCCACHE_PATH:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -519,6 +574,7 @@ jobs:
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
           HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.os }}
+          HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
         run: |
           set -euo pipefail
           start=$SECONDS
@@ -544,6 +600,7 @@ jobs:
             echo "| Release mode | $HARN_RELEASE_IS_RELEASE |"
             echo "| Duration | ${duration}s |"
             echo "| Rust wrapper | ${RUSTC_WRAPPER:-<none>} |"
+            echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
             echo "| Release LTO | ${CARGO_PROFILE_RELEASE_LTO:-<unset>} |"
             echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
