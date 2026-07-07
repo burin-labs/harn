@@ -1,0 +1,1 @@
+- Replace the MCP file-upload conformance Python helper with a Harn-served fixture.
