@@ -9,6 +9,40 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.0
+
+### Breaking
+
+- **Variable-binding keywords now follow the TypeScript/Swift convention.**
+  `const` is the immutable default binding (formerly `let`) and `let` is the
+  mutable binding (formerly `var`); `var` is removed and now produces a
+  migration diagnostic. `const` is a normal immutable binding that accepts any
+  initializer — the old strict compile-time-constant rejection is gone (pure
+  initializers are still folded as a transparent optimization). Every `.harn`
+  source must be migrated; see `docs/src/migrations/const-let.md` for the
+  automated `harn codemod` rules.
+
+### Added
+
+- Added opt-in raw provider request/response sidecars for LLM transcript debugging via `HARN_LLM_TRANSCRIPT_RAW=1`.
+
+### Changed
+
+- Move `std/llm/tool_binder` and `std/llm/structural_validator` public option validation
+  onto the Harn schema runtime, and preserve `std/schema` required-field markers through schema
+  builder helpers.
+- Replace the MCP file-upload conformance Python helper with a Harn-served fixture.
+
+### Fixed
+
+- `harn run <bare-filename>` from a project root now resolves top-level
+  `@asset`/relative prompt paths against the project even when a
+  `[dependencies]` provider connector is installed. The entry pipeline's source
+  dir is now always established (falling back to the working directory) and
+  re-asserted immediately before execution, so a dependency provider-connector
+  contract load during startup can no longer leave the resting source dir
+  pointing at `.harn/packages/<dep>/`.
+
 ## v0.9.22
 
 ### Added
