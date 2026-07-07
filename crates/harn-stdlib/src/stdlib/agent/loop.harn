@@ -3503,15 +3503,103 @@ fn __agent_loop_terminal_callback_extend_by(budget) {
   return 1
 }
 
+fn __agent_loop_tool_call_names(tool_calls) {
+  var names = []
+  for call in tool_calls ?? [] {
+    let name = __tool_call_name(call)
+    if name != "" && !contains(names, name) {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+fn __agent_loop_thrash_recovery_feedback(warning) {
+  let tool_name = to_string(warning?.tool_name ?? "")
+  let action = if tool_name != "" {
+    "`" + tool_name + "`"
+  } else {
+    "the same tool"
+  }
+  let signature = trim(to_string(warning?.signature ?? ""))
+  let signature_line = if signature != "" {
+    "\nRepeated call signature: " + signature
+  } else {
+    ""
+  }
+  return "Repeated identical " + action + " calls are not making progress. "
+    + "Do not issue that same call again. Change strategy with a targeted action "
+    + "that changes evidence, such as reading the exact file or symbol named by "
+    + "the task, then edit only once you have the needed facts."
+    + signature_line
+}
+
+fn __agent_loop_thrash_recovery_allowed(warning, tool_calls) {
+  if len(tool_calls ?? []) == 0 {
+    return false
+  }
+  if !(warning?.hard_stop ?? false) {
+    return false
+  }
+  // Recovery is for a repeated action that returned the same observation, such
+  // as a broad listing loop. Diagnostic hard stops already carry the specific
+  // blocker and must remain terminal instead of turning into a false finish.
+  return to_string(warning?.pattern ?? "") == "repeated_same_observation"
+}
+
+fn __agent_loop_stall_warning_receipt(warning) {
+  return {
+    pattern: to_string(warning?.pattern ?? ""),
+    tool_name: to_string(warning?.tool_name ?? ""),
+    repeat_count: to_int(warning?.repeat_count ?? warning?.count ?? 0) ?? 0,
+    threshold: to_int(warning?.threshold ?? 0) ?? 0,
+    consecutive_trips: to_int(warning?.consecutive_trips ?? 0) ?? 0,
+    hard_stop: warning?.hard_stop ?? false,
+    arguments_digest: to_string(warning?.arguments_digest ?? ""),
+    signature_digest: to_string(warning?.signature_digest ?? ""),
+    signature: to_string(warning?.signature ?? ""),
+  }
+}
+
+fn __agent_loop_emit_thrash_recovery_checkpoint(
+  session_id,
+  iteration,
+  tool_calls,
+  warning,
+  old_limit,
+  new_limit,
+) {
+  agent_emit_event(
+    session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.agent_loop_recovery_receipt.v1",
+      kind: "thrash_hard_stop_recovery",
+      receipt_kind: "thrash_hard_stop_recovery",
+      status: "fired",
+      action: "extend",
+      reason: "thrash_recovery_continue",
+      iteration: iteration,
+      old_limit: old_limit,
+      new_limit: new_limit,
+      tool_count: len(tool_calls ?? []),
+      tool_names: __agent_loop_tool_call_names(tool_calls),
+      warning: __agent_loop_stall_warning_receipt(warning),
+    },
+  )
+}
+
 /**
  * Forced terminal wrap-up turn. When the loop exits on exhaustion/cap while the
  * last turn still called tools, the surfaced final text would otherwise be a
  * dangling tool-call turn with no clean `<user_response>`/sentinel. This runs
- * exactly one extra LLM call with tools DISABLED to elicit the model's final
- * user-facing answer + completion sentinel, records it as the final assistant
- * turn so `agent_session_finalize` surfaces it, and never mutates
- * `final_status`/`stop_reason`. Defensive: any error falls back to existing
- * behavior. Returns true when a wrap-up response was recorded.
+ * exactly one extra LLM call with tools requested off to elicit the model's
+ * final user-facing answer + completion sentinel, records it as the final
+ * assistant turn so `agent_session_finalize` surfaces it, and never mutates
+ * `final_status`/`stop_reason`. Provider/tool-format leaks can still yield
+ * tool calls on this turn, so the loop records explicit skipped receipts before
+ * falling back. Defensive: any error falls back to existing behavior. Returns
+ * true when a wrap-up response was recorded.
  */
 fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration) {
   let directive = __agent_loop_wrapup_directive(opts)
@@ -3550,6 +3638,30 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
   let llm_result = call.value
   let raw_text = llm_result?.text ?? ""
   let parsed = agent_parse_tool_calls(raw_text, nil, wrapup_opts?.tool_format)
+  let wrapup_tool_calls = __resolve_tool_calls(llm_result, parsed)
+  if len(wrapup_tool_calls) > 0 {
+    agent_session_record_undispatched_tool_results(
+      session.session_id,
+      wrapup_tool_calls,
+      "skipped",
+      "not dispatched: final wrap-up turns cannot call tools",
+    )
+    agent_emit_event(
+      session.session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.agent_loop_final_wrapup_receipt.v1",
+        kind: "final_wrapup_tool_calls_skipped",
+        receipt_kind: "final_wrapup_tool_calls_skipped",
+        status: "skipped",
+        final_status: final_status,
+        stop_reason: stop_reason ?? "",
+        iteration: iteration,
+        tool_count: len(wrapup_tool_calls),
+        tool_names: __agent_loop_tool_call_names(wrapup_tool_calls),
+      },
+    )
+  }
   let visible_text = __visible_text(parsed, raw_text)
   if to_string(visible_text) == "" {
     return false
@@ -3698,6 +3810,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var stall_state = agent_stall_initial_state()
     var stall_enabled_seen = false
     var stall_prev_dispatch = nil
+    var stall_hard_stop_rescues = 0
     let max_verify_attempts = opts?.max_verify_attempts ?? 20
     let budget = opts?.iteration_budget
       ?? {
@@ -4251,6 +4364,61 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
         }
         if stall_observation.hard_stop {
+          if stall_hard_stop_rescues == 0
+            && __agent_loop_thrash_recovery_allowed(stall_warning, tool_calls) {
+            stall_hard_stop_rescues = stall_hard_stop_rescues + 1
+            let old_limit = current_max
+            current_max = max(current_max, iteration + 1)
+            agent_session_record_undispatched_tool_results(
+              session.session_id,
+              tool_calls,
+              "skipped",
+              "not dispatched: repeated identical tool call entered bounded thrash recovery",
+            )
+            __inject_feedback_with_tool_repair(
+              session.session_id,
+              "thrash_recovery",
+              __agent_loop_thrash_recovery_feedback(stall_warning),
+            )
+            let thrash_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+            agent_emit_event(
+              session.session_id,
+              "iteration_end",
+              {
+                iteration: iteration_index + 1,
+                iteration_info: __agent_loop_iteration_info(
+                  session.session_id,
+                  llm_result,
+                  len(tool_calls),
+                  visible_text,
+                  thrash_totals,
+                  loop_start_ms,
+                )
+                  + {dispatch_skipped: true, skip_reason: "thrash_recovery"},
+              },
+            )
+            agent_emit_event(
+              session.session_id,
+              "loop_control_decision",
+              {
+                iteration: iteration_index + 1,
+                action: "extend",
+                old_limit: old_limit,
+                new_limit: current_max,
+                reason: "thrash_recovery_continue",
+                status: "recovering",
+              },
+            )
+            __agent_loop_emit_thrash_recovery_checkpoint(
+              session.session_id,
+              iteration_index + 1,
+              tool_calls,
+              stall_warning,
+              old_limit,
+              current_max,
+            )
+            continue
+          }
           agent_emit_event(
             session.session_id,
             "loop_control_decision",
