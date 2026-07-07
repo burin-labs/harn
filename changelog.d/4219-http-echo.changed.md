@@ -1,0 +1,1 @@
+- Replaced the HTTP MCP echo conformance helper with a Harn-served MCP fixture.
