@@ -200,6 +200,35 @@ fn test_parses_mcp_serve_flags() {
 }
 
 #[test]
+fn test_parses_mcp_call_command() {
+    let cli = Cli::parse_from([
+        "harn",
+        "mcp",
+        "call",
+        "--tool",
+        "harn.trigger.fire",
+        "--arguments",
+        r#"{"trigger_id":"cron-ok"}"#,
+        "--progress-token",
+        "token-1",
+        "--",
+        "harn",
+        "mcp",
+        "serve",
+    ]);
+    let Command::Mcp(args) = cli.command.unwrap() else {
+        panic!("expected mcp command");
+    };
+    let McpCommand::Call(call) = args.command else {
+        panic!("expected mcp call");
+    };
+    assert_eq!(call.tool, "harn.trigger.fire");
+    assert_eq!(call.arguments, r#"{"trigger_id":"cron-ok"}"#);
+    assert_eq!(call.progress_token.as_deref(), Some("token-1"));
+    assert_eq!(call.command, vec!["harn", "mcp", "serve"]);
+}
+
+#[test]
 fn test_parses_mcp_mock_commands() {
     let cli = Cli::parse_from([
         "harn",

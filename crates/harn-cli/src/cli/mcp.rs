@@ -15,6 +15,8 @@ pub(crate) struct McpArgs {
 pub(crate) enum McpCommand {
     /// Expose a running orchestrator as an MCP server.
     Serve(McpServeArgs),
+    /// Call one tool on a stdio MCP server command and print a JSON report.
+    Call(McpCallArgs),
     /// Record, replay, verify, or simulate MCP servers for deterministic evals.
     Mock(McpMockArgs),
     /// Log in to a remote MCP server via OAuth.
@@ -29,6 +31,22 @@ pub(crate) enum McpCommand {
     RedirectUri,
     /// List the canonical catalog of well-known MCP server presets.
     Presets(McpPresetsArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpCallArgs {
+    /// MCP tool name to invoke.
+    #[arg(long, value_name = "NAME")]
+    pub tool: String,
+    /// JSON object to pass as the tool arguments.
+    #[arg(long, default_value = "{}", value_name = "JSON")]
+    pub arguments: String,
+    /// Optional MCP progress token; matching progress notifications are counted.
+    #[arg(long = "progress-token", value_name = "TOKEN")]
+    pub progress_token: Option<String>,
+    /// Upstream stdio MCP server command. Pass after `--`.
+    #[arg(last = true, required = true)]
+    pub command: Vec<String>,
 }
 
 #[derive(Debug, Args)]
