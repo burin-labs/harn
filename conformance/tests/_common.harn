@@ -11,6 +11,14 @@ fn first_group(pattern, text) {
 
 /** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
 pub fn resolve_harn_bin(harness: Harness, repo_root) {
+  const conformance_bin = harness.env.get("HARN_CONFORMANCE_HARN_BIN")
+  if conformance_bin {
+    return conformance_bin
+  }
+  const env_bin = harness.env.get("HARN_BIN")
+  if env_bin {
+    return env_bin
+  }
   const env_target_dir = harness.env.get("CARGO_TARGET_DIR")
   if env_target_dir {
     return path_join(env_target_dir, "debug/harn")

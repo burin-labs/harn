@@ -330,7 +330,8 @@ cmd_audit() {
   cp "$cargo_harn_bin" "$stable_harn_bin"
   chmod +x "$stable_harn_bin"
   HARN_BIN="$stable_harn_bin"
-  export HARN_BIN
+  HARN_CONFORMANCE_HARN_BIN="$stable_harn_bin"
+  export HARN_BIN HARN_CONFORMANCE_HARN_BIN
   printf 'ok: %-15s (%s)\n' "harn-bin" "$HARN_BIN"
   echo "audit lane log dir: $tmp"
   local -a steps=()
