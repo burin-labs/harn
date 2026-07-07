@@ -49,7 +49,7 @@ pub type PinSpec = {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn pin_kinds() {
   return __PIN_KINDS
@@ -80,7 +80,7 @@ fn __pin_role_hint(kind) {
  *
  * @effects: []
  * @errors: [runtime]
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
  */
 pub fn pin(kind, content, opts = nil) {
@@ -113,7 +113,7 @@ pub fn pin(kind, content, opts = nil) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn unpin(pins, pin_id) {
   var out = []
@@ -134,7 +134,7 @@ pub fn unpin(pins, pin_id) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn pin_reachability_roots(pins) {
   var roots = []
@@ -153,7 +153,7 @@ pub fn pin_reachability_roots(pins) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: transcript_project(t, with_pin_roots({policy: "reachability_gc"}, pins))
  */
 pub fn with_pin_roots(project_options, pins) {
@@ -179,7 +179,7 @@ pub fn with_pin_roots(project_options, pins) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn pin_compaction_policy(pins, opts = nil) {
   let base = if type_of(opts) == "dict" {
@@ -209,7 +209,7 @@ pub fn pin_compaction_policy(pins, opts = nil) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn pin_reminder(pin) {
   return {
@@ -228,7 +228,7 @@ pub fn pin_reminder(pin) {
  *
  * @effects: [host]
  * @errors: [runtime]
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_pin(session_id, pin) {
   return agent_session_inject_reminder(session_id, pin_reminder(pin))
@@ -241,7 +241,7 @@ pub fn agent_pin(session_id, pin) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn strip_no_compact(text) {
   return to_string(text).replace(__NO_COMPACT_MARKER, "").replace("  \n", "\n")
@@ -255,7 +255,7 @@ pub fn strip_no_compact(text) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: recognize_no_compact("## Session goal [no-compact]\nObjective: X")
  */
 pub fn recognize_no_compact(text, opts = nil) {

@@ -60,7 +60,7 @@ pub type LaneRow = {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn default_lane_rows() {
   return [
@@ -123,7 +123,7 @@ fn __lane_validate_rows(rows) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_lane_explicit_target_paths(task) {
   let found = regex_match("[\\w][\\w./-]*\\.[A-Za-z]{1,5}\\b", to_string(task ?? ""))
@@ -173,7 +173,7 @@ fn __lane_row_matches(row, task, task_lower) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_lane_match(rows, task) {
   let task_lower = lowercase(to_string(task ?? ""))
@@ -202,7 +202,7 @@ fn __lane_normalize_verdict(row, reason) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_lane_classify(rows, task, options = nil) {
   let opts = options ?? {}
@@ -312,7 +312,7 @@ fn __lane_own_tool_names(row, registry, policy) {
  *
  * @effects: []
  * @errors: [runtime]
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: agent_loop(task, nil, lane_policy(default_lane_rows(), task, {provider: "anthropic", tools: my_tools}))
  */
 pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
@@ -370,7 +370,7 @@ pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: agent_loop(task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
  */
 pub fn lane_scope_classifier(rows, options = nil) {
