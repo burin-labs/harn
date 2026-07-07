@@ -13,6 +13,10 @@ import {
   agent_lane_match,
   default_lane_rows,
   lane_policy,
+  stage_gate_allows,
+  stage_gate_denial,
+  stage_gate_label,
+  stage_gate_parse,
 } from "std/agent/lanes"
 import { agent_preset } from "std/agent/presets"
 
@@ -197,4 +201,86 @@ pipeline test_explicit_preset_lane_policy_wins_over_pack_default(task) {
   const custom = {rows: [{default: true, name: "only_lane"}]}
   const opts = agent_preset("repair", {lane_policy: custom})
   assert_eq(opts.lane_policy, custom)
+}
+
+// --- Per-stage tool-gate (additive; default-off) -------------------------------
+
+pipeline test_stage_gate_parity_lane_policy_unchanged(task) {
+  // ANTI-REGRESSION: adding the stage-gate seam must not perturb the existing
+  // `lane_policy` decision path. Re-pin the canonical narrowing + no-narrowing
+  // verdicts so any accidental change to shared module state is caught here.
+  let tools = tool_registry()
+  for name in ["look", "search", "edit", "run", "git", "run_codemod", "glob"] {
+    tools = tool_define(tools, name, "tool " + name, {handler: { _a -> "ok" }})
+  }
+  const narrowed = lane_policy(default_lane_rows(), "Fix the off-by-one in src/widget.py.", {tools: tools})
+  assert_eq(narrowed._lane_verdict.lane, "explicit_patch")
+  let kept = []
+  for entry in narrowed.tools.tools {
+    kept = kept.push(entry.name)
+  }
+  assert(contains(kept, "edit"), "explicit_patch still keeps edit")
+  assert(!contains(kept, "git"), "explicit_patch still hides git")
+  const open = lane_policy(default_lane_rows(), "Explain the architecture.", {tools: tools})
+  assert_eq(open._lane_verdict.lane, "general")
+  assert_eq(open._lane_verdict?.tool_names, nil)
+  assert_eq(len(open.tools.tools), 7)
+}
+
+pipeline test_stage_gate_inert_without_marker(task) {
+  // Default-off: text with no marker parses to an empty gate, and an empty gate
+  // never denies — the seam is invisible unless a marker is rendered.
+  assert_eq(stage_gate_parse("Fix the off-by-one in src/widget.py."), {})
+  assert(stage_gate_allows({}, "git"), "empty gate never denies")
+  assert(stage_gate_allows(stage_gate_parse("no marker here"), "anything"), "unmarked text never denies")
+  // An ungated label (blank lane/stage) is returned byte-identical.
+  const base = "Refactor the parser."
+  assert_eq(stage_gate_label(base, {stage: "implement"}), base)
+  assert_eq(stage_gate_label(base, {}), base)
+}
+
+pipeline test_stage_gate_label_roundtrips(task) {
+  const gate = {allowed_kinds: ["edit"], allowed_tools: ["edit", "look"], lane: "repair_local", stage: "repair"}
+  const label = stage_gate_label("Patch the bug.", gate)
+  assert(label.contains("[lane_gate lane=repair_local stage=repair"), "marker rendered into label")
+  const recovered = stage_gate_parse(label)
+  assert_eq(recovered.lane, "repair_local")
+  assert_eq(recovered.stage, "repair")
+  assert_eq(recovered.allowed_tools, ["edit", "look"])
+  assert_eq(recovered.allowed_kinds, ["edit"])
+}
+
+pipeline test_stage_gate_denies_by_tool_with_suggestion(task) {
+  const gate = stage_gate_parse(stage_gate_label("t", {allowed_tools: ["edit", "look"], lane: "repair_local", stage: "repair"}))
+  assert(stage_gate_allows(gate, "edit"), "named tool passes")
+  assert(!stage_gate_allows(gate, "git"), "unnamed tool denied")
+  const denial = stage_gate_denial(gate, "git")
+  assert(denial.contains("lane=repair_local"), "denial names the lane")
+  assert(denial.contains("stage=repair"), "denial names the stage")
+  assert(denial.contains("tool=git"), "denial names the attempted tool")
+  assert(denial.contains("suggestion=use edit or look"), "denial suggests the allowed tools")
+}
+
+pipeline test_stage_gate_kind_gate_uses_resolver(task) {
+  const gate = {allowed_kinds: ["search"], allowed_tools: [], lane: "read_only", stage: "plan"}
+  const kinds = {edit: "edit", look: "search", search: "search"}
+  const resolver = { name -> kinds[name] ?? "other" }
+  assert(stage_gate_allows(gate, "look", {kind_of: resolver}), "search-kind tool passes the kind gate")
+  assert(!stage_gate_allows(gate, "edit", {kind_of: resolver}), "edit-kind tool denied by the kind gate")
+  // Fail-open: a kind gate with no resolver cannot classify, so it never blocks.
+  assert(stage_gate_allows(gate, "edit"), "kind gate without a resolver fails open")
+  const denial = stage_gate_denial(gate, "edit", {kind_of: resolver})
+  assert(denial.contains("kind=edit"), "denial reports the resolved kind")
+  assert(denial.contains("suggestion="), "denial carries a suggestion")
+}
+
+pipeline test_stage_gate_rejects_bad_callbacks(task) {
+  const bad_kind_of = try {
+    stage_gate_allows({allowed_kinds: ["x"], lane: "l", stage: "s"}, "t", {kind_of: "not-callable"})
+  }
+  assert(is_err(bad_kind_of), "non-callable kind_of throws loudly")
+  const bad_suggest = try {
+    stage_gate_denial({lane: "l", stage: "s"}, "t", {suggest: 42})
+  }
+  assert(is_err(bad_suggest), "non-string/non-callable suggest throws loudly")
 }

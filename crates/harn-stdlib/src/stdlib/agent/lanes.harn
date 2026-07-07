@@ -388,3 +388,337 @@ pub fn lane_scope_classifier(rows, options = nil) {
   }
   return {pre_turn_scope_classifier: classifier}
 }
+
+// -------------------------------------------------------------------------------------------------
+// Per-stage tool-gate (ADDITIVE, default-off). Absorbs the generic core of
+// burin-code's `tool-gating.harn`. Where `lane_policy` above is a per-TASK
+// one-shot ceiling that HIDES tools silently at loop start (#2506) and never
+// reclassifies mid-transcript, this seam is a per-(lane, STAGE) gate whose
+// scope rides a machine-readable marker in the workflow node's task LABEL, is
+// recovered MID-TRANSCRIPT (from the latest user prompt, not only at loop
+// start), and DENIES a disallowed tool call with a suggestion instead of
+// hiding it. It is wholly separate from `lane_policy` and the classifier: a
+// caller that never renders a gate marker sees byte-identical behavior.
+//
+// Division of labor with burin: the lane×stage capability TABLE (which kinds a
+// `grounded_patch:implement` stage may run) and the tool->kind resolver stay in
+// the harness — they are its domain. This module owns the generic mechanism:
+// marker ENCODE (`stage_gate_label`), marker DECODE (`stage_gate_parse` /
+// `stage_gate_from_session`), the allow DECISION (`stage_gate_allows`), and the
+// denial-with-suggestion UX text (`stage_gate_denial`). Kind resolution is
+// injected via an `options.kind_of` callback so the seam never hardwires a
+// particular tool registry.
+// -------------------------------------------------------------------------------------------------
+
+const __STAGE_GATE_PREFIX = "[lane_gate "
+
+fn __stage_gate_token_list(values) {
+  let out = []
+  for value in values ?? [] {
+    const rendered = to_string(value ?? "").trim()
+    if rendered != "" && !contains(out, rendered) {
+      out = out.push(rendered)
+    }
+  }
+  return out
+}
+
+fn __stage_gate_token_string(values) {
+  const normalized = __stage_gate_token_list(values)
+  if len(normalized) == 0 {
+    return "-"
+  }
+  return join(normalized, ",")
+}
+
+fn __stage_gate_parse_token_list(raw) {
+  const normalized = to_string(raw ?? "").trim()
+  if normalized == "" || normalized == "-" {
+    return []
+  }
+  return __stage_gate_token_list(normalized.split(","))
+}
+
+fn __stage_gate_validate_options(options) {
+  const kind_of = options?.kind_of
+  if kind_of != nil && type_of(kind_of) != "closure" {
+    throw "stage_gate: `kind_of` must be a callable (tool_name) -> kind string"
+  }
+  const suggest = options?.suggest
+  if suggest != nil && type_of(suggest) != "closure" && type_of(suggest) != "string" {
+    throw "stage_gate: `suggest` must be a string or a callable (gate) -> string"
+  }
+  return options
+}
+
+fn __stage_gate_kind_of(options, tool_name) {
+  const resolver = options?.kind_of
+  if resolver == nil {
+    return ""
+  }
+  const kind = try {
+    resolver(tool_name)
+  } catch (e) {
+    ""
+  }
+  return to_string(kind ?? "")
+}
+
+/**
+ * stage_gate_label(base_label, gate) — encode a lane/stage gate into a task
+ * label so a downstream PreToolUse enforcement seam can recover the active
+ * workflow scope from the prompt itself. `gate` is `{lane, stage,
+ * allowed_kinds?, allowed_tools?}`. Returns `base_label` UNCHANGED when either
+ * `lane` or `stage` is blank — so an ungated node's label is byte-identical to
+ * what it would be without this seam.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ * @example: stage_gate_label(task, {lane: "repair_local", stage: "repair", allowed_tools: ["edit", "look"]})
+ */
+pub fn stage_gate_label(base_label, gate) {
+  const base = to_string(base_label ?? "").trim()
+  const spec = if type_of(gate) == "dict" {
+    gate
+  } else {
+    {}
+  }
+  const lane = to_string(spec?.lane ?? "").trim()
+  const stage = to_string(spec?.stage ?? "").trim()
+  if lane == "" || stage == "" {
+    return base
+  }
+  const marker = __STAGE_GATE_PREFIX + "lane=" + lane + " stage=" + stage + " kinds="
+    + __stage_gate_token_string(spec?.allowed_kinds ?? []) + " tools="
+    + __stage_gate_token_string(spec?.allowed_tools ?? []) + "]"
+  if base == "" {
+    return marker
+  }
+  return base + " " + marker
+}
+
+/**
+ * stage_gate_parse(text) — recover a gate from any text carrying a marker
+ * rendered by `stage_gate_label`. Returns `{lane, stage, allowed_kinds,
+ * allowed_tools}`, or an EMPTY dict `{}` when no well-formed marker is present.
+ * An empty gate never denies anything (see `stage_gate_allows`), so text
+ * without a marker is inert.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn stage_gate_parse(text) {
+  const body = to_string(text ?? "")
+  const start = body.index_of(__STAGE_GATE_PREFIX)
+  if start < 0 {
+    return {}
+  }
+  const body_start = start + len(__STAGE_GATE_PREFIX)
+  const tail = body.substring(body_start, len(body))
+  const end = tail.index_of("]")
+  if end < 0 {
+    return {}
+  }
+  const marker = tail.substring(0, end).trim()
+  let lane = ""
+  let stage = ""
+  let kinds = []
+  let tools = []
+  for token in marker.split(" ") {
+    const piece = token.trim()
+    const eq = piece.index_of("=")
+    if eq <= 0 {
+      continue
+    }
+    const key = piece.substring(0, eq).trim()
+    const value = piece.substring(eq + 1, len(piece)).trim()
+    if key == "lane" {
+      lane = value
+    }
+    if key == "stage" {
+      stage = value
+    }
+    if key == "kinds" {
+      kinds = __stage_gate_parse_token_list(value)
+    }
+    if key == "tools" {
+      tools = __stage_gate_parse_token_list(value)
+    }
+  }
+  if lane == "" || stage == "" {
+    return {}
+  }
+  return {allowed_kinds: kinds, allowed_tools: tools, lane: lane, stage: stage}
+}
+
+fn __stage_gate_latest_user_prompt(messages) {
+  let prompt = ""
+  for message in messages ?? [] {
+    if to_string(message?.role ?? "") != "user" {
+      continue
+    }
+    const content = to_string(message?.content ?? "").trim()
+    if content != "" {
+      prompt = content
+    }
+  }
+  return prompt
+}
+
+/**
+ * stage_gate_from_session(session_id) — recover the active gate MID-TRANSCRIPT
+ * by inspecting the latest user prompt in a live session's transcript (the
+ * marker-recovery half of the PreToolUse enforcement seam). Reads the existing
+ * `agent_session_snapshot`/`transcript_messages` seam — no new host surface.
+ * Returns an empty dict `{}` when the session is unknown or carries no marker.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn stage_gate_from_session(session_id) {
+  const sid = to_string(session_id ?? "").trim()
+  if sid == "" {
+    return {}
+  }
+  const snapshot = agent_session_snapshot(sid)
+  if snapshot == nil {
+    return {}
+  }
+  const messages = try {
+    transcript_messages(snapshot)
+  } catch (e) {
+    snapshot?.messages ?? []
+  }
+  const prompt = __stage_gate_latest_user_prompt(messages)
+  if prompt == "" {
+    return {}
+  }
+  return stage_gate_parse(prompt)
+}
+
+/**
+ * stage_gate_allows(gate, tool_name, options?) — the allow DECISION for a
+ * per-(lane, stage) gate. Returns `true` (never denies) when `gate` carries no
+ * lane/stage or no tool is named — so an inactive gate is default-off. A tool
+ * named in `allowed_tools` always passes. A gate with `allowed_kinds` consults
+ * `options.kind_of` (a `(tool_name) -> kind` callback) and passes when the
+ * resolved kind is allowed; when no `kind_of` is supplied the gate FAILS OPEN
+ * (a gate must never silently block on missing wiring). A tools-only gate with
+ * an empty tool list gates nothing.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ */
+pub fn stage_gate_allows(gate, tool_name, options = nil) {
+  const spec = if type_of(gate) == "dict" {
+    gate
+  } else {
+    {}
+  }
+  const opts = __stage_gate_validate_options(options ?? {})
+  const name = to_string(tool_name ?? "").trim()
+  if to_string(spec?.lane ?? "") == "" || to_string(spec?.stage ?? "") == "" || name == "" {
+    return true
+  }
+  const allowed_tools = __stage_gate_token_list(spec?.allowed_tools ?? [])
+  if contains(allowed_tools, name) {
+    return true
+  }
+  const allowed_kinds = __stage_gate_token_list(spec?.allowed_kinds ?? [])
+  if len(allowed_kinds) == 0 {
+    return len(allowed_tools) == 0
+  }
+  const kind = __stage_gate_kind_of(opts, name)
+  if kind == "" {
+    return true
+  }
+  return contains(allowed_kinds, kind)
+}
+
+fn __stage_gate_render_allowed(gate) {
+  const kinds = __stage_gate_token_list(gate?.allowed_kinds ?? [])
+  const tools = __stage_gate_token_list(gate?.allowed_tools ?? [])
+  let parts = []
+  if len(kinds) > 0 {
+    parts = parts.push("kinds=" + join(kinds, ","))
+  }
+  if len(tools) > 0 {
+    parts = parts.push("tools=" + join(tools, ","))
+  }
+  if len(parts) == 0 {
+    return "none"
+  }
+  return join(parts, " ")
+}
+
+fn __stage_gate_default_suggestion(gate) {
+  const tools = __stage_gate_token_list(gate?.allowed_tools ?? [])
+  if len(tools) > 0 {
+    return "use " + join(tools, " or ")
+  }
+  const kinds = __stage_gate_token_list(gate?.allowed_kinds ?? [])
+  if len(kinds) > 0 {
+    return "use one of the declared " + join(kinds, "/") + " tools for this stage"
+  }
+  return "use one of the declared tools for this stage"
+}
+
+fn __stage_gate_suggestion_text(gate, options) {
+  const override = options?.suggest
+  if type_of(override) == "string" && override != "" {
+    return override
+  }
+  if type_of(override) == "closure" {
+    const custom = try {
+      override(gate)
+    } catch (e) {
+      nil
+    }
+    if type_of(custom) == "string" && custom != "" {
+      return custom
+    }
+  }
+  return __stage_gate_default_suggestion(gate)
+}
+
+/**
+ * stage_gate_denial(gate, tool_name, options?) — the denial-with-suggestion UX
+ * text a PreToolUse hook surfaces when `stage_gate_allows` rejects a call
+ * (rather than the tool being silently hidden). Names the lane, stage, tool,
+ * resolved kind, the allowed set, and a recovery suggestion. `options.kind_of`
+ * resolves the tool kind for the report; `options.suggest` (a string or a
+ * `(gate) -> string` callback) overrides the default suggestion.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ * @example: stage_gate_denial(gate, "git", {kind_of: { name -> tool_kind(name) }})
+ */
+pub fn stage_gate_denial(gate, tool_name, options = nil) {
+  const spec = if type_of(gate) == "dict" {
+    gate
+  } else {
+    {}
+  }
+  const opts = __stage_gate_validate_options(options ?? {})
+  const name = to_string(tool_name ?? "").trim()
+  const lane = if to_string(spec?.lane ?? "") != "" {
+    to_string(spec.lane)
+  } else {
+    "unknown"
+  }
+  const stage = if to_string(spec?.stage ?? "") != "" {
+    to_string(spec.stage)
+  } else {
+    "unknown"
+  }
+  const kind = __stage_gate_kind_of(opts, name)
+  const allowed = __stage_gate_render_allowed(spec)
+  const suggestion = __stage_gate_suggestion_text(spec, opts)
+  return "tool_not_available_in_stage lane=" + lane + " stage=" + stage + " tool=" + name + " kind="
+    + kind + " allowed=" + allowed + " suggestion=" + suggestion
+}
