@@ -3,6 +3,7 @@
 //! request-body construction lives in `crate::llm::providers`; this file is
 //! the wire-format layer below that.
 
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::agent_events::{AgentEvent, ToolCallStatus};
@@ -22,6 +23,54 @@ use super::response::{
 use super::result::LlmResult;
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
+
+fn response_content_type(response: &reqwest::Response) -> Option<String> {
+    response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
+fn capture_stream_bytes(capture: Option<&Arc<Mutex<Vec<u8>>>>, bytes: &bytes::Bytes) {
+    let Some(capture) = capture else {
+        return;
+    };
+    let mut raw = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    raw.extend_from_slice(bytes);
+}
+
+fn captured_stream_text(capture: &Arc<Mutex<Vec<u8>>>) -> String {
+    let raw = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    String::from_utf8_lossy(&raw).into_owned()
+}
+
+#[derive(Clone)]
+struct RawProviderCaptureTarget {
+    context: Option<crate::llm::agent_observe::RawProviderCaptureContext>,
+    attempt: Option<usize>,
+}
+
+impl RawProviderCaptureTarget {
+    fn new(
+        context: Option<crate::llm::agent_observe::RawProviderCaptureContext>,
+        attempt: Option<usize>,
+    ) -> Self {
+        Self { context, attempt }
+    }
+
+    fn context(&self) -> Option<&crate::llm::agent_observe::RawProviderCaptureContext> {
+        self.context.as_ref()
+    }
+
+    fn enabled(&self) -> bool {
+        crate::llm::agent_observe::raw_provider_capture_enabled(self.context())
+    }
+}
 
 fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Value {
     match arguments {
@@ -356,6 +405,7 @@ async fn vm_call_llm_api_with_body_inner(
     let is_ollama = dialect.is_ollama();
     let provider = &opts.provider;
     let model = &opts.model;
+    let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
     let wants_streaming = delta_tx.is_some() && opts.stream;
     // Whether this request offered any tools to the model. Used by the
     // billed-no-op contract guard so a deliberately terse text answer to a
@@ -452,6 +502,14 @@ async fn vm_call_llm_api_with_body_inner(
         };
         let mut ollama_warmup_gate = false;
         for attempt in 0..max_attempts {
+            crate::llm::agent_observe::persist_raw_provider_request(
+                raw_capture_context.as_ref(),
+                provider,
+                model,
+                dialect.as_str(),
+                Some(attempt),
+                &body,
+            );
             let req = client
                 .post(resolved.url())
                 .header("Content-Type", "application/json")
@@ -473,7 +531,18 @@ async fn vm_call_llm_api_with_body_inner(
             if !response.status().is_success() {
                 let status = response.status();
                 let retry_after = super::retry_after_header(response.headers());
+                let content_type = response_content_type(&response);
                 let body = response.text().await.unwrap_or_default();
+                crate::llm::agent_observe::persist_raw_provider_response(
+                    raw_capture_context.as_ref(),
+                    provider,
+                    model,
+                    "stream-error",
+                    Some(attempt),
+                    status.as_u16(),
+                    content_type.as_deref(),
+                    &body,
+                );
                 let msg = classify_transport_http_error(
                     provider,
                     status,
@@ -502,6 +571,7 @@ async fn vm_call_llm_api_with_body_inner(
                     opts.session_id.as_deref(),
                     schema_watch,
                     tools_offered,
+                    RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
                 )
                 .await;
             }
@@ -513,6 +583,7 @@ async fn vm_call_llm_api_with_body_inner(
                 unload_grace,
                 &mut ollama_warmup_gate,
                 schema_watch,
+                RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
             )
             .await
             {
@@ -541,6 +612,14 @@ async fn vm_call_llm_api_with_body_inner(
         unreachable!("streaming LLM attempt loop exhausted without returning");
     }
 
+    crate::llm::agent_observe::persist_raw_provider_request(
+        raw_capture_context.as_ref(),
+        provider,
+        model,
+        dialect.as_str(),
+        None,
+        &body,
+    );
     let response = req
         .send()
         .await
@@ -552,7 +631,18 @@ async fn vm_call_llm_api_with_body_inner(
     if !response.status().is_success() {
         let status = response.status();
         let retry_after = super::retry_after_header(response.headers());
+        let content_type = response_content_type(&response);
         let body = response.text().await.unwrap_or_default();
+        crate::llm::agent_observe::persist_raw_provider_response(
+            raw_capture_context.as_ref(),
+            provider,
+            model,
+            "json",
+            None,
+            status.as_u16(),
+            content_type.as_deref(),
+            &body,
+        );
         let msg = classify_transport_http_error(
             provider,
             status,
@@ -564,7 +654,24 @@ async fn vm_call_llm_api_with_body_inner(
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
     }
 
-    let json: serde_json::Value = response.json().await.map_err(|e| {
+    let status = response.status();
+    let content_type = response_content_type(&response);
+    let body = response.text().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "{provider} response parse error: {e}"
+        ))))
+    })?;
+    crate::llm::agent_observe::persist_raw_provider_response(
+        raw_capture_context.as_ref(),
+        provider,
+        model,
+        "json",
+        None,
+        status.as_u16(),
+        content_type.as_deref(),
+        &body,
+    );
+    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "{provider} response parse error: {e}"
         ))))
@@ -590,14 +697,26 @@ async fn vm_call_llm_api_sse_from_response(
     session_id: Option<&str>,
     schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
     tools_offered: bool,
+    raw_capture: RawProviderCaptureTarget,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
+    let status = response.status();
+    let content_type = response_content_type(&response);
+    let raw_bytes = raw_capture
+        .enabled()
+        .then(|| Arc::new(Mutex::new(Vec::new())));
+    let stream_capture = raw_bytes.clone();
     let stream = response.bytes_stream();
-    let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
-        stream.map(|r| r.map_err(std::io::Error::other)),
-    ));
-    consume_sse_lines(
+    let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(stream.map(
+        move |result| {
+            if let Ok(bytes) = &result {
+                capture_stream_bytes(stream_capture.as_ref(), bytes);
+            }
+            result.map_err(std::io::Error::other)
+        },
+    )));
+    let result = consume_sse_lines(
         reader,
         provider,
         model,
@@ -607,7 +726,20 @@ async fn vm_call_llm_api_sse_from_response(
         schema_watch,
         tools_offered,
     )
-    .await
+    .await;
+    if let Some(raw_bytes) = raw_bytes {
+        crate::llm::agent_observe::persist_raw_provider_response(
+            raw_capture.context(),
+            provider,
+            model,
+            "sse",
+            raw_capture.attempt,
+            status.as_u16(),
+            content_type.as_deref(),
+            &captured_stream_text(&raw_bytes),
+        );
+    }
+    result
 }
 
 /// Try to publish the live `(tool_call_id, tool_name, accumulated_bytes)`
@@ -1543,14 +1675,26 @@ async fn vm_call_llm_api_ndjson_from_response(
     unload_grace: Duration,
     warmup_gate: &mut bool,
     schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
+    raw_capture: RawProviderCaptureTarget,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
+    let status = response.status();
+    let content_type = response_content_type(&response);
+    let raw_bytes = raw_capture
+        .enabled()
+        .then(|| Arc::new(Mutex::new(Vec::new())));
+    let stream_capture = raw_bytes.clone();
     let stream = response.bytes_stream();
-    let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
-        stream.map(|r| r.map_err(std::io::Error::other)),
-    ));
-    consume_ollama_ndjson_lines(
+    let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(stream.map(
+        move |result| {
+            if let Ok(bytes) = &result {
+                capture_stream_bytes(stream_capture.as_ref(), bytes);
+            }
+            result.map_err(std::io::Error::other)
+        },
+    )));
+    let result = consume_ollama_ndjson_lines(
         reader,
         provider,
         model,
@@ -1559,7 +1703,20 @@ async fn vm_call_llm_api_ndjson_from_response(
         warmup_gate,
         schema_watch,
     )
-    .await
+    .await;
+    if let Some(raw_bytes) = raw_bytes {
+        crate::llm::agent_observe::persist_raw_provider_response(
+            raw_capture.context(),
+            provider,
+            model,
+            "ndjson",
+            raw_capture.attempt,
+            status.as_u16(),
+            content_type.as_deref(),
+            &captured_stream_text(&raw_bytes),
+        );
+    }
+    result
 }
 
 async fn consume_ollama_ndjson_lines<R>(

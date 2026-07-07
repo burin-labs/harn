@@ -38,6 +38,9 @@
 //!   Set `HARN_LLM_TRANSCRIPT_VERBOSE=1` to include a `request_snapshot`
 //!   object with the exact system prompt, message list, and tool schemas
 //!   attached to each request for debugging provider-context issues.
+//!   Set `HARN_LLM_TRANSCRIPT_RAW=1` to persist redacted, exact provider
+//!   request/response sidecars under `raw-provider/` and emit
+//!   `provider_raw_capture` pointer events for extraction-drop debugging.
 //! - `provider_call_response` core `{call_id, iteration, model, provider,
 //!   text, tool_calls, parsed_tool_calls, input_tokens, output_tokens,
 //!   response_ms}`. `tool_calls` is the provider-native tool-call array
@@ -58,6 +61,8 @@
 //! `message` up to (but not including) the matching `provider_call_request`.
 
 use std::cell::RefCell;
+use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::event_log::EventLog;
@@ -75,6 +80,41 @@ thread_local! {
     static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+tokio::task_local! {
+    static RAW_PROVIDER_CAPTURE_CONTEXT: RawProviderCaptureContext;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RawProviderCaptureContext {
+    pub(crate) call_id: String,
+    pub(crate) iteration: usize,
+    transcript_dir: Option<String>,
+}
+
+impl RawProviderCaptureContext {
+    fn new(call_id: String, iteration: usize) -> Self {
+        Self {
+            call_id,
+            iteration,
+            transcript_dir: current_transcript_dir(),
+        }
+    }
+}
+
+pub(crate) async fn with_raw_provider_capture_context<F>(
+    context: RawProviderCaptureContext,
+    future: F,
+) -> F::Output
+where
+    F: Future,
+{
+    RAW_PROVIDER_CAPTURE_CONTEXT.scope(context, future).await
+}
+
+pub(crate) fn current_raw_provider_capture_context() -> Option<RawProviderCaptureContext> {
+    RAW_PROVIDER_CAPTURE_CONTEXT.try_with(Clone::clone).ok()
 }
 
 fn reset_transcript_dedup() {
@@ -120,14 +160,167 @@ fn hash_json(value: &serde_json::Value) -> u64 {
     hash_str(&encoded)
 }
 
-fn verbose_llm_transcript_enabled() -> bool {
-    std::env::var("HARN_LLM_TRANSCRIPT_VERBOSE")
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name)
         .ok()
         .map(|value| {
             let normalized = value.trim().to_ascii_lowercase();
             matches!(normalized.as_str(), "1" | "true" | "yes" | "on" | "full")
         })
         .unwrap_or(false)
+}
+
+fn verbose_llm_transcript_enabled() -> bool {
+    env_flag_enabled("HARN_LLM_TRANSCRIPT_VERBOSE")
+}
+
+fn raw_llm_transcript_enabled() -> bool {
+    env_flag_enabled("HARN_LLM_TRANSCRIPT_RAW")
+}
+
+pub(crate) fn raw_provider_capture_enabled(context: Option<&RawProviderCaptureContext>) -> bool {
+    context
+        .and_then(|context| context.transcript_dir.as_ref())
+        .is_some()
+        && raw_llm_transcript_enabled()
+}
+
+pub(crate) fn persist_raw_provider_request(
+    context: Option<&RawProviderCaptureContext>,
+    provider: &str,
+    model: &str,
+    wire_dialect: &str,
+    attempt: Option<usize>,
+    body: &serde_json::Value,
+) -> Option<String> {
+    let context = context?;
+    if !raw_provider_capture_enabled(Some(context)) {
+        return None;
+    }
+    let envelope = serde_json::json!({
+        "schema_version": "harn.llm.raw_provider_request.v1",
+        "kind": "request",
+        "captured_at": chrono_now(),
+        "call_id": context.call_id,
+        "iteration": context.iteration,
+        "attempt": attempt,
+        "provider": provider,
+        "model": model,
+        "wire_dialect": wire_dialect,
+        "body": body,
+    });
+    write_raw_provider_sidecar(context, "request", provider, model, attempt, envelope)
+}
+
+pub(crate) fn persist_raw_provider_response(
+    context: Option<&RawProviderCaptureContext>,
+    provider: &str,
+    model: &str,
+    transport: &str,
+    attempt: Option<usize>,
+    status: u16,
+    content_type: Option<&str>,
+    body_text: &str,
+) -> Option<String> {
+    let context = context?;
+    if !raw_provider_capture_enabled(Some(context)) {
+        return None;
+    }
+    let parsed_json = serde_json::from_str::<serde_json::Value>(body_text).ok();
+    let envelope = serde_json::json!({
+        "schema_version": "harn.llm.raw_provider_response.v1",
+        "kind": "response",
+        "captured_at": chrono_now(),
+        "call_id": context.call_id,
+        "iteration": context.iteration,
+        "attempt": attempt,
+        "provider": provider,
+        "model": model,
+        "transport": transport,
+        "status": status,
+        "content_type": content_type,
+        "body_text": body_text,
+        "body_json": parsed_json,
+    });
+    write_raw_provider_sidecar(
+        context,
+        &format!("response-{transport}"),
+        provider,
+        model,
+        attempt,
+        envelope,
+    )
+}
+
+fn write_raw_provider_sidecar(
+    context: &RawProviderCaptureContext,
+    suffix: &str,
+    provider: &str,
+    model: &str,
+    attempt: Option<usize>,
+    mut envelope: serde_json::Value,
+) -> Option<String> {
+    crate::redact::current_policy().redact_json_in_place(&mut envelope);
+    let dir = context.transcript_dir.as_deref()?;
+    let raw_dir = PathBuf::from(&dir).join("raw-provider");
+    std::fs::create_dir_all(&raw_dir).ok()?;
+    let call_id = raw_provider_file_id(&context.call_id);
+    let attempt_part = attempt
+        .map(|attempt| format!("-attempt-{attempt}"))
+        .unwrap_or_default();
+    let filename = format!("{call_id}{attempt_part}-{suffix}.json");
+    let relative_path = format!("raw-provider/{filename}");
+    let path = raw_dir.join(filename);
+    let encoded = serde_json::to_vec_pretty(&envelope).ok()?;
+    static RAW_PROVIDER_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    {
+        let _guard = RAW_PROVIDER_WRITE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .ok()?;
+        use std::io::Write;
+        file.write_all(&encoded).ok()?;
+        file.write_all(b"\n").ok()?;
+    }
+    append_llm_transcript_entry_to_dir(
+        &serde_json::json!({
+            "type": "provider_raw_capture",
+            "timestamp": chrono_now(),
+            "span_id": crate::tracing::current_span_id(),
+            "call_id": context.call_id,
+            "iteration": context.iteration,
+            "attempt": attempt,
+            "provider": provider,
+            "model": model,
+            "capture": suffix,
+            "path": relative_path,
+        }),
+        Some(dir),
+    );
+    Some(relative_path)
+}
+
+fn raw_provider_file_id(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "call".to_string()
+    } else {
+        sanitized
+    }
 }
 
 /// Classify whether a VmError from an LLM call is transient and worth
@@ -869,14 +1062,19 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
 /// produce invalid JSON that downstream readers (and tests) silently
 /// drop.
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
+    let dir = current_transcript_dir();
+    append_llm_transcript_entry_to_dir(entry, dir.as_deref());
+}
+
+fn append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option<&str>) {
     let mut redacted = entry.clone();
     crate::redact::current_policy().redact_json_in_place(&mut redacted);
     forward_transcript_run_events(&redacted);
     append_llm_transcript_event_log(&redacted);
-    let Some(dir) = current_transcript_dir() else {
+    let Some(dir) = dir else {
         return;
     };
-    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::create_dir_all(dir);
     let path = format!("{dir}/llm_transcript.jsonl");
     let Ok(line) = serde_json::to_string(&redacted) else {
         return;
@@ -1787,53 +1985,59 @@ pub(crate) async fn observed_llm_call(
                 session_id: c.session_id.clone(),
                 known_tools: c.known_tools.clone(),
             });
-        let llm_result = if let Some(b) = bridge {
-            let delta_tx = spawn_progress_forwarder(
-                b,
-                call_id.clone(),
-                user_visible,
-                detector_ctx,
-                first_token,
-            );
-            let delta_tx = match delta_sink.clone() {
-                Some(sink) => tee_delta_sender(vec![delta_tx, sink]),
-                None => delta_tx,
-            };
-            if offthread {
-                vm_call_llm_full_streaming_offthread(opts, delta_tx).await
-            } else {
-                vm_call_llm_full_streaming(opts, delta_tx).await
-            }
-        } else if offthread {
-            let delta_tx = match detector_ctx {
-                Some(ctx) => {
-                    let detector_tx = spawn_detector_only_forwarder(ctx, first_token);
-                    match delta_sink.clone() {
-                        Some(sink) => tee_delta_sender(vec![detector_tx, sink]),
-                        None => detector_tx,
+        let raw_capture_context =
+            RawProviderCaptureContext::new(call_id.clone(), iteration.unwrap_or(0));
+        let llm_result = with_raw_provider_capture_context(raw_capture_context, async {
+            if let Some(b) = bridge {
+                let delta_tx = spawn_progress_forwarder(
+                    b,
+                    call_id.clone(),
+                    user_visible,
+                    detector_ctx,
+                    first_token,
+                );
+                let delta_tx = match delta_sink.clone() {
+                    Some(sink) => tee_delta_sender(vec![delta_tx, sink]),
+                    None => delta_tx,
+                };
+                if offthread {
+                    vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+                } else {
+                    vm_call_llm_full_streaming(opts, delta_tx).await
+                }
+            } else if offthread {
+                let delta_tx = match detector_ctx {
+                    Some(ctx) => {
+                        let detector_tx = spawn_detector_only_forwarder(ctx, first_token);
+                        match delta_sink.clone() {
+                            Some(sink) => tee_delta_sender(vec![detector_tx, sink]),
+                            None => detector_tx,
+                        }
                     }
-                }
-                None if let Some(sink) = delta_sink.clone() => sink,
-                None => {
-                    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                    tx
-                }
-            };
-            vm_call_llm_full_streaming_offthread(opts, delta_tx).await
-        } else if let Some(sink) = delta_sink.clone() {
-            let delta_tx = match detector_ctx {
-                Some(ctx) => {
-                    tee_delta_sender(vec![spawn_detector_only_forwarder(ctx, first_token), sink])
-                }
-                None => sink,
-            };
-            vm_call_llm_full_streaming(opts, delta_tx).await
-        } else if let Some(ctx) = detector_ctx {
-            let delta_tx = spawn_detector_only_forwarder(ctx, first_token);
-            vm_call_llm_full_streaming(opts, delta_tx).await
-        } else {
-            super::api::vm_call_llm_full(opts).await
-        };
+                    None if let Some(sink) = delta_sink.clone() => sink,
+                    None => {
+                        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                        tx
+                    }
+                };
+                vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+            } else if let Some(sink) = delta_sink.clone() {
+                let delta_tx = match detector_ctx {
+                    Some(ctx) => tee_delta_sender(vec![
+                        spawn_detector_only_forwarder(ctx, first_token),
+                        sink,
+                    ]),
+                    None => sink,
+                };
+                vm_call_llm_full_streaming(opts, delta_tx).await
+            } else if let Some(ctx) = detector_ctx {
+                let delta_tx = spawn_detector_only_forwarder(ctx, first_token);
+                vm_call_llm_full_streaming(opts, delta_tx).await
+            } else {
+                super::api::vm_call_llm_full(opts).await
+            }
+        })
+        .await;
         drop(rate_limit_permit);
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -2414,6 +2618,26 @@ mod retry_tests {
         }
     }
 
+    fn set_env_for_test(key: &str, value: Option<&str>) -> Option<String> {
+        let previous = std::env::var(key).ok();
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+        previous
+    }
+
+    fn restore_env_for_test(key: &str, previous: Option<String>) {
+        match previous {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    fn temp_transcript_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{label}-{}", uuid::Uuid::now_v7()))
+    }
+
     // ----- L0 governor throttle detection (VmError -> ThrottleSignal) --------
 
     #[test]
@@ -2810,6 +3034,111 @@ mod retry_tests {
             Some("/tmp/harn-transcript-a")
         );
         pop_llm_transcript_dir();
+    }
+
+    #[test]
+    fn raw_provider_capture_is_disabled_by_default() {
+        let _guard = crate::llm::env_guard();
+        let previous_raw = set_env_for_test("HARN_LLM_TRANSCRIPT_RAW", None);
+        let dir = temp_transcript_dir("harn-raw-provider-disabled");
+        let dir_string = dir.to_string_lossy().to_string();
+        push_llm_transcript_dir(&dir_string);
+
+        let context = RawProviderCaptureContext::new("call-disabled".to_string(), 2);
+        let path = persist_raw_provider_request(
+            Some(&context),
+            "openai",
+            "gpt-test",
+            "openai",
+            None,
+            &serde_json::json!({"messages": []}),
+        );
+
+        pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_RAW", previous_raw);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn raw_provider_capture_writes_sidecars_and_pointer_events() {
+        let _guard = crate::llm::env_guard();
+        let previous_raw = set_env_for_test("HARN_LLM_TRANSCRIPT_RAW", Some("1"));
+        let dir = temp_transcript_dir("harn-raw-provider-enabled");
+        let dir_string = dir.to_string_lossy().to_string();
+        push_llm_transcript_dir(&dir_string);
+
+        let context = RawProviderCaptureContext::new("call/raw 1".to_string(), 7);
+        let request_path = persist_raw_provider_request(
+            Some(&context),
+            "openai",
+            "gpt-test",
+            "openai",
+            Some(3),
+            &serde_json::json!({"messages": [{"role": "user", "content": "hello"}]}),
+        )
+        .expect("request sidecar path");
+        let response_path = persist_raw_provider_response(
+            Some(&context),
+            "openai",
+            "gpt-test",
+            "json",
+            Some(3),
+            200,
+            Some("application/json"),
+            r#"{"choices":[{"message":{"content":"done"}}]}"#,
+        )
+        .expect("response sidecar path");
+
+        pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_RAW", previous_raw);
+
+        assert!(request_path.starts_with("raw-provider/"));
+        assert!(request_path.ends_with("-attempt-3-request.json"));
+        assert!(response_path.ends_with("-attempt-3-response-json.json"));
+
+        let request_text =
+            std::fs::read_to_string(dir.join(&request_path)).expect("request sidecar");
+        let request_json: serde_json::Value =
+            serde_json::from_str(&request_text).expect("request json");
+        assert_eq!(
+            request_json["schema_version"],
+            serde_json::json!("harn.llm.raw_provider_request.v1")
+        );
+        assert_eq!(request_json["wire_dialect"], serde_json::json!("openai"));
+        assert_eq!(request_json["attempt"], serde_json::json!(3));
+
+        let response_text =
+            std::fs::read_to_string(dir.join(&response_path)).expect("response sidecar");
+        let response_json: serde_json::Value =
+            serde_json::from_str(&response_text).expect("response json");
+        assert_eq!(
+            response_json["schema_version"],
+            serde_json::json!("harn.llm.raw_provider_response.v1")
+        );
+        assert_eq!(response_json["transport"], serde_json::json!("json"));
+        assert_eq!(response_json["status"], serde_json::json!(200));
+        assert!(response_json["body_json"].is_object());
+
+        let transcript =
+            std::fs::read_to_string(dir.join("llm_transcript.jsonl")).expect("transcript");
+        assert!(transcript.contains("\"type\":\"provider_raw_capture\""));
+        assert!(transcript.contains(&request_path));
+        assert!(transcript.contains(&response_path));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn raw_provider_capture_context_scopes_to_current_task() {
+        let context = RawProviderCaptureContext::new("call-context".to_string(), 4);
+        with_raw_provider_capture_context(context.clone(), async {
+            assert_eq!(current_raw_provider_capture_context(), Some(context));
+        })
+        .await;
+
+        assert_eq!(current_raw_provider_capture_context(), None);
     }
 
     // Regression for #2660. `append_llm_transcript_event_log` used to
