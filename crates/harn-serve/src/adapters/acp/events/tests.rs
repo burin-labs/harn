@@ -658,15 +658,14 @@ async fn feedback_injected_streak_reaches_acp_payload() {
 
     assert_eq!(actual.len(), 1);
     assert_eq!(actual[0]["method"], HARN_AGENT_EVENT_METHOD);
-    assert_eq!(actual[0]["params"]["kind"], "feedback_injected");
+    let params = &actual[0]["params"];
+    assert_eq!(params["kind"], "feedback_injected");
+    assert_eq!(params["feedbackKind"], "no_progress_streak_nudge");
     assert_eq!(
-        actual[0]["params"]["payload"],
-        serde_json::json!({
-            "feedbackKind": "no_progress_streak_nudge",
-            "content": "No progress last turn. Emit exactly one tool call now.",
-            "streak": 2,
-        }),
+        params["content"],
+        "No progress last turn. Emit exactly one tool call now."
     );
+    assert_eq!(params["streak"], 2);
 }
 
 #[tokio::test(flavor = "current_thread")]
