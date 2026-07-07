@@ -17,10 +17,12 @@ use crate::cli::{McpCommand, McpDiscoverArgs, McpLoginArgs, McpServerRefArgs};
 use crate::json_envelope::{self, JsonEnvelope};
 use crate::package::{self, McpAuthConfig, McpServerConfig};
 
+mod call;
 mod mock;
 mod oauth_resource;
 pub(crate) mod presets;
 pub(crate) mod serve;
+mod stdio_client;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
 use harn_vm::mcp_protocol::PROTOCOL_VERSION as MCP_PROTOCOL_VERSION;
@@ -49,6 +51,14 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 process::exit(1);
             }
         }
+        McpCommand::Call(args) => match call::run(args).await {
+            Ok(0) => {}
+            Ok(code) => process::exit(code),
+            Err(error) => {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        },
         McpCommand::Mock(args) => match mock::run(&args.command).await {
             Ok(0) => {}
             Ok(code) => process::exit(code),

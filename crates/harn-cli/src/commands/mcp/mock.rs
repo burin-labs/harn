@@ -9,13 +9,15 @@ use harn_vm::testbench::mcp_mock::{
 };
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 use crate::cli::{
     McpMockCommand, McpMockEvalArgs, McpMockRecordArgs, McpMockReplayArgs, McpMockVerifyArgs,
     McpMockWorldArgs,
 };
+
+use super::stdio_client::{jsonrpc_id_key, split_command, write_json_line};
 
 pub(crate) async fn run(command: &McpMockCommand) -> Result<i32, String> {
     match command {
@@ -338,36 +340,6 @@ fn eval_args(args: &McpMockEvalArgs) -> Result<i32, String> {
     let report = McpWorldEvalReport::from_scores(scores);
     emit_json(&report, args.report.as_deref())?;
     Ok(if report.passed { 0 } else { 2 })
-}
-
-fn split_command(command: &[String]) -> Result<(&str, &[String]), String> {
-    let Some((program, argv)) = command.split_first() else {
-        return Err("missing command after --".to_string());
-    };
-    Ok((program.as_str(), argv))
-}
-
-fn jsonrpc_id_key(id: Option<&JsonValue>) -> Option<String> {
-    id.and_then(|id| serde_json::to_string(id).ok())
-}
-
-async fn write_json_line<W>(writer: &mut W, value: &JsonValue) -> Result<(), String>
-where
-    W: AsyncWrite + Unpin,
-{
-    let line = serde_json::to_string(value).map_err(|error| format!("encode JSON: {error}"))?;
-    writer
-        .write_all(line.as_bytes())
-        .await
-        .map_err(|error| format!("write JSON line: {error}"))?;
-    writer
-        .write_all(b"\n")
-        .await
-        .map_err(|error| format!("write JSON line: {error}"))?;
-    writer
-        .flush()
-        .await
-        .map_err(|error| format!("flush JSON line: {error}"))
 }
 
 fn emit_json<T: Serialize>(value: &T, path: Option<&str>) -> Result<(), String> {
