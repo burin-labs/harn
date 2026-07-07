@@ -1,4 +1,12 @@
+fn record_echo_call(harness: Harness, state_file: string, args) {
+  if state_file == "" {
+    return nil
+  }
+  harness.fs.append(state_file, json_stringify({name: "echo", arguments: args}) + "\n")
+}
+
 pipeline default() {
+  const state_file = harness.env.get_or("HARN_MCP_ECHO_STATE_FILE", "")
   mcp_server_metadata(
     {
       name: "test-echo-server",
@@ -13,7 +21,10 @@ pipeline default() {
     "Echo a message back",
     {
       parameters: {message: "string"},
-      handler: { args -> args.message ?? "" },
+      handler: { args ->
+        record_echo_call(harness, state_file, args)
+        return args.message ?? ""
+      },
       annotations: {
         title: "Echo",
         readOnlyHint: true,
