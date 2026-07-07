@@ -1,6 +1,6 @@
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use std::{cell::RefCell, thread_local};
@@ -556,19 +556,19 @@ fn parse_path_status_access(args: &[VmValue]) -> Result<crate::stdlib::sandbox::
 
 fn base_path_status(
     path: String,
-    resolved: &PathBuf,
+    resolved: &Path,
     access: crate::stdlib::sandbox::FsAccess,
 ) -> BTreeMap<String, VmValue> {
     let mut info = BTreeMap::new();
     info.put_str("path", path);
-    info.put_str("resolved_path", resolved.to_string_lossy().into_owned());
+    info.put_str("resolved_path", resolved.to_string_lossy());
     info.put_str("access", fs_access_label(access));
     info
 }
 
 fn path_status_from_metadata(
     path: String,
-    resolved: &PathBuf,
+    resolved: &Path,
     access: crate::stdlib::sandbox::FsAccess,
     metadata: std::fs::Metadata,
 ) -> VmValue {
@@ -608,7 +608,7 @@ fn path_status_from_metadata(
 
 fn missing_path_status(
     path: String,
-    resolved: &PathBuf,
+    resolved: &Path,
     access: crate::stdlib::sandbox::FsAccess,
 ) -> VmValue {
     let mut info = base_path_status(path, resolved, access);
@@ -621,7 +621,7 @@ fn missing_path_status(
 
 fn scope_denied_path_status(
     path: String,
-    resolved: &PathBuf,
+    resolved: &Path,
     access: crate::stdlib::sandbox::FsAccess,
     violation: crate::stdlib::sandbox::SandboxViolation,
 ) -> VmValue {
@@ -636,13 +636,10 @@ fn scope_denied_path_status(
     info.insert("visible".to_string(), VmValue::Bool(false));
     info.insert("exists".to_string(), VmValue::Nil);
     info.insert("read_only".to_string(), VmValue::Bool(violation.read_only));
-    info.put_str(
-        "attempted",
-        violation.attempted.to_string_lossy().into_owned(),
-    );
+    info.put_str("attempted", violation.attempted.to_string_lossy());
     info.insert(
         "roots".to_string(),
-        VmValue::List(
+        VmValue::List(std::sync::Arc::new(
             violation
                 .roots
                 .iter()
@@ -650,7 +647,7 @@ fn scope_denied_path_status(
                     VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().into_owned()))
                 })
                 .collect(),
-        ),
+        )),
     );
     info.put_str("message", violation.message("path_status"));
     VmValue::dict(info)
@@ -658,7 +655,7 @@ fn scope_denied_path_status(
 
 fn stat_error_path_status(
     path: String,
-    resolved: &PathBuf,
+    resolved: &Path,
     access: crate::stdlib::sandbox::FsAccess,
     error: std::io::Error,
 ) -> VmValue {
