@@ -1,9 +1,10 @@
 .PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-capabilities check-provider-capabilities gen-provider-matrix check-provider-matrix check-provider-support gen-provider-config check-provider-config check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-python-boundary check-crate-sibling-versions gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry
 
 HARN_BIN ?=
-HARN_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",cargo run --quiet --bin harn --)
-HARN_CMD_VERBOSE = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",cargo run --bin harn --)
-HARN_CLI_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",cargo run --quiet -p harn-cli --)
+HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
+HARN_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",$(HARN_CARGO_CMD) run --quiet --bin harn --)
+HARN_CMD_VERBOSE = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",$(HARN_CARGO_CMD) run --bin harn --)
+HARN_CLI_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",$(HARN_CARGO_CMD) run --quiet -p harn-cli --)
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -338,6 +339,7 @@ test-pr-gate-scripts:
 	./scripts/tests/nextest_filters_from_paths_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
+	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/release_prepare_env_test.sh
 	./scripts/tests/publish_script_test.sh
