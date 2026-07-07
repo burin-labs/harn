@@ -4812,16 +4812,15 @@ fn __agent_loop_run(message, session, initial_opts) {
             let has_tools = len(opts?.tools?.tools ?? []) > 0
             let tool_mode = agent_tool_call_paradigm(turn_opts).kind
             let made_tool_calls = tool_count > 0
-            __inject_feedback_with_tool_repair(
-              session.session_id,
-              "no_progress_streak",
-              __progress_nudge_text(turns_since_progress, has_tools, tool_mode, made_tool_calls),
-            )
+            const nudge_text = __progress_nudge_text(turns_since_progress, has_tools, tool_mode, made_tool_calls)
+            __inject_feedback_with_tool_repair(session.session_id, "no_progress_streak", nudge_text)
             agent_emit_event(
               session.session_id,
               "no_progress_streak_nudge",
               {
                 iteration: iteration_index,
+                content: nudge_text,
+                streak: turns_since_progress,
                 turns_since_progress: turns_since_progress,
                 has_tools: has_tools,
                 made_tool_calls: made_tool_calls,
