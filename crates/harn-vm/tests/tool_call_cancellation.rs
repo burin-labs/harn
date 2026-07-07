@@ -120,7 +120,7 @@ pipeline main(_) {
   // observation text from the cancellation result. Verify the
   // "cancelled call to slow_tool" stamp made it in.
   let messages = transcript_messages(result.transcript)
-  var saw_cancellation_observation = false
+  let saw_cancellation_observation = false
   for msg in messages {
     let role = to_string(msg?.role ?? "")
     if role != "tool" && role != "tool_result" {
@@ -319,7 +319,7 @@ pipeline main(_) {
   let _ = await(canceller)
   log(result.status)
   let reminders = transcript_events_by_kind(result.transcript, "system_reminder")
-  var saw_cancellation = false
+  let saw_cancellation = false
   for event in reminders {
     if contains(event?.reminder?.body ?? "", "cancelled by the host") {
       saw_cancellation = true

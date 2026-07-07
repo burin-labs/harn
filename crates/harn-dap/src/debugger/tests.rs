@@ -293,13 +293,13 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
 
 pipeline test(task) {
   let pool = pool_create({name: "dap-pool-runtime", max_concurrent: 4})
-  var handles = []
+  let handles = []
   for i in 0 to 8 exclusive {
     let seed = i
     handles = handles.push(pool.submit({ -> seed + 10 }))
   }
   let results = pool_wait(handles)
-  var completed = 0
+  let completed = 0
   for result in results {
     if result.status == "completed" && result.result >= 10 {
       completed = completed + 1

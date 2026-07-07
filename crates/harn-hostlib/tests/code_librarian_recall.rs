@@ -98,7 +98,7 @@ fn librarian_query_meets_ground_truth_recall() {
 import "std/code_librarian"
 
 fn project(rows, key) {{
-  var out = []
+  let out = []
   for row in rows {{
     let v = row?[key]
     if v != nil {{
@@ -109,7 +109,7 @@ fn project(rows, key) {{
 }}
 
 let _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
-var rows = []
+let rows = []
 {query_lines}
 return rows
 "#
@@ -174,11 +174,11 @@ fn librarian_who_calls_returns_call_sites() {
 import "std/code_librarian"
 let _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
 let callers = code_librarian_who_calls("fetchUser")
-var paths = []
+let paths = []
 for c in callers {{
   paths = paths + [c.path]
 }}
-var symbols = []
+let symbols = []
 for c in callers {{
   symbols = symbols + [c.symbol]
 }}

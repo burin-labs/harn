@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn resolve_repair_edit_returns_fix_for_known_repair_id() {
-        let source = "fn main() {\n  var x = 1\n  print(x)\n}\n";
+        let source = "fn main() {\n  let x = 1\n  print(x)\n}\n";
         let state = DocumentState::new(source.to_string());
         let repair_id = make_immutable_repair_id(&state);
 
@@ -152,12 +152,12 @@ mod tests {
         let changes = edit.changes.expect("edit should carry per-file changes");
         let text_edits = changes.get(&doc_url()).expect("edit targets the document");
         assert_eq!(text_edits.len(), 1);
-        assert_eq!(text_edits[0].new_text, "let");
+        assert_eq!(text_edits[0].new_text, "const");
     }
 
     #[test]
     fn resolve_repair_edit_is_none_for_unknown_repair_id() {
-        let source = "fn main() {\n  var x = 1\n  print(x)\n}\n";
+        let source = "fn main() {\n  let x = 1\n  print(x)\n}\n";
         let state = DocumentState::new(source.to_string());
 
         let edit = resolve_repair_edit(

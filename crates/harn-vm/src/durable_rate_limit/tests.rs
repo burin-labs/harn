@@ -286,8 +286,8 @@ pipeline main(task) {
       timeout_ms: 0,
     })
   }
-  var successes = 0
-  var timeouts = 0
+  let successes = 0
+  let timeouts = 0
   for attempt in attempts {
     if attempt.ok {
       successes = successes + 1

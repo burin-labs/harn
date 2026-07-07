@@ -245,8 +245,8 @@ fn fanout_preserves_order_labels_and_isolates_children() {
         r#"{PRELUDE}
 pipeline main(task) {{
   let labels = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
-  var reqs = []
-  var i = 0
+  let reqs = []
+  let i = 0
   for label in labels {{
     let marker = "MARK-" + to_string(i)
     reqs = reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
@@ -303,8 +303,8 @@ fn fanout_isolates_a_single_child_failure() {
         r#"{PRELUDE}
 pipeline main(task) {{
   let labels = ["alpha", "bravo", "charlie", "delta", "echo"]
-  var reqs = []
-  var i = 0
+  let reqs = []
+  let i = 0
   for label in labels {{
     let marker = "MARK-" + to_string(i)
     let caller = if i == 2 {{ fail_caller(marker) }} else {{ ok_caller(marker) }}
@@ -374,8 +374,8 @@ fn fanout_runs_all_waves_without_dropping_or_reordering() {
         r#"{PRELUDE}
 pipeline main(task) {{
   let labels = ["w0", "w1", "w2", "w3", "w4"]
-  var reqs = []
-  var i = 0
+  let reqs = []
+  let i = 0
   for label in labels {{
     let marker = "WAVE-" + to_string(i)
     reqs = reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
@@ -542,8 +542,8 @@ fn fanout_isolates_a_spawn_time_throw() {
         r#"{PRELUDE}
 pipeline main(task) {{
   let labels = ["alpha", "bravo", "charlie"]
-  var reqs = []
-  var i = 0
+  let reqs = []
+  let i = 0
   for label in labels {{
     let marker = "MARK-" + to_string(i)
     let opts = if i == 1 {{
@@ -628,8 +628,8 @@ fn fanout_spawn_throw_in_first_wave_does_not_drop_later_waves() {
         r#"{PRELUDE}
 pipeline main(task) {{
   let labels = ["w0", "w1", "w2", "w3"]
-  var reqs = []
-  var i = 0
+  let reqs = []
+  let i = 0
   for label in labels {{
     let marker = "WAVE-" + to_string(i)
     let opts = if i == 0 {{

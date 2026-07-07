@@ -2184,7 +2184,7 @@ pub fn payload_schema() {
 }
 
 pub fn poll_tick(ctx) {
-  var previous = 0
+  let previous = 0
   if ctx.cursor != nil && ctx.cursor.count != nil {
     previous = ctx.cursor.count
   }

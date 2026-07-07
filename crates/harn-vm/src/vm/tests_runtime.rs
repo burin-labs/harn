@@ -396,7 +396,7 @@ fn test_comparisons() {
 
 #[test]
 fn test_let_var() {
-    let out = run_output("pipeline t(task) { let x = 42\nlog(x)\nvar y = 1\ny = 2\nlog(y) }");
+    let out = run_output("pipeline t(task) { let x = 42\nlog(x)\nlet y = 1\ny = 2\nlog(y) }");
     assert_eq!(out, "[harn] 42\n[harn] 2");
 }
 
@@ -411,7 +411,7 @@ if false { log("wrong") } else { log("no") } }"#,
 
 #[test]
 fn test_while_loop() {
-    let out = run_output("pipeline t(task) { var i = 0\n while i < 5 { i = i + 1 }\n log(i) }");
+    let out = run_output("pipeline t(task) { let i = 0\n while i < 5 { i = i + 1 }\n log(i) }");
     assert_eq!(out, "[harn] 5");
 }
 
@@ -432,7 +432,7 @@ fn test_inner_for_return_does_not_leak_iterator_into_caller() {
     return ""
   }
 
-  var seen = []
+  let seen = []
   for path in ["outer"] {
     seen = seen + [path + ":" + first_match()]
   }
@@ -726,8 +726,8 @@ fn test_inline_cache_warms_property_sites() {
 let list = [1, 2, 3]
 let text = ""
 let p = pair("left", "right")
-var i = 0
-var total = 0
+let i = 0
+let total = 0
 while i < 3 {
   total = total + list.count
   if text.empty {
@@ -786,8 +786,8 @@ struct Point {
 }
 let record = {hot: 7}
 let point = Point {x: 2, y: 3}
-var i = 0
-var total = 0
+let i = 0
+let total = 0
 while i < 3 {
   total = total + record.hot + point.y
   i = i + 1
@@ -851,8 +851,8 @@ let text = "abc"
 let dict = {a: 1, b: 2}
 let range = 1 to 3
 let values = set(1, 2)
-var i = 0
-var total = 0
+let i = 0
+let total = 0
 while i < 3 {
   total = total + list.count()
   total = total + text.count()
@@ -898,8 +898,8 @@ log(total)
 fn test_inline_cache_warms_harness_property_and_method_sites() {
     let (entries, out, result) = run_harn_with_inline_cache_entries(
         r#"fn main(harness: Harness) {
-  var i = 0
-  var hits = 0
+  let i = 0
+  let hits = 0
   while i < 3 {
     if harness.env.get_or("__HARN_TEST_MISSING__", "fallback") == "fallback" {
       hits = hits + 1
@@ -952,8 +952,8 @@ fn test_adaptive_inline_cache_specializes_generic_integer_add_site() {
 fn erase(x) {
   return x
 }
-var i = erase(0)
-var total = erase(0)
+let i = erase(0)
+let total = erase(0)
 while i < erase(8) {
   total = total + i
   i = i + erase(1)
@@ -987,7 +987,7 @@ fn erase(x) {
   return x
 }
 let values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
-var acc = erase(0)
+let acc = erase(0)
 for value in values {
   acc = acc + value
 }
@@ -1019,8 +1019,8 @@ fn test_adaptive_inline_cache_specializes_named_closure_call_site() {
 fn inc(x) {
   return x + 1
 }
-var i = 0
-var total = 0
+let i = 0
+let total = 0
 while i < 8 {
   total = total + inc(i)
   i = i + 1
@@ -1051,9 +1051,9 @@ fn inc(x) {
 fn dec(x) {
   return x - 1
 }
-var op = inc
-var i = 0
-var total = 0
+let op = inc
+let i = 0
+let total = 0
 while i < 5 {
   if i == 3 {
     op = dec
@@ -1083,7 +1083,7 @@ fn test_inline_cache_warms_spread_method_site() {
         r"pipeline t(task) {
 let list = [1, 2, 3]
 let args = []
-var i = 0
+let i = 0
 while i < 3 {
   log(list.count(...args))
   i = i + 1
@@ -1266,9 +1266,9 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
 fn test_slot_locals_preserve_shadowing_and_assignment() {
     let out = run_output(
         r"pipeline t(task) {
-var x = 1
+let x = 1
 if true {
-  var x = 10
+  let x = 10
   x = x + 1
   log(x)
 }
@@ -1299,7 +1299,7 @@ log(sum_to(5))
 fn test_slot_locals_sync_for_closure_capture() {
     let out = run_output(
         r"pipeline t(task) {
-var x = 1
+let x = 1
 x = 7
 let f = { -> x + 1 }
 log(f())
@@ -1312,7 +1312,7 @@ log(f())
 fn test_slot_property_assignment_updates_slot_value() {
     let out = run_output(
         r"pipeline t(task) {
-var d = {count: 1}
+let d = {count: 1}
 d.count = d.count + 2
 log(d.count)
 }",
@@ -1324,10 +1324,10 @@ log(d.count)
 fn test_slot_subscript_assignment_updates_slot_value() {
     let out = run_output(
         r#"pipeline t(task) {
-var d = {}
+let d = {}
 d["a"] = 1
 d["b"] = 2
-var xs = [0, 0]
+let xs = [0, 0]
 xs[1] = 3
 log(d.a + d["b"] + xs[1])
 }"#,
@@ -1348,7 +1348,7 @@ fn test_try_catch_basic() {
 fn test_try_no_error() {
     let out = run_output(
         r"pipeline t(task) {
-var result = 0
+let result = 0
 try { result = 42 } catch(e) { result = 0 }
 log(result)
 }",
@@ -1473,7 +1473,7 @@ fn test_for_loop_new() {
 
 #[test]
 fn test_while_loop_new() {
-    let out = run_vm("pipeline default(task) { var i = 0\nwhile i < 3 { log(i)\ni = i + 1 } }");
+    let out = run_vm("pipeline default(task) { let i = 0\nwhile i < 3 { log(i)\ni = i + 1 } }");
     assert_eq!(out, "[harn] 0\n[harn] 1\n[harn] 2\n");
 }
 
@@ -1869,7 +1869,7 @@ fn test_cancel_graceful_propagates_to_cpu_bound_spawn() {
     let out = run_output(
         r#"pipeline t(task) {
 let handle = spawn {
-  var i = 0
+  let i = 0
   while true {
     i = i + 1
   }
@@ -1934,7 +1934,7 @@ import "std/signal"
 
 pipeline t() {
   on_interrupt({ ->
-    var spin = 0
+    let spin = 0
     while true { spin = spin + 1 }
   }, {graceful_timeout_ms: 0})
   let result = try {
@@ -2024,7 +2024,7 @@ fn test_deadline_exceeded() {
     let result = run_harn_result(
         r"pipeline t(task) {
 deadline 1ms {
-  var i = 0
+  let i = 0
   while i < 1000000 { i = i + 1 }
 }
 }",
@@ -2038,7 +2038,7 @@ fn test_deadline_caught_by_try() {
         r#"pipeline t(task) {
 try {
   deadline 1ms {
-    var i = 0
+    let i = 0
     while i < 1000000 { i = i + 1 }
   }
 } catch(e) {
@@ -3001,9 +3001,9 @@ fn typed_param_lambda_uses_check_type_and_walks() {
 #[test]
 fn var_reassigned_via_any_matches_unoptimized() {
     let source = r#"pipeline default(task) {
-  var x = 0
-  var sum = 0
-  var i = 0
+  let x = 0
+  let sum = 0
+  let i = 0
   let cell = shared_cell("k", 2.5)
   while i < 3 {
     sum = sum + x
@@ -3030,7 +3030,7 @@ fn var_reassigned_via_any_matches_unoptimized() {
 #[test]
 fn for_item_reassigned_via_any_matches_unoptimized() {
     let source = r#"pipeline default(task) {
-  var sum = 0
+  let sum = 0
   let cell = shared_cell("k", 2.5)
   for n in [1, 2, 3] {
     sum = sum + n
@@ -3056,8 +3056,8 @@ fn for_item_reassigned_via_any_matches_unoptimized() {
 #[test]
 fn monomorphic_counter_loop_result_is_correct() {
     let source = r#"pipeline default(task) {
-  var i = 0
-  var total = 0
+  let i = 0
+  let total = 0
   while i < 10 {
     total = total + (i + 3) * 2 - 1
     i = i + 1
@@ -3076,11 +3076,11 @@ fn inplace_concat_untyped_accumulator_builds_correctly() {
     let source = r#"
 fn seed() -> any { return [] }
 pipeline t(task) {
-  var x = seed()
+  let x = seed()
   for i in [1, 2, 3] {
     x = x + [i]
   }
-  var y = seed()
+  let y = seed()
   for i in [4, 5] {
     y += [i]
   }
@@ -3096,7 +3096,7 @@ fn list_push_assign_preserves_alias_immutability() {
     // pointing at the original immutable list.
     let source = r#"
 pipeline t(task) {
-  var x = []
+  let x = []
   x = x.push(1)
   let y = x
   x = x.push(2)
@@ -3113,7 +3113,7 @@ fn inplace_concat_preserves_binding_when_add_throws() {
     // left as the placeholder.
     let source = r#"
 pipeline t(task) {
-  var x = 5
+  let x = 5
   try {
     x += [1]
   } catch (e) {

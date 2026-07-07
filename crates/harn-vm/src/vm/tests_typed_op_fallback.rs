@@ -89,7 +89,7 @@ fn annotated_var_initializer_from_dynamic_float_falls_back() {
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
   let cell = shared_cell("k", 4.5)
-  var x: int = shared_get(cell)
+  let x: int = shared_get(cell)
   log("${x - 1}")
 }"#,
     );
@@ -154,8 +154,8 @@ fn monomorphic_fast_path_still_correct() {
     // The hot path (operands match the static guess) is unaffected.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
-  var i = 0
-  var total = 0
+  let i = 0
+  let total = 0
   while i < 10 {
     total = total + (i + 3) * 2 - 1
     i = i + 1

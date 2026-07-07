@@ -155,7 +155,7 @@ pipeline main(task) {{
   )
   log(result.status)
   let checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
-  var skipped_count = 0
+  let skipped_count = 0
   for event in checkpoints {{
     if event?.metadata?.dispatch_skipped == true {{
       skipped_count = skipped_count + 1
@@ -166,7 +166,7 @@ pipeline main(task) {{
   log(stats.tool_result_message_count)
   log(shared_get(handler_calls))
   let messages = transcript_messages(result.transcript)
-  var placeholder_count = 0
+  let placeholder_count = 0
   for message in messages {{
     let role = message?.role ?? ""
     if role == "tool" || role == "tool_result" {{
@@ -300,7 +300,7 @@ pipeline main(task) {{
   log(result.status)
   log(shared_get(call_counter))
   let reminder_events = transcript_events_by_kind(result.transcript, "system_reminder")
-  var saw_audit_reminder = false
+  let saw_audit_reminder = false
   for event in reminder_events {{
     if event?.reminder?.body == "audit trail: agent finished the merge" {{
       saw_audit_reminder = true
@@ -308,7 +308,7 @@ pipeline main(task) {{
   }}
   log(saw_audit_reminder)
   let checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
-  var loop_exit_deliveries = 0
+  let loop_exit_deliveries = 0
   for event in checkpoints {{
     if event?.metadata?.kind == "loop_exit" && (event?.metadata?.delivered ?? 0) >= 1 {{
       loop_exit_deliveries = loop_exit_deliveries + 1
@@ -463,8 +463,8 @@ pipeline main(task) {{
   log(stats.tool_result_message_count)
 
   let checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
-  var mid_turn_deliveries = 0
-  var loop_exit_deliveries = 0
+  let mid_turn_deliveries = 0
+  let loop_exit_deliveries = 0
   for event in checkpoints {{
     let delivered = event?.metadata?.delivered ?? 0
     if delivered >= 1 {{
@@ -482,11 +482,11 @@ pipeline main(task) {{
   // the steer user message must land after the tool_result and before the
   // final assistant message.
   let messages = transcript_messages(result.transcript)
-  var steer_user_count = 0
-  var tool_result_idx = -1
-  var steer_idx = -1
-  var last_assistant_idx = -1
-  var idx = 0
+  let steer_user_count = 0
+  let tool_result_idx = -1
+  let steer_idx = -1
+  let last_assistant_idx = -1
+  let idx = 0
   for message in messages {{
     let role = message?.role ?? ""
     let content = message?.content ?? ""

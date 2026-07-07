@@ -265,7 +265,7 @@ fn test_signal_cancel_unwinds_step_loop() {
     // instruction check throws VmError::Thrown with the
     // cancelled kind.
     let chunk =
-        crate::compile_source("pipeline t(task) { var i = 0\n while i < 1000000 { i = i + 1 } }\n")
+        crate::compile_source("pipeline t(task) { let i = 0\n while i < 1000000 { i = i + 1 } }\n")
             .unwrap();
     vm.start(&chunk);
     vm.signal_cancel();

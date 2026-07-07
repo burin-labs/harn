@@ -63,14 +63,14 @@ fn introspection_tools_bundle_adds_all_by_default() {
 pipeline main(task) {
   let reg = runtime_introspection_tools(tool_registry())
   let names = []
-  var collected = names
+  let collected = names
   for entry in reg.tools {
     collected = collected + [entry.name]
   }
   for name in ["current_model", "current_provider", "current_context_window",
                "current_harn_version", "current_harness",
                "available_runtime_capabilities", "current_compaction_policy"] {
-    var found = false
+    let found = false
     for n in collected {
       if n == name {
         found = true
@@ -106,7 +106,7 @@ pipeline main(task) {
   )
   log(len(reg.tools))
   let sorted = []
-  var collected = sorted
+  let collected = sorted
   for entry in reg.tools {
     collected = collected + [entry.name]
   }
@@ -128,9 +128,9 @@ pipeline main(task) {
     tool_registry(),
     {exclude: ["current_compaction_policy", "available_runtime_capabilities"]},
   )
-  var has_compaction = false
-  var has_capabilities = false
-  var has_model = false
+  let has_compaction = false
+  let has_capabilities = false
+  let has_model = false
   for entry in reg.tools {
     if entry.name == "current_compaction_policy" {
       has_compaction = true

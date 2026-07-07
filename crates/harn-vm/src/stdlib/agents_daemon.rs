@@ -1077,8 +1077,8 @@ pipeline test(task) {
         let (output, _) = run_harn_result(
             r#"
 fn wait_for_iterations(handle, min_iterations) {
-  var attempts = 0
-  var snap = daemon_snapshot(handle)
+  let attempts = 0
+  let snap = daemon_snapshot(handle)
   while attempts < 200 && snap?.total_iterations ?? 0 < min_iterations {
     sleep(10ms)
     snap = daemon_snapshot(handle)

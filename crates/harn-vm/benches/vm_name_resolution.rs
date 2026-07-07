@@ -42,8 +42,8 @@ fn rt() -> tokio::runtime::Runtime {
 const LOCAL_READ: &str = r"pipeline t(task) {
   fn work() {
     let a = 1
-    var total = 0
-    var i = 0
+    let total = 0
+    let i = 0
     while i < 50000 {
       total = total + a + a + a + a + a + a + a + a + a + a
       i = i + 1
@@ -59,8 +59,8 @@ const LOCAL_READ: &str = r"pipeline t(task) {
 const GLOBAL_READ: &str = r"pipeline t(task) {
   let a = 1
   fn work() {
-    var total = 0
-    var i = 0
+    let total = 0
+    let i = 0
     while i < 50000 {
       total = total + a + a + a + a + a + a + a + a + a + a
       i = i + 1
@@ -95,8 +95,8 @@ const GLOBAL_READ_MANY_LOCALS: &str = r"pipeline t(task) {
     let l17 = 17
     let l18 = 18
     let l19 = 19
-    var total = l0 + l19
-    var i = 0
+    let total = l0 + l19
+    let i = 0
     while i < 50000 {
       total = total + a + a + a + a + a + a + a + a + a + a
       i = i + 1
@@ -118,8 +118,8 @@ fn bench(c: &mut Criterion, name: &str, src: &str) {
 /// before the builtin finally dispatches by id.
 const BUILTIN_CALL: &str = r"pipeline t(task) {
   fn work() {
-    var total = 0
-    var i = 0
+    let total = 0
+    let i = 0
     while i < 50000 {
       total = abs(i) + abs(i) + abs(i) + abs(i) + abs(i) + abs(i) + abs(i) + abs(i) + abs(i) + abs(i)
       i = i + 1
@@ -135,8 +135,8 @@ const BUILTIN_CALL: &str = r"pipeline t(task) {
 const USER_FN_CALL: &str = r"pipeline t(task) {
   fn dbl(x) { return x + x }
   fn work() {
-    var total = 0
-    var i = 0
+    let total = 0
+    let i = 0
     while i < 50000 {
       total = dbl(i) + dbl(i) + dbl(i) + dbl(i) + dbl(i) + dbl(i) + dbl(i) + dbl(i) + dbl(i) + dbl(i)
       i = i + 1

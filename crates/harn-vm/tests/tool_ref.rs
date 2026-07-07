@@ -37,7 +37,7 @@ fn out(source: &str) -> Vec<String> {
 fn tool_ref_returns_name_when_registered() {
     let lines = out(r#"
 pipeline main(task) {
-  var r = tool_registry()
+  let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
   log(tool_ref("edit"))
@@ -50,7 +50,7 @@ pipeline main(task) {
 fn tool_ref_throws_on_unknown_name() {
     let err = run(r#"
 pipeline main(task) {
-  var r = tool_registry()
+  let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
   log(tool_ref("nonexistent"))
@@ -85,7 +85,7 @@ pipeline main(task) {
 fn tool_def_returns_registered_entry() {
     let lines = out(r#"
 pipeline main(task) {
-  var r = tool_registry()
+  let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file in place", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
   let def = tool_def("edit")
@@ -100,7 +100,7 @@ pipeline main(task) {
 fn tool_def_throws_on_unknown_name() {
     let err = run(r#"
 pipeline main(task) {
-  var r = tool_registry()
+  let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
   log(tool_def("nonexistent"))
@@ -131,7 +131,7 @@ pipeline main(task) {
 fn tool_bind_nil_clears_registry() {
     let err = run(r#"
 pipeline main(task) {
-  var r = tool_registry()
+  let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
   tool_bind(nil)

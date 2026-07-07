@@ -63,7 +63,7 @@ fn user_fn_shadowing_a_builtin_name_still_wins() {
 fn builtin_calls_work_inside_a_loop() {
     let result = eval(
         r"pipeline t(task) {
-            var s = 0
+            let s = 0
             for x in [-1, -2, 3] {
                 s = s + abs(x)
             }

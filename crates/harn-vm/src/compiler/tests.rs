@@ -99,8 +99,8 @@ fn test_compile_arithmetic() {
 fn test_compile_typed_int_loop_ops() {
     let chunk = compile_source(
         "pipeline test(task) {
-  var i = 0
-  var total = 0
+  let i = 0
+  let total = 0
   while i < 10 {
     total = total + (i + 3) * 2 - 1
     i = i + 1
@@ -174,8 +174,8 @@ fn monomorphic_var_keeps_typed_int_ops() {
     // use precedes the reassignment in source order.
     let chunk = compile_source(
         "pipeline test(task) {
-  var x = 0
-  var i = 0
+  let x = 0
+  let i = 0
   while i < 3 {
     log(x + 1)
     x = x + 2
@@ -200,7 +200,7 @@ fn polymorphic_var_reassigned_from_dynamic_falls_back_to_generic() {
     // appearing at all would mean `x` was wrongly specialized.)
     let chunk = compile_source(
         "pipeline test(task) {
-  var x = 0
+  let x = 0
   let cell = shared_cell(\"k\", 2.5)
   log(x + 1)
   x = shared_get(cell)
@@ -223,8 +223,8 @@ fn polymorphic_var_demotes_dependent_sibling() {
     // primitive type is not provable either — the fixpoint must demote both.
     let chunk = compile_source(
         "pipeline test(task) {
-  var x = 0
-  var sum = 0
+  let x = 0
+  let sum = 0
   let cell = shared_cell(\"k\", 2.5)
   sum = sum + x
   x = shared_get(cell)
@@ -245,7 +245,7 @@ fn for_item_reassigned_from_dynamic_falls_back_to_generic() {
     // stay generic.
     let chunk = compile_source(
         "pipeline test(task) {
-  var sum = 0
+  let sum = 0
   let cell = shared_cell(\"k\", 2.5)
   for n in [1, 2, 3] {
     sum = sum + n
@@ -267,7 +267,7 @@ fn for_item_never_reassigned_keeps_typed_ops() {
     // fast path.
     let chunk = compile_source(
         "pipeline test(task) {
-  var sum = 0
+  let sum = 0
   for n in [1, 2, 3] {
     sum = sum + n
   }
@@ -402,7 +402,7 @@ fn test_compile_if_else() {
 
 #[test]
 fn test_compile_while() {
-    let chunk = compile_source("pipeline test(task) { var i = 0\n while i < 5 { i = i + 1 } }");
+    let chunk = compile_source("pipeline test(task) { let i = 0\n while i < 5 { i = i + 1 } }");
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("JUMP_IF_FALSE"));
     assert!(disasm.contains("JUMP"));
@@ -413,7 +413,7 @@ fn test_compile_locals_to_slots() {
     let chunk = compile_source(
         "pipeline test(task) {
   let a = 1
-  var i = 0
+  let i = 0
   while i < 3 {
     i = i + a
   }
@@ -452,7 +452,7 @@ fn assert_loop_guard_keeps_local_slots(source: &str) {
 fn loop_guard_break_keeps_later_bindings_in_local_slots() {
     assert_loop_guard_keeps_local_slots(
         r#"pipeline test(task) {
-  var index = 0
+  let index = 0
   while index < 1 {
     let name = "abc"
     if name == "" {
@@ -469,7 +469,7 @@ fn loop_guard_break_keeps_later_bindings_in_local_slots() {
 fn loop_guard_continue_keeps_later_bindings_in_local_slots() {
     assert_loop_guard_keeps_local_slots(
         r#"pipeline test(task) {
-  var index = 0
+  let index = 0
   while index < 1 {
     let name = "abc"
     if name == "" {
@@ -730,7 +730,7 @@ fn inplace_list_concat_uses_fused_opcode() {
     // `CONCAT_ASSIGN_LOCAL` opcode. At runtime it takes the slot's value in
     // place before the concat so `Arc::try_unwrap` extends the existing
     // allocation rather than cloning it (O(n^2) -> O(1) amortized).
-    let chunk = compile_source("pipeline t(task) {\n  var x = []\n  x = x + [1]\n}");
+    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x = x + [1]\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
@@ -747,7 +747,7 @@ fn list_push_assign_uses_fused_concat_opcode() {
     // `x = x.push(i)` is the method spelling of an immutable list append, so a
     // local list accumulator should use the same fused concat opcode as
     // `x = x + [i]` instead of dispatching through the cloning list method.
-    let chunk = compile_source("pipeline t(task) {\n  var x = []\n  x = x.push(1)\n}");
+    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x = x.push(1)\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
@@ -762,7 +762,7 @@ fn list_push_assign_uses_fused_concat_opcode() {
 #[test]
 fn inplace_list_concat_compound_assign_form() {
     // `x += [i]` gets the same fused opcode as `x = x + [i]`.
-    let chunk = compile_source("pipeline t(task) {\n  var x = []\n  x += [1]\n}");
+    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x += [1]\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
@@ -776,7 +776,7 @@ fn inplace_concat_fires_for_untyped_local_accumulator() {
     // whose static type is unknown (`any`-returning helper) still gets the
     // in-place path — the gap the compile-time-typed peephole could not close.
     let chunk = compile_source(
-        "fn seed() -> any { return [] }\npipeline t(task) {\n  var x = seed()\n  x = x + [1]\n}",
+        "fn seed() -> any { return [] }\npipeline t(task) {\n  let x = seed()\n  x = x + [1]\n}",
     );
     let d = chunk.disassemble("t");
     assert!(
@@ -789,7 +789,7 @@ fn inplace_concat_fires_for_untyped_local_accumulator() {
 fn inplace_concat_skips_scalar_compound_assign() {
     // `i = i + 1` must NOT take the list peephole: it keeps the specialized
     // ADD_INT fast path and a single store (no clear-binding doubling).
-    let chunk = compile_source("pipeline t(task) {\n  var i = 0\n  i = i + 1\n}");
+    let chunk = compile_source("pipeline t(task) {\n  let i = 0\n  i = i + 1\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("ADD_INT"),
@@ -804,7 +804,7 @@ fn inplace_concat_skips_scalar_compound_assign() {
 
 #[test]
 fn local_property_assignment_uses_slot_opcode() {
-    let chunk = compile_source("pipeline t(task) {\n  var out = {}\n  out.a = 1\n}");
+    let chunk = compile_source("pipeline t(task) {\n  let out = {}\n  out.a = 1\n}");
     let d = chunk.disassemble("t");
     let opcodes = disasm_opcodes(&d);
     assert!(
@@ -819,7 +819,7 @@ fn local_property_assignment_uses_slot_opcode() {
 
 #[test]
 fn local_subscript_assignment_uses_slot_opcode() {
-    let chunk = compile_source("pipeline t(task) {\n  var out = {}\n  out[\"a\"] = 1\n}");
+    let chunk = compile_source("pipeline t(task) {\n  let out = {}\n  out[\"a\"] = 1\n}");
     let d = chunk.disassemble("t");
     let opcodes = disasm_opcodes(&d);
     assert!(
@@ -834,7 +834,7 @@ fn local_subscript_assignment_uses_slot_opcode() {
 
 #[test]
 fn nonlocal_subscript_assignment_keeps_by_name_opcode() {
-    let chunk = compile_source("var out = {}\npipeline t(task) {\n  out[\"a\"] = 1\n}");
+    let chunk = compile_source("let out = {}\npipeline t(task) {\n  out[\"a\"] = 1\n}");
     let d = chunk.disassemble("t");
     let opcodes = disasm_opcodes(&d);
     assert!(

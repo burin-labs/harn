@@ -1697,7 +1697,7 @@ fn main(harness: Harness) {
         run_harness_source(
             r#"
 fn main(harness: Harness) {
-  var i = 0
+  let i = 0
   while i < 3 {
     let _ = harness.clock.elapsed()
     let value = harness.env.get_or("KEY", "")
