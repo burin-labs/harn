@@ -297,18 +297,13 @@ jobs:
       # only drops the binary in PATH; it does NOT replace /usr/bin/ld, so the
       # stock linker stays intact and rustc opts in explicitly through the
       # `-fuse-ld=mold` link-arg. ubuntu-latest's gcc cc-driver (>=12) supports
-      # `-fuse-ld=mold` directly. Mirrors the apt install used by burin-code.
+      # `-fuse-ld=mold` directly.
       - name: Install mold linker
+        uses: ./.github/actions/apt-install
         timeout-minutes: 5
-        run: |
-          set -euo pipefail
-          if command -v mold >/dev/null 2>&1; then
-            mold --version
-            exit 0
-          fi
-          sudo apt-get update
-          sudo apt-get install -y mold
-          mold --version
+        with:
+          packages: mold
+          check-command: mold
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         if: matrix.rust_components == ''
         with:
@@ -444,19 +439,13 @@ jobs:
           fetch-depth: 0
       # Install mold early so the later `cargo run --bin harn` link steps use
       # it. apt's `mold` does not replace /usr/bin/ld; rustc opts in via the
-      # `-fuse-ld=mold` RUSTFLAGS link-arg above. Mirrors burin-code's apt
-      # install.
+      # `-fuse-ld=mold` RUSTFLAGS link-arg above.
       - name: Install mold linker
+        uses: ./.github/actions/apt-install
         timeout-minutes: 5
-        run: |
-          set -euo pipefail
-          if command -v mold >/dev/null 2>&1; then
-            mold --version
-            exit 0
-          fi
-          sudo apt-get update
-          sudo apt-get install -y mold
-          mold --version
+        with:
+          packages: mold
+          check-command: mold
       # Pure-shell grep gate: agent-facing hostlib paths must be
       # forward-slash-normalized on every platform (see
       # scripts/check_agent_path_normalization.sh). Kept with the other
@@ -731,14 +720,14 @@ jobs:
         # toolchain action's `targets:` — that adds it to the wrong toolchain.
         run: rustup target add x86_64-pc-windows-gnu
       - name: Install mingw-w64 cross toolchain
-        run: |
-          sudo apt-get update
-          # gcc-mingw-w64-x86-64 provides x86_64-w64-mingw32-{gcc,g++,ar}, which
-          # cc-rs / the C build scripts (ring, aws-lc-sys) use to cross-compile.
-          # cmake + nasm are needed by aws-lc-sys's assembly/build; they are the
-          # only non-mingw prerequisites this cross-check adds.
-          sudo apt-get install -y --no-install-recommends \
-            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm cmake
+        # gcc-mingw-w64-x86-64 provides x86_64-w64-mingw32-{gcc,g++,ar}, which
+        # cc-rs / the C build scripts (ring, aws-lc-sys) use to cross-compile.
+        # cmake + nasm are needed by aws-lc-sys's assembly/build; they are the
+        # only non-mingw prerequisites this cross-check adds.
+        uses: ./.github/actions/apt-install
+        with:
+          packages: gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm cmake
+          check-command: x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++ nasm cmake
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:

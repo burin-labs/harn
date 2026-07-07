@@ -145,7 +145,10 @@ jobs:
         # security-audit lane greps the repo via `rg` — install
         # explicitly to match the local dev expectation.
         if: steps.bump.outputs.skip != 'true'
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ripgrep
+          check-command: rg
 
       - name: Build tree-sitter grammar
         # grammar-audit's verify_tree_sitter_parse.harn loads the

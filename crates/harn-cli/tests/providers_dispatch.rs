@@ -578,3 +578,165 @@ fn provider_tool_probe_fixture_nonstreaming_human_is_byte_identical_across_runs(
         "tool-probe non-streaming human stdout diverged"
     );
 }
+
+// ─── provider tool-scorecard (fixture report mode) ───────────────────────
+
+#[test]
+fn provider_tool_scorecard_json_is_structurally_identical_across_runs() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let passing = dir.path().join("passing.json");
+    let failing = dir.path().join("failing.json");
+    write_tool_probe_report_fixture(
+        &passing,
+        1,
+        "anthropic",
+        "claude",
+        "structured_native_tool_call",
+        true,
+    );
+    write_tool_probe_report_fixture(&failing, 1, "fireworks", "gpt-oss", "empty_silent", false);
+    let passing_path = passing.to_string_lossy().into_owned();
+    let failing_path = failing.to_string_lossy().into_owned();
+    let argv = [
+        "provider",
+        "tool-scorecard",
+        "--tool-probe-report",
+        passing_path.as_str(),
+        "--tool-probe-report",
+        failing_path.as_str(),
+    ];
+
+    let harn = run(&argv, &[]);
+    let repeat = run(&argv, &[]);
+    assert_eq!(
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
+    );
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
+    assert_eq!(
+        repeat_value, harn_value,
+        "tool-scorecard JSON shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
+    );
+    assert_eq!(harn_value["route_count"], 2);
+    assert_eq!(harn_value["summary"]["pass"], 1);
+    assert_eq!(harn_value["summary"]["fail"], 1);
+    assert_eq!(harn_value["routes"][0]["provider"], "anthropic");
+    assert_eq!(harn_value["routes"][1]["status"], "fail");
+}
+
+#[test]
+fn provider_tool_scorecard_human_is_byte_identical_across_runs() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("passing.json");
+    write_tool_probe_report_fixture(
+        &fixture,
+        1,
+        "anthropic",
+        "claude",
+        "structured_native_tool_call",
+        true,
+    );
+    let path = fixture.to_string_lossy().into_owned();
+    let argv = [
+        "provider",
+        "tool-scorecard",
+        "--tool-probe-report",
+        path.as_str(),
+        "--json=false",
+    ];
+
+    let harn = run(&argv, &[]);
+    let repeat = run(&argv, &[]);
+    assert_eq!(
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
+    );
+    assert_eq!(
+        harn.stdout, repeat.stdout,
+        "tool-scorecard human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
+    );
+    assert!(
+        harn.stdout
+            .contains("provider tool-call scorecard: routes=1 pass=1 warn=0 fail=0"),
+        "unexpected human output: {}",
+        harn.stdout
+    );
+}
+
+#[test]
+fn provider_tool_scorecard_rejects_unsupported_tool_probe_schema() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("future.json");
+    write_tool_probe_report_fixture(
+        &fixture,
+        999,
+        "anthropic",
+        "claude",
+        "structured_native_tool_call",
+        true,
+    );
+    let path = fixture.to_string_lossy().into_owned();
+    let harn = run(
+        &[
+            "provider",
+            "tool-scorecard",
+            "--tool-probe-report",
+            path.as_str(),
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 1, "unexpected stdout: {}", harn.stdout);
+    assert!(
+        harn.stderr
+            .contains("unsupported tool-probe report schema_version 999"),
+        "unexpected stderr: {}",
+        harn.stderr
+    );
+}
+
+fn write_tool_probe_report_fixture(
+    path: &Path,
+    schema_version: u32,
+    provider: &str,
+    model: &str,
+    classification: &str,
+    ok: bool,
+) {
+    let fallback = if ok { "native" } else { "disabled" };
+    let body = serde_json::json!({
+        "schema_version": schema_version,
+        "provider": provider,
+        "model": model,
+        "tool_name": "echo_marker",
+        "marker": "marker",
+        "cases": [
+            {
+                "mode": "non_streaming",
+                "ok": ok,
+                "classification": classification,
+                "fallback_mode": fallback,
+                "native_tool_call_count": usize::from(ok),
+                "text_tool_call_count": 0,
+                "parser_errors": [],
+                "protocol_violations": []
+            }
+        ],
+        "tool_calling": {
+            "native": if ok { "pass" } else { "fail" },
+            "text": "unknown",
+            "streaming_native": "unknown",
+            "fallback_mode": fallback
+        }
+    });
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(&body).expect("serialize fixture"),
+    )
+    .expect("write scorecard fixture");
+}

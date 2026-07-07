@@ -13,7 +13,6 @@
 //! readiness HTTP probe + `/api/ps` calls), the rendering layer lives
 //! in `crates/harn-stdlib/src/stdlib/cli/providers/{probe,tool_probe}.harn`.
 
-use std::io::Write as _;
 use std::process;
 
 use harn_vm::llm::readiness::{probe_provider_readiness, ProviderReadiness};
@@ -22,10 +21,10 @@ use serde::Serialize;
 
 use crate::cli::{
     ProviderCacheProbeArgs, ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg,
+    ProviderToolScorecardArgs,
 };
 use crate::commands::local::runtime::{fetch_ollama_ps, LoadedModel, LOCAL_PROVIDERS};
-use crate::dispatch;
-use crate::env_guard::ScopedEnvVar;
+use crate::commands::provider_report::{dispatch_provider_report, ProviderReportDispatch};
 
 /// Env var carrying the JSON `ProviderProbe` envelope handed across to
 /// the embedded `cli/providers/probe` script.
@@ -45,6 +44,13 @@ const TOOL_PROBE_PAYLOAD_ENV: &str = "HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON";
 /// rationale as [`PROBE_PAYLOAD_PRETTY_ENV`].
 const TOOL_PROBE_PAYLOAD_PRETTY_ENV: &str = "HARN_PROVIDER_TOOL_PROBE_PAYLOAD_PRETTY";
 
+/// Env var carrying the JSON `ToolScorecardReport` envelope handed across to
+/// the embedded `cli/providers/tool_scorecard` render script.
+const TOOL_SCORECARD_PAYLOAD_ENV: &str = "HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON";
+
+/// Pretty-printed companion to [`TOOL_SCORECARD_PAYLOAD_ENV`].
+const TOOL_SCORECARD_PAYLOAD_PRETTY_ENV: &str = "HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_PRETTY";
+
 /// Env var carrying the JSON `CacheConformanceReport` envelope handed across
 /// to the embedded `cli/providers/cache_probe` render script.
 const CACHE_PROBE_PAYLOAD_ENV: &str = "HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON";
@@ -52,12 +58,6 @@ const CACHE_PROBE_PAYLOAD_ENV: &str = "HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON";
 /// Pretty-printed companion to [`CACHE_PROBE_PAYLOAD_ENV`] — same rationale as
 /// [`PROBE_PAYLOAD_PRETTY_ENV`].
 const CACHE_PROBE_PAYLOAD_PRETTY_ENV: &str = "HARN_PROVIDER_CACHE_PROBE_PAYLOAD_PRETTY";
-
-/// Serialises the dispatch path so concurrent in-process callers
-/// don't race on the global env vars the shim sets.
-static DISPATCH_PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-static DISPATCH_TOOL_PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-static DISPATCH_CACHE_PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Serialize)]
 struct ProviderProbe {
@@ -70,6 +70,34 @@ struct ProviderProbe {
     loaded_models: Vec<LoadedModel>,
 }
 
+const PROBE_REPORT_DISPATCH: ProviderReportDispatch = ProviderReportDispatch {
+    script_name: "providers/probe",
+    payload_name: "provider probe",
+    payload_env: PROBE_PAYLOAD_ENV,
+    pretty_env: PROBE_PAYLOAD_PRETTY_ENV,
+};
+
+const TOOL_PROBE_REPORT_DISPATCH: ProviderReportDispatch = ProviderReportDispatch {
+    script_name: "providers/tool_probe",
+    payload_name: "tool-probe",
+    payload_env: TOOL_PROBE_PAYLOAD_ENV,
+    pretty_env: TOOL_PROBE_PAYLOAD_PRETTY_ENV,
+};
+
+const TOOL_SCORECARD_REPORT_DISPATCH: ProviderReportDispatch = ProviderReportDispatch {
+    script_name: "providers/tool_scorecard",
+    payload_name: "tool-scorecard",
+    payload_env: TOOL_SCORECARD_PAYLOAD_ENV,
+    pretty_env: TOOL_SCORECARD_PAYLOAD_PRETTY_ENV,
+};
+
+const CACHE_PROBE_REPORT_DISPATCH: ProviderReportDispatch = ProviderReportDispatch {
+    script_name: "providers/cache_probe",
+    payload_name: "cache-probe",
+    payload_env: CACHE_PROBE_PAYLOAD_ENV,
+    pretty_env: CACHE_PROBE_PAYLOAD_PRETTY_ENV,
+};
+
 pub(crate) async fn run_provider_probe(args: ProviderProbeArgs) {
     let exit_code = dispatch_provider_probe(args).await;
     if exit_code != 0 {
@@ -80,35 +108,12 @@ pub(crate) async fn run_provider_probe(args: ProviderProbeArgs) {
 async fn dispatch_provider_probe(args: ProviderProbeArgs) -> i32 {
     let probe = aggregate_provider_probe(&args).await;
     let exit_code = i32::from(!probe.readiness.ok);
-    let payload_json = match serde_json::to_string(&probe) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to serialise provider probe payload: {error}");
-            return 1;
-        }
-    };
-    let payload_pretty = match serde_json::to_string_pretty(&probe) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to render provider probe payload: {error}");
-            return 1;
-        }
-    };
-    let _guard = DISPATCH_PROBE_LOCK.lock().await;
-    let _payload_guard = ScopedEnvVar::set(PROBE_PAYLOAD_ENV, &payload_json);
-    let _pretty_guard = ScopedEnvVar::set(PROBE_PAYLOAD_PRETTY_ENV, &payload_pretty);
-    let outcome = dispatch::run_embedded_script("providers/probe", Vec::new(), args.json).await;
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
-    }
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
+    let render_exit = dispatch_provider_report(PROBE_REPORT_DISPATCH, args.json, &probe).await;
     // The script's own exit code reflects readiness (1 on failure).
     // If the script itself errored at the 70 level (internal), surface
     // that to the user instead.
-    if outcome.exit_code != 0 {
-        outcome.exit_code
+    if render_exit != 0 {
+        render_exit
     } else {
         exit_code
     }
@@ -177,35 +182,12 @@ async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
             return 1;
         }
     };
-    let payload_json = match serde_json::to_string(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to serialise tool-probe payload: {error}");
-            return 1;
-        }
-    };
-    let payload_pretty = match serde_json::to_string_pretty(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to render tool-probe payload: {error}");
-            return 1;
-        }
-    };
     let fallback_disabled = report.tool_calling.fallback_mode
         == harn_vm::llm::tool_conformance::ToolProbeFallbackMode::Disabled;
-    let _guard = DISPATCH_TOOL_PROBE_LOCK.lock().await;
-    let _payload_guard = ScopedEnvVar::set(TOOL_PROBE_PAYLOAD_ENV, &payload_json);
-    let _pretty_guard = ScopedEnvVar::set(TOOL_PROBE_PAYLOAD_PRETTY_ENV, &payload_pretty);
-    let outcome =
-        dispatch::run_embedded_script("providers/tool_probe", Vec::new(), args.json).await;
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
-    }
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
-    if outcome.exit_code != 0 {
-        return outcome.exit_code;
+    let render_exit =
+        dispatch_provider_report(TOOL_PROBE_REPORT_DISPATCH, args.json, &report).await;
+    if render_exit != 0 {
+        return render_exit;
     }
     i32::from(fallback_disabled)
 }
@@ -249,6 +231,55 @@ async fn aggregate_tool_conformance_report(
     }
 }
 
+pub(crate) async fn run_provider_tool_scorecard(args: ProviderToolScorecardArgs) {
+    let exit_code = dispatch_provider_tool_scorecard(args).await;
+    if exit_code != 0 {
+        process::exit(exit_code);
+    }
+}
+
+async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i32 {
+    let report = match aggregate_tool_scorecard(&args) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    };
+    dispatch_provider_report(TOOL_SCORECARD_REPORT_DISPATCH, args.json, &report).await
+}
+
+fn aggregate_tool_scorecard(
+    args: &ProviderToolScorecardArgs,
+) -> Result<harn_vm::llm::tool_scorecard::ToolScorecardReport, String> {
+    let mut reports = Vec::new();
+    for path in &args.tool_probe_reports {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|error| format!("error: failed to read {}: {error}", path.display()))?;
+        let report =
+            serde_json::from_str::<harn_vm::llm::tool_conformance::ToolConformanceReport>(&raw)
+                .map_err(|error| {
+                    format!(
+                        "error: failed to parse tool-probe report {}: {error}",
+                        path.display()
+                    )
+                })?;
+        if report.schema_version != harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION
+        {
+            return Err(format!(
+                "error: unsupported tool-probe report schema_version {} in {}; expected {}",
+                report.schema_version,
+                path.display(),
+                harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION
+            ));
+        }
+        reports.push(report);
+    }
+    Ok(harn_vm::llm::tool_scorecard::scorecard_from_tool_reports(
+        reports,
+    ))
+}
+
 pub(crate) async fn run_provider_cache_probe(args: ProviderCacheProbeArgs) {
     let exit_code = dispatch_provider_cache_probe(args).await;
     if exit_code != 0 {
@@ -283,33 +314,10 @@ async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
         }
     };
     let dogfood_failure = report.dogfood_failure;
-    let payload_json = match serde_json::to_string(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to serialise cache-probe payload: {error}");
-            return 1;
-        }
-    };
-    let payload_pretty = match serde_json::to_string_pretty(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to render cache-probe payload: {error}");
-            return 1;
-        }
-    };
-    let _guard = DISPATCH_CACHE_PROBE_LOCK.lock().await;
-    let _payload_guard = ScopedEnvVar::set(CACHE_PROBE_PAYLOAD_ENV, &payload_json);
-    let _pretty_guard = ScopedEnvVar::set(CACHE_PROBE_PAYLOAD_PRETTY_ENV, &payload_pretty);
-    let outcome =
-        dispatch::run_embedded_script("providers/cache_probe", Vec::new(), args.json).await;
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
-    }
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
-    if outcome.exit_code != 0 {
-        return outcome.exit_code;
+    let render_exit =
+        dispatch_provider_report(CACHE_PROBE_REPORT_DISPATCH, args.json, &report).await;
+    if render_exit != 0 {
+        return render_exit;
     }
     // A supported route that never caches, or contradictory provider fields, is
     // a real conformance failure; a non-cache provider is not.

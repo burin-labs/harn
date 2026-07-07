@@ -494,10 +494,14 @@ jobs:
       # unavailable and the leg is pointed back at ubuntu-latest.
       - name: Install Linux ARM64 cross linker (x86 host only)
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        with:
+          packages: gcc-aarch64-linux-gnu
+          check-command: aarch64-linux-gnu-gcc
+
+      - name: Configure Linux ARM64 cross linker (x86 host only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
+        run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build
         timeout-minutes: 90

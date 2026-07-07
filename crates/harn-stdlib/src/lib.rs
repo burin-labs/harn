@@ -1128,6 +1128,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/providers/tool_probe.harn"),
     },
     StdlibCliScript {
+        name: "providers/tool_scorecard",
+        source: include_str!("stdlib/cli/providers/tool_scorecard.harn"),
+    },
+    StdlibCliScript {
         name: "routes",
         source: include_str!("stdlib/cli/routes.harn"),
     },
