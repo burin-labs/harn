@@ -14,6 +14,7 @@ surface.
 | `harness.fs.write_text(path, content)` | `write_file(path, content)` | `workspace.write_text` |
 | `harness.fs.write_bytes(path, content)` | `write_file_bytes(path, content)` | `workspace.write_text` |
 | `harness.fs.exists(path)` | `file_exists(path)` | `workspace.exists` |
+| `harness.fs.status(path, access?)` | `path_status(path, access?)` | `workspace.exists` |
 | `harness.fs.delete(path)` | `delete_file(path)` | `workspace.delete` |
 | `harness.fs.append(path, content)` | `append_file(path, content)` | `workspace.write_text` |
 | `harness.fs.list_dir(path?)` | `list_dir(path?)` | `workspace.list` |

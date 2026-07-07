@@ -26,6 +26,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &WRITE_FILE_BUILTIN_DEF,
     &WRITE_FILE_BYTES_BUILTIN_DEF,
     &FILE_EXISTS_BUILTIN_DEF,
+    &PATH_STATUS_BUILTIN_DEF,
     &DELETE_FILE_BUILTIN_DEF,
     &APPEND_FILE_BUILTIN_DEF,
     &LIST_DIR_BUILTIN_DEF,
@@ -517,6 +518,182 @@ fn file_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         ));
     }
     Ok(VmValue::Bool(overlay::exists(&resolved)))
+}
+
+fn fs_access_label(access: crate::stdlib::sandbox::FsAccess) -> &'static str {
+    match access {
+        crate::stdlib::sandbox::FsAccess::Read => "read",
+        crate::stdlib::sandbox::FsAccess::Write => "write",
+        crate::stdlib::sandbox::FsAccess::Delete => "delete",
+    }
+}
+
+fn parse_path_status_access(args: &[VmValue]) -> Result<crate::stdlib::sandbox::FsAccess, VmError> {
+    let Some(raw) = args.get(1) else {
+        return Ok(crate::stdlib::sandbox::FsAccess::Read);
+    };
+    let text = match raw {
+        VmValue::Nil => return Ok(crate::stdlib::sandbox::FsAccess::Read),
+        VmValue::String(text) => text.as_str(),
+        other => {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                format!(
+                    "path_status access must be a string, got {}",
+                    other.type_name()
+                ),
+            ))));
+        }
+    };
+    match text {
+        "" | "read" => Ok(crate::stdlib::sandbox::FsAccess::Read),
+        "write" => Ok(crate::stdlib::sandbox::FsAccess::Write),
+        "delete" | "remove" => Ok(crate::stdlib::sandbox::FsAccess::Delete),
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "path_status access must be one of: read, write, delete",
+        )))),
+    }
+}
+
+fn base_path_status(
+    path: String,
+    resolved: &PathBuf,
+    access: crate::stdlib::sandbox::FsAccess,
+) -> BTreeMap<String, VmValue> {
+    let mut info = BTreeMap::new();
+    info.put_str("path", path);
+    info.put_str("resolved_path", resolved.to_string_lossy().into_owned());
+    info.put_str("access", fs_access_label(access));
+    info
+}
+
+fn path_status_from_metadata(
+    path: String,
+    resolved: &PathBuf,
+    access: crate::stdlib::sandbox::FsAccess,
+    metadata: std::fs::Metadata,
+) -> VmValue {
+    let status = if metadata.is_file() {
+        "present_file"
+    } else if metadata.is_dir() {
+        "present_dir"
+    } else {
+        "present_other"
+    };
+    let kind = if metadata.is_file() {
+        "file"
+    } else if metadata.is_dir() {
+        "dir"
+    } else {
+        "other"
+    };
+    let mut info = base_path_status(path, resolved, access);
+    info.put_str("status", status);
+    info.put_str("kind", kind);
+    info.insert("visible".to_string(), VmValue::Bool(true));
+    info.insert("exists".to_string(), VmValue::Bool(true));
+    info.insert("size".to_string(), VmValue::Int(metadata.len() as i64));
+    info.insert("is_file".to_string(), VmValue::Bool(metadata.is_file()));
+    info.insert("is_dir".to_string(), VmValue::Bool(metadata.is_dir()));
+    info.insert(
+        "readonly".to_string(),
+        VmValue::Bool(metadata.permissions().readonly()),
+    );
+    if let Ok(modified) = metadata.modified() {
+        if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+            info.insert("modified".to_string(), VmValue::Float(dur.as_secs_f64()));
+        }
+    }
+    VmValue::dict(info)
+}
+
+fn missing_path_status(
+    path: String,
+    resolved: &PathBuf,
+    access: crate::stdlib::sandbox::FsAccess,
+) -> VmValue {
+    let mut info = base_path_status(path, resolved, access);
+    info.put_str("status", "missing");
+    info.put_str("kind", "missing");
+    info.insert("visible".to_string(), VmValue::Bool(true));
+    info.insert("exists".to_string(), VmValue::Bool(false));
+    VmValue::dict(info)
+}
+
+fn scope_denied_path_status(
+    path: String,
+    resolved: &PathBuf,
+    access: crate::stdlib::sandbox::FsAccess,
+    violation: crate::stdlib::sandbox::SandboxViolation,
+) -> VmValue {
+    let status = if violation.read_only {
+        "read_only_denied"
+    } else {
+        "scope_denied"
+    };
+    let mut info = base_path_status(path, resolved, access);
+    info.put_str("status", status);
+    info.put_str("kind", status);
+    info.insert("visible".to_string(), VmValue::Bool(false));
+    info.insert("exists".to_string(), VmValue::Nil);
+    info.insert("read_only".to_string(), VmValue::Bool(violation.read_only));
+    info.put_str(
+        "attempted",
+        violation.attempted.to_string_lossy().into_owned(),
+    );
+    info.insert(
+        "roots".to_string(),
+        VmValue::List(
+            violation
+                .roots
+                .iter()
+                .map(|root| {
+                    VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().into_owned()))
+                })
+                .collect(),
+        ),
+    );
+    info.put_str("message", violation.message("path_status"));
+    VmValue::dict(info)
+}
+
+fn stat_error_path_status(
+    path: String,
+    resolved: &PathBuf,
+    access: crate::stdlib::sandbox::FsAccess,
+    error: std::io::Error,
+) -> VmValue {
+    let mut info = base_path_status(path, resolved, access);
+    info.put_str("status", "stat_error");
+    info.put_str("kind", "stat_error");
+    info.insert("visible".to_string(), VmValue::Bool(false));
+    info.insert("exists".to_string(), VmValue::Nil);
+    info.put_str("error_kind", format!("{:?}", error.kind()));
+    info.put_str(
+        "message",
+        format!("Failed to stat {}: {error}", resolved.display()),
+    );
+    VmValue::dict(info)
+}
+
+#[harn_builtin(
+    sig = "path_status(path: string, access?: string) -> dict",
+    category = "fs",
+    doc = "Return structured filesystem visibility status without collapsing scope denial into absence."
+)]
+fn path_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let access = parse_path_status_access(args)?;
+    let resolved = resolve_fs_path(&path);
+    if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(&resolved, access) {
+        return Ok(scope_denied_path_status(path, &resolved, access, violation));
+    }
+    match std::fs::metadata(&resolved) {
+        Ok(metadata) => Ok(path_status_from_metadata(path, &resolved, access, metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(missing_path_status(path, &resolved, access))
+        }
+        Err(error) => Ok(stat_error_path_status(path, &resolved, access, error)),
+    }
 }
 
 #[harn_builtin(

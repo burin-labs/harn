@@ -597,6 +597,7 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
 | `delete_file(path)` | path: string | nil | Delete a file or directory (recursive). Throws on failure |
 | `file_exists(path)` | path: string | bool | Check if a file or directory exists |
+| `path_status(path, access?)` / `harness.fs.status(path, access?)` | path: string, access: `"read"`/`"write"`/`"delete"` (default `"read"`) | dict | Structured path visibility probe. Returns statuses such as `present_file`, `present_dir`, `present_other`, `missing`, `scope_denied`, `read_only_denied`, or `stat_error` without collapsing sandbox scope denial into absence |
 | `list_dir(path?)` | path: string (default `"."`) | list | List directory contents as sorted list of file names. Throws on failure |
 | `walk_dir(path, options?)` | path: string, options: dict | list or handle dict | Recursively list files/directories. Options: `max_depth`, `follow_symlinks`, `long_running`/`background` |
 | `glob(pattern, base_or_options?, options?)` / `harness.fs.glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory. Set `long_running`/`background` in options to return a handle |

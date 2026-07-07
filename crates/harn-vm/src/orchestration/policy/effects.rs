@@ -218,6 +218,7 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "walk_dir"
         | "glob"
         | "file_exists"
+        | "path_status"
         | "stat" => Some(EffectRecord::new(EffectKind::Fs, EffectScope::Read)),
 
         // fs writes
@@ -458,9 +459,11 @@ fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
             EffectScope::Read,
         ),
         ("random", _) => return None,
-        ("fs", "read_file" | "read_text" | "read" | "exists" | "list_dir" | "stat") => {
-            (EffectKind::Fs, EffectScope::Read)
-        }
+        (
+            "fs",
+            "read_file" | "read_text" | "read" | "exists" | "status" | "path_status" | "list_dir"
+            | "stat",
+        ) => (EffectKind::Fs, EffectScope::Read),
         (
             "fs",
             "write_file"

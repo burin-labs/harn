@@ -386,6 +386,7 @@ const BUILTIN_CAPABILITIES: &[(&str, &str, &str, &str)] = &[
     ),
     ("list_dir", "workspace", "list", "read_only"),
     ("file_exists", "workspace", "exists", "read_only"),
+    ("path_status", "workspace", "exists", "read_only"),
     ("stat", "workspace", "exists", "read_only"),
     ("write_file", "workspace", "write_text", "workspace_write"),
     (

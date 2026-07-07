@@ -265,7 +265,7 @@ fn direct_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         "list_dir" | "walk_dir" | "glob" | "find_text" => {
             out.insert("workspace.list".to_string());
         }
-        "file_exists" | "stat" => {
+        "file_exists" | "path_status" | "stat" => {
             out.insert("workspace.exists".to_string());
         }
         "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "mkdtemp" | "copy_file"
