@@ -1,8 +1,9 @@
 pipeline default() {
   // Connect to the test MCP echo server
   let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let server_path = path_join(root, "conformance/helpers/mcp_echo_server.py")
-  let client = mcp_connect("python3", [server_path])
+  let harn_bin = harness.env.get("HARN_BIN") ?? "harn"
+  let server_path = path_join(root, "conformance/helpers/mcp_echo_server.harn")
+  let client = mcp_connect(harn_bin, ["serve", "mcp", server_path])
   // Check type
   __io_println(type_of(client))
   // List tools

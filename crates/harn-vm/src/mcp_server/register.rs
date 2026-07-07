@@ -10,6 +10,7 @@ use crate::vm::Vm;
 
 use super::defs::{
     McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
+    McpServerMetadata,
 };
 
 thread_local! {
@@ -21,6 +22,8 @@ thread_local! {
     static MCP_SERVE_RESOURCE_TEMPLATES: RefCell<Vec<McpResourceTemplateDef>> = const { RefCell::new(Vec::new()) };
     /// Prompts registered by `mcp_prompt`.
     static MCP_SERVE_PROMPTS: RefCell<Vec<McpPromptDef>> = const { RefCell::new(Vec::new()) };
+    /// Optional metadata registered by `mcp_server_metadata`.
+    static MCP_SERVE_METADATA: RefCell<Option<McpServerMetadata>> = const { RefCell::new(None) };
 }
 
 /// Register all MCP server builtins on a VM.
@@ -53,6 +56,35 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
     vm.register_builtin("mcp_tools", |args, _out| register_tools_impl(args));
     // `mcp_serve` is the old name; kept as an alias.
     vm.register_builtin("mcp_serve", |args, _out| register_tools_impl(args));
+
+    // mcp_server_metadata({name?, version?, instructions?}) -> nil
+    vm.register_builtin("mcp_server_metadata", |args, _out| {
+        let dict = match args.first() {
+            Some(VmValue::Dict(d)) => d,
+            _ => {
+                return Err(VmError::Runtime(
+                    "mcp_server_metadata: argument must be a dict".into(),
+                ));
+            }
+        };
+
+        let metadata = McpServerMetadata {
+            name: optional_non_empty_string(dict, "name", "mcp_server_metadata")?,
+            version: optional_non_empty_string(dict, "version", "mcp_server_metadata")?,
+            instructions: optional_non_empty_string(dict, "instructions", "mcp_server_metadata")?,
+        };
+        if metadata == McpServerMetadata::default() {
+            return Err(VmError::Runtime(
+                "mcp_server_metadata: at least one of name, version, or instructions is required"
+                    .into(),
+            ));
+        }
+
+        MCP_SERVE_METADATA.with(|cell| {
+            *cell.borrow_mut() = Some(metadata);
+        });
+        Ok(VmValue::Nil)
+    });
 
     // mcp_resource({uri, name, text, description?, mime_type?}) -> nil
     vm.register_builtin("mcp_resource", |args, _out| {
@@ -429,4 +461,26 @@ pub fn take_mcp_serve_resource_templates() -> Vec<McpResourceTemplateDef> {
 
 pub fn take_mcp_serve_prompts() -> Vec<McpPromptDef> {
     MCP_SERVE_PROMPTS.with(|cell| cell.borrow_mut().drain(..).collect())
+}
+
+pub fn take_mcp_serve_metadata() -> Option<McpServerMetadata> {
+    MCP_SERVE_METADATA.with(|cell| cell.borrow_mut().take())
+}
+
+fn optional_non_empty_string(
+    dict: &crate::value::DictMap,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<String>, VmError> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) if !value.is_empty() => Ok(Some(value.to_string())),
+        Some(VmValue::String(_)) => Err(VmError::Runtime(format!(
+            "{builtin}: '{key}' must be a non-empty string"
+        ))),
+        Some(value) => Err(VmError::Runtime(format!(
+            "{builtin}: '{key}' must be a string (got {})",
+            value.display()
+        ))),
+    }
 }
