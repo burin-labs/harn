@@ -1,0 +1,74 @@
+import "../remote_eval_fanout_plan.harn"
+
+fn catalog() {
+  return {
+    evals: {"cpp-test": {}, "swift-feat": {}, "zig-test": {}},
+    groups: {"meter-mini": ["cpp-test", "zig-test"], duplicates: ["cpp-test", "cpp-test", "swift-feat"]},
+  }
+}
+
+@test
+pipeline test_expand_cells_expands_groups_and_deduplicates(task) {
+  const cells = expand_cells("meter-mini,cpp-test,swift-feat", catalog())
+  assert_eq(cells, ["cpp-test", "zig-test", "swift-feat"])
+}
+
+@test
+pipeline test_build_shards_have_stable_ids_and_run_eval_args(task) {
+  const shards = build_shards(
+    ["cpp-test", "swift feat"],
+    2,
+    "scripts/run-eval.sh",
+    "fw-gpt-oss-120b",
+    ["agent.x=on"],
+  )
+  assert_eq(len(shards), 4)
+  assert_eq(shards[0].id, "cpp-test-t1")
+  assert_eq(shards[1].id, "cpp-test-t2")
+  assert_eq(shards[2].id, "swift-feat-t1")
+  assert_eq(
+    shards[0].run_eval_args[0:7],
+    ["bash", "scripts/run-eval.sh", "cpp-test", "--model", "fw-gpt-oss-120b", "--trials", "1"],
+  )
+  assert_eq(shards[0].run_eval_args[7:11], ["--meter", "--flag", "agent.x=on"])
+}
+
+@test
+pipeline test_remote_eval_fanout_plan_records_concurrency_and_receipts(task) {
+  const plan = remote_eval_fanout_plan(
+    {
+      cells: "duplicates",
+      trials: 3,
+      k: 1,
+      max_concurrency: 4,
+      max_escalating: 2,
+      model: "fw-gpt-oss-120b",
+      split: "meter-holdout",
+      runner: "scripts/run-eval.sh",
+      backend: "modal",
+      flags: ["agent.stop_policy=escalate_single"],
+    },
+    catalog(),
+  )
+  assert_eq(plan.producer, "harn_remote_eval_fanout_plan_v1")
+  assert_eq(plan.cells, ["cpp-test", "swift-feat"])
+  assert_eq(plan.shard_count, 6)
+  assert_eq(plan.concurrency.max_concurrency, 4)
+  assert_eq(plan.concurrency.max_escalating, 2)
+  assert_eq(plan.ledger.serialized_ingest, true)
+  assert(plan.artifacts.required_receipts.contains("rejoin_summary"), "rejoin receipt required")
+}
+
+@test
+pipeline test_remote_eval_fanout_plan_rejects_bad_concurrency(task) {
+  const result = try {
+    remote_eval_fanout_plan(
+      {cells: "cpp-test", trials: 1, max_concurrency: 2, max_escalating: 3},
+      catalog(),
+    )
+    "ok"
+  } catch (err) {
+    to_string(err)
+  }
+  assert_eq(result, "--max-escalating cannot exceed --max-concurrency")
+}
