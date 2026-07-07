@@ -51,6 +51,15 @@ Python requires a concrete foreign-toolchain, generated-binding, external-spec,
 or subprocess-fixture reason and must be allowlisted in
 `check_python_boundary.harn`.
 
+## Temporary Harn cutover debt
+
+These files are explicitly issue-backed and should be replaced or deleted rather
+than treated as permanent foreign infrastructure.
+
+- **`conformance/helpers/*.py`** — remaining MCP/proxy conformance helper
+  servers. Harn owns durable fixture serving and capture; tracked by
+  `harn#4219`.
+
 ## Out of scope — stays in its current language
 
 External-toolchain or foreign-artifact reasons; porting would defeat the
@@ -67,9 +76,6 @@ script's purpose or fight a tool that is JS/Python by design.
 - **`spec/protocol-artifacts/*.ts`, `python/harn_protocol.py`,
   `harn-protocol.ts`** — generated multi-language SDK bindings for external
   consumers.
-- **`conformance/helpers/*.py`** (github/slack/linear/mcp/http mock servers) —
-  out-of-process mock servers for the conformance harness; intentionally foreign
-  infra spawned as subprocesses.
 - **`docs/theme/harn-keywords.js`** — docs-site theme JS (browser).
 - **`experiments/**`, `opentrustgraph-spec/examples/*.py`** — throwaway
   experiments / external spec examples.

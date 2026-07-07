@@ -13,6 +13,10 @@ const SKIP_SEGMENTS = [
   "/target/",
 ]
 
+const HARN_MCP_HELPER_DEBT_REASON = "Tracked by harn#4219: Harn owns MCP fixture serving; Python remains only as a cutover shim."
+
+const HARN_PROXY_HELPER_DEBT_REASON = "Tracked by harn#4219: Harn owns deterministic proxy fixture serving and capture; Python remains only as a cutover shim."
+
 const PYTHON_ALLOWLIST = [
   {
     kind: "exact",
@@ -21,10 +25,40 @@ const PYTHON_ALLOWLIST = [
     reason: "Out-of-process bridge test host intentionally runs as a foreign subprocess.",
   },
   {
-    kind: "prefix",
-    pattern: "conformance/helpers/",
-    category: "test-harness-adapter",
-    reason: "Conformance mock servers intentionally run as foreign subprocesses.",
+    kind: "exact",
+    pattern: "conformance/helpers/mcp_stdio_tool.py",
+    category: "harn-cutover-debt",
+    reason: HARN_MCP_HELPER_DEBT_REASON,
+  },
+  {
+    kind: "exact",
+    pattern: "conformance/helpers/mcp_stdio_progress.py",
+    category: "harn-cutover-debt",
+    reason: HARN_MCP_HELPER_DEBT_REASON,
+  },
+  {
+    kind: "exact",
+    pattern: "conformance/helpers/mcp_http_echo_server.py",
+    category: "harn-cutover-debt",
+    reason: HARN_MCP_HELPER_DEBT_REASON,
+  },
+  {
+    kind: "exact",
+    pattern: "conformance/helpers/mcp_http_elicit_server.py",
+    category: "harn-cutover-debt",
+    reason: HARN_MCP_HELPER_DEBT_REASON,
+  },
+  {
+    kind: "exact",
+    pattern: "conformance/helpers/mcp_roots_server.py",
+    category: "harn-cutover-debt",
+    reason: HARN_MCP_HELPER_DEBT_REASON,
+  },
+  {
+    kind: "exact",
+    pattern: "conformance/helpers/http_proxy_server.py",
+    category: "harn-cutover-debt",
+    reason: HARN_PROXY_HELPER_DEBT_REASON,
   },
   {
     kind: "prefix",
@@ -144,7 +178,7 @@ fn render_report(report: dict) -> string {
   if report.violation_count == 0 {
     return "python boundary check passed: "
       + to_string(report.allowed_count)
-      + " allowlisted Python file(s); no unclassified Python scripts remain."
+      + " classified Python file(s); no unclassified Python scripts remain."
   }
   let lines = [
     "python boundary check failed: " + to_string(report.violation_count)
