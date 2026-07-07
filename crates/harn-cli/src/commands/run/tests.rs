@@ -577,3 +577,105 @@ length: 20,
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "true\n8\n2000\n10\ntrue");
 }
+
+/// End-to-end regression for the dependency-package source-dir leak.
+///
+/// A project whose entry pipeline renders a top-level `@alias/...` asset, WITH
+/// a materialized path-dependency provider connector under
+/// `.harn/packages/<dep>/`, is run the way a user runs it: `cd project && harn
+/// run main.harn` (a bare filename, so the entry path has an empty parent).
+///
+/// `harn run` startup loads the dependency's provider-connector contract to
+/// build the manifest provider catalog. That load used to leak its own source
+/// dir into the caller's resting thread-local, so the entry pipeline's first
+/// `render("@promptdir/...")` resolved against the dependency's `harn.toml`
+/// (which lacks the alias) and threw `asset alias 'promptdir' is not defined in
+/// [asset_roots] of .../.harn/packages/dep-connector/harn.toml`.
+///
+/// Red before the fix (exit 1 + asset-alias error), green after (exit 0): the
+/// entry asset resolves against the PROJECT root even though a `[dependencies]`
+/// provider connector is present.
+#[tokio::test]
+async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency() {
+    let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path();
+
+    // Project manifest declares the asset alias the entry render depends on.
+    std::fs::write(
+        project.join("harn.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[asset_roots]\npromptdir = \"prompts\"\n",
+    )
+    .expect("write project manifest");
+
+    // The asset the entry pipeline renders.
+    std::fs::create_dir_all(project.join("prompts")).expect("prompts dir");
+    std::fs::write(
+        project.join("prompts").join("greeting.harn.prompt"),
+        "hello from the project prompt\n",
+    )
+    .expect("write prompt");
+
+    // Materialized path-dependency provider connector. Its own manifest does
+    // NOT define the `promptdir` alias, so a leaked source dir surfaces as an
+    // asset-alias error anchored on this package's harn.toml.
+    let dep = project.join(".harn").join("packages").join("dep-connector");
+    std::fs::create_dir_all(dep.join("src")).expect("dep src dir");
+    std::fs::write(
+        dep.join("harn.toml"),
+        "[package]\nname = \"dep-connector\"\nversion = \"0.1.0\"\n\n[[providers]]\nid = \"depwebhook\"\nconnector = { harn = \"src/lib.harn\" }\n",
+    )
+    .expect("write dep manifest");
+    std::fs::write(
+        dep.join("src").join("lib.harn"),
+        "pub fn provider_id() { return \"depwebhook\" }\npub fn kinds() { return [\"webhook\"] }\npub fn payload_schema() { return \"GenericWebhookPayload\" }\n",
+    )
+    .expect("write connector module");
+
+    // Lockfile so `harn run` startup loads the installed provider connector.
+    std::fs::write(
+        project.join("harn.lock"),
+        "version = 4\n\n[[package]]\nname = \"dep-connector\"\nsource = \"path+.harn/packages/dep-connector\"\n",
+    )
+    .expect("write lockfile");
+
+    // Entry pipeline at the PROJECT ROOT, rendering a top-level `@alias`.
+    std::fs::write(
+        project.join("main.harn"),
+        "pipeline main() {\n  let _ = render(\"@promptdir/greeting.harn.prompt\", {})\n}\n",
+    )
+    .expect("write entry");
+
+    // Run it exactly like `cd project && harn run main.harn`: a bare filename
+    // whose parent is empty is what left the resting source dir unestablished.
+    let original_cwd = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(project).expect("chdir into project");
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        "main.harn",
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::disabled(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+    std::env::set_current_dir(&original_cwd).expect("restore cwd");
+    harn_vm::reset_thread_local_state();
+
+    assert!(
+        !outcome.stderr.contains("is not defined in [asset_roots]"),
+        "entry `@promptdir` render leaked onto the dependency's harn.toml; stderr:\n{}",
+        outcome.stderr
+    );
+    assert_eq!(
+        outcome.exit_code, 0,
+        "entry `@alias` render must resolve against the project root even with a \
+         dependency provider connector present; stderr:\n{}",
+        outcome.stderr
+    );
+}

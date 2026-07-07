@@ -1345,6 +1345,26 @@ pub(crate) async fn execute_run_with_timing(
     .await
 }
 
+/// Directory that anchors the entry script's source-relative and `@asset`
+/// resolution.
+///
+/// Returns the script's parent directory, or the current working directory
+/// when the path is a bare filename (empty parent) — e.g. `cd project &&
+/// harn run main.harn`. The old code skipped setting the source dir in that
+/// case, which left the resting thread-local source dir unset (`None`). A
+/// dependency provider-connector contract load during `harn run` startup then
+/// repointed the thread-local at `.harn/packages/<dep>/src` and, because the
+/// restore-on-return path is a no-op over an unset baseline, left it there —
+/// so the entry pipeline's first `render("@alias/...")` resolved against the
+/// dependency's `harn.toml` instead of the project root. Always establishing
+/// the entry dir keeps that resolution anchored on the project.
+fn entry_source_dir(path: &str) -> std::path::PathBuf {
+    match std::path::Path::new(path).parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    }
+}
+
 // See [`compile_or_load_chunk_with_timing`] for why `as_deref_mut` is
 // the intentional reborrow pattern here.
 #[allow(clippy::needless_option_as_deref)]
@@ -1538,11 +1558,11 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         vm.set_project_root(root);
     }
 
-    if let Some(p) = std::path::Path::new(path).parent() {
-        if !p.as_os_str().is_empty() {
-            vm.set_source_dir(p);
-        }
-    }
+    // Establish the entry script's directory as the resting source dir. When
+    // `path` is a bare filename (empty parent) — e.g. `cd project && harn run
+    // main.harn` — anchor on the current working directory instead of skipping,
+    // so the resting source dir is never left unset. See `entry_source_dir`.
+    vm.set_source_dir(&entry_source_dir(path));
 
     // Load filesystem + manifest skills before the pipeline runs so
     // `skills` is populated with a pre-discovered registry (see #73).
@@ -1648,6 +1668,14 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         t.run_setup = setup_start.elapsed();
     }
     let main_start = Instant::now();
+    // Re-anchor the entry source dir immediately before executing the entry
+    // pipeline. The manifest/dependency setup above (provider-connector
+    // contract loads, hook-handler module loads) transiently repoints the
+    // thread-local source dir and does not guarantee it is restored to the
+    // entry's dir — a dependency provider connector under
+    // `.harn/packages/<dep>/` would otherwise leave the entry pipeline's first
+    // `render("@alias/...")` resolving against the dependency's `harn.toml`.
+    vm.set_source_dir(&entry_source_dir(path));
     let execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
@@ -2544,11 +2572,10 @@ pub(crate) async fn run_file_mcp_serve(
     if let Some(ref root) = project_root {
         vm.set_project_root(root);
     }
-    if let Some(p) = std::path::Path::new(path).parent() {
-        if !p.as_os_str().is_empty() {
-            vm.set_source_dir(p);
-        }
-    }
+    // Anchor on the entry script's directory (cwd when the path is a bare
+    // filename); never leave the resting source dir unset. See
+    // `entry_source_dir`.
+    vm.set_source_dir(&entry_source_dir(path));
 
     // Same skill discovery as `harn run` — see comment there.
     let loaded = load_skills(&SkillLoaderInputs {
@@ -2574,6 +2601,11 @@ pub(crate) async fn run_file_mcp_serve(
         process::exit(1);
     }
 
+    // Re-anchor the entry source dir immediately before executing the entry
+    // pipeline, so manifest/dependency setup can't leave a leaked source dir
+    // in place for the pipeline's first `render("@alias/...")`. See the sibling
+    // `execute_run_inner`.
+    vm.set_source_dir(&entry_source_dir(path));
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
