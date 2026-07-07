@@ -630,9 +630,15 @@ mod tests {
                         "minLength": 2,
                         "format": "email",
                         "default": "ok"
+                    },
+                    "variant": {
+                        "oneOf": [
+                            {"type": "string"},
+                            {"type": "integer"}
+                        ]
                     }
                 },
-                "required": ["ok"],
+                "required": ["ok", "variant"],
             }),
             strict: true,
         };
@@ -654,6 +660,12 @@ mod tests {
                             "pattern": "^harn",
                             "minLength": 1,
                             "default": "harn"
+                        },
+                        "mode": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {"type": "integer"}
+                            ]
                         }
                     }
                 },
@@ -681,7 +693,7 @@ mod tests {
         );
         assert_eq!(
             body["text"]["format"]["schema"]["required"],
-            serde_json::json!(["ok"])
+            serde_json::json!(["ok", "variant"])
         );
         assert!(body["text"]["format"]["schema"]["properties"]["ok"]
             .get("default")
@@ -695,6 +707,15 @@ mod tests {
         assert!(body["text"]["format"]["schema"]["properties"]["ok"]
             .get("format")
             .is_none());
+        assert!(body["text"]["format"]["schema"]["properties"]["variant"]
+            .get("oneOf")
+            .is_none());
+        assert!(
+            body["text"]["format"]["schema"]["properties"]["variant"]["description"]
+                .as_str()
+                .expect("oneOf compatibility note")
+                .contains("Original JSON Schema `oneOf` constraint omitted")
+        );
         assert_eq!(body["tools"][0]["type"], "web_search_preview");
         assert_eq!(body["tools"][1]["type"], "function");
         assert_eq!(body["tools"][1]["name"], "lookup");
@@ -705,7 +726,7 @@ mod tests {
         );
         assert_eq!(
             body["tools"][1]["parameters"]["required"],
-            serde_json::json!(["query"])
+            serde_json::json!(["mode", "query"])
         );
         assert!(body["tools"][1]["parameters"]["properties"]["query"]
             .get("default")
@@ -715,6 +736,9 @@ mod tests {
             .is_none());
         assert!(body["tools"][1]["parameters"]["properties"]["query"]
             .get("minLength")
+            .is_none());
+        assert!(body["tools"][1]["parameters"]["properties"]["mode"]
+            .get("oneOf")
             .is_none());
     }
 

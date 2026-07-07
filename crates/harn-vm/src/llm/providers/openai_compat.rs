@@ -1633,6 +1633,12 @@ mod tests {
                         "pattern": "^[a-z]+$",
                         "format": "email",
                         "default": "unknown"
+                    },
+                    "variant": {
+                        "oneOf": [
+                            {"type": "string"},
+                            {"type": "integer"}
+                        ]
                     }
                 }
             }),
@@ -1651,6 +1657,12 @@ mod tests {
                             "pattern": "^harn",
                             "minLength": 1,
                             "default": "harn"
+                        },
+                        "mode": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {"type": "integer"}
+                            ]
                         }
                     }
                 }
@@ -1661,7 +1673,7 @@ mod tests {
 
         let response_schema = &body["response_format"]["json_schema"]["schema"];
         assert_eq!(response_schema["additionalProperties"], false);
-        assert_eq!(response_schema["required"], json!(["answer"]));
+        assert_eq!(response_schema["required"], json!(["answer", "variant"]));
         assert!(response_schema.get("$schema").is_none());
         assert!(response_schema["properties"]["answer"]
             .get("default")
@@ -1675,15 +1687,23 @@ mod tests {
         assert!(response_schema["properties"]["answer"]
             .get("format")
             .is_none());
+        assert!(response_schema["properties"]["variant"]
+            .get("oneOf")
+            .is_none());
+        assert!(response_schema["properties"]["variant"]["description"]
+            .as_str()
+            .expect("oneOf compatibility note")
+            .contains("Original JSON Schema `oneOf` constraint omitted"));
 
         let tool_schema = &body["tools"][0]["function"]["parameters"];
         assert_eq!(tool_schema["additionalProperties"], false);
-        assert_eq!(tool_schema["required"], json!(["query"]));
+        assert_eq!(tool_schema["required"], json!(["mode", "query"]));
         assert!(tool_schema["properties"]["query"].get("default").is_none());
         assert!(tool_schema["properties"]["query"].get("pattern").is_none());
         assert!(tool_schema["properties"]["query"]
             .get("minLength")
             .is_none());
+        assert!(tool_schema["properties"]["mode"].get("oneOf").is_none());
     }
 
     #[test]

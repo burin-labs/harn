@@ -104,6 +104,7 @@ impl SchemaCompatProfile {
                 "else",
                 "not",
                 "allOf",
+                "oneOf",
             ],
             Self::AnthropicStrict => &[
                 "$schema",
@@ -546,6 +547,12 @@ mod tests {
                             "pattern": "^[A-Z]+$",
                             "format": "email"
                         },
+                        "variant": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {"type": "integer"}
+                            ]
+                        },
                         "count": {
                             "type": "integer",
                             "minimum": 1,
@@ -585,12 +592,18 @@ mod tests {
         );
         assert_eq!(
             sanitized["properties"]["nested"]["required"],
-            serde_json::json!(["count", "items", "value"])
+            serde_json::json!(["count", "items", "value", "variant"])
         );
         assert!(sanitized["properties"]["nested"].get("default").is_none());
         assert!(sanitized["properties"]["nested"]
             .get("minProperties")
             .is_none());
+        let variant_schema = &sanitized["properties"]["nested"]["properties"]["variant"];
+        assert!(variant_schema.get("oneOf").is_none());
+        assert!(variant_schema["description"]
+            .as_str()
+            .expect("oneOf note")
+            .contains("Original JSON Schema `oneOf` constraint omitted"));
         let value_schema = &sanitized["properties"]["nested"]["properties"]["value"];
         assert!(value_schema.get("minLength").is_none());
         assert!(value_schema.get("maxLength").is_none());
