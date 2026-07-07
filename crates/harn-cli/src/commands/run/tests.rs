@@ -143,6 +143,7 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["run_default_enabled"], false);
     assert_eq!(metadata["active"], true);
     assert_eq!(metadata["workspace_roots"][0], "/tmp/workspace");
+    assert_eq!(metadata["write_roots"].as_array().unwrap().len(), 0);
     assert_eq!(metadata["read_only_roots"][0], "/tmp/shared");
     assert_eq!(metadata["profile"], "os_hardened");
     assert_eq!(metadata["egress"], "host_policy");
@@ -235,6 +236,55 @@ pipeline main() {{
     assert!(
         !protected.exists(),
         "write under read-only root must be denied"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_allows_write_to_explicit_write_root() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let write_root = temp.path().join("external-receipts");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::create_dir(&write_root).expect("create write root");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+
+    let target = write_root.join("2026-07-06 Example 5.00.pdf");
+    let target_literal = target.to_string_lossy().replace('\\', "\\\\");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main() {{
+  write_file("{target_literal}", "%PDF-1.4\n")
+  __io_println(read_file("{target_literal}"))
+}}
+"#,
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_write_roots(vec![write_root.clone()]),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "%PDF-1.4");
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("read generated target"),
+        "%PDF-1.4\n"
     );
     harn_vm::reset_thread_local_state();
 }

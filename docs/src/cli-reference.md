@@ -19,6 +19,7 @@ harn run -e 'log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
 harn run --no-sandbox <file.harn>
+harn run --write-root /path/to/output main.harn
 harn run --read-only-root /path/to/other-repo main.harn
 harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
@@ -41,6 +42,7 @@ harn run --resume .harn/workers/worker_...json
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
+| `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
@@ -488,6 +490,7 @@ harn time run main.harn
 harn time run main.harn --json
 harn time run main.harn --json --no-cache
 harn time run main.harn --no-sandbox
+harn time run main.harn --write-root /path/to/output
 harn time run -e 'log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```
