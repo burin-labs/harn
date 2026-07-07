@@ -679,6 +679,10 @@ pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
             VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.roots")),
         ),
         (
+            "client_roots".to_string(),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.client_roots")),
+        ),
+        (
             "configure".to_string(),
             VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.configure")),
         ),

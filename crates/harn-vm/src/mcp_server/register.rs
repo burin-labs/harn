@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value as JsonValue;
 
-use crate::mcp_elicit::current_bus;
+use crate::mcp_client_request::current_bus;
 use crate::mcp_progress::{current_context as current_progress_context, is_valid_progress_token};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -290,6 +290,25 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         })?;
 
         bus.elicit(message, requested_schema_json).await
+    });
+
+    // Ask the connected MCP client for its roots via `roots/list`.
+    // Only valid while a Harn-as-MCP-server handler is running.
+    vm.register_async_builtin("mcp_client_roots", |_ctx, args| async move {
+        if !args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "mcp_client_roots: takes no arguments",
+            ))));
+        }
+        crate::mcp_client_roots::request_client_roots().await
+    });
+    vm.register_async_builtin("harn.mcp.client_roots", |_ctx, args| async move {
+        if !args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "harn.mcp.client_roots: takes no arguments",
+            ))));
+        }
+        crate::mcp_client_roots::request_client_roots().await
     });
 
     // mcp_report_progress(progress, opts?) -> bool

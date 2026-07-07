@@ -2295,6 +2295,7 @@ MCP servers.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `mcp_roots()` / `harn.mcp.roots()` | none | list | Return the MCP roots Harn exposes to connected servers (`uri`, `name`, `path`) |
+| `mcp_client_roots()` / `harn.mcp.client_roots()` | none | list | From a Harn-served MCP handler, ask the connected client for its `roots/list` result |
 | `mcp_configure(config)` / `harn.mcp.configure(config)` | config: dict | dict | Opt into experimental MCP behavior for the current VM, including draft SEP-2356 file inputs |
 | `mcp_file_input(options?)` / `harn.mcp.file_input(options?)` | options: dict | dict | Return a JSON Schema property using the draft `x-mcp-file` annotation |
 | `mcp_upload_file(server, file_path, options?)` / `harn.mcp.upload_file(server, file_path, options?)` | server: mcp\_client, file\_path: string, options: dict | string | Encode a local file as an RFC 2397 `data:` URI for an experimental MCP file input |
