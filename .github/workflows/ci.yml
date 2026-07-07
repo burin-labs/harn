@@ -28,6 +28,13 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  runner-availability:
+    name: Detect self-hosted runner availability
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@51a98eb52e4b189cb56a0ed91ccaff8bd2562779
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
   # Decide whether the heavy Linux Rust lanes (rust-builds, audit-scripts) need
   # to run at all.
   #
@@ -840,9 +847,13 @@ jobs:
 
   macos:
     name: Rust on macOS (deny-warnings build + lint)
-    runs-on: macos-latest
+    # Prefer an idle self-hosted macOS runner to reduce merge/release queue
+    # latency; if the local pool is busy or inaccessible, fall through to
+    # GitHub-hosted macOS instead of queueing behind active eval/development
+    # work on the shared Mac.
+    runs-on: ${{ needs.runner-availability.outputs.macos == 'true' && fromJSON('["self-hosted", "macOS", "harn-ci"]') || 'macos-latest' }}
     timeout-minutes: 60
-    needs: macos-plan
+    needs: [macos-plan, runner-availability]
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
     # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
@@ -1011,7 +1022,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [changes, fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs: [runner-availability, changes, fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -1019,6 +1030,7 @@ jobs:
             ["Detect changes"]="${{ needs.changes.result }}"
             ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
+            ["Runner availability"]="${{ needs['runner-availability'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
