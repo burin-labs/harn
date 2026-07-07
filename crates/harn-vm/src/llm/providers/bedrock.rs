@@ -14,6 +14,9 @@ use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,
 };
+use crate::llm::providers::schema_compat::{
+    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
+};
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
@@ -99,7 +102,11 @@ impl BedrockProvider {
             body["inferenceConfig"] = serde_json::Value::Object(inference);
         }
         strip_anthropic_sampling_params(&mut body, request);
-        if let Some(tool_config) = bedrock_tool_config(request.native_tools.as_deref()) {
+        if let Some(tool_config) = bedrock_tool_config(
+            &request.provider,
+            &request.model,
+            request.native_tools.as_deref(),
+        ) {
             body["toolConfig"] = tool_config;
         }
         body
@@ -202,7 +209,11 @@ impl LlmProviderChat for BedrockProvider {
     }
 }
 
-fn bedrock_tool_config(tools: Option<&[serde_json::Value]>) -> Option<serde_json::Value> {
+fn bedrock_tool_config(
+    provider: &str,
+    model: &str,
+    tools: Option<&[serde_json::Value]>,
+) -> Option<serde_json::Value> {
     let mut specs = Vec::new();
     for tool in tools.unwrap_or_default() {
         let function = tool.get("function").unwrap_or(tool);
@@ -217,6 +228,21 @@ fn bedrock_tool_config(tools: Option<&[serde_json::Value]>) -> Option<serde_json
             .get("parameters")
             .or_else(|| function.get("input_schema"))
         {
+            let schema = if function
+                .get("strict")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                sanitize_schema_for_provider(
+                    provider,
+                    model,
+                    SchemaCompatProfile::AnthropicStrict,
+                    SchemaSurface::ToolParameters,
+                    schema,
+                )
+            } else {
+                schema.clone()
+            };
             spec["inputSchema"] = serde_json::json!({ "json": schema });
         }
         specs.push(serde_json::json!({ "toolSpec": spec }));

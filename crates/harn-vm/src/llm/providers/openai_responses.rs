@@ -7,6 +7,9 @@
 //! OpenAI-compatible providers.
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ThinkingConfig};
+use crate::llm::providers::schema_compat::{
+    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
+};
 use crate::value::{VmError, VmValue};
 
 const RESPONSES_ENDPOINT: &str = "/responses";
@@ -162,6 +165,18 @@ impl OpenAiResponsesProvider {
                 });
             }
             OutputFormat::JsonSchema { schema, strict } => {
+                let schema_profile = if *strict {
+                    SchemaCompatProfile::OpenAiStrict
+                } else {
+                    SchemaCompatProfile::OpenAiLenient
+                };
+                let schema = sanitize_schema_for_provider(
+                    &opts.provider,
+                    &opts.model,
+                    schema_profile,
+                    SchemaSurface::StructuredOutput,
+                    schema,
+                );
                 body["text"] = serde_json::json!({
                     "format": {
                         "type": "json_schema",
@@ -213,12 +228,20 @@ fn responses_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::V
 fn responses_tools(opts: &LlmRequestPayload) -> Vec<serde_json::Value> {
     let mut tools = opts.provider_tools.clone();
     if let Some(native_tools) = opts.native_tools.as_ref() {
-        tools.extend(native_tools.iter().map(responses_function_tool));
+        tools.extend(
+            native_tools
+                .iter()
+                .map(|tool| responses_function_tool(&opts.provider, &opts.model, tool)),
+        );
     }
     tools
 }
 
-fn responses_function_tool(tool: &serde_json::Value) -> serde_json::Value {
+fn responses_function_tool(
+    provider: &str,
+    model: &str,
+    tool: &serde_json::Value,
+) -> serde_json::Value {
     if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
         return tool.clone();
     }
@@ -228,10 +251,31 @@ fn responses_function_tool(tool: &serde_json::Value) -> serde_json::Value {
 
     let mut out = serde_json::Map::new();
     out.insert("type".to_string(), serde_json::json!("function"));
-    for key in ["name", "description", "parameters", "strict"] {
+    for key in ["name", "description", "strict"] {
         if let Some(value) = function.get(key) {
             out.insert(key.to_string(), value.clone());
         }
+    }
+    if let Some(parameters) = function.get("parameters") {
+        let schema_profile = if function
+            .get("strict")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            SchemaCompatProfile::OpenAiStrict
+        } else {
+            SchemaCompatProfile::OpenAiLenient
+        };
+        out.insert(
+            "parameters".to_string(),
+            sanitize_schema_for_provider(
+                provider,
+                model,
+                schema_profile,
+                SchemaSurface::ToolParameters,
+                parameters,
+            ),
+        );
     }
     for key in ["defer_loading", "namespace", "namespaces"] {
         if let Some(value) = tool.get(key).or_else(|| function.get(key)) {
@@ -577,8 +621,9 @@ mod tests {
         opts.max_tool_calls = Some(3);
         opts.output_format = OutputFormat::JsonSchema {
             schema: serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {"ok": {"type": "boolean"}},
+                "properties": {"ok": {"type": "boolean", "default": true}},
                 "required": ["ok"],
             }),
             strict: true,
@@ -592,7 +637,11 @@ mod tests {
             "function": {
                 "name": "lookup",
                 "description": "Lookup a record",
-                "parameters": {"type": "object"},
+                "strict": true,
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "default": "harn"}}
+                },
             }
         })]);
         let payload = LlmRequestPayload::from(&opts);
@@ -611,10 +660,32 @@ mod tests {
             body["text"]["format"]["schema"]["properties"]["ok"]["type"],
             "boolean"
         );
+        assert_eq!(
+            body["text"]["format"]["schema"]["additionalProperties"],
+            false
+        );
+        assert_eq!(
+            body["text"]["format"]["schema"]["required"],
+            serde_json::json!(["ok"])
+        );
+        assert!(body["text"]["format"]["schema"]["properties"]["ok"]
+            .get("default")
+            .is_none());
         assert_eq!(body["tools"][0]["type"], "web_search_preview");
         assert_eq!(body["tools"][1]["type"], "function");
         assert_eq!(body["tools"][1]["name"], "lookup");
         assert_eq!(body["tools"][1]["defer_loading"], true);
+        assert_eq!(
+            body["tools"][1]["parameters"]["additionalProperties"],
+            false
+        );
+        assert_eq!(
+            body["tools"][1]["parameters"]["required"],
+            serde_json::json!(["query"])
+        );
+        assert!(body["tools"][1]["parameters"]["properties"]["query"]
+            .get("default")
+            .is_none());
     }
 
     #[test]

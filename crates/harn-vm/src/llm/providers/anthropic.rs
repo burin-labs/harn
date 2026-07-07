@@ -6,6 +6,9 @@ use std::collections::HashSet;
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ReasoningEffort, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::parse_major_minor_tail;
+use crate::llm::providers::schema_compat::{
+    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
+};
 use crate::value::VmError;
 
 pub(crate) const ANTHROPIC_INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
@@ -484,7 +487,9 @@ impl AnthropicProvider {
             if !tools.is_empty() {
                 let sanitized: Vec<serde_json::Value> = tools
                     .iter()
-                    .map(sanitize_anthropic_tool_for_request)
+                    .map(|tool| {
+                        sanitize_anthropic_tool_for_request(&opts.provider, &opts.model, tool)
+                    })
                     .collect();
                 body["tools"] = serde_json::json!(sanitized);
             }
@@ -497,7 +502,11 @@ impl AnthropicProvider {
         if !opts.provider_tools.is_empty() {
             let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
             for tool in &opts.provider_tools {
-                tools.push(sanitize_anthropic_tool_for_request(tool));
+                tools.push(sanitize_anthropic_tool_for_request(
+                    &opts.provider,
+                    &opts.model,
+                    tool,
+                ));
             }
             body["tools"] = serde_json::json!(tools);
         }
@@ -897,13 +906,35 @@ fn is_user_message_without_tool_result(message: &serde_json::Value) -> bool {
 /// equivalent helper in `openai_compat.rs`. Anthropic's native-tools shape
 /// keeps tool fields at the root (no `function` wrapper), so we strip
 /// only at that level.
-fn sanitize_anthropic_tool_for_request(tool: &serde_json::Value) -> serde_json::Value {
+fn sanitize_anthropic_tool_for_request(
+    provider: &str,
+    model: &str,
+    tool: &serde_json::Value,
+) -> serde_json::Value {
     let mut tool = tool.clone();
     if let Some(object) = tool.as_object_mut() {
         object.remove("x-harn-output-schema");
         object.remove("defer_loading");
         object.remove("namespace");
         object.remove("namespaces");
+        if object
+            .get("strict")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            if let Some(schema) = object.get("input_schema").cloned() {
+                object.insert(
+                    "input_schema".to_string(),
+                    sanitize_schema_for_provider(
+                        provider,
+                        model,
+                        SchemaCompatProfile::AnthropicStrict,
+                        SchemaSurface::ToolParameters,
+                        &schema,
+                    ),
+                );
+            }
+        }
     }
     tool
 }
@@ -997,6 +1028,13 @@ fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Va
     }
     body["tools"] = {
         let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
+        let schema = sanitize_schema_for_provider(
+            "anthropic",
+            model,
+            SchemaCompatProfile::AnthropicStrict,
+            SchemaSurface::StructuredOutput,
+            schema,
+        );
         tools.push(serde_json::json!({
             "name": "json_response",
             "description": "Return a structured JSON response matching the schema.",
@@ -2183,7 +2221,18 @@ mod tests {
         payload.native_tools = Some(vec![serde_json::json!({
             "name": "read_file",
             "description": "Read a file",
-            "input_schema": {"type": "object"},
+            "strict": true,
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "pattern": "^/",
+                        "format": "uri-reference",
+                        "minLength": 1
+                    }
+                }
+            },
             "x-harn-output-schema": {"type": "object"},
             "defer_loading": true,
             "namespace": "fs",
@@ -2198,6 +2247,16 @@ mod tests {
         assert!(!sent.contains_key("defer_loading"));
         assert!(!sent.contains_key("namespace"));
         assert!(sent.contains_key("input_schema"));
+        assert_eq!(sent["input_schema"]["additionalProperties"], false);
+        assert!(sent["input_schema"]["properties"]["path"]
+            .get("pattern")
+            .is_none());
+        assert!(sent["input_schema"]["properties"]["path"]
+            .get("format")
+            .is_none());
+        assert!(sent["input_schema"]["properties"]["path"]
+            .get("minLength")
+            .is_none());
     }
 
     #[test]
@@ -2206,7 +2265,7 @@ mod tests {
         payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
             schema: serde_json::json!({
                 "type": "object",
-                "properties": {"answer": {"type": "string"}},
+                "properties": {"answer": {"type": "string", "pattern": "^ok"}},
                 "required": ["answer"],
             }),
             strict: true,
@@ -2227,6 +2286,10 @@ mod tests {
             json_tool["input_schema"]["properties"]["answer"]["type"],
             "string"
         );
+        assert_eq!(json_tool["input_schema"]["additionalProperties"], false);
+        assert!(json_tool["input_schema"]["properties"]["answer"]
+            .get("pattern")
+            .is_none());
     }
 
     #[test]

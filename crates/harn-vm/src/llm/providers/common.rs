@@ -1,4 +1,7 @@
 use crate::llm::api::{DeltaSender, LlmResult, ProviderTelemetry};
+use crate::llm::providers::schema_compat::{
+    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
+};
 use crate::value::{VmError, VmValue};
 
 pub(super) fn vm_err(message: impl Into<String>) -> VmError {
@@ -68,18 +71,24 @@ pub(super) fn apply_provider_overrides(
 }
 
 pub(super) fn google_function_declaration_tools(
+    provider: &str,
+    model: &str,
     tools: Option<&[serde_json::Value]>,
 ) -> Option<serde_json::Value> {
     let declarations: Vec<serde_json::Value> = tools
         .unwrap_or_default()
         .iter()
-        .filter_map(google_function_declaration)
+        .filter_map(|tool| google_function_declaration(provider, model, tool))
         .collect();
     (!declarations.is_empty())
         .then(|| serde_json::json!([{ "functionDeclarations": declarations }]))
 }
 
-fn google_function_declaration(tool: &serde_json::Value) -> Option<serde_json::Value> {
+fn google_function_declaration(
+    provider: &str,
+    model: &str,
+    tool: &serde_json::Value,
+) -> Option<serde_json::Value> {
     let function = tool.get("function").unwrap_or(tool);
     let name = function
         .get("name")
@@ -93,7 +102,13 @@ fn google_function_declaration(tool: &serde_json::Value) -> Option<serde_json::V
         .get("parameters")
         .or_else(|| function.get("input_schema"))
     {
-        declaration["parameters"] = parameters.clone();
+        declaration["parameters"] = sanitize_schema_for_provider(
+            provider,
+            model,
+            SchemaCompatProfile::Google,
+            SchemaSurface::ToolParameters,
+            parameters,
+        );
     }
     Some(declaration)
 }

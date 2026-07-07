@@ -7,6 +7,9 @@ use std::collections::HashSet;
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::parse_major_minor_tail;
+use crate::llm::providers::schema_compat::{
+    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
+};
 use crate::value::VmError;
 
 /// Parse the (major, minor) version out of a GPT model ID. Handles dotted
@@ -268,6 +271,18 @@ impl OpenAiCompatibleProvider {
                 body["response_format"] = serde_json::json!({"type": "json_object"});
             }
             crate::llm::api::OutputFormat::JsonSchema { schema, strict } => {
+                let schema_profile = if *strict {
+                    SchemaCompatProfile::OpenAiStrict
+                } else {
+                    SchemaCompatProfile::OpenAiLenient
+                };
+                let schema = sanitize_schema_for_provider(
+                    &opts.provider,
+                    &opts.model,
+                    schema_profile,
+                    SchemaSurface::StructuredOutput,
+                    schema,
+                );
                 body["response_format"] = serde_json::json!({
                     "type": "json_schema",
                     "json_schema": {
@@ -1121,11 +1136,20 @@ fn provider_request_tools(
 
     tools
         .iter()
-        .map(|tool| sanitize_openai_tool_for_request(tool, supports_openai_tool_search_extensions))
+        .map(|tool| {
+            sanitize_openai_tool_for_request(
+                provider,
+                model,
+                tool,
+                supports_openai_tool_search_extensions,
+            )
+        })
         .collect()
 }
 
 fn sanitize_openai_tool_for_request(
+    provider: &str,
+    model: &str,
     tool: &serde_json::Value,
     supports_openai_tool_search_extensions: bool,
 ) -> serde_json::Value {
@@ -1147,6 +1171,27 @@ fn sanitize_openai_tool_for_request(
     {
         function.remove("x-harn-output-schema");
         function.remove("namespace");
+        let schema_profile = if function
+            .get("strict")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            SchemaCompatProfile::OpenAiStrict
+        } else {
+            SchemaCompatProfile::OpenAiLenient
+        };
+        if let Some(parameters) = function.get("parameters").cloned() {
+            function.insert(
+                "parameters".to_string(),
+                sanitize_schema_for_provider(
+                    provider,
+                    model,
+                    schema_profile,
+                    SchemaSurface::ToolParameters,
+                    &parameters,
+                ),
+            );
+        }
     }
 
     tool
@@ -1570,6 +1615,54 @@ mod tests {
             source_tool["function"]["x-harn-output-schema"]["type"],
             "object"
         );
+    }
+
+    #[test]
+    fn openai_strict_schemas_are_sanitized_before_request() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-5.4".to_string();
+        payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "answer": {
+                        "type": "string",
+                        "default": "unknown"
+                    }
+                }
+            }),
+            strict: true,
+        };
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "strict": true,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "default": "harn"}
+                    }
+                }
+            }
+        })]);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        let response_schema = &body["response_format"]["json_schema"]["schema"];
+        assert_eq!(response_schema["additionalProperties"], false);
+        assert_eq!(response_schema["required"], json!(["answer"]));
+        assert!(response_schema.get("$schema").is_none());
+        assert!(response_schema["properties"]["answer"]
+            .get("default")
+            .is_none());
+
+        let tool_schema = &body["tools"][0]["function"]["parameters"];
+        assert_eq!(tool_schema["additionalProperties"], false);
+        assert_eq!(tool_schema["required"], json!(["query"]));
+        assert!(tool_schema["properties"]["query"].get("default").is_none());
     }
 
     #[test]
