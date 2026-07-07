@@ -1,0 +1,304 @@
+import { parse_args } from "std/cli"
+
+const DEFAULT_MODEL = "default"
+
+const DEFAULT_BACKEND = "modal"
+
+const DEFAULT_SPLIT = "default"
+
+const DEFAULT_RUNNER = "scripts/run-eval.sh"
+
+const DEFAULT_TRIALS = 1
+
+const DEFAULT_K = 1
+
+const DEFAULT_MAX_CONCURRENCY = 1
+
+const DEFAULT_MAX_ESCALATING = 1
+
+const DEFAULT_ARTIFACT_RAW_FILE_MAX_BYTES = 33554432
+
+const DEFAULT_ARTIFACT_BUNDLE_MAX_BYTES = 25165824
+
+fn usage() -> string {
+  return join(
+    [
+      "usage: harn run scripts/remote_eval_fanout_plan.harn -- --catalog PATH --cells CELLS [options]",
+      "",
+      "Options:",
+      "  --cells NAME[,NAME...]         Eval cell names or catalog group names.",
+      "  --trials N                    Trial count per concrete cell (default 1).",
+      "  --max-concurrency N           Max concurrently running remote shards.",
+      "  --max-escalating N            Max shards allowed to enter escalation at once.",
+      "  --model MODEL                 Primary model selector.",
+      "  --split NAME                  Meter/eval split label.",
+      "  --runner PATH                 Per-shard runner path.",
+      "  --flag KEY=VALUE              Repeatable runtime flag forwarded to each shard.",
+      "  --backend NAME                Remote backend label (default modal).",
+      "  --out PATH                    Write JSON plan to PATH.",
+      "  --json                        Emit a JSON envelope.",
+    ],
+    "\n",
+  )
+}
+
+fn arg_spec() -> list {
+  return [
+    {kind: "option", name: "catalog", flags: ["--catalog"], parse: "string", default: ""},
+    {kind: "option", name: "cells", flags: ["--cells"], parse: "string", default: ""},
+    {kind: "option", name: "trials", flags: ["--trials"], parse: "int", default: DEFAULT_TRIALS},
+    {kind: "option", name: "k", flags: ["--k"], parse: "int", default: DEFAULT_K},
+    {
+      kind: "option",
+      name: "max_concurrency",
+      flags: ["--max-concurrency"],
+      parse: "int",
+      default: DEFAULT_MAX_CONCURRENCY,
+    },
+    {
+      kind: "option",
+      name: "max_escalating",
+      flags: ["--max-escalating"],
+      parse: "int",
+      default: DEFAULT_MAX_ESCALATING,
+    },
+    {kind: "option", name: "model", flags: ["--model"], parse: "string", default: DEFAULT_MODEL},
+    {kind: "option", name: "split", flags: ["--split"], parse: "string", default: DEFAULT_SPLIT},
+    {kind: "option", name: "runner", flags: ["--runner"], parse: "string", default: DEFAULT_RUNNER},
+    {kind: "option", name: "backend", flags: ["--backend"], parse: "string", default: DEFAULT_BACKEND},
+    {kind: "option", name: "flag", flags: ["--flag"], parse: "string", multi: true, default: []},
+    {kind: "option", name: "out", flags: ["--out"], parse: "string", default: ""},
+    {kind: "flag", name: "json", flags: ["--json"], default: false},
+  ]
+}
+
+fn require_positive_int(name: string, value) -> int {
+  const n = to_int(value) ?? 0
+  if n < 1 {
+    throw name + " must be a positive integer"
+  }
+  return n
+}
+
+fn split_csv(value: string) -> list<string> {
+  let out: list<string> = []
+  for raw in value.split(",") {
+    const item = raw.trim()
+    if item != "" {
+      out = out + [item]
+    }
+  }
+  return out
+}
+
+fn catalog_eval_names(catalog) -> list<string> {
+  const evals = catalog?.evals ?? {}
+  let out: list<string> = []
+  for name in evals.keys().sort() {
+    out = out + [to_string(name)]
+  }
+  return out
+}
+
+fn catalog_groups(catalog) {
+  return catalog?.groups ?? {}
+}
+
+fn append_unique(list: list<string>, value: string) -> list<string> {
+  if list.contains(value) {
+    return list
+  }
+  return list + [value]
+}
+
+pub fn expand_cells(cells: string, catalog) -> list<string> {
+  const groups = catalog_groups(catalog)
+  const eval_names = catalog_eval_names(catalog)
+  let expanded: list<string> = []
+  for token in split_csv(cells) {
+    if eval_names.contains(token) {
+      expanded = append_unique(expanded, token)
+      continue
+    }
+    const group = groups[token]
+    if type_of(group) == "list" {
+      for cell in group {
+        expanded = append_unique(expanded, to_string(cell))
+      }
+      continue
+    }
+    expanded = append_unique(expanded, token)
+  }
+  return expanded
+}
+
+fn shard_safe(value: string) -> string {
+  let out = ""
+  for ch in value.chars() {
+    const s = to_string(ch)
+    if (s >= "a" && s <= "z") || (s >= "A" && s <= "Z") || (s >= "0" && s <= "9") {
+      out = out + s
+    } else {
+      out = out + "-"
+    }
+  }
+  while out.contains("--") {
+    out = out.replace("--", "-")
+  }
+  return lowercase(out.trim("-"))
+}
+
+fn run_eval_args(runner: string, cell: string, model: string, flags: list<string>) -> list<string> {
+  let args = ["bash", runner, cell, "--model", model, "--trials", "1", "--meter"]
+  for flag in flags {
+    args = args + ["--flag", flag]
+  }
+  return args
+}
+
+pub fn build_shards(
+  cells: list<string>,
+  trials: int,
+  runner: string,
+  model: string,
+  flags: list<string>,
+) -> list {
+  let shards = []
+  for cell in cells {
+    for i in range(1, trials + 1) {
+      const id = shard_safe(cell) + "-t" + to_string(i)
+      shards = shards
+        + [
+        {
+          id: id,
+          cell: cell,
+          trial_index: i,
+          seed: i,
+          run_eval_args: run_eval_args(runner, cell, model, flags),
+        },
+      ]
+    }
+  }
+  return shards
+}
+
+pub fn remote_eval_fanout_plan(options, catalog) {
+  const cells = expand_cells(to_string(options?.cells ?? ""), catalog)
+  if len(cells) == 0 {
+    throw "--cells must name at least one eval cell or group"
+  }
+  const trials = require_positive_int("--trials", options?.trials ?? DEFAULT_TRIALS)
+  const k = require_positive_int("--k", options?.k ?? DEFAULT_K)
+  const max_concurrency = require_positive_int("--max-concurrency", options?.max_concurrency ?? DEFAULT_MAX_CONCURRENCY)
+  const max_escalating = require_positive_int("--max-escalating", options?.max_escalating ?? DEFAULT_MAX_ESCALATING)
+  if max_escalating > max_concurrency {
+    throw "--max-escalating cannot exceed --max-concurrency"
+  }
+  const model = to_string(options?.model ?? DEFAULT_MODEL)
+  const runner = to_string(options?.runner ?? DEFAULT_RUNNER)
+  const flags = options?.flags ?? options?.flag ?? []
+  const shards = build_shards(cells, trials, runner, model, flags)
+  return {
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_plan_v1",
+    backend: to_string(options?.backend ?? DEFAULT_BACKEND),
+    split: to_string(options?.split ?? DEFAULT_SPLIT),
+    model: model,
+    runner: runner,
+    k: k,
+    cells: cells,
+    shard_count: len(shards),
+    shards: shards,
+    concurrency: {
+      max_concurrency: max_concurrency,
+      max_escalating: max_escalating,
+      escalation_governor: "backend_must_limit_simultaneously_escalating_shards",
+    },
+    artifacts: {
+      raw_file_max_bytes: DEFAULT_ARTIFACT_RAW_FILE_MAX_BYTES,
+      compressed_bundle_max_bytes: DEFAULT_ARTIFACT_BUNDLE_MAX_BYTES,
+      required_receipts: [
+        "per_shard_trial_summary",
+        "artifact_bundle_manifest",
+        "path_rewrite_map",
+        "provider_served_evidence",
+        "rejoin_summary",
+      ],
+    },
+    ledger: {
+      serialized_ingest: true,
+      ingest_source: "harn_remote_eval_fanout_rejoin_receipt",
+      never_ingest_invalid_or_partial_shards: true,
+    },
+  }
+}
+
+fn render_human(plan) -> string {
+  return join(
+    [
+      "remote eval fanout plan",
+      "  backend: " + to_string(plan.backend),
+      "  model: " + to_string(plan.model),
+      "  split: " + to_string(plan.split),
+      "  cells: " + join(plan.cells, ", "),
+      "  shards: " + to_string(plan.shard_count),
+      "  max concurrency: " + to_string(plan.concurrency.max_concurrency),
+      "  max escalating: " + to_string(plan.concurrency.max_escalating),
+    ],
+    "\n",
+  )
+}
+
+fn load_catalog(path: string) {
+  if path == "" {
+    return {evals: {}, groups: {}}
+  }
+  return json_parse(harness.fs.read_text(path))
+}
+
+pipeline default(args) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio.println(usage())
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    harness.stdio.eprintln(join(errors, "\n"))
+    harness.stdio.eprintln("")
+    harness.stdio.eprintln(usage())
+    exit(2)
+  }
+  const catalog = load_catalog(to_string(parsed?.catalog ?? ""))
+  const plan = try {
+    remote_eval_fanout_plan(
+      {
+        cells: parsed?.cells ?? "",
+        trials: parsed?.trials ?? DEFAULT_TRIALS,
+        k: parsed?.k ?? DEFAULT_K,
+        max_concurrency: parsed?.max_concurrency ?? DEFAULT_MAX_CONCURRENCY,
+        max_escalating: parsed?.max_escalating ?? DEFAULT_MAX_ESCALATING,
+        model: parsed?.model ?? DEFAULT_MODEL,
+        split: parsed?.split ?? DEFAULT_SPLIT,
+        runner: parsed?.runner ?? DEFAULT_RUNNER,
+        backend: parsed?.backend ?? DEFAULT_BACKEND,
+        flags: parsed?.flag ?? [],
+      },
+      catalog,
+    )
+  } catch (err) {
+    harness.stdio.eprintln("error: " + to_string(err))
+    exit(2)
+  }
+  const out_path = to_string(parsed?.out ?? "")
+  const text = json_stringify_pretty(plan) + "\n"
+  if out_path != "" {
+    harness.fs.write_text(out_path, text)
+  }
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty({schema_version: 1, ok: true, data: plan}))
+  } else {
+    harness.stdio.println(render_human(plan))
+  }
+  return nil
+}
