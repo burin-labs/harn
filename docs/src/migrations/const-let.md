@@ -37,8 +37,8 @@ expects.
 ### Before
 
 ```harn,ignore
-const name = "ada"       // immutable
-let count = 0          // mutable
+let name = "ada"       // immutable — old `let` was the immutable keyword
+var count = 0          // mutable — old `var` was the mutable keyword
 count = count + 1
 ```
 
@@ -46,7 +46,7 @@ count = count + 1
 
 ```harn,ignore
 const name = "ada"     // immutable
-const count = 0          // mutable
+let count = 0          // mutable
 count = count + 1
 ```
 
