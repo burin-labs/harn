@@ -71,7 +71,40 @@ impl SchemaCompatProfile {
     fn unsupported_keywords(self) -> &'static [&'static str] {
         match self {
             Self::OpenAiLenient => &["$schema", "$id", "id", "default"],
-            Self::OpenAiStrict => &["$schema", "$id", "id", "default"],
+            Self::OpenAiStrict => &[
+                "$schema",
+                "$id",
+                "id",
+                "default",
+                "minimum",
+                "maximum",
+                "exclusiveMinimum",
+                "exclusiveMaximum",
+                "multipleOf",
+                "minLength",
+                "maxLength",
+                "pattern",
+                "format",
+                "minItems",
+                "maxItems",
+                "uniqueItems",
+                "minProperties",
+                "maxProperties",
+                "patternProperties",
+                "propertyNames",
+                "unevaluatedProperties",
+                "unevaluatedItems",
+                "contains",
+                "minContains",
+                "maxContains",
+                "dependentRequired",
+                "dependentSchemas",
+                "if",
+                "then",
+                "else",
+                "not",
+                "allOf",
+            ],
             Self::AnthropicStrict => &[
                 "$schema",
                 "$id",
@@ -496,11 +529,37 @@ mod tests {
     fn strict_profile_closes_objects_and_removes_defaults() {
         let schema = serde_json::json!({
             "type": "object",
+            "patternProperties": {
+                "^x-": {"type": "string"}
+            },
             "properties": {
+                "pattern": {"type": "string"},
                 "nested": {
                     "type": "object",
                     "default": {},
-                    "properties": {"value": {"type": "string"}}
+                    "minProperties": 1,
+                    "properties": {
+                        "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[A-Z]+$",
+                            "format": "email"
+                        },
+                        "count": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10,
+                            "multipleOf": 1
+                        },
+                        "items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 3,
+                            "uniqueItems": true,
+                            "contains": {"type": "string"}
+                        }
+                    }
                 }
             }
         });
@@ -514,16 +573,42 @@ mod tests {
         );
 
         assert_eq!(sanitized["additionalProperties"], false);
-        assert_eq!(sanitized["required"], serde_json::json!(["nested"]));
+        assert_eq!(
+            sanitized["required"],
+            serde_json::json!(["nested", "pattern"])
+        );
+        assert!(sanitized.get("patternProperties").is_none());
+        assert_eq!(sanitized["properties"]["pattern"]["type"], "string");
         assert_eq!(
             sanitized["properties"]["nested"]["additionalProperties"],
             false
         );
         assert_eq!(
             sanitized["properties"]["nested"]["required"],
-            serde_json::json!(["value"])
+            serde_json::json!(["count", "items", "value"])
         );
         assert!(sanitized["properties"]["nested"].get("default").is_none());
+        assert!(sanitized["properties"]["nested"]
+            .get("minProperties")
+            .is_none());
+        let value_schema = &sanitized["properties"]["nested"]["properties"]["value"];
+        assert!(value_schema.get("minLength").is_none());
+        assert!(value_schema.get("maxLength").is_none());
+        assert!(value_schema.get("pattern").is_none());
+        assert!(value_schema.get("format").is_none());
+        let count_schema = &sanitized["properties"]["nested"]["properties"]["count"];
+        assert!(count_schema.get("minimum").is_none());
+        assert!(count_schema.get("maximum").is_none());
+        assert!(count_schema.get("multipleOf").is_none());
+        let items_schema = &sanitized["properties"]["nested"]["properties"]["items"];
+        assert!(items_schema.get("minItems").is_none());
+        assert!(items_schema.get("maxItems").is_none());
+        assert!(items_schema.get("uniqueItems").is_none());
+        assert!(items_schema.get("contains").is_none());
+        assert!(value_schema["description"]
+            .as_str()
+            .expect("constraint note")
+            .contains("Original JSON Schema `pattern` constraint omitted"));
     }
 
     #[test]

@@ -623,7 +623,15 @@ mod tests {
             schema: serde_json::json!({
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {"ok": {"type": "boolean", "default": true}},
+                "properties": {
+                    "ok": {
+                        "type": "string",
+                        "pattern": "^ok$",
+                        "minLength": 2,
+                        "format": "email",
+                        "default": "ok"
+                    }
+                },
                 "required": ["ok"],
             }),
             strict: true,
@@ -640,7 +648,14 @@ mod tests {
                 "strict": true,
                 "parameters": {
                     "type": "object",
-                    "properties": {"query": {"type": "string", "default": "harn"}}
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "pattern": "^harn",
+                            "minLength": 1,
+                            "default": "harn"
+                        }
+                    }
                 },
             }
         })]);
@@ -658,7 +673,7 @@ mod tests {
         assert_eq!(body["text"]["format"]["type"], "json_schema");
         assert_eq!(
             body["text"]["format"]["schema"]["properties"]["ok"]["type"],
-            "boolean"
+            "string"
         );
         assert_eq!(
             body["text"]["format"]["schema"]["additionalProperties"],
@@ -670,6 +685,15 @@ mod tests {
         );
         assert!(body["text"]["format"]["schema"]["properties"]["ok"]
             .get("default")
+            .is_none());
+        assert!(body["text"]["format"]["schema"]["properties"]["ok"]
+            .get("pattern")
+            .is_none());
+        assert!(body["text"]["format"]["schema"]["properties"]["ok"]
+            .get("minLength")
+            .is_none());
+        assert!(body["text"]["format"]["schema"]["properties"]["ok"]
+            .get("format")
             .is_none());
         assert_eq!(body["tools"][0]["type"], "web_search_preview");
         assert_eq!(body["tools"][1]["type"], "function");
@@ -685,6 +709,12 @@ mod tests {
         );
         assert!(body["tools"][1]["parameters"]["properties"]["query"]
             .get("default")
+            .is_none());
+        assert!(body["tools"][1]["parameters"]["properties"]["query"]
+            .get("pattern")
+            .is_none());
+        assert!(body["tools"][1]["parameters"]["properties"]["query"]
+            .get("minLength")
             .is_none());
     }
 

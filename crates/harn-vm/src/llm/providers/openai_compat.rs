@@ -1629,6 +1629,9 @@ mod tests {
                 "properties": {
                     "answer": {
                         "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[a-z]+$",
+                        "format": "email",
                         "default": "unknown"
                     }
                 }
@@ -1643,7 +1646,12 @@ mod tests {
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "default": "harn"}
+                        "query": {
+                            "type": "string",
+                            "pattern": "^harn",
+                            "minLength": 1,
+                            "default": "harn"
+                        }
                     }
                 }
             }
@@ -1658,11 +1666,24 @@ mod tests {
         assert!(response_schema["properties"]["answer"]
             .get("default")
             .is_none());
+        assert!(response_schema["properties"]["answer"]
+            .get("minLength")
+            .is_none());
+        assert!(response_schema["properties"]["answer"]
+            .get("pattern")
+            .is_none());
+        assert!(response_schema["properties"]["answer"]
+            .get("format")
+            .is_none());
 
         let tool_schema = &body["tools"][0]["function"]["parameters"];
         assert_eq!(tool_schema["additionalProperties"], false);
         assert_eq!(tool_schema["required"], json!(["query"]));
         assert!(tool_schema["properties"]["query"].get("default").is_none());
+        assert!(tool_schema["properties"]["query"].get("pattern").is_none());
+        assert!(tool_schema["properties"]["query"]
+            .get("minLength")
+            .is_none());
     }
 
     #[test]
