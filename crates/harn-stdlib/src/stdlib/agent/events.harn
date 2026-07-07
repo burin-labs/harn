@@ -1,3 +1,212 @@
+import "std/schema"
+
+fn __agent_event_number_schema() {
+  return schema_union([schema_int(), schema_float()])
+}
+
+fn __agent_event_nonnegative_int_schema() {
+  return schema_int() + {min: 0}
+}
+
+fn __agent_event_digest_schema() {
+  return schema_string() + {pattern: "^[a-f0-9]{64}$"}
+}
+
+/**
+ * Generic schema for agent events captured by `agent_capture_events`.
+ *
+ * The runtime event stream is intentionally extensible: event-specific payload
+ * fields live beside the required `type` discriminator. Use the narrower
+ * schemas below when a consumer relies on a specific event family.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_event_schema() {
+  return schema_object({type: schema_string()}, {additional_properties: schema_any()})
+}
+
+/**
+ * Schema for captured event envelopes returned by `agent_capture_events`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_event_capture_schema() {
+  return schema_object(
+    {result: schema_field(schema_any(), false), events: schema_list(agent_event_schema())},
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for tool lifecycle events emitted by the agent loop.
+ *
+ * Covers `tool_call` and `tool_call_update` events that drive TUI/ACP tool
+ * progress, transcript integrity audits, and replay/debug tooling.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_lifecycle_event_schema() {
+  return schema_object(
+    {
+      type: schema_enum(["tool_call", "tool_call_update"]),
+      tool_call_id: schema_string(),
+      tool_name: schema_string(),
+      status: schema_enum(["pending", "in_progress", "completed", "failed"]),
+      raw_input: schema_field(schema_any(), false),
+      raw_output: schema_field(schema_any(), false),
+      error: schema_field(schema_any(), false),
+      duration_ms: schema_field(__agent_event_number_schema(), false),
+      execution_duration_ms: schema_field(__agent_event_number_schema(), false),
+      error_category: schema_field(schema_string(), false),
+      executor: schema_field(schema_any(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for typed tool-call receipts attached to `tool_call_audit` events.
+ *
+ * Matches the runtime's `ToolCallReceipt` wire shape: arguments/results are
+ * represented by hashes and nullable metadata fields serialize as explicit
+ * `nil` values.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_call_receipt_schema() {
+  const nullable_string = schema_nullable(schema_string())
+  return schema_object(
+    {
+      schema_version: schema_literal(1),
+      session_id: schema_string() + {min_length: 1},
+      run_id: nullable_string,
+      tool_call_id: schema_string() + {min_length: 1},
+      tool_name: schema_string() + {min_length: 1},
+      iteration: __agent_event_nonnegative_int_schema(),
+      turn_index: schema_nullable(__agent_event_nonnegative_int_schema()),
+      emit_order: __agent_event_nonnegative_int_schema(),
+      reason: nullable_string,
+      kind: nullable_string,
+      executor: schema_nullable(schema_enum(["harn", "host_bridge", "mcp_server", "provider_native"])),
+      status: schema_enum(["ok", "schema_violation", "consent_denied", "timeout", "error"]),
+      error_category: nullable_string,
+      duration_ms: __agent_event_nonnegative_int_schema(),
+      args_hash: __agent_event_digest_schema(),
+      result_hash: schema_nullable(__agent_event_digest_schema()),
+      audit: schema_any(),
+      emitted_at: schema_string(),
+      model: nullable_string,
+      provider: nullable_string,
+    },
+    {additional_properties: false},
+  )
+}
+
+/**
+ * Schema for tool-call audit events emitted by agent tooling and subagents.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_audit_event_schema() {
+  return schema_object(
+    {
+      type: schema_literal("tool_call_audit"),
+      tool_call_id: schema_string(),
+      tool_name: schema_string(),
+      audit: schema_field(schema_dict(schema_any()), false),
+      receipt: schema_field(agent_tool_call_receipt_schema(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for typed checkpoint events used by control, replay, and eval
+ * diagnostics.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_typed_checkpoint_event_schema() {
+  return schema_object(
+    {
+      type: schema_literal("typed_checkpoint"),
+      checkpoint: schema_object(
+        {
+          kind: schema_string(),
+          phase: schema_field(schema_string(), false),
+          iteration: schema_field(schema_int(), false),
+          attempt: schema_field(schema_int(), false),
+          context_overflow_recovery_attempt: schema_field(schema_int(), false),
+          provider: schema_field(schema_string(), false),
+          model: schema_field(schema_string(), false),
+          tool_format: schema_field(schema_string(), false),
+          final_wrapup: schema_field(schema_bool(), false),
+        },
+        {additional_properties: schema_any()},
+      ),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Validate one captured agent event and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_event_report(value, schema = nil, apply_defaults = false) {
+  return get_typed_report(value, schema ?? agent_event_schema(), apply_defaults)
+}
+
+/**
+ * Validate one captured agent event and return the typed value, throwing on
+ * validation failure.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_event_value(value, schema = nil, apply_defaults = false) {
+  return get_typed_value(value, schema ?? agent_event_schema(), apply_defaults)
+}
+
+/**
+ * Validate an `agent_capture_events` result and return a structured report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_event_capture_report(value, apply_defaults = false) {
+  return get_typed_report(value, agent_event_capture_schema(), apply_defaults)
+}
+
+/**
+ * Validate an `agent_capture_events` result and return the typed value,
+ * throwing on validation failure.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_event_capture_value(value, apply_defaults = false) {
+  return get_typed_value(value, agent_event_capture_schema(), apply_defaults)
+}
+
 /**
  * Capture agent events for session_id while body runs.
  *
