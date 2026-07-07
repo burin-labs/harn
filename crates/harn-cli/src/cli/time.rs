@@ -1,4 +1,5 @@
 use clap::{Args, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub(crate) struct TimeArgs {
@@ -35,6 +36,23 @@ pub(crate) struct TimeRunArgs {
     /// network egress fail-closed guard for this run.
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
     pub no_sandbox: bool,
+    /// Extra writable filesystem roots. Repeatable; each path becomes
+    /// part of the run's write jail while sandboxing stays enabled.
+    #[arg(
+        long = "write-root",
+        visible_alias = "writable-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub write_root: Vec<PathBuf>,
+    /// Extra read-only filesystem roots. Repeatable; each path is
+    /// readable but never writable.
+    #[arg(
+        long = "read-only-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub read_only_root: Vec<PathBuf>,
     /// Positional arguments passed to the pipeline as the global `argv`
     /// list. Place them after a `--` separator: `harn time run script.harn -- a b c`.
     #[arg(last = true)]

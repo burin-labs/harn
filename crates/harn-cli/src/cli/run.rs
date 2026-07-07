@@ -36,6 +36,15 @@ pub(crate) struct RunArgs {
         conflicts_with = "no_sandbox"
     )]
     pub read_only_root: Vec<PathBuf>,
+    /// Extra writable filesystem roots. Repeatable; each path becomes
+    /// part of the run's write jail while sandboxing stays enabled.
+    #[arg(
+        long = "write-root",
+        visible_alias = "writable-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub write_root: Vec<PathBuf>,
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,

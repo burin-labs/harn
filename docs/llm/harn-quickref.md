@@ -2850,6 +2850,23 @@ plain terminal.
   fallback.
 - `read_lines(path)` → list of lines (no trailing newline). Handles
   CRLF correctly.
+- Direct runs can keep sandboxing on while writing outside the project with
+  `harn run --write-root <path> script.harn`; the path is added to
+  `workspace_roots`. Use `--read-only-root <path>` for additive read scope.
+
+### Document helpers
+
+Import with `import { pdf_bytes, write_pdf, extract_text, pdf_capabilities } from "std/document"`.
+
+- `pdf_bytes(source, options?)` renders text, HTML, or Markdown to PDF bytes
+  using Harn's dependency-free `builtin_text_pdf` renderer. Options include
+  `source_format`, `title`, `page_width_pt`, `page_height_pt`, `margin_pt`,
+  `font_size_pt`, `line_height_pt`, and `max_line_chars`.
+- `write_pdf(path, source, options?)` writes those bytes through
+  `harness.fs.write_bytes`, so normal sandbox `workspace_roots` apply.
+- `extract_text(source, {source_format?})` normalizes text-like document input.
+- `pdf_capabilities()` reports available renderers and source formats. The
+  built-in renderer is portable and text-layout oriented, not browser-grade CSS.
 
 ### Diff helpers
 

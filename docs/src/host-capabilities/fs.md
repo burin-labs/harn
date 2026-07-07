@@ -63,3 +63,9 @@ fixed-string by default for lint/source-guard workloads; pass
 explicit overrides. Count mode is capped by `max_matches` (default 1000).
 Summary modes can set `parallel: true` and optional `threads` for a parallel
 walker.
+
+For direct CLI runs, `harn run --write-root <path>` adds an external writable
+root to the same sandbox policy used for the primary workspace. Prefer it over
+`--no-sandbox` when a script needs to update a declared output folder outside
+the project tree. `--read-only-root <path>` remains the additive read-only
+variant for shared assets or sibling repositories.
