@@ -527,6 +527,74 @@ mod tests {
     }
 
     #[test]
+    fn strict_profile_sanitizes_defs_refs_and_combinators() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "$defs": {
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string", "default": "x"}
+                    }
+                }
+            },
+            "properties": {
+                "item": {"$ref": "#/$defs/Item"},
+                "choice": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": {"count": {"type": "integer", "default": 1}}
+                        },
+                        {"type": "null"}
+                    ]
+                }
+            }
+        });
+
+        let sanitized = sanitize_schema_for_provider(
+            "openai",
+            "gpt-5.4",
+            SchemaCompatProfile::OpenAiStrict,
+            SchemaSurface::StructuredOutput,
+            &schema,
+        );
+
+        let required = sanitized["required"]
+            .as_array()
+            .expect("root required")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            required,
+            std::collections::BTreeSet::from(["choice", "item"])
+        );
+        assert_eq!(sanitized["properties"]["item"]["$ref"], "#/$defs/Item");
+        assert_eq!(sanitized["$defs"]["Item"]["additionalProperties"], false);
+        assert_eq!(
+            sanitized["$defs"]["Item"]["required"],
+            serde_json::json!(["value"])
+        );
+        assert!(sanitized["$defs"]["Item"]["properties"]["value"]
+            .get("default")
+            .is_none());
+        assert_eq!(
+            sanitized["properties"]["choice"]["anyOf"][0]["additionalProperties"],
+            false
+        );
+        assert_eq!(
+            sanitized["properties"]["choice"]["anyOf"][0]["required"],
+            serde_json::json!(["count"])
+        );
+        assert!(
+            sanitized["properties"]["choice"]["anyOf"][0]["properties"]["count"]
+                .get("default")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn emits_structured_sanitization_receipt() {
         let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
         crate::events::clear_event_sinks();
