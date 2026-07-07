@@ -8,6 +8,12 @@
 //!
 //! Schemas use JSON Schema draft 2020-12.
 
+use std::sync::OnceLock;
+
+use harn_vm::{VmDictExt, VmValue};
+
+use crate::error::HostlibError;
+
 /// Direction of a schema (request body vs. response body).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SchemaKind {
@@ -1160,4 +1166,105 @@ pub fn lookup(module: &str, method: &str, kind: SchemaKind) -> Option<&'static s
         .iter()
         .find(|(m, mt, k, _)| *m == module && *mt == method && *k == kind)
         .map(|(_, _, _, body)| *body)
+}
+
+struct CompiledSchema {
+    module: &'static str,
+    method: &'static str,
+    kind: SchemaKind,
+    body: Result<VmValue, String>,
+}
+
+fn compiled_schemas() -> &'static [CompiledSchema] {
+    static COMPILED: OnceLock<Vec<CompiledSchema>> = OnceLock::new();
+    COMPILED.get_or_init(|| {
+        SCHEMAS
+            .iter()
+            .filter(|(_, _, kind, _)| *kind == SchemaKind::Request)
+            .map(|(module, method, kind, body)| {
+                let body = serde_json::from_str::<serde_json::Value>(body)
+                    .map_err(|err| format!("schema is not valid JSON: {err}"))
+                    .map(|json| harn_vm::json_to_vm_value(&json))
+                    .and_then(|schema| harn_vm::schema::canonicalize_json_schema(&schema));
+                CompiledSchema {
+                    module,
+                    method,
+                    kind: *kind,
+                    body,
+                }
+            })
+            .collect()
+    })
+}
+
+fn compiled_schema(
+    module: &str,
+    method: &str,
+    kind: SchemaKind,
+) -> Option<&'static CompiledSchema> {
+    compiled_schemas()
+        .iter()
+        .find(|schema| schema.module == module && schema.method == method && schema.kind == kind)
+}
+
+pub(crate) fn validate_request_args(
+    builtin: &'static str,
+    module: &'static str,
+    method: &'static str,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
+    let request = normalize_request_arg(builtin, module, method, args)?;
+    let schema = compiled_schema(module, method, SchemaKind::Request).ok_or_else(|| {
+        HostlibError::Backend {
+            builtin,
+            message: format!("missing request schema for {module}.{method}"),
+        }
+    })?;
+    let schema = schema
+        .body
+        .as_ref()
+        .map_err(|message| HostlibError::Backend {
+            builtin,
+            message: format!("invalid request schema for {module}.{method}: {message}"),
+        })?;
+    harn_vm::schema::validate_value_against_canonical_schema(&request, schema, true).map_err(
+        |message| HostlibError::InvalidParameter {
+            builtin,
+            param: "request",
+            message,
+        },
+    )
+}
+
+fn normalize_request_arg(
+    builtin: &'static str,
+    module: &'static str,
+    method: &'static str,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
+    if args.len() > 1 {
+        return Err(HostlibError::InvalidParameter {
+            builtin,
+            param: "request",
+            message: format!("expected exactly one request argument, got {}", args.len()),
+        });
+    }
+
+    let first = args.first().ok_or(HostlibError::MissingParameter {
+        builtin,
+        param: "request",
+    })?;
+    match first {
+        VmValue::Dict(map) => Ok(VmValue::Dict(map.clone())),
+        VmValue::String(feature) if (module, method) == ("tools", "enable") => {
+            let mut normalized = harn_vm::value::DictMap::new();
+            normalized.put_str("feature", feature.to_string());
+            Ok(VmValue::dict(normalized))
+        }
+        other => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: "request",
+            message: format!("expected a dict request body, got {}", other.type_name()),
+        }),
+    }
 }

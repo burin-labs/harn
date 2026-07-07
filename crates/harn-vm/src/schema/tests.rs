@@ -118,6 +118,60 @@ fn normalize_json_schema_types() {
 }
 
 #[test]
+fn dollar_defs_refs_validate_and_round_trip() {
+    let schema = make_vm_dict(vec![
+        ("type", s("object")),
+        (
+            "properties",
+            make_vm_dict(vec![(
+                "expected_hash",
+                make_vm_dict(vec![("$ref", s("#/$defs/sha256Label"))]),
+            )]),
+        ),
+        (
+            "$defs",
+            make_vm_dict(vec![(
+                "sha256Label",
+                make_vm_dict(vec![
+                    ("type", s("string")),
+                    ("pattern", s("^sha256:[0-9a-f]{64}$")),
+                ]),
+            )]),
+        ),
+    ]);
+
+    let normalized = canonicalize_schema_value(&schema).unwrap();
+    assert!(normalized.as_dict().unwrap().contains_key("$defs"));
+    assert!(schema_is_value(
+        &make_vm_dict(vec![(
+            "expected_hash",
+            s("sha256:0000000000000000000000000000000000000000000000000000000000000000"),
+        )]),
+        &normalized,
+    )
+    .unwrap());
+    assert!(!schema_is_value(
+        &make_vm_dict(vec![("expected_hash", s("sha256:nothex"))]),
+        &normalized,
+    )
+    .unwrap());
+
+    let exported = schema_to_json_schema_value(&normalized).unwrap();
+    let exported_dict = exported.as_dict().unwrap();
+    assert!(exported_dict.contains_key("$defs"));
+    let expected_hash = exported_dict
+        .get("properties")
+        .and_then(VmValue::as_dict)
+        .and_then(|properties| properties.get("expected_hash"))
+        .and_then(VmValue::as_dict)
+        .expect("expected_hash property schema");
+    assert_eq!(
+        expected_hash.get("$ref").map(VmValue::display),
+        Some("#/$defs/sha256Label".to_string())
+    );
+}
+
+#[test]
 fn direct_self_ref_schema_is_rejected() {
     let schema = make_vm_dict(vec![("$ref", s("#"))]);
     assert_schema_error_contains(&schema, "cyclic schema reference: # -> #");

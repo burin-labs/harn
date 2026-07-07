@@ -7,17 +7,56 @@
 //! that a routed `Unimplemented` becomes a real return value — never a
 //! removed builtin.
 
+use std::fs;
+
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, embed::EmbedCapability, fs::FsCapability,
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability, scanner::ScannerCapability,
     schemas, secret_store::SecretStoreCapability, tools::permissions, tools::ToolsCapability,
     BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry,
 };
+use harn_lexer::Lexer;
+use harn_parser::Parser;
+use harn_vm::{register_vm_stdlib, Compiler, Vm, VmError, VmValue};
+use sha2::{Digest, Sha256};
+use tempfile::TempDir;
 
 fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
     let mut registry = BuiltinRegistry::new();
     cap.register_builtins(&mut registry);
     registry
+}
+
+fn execute_harn(source: &str) -> Result<VmValue, VmError> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut lexer = Lexer::new(source);
+                let tokens = lexer.tokenize().expect("tokenize");
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse().expect("parse");
+                let chunk = Compiler::new().compile(&program).expect("compile");
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                let _ = harn_hostlib::install_default(&mut vm);
+                vm.execute(&chunk).await
+            })
+            .await
+    })
+}
+
+fn sha256_label(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn harn_string_literal(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[test]
@@ -452,6 +491,94 @@ fn install_default_wires_every_module_into_a_vm() {
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
     // + 1 hostlib_enable + 4 secret_store = 79.
     assert!(registry.builtins().len() >= 79);
+}
+
+#[test]
+fn registered_hostlib_builtins_validate_request_schema_before_handler() {
+    permissions::reset();
+    let result = execute_harn(
+        r#"
+pipeline default(task) {
+  return hostlib_tools_run_command({argv: [1]})
+}
+"#,
+    );
+    let error = match result {
+        Err(VmError::Thrown(VmValue::Dict(error))) => error,
+        other => panic!("expected structured hostlib request validation error, got {other:?}"),
+    };
+    assert_eq!(
+        error.get("kind").map(VmValue::display),
+        Some("invalid_parameter".to_string())
+    );
+    assert_eq!(
+        error.get("builtin").map(VmValue::display),
+        Some("hostlib_tools_run_command".to_string())
+    );
+    let message = error
+        .get("message")
+        .map(VmValue::display)
+        .unwrap_or_default();
+    assert!(
+        message.contains("argv[0]") && message.contains("expected type 'string'"),
+        "unexpected validation message: {message}"
+    );
+}
+
+#[test]
+fn registered_hostlib_enable_normalizes_legacy_feature_string_before_validation() {
+    permissions::reset();
+    let result = execute_harn(
+        r#"
+pipeline default(task) {
+  return hostlib_enable("tools:deterministic")
+}
+"#,
+    )
+    .expect("hostlib_enable string form remains accepted through schema normalization");
+    let dict = result.as_dict().expect("hostlib_enable returns a dict");
+    assert_eq!(
+        dict.get("feature").map(VmValue::display),
+        Some("tools:deterministic".to_string())
+    );
+    assert!(matches!(dict.get("enabled"), Some(VmValue::Bool(true))));
+}
+
+#[test]
+fn registered_safe_text_patch_validates_dollar_defs_expected_hash() {
+    permissions::reset();
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("notes.txt");
+    fs::write(&file, "alpha").unwrap();
+    let expected_hash = sha256_label(b"alpha");
+    let source = format!(
+        r#"
+pipeline default(task) {{
+  hostlib_enable("tools:deterministic")
+  return hostlib_fs_safe_text_patch({{
+    path: "{}",
+    content: "beta",
+    expected_hash: "{}"
+  }})
+}}
+"#,
+        harn_string_literal(&file.to_string_lossy()),
+        expected_hash
+    );
+
+    let result = execute_harn(&source)
+        .expect("safe_text_patch expected_hash should validate through #/$defs before dispatch");
+    let dict = result.as_dict().expect("safe_text_patch returns a dict");
+    assert_eq!(
+        dict.get("result").map(VmValue::display),
+        Some("applied".to_string())
+    );
+    assert!(matches!(dict.get("applied"), Some(VmValue::Bool(true))));
+    assert_eq!(
+        dict.get("before_sha256").map(VmValue::display),
+        Some(expected_hash)
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), "beta");
 }
 
 #[test]

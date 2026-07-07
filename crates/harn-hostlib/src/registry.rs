@@ -189,14 +189,18 @@ impl HostlibRegistry {
             vm.register_builtin(
                 builtin.name,
                 move |args, _out| -> Result<VmValue, VmError> {
-                    if let Some(params) = args.first().and_then(VmValue::as_dict) {
+                    let request =
+                        crate::schemas::validate_request_args(builtin.name, module, method, args)
+                            .map_err(VmError::from)?;
+                    let validated_args = [request.clone()];
+                    if let Some(params) = request.as_dict() {
                         if let Some(mocked) = harn_vm::stdlib::host::dispatch_mock_hostlib_call(
                             module, method, params,
                         ) {
                             return mocked;
                         }
                     }
-                    handler(args).map_err(VmError::from)
+                    handler(&validated_args).map_err(VmError::from)
                 },
             );
         }

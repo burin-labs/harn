@@ -191,6 +191,12 @@ fn canonicalize_schema_dict(
             VmValue::dict(canonicalize_schema_map(definitions, traversal)?),
         );
     }
+    if let Some(definitions) = schema.get("$defs").and_then(VmValue::as_dict) {
+        out.insert(
+            crate::value::intern_key("$defs"),
+            VmValue::dict(canonicalize_schema_map(definitions, traversal)?),
+        );
+    }
 
     if let Some(components) = schema.get("components").and_then(VmValue::as_dict) {
         let mut next_components = components.clone();
@@ -398,19 +404,21 @@ fn validate_ref_graph_dict_inner(
             }
         }
     }
-    if let Some(VmValue::Dict(definitions)) = schema.get("definitions") {
-        for (name, child) in definitions.iter() {
-            validate_ref_graph_value(
-                child,
-                root_schema,
-                &format!(
-                    "{pointer}/definitions/{}",
-                    encode_json_pointer_segment(name)
-                ),
-                traversal,
-                stack,
-                checked,
-            )?;
+    for container in ["definitions", "$defs"] {
+        if let Some(VmValue::Dict(definitions)) = schema.get(container) {
+            for (name, child) in definitions.iter() {
+                validate_ref_graph_value(
+                    child,
+                    root_schema,
+                    &format!(
+                        "{pointer}/{container}/{}",
+                        encode_json_pointer_segment(name)
+                    ),
+                    traversal,
+                    stack,
+                    checked,
+                )?;
+            }
         }
     }
     if let Some(schemas) = schema
@@ -674,6 +682,16 @@ fn canonical_to_json_schema_with(
                 "definitions".to_string(),
                 serde_json::Value::Object(exported),
             );
+        }
+        if let Some(VmValue::Dict(definitions)) = schema_dict.get("$defs") {
+            let mut exported = serde_json::Map::new();
+            for (name, child) in definitions.iter() {
+                exported.insert(
+                    name.to_string(),
+                    canonical_to_json_schema_with(child, openapi_style, traversal)?,
+                );
+            }
+            out.insert("$defs".to_string(), serde_json::Value::Object(exported));
         }
         if let Some(VmValue::Dict(components)) = schema_dict.get("components") {
             let mut next_components = serde_json::Map::new();
