@@ -65,7 +65,7 @@ pub fn schema_dict(value_schema = nil, options = nil) {
 }
 
 pub fn schema_field(schema, required = true) {
-  return schema_extend(schema, {required: required})
+  return schema + {required: required}
 }
 
 pub fn schema_object(fields, options = nil) {
@@ -103,7 +103,7 @@ pub fn schema_nullable(schema) {
 }
 
 pub fn schema_default(schema, value) {
-  return schema_extend(schema, {default: value, required: false})
+  return schema + {default: value, required: false}
 }
 
 pub fn schema_pick_keys(schema, keys) {
