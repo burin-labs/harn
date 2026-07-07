@@ -688,22 +688,22 @@ pub(crate) fn extract_llm_options(
         .map(vm_value_to_json);
 
     // `fast: true` (or the provider-flavored `speed: "fast"`) opts into the
-    // model's accelerated-serving tier. The catalog is the source of truth
-    // for the per-provider knob, so we only validate the request is sane
-    // here; the provider body builder reads `fast_mode.param`/`value`.
+    // model's catalog-declared `fast` serving tier. The catalog is the source
+    // of truth for the per-provider knob, so we only validate the request is
+    // sane here; the provider body builder reads `serving_tiers[].request`.
     let fast = opt_bool(&options, "fast") || opt_str(&options, "speed").as_deref() == Some("fast");
     if fast && enforce_capability_gates {
-        match crate::llm::fast_mode::gate(&model) {
-            crate::llm::fast_mode::FastModeGate::Usable => {}
-            crate::llm::fast_mode::FastModeGate::Unsupported => {
+        match crate::llm::serving_tiers::fast_gate(&model) {
+            crate::llm::serving_tiers::ServingTierGate::Usable => {}
+            crate::llm::serving_tiers::ServingTierGate::Unsupported => {
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                     "fast: model \"{model}\" (provider \"{provider}\") has no accelerated-serving \
-                     tier in the catalog; remove `fast` or pick a model that advertises `fast_mode`"
+                     tier in the catalog; remove `fast` or pick a model that advertises a `fast` serving_tier"
                 ),
                 ))));
             }
-            crate::llm::fast_mode::FastModeGate::Deprecated { note } => {
+            crate::llm::serving_tiers::ServingTierGate::Deprecated { note } => {
                 let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(

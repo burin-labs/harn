@@ -347,7 +347,12 @@ pub(super) fn decode_and_validate_document(
     body: &str,
     allow_unsigned: bool,
 ) -> Result<DecodedCatalogDocument, String> {
-    if let Ok(artifact) = serde_json::from_str::<ProviderCatalogArtifact>(body) {
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|error| format!("catalog JSON is invalid: {error}"))?;
+    let is_signed_envelope = value.get("catalog").is_some() || value.get("signature").is_some();
+    if !is_signed_envelope {
+        let artifact: ProviderCatalogArtifact = serde_json::from_value(value)
+            .map_err(|error| format!("catalog JSON does not match the runtime schema: {error}"))?;
         if !allow_unsigned {
             return Err(format!(
                 "unsigned provider catalog rejected; set {HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV}=1 only for trusted development sources"
@@ -355,8 +360,9 @@ pub(super) fn decode_and_validate_document(
         }
         validate_remote_artifact(artifact, DEFAULT_REMOTE_TTL_MS)
     } else {
-        let document: CatalogDocument = serde_json::from_str(body)
-            .map_err(|error| format!("catalog JSON does not match the runtime schema: {error}"))?;
+        let document: CatalogDocument = serde_json::from_value(value).map_err(|error| {
+            format!("catalog JSON does not match the signed envelope schema: {error}")
+        })?;
         verify_document_signature(&document)?;
         validate_remote_artifact(
             document.catalog,

@@ -366,7 +366,7 @@ pub(crate) struct LlmCallOptions {
     // --- Serving tier ---
     /// Opt into the model's accelerated-serving ("fast mode") tier. Maps to
     /// the per-provider knob declared in the catalog (`speed` for Anthropic,
-    /// `service_tier` for OpenAI) and bills at the premium `fast_mode.pricing`
+    /// `service_tier` for OpenAI) and bills at the premium `serving_tiers`
     /// when the provider confirms it served the request fast. Off by default;
     /// validated against the catalog at option extraction time.
     pub fast: bool,
@@ -518,7 +518,7 @@ impl LlmCallOptions {
                 crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
             );
         }
-        if let Some(header) = crate::llm::fast_mode::beta_header(&self.model, self.fast) {
+        if let Some(header) = crate::llm::serving_tiers::beta_header(&self.model, self.fast) {
             push_unique_anthropic_beta_feature(&mut features, &header);
         }
         // The `computer-use` beta is required ONLY by the provider-native

@@ -28,7 +28,11 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
-fast_mode = { param = "service_tier", value = "fast", otps_speedup = 1.5, status = "ga", pricing = { input_per_mtok = 12.50, output_per_mtok = 75.00, cache_read_per_mtok = 1.25 }, note = "Codex \"Fast mode\" (service_tier=\"fast\", ~1.5x faster output) and API priority processing (service_tier=\"priority\") both bill at 2.5x standard. Not offered for long-context, fine-tuned models, or embeddings." }
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast" }, otps_speedup = 1.5, cost_multiplier = 2.5, status = "ga", pricing = { input_per_mtok = 12.50, output_per_mtok = 75.00, cache_read_per_mtok = 1.25 }, latency = "lower latency and faster output than default serving", reliability = "provider may downgrade or reject unavailable premium capacity", unsuitable_workloads = ["batch"], note = "Codex fast mode rides the same service_tier request surface as OpenAI priority processing. Not offered for long-context, fine-tuned models, or embeddings." },
+  { id = "priority", label = "Priority processing", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 2.5, status = "ga", latency = "lower and more consistent latency for user-facing traffic", reliability = "shares standard rate limits and can be downgraded during ramp or congestion", unsuitable_workloads = ["batch"], note = "Response service_tier is the authoritative billing signal when provider-side downgrade occurs." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Docs describe Flex as model-availability limited and priced at Batch API rates; do not treat it as an async Batch API route." },
+]
 
 [models."gpt-5.5-pro"]
 name = "GPT-5.5 Pro"
@@ -198,6 +202,10 @@ tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
 
 [models."gemini-2.5-flash-lite"]
 name = "Gemini 2.5 Flash-Lite"
@@ -208,6 +216,10 @@ pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok =
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "summarization", "tool_use"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
 
 # Gemini 3.5 Flash is Google's current speed/cost frontier route for agentic
 # workflows. Google lists a 1,048,576-token input window and 65,536-token
@@ -222,6 +234,10 @@ tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
 
 # Gemini 3.1 Pro (Preview) — context-length-tiered pricing: $2 in / $12
 # out per MTok up to 200k input, $4 / $18 beyond (the catalog records
@@ -237,6 +253,10 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
 
 [models."gemini-3.1-flash-lite"]
 name = "Gemini 3.1 Flash-Lite"
@@ -247,6 +267,10 @@ pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok =
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
 
 # OpenRouter-routed variants of the same models — kept as distinct
 # catalog entry so the `qc_defaults.openrouter` lookup resolves to a
@@ -287,6 +311,10 @@ open_weight = false
 strengths = ["long_context", "vision", "reasoning", "coding"]
 benchmarks = { swe_bench_verified = 63.8 }
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
 
 # Mistral ─ pricing: https://mistral.ai/pricing/api/, verified
 # 2026-07-02. Direct rows first, then OpenRouter mirrors.

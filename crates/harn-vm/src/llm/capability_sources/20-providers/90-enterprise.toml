@@ -11,6 +11,7 @@
 [[provider.bedrock]]
 model_match = "anthropic.claude-*"
 native_tools = true
+batch_api = true
 preferred_tool_format = "native"
 message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
@@ -27,6 +28,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*claude*"
 native_tools = true
+batch_api = true
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 text_tool_wire_format_supported = true
@@ -41,6 +43,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*"
 native_tools = true
+batch_api = true
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 text_tool_wire_format_supported = true
@@ -58,6 +61,7 @@ thinking_block_style = "none"
 [[provider.azure_openai]]
 model_match = "gpt-*"
 native_tools = true
+batch_api = true
 preferred_tool_format = "native"
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
@@ -127,4 +131,3 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
-

@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v2.json",
+  "schema_version": 3,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v3.json",
   "generated_by": "harn provider catalog export",
   "providers": [
     {
@@ -91,7 +91,8 @@
         "azure_openai_chat_completions"
       ],
       "features": [
-        "native_tools"
+        "native_tools",
+        "batch"
       ],
       "caveats": [
         "The Harn model field names the Azure deployment."
@@ -1210,6 +1211,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -1307,6 +1314,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -1404,6 +1417,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -1501,6 +1520,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -1603,6 +1628,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -1716,6 +1747,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -1817,6 +1854,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -1922,6 +1965,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2027,6 +2076,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2128,6 +2183,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2236,6 +2297,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2279,20 +2346,34 @@
         "swe_bench_pro": 64.3,
         "swe_bench_verified": 87.6
       },
-      "fast_mode": {
-        "param": "speed",
-        "value": "fast",
-        "beta_header": "fast-mode-2026-02-01",
-        "otps_speedup": 2.5,
-        "status": "research_preview",
-        "pricing": {
-          "input_per_mtok": 30.0,
-          "output_per_mtok": 150.0,
-          "cache_read_per_mtok": 3.0,
-          "cache_write_per_mtok": 37.5
-        },
-        "note": "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate."
-      }
+      "serving_tiers": [
+        {
+          "id": "fast",
+          "label": "Fast mode",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "speed",
+            "value": "fast",
+            "beta_header": "fast-mode-2026-02-01"
+          },
+          "otps_speedup": 2.5,
+          "cost_multiplier": 6.0,
+          "status": "research_preview",
+          "pricing": {
+            "input_per_mtok": 30.0,
+            "output_per_mtok": 150.0,
+            "cache_read_per_mtok": 3.0,
+            "cache_write_per_mtok": 37.5
+          },
+          "latency": "higher output-token throughput than standard Claude serving",
+          "reliability": "research preview, account-manager gated",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate."
+        }
+      ]
     },
     {
       "id": "claude-opus-4-8",
@@ -2360,6 +2441,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2408,20 +2495,34 @@
         "swe_bench_pro": 69.2,
         "swe_bench_verified": 88.6
       },
-      "fast_mode": {
-        "param": "speed",
-        "value": "fast",
-        "beta_header": "fast-mode-2026-02-01",
-        "otps_speedup": 2.5,
-        "status": "research_preview",
-        "pricing": {
-          "input_per_mtok": 10.0,
-          "output_per_mtok": 50.0,
-          "cache_read_per_mtok": 1.0,
-          "cache_write_per_mtok": 12.5
-        },
-        "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated."
-      }
+      "serving_tiers": [
+        {
+          "id": "fast",
+          "label": "Fast mode",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "speed",
+            "value": "fast",
+            "beta_header": "fast-mode-2026-02-01"
+          },
+          "otps_speedup": 2.5,
+          "cost_multiplier": 2.0,
+          "status": "research_preview",
+          "pricing": {
+            "input_per_mtok": 10.0,
+            "output_per_mtok": 50.0,
+            "cache_read_per_mtok": 1.0,
+            "cache_write_per_mtok": 12.5
+          },
+          "latency": "higher output-token throughput than standard Claude serving",
+          "reliability": "research preview, account-manager gated",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated."
+        }
+      ]
     },
     {
       "id": "claude-sonnet-4-20250514",
@@ -2486,6 +2587,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2591,6 +2698,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2697,6 +2810,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2804,6 +2923,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -2922,6 +3047,12 @@
           "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
         ]
       },
       "pricing": {
@@ -5697,7 +5828,13 @@
         "partial_failure": "unknown",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
       },
       "pricing": {
         "input_per_mtok": 1.74,
@@ -5784,7 +5921,13 @@
         "partial_failure": "unknown",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
       },
       "pricing": {
         "input_per_mtok": 1.4,
@@ -5878,7 +6021,13 @@
         "partial_failure": "unknown",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.15,
@@ -5963,7 +6112,13 @@
         "partial_failure": "unknown",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.6,
@@ -6052,7 +6207,13 @@
         "partial_failure": "unknown",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.95,
@@ -6139,7 +6300,13 @@
         "partial_failure": "unknown",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.3,
@@ -6228,7 +6395,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.3,
@@ -6271,6 +6443,48 @@
         "cheap",
         "tool_use",
         "agentic"
+      ],
+      "serving_tiers": [
+        {
+          "id": "flex",
+          "label": "Flex inference",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "research_preview",
+          "latency": "variable synchronous latency for latency-tolerant workloads",
+          "reliability": "best-effort availability; resource unavailability is possible",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ],
+          "note": "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented."
+        },
+        {
+          "id": "priority",
+          "label": "Priority inference",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "status": "research_preview",
+          "latency": "predictable low-latency serving for user-facing traffic",
+          "reliability": "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "GenerateContent responses expose downgrade via x-gemini-service-tier."
+        }
       ]
     },
     {
@@ -6327,7 +6541,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.1,
@@ -6362,6 +6581,48 @@
         "long_context",
         "summarization",
         "tool_use"
+      ],
+      "serving_tiers": [
+        {
+          "id": "flex",
+          "label": "Flex inference",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "research_preview",
+          "latency": "variable synchronous latency for latency-tolerant workloads",
+          "reliability": "best-effort availability; resource unavailability is possible",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ],
+          "note": "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented."
+        },
+        {
+          "id": "priority",
+          "label": "Priority inference",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "status": "research_preview",
+          "latency": "predictable low-latency serving for user-facing traffic",
+          "reliability": "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "GenerateContent responses expose downgrade via x-gemini-service-tier."
+        }
       ]
     },
     {
@@ -6418,7 +6679,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "pricing": {
         "input_per_mtok": 1.25,
@@ -6462,7 +6728,49 @@
       ],
       "benchmarks": {
         "swe_bench_verified": 63.8
-      }
+      },
+      "serving_tiers": [
+        {
+          "id": "flex",
+          "label": "Flex inference",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "research_preview",
+          "latency": "variable synchronous latency for latency-tolerant workloads",
+          "reliability": "best-effort availability; resource unavailability is possible",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ],
+          "note": "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented."
+        },
+        {
+          "id": "priority",
+          "label": "Priority inference",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "status": "research_preview",
+          "latency": "predictable low-latency serving for user-facing traffic",
+          "reliability": "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "GenerateContent responses expose downgrade via x-gemini-service-tier."
+        }
+      ]
     },
     {
       "id": "gemini-3.1-flash-lite",
@@ -6517,7 +6825,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.25,
@@ -6552,6 +6865,48 @@
         "cheap",
         "long_context",
         "tool_use"
+      ],
+      "serving_tiers": [
+        {
+          "id": "flex",
+          "label": "Flex inference",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "research_preview",
+          "latency": "variable synchronous latency for latency-tolerant workloads",
+          "reliability": "best-effort availability; resource unavailability is possible",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ],
+          "note": "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented."
+        },
+        {
+          "id": "priority",
+          "label": "Priority inference",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "status": "research_preview",
+          "latency": "predictable low-latency serving for user-facing traffic",
+          "reliability": "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "GenerateContent responses expose downgrade via x-gemini-service-tier."
+        }
       ]
     },
     {
@@ -6607,7 +6962,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "pricing": {
         "input_per_mtok": 2.0,
@@ -6650,6 +7010,48 @@
         "long_context",
         "vision",
         "agentic"
+      ],
+      "serving_tiers": [
+        {
+          "id": "flex",
+          "label": "Flex inference",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "research_preview",
+          "latency": "variable synchronous latency for latency-tolerant workloads",
+          "reliability": "best-effort availability; resource unavailability is possible",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ],
+          "note": "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented."
+        },
+        {
+          "id": "priority",
+          "label": "Priority inference",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "status": "research_preview",
+          "latency": "predictable low-latency serving for user-facing traffic",
+          "reliability": "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "GenerateContent responses expose downgrade via x-gemini-service-tier."
+        }
       ]
     },
     {
@@ -6705,7 +7107,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "pricing": {
         "input_per_mtok": 1.5,
@@ -6748,6 +7155,48 @@
         "vision",
         "tool_use",
         "agentic"
+      ],
+      "serving_tiers": [
+        {
+          "id": "flex",
+          "label": "Flex inference",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "research_preview",
+          "latency": "variable synchronous latency for latency-tolerant workloads",
+          "reliability": "best-effort availability; resource unavailability is possible",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ],
+          "note": "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented."
+        },
+        {
+          "id": "priority",
+          "label": "Priority inference",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "status": "research_preview",
+          "latency": "predictable low-latency serving for user-facing traffic",
+          "reliability": "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "GenerateContent responses expose downgrade via x-gemini-service-tier."
+        }
       ]
     },
     {
@@ -6802,7 +7251,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -6880,7 +7334,12 @@
         "cancellation": "supported",
         "discount_percent": 50,
         "turnaround_hours": 24,
-        "max_input_bytes": 2147483648
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -8506,7 +8965,15 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "discount_percent": 50
+        "discount_percent": 50,
+        "max_requests": 100000,
+        "max_input_bytes": 536870912,
+        "result_retention_days": 1,
+        "operational_notes": [
+          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+          "Batch jobs use separate accounting from real-time rate limits.",
+          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.3,
@@ -8583,7 +9050,15 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "discount_percent": 50
+        "discount_percent": 50,
+        "max_requests": 100000,
+        "max_input_bytes": 536870912,
+        "result_retention_days": 1,
+        "operational_notes": [
+          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+          "Batch jobs use separate accounting from real-time rate limits.",
+          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.4,
@@ -8660,7 +9135,15 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "discount_percent": 50
+        "discount_percent": 50,
+        "max_requests": 100000,
+        "max_input_bytes": 536870912,
+        "result_retention_days": 1,
+        "operational_notes": [
+          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+          "Batch jobs use separate accounting from real-time rate limits.",
+          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.1,
@@ -8745,7 +9228,15 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "discount_percent": 50
+        "discount_percent": 50,
+        "max_requests": 100000,
+        "max_input_bytes": 536870912,
+        "result_retention_days": 1,
+        "operational_notes": [
+          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+          "Batch jobs use separate accounting from real-time rate limits.",
+          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.5,
@@ -8833,7 +9324,15 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "discount_percent": 50
+        "discount_percent": 50,
+        "max_requests": 100000,
+        "max_input_bytes": 536870912,
+        "result_retention_days": 1,
+        "operational_notes": [
+          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+          "Batch jobs use separate accounting from real-time rate limits.",
+          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
+        ]
       },
       "pricing": {
         "input_per_mtok": 1.5,
@@ -8924,7 +9423,15 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "discount_percent": 50
+        "discount_percent": 50,
+        "max_requests": 100000,
+        "max_input_bytes": 536870912,
+        "result_retention_days": 1,
+        "operational_notes": [
+          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+          "Batch jobs use separate accounting from real-time rate limits.",
+          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.15,
@@ -10910,6 +11417,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -10994,6 +11505,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11081,6 +11596,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11180,6 +11699,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11272,6 +11795,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11375,6 +11902,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11476,6 +12007,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11569,6 +12104,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11610,19 +12149,74 @@
         "long_context",
         "agentic"
       ],
-      "fast_mode": {
-        "param": "service_tier",
-        "value": "fast",
-        "otps_speedup": 1.5,
-        "status": "ga",
-        "pricing": {
-          "input_per_mtok": 12.5,
-          "output_per_mtok": 75.0,
-          "cache_read_per_mtok": 1.25,
-          "cache_write_per_mtok": null
+      "serving_tiers": [
+        {
+          "id": "fast",
+          "label": "Fast mode",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "fast"
+          },
+          "otps_speedup": 1.5,
+          "cost_multiplier": 2.5,
+          "status": "ga",
+          "pricing": {
+            "input_per_mtok": 12.5,
+            "output_per_mtok": 75.0,
+            "cache_read_per_mtok": 1.25,
+            "cache_write_per_mtok": null
+          },
+          "latency": "lower latency and faster output than default serving",
+          "reliability": "provider may downgrade or reject unavailable premium capacity",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "Codex fast mode rides the same service_tier request surface as OpenAI priority processing. Not offered for long-context, fine-tuned models, or embeddings."
         },
-        "note": "Codex \"Fast mode\" (service_tier=\"fast\", ~1.5x faster output) and API priority processing (service_tier=\"priority\") both bill at 2.5x standard. Not offered for long-context, fine-tuned models, or embeddings."
-      }
+        {
+          "id": "priority",
+          "label": "Priority processing",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "cost_multiplier": 2.5,
+          "status": "ga",
+          "latency": "lower and more consistent latency for user-facing traffic",
+          "reliability": "shares standard rate limits and can be downgraded during ramp or congestion",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "Response service_tier is the authoritative billing signal when provider-side downgrade occurs."
+        },
+        {
+          "id": "flex",
+          "label": "Flex processing",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "research_preview",
+          "latency": "slower and variable synchronous latency",
+          "reliability": "best-effort availability; provider can return resource unavailable",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ],
+          "note": "Docs describe Flex as model-availability limited and priced at Batch API rates; do not treat it as an async Batch API route."
+        }
+      ]
     },
     {
       "id": "gpt-5.5-pro",
@@ -11683,6 +12277,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11780,6 +12378,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11866,6 +12468,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -11953,6 +12559,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -12043,6 +12653,10 @@
         "security_notes": [
           "Batch rate limits use a separate provider pool from synchronous model calls.",
           "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
         ]
       },
       "pricing": {
@@ -16466,7 +17080,12 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "operational_notes": [
+          "Most text batch jobs complete within 24 hours, but completion time is best effort and not guaranteed.",
+          "Batch discounts vary by model; do not assume a global 50% discount for xAI.",
+          "Official pricing distinguishes text/language batch discounts from image/video paths that may bill at standard rates."
+        ]
       },
       "pricing": {
         "input_per_mtok": 1.25,
@@ -16562,7 +17181,12 @@
         "result_ordering": "custom_id_rejoin",
         "partial_failure": "unknown",
         "cancellation": "unknown",
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "operational_notes": [
+          "Most text batch jobs complete within 24 hours, but completion time is best effort and not guaranteed.",
+          "Batch discounts vary by model; do not assume a global 50% discount for xAI.",
+          "Official pricing distinguishes text/language batch discounts from image/video paths that may bill at standard rates."
+        ]
       },
       "pricing": {
         "input_per_mtok": 1.0,

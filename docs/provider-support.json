@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_by": "harn provider catalog support",
   "sources": {
-    "provider_catalog_schema_version": 2,
+    "provider_catalog_schema_version": 3,
     "capability_matrix": "crates/harn-vm/src/llm/capabilities.toml",
     "notes": "crates/harn-cli/data/provider_support_notes.toml",
     "empirical": []
@@ -44,6 +44,25 @@
         "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
+        "serving_tiers": [
+          {
+            "id": "fast",
+            "mode": "synchronous",
+            "economics": "premium",
+            "request_param": "speed",
+            "request_value": "fast",
+            "discount_percent": null,
+            "cost_multiplier": 2.0,
+            "status": "research_preview",
+            "latency": "higher output-token throughput than standard Claude serving",
+            "reliability": "research preview, account-manager gated",
+            "suitable_workloads": [],
+            "unsuitable_workloads": [
+              "batch"
+            ],
+            "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated."
+          }
+        ],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -101,6 +120,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -152,8 +172,9 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
-        "batch_api": false,
-        "batch_discount_percent": null,
+        "batch_api": true,
+        "batch_discount_percent": 50,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -209,6 +230,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -256,8 +278,9 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
-        "batch_api": false,
+        "batch_api": true,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -313,6 +336,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -374,6 +398,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -429,6 +454,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -484,6 +510,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -538,6 +565,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -593,6 +621,7 @@
         "prompt_or_context_cache": false,
         "batch_api": true,
         "batch_discount_percent": 50,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -642,6 +671,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -699,6 +729,46 @@
         "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
+        "serving_tiers": [
+          {
+            "id": "flex",
+            "mode": "synchronous",
+            "economics": "discounted",
+            "request_param": "service_tier",
+            "request_value": "flex",
+            "discount_percent": 50,
+            "cost_multiplier": null,
+            "status": "research_preview",
+            "latency": "variable synchronous latency for latency-tolerant workloads",
+            "reliability": "best-effort availability; resource unavailability is possible",
+            "suitable_workloads": [
+              "offline_eval",
+              "corpus",
+              "bulk_judge"
+            ],
+            "unsuitable_workloads": [
+              "interactive_chat"
+            ],
+            "note": "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented."
+          },
+          {
+            "id": "priority",
+            "mode": "synchronous",
+            "economics": "premium",
+            "request_param": "service_tier",
+            "request_value": "priority",
+            "discount_percent": null,
+            "cost_multiplier": null,
+            "status": "research_preview",
+            "latency": "predictable low-latency serving for user-facing traffic",
+            "reliability": "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded",
+            "suitable_workloads": [],
+            "unsuitable_workloads": [
+              "batch"
+            ],
+            "note": "GenerateContent responses expose downgrade via x-gemini-service-tier."
+          }
+        ],
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -758,6 +828,7 @@
         "prompt_or_context_cache": false,
         "batch_api": true,
         "batch_discount_percent": 50,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -813,6 +884,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -862,6 +934,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -915,6 +988,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -973,6 +1047,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "low"
       },
       "empirical": {
@@ -1035,6 +1110,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1086,6 +1162,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -1145,6 +1222,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -1207,6 +1285,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1256,6 +1335,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1311,6 +1391,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1361,6 +1442,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1422,6 +1504,63 @@
         "prompt_or_context_cache": false,
         "batch_api": true,
         "batch_discount_percent": 50,
+        "serving_tiers": [
+          {
+            "id": "fast",
+            "mode": "synchronous",
+            "economics": "premium",
+            "request_param": "service_tier",
+            "request_value": "fast",
+            "discount_percent": null,
+            "cost_multiplier": 2.5,
+            "status": "ga",
+            "latency": "lower latency and faster output than default serving",
+            "reliability": "provider may downgrade or reject unavailable premium capacity",
+            "suitable_workloads": [],
+            "unsuitable_workloads": [
+              "batch"
+            ],
+            "note": "Codex fast mode rides the same service_tier request surface as OpenAI priority processing. Not offered for long-context, fine-tuned models, or embeddings."
+          },
+          {
+            "id": "priority",
+            "mode": "synchronous",
+            "economics": "premium",
+            "request_param": "service_tier",
+            "request_value": "priority",
+            "discount_percent": null,
+            "cost_multiplier": 2.5,
+            "status": "ga",
+            "latency": "lower and more consistent latency for user-facing traffic",
+            "reliability": "shares standard rate limits and can be downgraded during ramp or congestion",
+            "suitable_workloads": [],
+            "unsuitable_workloads": [
+              "batch"
+            ],
+            "note": "Response service_tier is the authoritative billing signal when provider-side downgrade occurs."
+          },
+          {
+            "id": "flex",
+            "mode": "synchronous",
+            "economics": "discounted",
+            "request_param": "service_tier",
+            "request_value": "flex",
+            "discount_percent": 50,
+            "cost_multiplier": null,
+            "status": "research_preview",
+            "latency": "slower and variable synchronous latency",
+            "reliability": "best-effort availability; provider can return resource unavailable",
+            "suitable_workloads": [
+              "offline_eval",
+              "corpus",
+              "bulk_judge"
+            ],
+            "unsuitable_workloads": [
+              "interactive_chat"
+            ],
+            "note": "Docs describe Flex as model-availability limited and priced at Batch API rates; do not treat it as an async Batch API route."
+          }
+        ],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1484,6 +1623,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1533,6 +1673,7 @@
         "prompt_or_context_cache": false,
         "batch_api": true,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1588,6 +1729,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1639,6 +1781,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1686,6 +1829,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "local_zero_cost"
       },
       "empirical": {
@@ -1738,6 +1882,7 @@
         "prompt_or_context_cache": false,
         "batch_api": true,
         "batch_discount_percent": 50,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1791,6 +1936,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1838,6 +1984,7 @@
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "local_zero_cost"
       },
       "empirical": {
@@ -1892,6 +2039,7 @@
         "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1947,6 +2095,7 @@
         "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
+        "serving_tiers": [],
         "usage_accounting_confidence": "high"
       },
       "empirical": {

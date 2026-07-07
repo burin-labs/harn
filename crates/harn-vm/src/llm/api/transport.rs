@@ -1111,7 +1111,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
                         input_tokens = n;
                     }
-                    served_fast |= crate::llm::fast_mode::served_fast(model, &json["message"]);
+                    served_fast |= crate::llm::serving_tiers::served_fast(model, &json["message"]);
                     let usage = &json["message"]["usage"];
                     let cr = extract_cache_read_tokens(usage);
                     if cr > 0 {
@@ -1457,7 +1457,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 }
             }
 
-            served_fast |= crate::llm::fast_mode::served_fast(model, &json);
+            served_fast |= crate::llm::serving_tiers::served_fast(model, &json);
             if let Some(usage) = json.get("usage") {
                 if let Some(n) = usage["prompt_tokens"].as_i64() {
                     input_tokens = n;

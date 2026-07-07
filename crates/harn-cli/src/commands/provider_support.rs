@@ -103,7 +103,25 @@ pub(crate) struct SupportCapabilities {
     pub prompt_or_context_cache: bool,
     pub batch_api: bool,
     pub batch_discount_percent: Option<u32>,
+    pub serving_tiers: Vec<SupportServingTier>,
     pub usage_accounting_confidence: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SupportServingTier {
+    pub id: String,
+    pub mode: String,
+    pub economics: String,
+    pub request_param: Option<String>,
+    pub request_value: Option<String>,
+    pub discount_percent: Option<u32>,
+    pub cost_multiplier: Option<f64>,
+    pub status: Option<String>,
+    pub latency: Option<String>,
+    pub reliability: Option<String>,
+    pub suitable_workloads: Vec<String>,
+    pub unsuitable_workloads: Vec<String>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -297,6 +315,10 @@ fn build_entry(
     let model = models_by_key
         .get(&(catalog_provider.to_string(), model_id.clone()))
         .copied();
+    let provider_models = models_by_provider
+        .get(catalog_provider)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let caps = if model_id == "*" {
         Capabilities::default()
     } else {
@@ -367,6 +389,7 @@ fn build_entry(
                 || model.is_some_and(model_has_cache_pricing),
             batch_api,
             batch_discount_percent: batch_api.then_some(caps.batch_discount_percent).flatten(),
+            serving_tiers: support_serving_tiers(provider_models),
             usage_accounting_confidence: note
                 .and_then(|entry| entry.usage_confidence.clone())
                 .unwrap_or_else(|| usage_confidence(provider, model)),
@@ -845,11 +868,11 @@ pub(crate) fn render_markdown(report: &ProviderSupportReport) -> String {
             report.sources.empirical.join("`, `")
         ));
     }
-    out.push_str("| Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Batch | Usage confidence | Empirical |\n");
-    out.push_str("|---|---|---|---|---:|---:|---|---|---:|---|---|---|\n");
+    out.push_str("| Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Batch | Serving tiers | Usage confidence | Empirical |\n");
+    out.push_str("|---|---|---|---|---:|---:|---|---|---:|---|---|---|---|\n");
     for entry in &report.providers {
         out.push_str(&format!(
-            "| `{}` | {} | `{}` | `{}` | {} | {} | `{}` / `{}` | {} | {} | {} | `{}` | {} |\n",
+            "| `{}` | {} | `{}` | `{}` | {} | {} | `{}` / `{}` | {} | {} | {} | {} | `{}` | {} |\n",
             markdown_escape(&entry.display_name),
             markdown_escape(&entry.endpoint_style),
             markdown_escape(&entry.recommended.selector),
@@ -868,6 +891,7 @@ pub(crate) fn render_markdown(report: &ProviderSupportReport) -> String {
             },
             yes_no(entry.capabilities.prompt_or_context_cache),
             batch_cell(&entry.capabilities),
+            serving_tiers_cell(&entry.capabilities),
             markdown_escape(&entry.capabilities.usage_accounting_confidence),
             empirical_cell(&entry.empirical),
         ));
@@ -930,6 +954,78 @@ fn batch_cell(capabilities: &SupportCapabilities) -> String {
         .batch_discount_percent
         .map(|discount| format!("Yes ({discount}%)"))
         .unwrap_or_else(|| "Yes".to_string())
+}
+
+fn support_serving_tiers(models: &[&CatalogModel]) -> Vec<SupportServingTier> {
+    let mut seen = BTreeSet::new();
+    let mut tiers = Vec::new();
+    for model in models
+        .iter()
+        .filter(|model| matches!(&model.deprecation.status, DeprecationStatus::Active))
+    {
+        for tier in &model.serving_tiers {
+            let request = tier.request.as_ref();
+            let mode = serving_tier_mode(&tier.mode).to_string();
+            let economics = serving_tier_economics(&tier.economics).to_string();
+            let request_param = request.map(|request| request.param.clone());
+            let request_value = request.map(|request| request.value.clone());
+            let key = (
+                tier.id.clone(),
+                mode.clone(),
+                economics.clone(),
+                request_param.clone(),
+                request_value.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            tiers.push(SupportServingTier {
+                id: tier.id.clone(),
+                mode,
+                economics,
+                request_param,
+                request_value,
+                discount_percent: tier.discount_percent,
+                cost_multiplier: tier.cost_multiplier,
+                status: tier.status.clone(),
+                latency: tier.latency.clone(),
+                reliability: tier.reliability.clone(),
+                suitable_workloads: tier.suitable_workloads.clone(),
+                unsuitable_workloads: tier.unsuitable_workloads.clone(),
+                note: tier.note.clone(),
+            });
+        }
+    }
+    tiers
+}
+
+fn serving_tier_mode(mode: &harn_vm::llm_config::ServingTierMode) -> &'static str {
+    match mode {
+        harn_vm::llm_config::ServingTierMode::Synchronous => "synchronous",
+    }
+}
+
+fn serving_tier_economics(economics: &harn_vm::llm_config::ServingTierEconomics) -> &'static str {
+    match economics {
+        harn_vm::llm_config::ServingTierEconomics::Discounted => "discounted",
+        harn_vm::llm_config::ServingTierEconomics::Standard => "standard",
+        harn_vm::llm_config::ServingTierEconomics::Premium => "premium",
+    }
+}
+
+fn serving_tiers_cell(capabilities: &SupportCapabilities) -> String {
+    if capabilities.serving_tiers.is_empty() {
+        return "none".to_string();
+    }
+    capabilities
+        .serving_tiers
+        .iter()
+        .map(|tier| {
+            let economics = markdown_escape(&tier.economics);
+            format!("`{}:{}`", markdown_escape(&tier.id), economics)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn render_bullets(out: &mut String, title: &str, items: &[String]) {
@@ -1013,6 +1109,39 @@ mod tests {
             .expect("azure row");
         assert_ne!(azure.recommended.model, "*");
         assert!(azure.capabilities.native_tools);
+        assert!(
+            azure.capabilities.batch_api,
+            "Azure OpenAI should surface Batch API support"
+        );
+
+        let openai = report
+            .providers
+            .iter()
+            .find(|entry| entry.id == "openai")
+            .expect("openai row");
+        assert!(
+            openai
+                .capabilities
+                .serving_tiers
+                .iter()
+                .any(|tier| tier.id == "flex" && tier.economics == "discounted"),
+            "OpenAI support row should surface synchronous Flex separately from Batch"
+        );
+
+        let gemini = report
+            .providers
+            .iter()
+            .find(|entry| entry.id == "gemini")
+            .expect("gemini row");
+        assert!(
+            gemini
+                .capabilities
+                .serving_tiers
+                .iter()
+                .any(|tier| tier.id == "priority"
+                    && tier.request_value.as_deref() == Some("priority")),
+            "Gemini support row should surface Priority as a synchronous serving tier"
+        );
     }
 
     #[test]

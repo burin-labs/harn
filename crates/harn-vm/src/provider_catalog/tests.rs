@@ -247,6 +247,13 @@ fn generated_catalog_exports_typed_batch_lifecycle_metadata() {
             .any(|note| note.contains("separate provider pool")),
         "OpenAI batch notes should explain the separate rate-limit pool"
     );
+    assert!(
+        openai_batch
+            .operational_notes
+            .iter()
+            .any(|note| note.contains("custom_id")),
+        "OpenAI batch operational notes should explain result rejoin"
+    );
 
     let anthropic = catalog
         .models
@@ -267,6 +274,13 @@ fn generated_catalog_exports_typed_batch_lifecycle_metadata() {
         anthropic_batch.cancellation,
         BatchCancellationSupport::Supported
     );
+    assert!(
+        anthropic_batch
+            .operational_notes
+            .iter()
+            .any(|note| note.contains("cache hits are best effort")),
+        "Anthropic batch notes should document prompt-cache best-effort behavior"
+    );
 
     let gemini = catalog
         .models
@@ -284,6 +298,71 @@ fn generated_catalog_exports_typed_batch_lifecycle_metadata() {
     assert_eq!(
         gemini_batch.cancellation,
         BatchCancellationSupport::Supported
+    );
+    assert!(
+        gemini_batch
+            .operational_notes
+            .iter()
+            .any(|note| note.contains("discounts do not stack")),
+        "Gemini batch notes should document cache/batch discount precedence"
+    );
+}
+
+#[test]
+fn generated_catalog_exports_non_batch_serving_tiers() {
+    llm_config::clear_user_overrides();
+    let catalog = artifact();
+
+    let openai = catalog
+        .models
+        .iter()
+        .find(|model| model.provider == "openai" && model.id == "gpt-5.5")
+        .expect("openai gpt-5.5 catalog row");
+    let openai_flex = openai
+        .serving_tiers
+        .iter()
+        .find(|tier| tier.id == "flex")
+        .expect("OpenAI Flex tier");
+    assert_eq!(openai_flex.mode, llm_config::ServingTierMode::Synchronous);
+    assert_eq!(
+        openai_flex.economics,
+        llm_config::ServingTierEconomics::Discounted
+    );
+    assert_eq!(
+        openai_flex
+            .request
+            .as_ref()
+            .map(|request| request.param.as_str()),
+        Some("service_tier")
+    );
+    assert!(
+        openai.batch.is_some(),
+        "OpenAI async Batch support should remain separate from Flex"
+    );
+
+    let gemini = catalog
+        .models
+        .iter()
+        .find(|model| model.provider == "gemini" && model.id == "gemini-2.5-flash")
+        .expect("gemini-2.5-flash catalog row");
+    let gemini_priority = gemini
+        .serving_tiers
+        .iter()
+        .find(|tier| tier.id == "priority")
+        .expect("Gemini Priority tier");
+    assert_eq!(
+        gemini_priority
+            .request
+            .as_ref()
+            .map(|request| request.value.as_str()),
+        Some("priority")
+    );
+    assert!(
+        gemini_priority
+            .unsuitable_workloads
+            .iter()
+            .any(|workload| workload == "batch"),
+        "Priority must not be presented as an async batch route"
     );
 }
 
@@ -456,6 +535,68 @@ fn signed_catalog_envelope_accepts_trusted_key() {
         .models
         .iter()
         .any(|model| model.id == "refreshco/new-model"));
+}
+
+fn stale_fast_mode_catalog_value() -> serde_json::Value {
+    let mut catalog = serde_json::to_value(remote_catalog_with_extra_model())
+        .expect("catalog serializes to JSON value");
+    let models = catalog["models"]
+        .as_array_mut()
+        .expect("catalog models is an array");
+    let opus = models
+        .iter_mut()
+        .find(|model| model["id"] == "claude-opus-4-8")
+        .expect("fixture includes an old fast-mode capable model");
+    if let Some(object) = opus.as_object_mut() {
+        object.remove("serving_tiers");
+        object.insert(
+            "fast_mode".to_string(),
+            json!({
+                "request": {"param": "speed", "value": "fast"},
+                "status": "ga"
+            }),
+        );
+    }
+    catalog
+}
+
+#[test]
+fn remote_catalog_rejects_stale_v2_schema() {
+    let _guard = RuntimeCatalogGuard::new();
+    let mut catalog = serde_json::to_value(remote_catalog_with_extra_model())
+        .expect("catalog serializes to JSON value");
+    catalog["schema_version"] = json!(2);
+    catalog["schema"] = json!("https://harnlang.com/schemas/provider-catalog.v2.json");
+
+    let body = serde_json::to_string(&catalog).expect("stale catalog serializes");
+    let error = match remote::decode_and_validate_document(&body, true) {
+        Ok(_) => panic!("stale v2 catalog must not be accepted"),
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("schema_version must be 3, got 2"),
+        "unexpected stale-catalog rejection: {error}"
+    );
+    assert!(
+        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v3.json"),
+        "unexpected stale-catalog rejection: {error}"
+    );
+}
+
+#[test]
+fn remote_catalog_rejects_stale_v3_fast_mode_shape() {
+    let _guard = RuntimeCatalogGuard::new();
+    let catalog = stale_fast_mode_catalog_value();
+
+    let body = serde_json::to_string(&catalog).expect("stale catalog serializes");
+    let error = match remote::decode_and_validate_document(&body, true) {
+        Ok(_) => panic!("stale fast_mode catalog must not silently drop the field"),
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("unknown field `fast_mode`"),
+        "unexpected stale-fast-mode rejection: {error}"
+    );
 }
 
 #[test]
@@ -1086,35 +1227,35 @@ fn downstream_bindings_include_empirical_tool_parity_shape() {
 }
 
 #[test]
-fn fast_mode_and_supersession_surface_in_contract() {
+fn serving_tiers_and_supersession_surface_in_contract() {
     let schema = schema_value();
     assert_eq!(
-        schema["$defs"]["model"]["properties"]["fast_mode"]["$ref"],
-        "#/$defs/fast_mode"
+        schema["$defs"]["model"]["properties"]["serving_tiers"]["items"]["$ref"],
+        "#/$defs/serving_tier"
     );
     assert_eq!(
-        schema["$defs"]["fast_mode"]["properties"]["pricing"]["$ref"],
+        schema["$defs"]["serving_tier"]["properties"]["pricing"]["$ref"],
         "#/$defs/pricing"
     );
     assert!(schema["$defs"]["deprecation"]["properties"]["superseded_by"].is_object());
 
     let typescript = typescript_declarations();
-    assert!(typescript.contains("export interface HarnModelFastMode"));
-    assert!(typescript.contains("fast_mode?: HarnModelFastMode"));
+    assert!(typescript.contains("export interface HarnModelServingTier"));
+    assert!(typescript.contains("serving_tiers?: HarnModelServingTier[]"));
     assert!(typescript.contains("superseded_by?: string"));
     assert!(typescript.contains("family: string"));
     assert!(typescript.contains("lineage: string"));
 
     let swift = swift_binding().expect("swift binding renders");
-    assert!(swift.contains("public struct HarnModelFastMode"));
-    assert!(swift.contains("public let fastMode: HarnModelFastMode?"));
+    assert!(swift.contains("public struct HarnModelServingTier"));
+    assert!(swift.contains("public let servingTiers: [HarnModelServingTier]"));
     assert!(swift.contains("case supersededBy = \"superseded_by\""));
     assert!(swift.contains("public let family: String"));
     assert!(swift.contains("public let lineage: String"));
 }
 
 #[test]
-fn dangling_superseded_by_and_unknown_fast_status_warn() {
+fn dangling_superseded_by_and_unknown_serving_tier_status_warn() {
     let _guard = install_overlay(
         r#"
 [providers.warn_co]
@@ -1131,7 +1272,9 @@ context_window = 4096
 deprecated = true
 deprecation_note = "Retiring soon."
 superseded_by = "warn/does-not-exist"
-fast_mode = { param = "speed", value = "fast", status = "turbo", pricing = { input_per_mtok = 1.0, output_per_mtok = 2.0 } }
+serving_tiers = [
+  { id = "fast", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast" }, status = "turbo", pricing = { input_per_mtok = 1.0, output_per_mtok = 2.0 } },
+]
 "#,
     );
     let report = validate_current();
@@ -1147,8 +1290,9 @@ fast_mode = { param = "speed", value = "fast", status = "turbo", pricing = { inp
         report
             .warnings
             .iter()
-            .any(|message| message.contains("fast_mode.status") && message.contains("turbo")),
-        "expected fast_mode.status warning, got {:?}",
+            .any(|message| message.contains("serving_tiers[fast].status")
+                && message.contains("turbo")),
+        "expected serving_tiers status warning, got {:?}",
         report.warnings
     );
 }

@@ -1590,49 +1590,23 @@ pub(crate) fn capabilities_to_vm_value(
                 .collect::<crate::value::DictMap>(),
         ),
     );
-    // Accelerated-serving ("fast mode") tier, read from the catalog so
-    // callers can branch on `llm_call(..., { fast: true })` support without
-    // re-parsing the model row. `fast_mode_supported` is true only for a
-    // usable (non-deprecated) tier; the nested `fast_mode` dict mirrors the
-    // catalog metadata when any tier is declared.
-    let fast_mode = super::fast_mode::lookup(model);
-    dict.insert(
-        crate::value::intern_key("fast_mode_supported"),
-        VmValue::Bool(
-            fast_mode
-                .as_ref()
-                .map(super::fast_mode::is_usable)
-                .unwrap_or(false),
-        ),
+    // Accelerated-serving (`fast`) tier, read from the generalized
+    // `serving_tiers` catalog so callers can branch on `llm_call(...,
+    // { fast: true })` support without re-parsing the model row.
+    let fast_tier = super::serving_tiers::fast_tier(model);
+    let fast_tier_supported = matches!(
+        super::serving_tiers::fast_gate(model),
+        super::serving_tiers::ServingTierGate::Usable
     );
-    if let Some(fast_mode) = fast_mode {
-        let mut fast = crate::value::DictMap::new();
-        fast.put_str("param", fast_mode.param.as_str());
-        fast.put_str("value", fast_mode.value.as_str());
-        fast.insert(
-            crate::value::intern_key("status"),
-            fast_mode
-                .status
-                .as_deref()
-                .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
-                .unwrap_or(VmValue::Nil),
+    dict.insert(
+        crate::value::intern_key("fast_tier_supported"),
+        VmValue::Bool(fast_tier_supported),
+    );
+    if let Some(fast_tier) = fast_tier {
+        dict.insert(
+            crate::value::intern_key("fast_tier"),
+            serving_tier_to_vm_value(&fast_tier),
         );
-        fast.insert(
-            crate::value::intern_key("beta_header"),
-            fast_mode
-                .beta_header
-                .as_deref()
-                .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
-                .unwrap_or(VmValue::Nil),
-        );
-        fast.insert(
-            crate::value::intern_key("otps_speedup"),
-            fast_mode
-                .otps_speedup
-                .map(VmValue::Float)
-                .unwrap_or(VmValue::Nil),
-        );
-        dict.insert(crate::value::intern_key("fast_mode"), VmValue::dict(fast));
     }
     VmValue::dict(dict)
 }
@@ -1797,12 +1771,10 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         VmValue::dict(benchmarks),
     );
     dict.insert(
-        crate::value::intern_key("fast_mode"),
-        model
-            .fast_mode
-            .as_ref()
-            .map(fast_mode_to_vm_value)
-            .unwrap_or(VmValue::Nil),
+        crate::value::intern_key("serving_tiers"),
+        json_to_vm_value(
+            &serde_json::to_value(&model.serving_tiers).unwrap_or_else(|_| serde_json::json!([])),
+        ),
     );
     VmValue::dict(dict)
 }
@@ -1846,45 +1818,8 @@ fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
     VmValue::dict(dict)
 }
 
-fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
-    let mut dict = crate::value::DictMap::new();
-    dict.put_str("param", fast.param.as_str());
-    dict.put_str("value", fast.value.as_str());
-    dict.insert(
-        crate::value::intern_key("beta_header"),
-        fast.beta_header
-            .as_deref()
-            .map(|header| VmValue::String(arcstr::ArcStr::from(header)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("otps_speedup"),
-        fast.otps_speedup
-            .map(VmValue::Float)
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("status"),
-        fast.status
-            .as_deref()
-            .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("pricing"),
-        fast.pricing
-            .as_ref()
-            .map(pricing_to_vm_value)
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("note"),
-        fast.note
-            .as_deref()
-            .map(|note| VmValue::String(arcstr::ArcStr::from(note)))
-            .unwrap_or(VmValue::Nil),
-    );
-    VmValue::dict(dict)
+fn serving_tier_to_vm_value(tier: &llm_config::ServingTierDef) -> VmValue {
+    json_to_vm_value(&serde_json::to_value(tier).unwrap_or_else(|_| serde_json::json!({})))
 }
 
 fn provider_catalog_to_vm_value() -> VmValue {
@@ -2596,7 +2531,7 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_capabilities_surfaces_fast_mode() {
+    fn test_provider_capabilities_surfaces_fast_serving_tier() {
         super::super::capabilities::clear_user_overrides();
         let mut out = String::new();
 
@@ -2615,15 +2550,20 @@ mod tests {
             other => panic!("expected String for {key}, got {other:?}"),
         };
         assert!(matches!(
-            opus.get("fast_mode_supported"),
+            opus.get("fast_tier_supported"),
             Some(VmValue::Bool(true))
         ));
         let fast = opus
-            .get("fast_mode")
+            .get("fast_tier")
             .and_then(VmValue::as_dict)
-            .expect("fast_mode dict present");
-        expect_str(fast, "param", "speed");
-        expect_str(fast, "beta_header", "fast-mode-2026-02-01");
+            .expect("fast_tier dict present");
+        expect_str(fast, "id", "fast");
+        let request = fast
+            .get("request")
+            .and_then(VmValue::as_dict)
+            .expect("fast_tier request dict present");
+        expect_str(request, "param", "speed");
+        expect_str(request, "beta_header", "fast-mode-2026-02-01");
 
         // A model with no fast tier reports false and omits the dict.
         let gpt4o = provider_capabilities_builtin(
@@ -2636,10 +2576,53 @@ mod tests {
         .expect("builtin returned error");
         let gpt4o = gpt4o.as_dict().expect("expected dict");
         assert!(matches!(
-            gpt4o.get("fast_mode_supported"),
+            gpt4o.get("fast_tier_supported"),
             Some(VmValue::Bool(false))
         ));
-        assert!(gpt4o.get("fast_mode").is_none());
+        assert!(gpt4o.get("fast_tier").is_none());
+    }
+
+    #[test]
+    fn test_provider_capabilities_rejects_fast_tier_without_request_knob() {
+        llm_config::clear_user_overrides();
+        let overlay = llm_config::parse_config_toml(concat!(
+            "[providers.test_fast_gate]\n",
+            "display_name = \"Test Fast Gate\"\n",
+            "base_url = \"https://example.test/v1\"\n",
+            "auth_style = \"none\"\n",
+            "chat_endpoint = \"/chat/completions\"\n",
+            "\n",
+            "[models.\"test-fast-without-knob\"]\n",
+            "name = \"Missing Fast Knob Test\"\n",
+            "provider = \"test_fast_gate\"\n",
+            "context_window = 128000\n",
+            "serving_tiers = [\n",
+            "  { id = \"fast\", mode = \"synchronous\", economics = \"premium\" },\n",
+            "]\n",
+        ))
+        .expect("overlay parses");
+        llm_config::set_user_overrides(Some(overlay));
+
+        let mut out = String::new();
+        let caps = provider_capabilities_builtin(
+            &[
+                VmValue::String(arcstr::ArcStr::from("test_fast_gate")),
+                VmValue::String(arcstr::ArcStr::from("test-fast-without-knob")),
+            ],
+            &mut out,
+        )
+        .expect("builtin returned error");
+        let caps = caps.as_dict().expect("expected dict");
+        assert!(matches!(
+            caps.get("fast_tier_supported"),
+            Some(VmValue::Bool(false))
+        ));
+        assert!(
+            caps.get("fast_tier").is_some(),
+            "capability surface should still expose the malformed tier metadata"
+        );
+
+        llm_config::clear_user_overrides();
     }
 
     #[test]

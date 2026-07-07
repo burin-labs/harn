@@ -548,7 +548,7 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
             deprecated: false,
             deprecation_note: None,
             superseded_by: None,
-            fast_mode: None,
+            serving_tiers: Vec::new(),
             quality_tags: Vec::new(),
             availability: ModelAvailability::default(),
             tier: None,
@@ -1289,7 +1289,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
             deprecated: false,
             deprecation_note: None,
             superseded_by: None,
-            fast_mode: None,
+            serving_tiers: Vec::new(),
             quality_tags: Vec::new(),
             availability: ModelAvailability::default(),
             tier: None,
@@ -1621,7 +1621,7 @@ fn embedded_catalog_tier_aliases_resolve_to_active_models() {
 }
 
 #[test]
-fn opus_alias_tracks_claude_opus_4_8_with_fast_mode() {
+fn opus_alias_tracks_claude_opus_4_8_with_fast_serving_tier() {
     // The `opus` alias must follow the newest Opus release, and that
     // release advertises its (off-by-default) fast-mode tier.
     let (model, provider) = resolve_model("opus");
@@ -1630,11 +1630,19 @@ fn opus_alias_tracks_claude_opus_4_8_with_fast_mode() {
 
     let opus48 = model_catalog_entry("claude-opus-4-8").expect("opus 4.8 catalog entry");
     assert!(!opus48.deprecated, "newest Opus must not be deprecated");
-    let fast = opus48.fast_mode.expect("opus 4.8 advertises fast mode");
-    assert_eq!(fast.param, "speed");
-    assert_eq!(fast.value, "fast");
+    let fast = opus48
+        .serving_tiers
+        .iter()
+        .find(|tier| tier.id == "fast")
+        .expect("opus 4.8 advertises fast mode");
+    let request = fast.request.as_ref().expect("fast tier has request knob");
+    assert_eq!(request.param, "speed");
+    assert_eq!(request.value, "fast");
     assert_eq!(fast.status.as_deref(), Some("research_preview"));
-    let fast_pricing = fast.pricing.expect("fast mode carries premium pricing");
+    let fast_pricing = fast
+        .pricing
+        .as_ref()
+        .expect("fast mode carries premium pricing");
     let standard = opus48.pricing.expect("opus 4.8 standard pricing");
     assert!(
         fast_pricing.input_per_mtok > standard.input_per_mtok,
@@ -1658,26 +1666,31 @@ fn superseded_opus_models_point_at_claude_opus_4_8() {
 }
 
 #[test]
-fn opus_46_no_longer_advertises_fast_mode() {
+fn opus_46_no_longer_advertises_fast_serving_tier() {
     let opus46 = model_catalog_entry("claude-opus-4-6").expect("opus 4.6 catalog entry");
     assert!(
-        opus46.fast_mode.is_none(),
+        !opus46.serving_tiers.iter().any(|tier| tier.id == "fast"),
         "Anthropic removed Opus 4.6 fast mode on 2026-06-29; Harn should not advertise it"
     );
 
     let opus47 = model_catalog_entry("claude-opus-4-7").expect("opus 4.7 catalog entry");
     assert!(
-        opus47.fast_mode.is_some(),
+        opus47.serving_tiers.iter().any(|tier| tier.id == "fast"),
         "Opus 4.7 still advertises its own fast-mode tier"
     );
 }
 
 #[test]
-fn gpt_5_5_fast_mode_rides_service_tier() {
+fn gpt_5_5_fast_serving_tier_rides_service_tier() {
     // Fast mode is provider-agnostic: OpenAI exposes it through the
     // `service_tier` knob rather than Anthropic's `speed`.
     let entry = model_catalog_entry("gpt-5.5").expect("gpt-5.5 catalog entry");
-    let fast = entry.fast_mode.expect("gpt-5.5 advertises a fast tier");
-    assert_eq!(fast.param, "service_tier");
+    let fast = entry
+        .serving_tiers
+        .iter()
+        .find(|tier| tier.id == "fast")
+        .expect("gpt-5.5 advertises a fast tier");
+    let request = fast.request.as_ref().expect("fast tier has request knob");
+    assert_eq!(request.param, "service_tier");
     assert_eq!(fast.status.as_deref(), Some("ga"));
 }

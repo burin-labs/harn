@@ -1,5 +1,5 @@
 //! Model catalog DTOs: per-route serving definitions and the sub-records
-//! (pricing, rate limits, serving performance, architecture, fast mode,
+//! (pricing, rate limits, serving performance, architecture, serving tiers,
 //! local runtime/memory, and aliases) that make up a `ModelDef`.
 use std::collections::BTreeMap;
 
@@ -359,40 +359,89 @@ impl ModelArchitectureDef {
     }
 }
 
-/// Optional accelerated-serving ("fast mode") tier for a model. Off by
-/// default: its presence only *describes* that the provider offers a
-/// faster, premium-priced serving path running the same weights — callers
-/// must explicitly opt in via the provider's request knob, so nothing here
-/// changes default behavior. Deliberately provider-agnostic: Anthropic
-/// exposes the tier as `speed = "fast"` (beta-gated), while OpenAI uses
-/// `service_tier = "fast"` / `"priority"`. Premium pricing is stored as
-/// absolute per-MTok rates rather than a single multiplier because
-/// providers price the tier asymmetrically (Anthropic Opus 4.8 is 2x
-/// standard; Opus 4.7 fast mode is 6x).
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct FastModeDef {
-    /// Request field that opts into the fast tier (e.g. "speed" for
-    /// Anthropic, "service_tier" for OpenAI).
+/// Provider request knob that selects a non-default serving tier.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ServingTierRequestDef {
+    /// Request field that opts into the tier (for example `speed` for
+    /// Anthropic or `service_tier` for OpenAI/Gemini).
     pub param: String,
-    /// Value to send on `param` (e.g. "fast", "priority").
+    /// Value to send on `param` (for example `fast`, `flex`, or `priority`).
     pub value: String,
-    /// Provider beta/feature header required to use the tier, if any
-    /// (e.g. Anthropic "fast-mode-2026-02-01").
-    #[serde(default)]
+    /// Provider beta/feature header required to use the tier, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub beta_header: Option<String>,
+}
+
+/// Whether a serving tier is synchronous request handling or some other
+/// provider execution lane. Batch APIs remain represented by the separate
+/// async `batch` capability; discounted synchronous lanes such as Gemini Flex
+/// belong here instead of overloading `batch_api`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServingTierMode {
+    Synchronous,
+}
+
+/// Economic shape of a serving tier relative to the default synchronous API.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServingTierEconomics {
+    Discounted,
+    Standard,
+    Premium,
+}
+
+/// Optional non-default synchronous serving tier for a model. Off by default:
+/// its presence only describes provider capability. Callers must explicitly
+/// opt in via the declared request knob, so nothing here changes default
+/// behavior. Batch APIs are intentionally not modeled here; they remain the
+/// separate async `batch` capability used by `harn models batch`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ServingTierDef {
+    /// Stable tier id, e.g. `fast`, `flex`, or `priority`.
+    pub id: String,
+    /// Human-readable display label for CLI/catalog renderers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub mode: ServingTierMode,
+    pub economics: ServingTierEconomics,
+    /// Request knob for tiers selected per request. Some tiers may be
+    /// informational/account-level only and omit a knob.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<ServingTierRequestDef>,
     /// Output-tokens-per-second speedup vs standard serving (e.g. 2.5).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub otps_speedup: Option<f64>,
-    /// Lifecycle of the fast tier: "ga" | "research_preview" |
-    /// "deprecated". None when unspecified.
-    #[serde(default)]
+    /// Price multiplier relative to default synchronous rates, when public.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_multiplier: Option<f64>,
+    /// Discount percentage relative to default synchronous rates, when public.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discount_percent: Option<u32>,
+    /// Lifecycle of the tier: "ga" | "research_preview" | "deprecated".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    /// Premium pricing charged while the fast tier is active (absolute
-    /// per-MTok rates, not a multiplier on standard pricing).
-    #[serde(default)]
+    /// Absolute per-MTok rates charged while the tier is active. Prefer this
+    /// over a multiplier when the provider prices the tier asymmetrically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pricing: Option<ModelPricing>,
-    /// Free-text note: constraints, deprecation timeline, etc.
-    #[serde(default)]
+    /// Latency expectation for humans and planners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency: Option<String>,
+    /// Reliability/availability expectation for humans and planners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reliability: Option<String>,
+    /// Quota-pool or eligibility notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota: Option<String>,
+    /// Workloads this tier is suitable for (e.g. `offline_eval`, `corpus`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suitable_workloads: Vec<String>,
+    /// Workloads this tier should generally avoid (e.g. `interactive_chat`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsuitable_workloads: Vec<String>,
+    /// Free-text note: constraints, deprecation timeline, cache behavior, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
 
@@ -402,7 +451,7 @@ pub struct FastModeDef {
 /// is one transport attempt, and the loop advances to the next step ONLY
 /// on transport-class failures (connection/timeout/429/5xx/throttled).
 ///
-/// This data-driven declaration follows the same spirit as `fast_mode`
+/// This data-driven declaration follows the same spirit as `serving_tiers`
 /// (#4017): a capability/behavior encoded as catalog data rather than
 /// hand-rolled at each downstream call site (harn-bump-fleet,
 /// harn-cloud free_tier_pool, burin-code all shipped their own copy).
@@ -522,11 +571,12 @@ pub struct ModelDef {
     /// pair it with `deprecated = true` once a sunset is announced.
     #[serde(default)]
     pub superseded_by: Option<String>,
-    /// Accelerated-serving ("fast mode") tier metadata, when the model's
-    /// provider offers one. Off by default — see [`FastModeDef`]. None for
-    /// models with no faster serving path.
-    #[serde(default)]
-    pub fast_mode: Option<FastModeDef>,
+    /// Non-default synchronous serving tiers exposed by the provider, such as
+    /// premium fast/priority queues or discounted best-effort Flex lanes. Off
+    /// by default — see [`ServingTierDef`]. Empty for models with no alternate
+    /// synchronous serving path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub serving_tiers: Vec<ServingTierDef>,
     #[serde(default)]
     pub quality_tags: Vec<String>,
     /// Whether the model can be reached over a normal API-key serverless call,

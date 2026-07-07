@@ -165,40 +165,6 @@
       ],
       "type": "object"
     },
-    "fast_mode": {
-      "additionalProperties": false,
-      "properties": {
-        "beta_header": {
-          "type": "string"
-        },
-        "note": {
-          "type": "string"
-        },
-        "otps_speedup": {
-          "exclusiveMinimum": 0,
-          "type": "number"
-        },
-        "param": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "pricing": {
-          "$ref": "#/$defs/pricing"
-        },
-        "status": {
-          "type": "string"
-        },
-        "value": {
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "param",
-        "value"
-      ],
-      "type": "object"
-    },
     "format_preferences": {
       "additionalProperties": false,
       "properties": {
@@ -531,9 +497,6 @@
           "pattern": "^[a-z0-9][a-z0-9-]*$",
           "type": "string"
         },
-        "fast_mode": {
-          "$ref": "#/$defs/fast_mode"
-        },
         "format_preferences": {
           "$ref": "#/$defs/format_preferences"
         },
@@ -594,6 +557,12 @@
         "served_variant": {
           "minLength": 1,
           "type": "string"
+        },
+        "serving_tiers": {
+          "items": {
+            "$ref": "#/$defs/serving_tier"
+          },
+          "type": "array"
         },
         "stream_timeout": {
           "exclusiveMinimum": 0,
@@ -675,6 +644,13 @@
         "max_requests": {
           "minimum": 1,
           "type": "integer"
+        },
+        "operational_notes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
         },
         "partial_failure": {
           "enum": [
@@ -1012,6 +988,110 @@
       ],
       "type": "object"
     },
+    "serving_tier": {
+      "additionalProperties": false,
+      "properties": {
+        "cost_multiplier": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "discount_percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "economics": {
+          "enum": [
+            "discounted",
+            "standard",
+            "premium"
+          ]
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "latency": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "synchronous"
+          ]
+        },
+        "note": {
+          "type": "string"
+        },
+        "otps_speedup": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "pricing": {
+          "$ref": "#/$defs/pricing"
+        },
+        "quota": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "reliability": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/serving_tier_request"
+        },
+        "status": {
+          "type": "string"
+        },
+        "suitable_workloads": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unsuitable_workloads": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "economics"
+      ],
+      "type": "object"
+    },
+    "serving_tier_request": {
+      "additionalProperties": false,
+      "properties": {
+        "beta_header": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "param": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "param",
+        "value"
+      ],
+      "type": "object"
+    },
     "tool_empirical_parity": {
       "additionalProperties": false,
       "properties": {
@@ -1137,7 +1217,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v2.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v3.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1175,10 +1255,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v2.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v3.json"
     },
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "variants": {
       "items": {

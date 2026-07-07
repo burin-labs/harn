@@ -14,9 +14,9 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 2;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 3;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v2.json";
+    "https://harnlang.com/schemas/provider-catalog.v3.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog export";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -138,18 +138,7 @@ fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
         deprecated: model.deprecation.status == DeprecationStatus::Deprecated,
         deprecation_note: model.deprecation.note.clone(),
         superseded_by: model.deprecation.superseded_by.clone(),
-        fast_mode: model
-            .fast_mode
-            .as_ref()
-            .map(|fast| llm_config::FastModeDef {
-                param: fast.param.clone(),
-                value: fast.value.clone(),
-                beta_header: fast.beta_header.clone(),
-                otps_speedup: fast.otps_speedup,
-                status: fast.status.clone(),
-                pricing: fast.pricing.clone(),
-                note: fast.note.clone(),
-            }),
+        serving_tiers: model.serving_tiers.clone(),
         quality_tags: model.quality_tags.clone(),
         availability: match model.availability {
             ModelAvailabilityStatus::Serverless => llm_config::ModelAvailability::Serverless,
@@ -568,15 +557,7 @@ fn catalog_model(
         open_weight: model.open_weight,
         strengths: model.strengths.clone(),
         benchmarks: model.benchmarks.clone(),
-        fast_mode: model.fast_mode.as_ref().map(|fm| ModelFastMode {
-            param: fm.param.clone(),
-            value: fm.value.clone(),
-            beta_header: fm.beta_header.clone(),
-            otps_speedup: fm.otps_speedup,
-            status: fm.status.clone(),
-            pricing: fm.pricing.clone(),
-            note: fm.note.clone(),
-        }),
+        serving_tiers: model.serving_tiers.clone(),
         id,
         name: model.name,
         provider: model.provider,
@@ -617,6 +598,7 @@ fn catalog_batch_support(
         max_input_bytes: caps.batch_max_input_bytes,
         result_retention_days: caps.batch_result_retention_days,
         security_notes: caps.batch_security_notes.clone(),
+        operational_notes: caps.batch_operational_notes.clone(),
     })
 }
 
