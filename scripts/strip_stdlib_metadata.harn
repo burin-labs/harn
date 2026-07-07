@@ -43,14 +43,14 @@ fn _block_line_content(line) -> string {
 
 /**
  * True when an `@example:` value is a trivial echo of the signature for
- * `name`: an optional `let <ident> = ` binding around `name(...)` with
- * only bare identifier arguments. Anything richer (literals, nested
- * calls, multiple statements) is a real example and survives.
+ * `name`: an optional `const|let <ident> = ` binding around `name(...)`
+ * with only bare identifier arguments. Anything richer (literals,
+ * nested calls, multiple statements) is a real example and survives.
  */
 pub fn is_trivial_example(value, name) -> bool {
   const ident = "[A-Za-z_][A-Za-z0-9_]*"
   const args = "(?:${ident}(?:,\\s*${ident})*)?"
-  const pattern = "^(?:let ${ident} = )?${name}\\(${args}\\)$"
+  const pattern = "^(?:(?:const|let) ${ident} = )?${name}\\(${args}\\)$"
   return len(regex_captures(pattern, value)) > 0
 }
 

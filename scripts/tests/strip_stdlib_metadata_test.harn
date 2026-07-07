@@ -6,6 +6,7 @@ import "../strip_stdlib_metadata.harn"
 pipeline test_is_trivial_example(task) {
   assert_eq(is_trivial_example("foo()", "foo"), true)
   assert_eq(is_trivial_example("foo(a, b)", "foo"), true)
+  assert_eq(is_trivial_example("const s = foo(a)", "foo"), true)
   assert_eq(is_trivial_example("let s = foo(a)", "foo"), true)
   // Wrong name is not an echo of this signature.
   assert_eq(is_trivial_example("bar(a)", "foo"), false)
