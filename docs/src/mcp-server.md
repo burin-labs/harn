@@ -375,7 +375,7 @@ clients accept inbound sampling — see the
 | `prompts/get` | Supported; renders prompt templates with supplied arguments |
 | `completion/complete` | Supported for prompt arguments with front-matter suggestions and orchestrator resource template arguments |
 | `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
-| `roots/list` | Explicitly unsupported |
+| `roots/list` | Supported outbound from script-driven `harn serve mcp` surfaces via the `mcp_client_roots(...)` builtin |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.md#mcp-client-support-matrix). |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
 | `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for tools that advertise `execution.taskSupport="forbidden"` |
@@ -385,10 +385,11 @@ Explicitly unsupported methods return a JSON-RPC error with code `-32601` and
 task-augmented execution for a non-taskable tool return `-32602` because the
 request conflicts with the tool's advertised execution metadata.
 
-`sampling/createMessage` and `elicitation/create` are client-bound MCP requests.
-When a client sends either method to a Harn MCP server endpoint, Harn returns an
-explicit `mcp.unsupportedFeature` JSON-RPC error instead of treating the request
-as an ordinary unknown method.
+`roots/list`, `sampling/createMessage`, and `elicitation/create` are client-bound
+MCP requests. Script-driven Harn handlers can initiate `roots/list` and
+`elicitation/create`; when a client sends client-bound methods to a Harn MCP
+server endpoint, Harn returns an explicit `mcp.unsupportedFeature` JSON-RPC
+error instead of treating the request as an ordinary unknown method.
 
 ## Elicitation
 
@@ -424,6 +425,17 @@ returning so scripts can rely on its shape. On `decline` / `cancel`,
 `mcp_elicit(...)` is only valid while a client connection is active. If
 called outside a tool / resource / prompt handler — e.g. at pipeline
 top-level — it raises a structured error rather than hanging.
+
+## Client roots
+
+Script-driven MCP servers can ask the connected client for its roots:
+
+```harn
+const roots = mcp_client_roots()
+```
+
+`mcp_client_roots()` is only valid while a client connection is active and
+returns the client's `roots/list` result as a list of root objects.
 
 When Harn is on the *client* side of an MCP connection (`mcp_connect(...)`
 or `mcp_call(...)`) and a remote server sends an `elicitation/create`

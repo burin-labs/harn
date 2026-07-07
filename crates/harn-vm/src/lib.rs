@@ -66,6 +66,8 @@ pub mod mcp_allowlist;
 pub mod mcp_auth;
 pub mod mcp_bulk_auth;
 pub mod mcp_card;
+pub mod mcp_client_request;
+pub mod mcp_client_roots;
 pub mod mcp_elicit;
 pub mod mcp_file_upload;
 pub mod mcp_host;

@@ -17,80 +17,22 @@
 //! See the spec at
 //! <https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation>.
 
-use crate::value::VmDictExt;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-
 use serde_json::{json, Value as JsonValue};
-use tokio::sync::{mpsc, oneshot};
 
+use crate::mcp_client_request::ClientRequestBus;
 use crate::schema::{elicitation_validate, elicitation_validate_schema, json_to_vm_value};
 use crate::stdlib::host::{dispatch_host_call_bridge, dispatch_mock_host_call};
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
+
+pub use crate::mcp_client_request::{
+    current_bus, install_bus, ClientRequestBus as ElicitationBus, OutboundSender,
+};
 
 /// JSON-RPC method name for elicitation requests.
 pub const ELICITATION_METHOD: &str = "elicitation/create";
 
-/// Outbound message sink — typically wraps the MCP transport's writer
-/// (stdout for stdio servers, an SSE channel for HTTP servers).
-pub type OutboundSender = mpsc::UnboundedSender<JsonValue>;
-
-/// Per-connection bus that owns in-flight `elicitation/create` requests.
-///
-/// Cheap to clone (every clone shares the same pending map), so the
-/// transport layer can hand a copy to its reader task while the dispatch
-/// loop installs the same bus thread-locally for tool handlers.
-#[derive(Clone)]
-pub struct ElicitationBus {
-    outbound: OutboundSender,
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<JsonValue>>>>,
-    next_id: Arc<AtomicU64>,
-}
-
-impl ElicitationBus {
-    pub fn new(outbound: OutboundSender) -> Self {
-        Self {
-            outbound,
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            next_id: Arc::new(AtomicU64::new(1)),
-        }
-    }
-
-    /// Try to dispatch `msg` as a response to a pending elicitation
-    /// request. Returns `true` when the message was a JSON-RPC response
-    /// whose id matches an in-flight elicitation (and the bus delivered
-    /// it). Otherwise the caller should treat `msg` as a new inbound
-    /// request.
-    pub fn route_response(&self, msg: &JsonValue) -> bool {
-        // Responses have an id and either `result` or `error`, but no
-        // `method`. Notifications have a method but no id. Be strict so
-        // we don't accidentally swallow client-initiated requests that
-        // happen to share a string id with a recent elicitation.
-        if msg.get("method").is_some() {
-            return false;
-        }
-        if msg.get("result").is_none() && msg.get("error").is_none() {
-            return false;
-        }
-        let Some(id) = msg.get("id") else {
-            return false;
-        };
-        let id_key = canonical_id(id);
-        let mut pending = self.pending.lock().expect("elicitation pending poisoned");
-        if let Some(tx) = pending.remove(&id_key) {
-            // The receiver may have been dropped (e.g. the awaiting tool
-            // handler timed out). Sending into a closed oneshot is fine
-            // — we still ate the response so the dispatcher won't try
-            // to handle it as a request.
-            let _ = tx.send(msg.clone());
-            true
-        } else {
-            false
-        }
-    }
-
+impl ClientRequestBus {
     /// Send an `elicitation/create` request to the peer and await its
     /// reply. The returned envelope follows the spec: `{ action, content? }`.
     /// `content` is validated against `requested_schema` when present
@@ -102,77 +44,19 @@ impl ElicitationBus {
     ) -> Result<VmValue, VmError> {
         validate_requested_schema(&requested_schema)?;
 
-        let id_seq = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let id = format!("harn-elicit-{id_seq}");
-        let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .expect("elicitation pending poisoned")
-            .insert(id.clone(), tx);
-
-        let request = json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": ELICITATION_METHOD,
-            "params": {
-                "message": message,
-                "requestedSchema": requested_schema,
-            },
-        });
-
-        if self.outbound.send(request).is_err() {
-            self.pending
-                .lock()
-                .expect("elicitation pending poisoned")
-                .remove(&id);
-            return Err(VmError::Runtime(
-                "mcp_elicit: transport closed before request could be sent".into(),
-            ));
-        }
-
-        let response = match rx.await {
-            Ok(value) => value,
-            Err(_) => {
-                // Receiver dropped before a response arrived — most
-                // likely the transport closed mid-flight.
-                return Err(VmError::Runtime(
-                    "mcp_elicit: transport dropped before client responded".into(),
-                ));
-            }
-        };
-
-        if let Some(error) = response.get("error") {
-            let message = error
-                .get("message")
-                .and_then(|value| value.as_str())
-                .unwrap_or("unknown error");
-            let code = error
-                .get("code")
-                .and_then(|value| value.as_i64())
-                .unwrap_or(-1);
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("mcp_elicit: client error ({code}): {message}"),
-            ))));
-        }
-
-        let result = response.get("result").cloned().unwrap_or(JsonValue::Null);
+        let result = self
+            .request(
+                "elicit",
+                ELICITATION_METHOD,
+                json!({
+                    "message": message,
+                    "requestedSchema": requested_schema,
+                }),
+                "mcp_elicit",
+            )
+            .await?;
         envelope_from_response(&result, &requested_schema)
     }
-}
-
-/// Coerce JSON-RPC ids (which may be strings or numbers per spec) into
-/// a single string key for the pending-response map.
-fn canonical_id(value: &JsonValue) -> String {
-    if let Some(s) = value.as_str() {
-        return s.to_string();
-    }
-    if let Some(n) = value.as_i64() {
-        return n.to_string();
-    }
-    if let Some(n) = value.as_u64() {
-        return n.to_string();
-    }
-    value.to_string()
 }
 
 /// Spec-compliant elicitation request schemas are flat objects whose
@@ -254,21 +138,6 @@ pub(crate) fn validate_accepted_content(
         )),
         other => other,
     })
-}
-
-thread_local! {
-    static CURRENT_BUS: RefCell<Option<ElicitationBus>> = const { RefCell::new(None) };
-}
-
-/// Install `bus` as the elicitation bus for the current thread. Returns
-/// the previously-installed bus (so callers can restore on exit).
-pub fn install_bus(bus: Option<ElicitationBus>) -> Option<ElicitationBus> {
-    CURRENT_BUS.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), bus))
-}
-
-/// Snapshot the bus currently installed on this thread, if any.
-pub fn current_bus() -> Option<ElicitationBus> {
-    CURRENT_BUS.with(|cell| cell.borrow().clone())
 }
 
 /// Dispatch an inbound server-to-client `elicitation/create` request
@@ -391,14 +260,9 @@ fn normalize_inbound_envelope(value: JsonValue) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use tokio::sync::mpsc;
 
-    #[test]
-    fn canonical_id_handles_strings_numbers_and_other() {
-        assert_eq!(canonical_id(&json!("a")), "a");
-        assert_eq!(canonical_id(&json!(42)), "42");
-        assert_eq!(canonical_id(&json!(true)), "true");
-    }
+    use super::*;
 
     #[test]
     fn validate_requested_schema_rejects_non_object() {

@@ -574,7 +574,7 @@ for registered resource URIs.
 | `resources/subscribe`, `resources/unsubscribe` | Supported for registered resource URIs; orchestrator topic resources emit update notifications |
 | `prompts/list`, `prompts/get` | Supported for registered prompts |
 | `completion/complete` | Supported for prompt arguments and resource template arguments |
-| `roots/list` | Explicitly unsupported; client-side roots are not served by Harn |
+| `roots/list` | Supported outbound from script-driven handlers through `mcp_client_roots()` / `harn.mcp.client_roots()` |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not currently emitted by the orchestrator-mode catalog; Harn declares the `sampling` capability when acting as a client (see the [client matrix](#mcp-client-support-matrix)). |
 | `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are rejected with an explicit unsupported-feature error |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |

@@ -1,0 +1,24 @@
+pipeline default() {
+  mcp_server_metadata({name: "roots-test-server", version: "1.0.0"})
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "roots_report",
+    "Return roots reported by the connected MCP client.",
+    {
+      parameters: {},
+      handler: { _args ->
+        const roots = mcp_client_roots()
+        return json_stringify({roots_count: roots.count, roots: roots})
+      },
+      annotations: {
+        title: "Roots Report",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+  )
+  mcp_tools(tools)
+}
