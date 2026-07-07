@@ -38,7 +38,7 @@ client initialization, no response parsing. Set an environment variable
 and call a model:
 
 ```harn
-let answer = llm_call("Summarize this code", "You are a code reviewer.")
+const answer = llm_call("Summarize this code", "You are a code reviewer.")
 ```
 
 Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter,
@@ -53,11 +53,11 @@ readable:
 
 ```harn
 pipeline analyze(task) {
-  let context = read_file("README.md")
-  let plan = llm_call("${task}\n\nContext:\n${context}", "Break this into steps.")
-  let steps = json_parse(plan.text)
+  const context = read_file("README.md")
+  const plan = llm_call("${task}\n\nContext:\n${context}", "Break this into steps.")
+  const steps = json_parse(plan.text)
 
-  let results = parallel each steps { step ->
+  const results = parallel each steps { step ->
     agent_loop(step, "You are a coding assistant.", {loop_until_done: true})
   }
 
@@ -79,9 +79,9 @@ The CLI handles standalone OAuth for remote HTTP MCP servers, so cloud MCP
 integrations can be ordinary runtime dependencies instead of host-specific glue.
 
 ```harn
-let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
-let tools = mcp_list_tools(client)
-let content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
+const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const tools = mcp_list_tools(client)
+const content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
 mcp_disconnect(client)
 ```
 
@@ -92,7 +92,7 @@ responses, or other workers. Harn makes that waiting explicit in the program
 without asking you to write an event loop.
 
 ```harn
-let results = parallel each files { file ->
+const results = parallel each files { file ->
   llm_call(read_file(file), "Review this file for security issues")
 }
 ```
@@ -119,7 +119,7 @@ unreliable LLM call in retries is a one-liner:
 
 ```harn
 retry 3 {
-  let result = llm_call(prompt, system)
+  const result = llm_call(prompt, system)
   json_parse(result.text)
 }
 ```
@@ -199,11 +199,11 @@ asyncio.run(main())
 
 ```harn
 pipeline default(task) {
-  let urls = ["https://a.com", "https://b.com", "https://c.com"]
+  const urls = ["https://a.com", "https://b.com", "https://c.com"]
 
-  let results = parallel each urls { url ->
+  const results = parallel each urls { url ->
     retry 3 {
-      let page = http_get(url)
+      const page = http_get(url)
       llm_call("Summarize:\n${page}", "Be concise.")
     }
   }

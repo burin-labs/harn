@@ -6,7 +6,7 @@ emits values over time and can be consumed with `for`, `.next()`, or
 
 ```harn
 gen fn numbers(start: int, end: int) -> Stream<int> {
-  var n = start
+  let n = start
   while n < end {
     emit n
     n = n + 1
@@ -23,7 +23,7 @@ whole batch. The streamed form preserves the `max_concurrent` cap but
 emits each result as soon as that task completes:
 
 ```harn
-let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
+const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
   sleep(ms)
   return ms
 } as stream
@@ -54,8 +54,8 @@ gen fn chunks() -> Stream<string> {
   emit "two"
 }
 
-let s: Stream<string> = chunks()
-let first = s.next()
+const s: Stream<string> = chunks()
+const first = s.next()
 log(first.value)  // one
 log(first.done)   // false
 ```

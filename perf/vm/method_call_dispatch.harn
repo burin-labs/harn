@@ -1,7 +1,7 @@
 pipeline default(task) {
-  let items = [1, 3, 5, 7, 9, 11, 13, 15]
-  var i = 0
-  var hits = 0
+  const items = [1, 3, 5, 7, 9, 11, 13, 15]
+  let i = 0
+  let hits = 0
   while i < 100000 {
     if items.contains(i % 16) {
       hits = hits + 1

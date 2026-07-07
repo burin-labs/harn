@@ -1,7 +1,7 @@
 import { end_timing, timing_event } from "std/timing"
 
 pipeline default() {
-  var raised = nil
+  let raised = nil
   try {
     end_timing({span_id: 9999})
   } catch (e) {

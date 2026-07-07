@@ -17,8 +17,8 @@ pipeline test(task) {
     )
     log("BUG: mcp_elicit returned without an active MCP connection")
   } catch (e) {
-    let message = e
-    let ok = contains(message, "mcp_elicit") && contains(message, "no active MCP client connection")
+    const message = e
+    const ok = contains(message, "mcp_elicit") && contains(message, "no active MCP client connection")
     assert(ok, "expected 'no active MCP client connection' error, got: " + message)
     log("mcp_elicit: outside-tool-handler call raised expected error")
   }

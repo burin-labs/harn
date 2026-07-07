@@ -5,7 +5,7 @@ fn mcp_tools_warns_for_unannotated_tool_define() {
     let diagnostics = lint_source(
         r#"
 pipeline main() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "echo", "Echo input", {
     parameters: {text: "string"},
     handler: { args -> args.text },
@@ -23,7 +23,7 @@ fn mcp_tools_accepts_annotated_tool_define() {
     let diagnostics = lint_source(
         r#"
 pipeline main() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "echo", "Echo input", {
     parameters: {text: "string"},
     handler: { args -> args.text },
@@ -42,7 +42,7 @@ fn non_mcp_tool_define_does_not_warn() {
     let diagnostics = lint_source(
         r#"
 pipeline main() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "echo", "Echo input", {
     parameters: {text: "string"},
     handler: { args -> args.text },
@@ -76,7 +76,7 @@ fn mcp_tools_reports_only_unannotated_entries_in_chain() {
     let diagnostics = lint_source(
         r#"
 pipeline main() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "read", "Read input", {
     parameters: {},
     handler: { _args -> "ok" },

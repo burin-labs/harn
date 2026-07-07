@@ -15,7 +15,7 @@ fn events_of(events, kind) {
 }
 
 fn stance_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "look",
@@ -61,7 +61,7 @@ fn stance_tools() {
 }
 
 fn policy_annotated_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "inspect",
@@ -108,8 +108,8 @@ pipeline default() {
       {text: "done ##DONE##"},
     ],
     { ->
-      let session = "read-only-stance-" + uuid()
-      let captured = agent_capture_events(
+      const session = "read-only-stance-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "no code changes yet, just research the bug",
@@ -125,20 +125,20 @@ pipeline default() {
           },
         ) },
       )
-      let calls = llm_mock_calls()
-      let first_tools = calls[0].tools
+      const calls = llm_mock_calls()
+      const first_tools = calls[0].tools
       __io_println(has_tool(first_tools, "look"))
       __io_println(has_tool(first_tools, "search"))
       __io_println(has_tool(first_tools, "request_write_access"))
       __io_println(has_tool(first_tools, "edit"))
       __io_println(has_tool(first_tools, "run"))
       __io_println(has_tool(first_tools, "mystery"))
-      let third_tools = calls[2].tools
+      const third_tools = calls[2].tools
       __io_println(has_tool(third_tools, "edit"))
-      let fourth_tools = calls[3].tools
+      const fourth_tools = calls[3].tools
       __io_println(has_tool(fourth_tools, "edit"))
-      let stance_events = events_of(captured.events, "stance_transition")
-      let phases = stance_events.map({ event -> event.phase })
+      const stance_events = events_of(captured.events, "stance_transition")
+      const phases = stance_events.map({ event -> event.phase })
       __io_println(contains(phases, "armed"))
       __io_println(contains(phases, "write_access_denied"))
       __io_println(contains(phases, "write_access_granted"))
@@ -153,8 +153,8 @@ pipeline default() {
       {text: "done ##DONE##"},
     ],
     { ->
-      let session = "read-only-stance-policy-" + uuid()
-      let captured = agent_capture_events(
+      const session = "read-only-stance-policy-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "inspect only",
@@ -176,12 +176,12 @@ pipeline default() {
           },
         ) },
       )
-      let first_tools = llm_mock_calls()[0].tools
+      const first_tools = llm_mock_calls()[0].tools
       __io_println(has_tool(first_tools, "inspect"))
       __io_println(has_tool(first_tools, "mutate"))
       __io_println(has_tool(first_tools, "unknown"))
       __io_println(has_tool(first_tools, "request_write_access"))
-      let policy_phases = events_of(captured.events, "stance_transition").map({ event -> event.phase })
+      const policy_phases = events_of(captured.events, "stance_transition").map({ event -> event.phase })
       __io_println(contains(policy_phases, "write_access_denied"))
     },
   )

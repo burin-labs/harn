@@ -19,13 +19,13 @@
 //
 // Pure logic lives in `pub fn`s so the paired test can drive them with no
 // filesystem; `main` does argv parsing, archive existence/hash/size, and IO.
-let REPO = "burin-labs/harn"
+const REPO = "burin-labs/harn"
 
-let PROG = "build_release_assets_manifest.py"
+const PROG = "build_release_assets_manifest.py"
 
 // argparse usage block (deterministic width-80 / non-tty form) and the help
 // epilog (the module docstring), reproduced verbatim from the Python.
-let USAGE = "usage: build_release_assets_manifest.py [-h] --artifacts-dir ARTIFACTS_DIR\n                                        --tag TAG --output OUTPUT"
+const USAGE = "usage: build_release_assets_manifest.py [-h] --artifacts-dir ARTIFACTS_DIR\n                                        --tag TAG --output OUTPUT"
 
 /**
  * Ordered list of Rust target triples. Order matches the Python `TARGETS`
@@ -88,8 +88,8 @@ pub fn target_meta(triple: string) -> any {
 
 /** Strip every leading "v" from `tag` — mirrors Python `tag.lstrip("v")`. */
 pub fn strip_leading_v(tag: string) -> string {
-  var i = 0
-  let n = tag.len()
+  let i = 0
+  const n = tag.len()
   while i < n && tag.char_at(i) == "v" {
     i = i + 1
   }
@@ -104,15 +104,15 @@ pub fn strip_leading_v(tag: string) -> string {
  * both match the Python `Path` repr.
  */
 pub fn posix_path_str(s: string) -> string {
-  let absolute = s.starts_with("/")
-  var parts: list<string> = []
+  const absolute = s.starts_with("/")
+  let parts: list<string> = []
   for seg in s.split("/") {
     if seg == "" || seg == "." {
       continue
     }
     parts = parts + [seg]
   }
-  let body = parts.join("/")
+  const body = parts.join("/")
   if absolute {
     return "/" + body
   }
@@ -128,7 +128,7 @@ pub fn posix_path_str(s: string) -> string {
  * has no separators here). A bare "." directory yields just the filename.
  */
 pub fn join_path(dir: string, filename: string) -> string {
-  let base = posix_path_str(dir)
+  const base = posix_path_str(dir)
   if base == "." {
     return filename
   }
@@ -144,8 +144,8 @@ pub fn join_path(dir: string, filename: string) -> string {
  * the same shape the Python emits.
  */
 pub fn asset_record(triple: string, download_base: string, sha256: string, size: int) -> any {
-  let meta = target_meta(triple)
-  let filename = meta.filename
+  const meta = target_meta(triple)
+  const filename = meta.filename
   return {
     filename: filename,
     url: "${download_base}/${filename}",
@@ -162,7 +162,7 @@ pub fn asset_record(triple: string, download_base: string, sha256: string, size:
  * `sorted(missing)`.
  */
 pub fn missing_message(missing: list<string>) -> string {
-  let sorted = missing.sort()
+  const sorted = missing.sort()
   return "release-assets manifest is missing required archives: " + sorted.join(", ")
 }
 
@@ -184,9 +184,9 @@ pub fn help_text() -> string {
   return USAGE + "\n\n" + DOC + "\n\n" + OPTIONS
 }
 
-let DOC = "Emit `release-assets.json` for a Harn GitHub release.\n\nDownstream consumers (`burin-code/scripts/fetch-harn.sh`, the Scoop\nmanifest generator, the `@burin/cli` npm postinstall) read this file\nto verify and fetch the correct per-architecture binary archive\nwithout scraping the GitHub releases API.\n\nSchema:\n    {\n      \"version\": \"0.8.21\",\n      \"tag\": \"v0.8.21\",\n      \"release_url\": \"https://github.com/.../releases/tag/v0.8.21\",\n      \"assets\": {\n        \"<rust-target-triple>\": {\n          \"filename\": \"harn-<triple>.tar.gz\" | \"harn-<triple>.zip\",\n          \"url\":      \"https://github.com/.../releases/download/<tag>/<filename>\",\n          \"sha256\":   \"<hex>\",\n          \"size\":     <bytes>,\n          \"format\":   \"tar.gz\" | \"zip\",\n          \"binaries\": [\"harn\", \"harn-dap\", \"harn-lsp\"] | [\"harn.exe\", ...]\n        }\n      }\n    }\n\nThe schema is keyed by Rust target triple so consumers can map their\nown platform detection (e.g. `uname -s`/`uname -m`, Node `process.platform`/\n`process.arch`) onto a single lookup. See\n`docs/src/dev/release-assets-manifest.md` for the consumer contract."
+const DOC = "Emit `release-assets.json` for a Harn GitHub release.\n\nDownstream consumers (`burin-code/scripts/fetch-harn.sh`, the Scoop\nmanifest generator, the `@burin/cli` npm postinstall) read this file\nto verify and fetch the correct per-architecture binary archive\nwithout scraping the GitHub releases API.\n\nSchema:\n    {\n      \"version\": \"0.8.21\",\n      \"tag\": \"v0.8.21\",\n      \"release_url\": \"https://github.com/.../releases/tag/v0.8.21\",\n      \"assets\": {\n        \"<rust-target-triple>\": {\n          \"filename\": \"harn-<triple>.tar.gz\" | \"harn-<triple>.zip\",\n          \"url\":      \"https://github.com/.../releases/download/<tag>/<filename>\",\n          \"sha256\":   \"<hex>\",\n          \"size\":     <bytes>,\n          \"format\":   \"tar.gz\" | \"zip\",\n          \"binaries\": [\"harn\", \"harn-dap\", \"harn-lsp\"] | [\"harn.exe\", ...]\n        }\n      }\n    }\n\nThe schema is keyed by Rust target triple so consumers can map their\nown platform detection (e.g. `uname -s`/`uname -m`, Node `process.platform`/\n`process.arch`) onto a single lookup. See\n`docs/src/dev/release-assets-manifest.md` for the consumer contract."
 
-let OPTIONS = "options:\n  -h, --help            show this help message and exit\n  --artifacts-dir ARTIFACTS_DIR\n                        Directory holding the downloaded per-target archives.\n  --tag TAG             Release tag, e.g. \"v0.8.21\".\n  --output OUTPUT       Where to write release-assets.json."
+const OPTIONS = "options:\n  -h, --help            show this help message and exit\n  --artifacts-dir ARTIFACTS_DIR\n                        Directory holding the downloaded per-target archives.\n  --tag TAG             Release tag, e.g. \"v0.8.21\".\n  --output OUTPUT       Where to write release-assets.json."
 
 /**
  * Parse argv into `{help, error, artifacts_dir, tag, output}`.
@@ -204,26 +204,26 @@ let OPTIONS = "options:\n  -h, --help            show this help message and exit
  * `error` is nil on success, else the post-`PROG: error: ` message text.
  */
 pub fn parse_args(args: list<string>) -> any {
-  var artifacts_dir: string? = nil
-  var tag: string? = nil
-  var output: string? = nil
-  var extras: list<string> = []
-  let n = args.count
-  var i = 0
+  let artifacts_dir: string? = nil
+  let tag: string? = nil
+  let output: string? = nil
+  let extras: list<string> = []
+  const n = args.count
+  let i = 0
   while i < n {
-    let a = args[i]
+    const a = args[i]
     if a == "-h" || a == "--help" {
       return {help: true, error: nil, artifacts_dir: nil, tag: nil, output: nil}
     }
-    let eq = a.index_of("=")
-    var name = a
-    var inline_val: string? = nil
+    const eq = a.index_of("=")
+    let name = a
+    let inline_val: string? = nil
     if a.starts_with("--") && eq >= 0 {
       name = a.substring(0, eq)
       inline_val = a.substring(eq + 1, a.len())
     }
     if name == "--artifacts-dir" || name == "--tag" || name == "--output" {
-      var value: string? = inline_val
+      let value: string? = inline_val
       if value == nil {
         if i + 1 >= n {
           return {
@@ -251,7 +251,7 @@ pub fn parse_args(args: list<string>) -> any {
     }
     i = i + 1
   }
-  var missing: list<string> = []
+  let missing: list<string> = []
   if artifacts_dir == nil {
     missing = missing + ["--artifacts-dir"]
   }
@@ -283,7 +283,7 @@ pub fn parse_args(args: list<string>) -> any {
 }
 
 pipeline main(task) {
-  let parsed = parse_args(argv)
+  const parsed = parse_args(argv)
   if parsed.help {
     __io_println(help_text())
     return 0
@@ -293,33 +293,33 @@ pipeline main(task) {
     __io_eprintln("${PROG}: error: ${parsed.error}")
     return 2
   }
-  let artifacts_dir: string = parsed.artifacts_dir
-  let tag: string = parsed.tag
-  let output: string = parsed.output
-  let version = strip_leading_v(tag)
-  let download_base = "https://github.com/${REPO}/releases/download/${tag}"
-  let release_url = "https://github.com/${REPO}/releases/tag/${tag}"
-  var assets: any = {}
-  var missing: list<string> = []
+  const artifacts_dir: string = parsed.artifacts_dir
+  const tag: string = parsed.tag
+  const output: string = parsed.output
+  const version = strip_leading_v(tag)
+  const download_base = "https://github.com/${REPO}/releases/download/${tag}"
+  const release_url = "https://github.com/${REPO}/releases/tag/${tag}"
+  let assets: any = {}
+  let missing: list<string> = []
   for triple in target_triples() {
-    let meta = target_meta(triple)
-    let filename: string = meta.filename
-    let path = join_path(artifacts_dir, filename)
+    const meta = target_meta(triple)
+    const filename: string = meta.filename
+    const path = join_path(artifacts_dir, filename)
     if !is_regular_file(path) {
       missing = missing + [filename]
       continue
     }
-    let bytes = harness.fs.read_bytes(path)
-    let sha = harness.crypto.sha256(bytes)
-    let size: int = harness.fs.stat(path).size
+    const bytes = harness.fs.read_bytes(path)
+    const sha = harness.crypto.sha256(bytes)
+    const size: int = harness.fs.stat(path).size
     assets = {...assets, [triple]: asset_record(triple, download_base, sha, size)}
   }
   if missing.count > 0 {
     __io_eprintln(missing_message(missing))
     return 1
   }
-  let manifest = build_manifest(version, tag, release_url, assets)
-  let out_path = posix_path_str(output)
+  const manifest = build_manifest(version, tag, release_url, assets)
+  const out_path = posix_path_str(output)
   harness.fs.write_text(out_path, json_stringify_pretty(manifest) + "\n")
   __io_eprintln("Wrote ${out_path} (${assets.keys().count} targets)")
   return 0

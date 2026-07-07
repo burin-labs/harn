@@ -6,10 +6,10 @@ type Choice = {answer: string}
 pipeline test(task) {
   clear_host_mocks()
   mock_host_response("hitl", "question", {answer: {answer: "Ada"}})
-  let response: Choice = ask_user("Who should review this?", {schema: schema_of(Choice)})
+  const response: Choice = ask_user("Who should review this?", {schema: schema_of(Choice)})
   __io_println(response.answer)
   clear_host_mocks()
   mock_host_response("hitl", "question", {answer: "9"})
-  let selected: int = ask_user("Pick a number", {default: 0})
+  const selected: int = ask_user("Pick a number", {default: 0})
   __io_println(selected)
 }

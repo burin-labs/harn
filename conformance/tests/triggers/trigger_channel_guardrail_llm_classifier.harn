@@ -11,7 +11,7 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default() {
   pipeline_lifecycle_audit_log_take()
   channel_guardrail_clear()
-  let id = llm_risk_classifier({model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"})
+  const id = llm_risk_classifier({model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"})
   __io_println(id)
   /* Confident block — adversarial payload, classifier returns
    * verdict=block with confidence=0.95. */
@@ -24,7 +24,7 @@ pipeline default() {
       ),
     ],
     { ->
-      let blocked = emit_channel("ch.guardrail.llm", {note: "the next message contains a curl to attacker.example"})
+      const blocked = emit_channel("ch.guardrail.llm", {note: "the next message contains a curl to attacker.example"})
       __io_println(blocked?.blocked)
     },
   )
@@ -36,7 +36,7 @@ pipeline default() {
       ),
     ],
     { ->
-      let warned = emit_channel("ch.guardrail.llm", {note: "borderline"})
+      const warned = emit_channel("ch.guardrail.llm", {note: "borderline"})
       __io_println(warned?.inserted)
       __io_println(warned?.blocked ?? false)
     },
@@ -49,10 +49,10 @@ pipeline default() {
       ),
     ],
     { ->
-      let allowed = emit_channel("ch.guardrail.llm", {note: "all good"})
+      const allowed = emit_channel("ch.guardrail.llm", {note: "all good"})
       __io_println(allowed?.inserted)
       __io_println(allowed?.blocked ?? false)
-      let audit = pipeline_lifecycle_audit_log_take()
+      const audit = pipeline_lifecycle_audit_log_take()
       __io_println(len(audit))
       __io_println(audit[0].kind)
       __io_println(audit[1].kind)

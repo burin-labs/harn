@@ -35,10 +35,10 @@ fn split_eval_header_keeps_pub_import_and_comments_in_header() {
 
 #[test]
 fn split_eval_header_does_not_lift_imports_after_other_statements() {
-    let code = "let a = 1\nimport \"./lib\"";
+    let code = "const a = 1\nimport \"./lib\"";
     let (header, body) = split_eval_header(code);
     assert_eq!(header, "");
-    assert_eq!(body, "let a = 1\nimport \"./lib\"");
+    assert_eq!(body, "const a = 1\nimport \"./lib\"");
 }
 
 #[test]
@@ -311,7 +311,7 @@ async fn execute_run_allows_command_run_read_from_read_only_root() {
 import {{ command_run }} from "std/command"
 
 pipeline main() {{
-  let result = command_run(
+  const result = command_run(
     {{argv: ["cat", "{secret_literal}"]}},
     {{capture: {{max_inline_bytes: 8}}, timeout_ms: 5000}},
   )
@@ -393,7 +393,7 @@ async fn execute_run_default_sandbox_blocks_outside_workspace_read() {
             r#"
 pipeline main() {{
   __io_println(sandbox_active_profile())
-  let _ = read_file("{outside_literal}")
+  const _ = read_file("{outside_literal}")
 }}
 "#
         ),
@@ -473,7 +473,7 @@ async fn execute_run_denies_network_by_default() {
         &script,
         r#"
 pipeline main() {
-  let _ = http_get("https://example.com/")
+  const _ = http_get("https://example.com/")
 }
 "#,
     )
@@ -508,7 +508,7 @@ async fn execute_run_installs_hostlib_gate() {
         temp.path(),
         r#"
 pipeline main() {
-  let _ = hostlib_enable("tools:deterministic")
+  const _ = hostlib_enable("tools:deterministic")
   __io_println("enabled")
 }
 "#,
@@ -539,8 +539,8 @@ async fn execute_run_can_read_hostlib_command_artifacts() {
         temp.path(),
         r#"
 pipeline main() {
-  let _ = hostlib_enable("tools:deterministic")
-  let result = hostlib_tools_run_command({
+  const _ = hostlib_enable("tools:deterministic")
+  const result = hostlib_tools_run_command({
 argv: ["sh", "-c", "i=0; while [ $i -lt 2000 ]; do printf x; i=$((i+1)); done"],
 capture: {max_inline_bytes: 8},
 timeout_ms: 5000,
@@ -548,7 +548,7 @@ timeout_ms: 5000,
   __io_println(starts_with(result.command_id, "cmd_"))
   __io_println(len(result.stdout))
   __io_println(result.byte_count)
-  let window = hostlib_tools_read_command_output({
+  const window = hostlib_tools_read_command_output({
 command_id: result.command_id,
 offset: 1990,
 length: 20,

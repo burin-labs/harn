@@ -12,10 +12,10 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(task) {
-  let topic = "oauth.client.audit"
-  let cursor = event_log.latest(topic) ?? 0
-  let store = memory()
-  let provider = custom(
+  const topic = "oauth.client.audit"
+  const cursor = event_log.latest(topic) ?? 0
+  const store = memory()
+  const provider = custom(
     {
       id: "mock401",
       auth_url: "https://idp.example/authorize",
@@ -23,8 +23,8 @@ pipeline test(task) {
       default_scopes: ["read"],
     },
   )
-  let now = to_int(harness.clock.timestamp())
-  let stored = {
+  const now = to_int(harness.clock.timestamp())
+  const stored = {
     access_token: "ACCESS-OLD",
     refresh_token: "REFRESH-1",
     expires_at_unix: now + 3600,
@@ -32,7 +32,7 @@ pipeline test(task) {
     token_type: "Bearer",
   }
   store.set("mock401", stored)
-  let cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  const cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
   http_mock_clear()
   http_mock(
     "POST",
@@ -53,10 +53,10 @@ pipeline test(task) {
       ],
     },
   )
-  let response = request(cli, "GET", "https://api.example.test/me")
+  const response = request(cli, "GET", "https://api.example.test/me")
   assert_eq(response.status, 200, "final response after refresh + retry should be 200")
   assert(contains(response.body, "agent"), "final response body propagated")
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 3, "expected GET + POST(token) + GET")
   assert_eq(calls[0].method, "GET", "first call is the original protected GET")
   assert_eq(calls[0].headers.authorization, "Bearer ACCESS-OLD", "first GET used stale token")
@@ -66,11 +66,11 @@ pipeline test(task) {
   assert(contains(calls[1].body, "refresh_token=REFRESH-1"), "refresh body has old refresh token")
   assert_eq(calls[2].method, "GET", "third call retries the original GET")
   assert_eq(calls[2].headers.authorization, "Bearer ACCESS-NEW", "retry used rotated token")
-  let after = store.get("mock401")
+  const after = store.get("mock401")
   assert_eq(after.access_token, "ACCESS-NEW", "storage updated to rotated access token")
   assert_eq(after.refresh_token, "REFRESH-2", "storage updated to rotated refresh token")
-  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
-  let logged = stream.next().value
+  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const logged = stream.next().value
   assert_eq(logged.kind, "token_refreshed", "audit kind")
   assert_eq(logged.payload.reason, "post_401", "audit reason")
   assert_eq(logged.payload.provider, "mock401", "audit provider")

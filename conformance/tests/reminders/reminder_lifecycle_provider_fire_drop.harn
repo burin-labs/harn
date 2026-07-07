@@ -18,12 +18,12 @@ pipeline main() {
       } },
     },
   )
-  let topic = "transcript.reminder.lifecycle"
-  let session = agent_session_open("reminder-lifecycle-provider-fire-drop")
+  const topic = "transcript.reminder.lifecycle"
+  const session = agent_session_open("reminder-lifecycle-provider-fire-drop")
   agent_session_reset(session)
   agent_session_inject(session, {role: "user", content: "hello"})
-  let cursor = event_log.latest(topic)
-  let report = agent_reminder_providers_fire(
+  const cursor = event_log.latest(topic)
+  const report = agent_reminder_providers_fire(
     session,
     "session_idle",
     {session: {id: session}, iteration: 4},
@@ -66,14 +66,14 @@ pipeline main() {
         },
       )
       llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
-      let after_first_drop = event_log.latest(topic)
+      const after_first_drop = event_log.latest(topic)
       llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
-      let drop_was_one_shot = event_log.latest(topic) == after_first_drop
-      let validation_session = agent_session_open("reminder-lifecycle-validation-no-fire")
+      const drop_was_one_shot = event_log.latest(topic) == after_first_drop
+      const validation_session = agent_session_open("reminder-lifecycle-validation-no-fire")
       agent_session_reset(validation_session)
       agent_session_inject(validation_session, transcript_reminder_event({body: "do not fire"}))
-      let validation_cursor = event_log.latest(topic)
-      let rejected = try {
+      const validation_cursor = event_log.latest(topic)
+      const rejected = try {
         llm_call(
           "ignored",
           nil,
@@ -83,13 +83,13 @@ pipeline main() {
       } catch (e) {
         contains(json_stringify(e), "transcript")
       }
-      let validation_did_not_fire = event_log.latest(topic) == validation_cursor
-      let stream = event_log
+      const validation_did_not_fire = event_log.latest(topic) == validation_cursor
+      const stream = event_log
         .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
-      let evaluated = stream.next().value
-      let injected = stream.next().value
-      let fired = stream.next().value
-      let dropped = stream.next().value
+      const evaluated = stream.next().value
+      const injected = stream.next().value
+      const fired = stream.next().value
+      const dropped = stream.next().value
       __io_println(report.fired_count)
       __io_println(evaluated.kind)
       __io_println(evaluated.payload.provider_id)

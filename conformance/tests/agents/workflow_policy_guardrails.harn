@@ -1,5 +1,5 @@
 pipeline main() {
-  var stage_tools = tool_registry()
+  let stage_tools = tool_registry()
   stage_tools = tool_define(
     stage_tools,
     "edit",
@@ -12,7 +12,7 @@ pipeline main() {
     "Run a command",
     {handler: { args -> "" }, parameters: {command: {type: "string"}}, returns: {type: "string"}},
   )
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "policy_guardrails",
       entry: "act",
@@ -27,11 +27,11 @@ pipeline main() {
       },
     },
   )
-  let ceiling = {tools: ["read"], capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"}
-  let report = workflow_validate(flow, ceiling)
+  const ceiling = {tools: ["read"], capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"}
+  const report = workflow_validate(flow, ceiling)
   __io_println(!report?.valid)
   __io_println(len(report?.errors) >= 1)
   __io_println(contains(join(report?.errors, "\n"), "host ceiling"))
-  let policy = workflow_policy_report(flow, ceiling)
+  const policy = workflow_policy_report(flow, ceiling)
   __io_println(!policy?.validation?.valid)
 }

@@ -4,7 +4,7 @@
  * deterministically and that all 30 ticks are ordered correctly.
  */
 pipeline test(task) {
-  let result = trigger_test_harness("cron_30_days")
+  const result = trigger_test_harness("cron_30_days")
   __io_println(result.ok)
   __io_println(len(result.emitted) == 30)
   __io_println(result.emitted[0].occurred_at == "2026-01-02T00:00:00Z")

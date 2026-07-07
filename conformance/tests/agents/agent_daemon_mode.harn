@@ -1,10 +1,10 @@
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let dir = path_join(harness.fs.temp_dir(), "harn-agent-daemon-" + unique)
+  const dir = path_join(harness.fs.temp_dir(), "harn-agent-daemon-" + unique)
   harness.fs.mkdir(dir)
-  let snapshot = path_join(dir, "daemon.json")
-  let result = agent_loop(
+  const snapshot = path_join(dir, "daemon.json")
+  const result = agent_loop(
     "Poll for background work",
     "You are helpful",
     {
@@ -21,7 +21,7 @@ pipeline test(task) {
       compact_callback: { archived -> {summary: "daemon compact " + to_string(len(archived))} },
     },
   )
-  let saved = json_parse(harness.fs.read_text(snapshot))
+  const saved = json_parse(harness.fs.read_text(snapshot))
   __io_println(result.status)
   __io_println(result.daemon_state)
   __io_println(result.daemon_snapshot_path == snapshot)

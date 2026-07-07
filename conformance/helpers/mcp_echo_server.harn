@@ -6,7 +6,7 @@ pipeline default() {
       instructions: "Use echo server tools only for conformance.",
     },
   )
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "echo",

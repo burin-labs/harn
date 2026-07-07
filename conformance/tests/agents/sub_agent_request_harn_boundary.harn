@@ -1,5 +1,5 @@
 fn worker_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_note",
@@ -16,9 +16,9 @@ fn worker_tools() {
 }
 
 pipeline main() {
-  let tools = worker_tools()
+  const tools = worker_tools()
   tool_bind(tools)
-  let request = sub_agent_request(
+  const request = sub_agent_request(
     "Inspect notes.",
     {
       name: "note-reader",

@@ -11,7 +11,7 @@ pipeline default() {
       llm_text("unreachable without a composed retry handler"),
     ],
     { ->
-      let fail_fast = try {
+      const fail_fast = try {
         llm_call("transport fail-fast", nil, {provider: "mock"})
       }
       __io_println(is_err(fail_fast))
@@ -20,14 +20,14 @@ pipeline default() {
       __io_println(len(llm_mock_calls()))
     },
   )
-  let schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
+  const schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
   // A schema-validation failure is not a transport failure: it consumes the
   // schema_retries budget only, and with schema_retries: 0 it surfaces on
   // the first call.
   with_llm_script(
     [llm_text("{\"wrong\": true}")],
     { ->
-      let schema_failure = try {
+      const schema_failure = try {
         llm_call(
           "schema failure is not a transport retry",
           nil,
@@ -49,7 +49,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"wrong\": true}"), llm_text("{\"answer\": \"fixed\"}")],
     { ->
-      let structured = llm_call(
+      const structured = llm_call(
         "schema retry",
         nil,
         {

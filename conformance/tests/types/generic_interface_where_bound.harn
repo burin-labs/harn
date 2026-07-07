@@ -17,7 +17,7 @@ pipeline test(task) {
   fn use_direct(sink: Sink<int>) {
     sink.accept(9)
   }
-  let sink = IntSink({label: "int"})
+  const sink = IntSink({label: "int"})
   drain(sink, 7)
   use_direct(sink)
 }

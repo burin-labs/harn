@@ -115,6 +115,6 @@ pub fn memory_list(namespace, options = nil) {
  * @errors: []
  */
 pub fn memory_reminders(namespace, options = nil) {
-  let flag = (options ?? {})?.flag ?? "auto_surface"
+  const flag = (options ?? {})?.flag ?? "auto_surface"
   return memory_list(namespace, (options ?? {}) + {flag: flag})
 }

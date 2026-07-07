@@ -1,14 +1,14 @@
 import { agent_capture_events } from "std/agent/events"
 
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   require agent_session_exists(s), "open returns an id that exists"
   require s == agent_session_open(s), "open(id) is idempotent"
   require agent_session_length(s) == 0, "new session is empty"
   agent_session_inject(s, {role: "user", content: "hello"})
   agent_session_inject(s, {role: "assistant", content: "hi"})
   require agent_session_length(s) == 2, "inject appends"
-  let snap = agent_session_snapshot(s)
+  const snap = agent_session_snapshot(s)
   require len(snap["messages"]) == 2, "snapshot mirrors transcript"
   require snap["id"] == s, "snapshot preserves id"
   agent_session_reset(s)
@@ -17,15 +17,15 @@ pipeline main(task) {
   agent_session_inject(s, {role: "user", content: "one"})
   agent_session_inject(s, {role: "user", content: "two"})
   agent_session_inject(s, {role: "user", content: "three"})
-  let kept = agent_session_trim(s, 2)
+  const kept = agent_session_trim(s, 2)
   require kept == 2, "trim returns kept count"
-  let after = agent_session_snapshot(s)
+  const after = agent_session_snapshot(s)
   require after["messages"][0]["content"] == "two", "trim drops oldest"
   require after["messages"][1]["content"] == "three", "trim retains newest"
   agent_session_close(s)
   require !agent_session_exists(s), "close evicts"
-  let close_session = "close-status-" + uuid()
-  let captured = agent_capture_events(
+  const close_session = "close-status-" + uuid()
+  const captured = agent_capture_events(
     close_session,
     fn() {
       let _ = agent_session_open(close_session)
@@ -35,7 +35,7 @@ pipeline main(task) {
   )
   require !captured.result, "close with status evicts"
   require len(captured.events) == 1, "close emits one terminal event"
-  let event = captured.events[0]
+  const event = captured.events[0]
   require event.type == "session_closed", "close event has stable type"
   require event.reason == "timeout", "close event carries reason"
   require event.status == "idle", "close event carries status"

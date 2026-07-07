@@ -1,24 +1,24 @@
 pipeline test(task) {
   // take_while stops at the first falsy predicate result.
-  let xs = [1, 2, 3, 4, 5, 6]
-  let taken = xs.take_while({ x -> x < 4 })
+  const xs = [1, 2, 3, 4, 5, 6]
+  const taken = xs.take_while({ x -> x < 4 })
   __io_println(len(taken) == 3)
   __io_println(taken[0] == 1 && taken[2] == 3)
-  let none_taken = xs.take_while({ x -> x > 10 })
+  const none_taken = xs.take_while({ x -> x > 10 })
   __io_println(len(none_taken) == 0)
-  let all_taken = xs.take_while({ x -> x < 100 })
+  const all_taken = xs.take_while({ x -> x < 100 })
   __io_println(len(all_taken) == 6)
   // drop_while skips the leading run, keeps everything else.
-  let dropped = xs.drop_while({ x -> x < 4 })
+  const dropped = xs.drop_while({ x -> x < 4 })
   __io_println(len(dropped) == 3)
   __io_println(dropped[0] == 4 && dropped[2] == 6)
-  let nothing_dropped = xs.drop_while({ x -> x > 10 })
+  const nothing_dropped = xs.drop_while({ x -> x > 10 })
   __io_println(len(nothing_dropped) == 6)
-  let all_dropped = xs.drop_while({ x -> x < 100 })
+  const all_dropped = xs.drop_while({ x -> x < 100 })
   __io_println(len(all_dropped) == 0)
   // count_by groups by the callback's key and tallies.
-  let words = ["apple", "ant", "banana", "blueberry", "cherry"]
-  let by_letter = words.count_by({ w -> substring(w, 0, 1) })
+  const words = ["apple", "ant", "banana", "blueberry", "cherry"]
+  const by_letter = words.count_by({ w -> substring(w, 0, 1) })
   __io_println(by_letter["a"] == 2)
   __io_println(by_letter["b"] == 2)
   __io_println(by_letter["c"] == 1)
@@ -26,7 +26,7 @@ pipeline test(task) {
   // count_by requires a string discriminator (v0.8.43+) — int returns
   // used to silently collide with string returns through display(), so
   // a non-string callback result is now a clear TypeError.
-  let int_error = try {
+  const int_error = try {
     [1, 2, 3].count_by({ x -> x })
     "no error"
   } catch (e) {
@@ -34,7 +34,7 @@ pipeline test(task) {
   }
   __io_println(contains(int_error, "count_by") && contains(int_error, "string discriminator"))
   // group_by has the same contract.
-  let bool_error = try {
+  const bool_error = try {
     [1, 2, 3].group_by({ x -> x % 2 == 0 })
     "no error"
   } catch (e) {
@@ -42,11 +42,11 @@ pipeline test(task) {
   }
   __io_println(contains(bool_error, "group_by") && contains(bool_error, "string discriminator"))
   // Coercing to string works as documented.
-  let by_parity = [1, 2, 3, 4].count_by({ x -> to_string(x % 2) })
+  const by_parity = [1, 2, 3, 4].count_by({ x -> to_string(x % 2) })
   __io_println(by_parity["0"] == 2 && by_parity["1"] == 2)
   // tally inherits the same strict-string contract: ints used to collapse
   // into the same bucket as their stringified form via `display()`.
-  let tally_error = try {
+  const tally_error = try {
     [1, 2, 3].tally()
     "no error"
   } catch (e) {
@@ -54,6 +54,6 @@ pipeline test(task) {
   }
   __io_println(contains(tally_error, "tally") && contains(tally_error, "expected a list of strings"))
   // Explicit coercion still tallies.
-  let by_string = [1, 2, 1, 1, 3].map({ x -> to_string(x) }).tally()
+  const by_string = [1, 2, 1, 1, 3].map({ x -> to_string(x) }).tally()
   __io_println(by_string["1"] == 3 && by_string["2"] == 1 && by_string["3"] == 1)
 }

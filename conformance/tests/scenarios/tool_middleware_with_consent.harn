@@ -33,31 +33,31 @@ fn envelope(name) {
 }
 
 pipeline default() {
-  let next = synthetic_next()
+  const next = synthetic_next()
   // Decide based on tool name; `delete_files` always denied.
-  let prompt = { call ->
+  const prompt = { call ->
     if call.tool_name == "delete_files" {
       return {decision: "denied", reason: "destructive op needs human approval", decided_by: "test"}
     }
     return {decision: "approved", decided_by: "test"}
   }
-  let mw = with_consent(prompt)
+  const mw = with_consent(prompt)
   // approved
-  let r1 = mw(envelope("read"), next)
+  const r1 = mw(envelope("read"), next)
   __io_println(r1.ok)
   __io_println(r1.audit.consent.decision)
   __io_println(r1.audit.consent.decided_by)
   // denied
-  let r2 = mw(envelope("delete_files"), next)
+  const r2 = mw(envelope("delete_files"), next)
   __io_println(r2.ok)
   __io_println(r2.error_category)
   __io_println(r2.error)
   __io_println(r2.audit.consent.decision)
   // bool-shorthand: returning bool is also accepted
-  let approve_all = with_consent({ _call -> true })
-  let deny_all = with_consent({ _call -> false })
-  let r3 = approve_all(envelope("any"), next)
-  let r4 = deny_all(envelope("any"), next)
+  const approve_all = with_consent({ _call -> true })
+  const deny_all = with_consent({ _call -> false })
+  const r3 = approve_all(envelope("any"), next)
+  const r4 = deny_all(envelope("any"), next)
   __io_println(r3.ok)
   __io_println(r4.ok)
   __io_println(r4.error_category)

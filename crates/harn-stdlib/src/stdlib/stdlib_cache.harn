@@ -90,7 +90,7 @@ pub fn cache_stats_reset(options = nil) {
  * @errors: []
  */
 pub fn mem_cache(options = nil) -> dict {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return __cache_store_dict("mem", nil, opts)
 }
 
@@ -105,7 +105,7 @@ pub fn mem_cache(options = nil) -> dict {
  * @errors: []
  */
 pub fn fs_cache(path: string, options = nil) -> dict {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return __cache_store_dict("fs", path, opts)
 }
 
@@ -119,12 +119,12 @@ pub fn fs_cache(path: string, options = nil) -> dict {
  * @errors: []
  */
 pub fn sqlite_cache(path: string, options = nil) -> dict {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return __cache_store_dict("sqlite", path, opts)
 }
 
 fn __cache_store_dict(backend, path, opts) -> dict {
-  var store = {backend: backend}
+  let store = {backend: backend}
   if path != nil {
     store = store + {path: path}
   }
@@ -196,12 +196,12 @@ pub fn with_cache(key: string, compute, options = nil) {
  * @errors: []
  */
 pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
-  let opts = options ?? {}
-  let store_opts = __with_cache_store_opts(opts)
-  let session_id = to_string(opts?.session_id ?? "")
-  let cached = cache_get(key, store_opts)
+  const opts = options ?? {}
+  const store_opts = __with_cache_store_opts(opts)
+  const session_id = to_string(opts?.session_id ?? "")
+  const cached = cache_get(key, store_opts)
   if cached.hit {
-    let metrics = __with_cache_hit_metrics(opts)
+    const metrics = __with_cache_hit_metrics(opts)
     if session_id != "" {
       __with_cache_emit(
         session_id,
@@ -211,13 +211,13 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
     }
     return {value: cached.value, hit: true, key: key, metrics: metrics}
   }
-  let outcome = timed(
+  const outcome = timed(
     "cache.compute",
     {key: key, backend: cached?.backend ?? "", namespace: cached?.namespace ?? ""},
     compute,
   )
-  let value = outcome.result
-  let compute_ms = outcome.timing.duration_ms
+  const value = outcome.result
+  const compute_ms = outcome.timing.duration_ms
   cache_put(key, value, store_opts)
   if session_id != "" {
     __with_cache_emit(
@@ -235,7 +235,7 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
 }
 
 fn __with_cache_store_opts(opts) -> dict {
-  var passthrough = {}
+  let passthrough = {}
   if opts?.store != nil {
     passthrough = passthrough + {store: opts.store}
   }
@@ -252,8 +252,8 @@ fn __with_cache_store_opts(opts) -> dict {
 }
 
 fn __with_cache_hit_metrics(opts) -> dict {
-  let estimate = opts?.estimate ?? {}
-  var metrics = {model_calls_avoided: estimate?.model_calls_avoided ?? 1}
+  const estimate = opts?.estimate ?? {}
+  let metrics = {model_calls_avoided: estimate?.model_calls_avoided ?? 1}
   if estimate?.tokens_saved != nil {
     metrics = metrics + {tokens_saved: estimate.tokens_saved}
   }
@@ -264,7 +264,7 @@ fn __with_cache_hit_metrics(opts) -> dict {
 }
 
 fn __with_cache_emit(session_id, name, payload) {
-  let _ = try {
+  const _ = try {
     agent_emit_event(session_id, name, payload)
   }
 }

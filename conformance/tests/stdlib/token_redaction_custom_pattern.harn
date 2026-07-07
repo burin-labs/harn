@@ -16,12 +16,12 @@ pipeline test(task) {
     throw "custom_patterns should start empty: " + to_string(custom_patterns())
   }
   register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
-  let names = custom_patterns()
+  const names = custom_patterns()
   if !contains(to_string(names), "acme_api_key") {
     throw "expected acme_api_key in custom_patterns, got: " + to_string(names)
   }
   // Redaction wraps the match with the named placeholder.
-  let scrubbed = redact("token ACME-ABCDEF123456 tail")
+  const scrubbed = redact("token ACME-ABCDEF123456 tail")
   if contains(scrubbed, "ACME-ABCDEF123456") {
     throw "raw acme token leaked: " + scrubbed
   }
@@ -34,7 +34,7 @@ pipeline test(task) {
   if len(custom_patterns()) != 0 {
     throw "custom patterns should be empty after clear: " + to_string(custom_patterns())
   }
-  let after = redact("token ACME-ABCDEF123456 tail")
+  const after = redact("token ACME-ABCDEF123456 tail")
   if !contains(after, "ACME-ABCDEF123456") {
     throw "after clearing, ACME tokens should not be scrubbed: " + after
   }

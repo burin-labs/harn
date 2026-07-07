@@ -20,7 +20,7 @@ pub fn defaults() {
 
 /** Merge per-repo policy.repair_worker on top of the defaults. */
 pub fn with_defaults(repair_policy) {
-  let d = defaults()
+  const d = defaults()
   if repair_policy == nil {
     return d
   }
@@ -38,7 +38,7 @@ pub fn with_defaults(repair_policy) {
 
 /** True when the per-repo policy allows the worker to handle this kind at all. */
 pub fn handles_kind(repair_policy, kind) {
-  let policy = with_defaults(repair_policy)
+  const policy = with_defaults(repair_policy)
   if !policy.enabled {
     return false
   }
@@ -50,7 +50,7 @@ pub fn requires_human_for(repair_policy, action_kind) {
   if !is_action_kind(action_kind) {
     return true
   }
-  let policy = with_defaults(repair_policy)
+  const policy = with_defaults(repair_policy)
   if policy.pre_approved {
     return false
   }
@@ -73,7 +73,7 @@ pub fn requires_human_for(repair_policy, action_kind) {
  *   }
  */
 pub fn gate(repair_policy, bundle, dry_run) {
-  let policy = with_defaults(repair_policy)
+  const policy = with_defaults(repair_policy)
   if dry_run {
     return {allowed: true, blocking_actions: [], approval_state: "dry_run"}
   }
@@ -83,7 +83,7 @@ pub fn gate(repair_policy, bundle, dry_run) {
   if policy.pre_approved {
     return {allowed: true, blocking_actions: [], approval_state: "pre_approved"}
   }
-  var blockers = []
+  let blockers = []
   for action_kind in bundle.approval_required_for {
     if requires_human_for(repair_policy, action_kind) {
       blockers = blockers + [action_kind]
@@ -100,7 +100,7 @@ pub fn validate_repair_policy(repair_policy) {
   if repair_policy == nil {
     return nil
   }
-  let policy = with_defaults(repair_policy)
+  const policy = with_defaults(repair_policy)
   for kind in policy.require_human_for {
     if !is_action_kind(kind) {
       return "repair_worker.require_human_for contains unknown action '${kind}'"
@@ -112,7 +112,7 @@ pub fn validate_repair_policy(repair_policy) {
     }
   }
   for kind in policy.handles_kinds {
-    let canonical = ["ci_failure", "merge_conflict", "release_audit", "flaky_test"]
+    const canonical = ["ci_failure", "merge_conflict", "release_audit", "flaky_test"]
     if !canonical.contains(kind) {
       return "repair_worker.handles_kinds contains unknown bundle kind '${kind}'"
     }

@@ -1,5 +1,5 @@
 pipeline default(task) {
-  let arr = [10, 20, 30, 40, 50]
+  const arr = [10, 20, 30, 40, 50]
   log(arr[-1])
   log(arr[-2])
   log(arr[-5])

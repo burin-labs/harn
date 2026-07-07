@@ -21,11 +21,11 @@ fn attempt_write(harness: Harness, target: string) -> dict {
 
 pipeline test(task) {
   harness.fs.mkdir(".harn")
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let agent = "needs-human-" + unique
-  let target = path_join(".harn", "needs_human_" + unique + ".txt")
-  let outcome = with_autonomy_policy(
+  const agent = "needs-human-" + unique
+  const target = path_join(".harn", "needs_human_" + unique + ".txt")
+  const outcome = with_autonomy_policy(
     {
       agent_id: agent,
       autonomy_tier: "act_auto",
@@ -41,7 +41,7 @@ pipeline test(task) {
   __io_println(contains(outcome.caught, "tool_rejected"))
   // 2. A trust-graph record was appended with outcome `denied` and the
   //    autonomy class flowing through metadata.
-  let records: list<TrustRecord> = trust_query({agent: agent, action: "fs.write"})
+  const records: list<TrustRecord> = trust_query({agent: agent, action: "fs.write"})
   __io_println(len(records) == 1)
   __io_println(records[0].outcome == "denied")
   __io_println(records[0].metadata.autonomy_class == "needs-human")
@@ -51,7 +51,7 @@ pipeline test(task) {
   // 3. An approval-request was queued with the `needs-human` tag in the
   //    payload so reviewers can render it distinctly from a normal
   //    tier-driven approval ask.
-  let pending = hitl_pending({}).filter({ row -> row.agent == agent })
+  const pending = hitl_pending({}).filter({ row -> row.agent == agent })
   __io_println(len(pending) == 1)
   __io_println(pending[0].metadata.detail.autonomy_class == "needs-human")
   __io_println(pending[0].metadata.detail.requires_human)

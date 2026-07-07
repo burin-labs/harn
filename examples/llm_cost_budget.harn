@@ -8,7 +8,7 @@
 import { with_budget } from "std/llm/handlers"
 
 pipeline default() {
-  let synthetic = { _call -> return {
+  const synthetic = { _call -> return {
     ok: true,
     value: {
       text: "ok",
@@ -19,12 +19,12 @@ pipeline default() {
       usage: {input_tokens: 100, output_tokens: 100},
     },
   } }
-  let caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
-  let call = {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}}
-  var i = 0
-  var exceeded_at = -1
+  const caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
+  const call = {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}}
+  let i = 0
+  let exceeded_at = -1
   while i < 5 {
-    let env = caller(call)
+    const env = caller(call)
     if !(env?.ok ?? false) {
       __io_println("call " + to_string(i + 1) + " -> " + to_string(env.status))
       if exceeded_at < 0 {

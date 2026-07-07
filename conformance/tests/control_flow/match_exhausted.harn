@@ -1,6 +1,6 @@
 pipeline test(task) {
   // Match with no matching arm should throw
-  let result = try {
+  const result = try {
     match "unexpected" {
       "a" -> { "got a" }
       "b" -> { "got b" }

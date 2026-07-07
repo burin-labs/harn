@@ -45,7 +45,7 @@ fn lint_json_emits_envelope_for_clean_and_diagnostic_files() {
     let warn_path = temp.path().join("warn.harn");
     std::fs::write(
         &warn_path,
-        "pipeline main(task) {\n  let x = 1\n  return 2\n}\n",
+        "pipeline main(task) {\n  const x = 1\n  return 2\n}\n",
     )
     .expect("warn write");
     let warn = Command::new(binary_path())

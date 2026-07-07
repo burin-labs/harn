@@ -142,25 +142,25 @@ type UiToolResultOptions = {
   fallback?: UiDefaultTextFallbackOptions,
 }?
 
-let UI_RESOURCE_SCHEMA = "harn.ui_resource.v1"
+const UI_RESOURCE_SCHEMA = "harn.ui_resource.v1"
 
-let UI_TOOL_META_SCHEMA = "harn.ui_tool_meta.v1"
+const UI_TOOL_META_SCHEMA = "harn.ui_tool_meta.v1"
 
-let UI_TEXT_FALLBACK_SCHEMA = "harn.ui_fallback.text.v1"
+const UI_TEXT_FALLBACK_SCHEMA = "harn.ui_fallback.text.v1"
 
-let UI_STRUCTURED_FALLBACK_SCHEMA = "harn.ui_fallback.structured.v1"
+const UI_STRUCTURED_FALLBACK_SCHEMA = "harn.ui_fallback.structured.v1"
 
-let UI_TOOL_RESULT_SCHEMA = "harn.ui_tool_result.v1"
+const UI_TOOL_RESULT_SCHEMA = "harn.ui_tool_result.v1"
 
-let UI_TOOL_CALL_SCHEMA = "harn.ui_tool_call.v1"
+const UI_TOOL_CALL_SCHEMA = "harn.ui_tool_call.v1"
 
-let UI_CONTEXT_UPDATE_SCHEMA = "harn.ui_context_update.v1"
+const UI_CONTEXT_UPDATE_SCHEMA = "harn.ui_context_update.v1"
 
-let UI_MCP_APP_PROFILE = "mcp-app"
+const UI_MCP_APP_PROFILE = "mcp-app"
 
-let UI_MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
+const UI_MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
 
-let UI_DEFAULT_CSP = {
+const UI_DEFAULT_CSP = {
   default_src: ["'self'"],
   script_src: ["'self'", "'unsafe-inline'"],
   style_src: ["'self'", "'unsafe-inline'"],
@@ -179,7 +179,7 @@ fn __ui_text(value) {
 
 fn __ui_first(values) {
   for value in values {
-    let text = __ui_text(value)
+    const text = __ui_text(value)
     if text != "" {
       return text
     }
@@ -188,9 +188,9 @@ fn __ui_first(values) {
 }
 
 fn __ui_str_list(values) {
-  var out = []
+  let out = []
   for value in values ?? [] {
-    let text = __ui_text(value)
+    const text = __ui_text(value)
     if text != "" && !out.contains(text) {
       out = out.push(text)
     }
@@ -199,7 +199,7 @@ fn __ui_str_list(values) {
 }
 
 fn __ui_validate_uri(uri) {
-  let text = __ui_text(uri)
+  const text = __ui_text(uri)
   if text == "" {
     throw "std/ui_resource: uri is required"
   }
@@ -218,7 +218,7 @@ fn __ui_validation_summary(validation) {
 }
 
 fn __ui_csp(options) {
-  let base = options?.csp ?? UI_DEFAULT_CSP
+  const base = options?.csp ?? UI_DEFAULT_CSP
   return {
     default_src: __ui_str_list(base.default_src ?? UI_DEFAULT_CSP.default_src),
     script_src: __ui_str_list(base.script_src ?? UI_DEFAULT_CSP.script_src),
@@ -237,8 +237,8 @@ fn __ui_csp(options) {
  * @errors: []
  */
 pub fn ui_resource_csp_header(csp: UiResourceCsp) -> string {
-  var directives = []
-  let entries = [
+  let directives = []
+  const entries = [
     {name: "default-src", values: csp.default_src},
     {name: "script-src", values: csp.script_src},
     {name: "style-src", values: csp.style_src},
@@ -276,26 +276,26 @@ pub fn ui_resource_sandbox_attr(csp: UiResourceCsp) -> string {
  * @errors: []
  */
 pub fn ui_resource(uri: string, name: string, html: string, options: UiResourceOptions = nil) -> UiResource {
-  let normalized_uri = __ui_validate_uri(uri)
-  let normalized_name = __ui_text(name)
+  const normalized_uri = __ui_validate_uri(uri)
+  const normalized_name = __ui_text(name)
   if normalized_name == "" {
     throw "std/ui_resource: name is required"
   }
-  let source = html ?? ""
+  const source = html ?? ""
   // MCP Apps resources communicate with the host through postMessage by
   // contract, so we default to allowing the artifact-web host-bridge surface.
   // Callers can pin a tighter policy via `options.validation`.
-  let validation_options = {allow_host_bridge: true}.merge(options?.validation ?? {})
-  let validation = web_artifact_validate(source, validation_options)
-  let encoding = options?.contents_encoding ?? "utf8"
-  let contents = if encoding == "base64" {
+  const validation_options = {allow_host_bridge: true}.merge(options?.validation ?? {})
+  const validation = web_artifact_validate(source, validation_options)
+  const encoding = options?.contents_encoding ?? "utf8"
+  const contents = if encoding == "base64" {
     bytes_to_base64(bytes_from_string(source))
   } else if encoding == "utf8" {
     source
   } else {
     throw "std/ui_resource: contents_encoding must be utf8 or base64, got " + __ui_text(encoding)
   }
-  let envelope = {
+  const envelope = {
     schema: UI_RESOURCE_SCHEMA,
     uri: normalized_uri,
     name: normalized_name,
@@ -327,11 +327,11 @@ pub fn ui_resource(uri: string, name: string, html: string, options: UiResourceO
  * @errors: []
  */
 pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> UiToolMeta {
-  let visibility = options?.visibility ?? "app_only"
+  const visibility = options?.visibility ?? "app_only"
   if !["app_only", "model_visible", "always_visible"].contains(visibility) {
     throw "std/ui_resource: visibility must be app_only, model_visible, or always_visible"
   }
-  let ui = filter_nil(
+  const ui = filter_nil(
     {
       resource_uri: resource.uri,
       resource_name: resource.name,
@@ -352,7 +352,7 @@ pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> U
  * @errors: []
  */
 pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
-  let ui = meta.ui
+  const ui = meta.ui
   return {
     ui: filter_nil(
       {
@@ -375,7 +375,7 @@ pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
  * @errors: []
  */
 pub fn ui_text_fallback(content: string) -> UiTextFallback {
-  let text = __ui_text(content)
+  const text = __ui_text(content)
   if text == "" {
     throw "std/ui_resource: text fallback content must not be empty"
   }
@@ -396,12 +396,12 @@ pub fn ui_structured_fallback(data: dict, options: UiStructuredFallbackOptions =
 }
 
 fn __ui_default_text_fallback(resource: UiResource, fallback_options: UiDefaultTextFallbackOptions) {
-  let html = if resource.contents_encoding == "base64" {
+  const html = if resource.contents_encoding == "base64" {
     bytes_to_string(bytes_from_base64(resource.contents))
   } else {
     resource.contents
   }
-  let max_chars = fallback_options?.max_chars ?? 2000
+  const max_chars = fallback_options?.max_chars ?? 2000
   return web_artifact_text_fallback(html, {max_chars: max_chars})
 }
 
@@ -417,8 +417,8 @@ fn __ui_default_text_fallback(resource: UiResource, fallback_options: UiDefaultT
  * @errors: []
  */
 pub fn ui_tool_result(resource: UiResource, options: UiToolResultOptions = nil) -> UiToolResult {
-  let meta = options?.tool_meta ?? ui_tool_meta(resource, options?.tool_meta_options)
-  let text_fallback = if options?.text_fallback != nil {
+  const meta = options?.tool_meta ?? ui_tool_meta(resource, options?.tool_meta_options)
+  const text_fallback = if options?.text_fallback != nil {
     if options?.text_fallback?.schema == UI_TEXT_FALLBACK_SCHEMA {
       options?.text_fallback
     } else {
@@ -427,10 +427,10 @@ pub fn ui_tool_result(resource: UiResource, options: UiToolResultOptions = nil) 
   } else {
     ui_text_fallback(__ui_default_text_fallback(resource, options?.fallback))
   }
-  let structured = options?.structured_fallback
-  let allow_invalid = options?.allow_invalid_resource ?? false
-  let include_resource = resource.validation.ok || allow_invalid
-  let envelope = {
+  const structured = options?.structured_fallback
+  const allow_invalid = options?.allow_invalid_resource ?? false
+  const include_resource = resource.validation.ok || allow_invalid
+  const envelope = {
     schema: UI_TOOL_RESULT_SCHEMA,
     ui_resource: include_resource ? resource : nil,
     meta: meta,
@@ -454,11 +454,11 @@ pub fn ui_tool_result(resource: UiResource, options: UiToolResultOptions = nil) 
  * @errors: []
  */
 pub fn ui_host_capabilities(input: UiHostCapabilityInput = nil) -> UiHostCapabilities {
-  let value = input ?? {}
-  let apps_flag = value?.apps?.enabled ?? value?.ui?.apps ?? value?.apps ?? false
-  let apps = type_of(apps_flag) == "bool" ? apps_flag : false
-  let declared_profiles = __ui_str_list(value?.apps?.profiles ?? value?.ui?.profiles ?? value?.profiles ?? [])
-  let profiles = if len(declared_profiles) > 0 {
+  const value = input ?? {}
+  const apps_flag = value?.apps?.enabled ?? value?.ui?.apps ?? value?.apps ?? false
+  const apps = type_of(apps_flag) == "bool" ? apps_flag : false
+  const declared_profiles = __ui_str_list(value?.apps?.profiles ?? value?.ui?.profiles ?? value?.profiles ?? [])
+  const profiles = if len(declared_profiles) > 0 {
     declared_profiles
   } else {
     apps ? [UI_MCP_APP_PROFILE] : []
@@ -478,7 +478,7 @@ pub fn ui_host_capabilities(input: UiHostCapabilityInput = nil) -> UiHostCapabil
  * @errors: []
  */
 pub fn ui_host_supports_apps(capabilities: UiHostCapabilityInput = nil) -> bool {
-  let caps = ui_host_capabilities(capabilities)
+  const caps = ui_host_capabilities(capabilities)
   if !caps.apps {
     return false
   }
@@ -500,13 +500,13 @@ pub fn ui_host_supports_apps(capabilities: UiHostCapabilityInput = nil) -> bool 
  * @errors: []
  */
 pub fn ui_select_for_host(result: UiToolResult, capabilities: UiHostCapabilityInput = nil) -> UiToolResult {
-  let supports_apps = ui_host_supports_apps(capabilities)
-  let resource = result.ui_resource
-  let resource_ok = resource != nil && resource.validation.ok
+  const supports_apps = ui_host_supports_apps(capabilities)
+  const resource = result.ui_resource
+  const resource_ok = resource != nil && resource.validation.ok
   if supports_apps && resource_ok {
     return result.merge({selected: "ui_resource"})
   }
-  let selected = if result.structured_fallback != nil {
+  const selected = if result.structured_fallback != nil {
     "structured_fallback"
   } else {
     "text_fallback"
@@ -521,11 +521,11 @@ pub fn ui_select_for_host(result: UiToolResult, capabilities: UiHostCapabilityIn
  * @errors: []
  */
 pub fn ui_tool_call_envelope(name: string, params: dict? = nil, options: UiToolCallOptions = nil) -> UiToolCallEnvelope {
-  let tool_name = __ui_text(name)
+  const tool_name = __ui_text(name)
   if tool_name == "" {
     throw "std/ui_resource: tool name is required"
   }
-  let id = (options?.id ?? "ui_call_") + substring(sha256(tool_name + json_stringify(params ?? {})), 0, 16)
+  const id = (options?.id ?? "ui_call_") + substring(sha256(tool_name + json_stringify(params ?? {})), 0, 16)
   return {
     schema: UI_TOOL_CALL_SCHEMA,
     jsonrpc: "2.0",
@@ -542,11 +542,11 @@ pub fn ui_tool_call_envelope(name: string, params: dict? = nil, options: UiToolC
  * @errors: []
  */
 pub fn ui_context_update_envelope(key: string, value, options: UiContextUpdateOptions = nil) -> UiContextUpdateEnvelope {
-  let context_key = __ui_text(key)
+  const context_key = __ui_text(key)
   if context_key == "" {
     throw "std/ui_resource: context update key is required"
   }
-  let id = (options?.id ?? "ui_ctx_") + substring(sha256(context_key + json_stringify(value ?? nil)), 0, 16)
+  const id = (options?.id ?? "ui_ctx_") + substring(sha256(context_key + json_stringify(value ?? nil)), 0, 16)
   return {
     schema: UI_CONTEXT_UPDATE_SCHEMA,
     jsonrpc: "2.0",
@@ -576,7 +576,7 @@ pub fn ui_tool_result_validate(result: UiToolResult) -> UiToolResult {
     throw "std/ui_resource: meta block is required"
   }
   if result.ui_resource != nil {
-    let resource = result.ui_resource
+    const resource = result.ui_resource
     if resource.schema != UI_RESOURCE_SCHEMA {
       throw "std/ui_resource: ui_resource has unsupported schema " + __ui_text(resource.schema)
     }
@@ -587,7 +587,7 @@ pub fn ui_tool_result_validate(result: UiToolResult) -> UiToolResult {
     }
   }
   if result.structured_fallback != nil {
-    let structured = result.structured_fallback
+    const structured = result.structured_fallback
     if structured.schema != UI_STRUCTURED_FALLBACK_SCHEMA {
       throw "std/ui_resource: structured_fallback has unsupported schema " + __ui_text(structured.schema)
     }

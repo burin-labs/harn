@@ -1,7 +1,7 @@
 /** Test structured error categories */
 pipeline default(task) {
   // throw_error creates categorized errors
-  let r1 = try {
+  const r1 = try {
     throw_error("connection timed out", "timeout")
   }
   __io_println(is_err(r1))
@@ -9,13 +9,13 @@ pipeline default(task) {
   // is_timeout helper
   __io_println(is_timeout(unwrap_err(r1)))
   // rate limit
-  let r2 = try {
+  const r2 = try {
     throw_error("too many requests", "rate_limit")
   }
   __io_println(error_category(unwrap_err(r2)))
   __io_println(is_rate_limited(unwrap_err(r2)))
   // generic error
-  let r3 = try {
+  const r3 = try {
     throw "some error"
   }
   __io_println(error_category(unwrap_err(r3)))

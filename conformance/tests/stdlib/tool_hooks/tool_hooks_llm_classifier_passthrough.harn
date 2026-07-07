@@ -24,26 +24,26 @@ pipeline default() {
       llm_text("{\"kind\": \"allow\", \"confidence\": 0.99, \"explanation\": \"safe\"}"),
     ],
     { ->
-      let inner = { args -> {ok: true, ran: args.command} }
-      let wrapper = preset_run_command(
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
         {
           llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8, cache: {ttl_ms: 60000}},
           inner: inner,
         },
       )
-      let r1 = wrapper({command: "echo hello"})
+      const r1 = wrapper({command: "echo hello"})
       __io_println(r1.ok)
       __io_println(r1.ran)
-      let r2 = wrapper({command: "ls -la"})
+      const r2 = wrapper({command: "ls -la"})
       __io_println(r2.ok)
       __io_println(r2.ran)
-      let calls_before = len(llm_mock_calls())
-      let r3 = wrapper({command: "echo   hello"})
+      const calls_before = len(llm_mock_calls())
+      const r3 = wrapper({command: "echo   hello"})
       __io_println(r3.ok)
       __io_println(r3.ran)
-      let calls_after = len(llm_mock_calls())
+      const calls_after = len(llm_mock_calls())
       __io_println(calls_after - calls_before)
-      let log = pipeline_lifecycle_audit_log_take()
+      const log = pipeline_lifecycle_audit_log_take()
       __io_println(len(log))
       __io_println(log[0].payload.action)
       __io_println(log[0].payload.cache_hit)

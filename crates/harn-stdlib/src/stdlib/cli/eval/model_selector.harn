@@ -34,15 +34,15 @@
  * helper.
  */
 fn __parse_provider_model_kv(raw: string) -> dict {
-  var provider = ""
-  var model = ""
+  let provider = ""
+  let model = ""
   for part in split(raw, ",") {
-    let idx = part.index_of("=")
+    const idx = part.index_of("=")
     if idx < 0 {
       return {}
     }
-    let key = part[0:idx].trim()
-    let value = part[idx + 1:len(part)].trim()
+    const key = part[0:idx].trim()
+    const value = part[idx + 1:len(part)].trim()
     if key == "provider" {
       provider = value
     } else if key == "model" {
@@ -68,23 +68,23 @@ fn __parse_provider_model_kv(raw: string) -> dict {
  *      `llm_config::resolve_model_info` for an unknown alias.
  */
 fn resolve_selector(raw: string, aliases: dict) -> dict {
-  let trimmed = raw.trim()
-  let kv = __parse_provider_model_kv(trimmed)
+  const trimmed = raw.trim()
+  const kv = __parse_provider_model_kv(trimmed)
   if len(keys(kv)) > 0 {
     return {selector: trimmed, provider: kv["provider"], model: kv["model"]}
   }
-  let colon_idx = trimmed.index_of(":")
+  const colon_idx = trimmed.index_of(":")
   if colon_idx >= 0 {
-    let provider = trimmed[0:colon_idx]
-    let model = trimmed[colon_idx + 1:len(trimmed)]
+    const provider = trimmed[0:colon_idx]
+    const model = trimmed[colon_idx + 1:len(trimmed)]
     if provider != "" && model != "" {
       return {selector: trimmed, provider: provider, model: model}
     }
   }
-  let resolved = aliases[trimmed]
+  const resolved = aliases[trimmed]
   if type_of(resolved) == "dict" {
-    let provider = __safe_string_local(resolved["provider"], trimmed)
-    let model = __safe_string_local(resolved["model"], trimmed)
+    const provider = __safe_string_local(resolved["provider"], trimmed)
+    const model = __safe_string_local(resolved["model"], trimmed)
     return {selector: trimmed, provider: provider, model: model}
   }
   return {selector: trimmed, provider: trimmed, model: trimmed}
@@ -106,7 +106,7 @@ fn selector_label(selector: dict) -> string {
  * cloud-only preflight checks on local-model phases.
  */
 fn selector_is_local(selector: dict) -> bool {
-  let provider = __safe_string_local(selector["provider"], "")
+  const provider = __safe_string_local(selector["provider"], "")
   return provider == "ollama"
     || provider == "llamacpp"
     || provider == "mlx"
@@ -143,26 +143,26 @@ fn __safe_string_local(value, fallback: string) -> string {
  *   `{"selector":"...","provider":"...","model":"..."}`.
  */
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_MODEL_SELECTOR_INPUT", "")
+  const raw = harness.env.get_or("HARN_MODEL_SELECTOR_INPUT", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_MODEL_SELECTOR_INPUT not set")
     return 70
   }
-  let aliases_json = harness.env.get_or("HARN_MODEL_SELECTOR_ALIASES_JSON", "{}")
-  let aliases = try {
+  const aliases_json = harness.env.get_or("HARN_MODEL_SELECTOR_ALIASES_JSON", "{}")
+  const aliases = try {
     json_parse(aliases_json)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse aliases JSON: " + to_string(e))
     return 70
   }
-  let resolved = resolve_selector(raw, aliases)
+  const resolved = resolve_selector(raw, aliases)
   // Extend the resolved record with `label` and `is_local` so a
   // dispatch caller can read the full helper surface in a single
   // round-trip. Also keeps the linter from flagging the helpers as
   // unused — they're public API for sibling scripts but the main
   // entrypoint is currently the only consumer.
-  let labelled = resolved + {label: selector_label(resolved), is_local: selector_is_local(resolved)}
+  const labelled = resolved + {label: selector_label(resolved), is_local: selector_is_local(resolved)}
   harness.stdio.println(json_stringify(labelled))
   return 0
 }

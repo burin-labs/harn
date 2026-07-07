@@ -66,10 +66,10 @@ fn error_contains(result, fragment) {
 }
 
 pipeline default() {
-  let next = synthetic_next()
-  let schema = file_schema()
+  const next = synthetic_next()
+  const schema = file_schema()
   // (1) Args already validate → binder is skipped, no hop, status="skipped".
-  let mw_skip = with_natural_language_executor(
+  const mw_skip = with_natural_language_executor(
     {
       provider: "cerebras",
       model: "gpt-oss-120b",
@@ -79,7 +79,7 @@ pipeline default() {
       },
     },
   )
-  let r1 = mw_skip(envelope("file_read", {path: "/etc/hosts"}, schema), next)
+  const r1 = mw_skip(envelope("file_read", {path: "/etc/hosts"}, schema), next)
   __io_println(r1.ok)
   __io_println(r1.audit.binder.status)
   __io_println(r1.audit.binder.reason)
@@ -87,15 +87,15 @@ pipeline default() {
   __io_println(r1.arguments.path)
   // (2) No intent provided AND args don't validate → still skipped because
   // there's nothing to bind from. Audit reason = "no_intent".
-  let r2 = mw_skip(envelope("file_read", {}, schema), next)
+  const r2 = mw_skip(envelope("file_read", {}, schema), next)
   __io_println(r2.audit.binder.status)
   __io_println(r2.audit.binder.reason)
   // (3) Successful binder dispatch — invalid args + intent → binder rewrites.
   // Also capture the binder opts so we can assert the configured `timeout_ms`
   // is forwarded to the inner caller (this is how the wall-clock budget is
   // expressed to a real `llm_call` substrate).
-  let captured_timeout_ms = atomic(0)
-  let mock_binder = { _prompt, _system, opts ->
+  const captured_timeout_ms = atomic(0)
+  const mock_binder = { _prompt, _system, opts ->
     let _ = atomic_set(captured_timeout_ms, to_int(opts?.timeout_ms ?? 0))
     return {
       text: "{\"path\":\"/var/log/syslog\",\"contents\":\"hello\"}",
@@ -105,12 +105,12 @@ pipeline default() {
       output_tokens: 0,
     }
   }
-  let mw_ok = with_natural_language_executor(
+  const mw_ok = with_natural_language_executor(
     {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
-  let _ = mock_time(0)
-  let r3 = mw_ok(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
-  let _ = unmock_time()
+  const _ = mock_time(0)
+  const r3 = mw_ok(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
+  const _ = unmock_time()
   __io_println(r3.ok)
   __io_println(r3.audit.binder.status)
   __io_println(r3.audit.binder.attempts)
@@ -125,9 +125,9 @@ pipeline default() {
   // (4) Defaults: the production defaults should be usable with reasoning
   // binder models without callers having to remember the empirical token
   // and latency budget.
-  let captured_default_timeout_ms = atomic(0)
-  let captured_default_max_tokens = atomic(0)
-  let default_binder = { _prompt, _system, opts ->
+  const captured_default_timeout_ms = atomic(0)
+  const captured_default_max_tokens = atomic(0)
+  const default_binder = { _prompt, _system, opts ->
     let _ = atomic_set(captured_default_timeout_ms, to_int(opts?.timeout_ms ?? 0))
     let _ = atomic_set(captured_default_max_tokens, to_int(opts?.max_tokens ?? 0))
     return {
@@ -138,20 +138,20 @@ pipeline default() {
       output_tokens: 0,
     }
   }
-  let mw_defaults = with_natural_language_executor(
+  const mw_defaults = with_natural_language_executor(
     {provider: "cerebras", model: "gpt-oss-120b", binder_fn: default_binder},
   )
-  let _ = mock_time(0)
-  let r_defaults = mw_defaults(
+  const _ = mock_time(0)
+  const r_defaults = mw_defaults(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
     next,
   )
-  let _ = unmock_time()
+  const _ = unmock_time()
   __io_println(r_defaults.audit.binder.status)
   __io_println(atomic_get(captured_default_timeout_ms))
   __io_println(atomic_get(captured_default_max_tokens))
   // (5) Timeout: binder takes longer than timeout_ms; envelope passes through.
-  let slow_binder = { _prompt, _system, _opts ->
+  const slow_binder = { _prompt, _system, _opts ->
     let _ = advance_time(250)
     return {
       text: "{\"path\":\"/never/reached\"}",
@@ -161,25 +161,25 @@ pipeline default() {
       output_tokens: 0,
     }
   }
-  let mw_timeout = with_natural_language_executor(
+  const mw_timeout = with_natural_language_executor(
     {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: slow_binder},
   )
-  let _ = mock_time(0)
-  let r4 = mw_timeout(envelope("file_read", {_nl_intent: "do something slow"}, schema), next)
-  let _ = unmock_time()
+  const _ = mock_time(0)
+  const r4 = mw_timeout(envelope("file_read", {_nl_intent: "do something slow"}, schema), next)
+  const _ = unmock_time()
   __io_println(r4.ok)
   __io_println(r4.audit.binder.status)
   __io_println(r4.audit.binder.latency_ms >= 100)
   // Stripped args reach next() — intent is gone, original args (empty here) pass through.
   __io_println(contains(r4.arguments.keys(), "_nl_intent"))
   // (6) on_failure: "reject" — bad binder JSON short-circuits with schema_violation.
-  let bad_binder = { _prompt, _system, _opts -> return {text: "not json at all", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0} }
-  let was_dispatched = atomic(0)
-  let watch_next = { call ->
+  const bad_binder = { _prompt, _system, _opts -> return {text: "not json at all", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0} }
+  const was_dispatched = atomic(0)
+  const watch_next = { call ->
     let _ = atomic_set(was_dispatched, 1)
     return next(call)
   }
-  let mw_reject = with_natural_language_executor(
+  const mw_reject = with_natural_language_executor(
     {
       provider: "cerebras",
       model: "gpt-oss-120b",
@@ -188,45 +188,45 @@ pipeline default() {
       on_failure: "reject",
     },
   )
-  let r5 = mw_reject(envelope("file_read", {_nl_intent: "anything"}, schema), watch_next)
+  const r5 = mw_reject(envelope("file_read", {_nl_intent: "anything"}, schema), watch_next)
   __io_println(r5.ok)
   __io_println(r5.error_category)
   __io_println(r5.audit.binder.status)
   __io_println(atomic_get(was_dispatched) == 0)
   // (7) compose_tool_callers stacks cleanly with the binder.
-  let composed = compose_tool_callers([mw_ok])
-  let _ = mock_time(0)
-  let r6 = composed(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
-  let _ = unmock_time()
+  const composed = compose_tool_callers([mw_ok])
+  const _ = mock_time(0)
+  const r6 = composed(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
+  const _ = unmock_time()
   __io_println(r6.ok)
   __io_println(r6.audit.binder.status)
   __io_println(r6.arguments.path)
   // (8) The binder's schema-time companion exposes an optional fallback
   // intent field, and the paired middleware returns both pieces together.
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "file_read",
     "Read",
     {handler: { _ -> "" }, parameters: file_schema(), returns: {type: "string"}},
   )
-  let transform = natural_language_executor_schema_transform()
-  let transformed = transform(tools.tools[0])
+  const transform = natural_language_executor_schema_transform()
+  const transformed = transform(tools.tools[0])
   __io_println(contains(transformed.parameters.properties.keys(), "_nl_intent"))
   __io_println(contains(transformed.parameters.required, "_nl_intent"))
   __io_println(transformed.parameters.properties._nl_intent.required)
-  let paired = natural_language_executor_middleware(
+  const paired = natural_language_executor_middleware(
     {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
-  let paired_entry = paired.schema_transform(tools.tools[0])
+  const paired_entry = paired.schema_transform(tools.tools[0])
   __io_println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
-  let _ = mock_time(0)
-  let r7 = paired
+  const _ = mock_time(0)
+  const r7 = paired
     .caller(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
     next,
   )
-  let _ = unmock_time()
+  const _ = unmock_time()
   __io_println(r7.ok)
   __io_println(r7.audit.binder.status)
   __io_println(r7.arguments.path)

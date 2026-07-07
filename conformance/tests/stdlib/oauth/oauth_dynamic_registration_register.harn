@@ -13,26 +13,26 @@ import {
 } from "std/oauth/dynamic_registration"
 
 pipeline test(task) {
-  let topic = "oauth.dynreg.audit"
-  let cursor = event_log.latest(topic) ?? 0
-  let store = dynamic_registration_store()
+  const topic = "oauth.dynreg.audit"
+  const cursor = event_log.latest(topic) ?? 0
+  const store = dynamic_registration_store()
   assert_eq(store.kind, "oauth_dynreg_store", "store handle kind")
-  let metadata = {
+  const metadata = {
     redirect_uris: ["https://app.example/callback"],
     grant_types: ["authorization_code", "refresh_token"],
     client_name: "Harn Conformance App",
     scope: "read write",
   }
-  let response = register_client(store, metadata)
-  let client_id = response.client_id
+  const response = register_client(store, metadata)
+  const client_id = response.client_id
   assert(len(client_id) >= 32, "client_id length >= 32 (256-bit base64url)")
-  let client_secret = response.client_secret
+  const client_secret = response.client_secret
   assert(len(client_secret) >= 32, "client_secret length >= 32")
   assert_eq(response.client_secret_expires_at, 0, "client_secret_expires_at=0 (non-expiring)")
   assert(response.client_id_issued_at >= 0, "client_id_issued_at present")
   assert_eq(response.redirect_uris, ["https://app.example/callback"], "metadata round-tripped")
   assert_eq(response.client_name, "Harn Conformance App", "client_name preserved")
-  let fetched = get_client(store, client_id)
+  const fetched = get_client(store, client_id)
   assert(fetched != nil, "get_client returns the registration")
   assert_eq(fetched.client_id, client_id, "get returns same client_id")
   assert(
@@ -41,17 +41,17 @@ pipeline test(task) {
   )
   assert_eq(fetched.redirect_uris, ["https://app.example/callback"], "metadata preserved on get")
   assert_eq(fetched.client_name, "Harn Conformance App", "client_name preserved on get")
-  let listed = list_clients(store)
+  const listed = list_clients(store)
   assert(listed.contains(client_id), "list_clients reports registered id")
   // Convenience closures on the store dict.
-  let response2 = store.register({redirect_uris: ["https://app.example/cb-2"]})
+  const response2 = store.register({redirect_uris: ["https://app.example/cb-2"]})
   assert(response2.client_id != client_id, "fresh registration mints a different client_id")
-  let listed2 = store.list()
+  const listed2 = store.list()
   assert_eq(len(listed2), 2, "two registrations in store")
-  let fetched2 = store.get(response2.client_id)
+  const fetched2 = store.get(response2.client_id)
   assert_eq(fetched2.client_id, response2.client_id, "store.get closure works")
   // Defaults are applied on registration.
-  let defaulted = register_client(store, {redirect_uris: ["https://app.example/cb-3"]})
+  const defaulted = register_client(store, {redirect_uris: ["https://app.example/cb-3"]})
   assert(defaulted.grant_types.contains("authorization_code"), "default grant_types applied")
   assert(defaulted.response_types.contains("code"), "default response_types applied")
   assert_eq(
@@ -60,8 +60,8 @@ pipeline test(task) {
     "default auth method applied",
   )
   // Audit event records the shape, NOT the secret.
-  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
-  let first = stream.next().value
+  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const first = stream.next().value
   assert_eq(first.kind, "client_registered", "audit kind")
   assert_eq(first.payload.client_id, client_id, "audit records client_id")
   assert_eq(first.payload.redacted.has_client_secret, true, "audit records presence flag")

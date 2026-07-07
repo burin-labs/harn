@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools() {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "read",
@@ -35,7 +35,7 @@ pipeline default() {
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      let stalled = agent_loop(
+      const stalled = agent_loop(
         "Inspect the file",
         nil,
         {
@@ -47,7 +47,7 @@ pipeline default() {
           stall_diagnostics: true,
         },
       )
-      let warning_events = transcript_events_by_kind(stalled.transcript, "agent_loop_stall_warning")
+      const warning_events = transcript_events_by_kind(stalled.transcript, "agent_loop_stall_warning")
       __io_println(stalled.status)
       __io_println(stalled.repeated_tool_calls)
       __io_println(stalled.suspected_loop)
@@ -68,7 +68,7 @@ pipeline default() {
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      let polling = agent_loop(
+      const polling = agent_loop(
         "Wait for the job",
         nil,
         {
@@ -89,7 +89,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Done. ##DONE##")],
     { ->
-      let invalid_config = try {
+      const invalid_config = try {
         agent_loop(
           "Validate stall config",
           nil,

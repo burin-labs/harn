@@ -1,13 +1,13 @@
 pipeline default() {
   // Tail call optimization with closures passed as arguments
-  let double = { x -> x * 2 }
-  let apply = { f, x -> f(x) }
+  const double = { x -> x * 2 }
+  const apply = { f, x -> f(x) }
   __io_println(apply(double, 5))
   __io_println(apply({ x -> x + 10 }, 3))
   // Pipe into closure
-  let result = 7 |> { x -> x * 3 }
+  const result = 7 |> { x -> x * 3 }
   __io_println(result)
   // Chained pipes with closures
-  let out = 2 |> { x -> x + 1 } |> { x -> x * 10 }
+  const out = 2 |> { x -> x + 1 } |> { x -> x * 10 }
   __io_println(out)
 }

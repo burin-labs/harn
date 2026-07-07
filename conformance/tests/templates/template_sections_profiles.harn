@@ -1,5 +1,5 @@
 pipeline default() {
-  let template = """
+  const template = """
 {{ section "system_framing" }}You are a build agent.{{ endsection }}
 {{ section "task" }}{{ if urgent }}Urgent: {{ end }}Build a tree CLI.{{ endsection }}
 {{ section "examples" }}{{ for ex in examples }}- Input: {{ ex.input }} -> Output: {{ ex.output }}{{ if !loop.last }}
@@ -9,7 +9,7 @@ pipeline default() {
 {{ section "thinking_scaffold" }}{{ endsection }}
 {{ section "chain_of_thought" }}{{ endsection }}
 """
-  let bindings = {
+  const bindings = {
     urgent: true,
     examples: [{input: "src", output: "src/main.harn"}, {input: "tests", output: "tests/tree.expected"}],
     output_schema: {type: "object", properties: {tree: {type: "string"}}, required: ["tree"]},

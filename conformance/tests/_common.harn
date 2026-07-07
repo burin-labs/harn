@@ -2,7 +2,7 @@ import { poll_until } from "std/poll"
 
 /** Shared conformance helper for fixtures that exec the built `harn` binary. */
 fn first_group(pattern, text) {
-  let matches = regex_captures(pattern, text)
+  const matches = regex_captures(pattern, text)
   if len(matches) == 0 {
     return nil
   }
@@ -11,14 +11,14 @@ fn first_group(pattern, text) {
 
 /** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
 pub fn resolve_harn_bin(harness: Harness, repo_root) {
-  let env_target_dir = harness.env.get("CARGO_TARGET_DIR")
+  const env_target_dir = harness.env.get("CARGO_TARGET_DIR")
   if env_target_dir {
     return path_join(env_target_dir, "debug/harn")
   }
-  let cargo_config = path_join(repo_root, ".cargo/config.toml")
+  const cargo_config = path_join(repo_root, ".cargo/config.toml")
   if harness.fs.exists(cargo_config) {
-    let config = exec("cat", cargo_config).stdout
-    let configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
+    const config = exec("cat", cargo_config).stdout
+    const configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
     if configured {
       return path_join(configured, "debug/harn")
     }
@@ -28,7 +28,7 @@ pub fn resolve_harn_bin(harness: Harness, repo_root) {
 
 /** Return whether a subprocess still exists according to the platform shell. */
 pub fn process_alive(pid) {
-  let probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
+  const probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
   return probe.success
 }
 
@@ -39,8 +39,8 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
       if !harness.fs.exists(log_path) {
         return nil
       }
-      let log = exec("cat", log_path).stdout
-      let matches = regex_captures(pattern, log)
+      const log = exec("cat", log_path).stdout
+      const matches = regex_captures(pattern, log)
       if len(matches) > 0 {
         return matches[0].groups[0]
       }
@@ -52,7 +52,7 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
 
 fn log_contains(harness: Harness, log_path, needle) {
   if harness.fs.exists(log_path) {
-    let log = exec("cat", log_path).stdout
+    const log = exec("cat", log_path).stdout
     if contains(log, needle) {
       return true
     }

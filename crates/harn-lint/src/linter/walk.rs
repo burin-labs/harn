@@ -262,11 +262,11 @@ impl<'a> Linter<'a> {
                     self.record_type_expr_references(ann);
                     self.check_eager_collection_conversion(ann, value);
                 }
-                self.declare_pattern_variables(pattern, snode.span, false);
+                self.declare_pattern_variables(pattern, snode.span, true);
                 self.lint_binding_pattern_defaults(pattern);
             }
 
-            Node::VarBinding {
+            Node::ConstBinding {
                 pattern,
                 type_ann,
                 value,
@@ -279,23 +279,8 @@ impl<'a> Linter<'a> {
                     self.record_type_expr_references(ann);
                     self.check_eager_collection_conversion(ann, value);
                 }
-                self.declare_pattern_variables(pattern, snode.span, true);
+                self.declare_pattern_variables(pattern, snode.span, false);
                 self.lint_binding_pattern_defaults(pattern);
-            }
-
-            Node::ConstBinding {
-                name,
-                type_ann,
-                value,
-            } => {
-                self.record_mcp_registry_binding(name, value);
-                self.lint_node(value);
-                if let Some(ann) = type_ann {
-                    self.record_type_expr_references(ann);
-                    self.check_eager_collection_conversion(ann, value);
-                }
-                let pattern = harn_parser::BindingPattern::Identifier(name.clone());
-                self.declare_pattern_variables(&pattern, snode.span, false);
             }
 
             Node::Assignment { target, value, .. } => {

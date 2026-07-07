@@ -4,8 +4,8 @@
 import { pack_chat, pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  let a = pack_chat("claude-sonnet-4-5")
-  let b = pack_for({model: "claude-sonnet-4-5", task: "chat"})
+  const a = pack_chat("claude-sonnet-4-5")
+  const b = pack_for({model: "claude-sonnet-4-5", task: "chat"})
   assert_eq(a.model, b.model)
   assert_eq(a.provider, b.provider)
   assert_eq(a.temperature, b.temperature)

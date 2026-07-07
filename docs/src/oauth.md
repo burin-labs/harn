@@ -29,7 +29,7 @@ import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 import { client, exchange_code, request, start_authorization, token, token_exchange } from "std/oauth/client"
 
-let cli = client(
+const cli = client(
   providers().github,
   {
     client_id: env("GITHUB_OAUTH_CLIENT_ID"),
@@ -41,12 +41,12 @@ let cli = client(
 )
 
 // One-time: send a human through the browser dance.
-let pkce = start_authorization(cli)
+const pkce = start_authorization(cli)
 // (host: open pkce.url, capture redirected code+state, then)
-let _ = exchange_code(cli, pkce, code, state)
+const _ = exchange_code(cli, pkce, code, state)
 
 // Steady state: client owns refresh + 1x retry on 401.
-let res = request(cli, "GET", "https://api.github.com/user")
+const res = request(cli, "GET", "https://api.github.com/user")
 ```
 
 ## Providers (`std/oauth/providers`)
@@ -60,11 +60,11 @@ field per-call:
 ```harn,ignore
 import { atlassian, github, github_enterprise, providers } from "std/oauth/providers"
 
-let gh = github()                                              // public github.com
-let ghe = github_enterprise("https://ghe.example.com")         // enterprise server
-let conf = atlassian({default_scopes: ["read:jira-work", "offline_access"]})
+const gh = github()                                              // public github.com
+const ghe = github_enterprise("https://ghe.example.com")         // enterprise server
+const conf = atlassian({default_scopes: ["read:jira-work", "offline_access"]})
 
-let all = providers()                                          // {github, slack, ..., custom, github_enterprise}
+const all = providers()                                          // {github, slack, ..., custom, github_enterprise}
 ```
 
 Built-ins: `github`, `github_enterprise`, `slack`, `linear`, `notion`,
@@ -115,10 +115,10 @@ Pick a backend; the OAuth client never knows the difference.
 ```harn,ignore
 import { custom, file, harn_cloud_org, memory } from "std/oauth/storage"
 
-let dev   = memory()
-let disk  = file("/var/lib/harn/oauth.bin", env("HARN_OAUTH_KEY"))
-let cloud = harn_cloud_org()                                   // org-shared bot
-let vault = custom({
+const dev   = memory()
+const disk  = file("/var/lib/harn/oauth.bin", env("HARN_OAUTH_KEY"))
+const cloud = harn_cloud_org()                                   // org-shared bot
+const vault = custom({
   get:    { key -> vault_get("oauth/" + key) },
   set:    { key, token_set, ttl_seconds = nil -> vault_put("oauth/" + key, token_set) },
   delete: { key -> vault_delete("oauth/" + key) },
@@ -146,7 +146,7 @@ import {
   token_exchange,
 } from "std/oauth/client"
 
-let cli = client(provider, {
+const cli = client(provider, {
   client_id:          string,
   storage:            <storage handle>,
   client_secret?:     string,                       // confidential clients only
@@ -234,7 +234,7 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 import { delegated_claims, token_type } from "std/oauth/token_exchange"
 
-let provider = custom({
+const provider = custom({
   id: "enterprise-as",
   auth_url: "https://idp.example/authorize",
   token_url: "https://idp.example/token",
@@ -250,8 +250,8 @@ let provider = custom({
   },
 })
 
-let cli = client(provider, {client_id: "agent-client", storage: memory()})
-let delegated = token_exchange(cli, {
+const cli = client(provider, {client_id: "agent-client", storage: memory()})
+const delegated = token_exchange(cli, {
   subject_token: user_access_token,
   subject_token_type: token_type("access_token"),
   actor_token: agent_jwt,
@@ -300,7 +300,7 @@ import { device_flow } from "std/oauth/device_flow"
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-let token_set = device_flow(
+const token_set = device_flow(
   providers().github,
   {
     client_id: env("GITHUB_OAUTH_CLIENT_ID"),
@@ -345,15 +345,15 @@ import {
 } from "std/oauth/dynamic_registration"
 import { providers } from "std/oauth/providers"
 
-let paths = well_known_paths()                              // {client_metadata, authorization_server_metadata, registration}
-let oas = authorization_server_metadata(
+const paths = well_known_paths()                              // {client_metadata, authorization_server_metadata, registration}
+const oas = authorization_server_metadata(
   providers().github,
   {registration_endpoint: paths.registration},
 )
-let oas_response = well_known_response(oas)                 // {status, content_type, headers, body}
+const oas_response = well_known_response(oas)                 // {status, content_type, headers, body}
 
-let store = dynamic_registration_store()
-let body = register_client(store, {
+const store = dynamic_registration_store()
+const body = register_client(store, {
   redirect_uris: ["https://app.example/cb"],
   client_name: "Acme Agent",
 })
@@ -394,7 +394,7 @@ import {
 } from "std/oauth/redaction"
 
 register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
-let display = redact("ACME-DEADBEEF1234 calling")
+const display = redact("ACME-DEADBEEF1234 calling")
 for entry in drain_audit() {
   // entry.code == "HARN-OAU-001"
   // entry.pattern, entry.match_count, entry.bytes_redacted
@@ -419,7 +419,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().github,
   {
     client_id: env("GITHUB_OAUTH_CLIENT_ID"),
@@ -429,10 +429,10 @@ let cli = client(
     storage: memory(),
   },
 )
-let pkce = start_authorization(cli)
+const pkce = start_authorization(cli)
 // host: open pkce.url, capture code + state from the redirect
-let _ = exchange_code(cli, pkce, code, state)
-let user = request(cli, "GET", "https://api.github.com/user")
+const _ = exchange_code(cli, pkce, code, state)
+const user = request(cli, "GET", "https://api.github.com/user")
 ```
 
 GitHub OAuth-app access tokens may be long-lived without a
@@ -454,7 +454,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().slack,
   {
     client_id: env("SLACK_CLIENT_ID"),
@@ -484,7 +484,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { providers } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().linear,
   {
     client_id: env("LINEAR_CLIENT_ID"),
@@ -517,7 +517,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { providers } from "std/oauth/providers"
 import { harn_cloud_session } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().notion,
   {
     client_id: env("NOTION_CLIENT_ID"),
@@ -527,7 +527,7 @@ let cli = client(
     extra_auth_params: {owner: "user"},                       // user-owned public connection
   },
 )
-let pages = request(
+const pages = request(
   cli,
   "GET",
   "https://api.notion.com/v1/users/me",
@@ -552,7 +552,7 @@ import { client, exchange_code, refresh, request, start_authorization } from "st
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().google,
   {
     client_id: env("GOOGLE_CLIENT_ID"),
@@ -588,8 +588,8 @@ import { client, request, start_authorization } from "std/oauth/client"
 import { microsoft } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
-let tenant = env("MS_TENANT_ID")
-let cli = client(
+const tenant = env("MS_TENANT_ID")
+const cli = client(
   microsoft({
     auth_url:  "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/authorize",
     token_url: "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/token",
@@ -602,7 +602,7 @@ let cli = client(
     storage: harn_cloud_org(),
   },
 )
-let me = request(cli, "GET", "https://graph.microsoft.com/v1.0/me")
+const me = request(cli, "GET", "https://graph.microsoft.com/v1.0/me")
 ```
 
 Microsoft Identity has two ergonomic traps:
@@ -630,7 +630,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { providers } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().atlassian,
   {
     client_id: env("ATLASSIAN_CLIENT_ID"),
@@ -642,7 +642,7 @@ let cli = client(
   },
 )
 // 1) Resolve accessible cloud sites (one token covers Jira AND Confluence on each).
-let sites = request(cli, "GET", "https://api.atlassian.com/oauth/token/accessible-resources")
+const sites = request(cli, "GET", "https://api.atlassian.com/oauth/token/accessible-resources")
 // 2) Use the returned cloudid for product calls:
 //    https://api.atlassian.com/ex/jira/<cloudid>/rest/api/3/myself
 //    https://api.atlassian.com/ex/confluence/<cloudid>/wiki/rest/api/user/current
@@ -666,7 +666,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().discord,
   {
     client_id: env("DISCORD_CLIENT_ID"),
@@ -697,7 +697,7 @@ import { custom, providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
 // Cloud:
-let cloud_cli = client(
+const cloud_cli = client(
   providers().gitlab,
   {
     client_id: env("GITLAB_CLIENT_ID"),
@@ -709,8 +709,8 @@ let cloud_cli = client(
 )
 
 // Self-hosted: same /oauth paths under your instance base URL.
-let base = "https://gitlab.acme.example"
-let self_hosted = custom({
+const base = "https://gitlab.acme.example"
+const self_hosted = custom({
   id: "gitlab",
   label: "GitLab (self-hosted)",
   auth_url:        base + "/oauth/authorize",
@@ -743,7 +743,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().bitbucket,
   {
     client_id: env("BITBUCKET_CLIENT_KEY"),
@@ -753,7 +753,7 @@ let cli = client(
     storage: file("/var/lib/harn/bitbucket.bin", env("HARN_OAUTH_KEY")),
   },
 )
-let workspaces = request(cli, "GET", "https://api.bitbucket.org/2.0/workspaces")
+const workspaces = request(cli, "GET", "https://api.bitbucket.org/2.0/workspaces")
 ```
 
 Bitbucket Cloud OAuth supports **authorization-code and
@@ -777,8 +777,8 @@ import { device_flow } from "std/oauth/device_flow"
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-let store = file("/var/lib/harn/ci-token.bin", env("HARN_OAUTH_KEY"))
-let token_set = device_flow(
+const store = file("/var/lib/harn/ci-token.bin", env("HARN_OAUTH_KEY"))
+const token_set = device_flow(
   providers().github,
   {
     client_id: env("GH_OAUTH_CLIENT_ID"),
@@ -786,8 +786,8 @@ let token_set = device_flow(
     storage: store,
     on_user_code: { user_code, verification_uri ->
       // Surface to the CI log + a chat webhook so an operator can complete the dance.
-      let _ = log("Visit " + verification_uri + " and enter " + user_code)
-      let _ = http_post(env("SLACK_WEBHOOK_URL"), json_stringify({
+      const _ = log("Visit " + verification_uri + " and enter " + user_code)
+      const _ = http_post(env("SLACK_WEBHOOK_URL"), json_stringify({
         text: "CI auth pending: open " + verification_uri + " and enter `" + user_code + "`",
       }), {headers: {"Content-Type": "application/json"}})
       nil
@@ -809,7 +809,7 @@ import { client, request } from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
-let cli = client(
+const cli = client(
   providers().github,
   {
     client_id: env("ORG_GITHUB_CLIENT_ID"),
@@ -820,7 +820,7 @@ let cli = client(
     storage_key: "github:org-bot",
   },
 )
-let issues = request(cli, "GET", "https://api.github.com/orgs/burin-labs/issues")
+const issues = request(cli, "GET", "https://api.github.com/orgs/burin-labs/issues")
 ```
 
 `harn_cloud_org()` routes through the `oauth_storage.cloud_*` host
@@ -838,7 +838,7 @@ import { client, exchange_code, request, start_authorization } from "std/oauth/c
 import { custom } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-let acme = custom({
+const acme = custom({
   id: "acme-oidc",
   label: "Acme Enterprise OIDC",
   auth_url:     "https://idp.acme.example/oauth2/authorize",
@@ -848,7 +848,7 @@ let acme = custom({
   default_scopes: ["openid", "profile", "email", "offline_access"],
   pkce_required: true,
 })
-let cli = client(
+const cli = client(
   acme,
   {
     client_id: env("ACME_OIDC_CLIENT_ID"),

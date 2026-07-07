@@ -6,7 +6,7 @@ import {
 } from "std/agent/state"
 
 fn __skills_registry(opts) {
-  let registry = opts?.skill_registry ?? opts?.skills
+  const registry = opts?.skill_registry ?? opts?.skills
   if type_of(registry) == "list" {
     return {_type: "skill_registry", skills: registry}
   }
@@ -34,9 +34,9 @@ fn __skill_find(registry, id) {
 }
 
 fn __skill_ids(entries) {
-  var ids = []
+  let ids = []
   for entry in entries {
-    let id = __skill_id(entry)
+    const id = __skill_id(entry)
     if id != "" {
       ids = ids.push(id)
     }
@@ -57,29 +57,29 @@ fn __tool_registry_has(registry, name) {
 }
 
 fn __render_loaded_skill(entry, request) {
-  let rendered = try {
+  const rendered = try {
     skill_render(entry, request?.arguments ?? request?.args ?? [])
   }
   if !is_err(rendered) {
-    let body = trim(unwrap(rendered))
+    const body = trim(unwrap(rendered))
     if body != "" {
       return body
     }
   }
-  var out = "### " + __skill_id(entry) + "\n"
-  let description = trim(entry?.description ?? "")
+  let out = "### " + __skill_id(entry) + "\n"
+  const description = trim(entry?.description ?? "")
   if description != "" {
     out = out + description + "\n"
   }
-  let when_to_use = trim(entry?.when_to_use ?? "")
+  const when_to_use = trim(entry?.when_to_use ?? "")
   if when_to_use != "" {
     out = out + "When to use: " + when_to_use + "\n"
   }
-  let allowed = entry?.allowed_tools ?? []
+  const allowed = entry?.allowed_tools ?? []
   if len(allowed) > 0 {
     out = out + "Scoped tools: " + join(allowed, ", ") + "\n"
   }
-  let prompt = trim(entry?.prompt ?? "")
+  const prompt = trim(entry?.prompt ?? "")
   if prompt != "" {
     out = out + "\n" + prompt + "\n"
   }
@@ -87,32 +87,32 @@ fn __render_loaded_skill(entry, request) {
 }
 
 fn __load_skill_for_session(session, opts, args) {
-  let request = if type_of(args) == "dict" {
+  const request = if type_of(args) == "dict" {
     args
   } else {
     {name: args}
   }
-  let registry = __skills_registry(opts)
-  let id = request?.name ?? ""
-  let entry = __skill_find(registry, id)
-  let require_signature = (request?.require_signature ?? false) || (entry?.require_signature ?? false)
+  const registry = __skills_registry(opts)
+  const id = request?.name ?? ""
+  const entry = __skill_find(registry, id)
+  const require_signature = (request?.require_signature ?? false) || (entry?.require_signature ?? false)
   if entry == nil || require_signature {
     return load_skill(request + {session_id: session.session_id})
   }
   if __skill_model_invocation_disabled(entry) {
     throw "skill_model_invocation_disabled: skill '" + id + "' cannot be loaded by a model"
   }
-  let loaded = try {
+  const loaded = try {
     load_skill(request + {session_id: session.session_id})
   }
-  let body = if is_err(loaded) {
+  const body = if is_err(loaded) {
     __render_loaded_skill(entry, request)
   } else {
     unwrap(loaded)
   }
   if entry != nil {
-    let prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
-    var next = prev
+    const prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+    let next = prev
     if !contains(__skill_ids(prev), id) {
       next = next.push(entry + {id: id, score: 1.0, trigger: "load_skill"})
       __record_activations(session, prev, next, 0)
@@ -123,8 +123,8 @@ fn __load_skill_for_session(session, opts, args) {
 }
 
 fn __with_load_skill_tool(session, opts) {
-  let existing = opts?.tools
-  let registry = if type_of(existing) == "dict" {
+  const existing = opts?.tools
+  const registry = if type_of(existing) == "dict" {
     existing
   } else {
     tool_registry()
@@ -132,7 +132,7 @@ fn __with_load_skill_tool(session, opts) {
   if __tool_registry_has(registry, "load_skill") {
     return opts + {tools: registry}
   }
-  let next_registry = tool_define(
+  const next_registry = tool_define(
     registry,
     "load_skill",
     "Load the full instructions for a skill from the active skill catalog",
@@ -152,8 +152,8 @@ fn __with_load_skill_tool(session, opts) {
 }
 
 fn __skills_same_ids(prev, next) {
-  let prev_ids = __skill_ids(prev)
-  let next_ids = __skill_ids(next)
+  const prev_ids = __skill_ids(prev)
+  const next_ids = __skill_ids(next)
   if len(prev_ids) != len(next_ids) {
     return false
   }
@@ -166,10 +166,10 @@ fn __skills_same_ids(prev, next) {
 }
 
 fn __active_from_ids(registry, ids) {
-  var active = []
+  let active = []
   for item in ids {
-    let id = item?.id ?? item?.name ?? item
-    let entry = __skill_find(registry, id)
+    const id = item?.id ?? item?.name ?? item
+    const entry = __skill_find(registry, id)
     if entry != nil {
       active = active.push(entry + {id: id})
     }
@@ -182,9 +182,9 @@ fn __context_profile_skill_ids(opts) {
 }
 
 fn __active_from_context_profile(registry, opts) {
-  var active = []
+  let active = []
   for id in __context_profile_skill_ids(opts) {
-    let entry = __skill_find(registry, id)
+    const entry = __skill_find(registry, id)
     if entry != nil {
       active = active.push(entry + {id: id, score: 1.0, trigger: "context_profile"})
     }
@@ -193,10 +193,10 @@ fn __active_from_context_profile(registry, opts) {
 }
 
 fn __merge_active_skills(left, right) {
-  var active = left ?? []
-  var ids = __skill_ids(active)
+  let active = left ?? []
+  let ids = __skill_ids(active)
   for entry in right ?? [] {
-    let id = __skill_id(entry)
+    const id = __skill_id(entry)
     if id != "" && !contains(ids, id) {
       active = active.push(entry)
       ids = ids.push(id)
@@ -206,7 +206,7 @@ fn __merge_active_skills(left, right) {
 }
 
 fn __latest_user_text(session) {
-  var latest = session?.task ?? ""
+  let latest = session?.task ?? ""
   for message in agent_session_messages(session.session_id) {
     if message?.role == "user" {
       latest = message?.content ?? latest
@@ -224,12 +224,12 @@ fn __match_strategy(opts) {
 }
 
 fn __match_strategy_manual(opts) {
-  let strategy = __match_strategy(opts)
+  const strategy = __match_strategy(opts)
   return strategy == "manual" || strategy == "none"
 }
 
 fn __match_top_n(opts) {
-  let value = __match_config(opts)?.top_n
+  const value = __match_config(opts)?.top_n
   if type_of(value) == "int" && value > 0 {
     return value
   }
@@ -237,7 +237,7 @@ fn __match_top_n(opts) {
 }
 
 fn __match_sticky(opts) {
-  let value = __match_config(opts)?.sticky
+  const value = __match_config(opts)?.sticky
   if type_of(value) == "bool" {
     return value
   }
@@ -245,7 +245,7 @@ fn __match_sticky(opts) {
 }
 
 fn __skill_catalog_limit(opts) {
-  let value = __match_config(opts)?.catalog_limit ?? opts?.skill_catalog_limit ?? 12
+  const value = __match_config(opts)?.catalog_limit ?? opts?.skill_catalog_limit ?? 12
   if type_of(value) == "int" && value > 0 {
     return value
   }
@@ -253,7 +253,7 @@ fn __skill_catalog_limit(opts) {
 }
 
 fn __skill_catalog_budget(opts) {
-  let value = __match_config(opts)?.catalog_budget ?? opts?.skill_catalog_budget ?? 2000
+  const value = __match_config(opts)?.catalog_budget ?? opts?.skill_catalog_budget ?? 2000
   if type_of(value) == "int" && value > 0 {
     return value
   }
@@ -261,7 +261,7 @@ fn __skill_catalog_budget(opts) {
 }
 
 fn __skill_catalog_always(opts) {
-  let value = __match_config(opts)?.catalog_always ?? opts?.skill_catalog_always
+  const value = __match_config(opts)?.catalog_always ?? opts?.skill_catalog_always
   if type_of(value) == "bool" {
     return value
   }
@@ -275,7 +275,7 @@ fn __skill_catalog_prompt(registry, opts, active) {
   if len(active ?? []) > 0 && !__skill_catalog_always(opts) {
     return ""
   }
-  let entries = skills_catalog_entries({_type: "skill_registry", skills: __matchable_skill_entries(registry)})
+  const entries = skills_catalog_entries({_type: "skill_registry", skills: __matchable_skill_entries(registry)})
   if len(entries) == 0 {
     return ""
   }
@@ -287,7 +287,7 @@ fn __skill_model_invocation_disabled(entry) {
 }
 
 fn __matchable_skill_entries(registry) {
-  var entries = []
+  let entries = []
   for entry in __skills_entries(registry) {
     if !__skill_model_invocation_disabled(entry) {
       entries = entries.push(entry)
@@ -349,11 +349,11 @@ fn __skill_score_stop_words() {
 }
 
 fn __skill_score_tokens(text) {
-  let normalized = regex_replace("[^A-Za-z0-9]+", " ", lowercase(to_string(text ?? "")))
-  let stop_words = __skill_score_stop_words()
-  var out = []
+  const normalized = regex_replace("[^A-Za-z0-9]+", " ", lowercase(to_string(text ?? "")))
+  const stop_words = __skill_score_stop_words()
+  let out = []
   for raw in split(trim(normalized), " ") {
-    let token = trim(raw)
+    const token = trim(raw)
     if len(token) > 2 && !contains(stop_words, token) && !contains(out, token) {
       out = out.push(token)
     }
@@ -362,8 +362,8 @@ fn __skill_score_tokens(text) {
 }
 
 fn __skill_score_term_hits(query_tokens, text) {
-  let haystack_tokens = __skill_score_tokens(text)
-  var hits = 0
+  const haystack_tokens = __skill_score_tokens(text)
+  let hits = 0
   for token in query_tokens {
     if contains(haystack_tokens, token) {
       hits = hits + 1
@@ -373,7 +373,7 @@ fn __skill_score_term_hits(query_tokens, text) {
 }
 
 fn __skill_score_id_match(query_tokens, id) {
-  let id_tokens = __skill_score_tokens(id)
+  const id_tokens = __skill_score_tokens(id)
   if len(id_tokens) == 0 {
     return false
   }
@@ -386,8 +386,8 @@ fn __skill_score_id_match(query_tokens, id) {
 }
 
 fn __skill_score_glob_match(pattern, path) {
-  let glob = to_string(pattern ?? "")
-  let value = to_string(path ?? "")
+  const glob = to_string(pattern ?? "")
+  const value = to_string(path ?? "")
   if glob == "" || value == "" {
     return false
   }
@@ -397,14 +397,14 @@ fn __skill_score_glob_match(pattern, path) {
   if !contains(glob, "*") {
     return false
   }
-  let parts = split(glob, "*")
-  var cursor = 0
+  const parts = split(glob, "*")
+  let cursor = 0
   for (index, part) in iter(parts).enumerate() {
     if part == "" {
       continue
     }
-    let rest = substring(value, cursor)
-    let offset = rest.index_of(part)
+    const rest = substring(value, cursor)
+    const offset = rest.index_of(part)
     if offset < 0 {
       return false
     }
@@ -413,12 +413,12 @@ fn __skill_score_glob_match(pattern, path) {
     }
     cursor = cursor + offset + len(part)
   }
-  let last = parts[len(parts) - 1]
+  const last = parts[len(parts) - 1]
   return last == "" || ends_with(value, last)
 }
 
 fn __skill_score_path_hits(patterns, working_files) {
-  var hits = 0
+  let hits = 0
   for pattern in patterns ?? [] {
     for file in working_files ?? [] {
       if __skill_score_glob_match(pattern, file) {
@@ -431,20 +431,20 @@ fn __skill_score_path_hits(patterns, working_files) {
 }
 
 fn __skill_score_metadata(context, registry) {
-  let query_tokens = __skill_score_tokens(context?.task ?? "")
-  let working_files = context?.working_files ?? []
-  var scored = []
+  const query_tokens = __skill_score_tokens(context?.task ?? "")
+  const working_files = context?.working_files ?? []
+  let scored = []
   for entry in __matchable_skill_entries(registry) {
-    let id = __skill_id(entry)
+    const id = __skill_id(entry)
     if id == "" {
       continue
     }
-    let keyword_hits = __skill_score_term_hits(query_tokens, entry?.description ?? "")
+    const keyword_hits = __skill_score_term_hits(query_tokens, entry?.description ?? "")
       + __skill_score_term_hits(query_tokens, entry?.when_to_use ?? "")
-    let id_match = __skill_score_id_match(query_tokens, id)
-    let path_hits = __skill_score_path_hits(entry?.paths ?? [], working_files)
-    var score = 0.0
-    var triggers = []
+    const id_match = __skill_score_id_match(query_tokens, id)
+    const path_hits = __skill_score_path_hits(entry?.paths ?? [], working_files)
+    let score = 0.0
+    let triggers = []
     if keyword_hits > 0 {
       score = score + keyword_hits / (keyword_hits + 1.5)
       triggers = triggers.push(to_string(keyword_hits) + " keyword hit(s)")
@@ -468,8 +468,8 @@ fn __skill_score_metadata(context, registry) {
 }
 
 fn __host_skill_score_candidates(context, registry, opts) {
-  let matchable = {_type: "skill_registry", skills: __matchable_skill_entries(registry)}
-  let outcome = try {
+  const matchable = {_type: "skill_registry", skills: __matchable_skill_entries(registry)}
+  const outcome = try {
     __host_skill_score(context, matchable, __match_config(opts))
   }
   if is_err(outcome) {
@@ -479,7 +479,7 @@ fn __host_skill_score_candidates(context, registry, opts) {
 }
 
 fn __score_candidates(session, registry, opts, iteration) {
-  let context = {task: __latest_user_text(session), working_files: opts?.working_files ?? [], iteration: iteration}
+  const context = {task: __latest_user_text(session), working_files: opts?.working_files ?? [], iteration: iteration}
   if __match_strategy(opts) == "metadata" {
     return __skill_score_metadata(context, registry)
   }
@@ -487,19 +487,19 @@ fn __score_candidates(session, registry, opts, iteration) {
 }
 
 fn __top_active_from_scores(registry, scored, opts) {
-  var active = []
-  let top_n = __match_top_n(opts)
-  let strategy = __match_strategy(opts)
+  let active = []
+  const top_n = __match_top_n(opts)
+  const strategy = __match_strategy(opts)
   for candidate in scored {
     if len(active) >= top_n {
       break
     }
-    let score = candidate?.score ?? 0.0
+    const score = candidate?.score ?? 0.0
     if score <= 0.0 && strategy == "metadata" {
       continue
     }
-    let id = candidate?.id ?? candidate?.name ?? ""
-    let entry = __skill_find(registry, id)
+    const id = candidate?.id ?? candidate?.name ?? ""
+    const entry = __skill_find(registry, id)
     if entry != nil {
       active = active.push(entry + {id: id, score: score, trigger: candidate?.trigger ?? candidate?.reason ?? ""})
     }
@@ -522,9 +522,9 @@ fn __record_matched(session, opts, iteration, scored) {
 }
 
 fn __record_deactivations(session, prev, next, iteration) {
-  let next_ids = __skill_ids(next)
+  const next_ids = __skill_ids(next)
   for entry in prev {
-    let id = __skill_id(entry)
+    const id = __skill_id(entry)
     if id != "" && !contains(next_ids, id) {
       agent_session_record_skill_event(
         session.session_id,
@@ -536,9 +536,9 @@ fn __record_deactivations(session, prev, next, iteration) {
 }
 
 fn __record_activations(session, prev, next, iteration) {
-  let prev_ids = __skill_ids(prev)
+  const prev_ids = __skill_ids(prev)
   for entry in next {
-    let id = __skill_id(entry)
+    const id = __skill_id(entry)
     if id == "" || contains(prev_ids, id) {
       continue
     }
@@ -566,7 +566,7 @@ fn __record_activations(session, prev, next, iteration) {
 }
 
 fn __allowed_union(active) {
-  var allowed = []
+  let allowed = []
   for active_entry in active {
     for allowed_entry in active_entry?.allowed_tools ?? [] {
       if !contains(allowed, allowed_entry) {
@@ -578,9 +578,9 @@ fn __allowed_union(active) {
 }
 
 fn __has_new_skill(prev, active) {
-  let prev_ids = __skill_ids(prev)
+  const prev_ids = __skill_ids(prev)
   for entry in active {
-    let id = __skill_id(entry)
+    const id = __skill_id(entry)
     if id != "" && !contains(prev_ids, id) {
       return true
     }
@@ -600,7 +600,7 @@ fn __allowed_matches_tool(entry, tool_entry) {
   if entry == "*" {
     return true
   }
-  let name = __tool_name(tool_entry)
+  const name = __tool_name(tool_entry)
   if entry == name {
     return true
   }
@@ -611,21 +611,21 @@ fn __allowed_matches_tool(entry, tool_entry) {
 }
 
 fn __skill_scoped_tools(opts, active) {
-  let allowed = __allowed_union(active)
+  const allowed = __allowed_union(active)
   if len(allowed) == 0 || contains(allowed, "*") {
     return opts?.tools
   }
-  let registry = opts?.tools
+  const registry = opts?.tools
   if type_of(registry) != "dict" {
     return registry
   }
-  var kept = []
+  let kept = []
   for tool_entry in registry?.tools ?? [] {
     if __tool_name(tool_entry) == "load_skill" {
       kept = kept.push(tool_entry)
       continue
     }
-    var keep = false
+    let keep = false
     for entry in allowed {
       if __allowed_matches_tool(entry, tool_entry) {
         keep = true
@@ -640,12 +640,12 @@ fn __skill_scoped_tools(opts, active) {
 }
 
 fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false) {
-  let scoped_tools = __skill_scoped_tools(opts, active)
-  var next = opts + {active_skills: active, _skill_activated_this_turn: activated_this_turn}
+  const scoped_tools = __skill_scoped_tools(opts, active)
+  let next = opts + {active_skills: active, _skill_activated_this_turn: activated_this_turn}
   if scoped_tools != nil {
     next = next + {tools: scoped_tools}
   }
-  let catalog_prompt = __skill_catalog_prompt(registry, opts, active)
+  const catalog_prompt = __skill_catalog_prompt(registry, opts, active)
   if catalog_prompt != "" {
     next = next + {skill_catalog_prompt: catalog_prompt}
   }
@@ -660,14 +660,14 @@ fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false
  * @api_stability: experimental
  */
 pub fn agent_skills_match(session, opts, iteration) {
-  let registry = __skills_registry(opts)
+  const registry = __skills_registry(opts)
   if registry == nil || len(__skills_entries(registry)) == 0 {
     return opts
   }
-  let tool_opts = __with_load_skill_tool(session, opts)
-  let stored_prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
-  let profile_active = __active_from_context_profile(registry, tool_opts)
-  let prev = __merge_active_skills(stored_prev, profile_active)
+  const tool_opts = __with_load_skill_tool(session, opts)
+  const stored_prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+  const profile_active = __active_from_context_profile(registry, tool_opts)
+  const prev = __merge_active_skills(stored_prev, profile_active)
   if !__skills_same_ids(stored_prev, prev) {
     __record_activations(session, stored_prev, prev, iteration)
     agent_session_set_active_skills(session.session_id, prev)
@@ -681,14 +681,14 @@ pub fn agent_skills_match(session, opts, iteration) {
   if __match_sticky(opts) && len(prev) > 0 {
     return __opts_with_active_skills(tool_opts, registry, prev)
   }
-  let scored = __score_candidates(session, registry, tool_opts, iteration)
+  const scored = __score_candidates(session, registry, tool_opts, iteration)
   __record_matched(session, tool_opts, iteration, scored)
-  let active = __merge_active_skills(__top_active_from_scores(registry, scored, tool_opts), profile_active)
+  const active = __merge_active_skills(__top_active_from_scores(registry, scored, tool_opts), profile_active)
   if !__skills_same_ids(prev, active) {
     __record_deactivations(session, prev, active, iteration)
     __record_activations(session, prev, active, iteration)
     agent_session_set_active_skills(session.session_id, active)
   }
-  let activated_this_turn = __has_new_skill(prev, active)
+  const activated_this_turn = __has_new_skill(prev, active)
   return __opts_with_active_skills(tool_opts, registry, active, activated_this_turn)
 }

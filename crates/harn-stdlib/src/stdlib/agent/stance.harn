@@ -28,9 +28,9 @@ import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
 import { agent_tool_annotations } from "std/agent/tool_annotations"
 
-let __STANCE_READ_ONLY_KINDS = ["read", "search", "think", "fetch"]
+const __STANCE_READ_ONLY_KINDS = ["read", "search", "think", "fetch"]
 
-let __STANCE_READ_ONLY_LEVELS = ["none", "read_only"]
+const __STANCE_READ_ONLY_LEVELS = ["none", "read_only"]
 
 fn __stance_config(opts) {
   return opts?.read_only_stance ?? {}
@@ -60,12 +60,12 @@ fn __stance_entry_name(entry) {
  * effect level. Unannotated tools are mutating by default.
  */
 fn __stance_entry_read_only(entry, policy) {
-  let annotations = agent_tool_annotations(entry, policy, __stance_entry_name(entry))
-  let kind = annotations?.kind
+  const annotations = agent_tool_annotations(entry, policy, __stance_entry_name(entry))
+  const kind = annotations?.kind
   if kind != nil {
     return contains(__STANCE_READ_ONLY_KINDS, to_string(kind))
   }
-  let level = annotations?.side_effect_level
+  const level = annotations?.side_effect_level
   if level != nil {
     return contains(__STANCE_READ_ONLY_LEVELS, to_string(level))
   }
@@ -73,7 +73,7 @@ fn __stance_entry_read_only(entry, policy) {
 }
 
 fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
-  var names = [escape_tool]
+  let names = [escape_tool]
   for name in hard_keep ?? [] {
     if !contains(names, name) {
       names = names.push(name)
@@ -81,7 +81,7 @@ fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
   }
   for entry in __stance_registry_entries(registry) {
     if __stance_entry_read_only(entry, policy) {
-      let name = __stance_entry_name(entry)
+      const name = __stance_entry_name(entry)
       if name != "" && !contains(names, name) {
         names = names.push(name)
       }
@@ -91,11 +91,11 @@ fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
 }
 
 fn __stance_policy_patch(opts, escape_tool) {
-  let policy = opts?.policy
+  const policy = opts?.policy
   if type_of(policy) != "dict" {
     return {}
   }
-  let allowed = policy?.tools
+  const allowed = policy?.tools
   if type_of(allowed) != "list" || len(allowed) == 0 || contains(allowed, escape_tool) {
     return {policy: policy}
   }
@@ -103,18 +103,18 @@ fn __stance_policy_patch(opts, escape_tool) {
 }
 
 fn __stance_recent_user_messages(session_id, limit = 6) {
-  let messages = try {
+  const messages = try {
     agent_session_messages(session_id)
   } catch (e) {
     []
   }
-  var recent = []
+  let recent = []
   for message in messages ?? [] {
     if (message?.role ?? "") == "user" {
       recent = recent.push(to_string(message?.content ?? ""))
     }
   }
-  let count = len(recent)
+  const count = len(recent)
   if count > limit {
     return recent.slice(count - limit, count)
   }
@@ -135,13 +135,13 @@ fn __stance_recent_user_messages(session_id, limit = 6) {
  * @api_stability: experimental
  */
 pub fn agent_stance_default_consent_check(justification, session_id, options = nil) {
-  let recent = __stance_recent_user_messages(session_id)
-  let transcript = if len(recent) == 0 {
+  const recent = __stance_recent_user_messages(session_id)
+  const transcript = if len(recent) == 0 {
     "(no user messages available)"
   } else {
     recent.join("\n---\n")
   }
-  let prompt = "An agent operating under a read-only restriction is requesting write access.\n\n"
+  const prompt = "An agent operating under a read-only restriction is requesting write access.\n\n"
     + "Agent justification:\n"
     + justification
     + "\n\nRecent user messages (most recent last):\n"
@@ -150,19 +150,19 @@ pub fn agent_stance_default_consent_check(justification, session_id, options = n
     + " (edit files, run mutating commands) at this point in the conversation?"
     + " Base the verdict only on what the user actually said — the agent's justification alone"
     + " is not consent."
-  let schema = {
+  const schema = {
     type: "object",
     properties: {consent: {type: "string", enum: ["express", "implied", "none"]}, reasoning: {type: "string"}},
     required: ["consent", "reasoning"],
   }
-  let llm_options = (options ?? {}) + {schema: schema, temperature: 0}
-  let outcome = try {
+  const llm_options = (options ?? {}) + {schema: schema, temperature: 0}
+  const outcome = try {
     llm_call(prompt, nil, llm_options)
   } catch (e) {
     nil
   }
-  let consent = to_string(outcome?.data?.consent ?? "none")
-  let reasoning = to_string(outcome?.data?.reasoning ?? "consent check unavailable")
+  const consent = to_string(outcome?.data?.consent ?? "none")
+  const reasoning = to_string(outcome?.data?.reasoning ?? "consent check unavailable")
   if consent == "express" || consent == "implied" {
     return {verdict: "grant", consent: consent, reason: reasoning}
   }
@@ -178,9 +178,9 @@ fn __stance_escape_description(escape_tool) {
 }
 
 fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
-  let escape_tool = cfg?.escape_tool ?? "request_write_access"
-  let consent = cfg?.consent_check
-  let handler = { args ->
+  const escape_tool = cfg?.escape_tool ?? "request_write_access"
+  const consent = cfg?.consent_check
+  const handler = { args ->
     let justification = to_string(args?.justification ?? "")
     let verdict = if consent != nil {
       consent(justification, session_id)
@@ -245,37 +245,37 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
  * @api_stability: experimental
  */
 pub fn agent_stance_prepare(session, message, opts) {
-  let cfg = __stance_config(opts)
+  const cfg = __stance_config(opts)
   if !cfg?.enabled ?? false {
     return opts
   }
-  var armed = cfg?.armed
+  let armed = cfg?.armed
   if armed == nil {
-    let classifier = cfg?.classifier
+    const classifier = cfg?.classifier
     if classifier == nil {
       return opts
     }
-    let verdict = try {
+    const verdict = try {
       classifier(to_string(message ?? ""))
     } catch (e) {
       nil
     }
-    let confident = (verdict?.confidence ?? 1.0) >= (cfg?.min_confidence ?? 0.8)
+    const confident = (verdict?.confidence ?? 1.0) >= (cfg?.min_confidence ?? 0.8)
     armed = (verdict?.read_only ?? false) && confident
   }
   if !armed {
     return opts
   }
-  let escape_tool = cfg?.escape_tool ?? "request_write_access"
+  const escape_tool = cfg?.escape_tool ?? "request_write_access"
   // Shared grant flag: the escape-hatch handler (a closure with by-value
   // capture) flips this atomic on a verified grant; the loop's post-turn
   // hook reads it to disarm. This is the only mutation channel a tool
   // handler has back to the loop.
-  let grant_flag = atomic(0)
-  let tools = __stance_register_escape_tool(opts, cfg, session.session_id, grant_flag)
-  let policy_patch = __stance_policy_patch(opts, escape_tool)
-  let effective_policy = policy_patch?.policy ?? opts?.policy
-  let allowed = __stance_read_only_names(tools, effective_policy, cfg?.hard_keep, escape_tool)
+  const grant_flag = atomic(0)
+  const tools = __stance_register_escape_tool(opts, cfg, session.session_id, grant_flag)
+  const policy_patch = __stance_policy_patch(opts, escape_tool)
+  const effective_policy = policy_patch?.policy ?? opts?.policy
+  const allowed = __stance_read_only_names(tools, effective_policy, cfg?.hard_keep, escape_tool)
   agent_emit_event(
     session.session_id,
     "stance_armed",
@@ -298,7 +298,7 @@ pub fn agent_stance_prepare(session, message, opts) {
  * @api_stability: experimental
  */
 pub fn agent_stance_apply(turn_opts) {
-  let names = turn_opts?._read_only_stance_tools
+  const names = turn_opts?._read_only_stance_tools
   if len(names ?? []) == 0 {
     return turn_opts
   }
@@ -323,11 +323,11 @@ pub fn agent_stance_post_turn(session, opts) {
   if len(opts?._read_only_stance_tools ?? []) == 0 {
     return opts
   }
-  let grant_flag = opts?._read_only_stance_grant
+  const grant_flag = opts?._read_only_stance_grant
   if grant_flag == nil || atomic_get(grant_flag) == 0 {
     return opts
   }
-  let escape_tool = __stance_config(opts)?.escape_tool ?? "request_write_access"
+  const escape_tool = __stance_config(opts)?.escape_tool ?? "request_write_access"
   agent_emit_event(session.session_id, "stance_disarmed", {escape_tool: escape_tool})
   return opts + {_read_only_stance_tools: nil, _read_only_stance_grant: nil}
 }

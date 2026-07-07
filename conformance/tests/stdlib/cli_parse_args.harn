@@ -4,7 +4,7 @@
 // required-arg validation, and unknown-flag passthrough via `_extras`.
 import { help_text, parse_args } from "std/cli"
 
-let spec = [
+const spec = [
   {kind: "flag", name: "dry_run", flags: ["--dry-run"]},
   {kind: "flag", name: "verbose", flags: ["--verbose", "-v"]},
   {kind: "option", name: "model", flags: ["--model", "-m"], default: "claude"},
@@ -17,7 +17,7 @@ let spec = [
 ]
 
 pipeline default() {
-  let one = parse_args(
+  const one = parse_args(
     [
       "--dry-run",
       "-v",
@@ -49,15 +49,15 @@ pipeline default() {
   __io_println(one._positional)
   __io_println(one._help)
   __io_println(len(one._errors))
-  let two = parse_args(["--unknown-flag", "--", "--max", "raw"], spec)
+  const two = parse_args(["--unknown-flag", "--", "--max", "raw"], spec)
   __io_println(two.dry_run)
   __io_println(two.max)
   __io_println(two._extras)
   __io_println(two._positional)
   __io_println(two.target)
-  let help = parse_args(["--help"], spec)
+  const help = parse_args(["--help"], spec)
   __io_println(help._help)
-  let with_errors = parse_args(["--max", "not-an-int"], spec)
+  const with_errors = parse_args(["--max", "not-an-int"], spec)
   __io_println(len(with_errors._errors) > 0)
   __io_println(starts_with(help_text(spec, "demo"), "Usage: demo"))
 }

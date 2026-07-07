@@ -1,9 +1,9 @@
 pipeline test(task) {
-  let held = sync_gate_acquire("runner", 1)
-  let blocked = sync_gate_acquire("runner", 1, 0)
+  const held = sync_gate_acquire("runner", 1)
+  const blocked = sync_gate_acquire("runner", 1, 0)
   __io_println(blocked == nil)
   sync_release(held)
-  let metrics = sync_metrics("gate", "runner")
+  const metrics = sync_metrics("gate", "runner")
   __io_println(metrics?.acquisition_count)
   __io_println(metrics?.timeout_count)
   __io_println(metrics?.current_held)

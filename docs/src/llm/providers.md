@@ -310,7 +310,7 @@ The provider support table is generated from
 capability surface without carrying vendor-specific knowledge:
 
 ```harn
-let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   native_tools: true, text_tool_wire_format_supported: true,
 //   preferred_tool_format: "native", tool_mode_parity: "unknown",
@@ -617,7 +617,7 @@ mcp_servers = []
 Provider-specific call overrides use the provider name as the option key:
 
 ```harn
-let answer = llm_call("Summarize the current workspace", nil, {
+const answer = llm_call("Summarize the current workspace", nil, {
   provider: "codex_acp",
   model: "default",
   codex_acp: {
@@ -844,7 +844,7 @@ Or in code:
 
 ```harn
 llm_rate_limit("anthropic", {rpm: 60, tpm: 250000})
-let active = llm_rate_limit("anthropic", {details: true})
+const active = llm_rate_limit("anthropic", {details: true})
 ```
 
 The limiter uses a sliding-window budget and pauses before sending requests

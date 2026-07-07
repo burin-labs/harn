@@ -2,9 +2,9 @@ import { agent_command_tools } from "std/agent/host_tools"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
-  let root = path_join(harness.fs.temp_dir(), "harn-host-tools-loop-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-host-tools-loop-" + uuid())
   harness.fs.mkdir(root, true)
-  let tools = agent_command_tools(
+  const tools = agent_command_tools(
     nil,
     {root: root, cwd: root, max_inline_bytes: 4, allow_argv_prefixes: [["sh", "-c"]]},
   )
@@ -23,7 +23,7 @@ pipeline main() {
       llm_text("Saw the command result."),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Run the command and report back.",
         nil,
         {
@@ -36,12 +36,12 @@ pipeline main() {
         },
       )
       __io_println(result.status)
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(len(calls) >= 2)
       __io_println(!contains(calls[0].system, "##DONE##"))
       __io_println(!contains(calls[1].system, "##DONE##"))
       __io_println(contains(calls[0].system, "no more tool calls"))
-      let second_turn = json_stringify(calls[1].messages)
+      const second_turn = json_stringify(calls[1].messages)
       __io_println(contains(second_turn, "byte_count"))
       __io_println(contains(second_turn, "tool"))
     },

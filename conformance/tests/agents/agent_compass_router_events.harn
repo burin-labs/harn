@@ -2,7 +2,7 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 fn compass_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "str_replace",
@@ -27,8 +27,8 @@ fn compass_tools() {
 }
 
 pipeline default() {
-  let session = "compass-router-" + uuid()
-  let captured = agent_capture_events(
+  const session = "compass-router-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_dispatch_tool_call(
       {
@@ -40,8 +40,8 @@ pipeline default() {
       {session_id: session, persona: "fixer", compass: {mode: "rewrite"}},
     ) },
   )
-  let events = captured.events.filter({ event -> event.type == "compass_routing_decision" })
-  let event = events[0]
+  const events = captured.events.filter({ event -> event.type == "compass_routing_decision" })
+  const event = events[0]
   __io_println(captured.result.tool_name)
   __io_println(captured.result.ok)
   __io_println(len(events))

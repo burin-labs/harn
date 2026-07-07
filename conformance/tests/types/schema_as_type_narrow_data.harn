@@ -6,13 +6,13 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
     { ->
-      let r = llm_call(
+      const r = llm_call(
         "Grade this",
         nil,
         {provider: "mock", output_schema: GraderOut, output_validation: "error", response_format: "json"},
       )
-      let v: "pass" | "fail" = r.data.verdict
-      let s: string = r.data.summary
+      const v: "pass" | "fail" = r.data.verdict
+      const s: string = r.data.summary
       __io_println(v)
       __io_println(s)
     },

@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let counter = atomic(0)
+  const counter = atomic(0)
   // The `scope { }` nursery joins every task spawned inside it before the
   // block exits, so both increments are observable afterwards.
   scope {

@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools() {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "lookup",
@@ -24,7 +24,7 @@ pipeline main() {
       llm_text("##DONE##"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Use the tool, then finish.",
         nil,
         {
@@ -43,7 +43,7 @@ pipeline main() {
       __io_println(result.llm.iterations)
       __io_println(result.text)
       __io_println(!contains(result.text, "##DONE##"))
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(contains(calls[0].system, "##DONE##"))
       __io_println(contains(calls[1].system, "##DONE##"))
       __io_println(contains(calls[2].system, "##DONE##"))

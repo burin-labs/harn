@@ -3,8 +3,8 @@
 import { parallel_judge } from "std/llm/ensemble"
 
 pipeline default() {
-  let judge_fn = { item -> {verdict: "score-" + to_string(item)} }
-  let results = parallel_judge([1, 2, 3, 4, 5, 6], judge_fn, {max_concurrent: 2})
+  const judge_fn = { item -> {verdict: "score-" + to_string(item)} }
+  const results = parallel_judge([1, 2, 3, 4, 5, 6], judge_fn, {max_concurrent: 2})
   __io_println(len(results))
   __io_println(results[0].item)
   __io_println(results[0].verdict.verdict)

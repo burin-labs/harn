@@ -1,5 +1,5 @@
 fn noisy_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "observe",
@@ -10,7 +10,7 @@ fn noisy_tools() {
 }
 
 pipeline default() {
-  let result = agent_loop(
+  const result = agent_loop(
     "Keep observing until the iteration budget is exhausted.",
     "You are a compacting test agent.",
     {
@@ -23,7 +23,7 @@ pipeline default() {
       compaction: {strategy: "hybrid", keep_last_n: 10},
     },
   )
-  let events = transcript_events_by_kind(result?.transcript, "compaction")
+  const events = transcript_events_by_kind(result?.transcript, "compaction")
   __io_println(result?.llm?.iterations == 100)
   __io_println(result?.status == "budget_exhausted")
   __io_println(result?.trace?.compactions > 0)

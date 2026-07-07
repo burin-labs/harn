@@ -3,7 +3,7 @@
 // out to `harn workflow ...` and are covered by parity runs).
 import "../check_docs_workflow_quickstart.harn"
 
-let DOC = {
+const DOC = {
   valid: true,
   bundle_id: "quickstart-minimal",
   errors: [],
@@ -57,14 +57,14 @@ pipeline test_check_empty_list(task) {
 
 @test
 pipeline test_check_mismatch_reports_actual(task) {
-  let res = json_path_check(DOC, "executed_nodes[0].node_id", "\"notify\"")
+  const res = json_path_check(DOC, "executed_nodes[0].node_id", "\"notify\"")
   assert_eq(res.ok, false)
   assert_eq(res.actual, "\"summarize\"")
 }
 
 @test
 pipeline test_check_missing_path_not_ok(task) {
-  let res = json_path_check(DOC, "missing[0].x", "\"y\"")
+  const res = json_path_check(DOC, "missing[0].x", "\"y\"")
   assert_eq(res.ok, false)
   assert_eq(res.actual.starts_with("<missing path:"), true)
 }

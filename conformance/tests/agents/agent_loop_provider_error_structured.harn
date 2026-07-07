@@ -1,7 +1,7 @@
 import { with_llm_script } from "std/testing"
 
 fn lookup_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -28,8 +28,8 @@ pipeline main() {
       },
     ],
     { ->
-      let transcript_dir = path_join(harness.fs.temp_dir(), "harn-agent-loop-provider-error-" + uuid())
-      let result = agent_loop(
+      const transcript_dir = path_join(harness.fs.temp_dir(), "harn-agent-loop-provider-error-" + uuid())
+      const result = agent_loop(
         "Inspect evidence and finish.",
         nil,
         {
@@ -56,7 +56,7 @@ pipeline main() {
       __io_println(result.tools.successful[0])
       __io_println(result?.missing_required_tools == nil)
       __io_println(contains(json_stringify(result.transcript), "agent_loop_terminal_error"))
-      let sidecar = harness.fs.read_text(path_join(transcript_dir, "llm_transcript.jsonl"))
+      const sidecar = harness.fs.read_text(path_join(transcript_dir, "llm_transcript.jsonl"))
       __io_println(contains(sidecar, "\"type\":\"provider_call_error\""))
       __io_println(contains(sidecar, "\"category\":\"generic\""))
       __io_println(contains(sidecar, "\"reason\":\"invalid_request\""))

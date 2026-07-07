@@ -1,10 +1,10 @@
 import { parse, parser } from "std/cli/argparse"
 
 fn main(harness: Harness) {
-  let spec = parser(
+  const spec = parser(
     {name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model", multi: true}]},
   )
-  let r = parse(spec, ["-m", "a", "--model", "b", "--model=c"])
+  const r = parse(spec, ["-m", "a", "--model", "b", "--model=c"])
   harness.stdio.println(len(r.ok.model))
   for m in r.ok.model {
     harness.stdio.println(m)

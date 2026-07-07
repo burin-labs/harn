@@ -1,8 +1,8 @@
 fn main(harness: Harness) {
-  let procs = harness.system.processes()
+  const procs = harness.system.processes()
   harness.stdio.println(type_of(procs))
   harness.stdio.println(len(procs) >= 1)
-  let self_proc = procs[0]
+  const self_proc = procs[0]
   harness.stdio.println(self_proc["is_harn_owned"])
   harness.stdio.println(self_proc["is_self"])
   harness.stdio.println(self_proc["name"])

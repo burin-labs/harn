@@ -1,7 +1,7 @@
 pipeline default() {
   // Use llm_stream with mock provider to test channel iteration
-  let stream = llm_stream("Say hello", nil, {provider: "mock"})
-  var chunks = []
+  const stream = llm_stream("Say hello", nil, {provider: "mock"})
+  let chunks = []
   for chunk in stream {
     chunks = chunks + [chunk]
   }

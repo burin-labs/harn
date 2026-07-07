@@ -3,14 +3,14 @@
 import { with_fallback } from "std/llm/handlers"
 
 pipeline default() {
-  let a = { _call -> {ok: false, status: "auth", error: "no key"} }
-  let b = { _call -> {ok: false, status: "transient", error: "blip"} }
-  let c = { _call -> {
+  const a = { _call -> {ok: false, status: "auth", error: "no key"} }
+  const b = { _call -> {ok: false, status: "transient", error: "blip"} }
+  const c = { _call -> {
     ok: true,
     value: {text: "C-text", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
   } }
-  let caller = with_fallback([a, b, c])
-  let env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const caller = with_fallback([a, b, c])
+  const env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(env.ok)
   __io_println(env.value.text)
   __io_println(env.fallback_index)

@@ -21,28 +21,28 @@ import {
 } from "std/cli/render"
 
 fn __percent(value) -> string {
-  let number = (to_float(value) ?? 0.0) * 100.0
+  const number = (to_float(value) ?? 0.0) * 100.0
   return to_string(number) + "%"
 }
 
 fn __render_human(harness: Harness, report: dict) {
-  let base = safe_dict(report["base"])
-  let request = safe_dict(report["request"])
-  let thresholds = safe_dict(report["thresholds"])
-  let stats = safe_dict(report["stats"])
-  let tool_calls = safe_dict(stats["tool_calls"])
-  let config = safe_dict(report["config"])
-  let breakdown = safe_dict(report["breakdown"])
-  let longest = safe_list(report["longest"])
-  let problems = safe_list(report["problem_examples"])
-  let skipped = safe_list(report["skipped_records"])
-  let warnings = safe_list(report["warnings"])
-  let errors = safe_list(report["errors"])
-  let base_id = safe_string(base["id"], "")
-  let provider = safe_string(base["provider"], "")
+  const base = safe_dict(report["base"])
+  const request = safe_dict(report["request"])
+  const thresholds = safe_dict(report["thresholds"])
+  const stats = safe_dict(report["stats"])
+  const tool_calls = safe_dict(stats["tool_calls"])
+  const config = safe_dict(report["config"])
+  const breakdown = safe_dict(report["breakdown"])
+  const longest = safe_list(report["longest"])
+  const problems = safe_list(report["problem_examples"])
+  const skipped = safe_list(report["skipped_records"])
+  const warnings = safe_list(report["warnings"])
+  const errors = safe_list(report["errors"])
+  const base_id = safe_string(base["id"], "")
+  const provider = safe_string(base["provider"], "")
   harness.stdio.println("LoRA preflight for " + base_id + " via " + provider)
   harness.stdio.println("  corpus: " + safe_string(request["corpus"], ""))
-  let config_path = safe_string(config["path"], "")
+  const config_path = safe_string(config["path"], "")
   if config_path != "" {
     harness.stdio.println("  config: " + config_path)
   }
@@ -54,7 +54,7 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_string(request["requested_tool_format"], "auto")
       + ")",
   )
-  let correction = safe_string(request["tool_format_correction"], "")
+  const correction = safe_string(request["tool_format_correction"], "")
   if correction != "" {
     harness.stdio.println("  tool format correction: " + correction)
   }
@@ -78,7 +78,7 @@ fn __render_human(harness: Harness, report: dict) {
     .println("  minimum records: " + safe_int_string(thresholds["min_records"], "0"))
   harness.stdio
     .println("  minimum tool-call share: " + __percent(thresholds["min_tool_call_share"]))
-  let marker = safe_string(thresholds["done_marker"], "")
+  const marker = safe_string(thresholds["done_marker"], "")
   if marker != "" {
     harness.stdio.println("  required done marker: " + marker)
   }
@@ -122,7 +122,7 @@ fn __render_human(harness: Harness, report: dict) {
   if longest.count > 0 {
     harness.stdio.println("  longest examples:")
     for example in longest {
-      let item = safe_dict(example)
+      const item = safe_dict(example)
       harness.stdio
         .println(
         "    - "
@@ -141,7 +141,7 @@ fn __render_human(harness: Harness, report: dict) {
   if problems.count > 0 {
     harness.stdio.println("  problem examples:")
     for problem in problems {
-      let item = safe_dict(problem)
+      const item = safe_dict(problem)
       harness.stdio
         .println(
         "    - "
@@ -157,7 +157,7 @@ fn __render_human(harness: Harness, report: dict) {
   }
   print_list(harness, "warnings", warnings)
   print_list(harness, "errors", errors)
-  let result = if safe_bool(report["ok"], false) {
+  const result = if safe_bool(report["ok"], false) {
     "PASS"
   } else {
     "FAIL"
@@ -166,8 +166,8 @@ fn __render_human(harness: Harness, report: dict) {
 }
 
 fn __render_json(report: dict) -> string {
-  let ok = safe_bool(report["ok"], false)
-  let envelope = if ok {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
     cli_json_envelope({schema_version: 1, ok: true, data: report})
   } else {
     cli_json_envelope(
@@ -186,21 +186,21 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON not set")
     return 70
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse LoRA preflight payload: " + to_string(e))
     return 70
   }
-  let ok = safe_bool(report["ok"], false)
-  let request = safe_dict(report["request"])
-  let check = safe_bool(request["check"], false)
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const ok = safe_bool(report["ok"], false)
+  const request = safe_dict(report["request"])
+  const check = safe_bool(request["check"], false)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {

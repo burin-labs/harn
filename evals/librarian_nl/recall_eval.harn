@@ -31,7 +31,7 @@ fn _row_value(row, key) {
   if type_of(row) != "dict" {
     return ""
   }
-  let v = row[key]
+  const v = row[key]
   if v == nil {
     return ""
   }
@@ -39,9 +39,9 @@ fn _row_value(row, key) {
 }
 
 fn _hits(rows, expected, match_key) {
-  var n = 0
+  let n = 0
   for want in expected {
-    var hit = false
+    let hit = false
     for r in rows {
       if !hit {
         if _row_value(r, match_key) == want {
@@ -57,34 +57,34 @@ fn _hits(rows, expected, match_key) {
 }
 
 fn _percentile(sorted_ms, p) {
-  let n = len(sorted_ms)
+  const n = len(sorted_ms)
   if n == 0 {
     return 0
   }
-  let idx = to_int(to_float(n - 1) * p)
+  const idx = to_int(to_float(n - 1) * p)
   return sorted_ms[idx]
 }
 
 pipeline run(task) {
-  let _ = hostlib_code_index_rebuild({root: CORPUS_ROOT})
-  let fixture = json_parse(harness.fs.read_text(FIXTURE_PATH))
-  let questions = fixture.questions
-  var per_question = []
-  var latencies = []
-  var total_expected = 0
-  var total_found = 0
-  var fallback_count = 0
-  var cache_hit_count = 0
+  const _ = hostlib_code_index_rebuild({root: CORPUS_ROOT})
+  const fixture = json_parse(harness.fs.read_text(FIXTURE_PATH))
+  const questions = fixture.questions
+  let per_question = []
+  let latencies = []
+  let total_expected = 0
+  let total_found = 0
+  let fallback_count = 0
+  let cache_hit_count = 0
   for q in questions {
     llm_mock_push_scope()
-    let mock_text = "{\"cypher\": \"" + q.cypher + "\"}"
+    const mock_text = "{\"cypher\": \"" + q.cypher + "\"}"
     llm_mock({data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text})
-    let r1 = code_librarian_query_nl(q.nl)
+    const r1 = code_librarian_query_nl(q.nl)
     // Second invocation tests cache; the cache key is the NL text and
     // the namespace TTL is 5m so this hits.
-    let r2 = code_librarian_query_nl(q.nl)
+    const r2 = code_librarian_query_nl(q.nl)
     llm_mock_pop_scope()
-    let hits = _hits(r1.rows, q.expected, q.match_key)
+    const hits = _hits(r1.rows, q.expected, q.match_key)
     total_expected = total_expected + len(q.expected)
     total_found = total_found + hits
     if r1.path == "mcts" {
@@ -109,18 +109,18 @@ pipeline run(task) {
       },
     ]
   }
-  let sorted_ms = latencies.sort()
-  let p50 = _percentile(sorted_ms, 0.5)
-  let p95 = _percentile(sorted_ms, 0.95)
-  let p99 = _percentile(sorted_ms, 0.99)
-  var max_ms = 0
+  const sorted_ms = latencies.sort()
+  const p50 = _percentile(sorted_ms, 0.5)
+  const p95 = _percentile(sorted_ms, 0.95)
+  const p99 = _percentile(sorted_ms, 0.99)
+  let max_ms = 0
   for ms in sorted_ms {
     max_ms = max(max_ms, ms)
   }
-  let recall = to_float(total_found) / to_float(total_expected)
-  let fallback_rate = to_float(fallback_count) / to_float(len(questions))
-  let cache_hit_ratio = to_float(cache_hit_count) / to_float(len(questions))
-  let report = {
+  const recall = to_float(total_found) / to_float(total_expected)
+  const fallback_rate = to_float(fallback_count) / to_float(len(questions))
+  const cache_hit_ratio = to_float(cache_hit_count) / to_float(len(questions))
+  const report = {
     questions: per_question,
     summary: {
       cache_hit_ratio: cache_hit_ratio,

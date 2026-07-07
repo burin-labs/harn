@@ -1,7 +1,7 @@
 pipeline test(task) {
   // `parallel each` shares `parallel`'s fail-fast semantics: an erroring
   // branch cancels in-flight siblings and queued branches never start.
-  let survived = atomic(0)
+  const survived = atomic(0)
   try {
     parallel each ["fail", "slow"] { item ->
       if item == "fail" {

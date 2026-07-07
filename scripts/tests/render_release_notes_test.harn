@@ -3,7 +3,7 @@
 // CHANGELOG.md, git, or the environment.
 import "../render_release_notes.harn"
 
-let SAMPLE = "# Changelog\n\n## v0.8.71\n\n### Added\n\n- thing one\n- thing two\n\n## v0.8.70\n\nolder body\n\n## v0.8.69\n\noldest body\n"
+const SAMPLE = "# Changelog\n\n## v0.8.71\n\n### Added\n\n- thing one\n- thing two\n\n## v0.8.70\n\nolder body\n\n## v0.8.69\n\noldest body\n"
 
 @test
 pipeline test_normalize_version(task) {
@@ -39,7 +39,7 @@ pipeline test_extract_section_last(task) {
 
 @test
 pipeline test_extract_section_missing_throws(task) {
-  let r = try {
+  const r = try {
     extract_section(SAMPLE, "9.9.9")
   } catch (_) {
     "caught"
@@ -49,7 +49,7 @@ pipeline test_extract_section_missing_throws(task) {
 
 @test
 pipeline test_previous_version(task) {
-  let vs = ["0.8.71", "0.8.70", "0.8.69"]
+  const vs = ["0.8.71", "0.8.70", "0.8.69"]
   assert_eq(previous_version(vs, "0.8.71"), "0.8.70")
   assert_eq(previous_version(vs, "0.8.70"), "0.8.69")
   assert_eq(previous_version(vs, "0.8.69"), nil)
@@ -66,28 +66,28 @@ pipeline test_parse_remote(task) {
 
 @test
 pipeline test_render_notes_with_link(task) {
-  let got = render_notes("body text", "owner/name", "0.8.70", "0.8.71")
-  let want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n\n**Full Changelog**: https://github.com/owner/name/compare/v0.8.70...v0.8.71\n"
+  const got = render_notes("body text", "owner/name", "0.8.70", "0.8.71")
+  const want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n\n**Full Changelog**: https://github.com/owner/name/compare/v0.8.70...v0.8.71\n"
   assert_eq(got, want)
 }
 
 @test
 pipeline test_render_notes_no_link_when_no_repo(task) {
-  let got = render_notes("body text", nil, "0.8.70", "0.8.71")
-  let want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
+  const got = render_notes("body text", nil, "0.8.70", "0.8.71")
+  const want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
   assert_eq(got, want)
 }
 
 @test
 pipeline test_render_notes_no_link_when_no_prev(task) {
-  let got = render_notes("body text", "owner/name", nil, "0.8.0")
-  let want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
+  const got = render_notes("body text", "owner/name", nil, "0.8.0")
+  const want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
   assert_eq(got, want)
 }
 
 @test
 pipeline test_flag_value(task) {
-  let args = ["--version", "0.8.71", "--repo=owner/name"]
+  const args = ["--version", "0.8.71", "--repo=owner/name"]
   assert_eq(flag_value(args, "--version"), "0.8.71")
   assert_eq(flag_value(args, "--repo"), "owner/name")
   assert_eq(flag_value(args, "--output"), nil)
@@ -95,7 +95,7 @@ pipeline test_flag_value(task) {
 
 @test
 pipeline test_flag_value_equals_form(task) {
-  let args = ["--version=v1.2.3", "--output=/tmp/notes.md"]
+  const args = ["--version=v1.2.3", "--output=/tmp/notes.md"]
   assert_eq(flag_value(args, "--version"), "v1.2.3")
   assert_eq(flag_value(args, "--output"), "/tmp/notes.md")
 }

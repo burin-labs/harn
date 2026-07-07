@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let x = "b"
+  const x = "b"
   match x {
     "a" -> { log("first") }
     "b" -> { log("second") }

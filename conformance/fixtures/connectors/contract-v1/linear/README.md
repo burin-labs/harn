@@ -45,7 +45,7 @@ trigger triage on linear {
     events: ["Issue"],
   }
   on event {
-    let raw = event.provider_payload.raw
+    const raw = event.provider_payload.raw
     if raw.action == "create" && raw.data.priority == 1 {
       linear_connector.call("graphql", {
         query: """

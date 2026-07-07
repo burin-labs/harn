@@ -52,28 +52,28 @@ fn __guardrails_validate_llm_config(cfg) {
   if type_of(cfg) != "dict" {
     throw "llm_risk_classifier: config must be a dict"
   }
-  let model = cfg?.model ?? ""
+  const model = cfg?.model ?? ""
   if type_of(model) != "string" || len(model) == 0 {
     throw "llm_risk_classifier: model must be a non-empty string"
   }
-  let threshold = cfg?.threshold ?? 0.7
-  let threshold_kind = type_of(threshold)
+  const threshold = cfg?.threshold ?? 0.7
+  const threshold_kind = type_of(threshold)
   if threshold_kind != "float" && threshold_kind != "int" {
     throw "llm_risk_classifier: threshold must be a number"
   }
-  let threshold_f = to_float(threshold)
+  const threshold_f = to_float(threshold)
   if threshold_f < 0.0 || threshold_f > 1.0 {
     throw "llm_risk_classifier: threshold must be between 0 and 1"
   }
-  let meta_prompt = cfg?.meta_prompt ?? __guardrails_default_meta_prompt()
+  const meta_prompt = cfg?.meta_prompt ?? __guardrails_default_meta_prompt()
   if type_of(meta_prompt) != "string" {
     throw "llm_risk_classifier: meta_prompt must be a string"
   }
-  let provider = cfg?.provider ?? nil
+  const provider = cfg?.provider ?? nil
   if provider != nil && type_of(provider) != "string" {
     throw "llm_risk_classifier: provider must be a string"
   }
-  let on_high_risk = cfg?.on_high_risk ?? "block"
+  const on_high_risk = cfg?.on_high_risk ?? "block"
   if on_high_risk != "block" && on_high_risk != "warn" {
     throw "llm_risk_classifier: on_high_risk must be \"block\" or \"warn\""
   }
@@ -91,7 +91,7 @@ fn __guardrails_classifier_options(classifier_cfg) {
   /* Merge order: caller llm_options first so they can override; then
    * pin `model` (and `provider` when supplied) so the classifier
    * never silently falls back to the default agent model. */
-  let merged = classifier_cfg.llm_options + {model: classifier_cfg.model}
+  const merged = classifier_cfg.llm_options + {model: classifier_cfg.model}
   if classifier_cfg.provider != nil {
     return merged + {provider: classifier_cfg.provider}
   }
@@ -106,7 +106,7 @@ fn __guardrails_extract_text(envelope) -> string {
 }
 
 fn __guardrails_parse_verdict(text) {
-  let trimmed = trim(to_string(text))
+  const trimmed = trim(to_string(text))
   if len(trimmed) == 0 {
     return {
       verdict: "allow",
@@ -116,7 +116,7 @@ fn __guardrails_parse_verdict(text) {
       error: "empty",
     }
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(trimmed)
   }
   if is_err(parsed) {
@@ -128,7 +128,7 @@ fn __guardrails_parse_verdict(text) {
       error: to_string(unwrap_err(parsed)),
     }
   }
-  let value = unwrap(parsed)
+  const value = unwrap(parsed)
   if type_of(value) != "dict" {
     return {
       verdict: "allow",
@@ -138,7 +138,7 @@ fn __guardrails_parse_verdict(text) {
       error: "non-dict",
     }
   }
-  let verdict = to_string(value?.verdict ?? "allow")
+  const verdict = to_string(value?.verdict ?? "allow")
   if verdict != "allow" && verdict != "warn" && verdict != "block" {
     return {
       verdict: "allow",
@@ -148,9 +148,9 @@ fn __guardrails_parse_verdict(text) {
       error: "bad-verdict",
     }
   }
-  let confidence_raw = value?.confidence ?? 0.0
-  let confidence_kind = type_of(confidence_raw)
-  let confidence = if confidence_kind == "float" || confidence_kind == "int" {
+  const confidence_raw = value?.confidence ?? 0.0
+  const confidence_kind = type_of(confidence_raw)
+  const confidence = if confidence_kind == "float" || confidence_kind == "int" {
     to_float(confidence_raw)
   } else {
     0.0
@@ -182,16 +182,16 @@ fn __guardrails_parse_verdict(text) {
  * @example: prompt_injection_scanner({on_hit: "warn"})
  */
 pub fn prompt_injection_scanner(opts) -> string {
-  let resolved = opts ?? {}
+  const resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "prompt_injection_scanner: opts must be a dict or nil"
   }
-  let config = {
+  const config = {
     kind: "prompt_injection_signature",
     on_hit: resolved?.on_hit ?? "block",
     applies_to: resolved?.applies_to ?? [],
   }
-  let with_id = if resolved?.id == nil {
+  const with_id = if resolved?.id == nil {
     config
   } else {
     config + {id: to_string(resolved.id)}
@@ -229,8 +229,8 @@ pub fn prompt_injection_scanner(opts) -> string {
  * @example: llm_risk_classifier({model: "haiku", threshold: 0.8})
  */
 pub fn llm_risk_classifier(opts) -> string {
-  let cfg = __guardrails_validate_llm_config(opts ?? {})
-  let scan_fn = { payload, context ->
+  const cfg = __guardrails_validate_llm_config(opts ?? {})
+  const scan_fn = { payload, context ->
     let payload_text = json_stringify(payload)
     let envelope = llm_call_safe(payload_text, cfg.meta_prompt, __guardrails_classifier_options(cfg))
     let raw_text = __guardrails_extract_text(envelope)
@@ -261,9 +261,9 @@ pub fn llm_risk_classifier(opts) -> string {
         + to_string(verdict.reason ?? ""),
     }
   }
-  let resolved = opts ?? {}
-  let config = {kind: "custom", scan_fn: scan_fn, applies_to: resolved?.applies_to ?? []}
-  let with_id = if resolved?.id == nil {
+  const resolved = opts ?? {}
+  const config = {kind: "custom", scan_fn: scan_fn, applies_to: resolved?.applies_to ?? []}
+  const with_id = if resolved?.id == nil {
     config + {id: "llm_risk_classifier:" + cfg.model}
   } else {
     config + {id: to_string(resolved.id)}
@@ -288,16 +288,16 @@ pub fn llm_risk_classifier(opts) -> string {
  * @example: register_guardrail({scan_fn: my_scanner})
  */
 pub fn register_guardrail(opts) -> string {
-  let resolved = opts ?? {}
+  const resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "register_guardrail: opts must be a dict"
   }
-  let scan_fn = resolved?.scan_fn
+  const scan_fn = resolved?.scan_fn
   if scan_fn == nil {
     throw "register_guardrail: scan_fn is required"
   }
-  let config = {kind: "custom", scan_fn: scan_fn, applies_to: resolved?.applies_to ?? []}
-  let with_id = if resolved?.id == nil {
+  const config = {kind: "custom", scan_fn: scan_fn, applies_to: resolved?.applies_to ?? []}
+  const with_id = if resolved?.id == nil {
     config
   } else {
     config + {id: to_string(resolved.id)}

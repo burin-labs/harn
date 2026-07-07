@@ -493,7 +493,7 @@ pub fn build_prompt(task) {
             r#"
 pipeline default(task) {
   llm_mock({text: "done"})
-  let result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
+  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
   __io_println(result.text)
 }
 "#,
@@ -571,7 +571,7 @@ pub fn build_prompt(task) {
             &script,
             r#"
 pipeline default(task) {
-  let result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
+  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
   __io_println(result.text)
 }
 "#,
@@ -612,12 +612,12 @@ pipeline default(task) {
             &script,
             r#"
 pipeline default(task) {
-  let first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
+  const first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
   __io_println(first.ok)
   __io_println(first.error.status)
   __io_println(first.error.kind)
   __io_println(first.error.reason)
-  let second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
+  const second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
   __io_println(second.text)
 }
 "#,

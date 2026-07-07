@@ -74,8 +74,8 @@ import "std/triggers"
 import { post_message } from "std/connectors/slack"
 
 pub fn on_review(event: TriggerEvent) -> dict {
-  let body = read_file("README.md")
-  let prompt = render_prompt("prompts/review.harn.prompt", {body: body})
+  const body = read_file("README.md")
+  const prompt = render_prompt("prompts/review.harn.prompt", {body: body})
   http_post("https://example.test/hook", prompt)
   return {ok: true}
 }

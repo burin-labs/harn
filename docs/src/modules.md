@@ -235,9 +235,9 @@ output before placing it into prompt context:
 ```harn
 import { single_line_or, truncate_middle } from "std/text"
 
-let long_output = "..."
-let label = single_line_or(" cargo\n test\t-p harn-vm ", "command")
-let summary = truncate_middle(long_output, 2000)
+const long_output = "..."
+const label = single_line_or(" cargo\n test\t-p harn-vm ", "command")
+const summary = truncate_middle(long_output, 2000)
 ```
 
 ### std/edit
@@ -458,7 +458,7 @@ log(softmax([1, 2, 3]))         // probabilities summing to 1
 log(cosine_similarity([1, 0], [1, 1])) // ~0.707
 log(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
 
-let grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
+const grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
 log(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
 ```
 
@@ -484,9 +484,9 @@ Options include `segments` (default `2`, clamped to `1..8`), `separator`
 ```harn
 import "std/slug"
 
-let run_name = random_slug({segments: 3})
-let stable = slug_from({repo: "harn", pr: 42}, {segments: 4, salt: "ci"})
-let id = slugify("Agent 007 / Fast Verify")
+const run_name = random_slug({segments: 3})
+const stable = slug_from({repo: "harn", pr: 42}, {segments: 4, salt: "ci"})
+const id = slugify("Agent 007 / Fast Verify")
 ```
 
 ### std/identity
@@ -507,13 +507,13 @@ surface adapters:
 import { actor_chain_format, actor_chain_report } from "std/identity"
 
 pipeline default() {
-  let chain = {
+  const chain = {
     sub: "user:owner",
     scopes: ["repo:read", "repo:write"],
     act: {sub: "agent:reviewer", scopes: ["repo:read"]},
   }
-  let report = actor_chain_report(chain)
-  let current = report.current
+  const report = actor_chain_report(chain)
+  const current = report.current
   require current != nil, "chain should have a current subject"
   log(current.subject)                    // "agent:reviewer"
   log(actor_chain_format(chain))          // "agent:reviewer for user:owner"
@@ -580,8 +580,8 @@ log(stem("/src/main.harn"))    // "main"
 log(is_absolute("/usr/bin"))   // true
 log(workspace_normalize("/packages/app/SKILL.md", cwd())) // "packages/app/SKILL.md"
 
-let files = list_files("src")
-let dirs = list_dirs(".")
+const files = list_files("src")
+const dirs = list_dirs(".")
 ```
 
 ### std/vision
@@ -596,7 +596,7 @@ builtin:
 ```harn
 import "std/vision"
 
-let structured = ocr("fixtures/ui.png")
+const structured = ocr("fixtures/ui.png")
 log(structured.text)
 log(structured.lines[0]?.text)
 log(structured.tokens[0]?.bbox.left)
@@ -619,19 +619,19 @@ JSON utility patterns:
 ```harn
 import "std/json"
 
-let data = safe_parse("{\"x\": 1}")   // {x: 1}, or nil on bad input
-let validator = stream_validator({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
-let status = validator.feed("{\"x\": 1}")  // JsonStreamStatus.Valid
-let parsed = validator.value()             // {x: 1}
+const data = safe_parse("{\"x\": 1}")   // {x: 1}, or nil on bad input
+const validator = stream_validator({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
+const status = validator.feed("{\"x\": 1}")  // JsonStreamStatus.Valid
+const parsed = validator.value()             // {x: 1}
 
 // std/json/stream_validate — plain-dict verdicts for streaming agents:
-let handle = stream_validate_create({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
-let r1 = stream_validate_chunk(handle, "{\"x\":")    // {verdict: "pending"}
-let r2 = stream_validate_chunk(handle, "1}")          // {verdict: "valid"}
-let r3 = stream_validate_finalize(handle)             // {verdict: "valid"}
-let merged = merge({a: 1}, {b: 2})    // {a: 1, b: 2}
-let subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
-let rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
+const handle = stream_validate_create({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
+const r1 = stream_validate_chunk(handle, "{\"x\":")    // {verdict: "pending"}
+const r2 = stream_validate_chunk(handle, "1}")          // {verdict: "valid"}
+const r3 = stream_validate_finalize(handle)             // {verdict: "valid"}
+const merged = merge({a: 1}, {b: 2})    // {a: 1, b: 2}
+const subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
+const rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
 ```
 
 ### std/ansi
@@ -659,7 +659,7 @@ escape output; otherwise let the auto policy decide.
 ```harn
 import { ansi_success, ansi_strip } from "std/ansi"
 
-let line = ansi_success("passed", {mode: "always"})
+const line = ansi_success("passed", {mode: "always"})
 log(ansi_strip(line)) // passed
 ```
 
@@ -973,7 +973,7 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 ```harn
 import { read_json, relative_path, write_json } from "std/fs"
 
-let path = path_join(temp_dir(), "report/data.json")
+const path = path_join(temp_dir(), "report/data.json")
 write_json(path, {status: "ok"}, {pretty: true})
 log(read_json(path).status)
 log(relative_path(temp_dir(), path))
@@ -1020,12 +1020,12 @@ import {
   run_artifacts_open,
 } from "std/run_artifacts"
 
-let run = run_artifacts_open("eval", {run_id: "smoke-001"})
+const run = run_artifacts_open("eval", {run_id: "smoke-001"})
 run_artifact_write_json(run, "facts.json", {status: "ok"}, {pretty: true})
 run_artifact_write_json(run, "agent-result.json", {summary: "complete"})
 
-let transcript = run_artifact_transcript_path(run)
-let reopened = run_artifacts_from_dir("eval", run.dir)
+const transcript = run_artifact_transcript_path(run)
+const reopened = run_artifacts_from_dir("eval", run.dir)
 log(reopened.paths.facts)
 log(transcript)
 ```
@@ -1089,7 +1089,7 @@ manager, or host:
 ```harn,ignore
 import { command_step } from "std/command"
 
-let step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
+const step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
   cwd: repo_root,
   capture: {max_inline_bytes: 12000},
   tail_bytes: 8000,
@@ -1121,12 +1121,12 @@ delegates retries and recovery metadata to `command_json_step`:
 ```harn,ignore
 import { command_json, command_json_step } from "std/command"
 
-let repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
   timeout_ms: 10000,
   capture: {max_inline_bytes: 65536},
 })
 
-let probe = command_json_step("read repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+const probe = command_json_step("read repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
   retry: {max_attempts: 2, delay_ms: 0},
 })
 ```
@@ -1138,7 +1138,7 @@ know about providers:
 ```harn,ignore
 import { command_json, command_try } from "std/command"
 
-let repo = command_try(
+const repo = command_try(
   [
     {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
     {source: "cli", run: fn() { return command_json(["gh", "api", "repos/burin-labs/harn"]) }},
@@ -1197,7 +1197,7 @@ and treats `$PAGER=cat` as print-only.
 ```harn
 import { page } from "std/tui"
 
-let result = page({
+const result = page({
   title: "Release audit",
   body: audit_markdown,
   format: "markdown",
@@ -1236,11 +1236,11 @@ describing what went wrong; the value is `opts.cancel_value` (or
 ```harn,ignore
 import { select_from } from "std/tui"
 
-let runs = [
+const runs = [
   {id: "r-001", label: "r-001 — 2 PRs queued"},
   {id: "r-002", label: "r-002 — verification flake"},
 ]
-let pick = select_from(runs, {prompt: "Pick a run", default_index: 0})
+const pick = select_from(runs, {prompt: "Pick a run", default_index: 0})
 if pick.ok {
   log("operator chose " + pick.value.id)
 }
@@ -1281,7 +1281,7 @@ participate in the existing Tool Vault / `tool_search` flow.
 ```harn,ignore
 import { git_tools } from "std/git"
 
-let tools = git_tools(nil, {
+const tools = git_tools(nil, {
   repo: repo_root,
   enabled_tools: ["git_status", "git_log", "git_switch"],
   names: {git_log: "release_git_log"},
@@ -1292,7 +1292,7 @@ For local models that do better with a tiny stable tool surface, use the
 two-tool toolbox:
 
 ```harn,ignore
-let tools = git_toolbox_tools(nil, {
+const tools = git_toolbox_tools(nil, {
   repo: repo_root,
   include_mutations: true,
 })
@@ -1897,8 +1897,8 @@ import "lib/agent"
 import "lib/helpers"
 
 pipeline default(task, project) {
-  let ctx = gather_context(task, project)
-  let result = run_agent(ctx)
+  const ctx = gather_context(task, project)
+  const result = run_agent(ctx)
   finalize(result)
 }
 ```

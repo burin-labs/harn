@@ -716,6 +716,39 @@ mod tests {
     }
 
     #[test]
+    fn raw_query_scales_to_many_bindings() {
+        // Scale-correctness companion to the O(N^2) enrich fix (semantic.rs's
+        // `exact_named_node` used to re-scan every sibling per binding, which
+        // hung `harn codemod` on real 2700-line connector files). A pure
+        // wall-clock assertion would be flaky, so this instead pins the
+        // *behaviour* the fix must preserve at scale: rewriting every binding in
+        // a large flat module produces exactly N surgical edits and a fully
+        // migrated result. (The perf win itself is exercised by the codemod on
+        // real files, not timed here.)
+        let compiled = rule(
+            r#"
+            id = "let-to-const"
+            language = "harn"
+            fix = "const"
+            fixTarget = "kw"
+            [rule]
+            query = '(let_binding "let" @kw) @__match'
+            "#,
+        );
+        let n = 200;
+        let mut src = String::from("fn f() {\n");
+        for i in 0..n {
+            src.push_str(&format!("  let v{i} = {i}\n"));
+        }
+        src.push_str("}\n");
+        let result = compiled.apply(&src).unwrap();
+        assert_eq!(result.edits.len(), n, "every binding keyword rewritten");
+        assert!(result.edits.iter().all(|e| e.before == "let"));
+        assert!(!result.rewritten.contains("let v"));
+        assert_eq!(result.rewritten.matches("const v").count(), n);
+    }
+
+    #[test]
     fn raw_query_without_root_capture_is_a_compile_error() {
         let parsed = Rule::from_toml_str(
             r#"

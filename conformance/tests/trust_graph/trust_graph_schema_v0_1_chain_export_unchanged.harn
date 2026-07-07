@@ -9,9 +9,9 @@ import "std/triggers"
  * `trust_graph::tests::v0_records_still_parse_for_backward_compat`.
  */
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let agent_id = "trust-graph-v0-1-chain-" + unique
+  const agent_id = "trust-graph-v0-1-chain-" + unique
   trust_graph_record(
     {
       agent: agent_id,
@@ -23,8 +23,8 @@ pipeline test(task) {
       metadata: {parent_record_id: nil},
     },
   )
-  let report: TrustChainReport = trust_graph_verify_chain()
-  let records: list<TrustRecord> = trust_query({agent: agent_id})
+  const report: TrustChainReport = trust_graph_verify_chain()
+  const records: list<TrustRecord> = trust_query({agent: agent_id})
   __io_println(report.verified)
   __io_println(records[0].schema == "opentrustgraph/v0.1")
   // The new metadata keys are optional: when omitted they don't surface

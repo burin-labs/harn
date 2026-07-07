@@ -1,14 +1,14 @@
 import { compact_for_bug_fix_resumption } from "std/agent/autocompact"
 
 pipeline test(task) {
-  let session = agent_session_open("host-compact-policy")
+  const session = agent_session_open("host-compact-policy")
   agent_session_inject(session, {role: "user", content: "Investigate the parser regression."})
   agent_session_inject(
     session,
     {role: "assistant", content: "The root cause is likely in diagnostic recovery."},
   )
   agent_session_inject(session, {role: "user", content: "Keep the failing tests and next command."})
-  let kept = agent_session_compact(
+  const kept = agent_session_compact(
     session,
     {
       keep_last: 1,
@@ -18,9 +18,9 @@ pipeline test(task) {
       policy: compact_for_bug_fix_resumption({author: "host"}),
     },
   )
-  let snapshot = agent_session_snapshot(session)
-  let events = transcript_events_by_kind(snapshot, "compaction")
-  let event = events[0]
+  const snapshot = agent_session_snapshot(session)
+  const events = transcript_events_by_kind(snapshot, "compaction")
+  const event = events[0]
   __io_println(transcript_summary(snapshot)?.contains("host compact bug_fix_resumption host 2"))
   __io_println(event.metadata?.mode == "host")
   __io_println(event.metadata?.instruction_mode == "extend")

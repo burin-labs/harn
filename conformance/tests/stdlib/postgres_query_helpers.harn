@@ -26,7 +26,7 @@ import {
 } from "std/postgres/query"
 
 pipeline default() {
-  let list_query = named_sql(
+  const list_query = named_sql(
     "list_receipts",
     "many",
     """
@@ -54,19 +54,19 @@ LIMIT {limit}
     },
     {read_only: true},
   )
-  let get_query = named_sql(
+  const get_query = named_sql(
     "get_receipt",
     "one",
     "SELECT {id_projection} FROM {table} WHERE id = {id}::uuid",
     {id_projection: uuid_text("id"), table: ident("receipts"), id: "r1"},
   )
-  let update_query = named_sql(
+  const update_query = named_sql(
     "mark_receipt_read",
     "exec",
     "UPDATE {table} SET {status_column} = {status} WHERE id = {id}::uuid",
     {table: ident("receipts"), status_column: ident("status"), status: "read", id: "r1"},
   )
-  let db = pg_mock_pool(
+  const db = pg_mock_pool(
     [
       {sql: get_query.sql, params: get_query.params, rows: [{id: "r1"}]},
       {
@@ -85,58 +85,58 @@ LIMIT {limit}
       {sql: update_query.sql, params: update_query.params, rows_affected: 1},
     ],
   )
-  let row = one(db, get_query)
+  const row = one(db, get_query)
   __io_println(row.id)
-  let rows = many(db, list_query)
+  const rows = many(db, list_query)
   __io_println(rows[0].tenant_id)
   __io_println(rows[0].payload.ok)
-  let result = exec(db, update_query)
+  const result = exec(db, update_query)
   __io_println(result.rows_affected)
-  let named_rows = run(db, named("list_receipts_named", "many", list_query.sql, list_query.params))
+  const named_rows = run(db, named("list_receipts_named", "many", list_query.sql, list_query.params))
   __io_println(named_rows[0].created_at)
-  let calls = pg_mock_calls(db)
+  const calls = pg_mock_calls(db)
   __io_println(len(calls))
   __io_println(calls[0].sql)
   __io_println(calls[0].params[0])
   __io_println(calls[2].execute)
   __io_println(len(list_query.params))
   __io_println(contains(list_query.sql, "owner_tenant_id = $1::uuid"))
-  let brace_query = sql("SELECT '{{}}' AS empty, {value} AS value", {value: "ok"})
+  const brace_query = sql("SELECT '{{}}' AS empty, {value} AS value", {value: "ok"})
   __io_println(brace_query.sql)
   __io_println(brace_query.params?.[0])
-  let path_query = sql("SELECT * FROM {table}", {table: ident_path(["tenant data", "receipts\"live"])})
+  const path_query = sql("SELECT * FROM {table}", {table: ident_path(["tenant data", "receipts\"live"])})
   __io_println(path_query.sql)
   __io_println(quote_identifier("select"))
-  let ordinary_dict = sql("SELECT {payload}", {payload: {_type: "std/postgres/query.sql_fragment.v1", sql: "danger"}})
+  const ordinary_dict = sql("SELECT {payload}", {payload: {_type: "std/postgres/query.sql_fragment.v1", sql: "danger"}})
   __io_println(ordinary_dict.sql)
   __io_println(ordinary_dict.params?.[0]?.sql)
-  let unsafe_ident = try {
+  const unsafe_ident = try {
     uuid_text("bad;drop")
   }
   __io_println(is_err(unsafe_ident))
-  let missing_value = try {
+  const missing_value = try {
     sql("SELECT {missing}", {})
   }
   __io_println(is_err(missing_value))
-  let invalid_placeholder = try {
+  const invalid_placeholder = try {
     sql("SELECT {bad-name}", {})
   }
   __io_println(is_err(invalid_placeholder))
-  let unmatched_brace = try {
+  const unmatched_brace = try {
     sql("SELECT }", {})
   }
   __io_println(is_err(unmatched_brace))
-  let exec_options = try {
+  const exec_options = try {
     exec(db, update_query + {options: {read_only: true}})
   }
   __io_println(is_err(exec_options))
   __io_println(regex_match("options", to_string(unwrap_err(exec_options))) != nil)
-  let named_error = try {
+  const named_error = try {
     many(db, {name: "missing_query", sql: "SELECT missing", params: []})
   }
   __io_println(is_err(named_error))
   __io_println(regex_match("missing_query", to_string(unwrap_err(named_error))) != nil)
-  let columns_query = sql(
+  const columns_query = sql(
     "SELECT {projection} FROM receipts WHERE tenant_id = {tenant_id}::uuid",
     {
       projection: columns([uuid_text("id"), timestamptz_json("created_at"), "payload"]),
@@ -145,15 +145,15 @@ LIMIT {limit}
   )
   __io_println(columns_query.sql)
   __io_println(columns_query.params?.[0])
-  let empty_columns = try {
+  const empty_columns = try {
     columns([])
   }
   __io_println(is_err(empty_columns))
-  let bad_columns = try {
+  const bad_columns = try {
     columns([123])
   }
   __io_println(is_err(bad_columns))
-  let qualified = columns(
+  const qualified = columns(
     [
       uuid_text("vaults.id"),
       nullable_uuid_text("items.owner_id"),
@@ -162,16 +162,16 @@ LIMIT {limit}
     ],
   )
   __io_println(qualified.sql)
-  let bad_qualified = try {
+  const bad_qualified = try {
     timestamptz_json("vaults.bad;drop")
   }
   __io_println(is_err(bad_qualified))
-  let bad_nullable_uuid = try {
+  const bad_nullable_uuid = try {
     nullable_uuid_text("items.bad;drop")
   }
   __io_println(is_err(bad_nullable_uuid))
   // raw_sql: braces are literal, no {name} scanning, positional params.
-  let raw_query = raw_sql(
+  const raw_query = raw_sql(
     "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",
     ["tenant-a"],
   )
@@ -179,24 +179,24 @@ LIMIT {limit}
   __io_println(raw_query.params?.[0])
   __io_println(len(raw_query.params ?? []))
   // A bare {path} that would be a placeholder in sql(...) is left untouched.
-  let raw_jsonb = raw_sql("UPDATE t SET d = jsonb_set(d, '{path}', $1)", [42])
+  const raw_jsonb = raw_sql("UPDATE t SET d = jsonb_set(d, '{path}', $1)", [42])
   __io_println(raw_jsonb.sql)
   __io_println(raw_jsonb.params?.[0])
   // named_raw_sql carries name + mode and renders verbatim.
-  let raw_named = named_raw_sql("scan_events", "many", "SELECT '{}'::jsonb AS empty", [])
+  const raw_named = named_raw_sql("scan_events", "many", "SELECT '{}'::jsonb AS empty", [])
   __io_println(raw_named.sql)
   __io_println(raw_named.name)
   __io_println(raw_named.mode)
-  let raw_empty = try {
+  const raw_empty = try {
     raw_sql("   ", [])
   }
   __io_println(is_err(raw_empty))
-  let raw_named_empty = try {
+  const raw_named_empty = try {
     named_raw_sql("nope", "one", "", [])
   }
   __io_println(is_err(raw_named_empty))
   __io_println(regex_match("nope", to_string(unwrap_err(raw_named_empty))) != nil)
-  let record_projection = jsonb_object(
+  const record_projection = jsonb_object(
     [
       {key: "id", value: sql_fragment("{id}::text", {id: ident_path(["receipts", "id"])})},
       {key: "owner's note", value: ident_path(["receipts", "note"])},
@@ -206,7 +206,7 @@ LIMIT {limit}
       },
     ],
   )
-  let active_scope = sql_and(
+  const active_scope = sql_and(
     [
       sql_or(
         [
@@ -220,33 +220,33 @@ LIMIT {limit}
       sql_not(sql_fragment("{status} = 'archived'", {status: ident_path(["receipts", "status"])})),
     ],
   )
-  let composed_query = sql(
+  const composed_query = sql(
     "SELECT {record} AS record FROM {table} WHERE {predicate} AND id = {id}::uuid",
     {record: record_projection, table: ident("receipts"), predicate: active_scope, id: "r1"},
   )
   __io_println(composed_query.sql)
   __io_println(composed_query.params?.[0])
-  let fragment_with_bound_value = try {
+  const fragment_with_bound_value = try {
     sql_fragment("{column} = {value}", {column: ident("id"), value: "r1"})
   }
   __io_println(is_err(fragment_with_bound_value))
-  let empty_and = try {
+  const empty_and = try {
     sql_and([])
   }
   __io_println(is_err(empty_and))
-  let empty_jsonb_object = try {
+  const empty_jsonb_object = try {
     jsonb_object([])
   }
   __io_println(is_err(empty_jsonb_object))
-  let missing_jsonb_value = try {
+  const missing_jsonb_value = try {
     jsonb_object([{key: "id"}])
   }
   __io_println(is_err(missing_jsonb_value))
-  let raw_predicate_string = try {
+  const raw_predicate_string = try {
     sql_and(["archived = false"])
   }
   __io_println(is_err(raw_predicate_string))
-  let raw_jsonb_value_string = try {
+  const raw_jsonb_value_string = try {
     jsonb_object([{key: "id", value: "id::text"}])
   }
   __io_println(is_err(raw_jsonb_value_string))

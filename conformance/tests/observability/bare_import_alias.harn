@@ -1,7 +1,7 @@
 import { obs } from "observability"
 
 pipeline default() {
-  let o = obs()
+  const o = obs()
   o.reset()
   o.configure({backend: o.Backend.test()})
   o.log("alias")

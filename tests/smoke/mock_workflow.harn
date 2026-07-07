@@ -8,7 +8,7 @@
  */
 pipeline default() {
   llm_mock({text: "smoke"})
-  let result = llm_call("smoke probe", nil, {provider: "mock"})
+  const result = llm_call("smoke probe", nil, {provider: "mock"})
   if result.text != "smoke" {
     throw "mock workflow smoke failed: expected text=smoke, got ${result.text}"
   }

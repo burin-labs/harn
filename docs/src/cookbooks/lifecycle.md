@@ -33,7 +33,7 @@ pipeline ingest(events) {
   }))
 
   for event in events {
-    let outcome = try_process_now(event)
+    const outcome = try_process_now(event)
     if outcome.deferred {
       // Stage the item directly on the harness so the on_finish
       // callback picks it up from harness.unsettled_state().
@@ -45,7 +45,7 @@ pipeline ingest(events) {
 
 // --- nightly settlement pipeline ---
 pipeline nightly_settle(envelope) {
-  let items = envelope.unsettled.partial_handoffs
+  const items = envelope.unsettled.partial_handoffs
   for item in items {
     settle_one(item.payload)
   }
@@ -153,12 +153,12 @@ pipeline research_runner(task) {
     return nil
   })
 
-  let resume_when = parse_resume_conditions({
+  const resume_when = parse_resume_conditions({
     timeout: {duration_minutes: 240, on_timeout: "resume_with_summary"},
     on_event: "operator.resume",
   })
 
-  let worker = spawn_agent({
+  const worker = spawn_agent({
     prompt: task,
     system: "Pause when you need a long-running external lookup.",
     options: {resume_when: resume_when},
@@ -187,7 +187,7 @@ the worker running and the agent gets a reminder explaining the policy.
 
 ```harn,ignore
 fn during_business_hours(now_ms) -> bool {
-  let hour = wall_clock_hour_local(now_ms)
+  const hour = wall_clock_hour_local(now_ms)
   return hour >= 9 && hour < 17
 }
 
@@ -252,12 +252,12 @@ pipeline multi_suspend_fixture() {
 
   // 3. Run the workload. Each suspend / resume / drain step records
   //    a typed audit entry.
-  let worker = spawn_research_worker()
+  const worker = spawn_research_worker()
   emit_external_event("operator.resume", {})
   advance_time(60_000)
   flush_trigger_aggregations()
 
-  let worker2 = spawn_followup_worker(worker)
+  const worker2 = spawn_followup_worker(worker)
   emit_external_event("operator.resume", {})
   advance_time(120_000)
   flush_trigger_aggregations()
@@ -268,7 +268,7 @@ pipeline multi_suspend_fixture() {
 pipeline assert_replay_determinism() {
   // 4. Drain the audit log; the conformance harness compares this
   //    byte-for-byte against the recorded fixture.
-  let entries = pipeline_lifecycle_audit_log_take()
+  const entries = pipeline_lifecycle_audit_log_take()
   return {audits: entries, count: len(entries)}
 }
 ```

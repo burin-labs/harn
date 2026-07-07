@@ -109,12 +109,12 @@ fn paused_clock_advances_thirty_days_deterministically() {
         "cron.harn",
         r#"
 pipeline default() {
-  let start = now_ms()
+  const start = now_ms()
   // 30 simulated days, one tick per simulated hour.
   for _ in range(30 * 24) {
     sleep(3600000)
   }
-  let advanced = now_ms() - start
+  const advanced = now_ms() - start
   __io_println("advanced_ms=${advanced}")
 }
 "#,
@@ -322,7 +322,7 @@ fn unified_tape_byte_identical_round_trip() {
         "tape.harn",
         r#"
 pipeline default() {
-  let start = now_ms()
+  const start = now_ms()
   sleep(50)
   write_file("snapshot.txt", "checkpoint at ${now_ms() - start}ms")
 }
@@ -606,9 +606,9 @@ fn des_runtime_paused_sleep_returns_immediately() {
         r#"
 pipeline default() {
   mock_time(1000000)
-  let start = now_ms()
+  const start = now_ms()
   sleep(86400000)
-  let delta = now_ms() - start
+  const delta = now_ms() - start
   __io_println("delta=${delta}")
 }
 "#,
@@ -635,7 +635,7 @@ fn des_runtime_concurrent_agents_settle_byte_identical() {
         r#"
 pipeline default() {
   mock_time(1000000)
-  let outcome = parallel settle [1, 2, 3, 4, 5] { item ->
+  const outcome = parallel settle [1, 2, 3, 4, 5] { item ->
     sleep(item * 100)
     item * item
   }
@@ -693,9 +693,9 @@ fn des_runtime_output_matches_paused_tokio() {
         r#"
 pipeline default() {
   mock_time(1767225600000)
-  let t0 = now_ms()
+  const t0 = now_ms()
   advance_time(5000)
-  let t1 = now_ms()
+  const t1 = now_ms()
   __io_println("delta=${t1 - t0}")
 }
 "#,
@@ -749,9 +749,9 @@ mod annotations {
             "seed.harn",
             r#"
 pipeline default() {
-  let start = now_ms()
+  const start = now_ms()
   sleep(500)
-  let after = now_ms()
+  const after = now_ms()
   __io_println("delta=${after - start}")
 }
 "#,

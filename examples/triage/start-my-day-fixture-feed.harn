@@ -1,12 +1,12 @@
 import { triage_start_my_day } from "std/triage"
 
 fn fixture(harness: Harness, name) {
-  let root = project_root() ?? cwd()
+  const root = project_root() ?? cwd()
   return json_parse(harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
 }
 
 pipeline default() {
-  let feed = triage_start_my_day(
+  const feed = triage_start_my_day(
     [
       fixture(harness, "github_issue"),
       fixture(harness, "slack_message"),

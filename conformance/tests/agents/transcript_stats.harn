@@ -1,6 +1,6 @@
 pipeline main() {
   // --- Unit shape: transcript_stats on a hand-crafted transcript ---
-  let crafted = {
+  const crafted = {
     _type: "transcript",
     messages: [
       {role: "user", content: "hi"},
@@ -16,7 +16,7 @@ pipeline main() {
       {kind: "message", visibility: "visible"},
     ],
   }
-  let stats = transcript_stats(crafted)
+  const stats = transcript_stats(crafted)
   __io_println(stats?.message_count == 6)
   __io_println(stats?.user_message_count == 1)
   __io_println(stats?.assistant_message_count == 2)
@@ -25,16 +25,16 @@ pipeline main() {
   __io_println(stats?.tool_call_count == 2)
   __io_println(stats?.visible_event_count == 2)
   // --- Events-by-kind filter ---
-  let visible_messages = transcript_events_by_kind(crafted, "message")
+  const visible_messages = transcript_events_by_kind(crafted, "message")
   __io_println(len(visible_messages) == 2)
-  let tool_results = transcript_events_by_kind(crafted, "tool_result")
+  const tool_results = transcript_events_by_kind(crafted, "tool_result")
   __io_println(len(tool_results) == 1)
   // --- Nil transcript returns zero stats rather than erroring ---
-  let empty_stats = transcript_stats(nil)
+  const empty_stats = transcript_stats(nil)
   __io_println(empty_stats?.message_count == 0)
   __io_println(empty_stats?.user_facing_message_count == 0)
   // --- Integration: transcript continuity across a persistent 2-stage workflow ---
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "continuity_demo",
       entry: "act",
@@ -48,12 +48,12 @@ pipeline main() {
   )
   // Both stages share a session id, so their transcripts
   // automatically flow together via the session store.
-  let result = workflow_execute("Write a note", flow, [], {max_steps: 4})
+  const result = workflow_execute("Write a note", flow, [], {max_steps: 4})
   __io_println(result?.status == "completed")
-  let stage_act = result?.run?.stages[0]
-  let stage_review = result?.run?.stages[1]
-  let act_stats = transcript_stats(stage_act?.transcript)
-  let review_stats = transcript_stats(stage_review?.transcript)
+  const stage_act = result?.run?.stages[0]
+  const stage_review = result?.run?.stages[1]
+  const act_stats = transcript_stats(stage_act?.transcript)
+  const review_stats = transcript_stats(stage_review?.transcript)
   __io_println(act_stats?.message_count >= 1)
   __io_println(review_stats?.message_count >= act_stats?.message_count)
   __io_println(review_stats?.user_facing_message_count >= act_stats?.user_facing_message_count)

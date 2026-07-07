@@ -45,8 +45,8 @@ fn open_anchored_session(session) {
 }
 
 pipeline default() {
-  let out_session = anchored_session("scope-out")
-  let out_classifier = pre_turn_scope_classifier(
+  const out_session = anchored_session("scope-out")
+  const out_classifier = pre_turn_scope_classifier(
     {
       enabled: true,
       confidence_threshold: 0.8,
@@ -59,7 +59,7 @@ pipeline default() {
       } },
     },
   )
-  let out = agent_capture_events(
+  const out = agent_capture_events(
     out_session,
     fn() {
       open_anchored_session(out_session)
@@ -79,8 +79,8 @@ pipeline default() {
       )
     },
   )
-  let out_events = scope_events(out.events)
-  let out_reminders = scope_reminders(out.result)
+  const out_events = scope_events(out.events)
+  const out_reminders = scope_reminders(out.result)
   __io_println(out.result.status)
   __io_println(out.result.stop_reason)
   __io_println(out.result.llm.iterations)
@@ -91,15 +91,15 @@ pipeline default() {
   __io_println(contains(out.result.text, "Add Root"))
   __io_println(contains(out_events[0].evidence, "/workspace/harn"))
   __io_println(contains(out_events[0].evidence, "recent_context=true"))
-  let in_session = anchored_session("scope-in")
-  let in_classifier = pre_turn_scope_classifier(
+  const in_session = anchored_session("scope-in")
+  const in_classifier = pre_turn_scope_classifier(
     {
       enabled: true,
       confidence_threshold: 0.8,
       classifier: { _payload -> {label: "in_scope", confidence: 0.91, evidence: "current repo"} },
     },
   )
-  let in_scope = agent_capture_events(
+  const in_scope = agent_capture_events(
     in_session,
     fn() {
       open_anchored_session(in_session)
@@ -117,20 +117,20 @@ pipeline default() {
       )
     },
   )
-  let in_events = scope_events(in_scope.events)
+  const in_events = scope_events(in_scope.events)
   __io_println(in_scope.result.status)
   __io_println(in_scope.result.text)
   __io_println(in_events[0].label)
   __io_println(len(scope_reminders(in_scope.result)))
-  let low_session = anchored_session("scope-low")
-  let low_classifier = pre_turn_scope_classifier(
+  const low_session = anchored_session("scope-low")
+  const low_classifier = pre_turn_scope_classifier(
     {
       enabled: true,
       confidence_threshold: 0.8,
       classifier: { _payload -> {label: "in_scope", confidence: 0.2, evidence: "weak signal"} },
     },
   )
-  let low = agent_capture_events(
+  const low = agent_capture_events(
     low_session,
     fn() {
       open_anchored_session(low_session)
@@ -148,16 +148,16 @@ pipeline default() {
       )
     },
   )
-  let low_events = scope_events(low.events)
+  const low_events = scope_events(low.events)
   __io_println(low.result.text)
   __io_println(low_events[0].label)
   __io_println(low_events[0].original_label)
-  let invalid = try {
+  const invalid = try {
     agent_loop_options({pre_turn_scope_classifier: "yes"})
   }
   __io_println(is_err(invalid))
   __io_println(contains(to_string(unwrap_err(invalid)), "pre_turn_scope_classifier"))
-  let invalid_threshold = try {
+  const invalid_threshold = try {
     pre_turn_scope_classifier({enabled: true, confidence_threshold: -0.1})
   }
   __io_println(is_err(invalid_threshold))

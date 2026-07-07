@@ -1076,7 +1076,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
                 decl_site(file, snode.span, name, DefKind::Type),
             );
         }
-        Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
+        Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
             for name in pattern_names(pattern) {
                 module.declarations.insert(
                     name.clone(),

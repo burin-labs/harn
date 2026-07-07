@@ -20,7 +20,7 @@ fn __patterns_list(value) {
 }
 
 fn __patterns_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -28,7 +28,7 @@ fn __patterns_non_empty_string(value) {
   if type_of(value) != "string" {
     return nil
   }
-  let trimmed = trim(value)
+  const trimmed = trim(value)
   if trimmed == "" {
     return nil
   }
@@ -36,21 +36,21 @@ fn __patterns_non_empty_string(value) {
 }
 
 fn __patterns_model_policy(config, key) {
-  let cfg = __patterns_dict(config)
-  let specific = __patterns_dict(cfg?.[key])
-  let shared = __patterns_dict(cfg?.model_policy)
+  const cfg = __patterns_dict(config)
+  const specific = __patterns_dict(cfg?.[key])
+  const shared = __patterns_dict(cfg?.model_policy)
   return shared + specific
 }
 
 fn __patterns_context_policy(config, key) {
-  let cfg = __patterns_dict(config)
-  let specific = __patterns_dict(cfg?.[key])
-  let shared = __patterns_dict(cfg?.context_policy)
+  const cfg = __patterns_dict(config)
+  const specific = __patterns_dict(cfg?.[key])
+  const shared = __patterns_dict(cfg?.context_policy)
   return shared + specific
 }
 
 fn __patterns_output_contract(default_kind, override_cfg) {
-  let cfg = __patterns_dict(override_cfg)
+  const cfg = __patterns_dict(override_cfg)
   if cfg?.output_contract != nil {
     return cfg.output_contract
   }
@@ -58,16 +58,16 @@ fn __patterns_output_contract(default_kind, override_cfg) {
 }
 
 fn __patterns_stage_node(config, key, defaults) {
-  let cfg = __patterns_dict(config)
-  let explicit_node = cfg?.[key + "_node"]
-  let override_cfg = if explicit_node != nil {
+  const cfg = __patterns_dict(config)
+  const explicit_node = cfg?.[key + "_node"]
+  const override_cfg = if explicit_node != nil {
     __patterns_dict(explicit_node)
   } else if key == "verify" {
     {}
   } else {
     __patterns_dict(cfg?.[key])
   }
-  var node = defaults + override_cfg
+  let node = defaults + override_cfg
   if node?.model_policy == nil {
     node = node + {model_policy: __patterns_model_policy(cfg, key + "_model_policy")}
   }
@@ -103,10 +103,10 @@ fn __patterns_verify_node(cfg) {
  * @api_stability: experimental
  */
 pub fn workflow_self_verifying_graph(config = nil) {
-  let cfg = __patterns_dict(config)
-  let act_id = __patterns_non_empty_string(cfg?.act_id) ?? "act"
-  let verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
-  let act = __patterns_stage_node(
+  const cfg = __patterns_dict(config)
+  const act_id = __patterns_non_empty_string(cfg?.act_id) ?? "act"
+  const verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
+  const act = __patterns_stage_node(
     cfg,
     "act",
     {
@@ -116,7 +116,7 @@ pub fn workflow_self_verifying_graph(config = nil) {
       output_contract: __patterns_output_contract(cfg?.act_output_kind ?? "draft", cfg?.act),
     },
   )
-  let verify = __patterns_verify_node(cfg)
+  const verify = __patterns_verify_node(cfg)
   return workflow_graph(
     {
       name: cfg?.name ?? "self_verifying",
@@ -139,11 +139,11 @@ pub fn workflow_self_verifying_graph(config = nil) {
  * @api_stability: experimental
  */
 pub fn workflow_command_verify_graph(config = nil) {
-  let cfg = __patterns_dict(config)
-  let implement_id = __patterns_non_empty_string(cfg?.implement_id) ?? "implement"
-  let verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
-  let repair_id = __patterns_non_empty_string(cfg?.repair_id) ?? "repair"
-  let implement = __patterns_stage_node(
+  const cfg = __patterns_dict(config)
+  const implement_id = __patterns_non_empty_string(cfg?.implement_id) ?? "implement"
+  const verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
+  const repair_id = __patterns_non_empty_string(cfg?.repair_id) ?? "repair"
+  const implement = __patterns_stage_node(
     cfg,
     "implement",
     {
@@ -153,9 +153,9 @@ pub fn workflow_command_verify_graph(config = nil) {
       output_contract: __patterns_output_contract(cfg?.implement_output_kind ?? "draft", cfg?.implement),
     },
   )
-  let verify = __patterns_verify_node(cfg)
-  let repair_policy = __patterns_dict(cfg?.repair_model_policy)
-  let repair = __patterns_stage_node(
+  const verify = __patterns_verify_node(cfg)
+  const repair_policy = __patterns_dict(cfg?.repair_model_policy)
+  const repair = __patterns_stage_node(
     cfg,
     "repair",
     {
@@ -202,15 +202,15 @@ pub fn workflow_command_verify_graph(config = nil) {
  * @api_stability: experimental
  */
 pub fn workflow_repair_stage_graph(config = nil) {
-  let cfg = __patterns_dict(config)
-  let stage_id = __patterns_non_empty_string(cfg?.id) ?? "repair"
-  let retry_policy = __patterns_dict(cfg?.retry_policy)
-  let policy = if retry_policy?.max_attempts == nil {
+  const cfg = __patterns_dict(config)
+  const stage_id = __patterns_non_empty_string(cfg?.id) ?? "repair"
+  const retry_policy = __patterns_dict(cfg?.retry_policy)
+  const policy = if retry_policy?.max_attempts == nil {
     retry_policy + {max_attempts: 2}
   } else {
     retry_policy
   }
-  let goal = __patterns_stage_node(
+  const goal = __patterns_stage_node(
     cfg,
     "goal",
     {
@@ -241,9 +241,9 @@ pub fn workflow_repair_stage_graph(config = nil) {
  * @api_stability: experimental
  */
 pub fn workflow_verification_only_graph(config = nil) {
-  let cfg = __patterns_dict(config)
-  let verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
-  let verify = __patterns_verify_node(cfg)
+  const cfg = __patterns_dict(config)
+  const verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
+  const verify = __patterns_verify_node(cfg)
   return workflow_graph(
     {name: cfg?.name ?? "verification_only", entry: verify_id, nodes: {[verify_id]: verify}, edges: []},
   )
@@ -255,8 +255,8 @@ pub fn workflow_verification_only_graph(config = nil) {
  * graphs).
  */
 fn __patterns_without_key(dict_value, drop_key) {
-  let source = __patterns_dict(dict_value)
-  var out = {}
+  const source = __patterns_dict(dict_value)
+  let out = {}
   for key in source.keys() {
     if key != drop_key {
       out = out + {[key]: source[key]}
@@ -284,36 +284,36 @@ fn __patterns_without_key(dict_value, drop_key) {
  * @api_stability: experimental
  */
 pub fn workflow_stages(spec = nil) {
-  let stages = if type_of(spec) == "list" {
+  const stages = if type_of(spec) == "list" {
     spec
   } else {
     __patterns_list(__patterns_dict(spec)?.stages)
   }
-  let cfg = if type_of(spec) == "dict" {
+  const cfg = if type_of(spec) == "dict" {
     spec
   } else {
     {}
   }
-  var nodes = {}
-  var order = []
+  let nodes = {}
+  let order = []
   for raw in stages {
-    let stage = __patterns_dict(raw)
-    let id = __patterns_non_empty_string(stage?.id) ?? ("stage_" + to_string(len(order) + 1))
+    const stage = __patterns_dict(raw)
+    const id = __patterns_non_empty_string(stage?.id) ?? ("stage_" + to_string(len(order) + 1))
     nodes = nodes + {[id]: __patterns_without_key(stage, "id")}
     order = order + [id]
   }
-  let edges = if cfg?.edges != nil {
+  const edges = if cfg?.edges != nil {
     cfg.edges
   } else {
-    var linear = []
-    var index = 0
+    let linear = []
+    let index = 0
     while index < len(order) - 1 {
       linear = linear + [{from: order[index], to: order[index + 1]}]
       index = index + 1
     }
     linear
   }
-  let entry = __patterns_non_empty_string(cfg?.entry) ?? if len(order) > 0 {
+  const entry = __patterns_non_empty_string(cfg?.entry) ?? if len(order) > 0 {
     order[0]
   } else {
     nil
@@ -335,7 +335,7 @@ fn __failover_disposition(value, fallback_action) {
 }
 
 fn __failover_route_id(route, index) -> string {
-  let explicit = __patterns_non_empty_string(route?.id ?? route?.name ?? route?.model ?? route?.provider)
+  const explicit = __patterns_non_empty_string(route?.id ?? route?.name ?? route?.model ?? route?.provider)
   if explicit != nil {
     return explicit
   }
@@ -343,7 +343,7 @@ fn __failover_route_id(route, index) -> string {
 }
 
 fn __failover_evaluate(config, route, ctx) {
-  let evaluator = config?.evaluate
+  const evaluator = config?.evaluate
   if __patterns_is_callable(evaluator) {
     return __failover_disposition(evaluator(route, ctx), "call")
   }
@@ -351,7 +351,7 @@ fn __failover_evaluate(config, route, ctx) {
 }
 
 fn __failover_classify(config, route, result, ctx) {
-  let classifier = config?.classify
+  const classifier = config?.classify
   if __patterns_is_callable(classifier) {
     return __failover_disposition(classifier(route, result, ctx), "continue")
   }
@@ -362,7 +362,7 @@ fn __failover_classify(config, route, result, ctx) {
 }
 
 fn __failover_terminal_status(decision) -> string {
-  let action = to_string(decision?.action ?? "")
+  const action = to_string(decision?.action ?? "")
   if action == "success" {
     return "success"
   }
@@ -387,23 +387,23 @@ fn __failover_terminal_status(decision) -> string {
  * @api_stability: experimental
  */
 pub fn workflow_failover(config = nil) {
-  let cfg = __patterns_dict(config)
-  let routes = __patterns_list(cfg?.routes)
-  let caller = cfg?.call
+  const cfg = __patterns_dict(config)
+  const routes = __patterns_list(cfg?.routes)
+  const caller = cfg?.call
   if !__patterns_is_callable(caller) {
     throw "workflow_failover: call must be callable"
   }
-  let max_attempts = to_int(cfg?.max_attempts ?? len(routes))
-  let base_ctx = __patterns_dict(cfg?.context)
-  var ctx = base_ctx + {attempts: []}
-  var attempts = []
-  var call_attempts = 0
-  var index = 0
+  const max_attempts = to_int(cfg?.max_attempts ?? len(routes))
+  const base_ctx = __patterns_dict(cfg?.context)
+  let ctx = base_ctx + {attempts: []}
+  let attempts = []
+  let call_attempts = 0
+  let index = 0
   for route in routes {
-    let route_id = __failover_route_id(route, index)
-    let evaluated = __failover_evaluate(cfg, route, ctx)
+    const route_id = __failover_route_id(route, index)
+    const evaluated = __failover_evaluate(cfg, route, ctx)
     if evaluated.action == "skip" {
-      let attempt = {
+      const attempt = {
         index: index,
         route_id: route_id,
         route: route,
@@ -420,10 +420,10 @@ pub fn workflow_failover(config = nil) {
       break
     }
     call_attempts = call_attempts + 1
-    let result = caller(route, ctx)
-    let decision = __failover_classify(cfg, route, result, ctx + {result: result})
-    let action = to_string(decision?.action ?? "continue")
-    let attempt = {
+    const result = caller(route, ctx)
+    const decision = __failover_classify(cfg, route, result, ctx + {result: result})
+    const action = to_string(decision?.action ?? "continue")
+    const attempt = {
       index: index,
       route_id: route_id,
       route: route,

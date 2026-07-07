@@ -167,7 +167,7 @@ impl CostAnalyzer {
                     self.walk_nodes(&arm.body);
                 }
             }
-            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+            Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
                 self.walk_node(value);
             }
             Node::Assignment { target, value, .. } => {
@@ -792,7 +792,7 @@ pipeline main() {
         let out = render(
             r#"
 pipeline main() {
-  let opts = {model: "gpt-4o"}
+  const opts = {model: "gpt-4o"}
   llm_call("hello", nil, {model: opts?.model ?? "claude-sonnet-4-20250514"})
 }
 "#,
@@ -827,7 +827,7 @@ pipeline main() {
 pipeline main() {
   while llm_call("condition", nil, {model: "gpt-4o"}) {
     retry (llm_call("count", nil, {model: "gpt-4o"})) {
-      let values = parallel each [llm_call("source", nil, {model: "gpt-4o"})] with {
+      const values = parallel each [llm_call("source", nil, {model: "gpt-4o"})] with {
         max_concurrent: llm_call("cap", nil, {model: "gpt-4o"})
       } { item ->
         item

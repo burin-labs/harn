@@ -6,11 +6,11 @@ but do not affect runtime behavior. Omitting annotations is always valid.
 ### Basic types
 
 ```harn
-let name: string = "Alice"
-let age: int = 30
-let rate: float = 3.14
-let ok: bool = true
-let nothing: nil = nil
+const name: string = "Alice"
+const age: int = 30
+const rate: float = 3.14
+const ok: bool = true
+const nothing: nil = nil
 ```
 
 ### The `never` type
@@ -52,8 +52,8 @@ fn passthrough(x: any) -> any {
   return x
 }
 
-let s: string = passthrough("hello")  // any → string, no narrowing required
-let n: int    = passthrough(42)
+const s: string = passthrough("hello")  // any → string, no narrowing required
+const n: int    = passthrough(42)
 ```
 
 Use `any` deliberately, when you want to opt out of checking — for
@@ -188,7 +188,7 @@ fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
   return a + b
 }
 
-let m = merge({a: 1, b: 2}, {b: "x", c: true})
+const m = merge({a: 1, b: 2}, {b: "x", c: true})
 // m : {a: int, b: string, c: bool}   (b overridden by the right side)
 ```
 
@@ -214,8 +214,8 @@ Rules:
 ### Union types
 
 ```harn
-let value: string | nil = nil
-let id: int | string = "abc"
+const value: string | nil = nil
+const id: int | string = "abc"
 ```
 
 Union members may also be **literal types** — specific string or int
@@ -225,7 +225,7 @@ values used to encode enum-like discriminated sets:
 type Verdict = "pass" | "fail" | "unclear"
 type RetryCount = 0 | 1 | 2 | 3
 
-let v: Verdict = "pass"
+const v: Verdict = "pass"
 ```
 
 Literal types are assignable to their base type (`"pass"` flows into
@@ -319,9 +319,9 @@ shape mismatch is.
 ### Parameterized types
 
 ```harn
-let numbers: list<int> = [1, 2, 3]
-let also_numbers: [int] = [1, 2, 3]
-let headers: dict<string, string> = {content_type: "json"}
+const numbers: list<int> = [1, 2, 3]
+const also_numbers: [int] = [1, 2, 3]
+const headers: dict<string, string> = {content_type: "json"}
 ```
 
 `[T]` is shorthand for `list<T>` in type positions. User-defined functions,
@@ -332,7 +332,7 @@ instantiation should be documented at the call site:
 
 ```harn,ignore
 fn map<T, U>(xs: [T], f: fn(T) -> U) -> [U] { ... }
-let labels: [string] = map<int, string>([1, 2, 3], label)
+const labels: [string] = map<int, string>([1, 2, 3], label)
 ```
 
 Explicit type arguments are erased at runtime. They are checked statically:
@@ -345,13 +345,13 @@ Dict shape types describe the expected fields of a dict value. The type checker
 verifies that dict literals have the required fields with compatible types.
 
 ```harn
-let user: {name: string, age: int} = {name: "Alice", age: 30}
+const user: {name: string, age: int} = {name: "Alice", age: 30}
 ```
 
 Optional fields use `?` and need not be present:
 
 ```harn
-let config: {host: string, port?: int} = {host: "localhost"}
+const config: {host: string, port?: int} = {host: "localhost"}
 ```
 
 Width subtyping: a dict with extra fields satisfies a shape that requires fewer fields.
@@ -385,7 +385,7 @@ pick({dropnil: true})   // type error — unknown option `dropnil`
 Nested shapes:
 
 ```harn
-let data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
+const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
 ```
 
 Shapes are compatible with `dict` and `dict<string, V>` when all field values match `V`.
@@ -394,7 +394,7 @@ Shapes are compatible with `dict` and `dict<string, V>` when all field values ma
 
 ```harn
 type Config = {model: string, max_tokens: int}
-let cfg: Config = {model: "gpt-4", max_tokens: 100}
+const cfg: Config = {model: "gpt-4", max_tokens: 100}
 ```
 
 A type alias can also drive schema validation for structured LLM output
@@ -409,10 +409,10 @@ type GraderOut = {
 }
 
 // Use the alias directly wherever a schema dict is expected.
-let s = schema_of(GraderOut)
-let ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
+const s = schema_of(GraderOut)
+const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
 
-let r = llm_call(prompt, nil, {
+const r = llm_call(prompt, nil, {
   provider: "openai",
   output_schema: GraderOut,     // alias in value position — compiled to schema_of(T)
   schema_retries: 2,
@@ -435,7 +435,7 @@ recorded in LLM transcript events with the selected route plus all considered
 alternatives so costs can be re-scored later:
 
 ```harn
-let r = llm_call(prompt, nil, {
+const r = llm_call(prompt, nil, {
   route_policy: "cheapest_over_quality(mid)",
   fallback_chain: ["local", "ollama", "openai"],
 })
@@ -458,11 +458,11 @@ the agent scratchpad.
 ```harn
 import { system_preamble, with_system_prompt_parts } from "std/llm/prompts"
 
-let opts = with_system_prompt_parts(
+const opts = with_system_prompt_parts(
   {provider: "anthropic", session_id: "review-42"},
   [system_preamble("Follow the repository's validation gate before final output.")]
 )
-let r = agent_loop("Review this change", "You are a code review agent.", opts)
+const r = agent_loop("Review this change", "You are a code review agent.", opts)
 ```
 
 For call sites that want routing policy to be visibly scoped around the work,
@@ -471,7 +471,7 @@ of its block. Nested `llm_call` invocations inherit the block's routing and
 budget options; an explicit option on the call wins for the same key.
 
 ```harn
-let r = cost_route {
+const r = cost_route {
   budget_usd: 0.05
   prefer: ["anthropic:claude-haiku-4-5", "openai:gpt-5.4-mini"]
   fallback_strategy: cheapest_first
@@ -504,7 +504,7 @@ to override that policy.
 ```harn
 import { with_cache } from "std/llm/handlers"
 
-let r = with_cache("Summarize this file", nil, {
+const r = with_cache("Summarize this file", nil, {
   provider: "anthropic",
   model: "claude-haiku-4-5",
   store: {backend: "fs", namespace: "summaries"},
@@ -589,13 +589,13 @@ A user-defined wrapper such as
 
 ```harn,ignore
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-  let r = llm_call(prompt, nil,
+  const r = llm_call(prompt, nil,
     {provider: "mock", output_schema: schema, output_validation: "error",
      response_format: "json"})
   return r.data
 }
 
-let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+const out: GraderOut = grade("Grade this", schema_of(GraderOut))
 log(out.verdict)
 ```
 
@@ -618,12 +618,12 @@ primitive accepts either named arguments or the legacy positional form;
 both lower to the same runtime.
 
 ```harn,ignore
-let answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
-let record = request_approval(action: "merge_pr", quorum: 2,
+const answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+const record = request_approval(action: "merge_pr", quorum: 2,
                               reviewers: ["alice", "bob", "carol"])
-let merged = dual_control(n: 2, m: 3, action: destructive_step,
+const merged = dual_control(n: 2, m: 3, action: destructive_step,
                           approvers: ["alice", "bob", "carol"])
-let handle = escalate_to(role: "oncall", reason: "deploy failed")
+const handle = escalate_to(role: "oncall", reason: "deploy failed")
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log

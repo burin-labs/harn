@@ -248,21 +248,8 @@ impl Compiler {
                     _ => self.infer_expr_type(value),
                 };
                 self.compile_node(value)?;
-                self.compile_destructuring(pattern, false)?;
-                self.record_binding_type(pattern, binding_type.clone());
-                self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
-            }
-            Node::VarBinding { pattern, value, .. } => {
-                let binding_type = match &snode.node {
-                    Node::VarBinding {
-                        type_ann: Some(type_ann),
-                        ..
-                    } => Some(type_ann.clone()),
-                    _ => self.infer_expr_type(value),
-                };
-                self.compile_node(value)?;
                 self.compile_destructuring(pattern, true)?;
-                // A `var` is reassignable, so its initializer-inferred primitive
+                // A `let` is reassignable, so its initializer-inferred primitive
                 // type is only safe for typed-opcode specialization when the
                 // binding is provably monomorphic (proven by
                 // `record_monomorphic_var_bindings`, run before this scope's
@@ -273,23 +260,23 @@ impl Compiler {
                 self.record_binding_type(pattern, binding_type.clone());
                 self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
-            Node::ConstBinding {
-                name,
-                type_ann,
-                value,
-            } => {
-                // `const` lowers to the same bytecode as a let-binding
-                // over a simple identifier. The compile-time const-eval
-                // pass in the typechecker has already proven the
-                // initializer is pure and within budget, so re-running
-                // it through the VM is guaranteed to produce the same
-                // value byte-for-byte.
-                let binding_type = type_ann.clone().or_else(|| self.infer_expr_type(value));
+            Node::ConstBinding { pattern, value, .. } => {
+                // `const` is an immutable binding. When its initializer is in
+                // the pure const-eval subset over a plain identifier, the
+                // typechecker has already folded it; either way the VM
+                // re-evaluates the same expression, producing the folded value
+                // byte-for-byte. Lowered immutable (destructuring allowed).
+                let binding_type = match &snode.node {
+                    Node::ConstBinding {
+                        type_ann: Some(type_ann),
+                        ..
+                    } => Some(type_ann.clone()),
+                    _ => self.infer_expr_type(value),
+                };
                 self.compile_node(value)?;
-                let pattern = harn_parser::BindingPattern::Identifier(name.clone());
-                self.compile_destructuring(&pattern, false)?;
-                self.record_binding_type(&pattern, binding_type.clone());
-                self.maybe_register_owned_drop(&pattern, binding_type.as_ref(), snode.span);
+                self.compile_destructuring(pattern, false)?;
+                self.record_binding_type(pattern, binding_type.clone());
+                self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
             Node::Assignment {
                 target, value, op, ..

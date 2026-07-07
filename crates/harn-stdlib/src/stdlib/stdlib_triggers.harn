@@ -1149,7 +1149,7 @@ pub fn stream_join(source, join: dict? = nil) -> StreamJoinPlan {
 }
 
 fn __stream_llm_classify_options(options: StreamLlmClassifyOptions = nil) -> StreamLlmClassifyConfig {
-  var config = {}
+  let config = {}
   if options?.cache != nil {
     config = config + {cache: options?.cache}
   }
@@ -1179,6 +1179,6 @@ pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
  * @errors: []
  */
 pub fn llm_classify(input, labels: list<string>, options: StreamLlmClassifyOptions = nil) -> StreamLlmClassifyPlan {
-  let config = __stream_llm_classify_options(options)
+  const config = __stream_llm_classify_options(options)
   return {kind: "stream.llm_classify", input: input, labels: labels, cache: config.cache, options: config}
 }

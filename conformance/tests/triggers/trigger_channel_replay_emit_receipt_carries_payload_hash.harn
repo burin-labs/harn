@@ -9,9 +9,9 @@ import "std/triggers"
  * (drift in the producer code surfaces as `HARN-REP-CHN-002`).
  */
 pipeline default() {
-  let audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
-  let _ = emit_channel("ch.replay.input", {repo: "harn", attempt: 1})
-  let entry = audit.next().value
+  const audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
+  const _ = emit_channel("ch.replay.input", {repo: "harn", attempt: 1})
+  const entry = audit.next().value
   __io_println(entry.kind)
   __io_println(entry.headers.schema)
   __io_println(entry.payload.name_resolved)
@@ -22,7 +22,7 @@ pipeline default() {
   __io_println(entry.payload.inserted)
   // Payload hash is a stable canonical-JSON SHA-256 — both runs of the
   // same producer code must emit the same hash for the same payload.
-  let hash = entry.payload.payload_hash
+  const hash = entry.payload.payload_hash
   __io_println(starts_with(hash, "sha256:"))
   __io_println(len(hash) > 10)
   // Signed timestamp carries the algorithm + key id used by the

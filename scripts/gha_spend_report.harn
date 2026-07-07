@@ -1,13 +1,13 @@
 import { parse_args } from "std/cli"
 import { render_table } from "std/table"
 
-let DEFAULT_ORG = "burin-labs"
+const DEFAULT_ORG = "burin-labs"
 
-let DEFAULT_REPOS = ["harn", "burin-code"]
+const DEFAULT_REPOS = ["harn", "burin-code"]
 
-let DEFAULT_RUNS_PER_REPO = 50
+const DEFAULT_RUNS_PER_REPO = 50
 
-let PRICE_PER_MINUTE = {UBUNTU: 0.008, WINDOWS: 0.016, MACOS: 0.08}
+const PRICE_PER_MINUTE = {UBUNTU: 0.008, WINDOWS: 0.016, MACOS: 0.08}
 
 fn arg_spec() -> list {
   return [
@@ -39,16 +39,16 @@ fn usage() -> string {
 }
 
 fn format_float_2(value) -> string {
-  let f = to_float(value) ?? 0.0
-  let sign = if f < 0.0 {
+  const f = to_float(value) ?? 0.0
+  const sign = if f < 0.0 {
     "-"
   } else {
     ""
   }
-  let scaled = to_int(round(abs(f) * 100.0)) ?? 0
-  let whole = scaled / 100
-  let frac = scaled % 100
-  let frac_text = if frac < 10 {
+  const scaled = to_int(round(abs(f) * 100.0)) ?? 0
+  const whole = scaled / 100
+  const frac = scaled % 100
+  const frac_text = if frac < 10 {
     "0" + to_string(frac)
   } else {
     to_string(frac)
@@ -61,10 +61,10 @@ fn number_value(value) -> float {
 }
 
 fn sort_spend_rows(rows: list) -> list {
-  var out = []
+  let out = []
   for row in rows ?? [] {
-    var next = []
-    var inserted = false
+    let next = []
+    let inserted = false
     for existing in out {
       if !inserted && number_value(row.usd) > number_value(existing.usd) {
         next = next.push(row)
@@ -81,7 +81,7 @@ fn sort_spend_rows(rows: list) -> list {
 }
 
 fn parse_json_maybe(text: string) {
-  let trimmed = text.trim()
+  const trimmed = text.trim()
   if trimmed == "" {
     return nil
   }
@@ -104,16 +104,16 @@ fn repo_filter_allows(repo: string, include_repos: list<string>) -> bool {
 }
 
 pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
-  var totals = {}
+  let totals = {}
   for item in data?.usageItems ?? [] {
     if item?.product != "actions" || item?.unitType != "Minutes" {
       continue
     }
-    let repo = to_string(item?.repositoryName ?? "unknown")
+    const repo = to_string(item?.repositoryName ?? "unknown")
     if !repo_filter_allows(repo, include_repos) {
       continue
     }
-    let prior = totals[repo] ?? {label: "repo:" + repo, minutes: 0.0, usd: 0.0, source: "billing-usage"}
+    const prior = totals[repo] ?? {label: "repo:" + repo, minutes: 0.0, usd: 0.0, source: "billing-usage"}
     totals = totals
       + {
       [repo]: prior
@@ -123,7 +123,7 @@ pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
       },
     }
   }
-  var rows = []
+  let rows = []
   for key in keys(totals).sort() {
     rows = rows.push(totals[key])
   }
@@ -131,9 +131,9 @@ pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
 }
 
 pub fn action_run_refs(data) -> list {
-  var out = []
+  let out = []
   for run in data?.workflow_runs ?? [] {
-    let id = run?.id
+    const id = run?.id
     if id == nil {
       continue
     }
@@ -143,20 +143,20 @@ pub fn action_run_refs(data) -> list {
 }
 
 pub fn run_timing_rows(samples: list) -> list {
-  var totals = {}
+  let totals = {}
   for sample in samples ?? [] {
-    let repo = to_string(sample?.repo ?? "")
-    let workflow = to_string(sample?.workflow ?? "")
+    const repo = to_string(sample?.repo ?? "")
+    const workflow = to_string(sample?.workflow ?? "")
     if repo == "" || workflow == "" {
       continue
     }
-    let key = repo + ":" + workflow
-    let prior = totals[key] ?? {label: key, minutes: 0.0, usd: 0.0, source: "run-timing"}
-    var minutes = 0.0
-    var usd = 0.0
-    let billable = sample?.timing?.billable ?? {}
+    const key = repo + ":" + workflow
+    const prior = totals[key] ?? {label: key, minutes: 0.0, usd: 0.0, source: "run-timing"}
+    let minutes = 0.0
+    let usd = 0.0
+    const billable = sample?.timing?.billable ?? {}
     for os_name in keys(billable) {
-      let os_minutes = number_value(billable[os_name]?.total_ms) / 60000.0
+      const os_minutes = number_value(billable[os_name]?.total_ms) / 60000.0
       minutes = minutes + os_minutes
       usd = usd + os_minutes * number_value(PRICE_PER_MINUTE[os_name])
     }
@@ -166,7 +166,7 @@ pub fn run_timing_rows(samples: list) -> list {
         + {minutes: number_value(prior.minutes) + minutes, usd: number_value(prior.usd) + usd},
     }
   }
-  var rows = []
+  let rows = []
   for key in keys(totals).sort() {
     rows = rows.push(totals[key])
   }
@@ -174,7 +174,7 @@ pub fn run_timing_rows(samples: list) -> list {
 }
 
 fn table_rows(rows: list) -> list {
-  var out = []
+  let out = []
   for row in rows ?? [] {
     out = out
       .push(
@@ -205,7 +205,7 @@ pub fn render_spend_table(rows: list) -> string {
 }
 
 fn current_utc_year() -> string {
-  let res = harness.process.spawn_captured({cmd: "date", args: ["-u", "+%Y"]})
+  const res = harness.process.spawn_captured({cmd: "date", args: ["-u", "+%Y"]})
   if res.success {
     return res.stdout.trim()
   }
@@ -213,7 +213,7 @@ fn current_utc_year() -> string {
 }
 
 fn require_gh() {
-  let res = harness.process.spawn_captured({cmd: "gh", args: ["--version"]})
+  const res = harness.process.spawn_captured({cmd: "gh", args: ["--version"]})
   if !res.success {
     harness.stdio.eprintln("gha_spend_report: gh CLI not found")
     exit(1)
@@ -221,7 +221,7 @@ fn require_gh() {
 }
 
 fn gh_api_json(path: string) {
-  let res = harness.process.spawn_captured({cmd: "gh", args: ["api", path]})
+  const res = harness.process.spawn_captured({cmd: "gh", args: ["api", path]})
   if !res.success {
     return nil
   }
@@ -229,11 +229,11 @@ fn gh_api_json(path: string) {
 }
 
 fn collect_run_timing_rows(org: string, repos: list<string>, runs_per_repo: int) -> list {
-  var samples = []
+  let samples = []
   for repo in repos {
-    let runs = gh_api_json("/repos/${org}/${repo}/actions/runs?per_page=${runs_per_repo}")
+    const runs = gh_api_json("/repos/${org}/${repo}/actions/runs?per_page=${runs_per_repo}")
     for ref in action_run_refs(runs) {
-      let timing = gh_api_json("/repos/${org}/${repo}/actions/runs/${ref.id}/timing")
+      const timing = gh_api_json("/repos/${org}/${repo}/actions/runs/${ref.id}/timing")
       if timing == nil {
         continue
       }
@@ -244,29 +244,29 @@ fn collect_run_timing_rows(org: string, repos: list<string>, runs_per_repo: int)
 }
 
 fn main(_harness: Harness) {
-  let parsed = parse_args(argv, arg_spec())
+  const parsed = parse_args(argv, arg_spec())
   if parsed?._help ?? false {
     harness.stdio.println(usage())
     return nil
   }
   if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    let errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
     harness.stdio.eprintln(join(errors, "\n"))
     harness.stdio.eprintln("")
     harness.stdio.eprintln(usage())
     exit(2)
   }
-  let org = to_string(parsed?.org ?? DEFAULT_ORG)
-  let requested_repos: list<string> = parsed?.repo ?? []
-  let repos: list<string> = if len(requested_repos) == 0 {
+  const org = to_string(parsed?.org ?? DEFAULT_ORG)
+  const requested_repos: list<string> = parsed?.repo ?? []
+  const repos: list<string> = if len(requested_repos) == 0 {
     DEFAULT_REPOS
   } else {
     requested_repos
   }
-  let runs_per_repo = to_int(parsed?.runs_per_repo ?? DEFAULT_RUNS_PER_REPO) ?? DEFAULT_RUNS_PER_REPO
+  const runs_per_repo = to_int(parsed?.runs_per_repo ?? DEFAULT_RUNS_PER_REPO) ?? DEFAULT_RUNS_PER_REPO
   require_gh()
-  let billing_path = "/orgs/${org}/settings/billing/usage?year=${current_utc_year()}"
-  let billing = gh_api_json(billing_path)
+  const billing_path = "/orgs/${org}/settings/billing/usage?year=${current_utc_year()}"
+  const billing = gh_api_json(billing_path)
   if parsed?.json ?? false {
     if has_billing_usage_items(billing) {
       harness.stdio.println(json_stringify_pretty(billing))

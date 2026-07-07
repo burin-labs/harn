@@ -36,9 +36,9 @@ fn require_eq(label, actual, expected) {
 }
 
 fn exercise_fresh_token_no_lock(harness: Harness) {
-  let _ = mock_time(1700000000000)
-  let now = to_int(harness.clock.timestamp())
-  let inner = memory()
+  const _ = mock_time(1700000000000)
+  const now = to_int(harness.clock.timestamp())
+  const inner = memory()
   inner
     .set(
     "freshNoLock",
@@ -50,15 +50,15 @@ fn exercise_fresh_token_no_lock(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  var lock_calls = 0
-  let store = inner
+  let lock_calls = 0
+  const store = inner
     + {
     with_refresh_lock: { key, body ->
       lock_calls = lock_calls + 1
       return body()
     },
   }
-  let cli = client(provider("freshNoLock"), {client_id: "cli-id", storage: store})
+  const cli = client(provider("freshNoLock"), {client_id: "cli-id", storage: store})
   http_mock_clear()
   http_mock(
     "POST",
@@ -76,13 +76,13 @@ fn exercise_fresh_token_no_lock(harness: Harness) {
     len(http_mock_calls({include_sensitive: true})),
     0,
   )
-  let _ = unmock_time()
+  const _ = unmock_time()
 }
 
 fn exercise_ttl_threshold(harness: Harness) {
-  let _ = mock_time(1700000000000)
-  let now = to_int(harness.clock.timestamp())
-  let inner = memory()
+  const _ = mock_time(1700000000000)
+  const now = to_int(harness.clock.timestamp())
+  const inner = memory()
   inner
     .set(
     "ttlReread",
@@ -94,7 +94,7 @@ fn exercise_ttl_threshold(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  let store = locking_store(
+  const store = locking_store(
     inner,
     {
       access_token: "ACCESS-FRESH",
@@ -104,7 +104,7 @@ fn exercise_ttl_threshold(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  let cli = client(provider("ttlReread"), {client_id: "cli-id", storage: store})
+  const cli = client(provider("ttlReread"), {client_id: "cli-id", storage: store})
   http_mock_clear()
   http_mock(
     "POST",
@@ -121,13 +121,13 @@ fn exercise_ttl_threshold(harness: Harness) {
     len(http_mock_calls({include_sensitive: true})),
     0,
   )
-  let _ = unmock_time()
+  const _ = unmock_time()
 }
 
 fn exercise_post_401(harness: Harness) {
-  let _ = mock_time(1700000000000)
-  let now = to_int(harness.clock.timestamp())
-  let inner = memory()
+  const _ = mock_time(1700000000000)
+  const now = to_int(harness.clock.timestamp())
+  const inner = memory()
   inner
     .set(
     "post401Reread",
@@ -139,7 +139,7 @@ fn exercise_post_401(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  let store = locking_store(
+  const store = locking_store(
     inner,
     {
       access_token: "ACCESS-ROTATED",
@@ -149,7 +149,7 @@ fn exercise_post_401(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  let cli = client(provider("post401Reread"), {client_id: "cli-id", storage: store})
+  const cli = client(provider("post401Reread"), {client_id: "cli-id", storage: store})
   http_mock_clear()
   http_mock(
     "POST",
@@ -170,19 +170,19 @@ fn exercise_post_401(harness: Harness) {
       ],
     },
   )
-  let response = request(cli, "GET", "https://api.example.test/me")
+  const response = request(cli, "GET", "https://api.example.test/me")
   require_eq("request() retries with another worker's rotated token", response.status, 200)
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   require_eq("no refresh grant spent after locked post-401 re-read", len(calls), 2)
   require_eq("first GET used stale token", calls[0].headers.authorization, "Bearer ACCESS-OLD")
   require_eq("retry used rotated token", calls[1].headers.authorization, "Bearer ACCESS-ROTATED")
-  let _ = unmock_time()
+  const _ = unmock_time()
 }
 
 fn exercise_forced_refresh(harness: Harness) {
-  let _ = mock_time(1700000000000)
-  let now = to_int(harness.clock.timestamp())
-  let inner = memory()
+  const _ = mock_time(1700000000000)
+  const now = to_int(harness.clock.timestamp())
+  const inner = memory()
   inner
     .set(
     "forcedReread",
@@ -194,7 +194,7 @@ fn exercise_forced_refresh(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  let store = locking_store(
+  const store = locking_store(
     inner,
     {
       access_token: "ACCESS-ROTATED",
@@ -204,7 +204,7 @@ fn exercise_forced_refresh(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  let cli = client(provider("forcedReread"), {client_id: "cli-id", storage: store})
+  const cli = client(provider("forcedReread"), {client_id: "cli-id", storage: store})
   http_mock_clear()
   http_mock(
     "POST",
@@ -225,7 +225,7 @@ fn exercise_forced_refresh(harness: Harness) {
     len(http_mock_calls({include_sensitive: true})),
     0,
   )
-  let _ = unmock_time()
+  const _ = unmock_time()
 }
 
 pipeline test(task) {

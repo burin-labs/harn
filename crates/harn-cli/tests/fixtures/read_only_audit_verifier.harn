@@ -2,16 +2,16 @@ import {
   coding_agent_read_only_audit_verification_success,
 } from "../../assets/evals/coding_agent_suite.harn"
 
-let README = "# Settings\n\nThe default timeout is 30 seconds.\n"
+const README = "# Settings\n\nThe default timeout is 30 seconds.\n"
 
-let SETTINGS = "DEFAULT_TIMEOUT_SECONDS = 30\n"
+const SETTINGS = "DEFAULT_TIMEOUT_SECONDS = 30\n"
 
 fn result(calls, text: string) {
   return {visible_text: text, tools: {calls: calls}}
 }
 
 pipeline main() {
-  let repeated_reads = result(
+  const repeated_reads = result(
     [
       {name: "read_file", arguments: {path: "README.md"}},
       {name: "read_file", arguments: {path: "settings.py"}},
@@ -19,12 +19,12 @@ pipeline main() {
     ],
     "AUDIT_OK: README matches the configured default timeout; no edits are needed.",
   )
-  let no_read = result([], "AUDIT_OK: no edits are needed.")
-  let edit_attempt = result(
+  const no_read = result([], "AUDIT_OK: no edits are needed.")
+  const edit_attempt = result(
     [{name: "replace_in_file", arguments: {path: "README.md"}}],
     "AUDIT_OK: no edits are needed.",
   )
-  let parent_path = result([{name: "read_file", arguments: {path: "../README.md"}}], "AUDIT_OK: no edits are needed.")
+  const parent_path = result([{name: "read_file", arguments: {path: "../README.md"}}], "AUDIT_OK: no edits are needed.")
   __io_println(
     "repeated_reads="
       + to_string(coding_agent_read_only_audit_verification_success(README, SETTINGS, repeated_reads)),

@@ -29,7 +29,7 @@ fn __mtok_from_string(text) {
   if text == nil {
     return nil
   }
-  let stripped = regex_replace("[^0-9.]", "", to_string(text))
+  const stripped = regex_replace("[^0-9.]", "", to_string(text))
   if stripped == "" {
     return nil
   }
@@ -40,7 +40,7 @@ fn __context_window_from_string(text) {
   if text == nil {
     return nil
   }
-  let stripped = regex_replace("[^0-9]", "", to_string(text))
+  const stripped = regex_replace("[^0-9]", "", to_string(text))
   if stripped == "" {
     return nil
   }
@@ -81,9 +81,9 @@ fn __fetch_failure_run(id: string, kind: string, source_owner: string, url: stri
 }
 
 fn __first_available_secret(env: dict, key_envs: list<string>) -> dict? {
-  let secrets = env?.secrets ?? {}
+  const secrets = env?.secrets ?? {}
   for name in key_envs ?? [] {
-    let value = secrets[name]
+    const value = secrets[name]
     if value != nil && value != "" {
       return {name: name, value: value}
     }
@@ -92,12 +92,12 @@ fn __first_available_secret(env: dict, key_envs: list<string>) -> dict? {
 }
 
 fn __env_with_auth_header(env: dict, config: dict, secret: dict) -> dict {
-  let base_options = env?.http_options ?? {}
-  let base_headers = base_options?.headers ?? {}
-  let auth_header = config?.auth_header ?? "Authorization"
-  let auth_prefix = config?.auth_prefix ?? "Bearer "
-  let auth_value = auth_prefix + secret.value
-  let headers = base_headers + (config?.extra_headers ?? {})
+  const base_options = env?.http_options ?? {}
+  const base_headers = base_options?.headers ?? {}
+  const auth_header = config?.auth_header ?? "Authorization"
+  const auth_prefix = config?.auth_prefix ?? "Bearer "
+  const auth_value = auth_prefix + secret.value
+  const headers = base_headers + (config?.extra_headers ?? {})
     + {Accept: "application/json", [auth_header]: auth_value}
   return env + {http_options: base_options + {headers: headers}}
 }
@@ -115,15 +115,15 @@ fn __env_with_auth_header(env: dict, config: dict, secret: dict) -> dict {
  *   header_match?, confidence (default "high"), terms_notes?.
  */
 pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
-  let url = config.source_url
-  let response = web_fetch(url, env?.http_options ?? {})
+  const url = config.source_url
+  const response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
     return {run: __fetch_failure_run(config.id, "html", "provider", url, response), observations: []}
   }
-  let parsed = web_parse_html(response.body, response.final_url)
-  let tables = parsed?.tables ?? []
-  let table_index = config?.table_index ?? 0
-  let table = tables[table_index]
+  const parsed = web_parse_html(response.body, response.final_url)
+  const tables = parsed?.tables ?? []
+  const table_index = config?.table_index ?? 0
+  const table = tables[table_index]
   if table == nil {
     return {
       run: __build_run(
@@ -137,39 +137,39 @@ pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
       observations: [],
     }
   }
-  let column_map = config.column_map
-  let headers = table?.headers ?? []
-  var indices = {}
-  var idx = 0
+  const column_map = config.column_map
+  const headers = table?.headers ?? []
+  let indices = {}
+  let idx = 0
   while idx < len(headers) {
-    let header = lowercase(trim(to_string(headers[idx])))
+    const header = lowercase(trim(to_string(headers[idx])))
     for entry in column_map {
-      let target = trim(lowercase(to_string(entry.header)))
+      const target = trim(lowercase(to_string(entry.header)))
       if header == target {
         indices = indices + {[entry.field]: idx}
       }
     }
     idx = idx + 1
   }
-  let model_idx = indices?.model_id
+  const model_idx = indices?.model_id
   if model_idx == nil {
     return {
       run: __build_run(config.id, "html", "provider", url, "error", {reason: "table missing model_id column"}),
       observations: [],
     }
   }
-  var observations = []
+  let observations = []
   for row in table?.rows ?? [] {
-    let model_id = trim(to_string(row[model_idx] ?? ""))
+    const model_id = trim(to_string(row[model_idx] ?? ""))
     if model_id == "" {
       continue
     }
-    let pricing_input = __mtok_from_string(__row_value(row, indices?.input_per_mtok))
-    let pricing_output = __mtok_from_string(__row_value(row, indices?.output_per_mtok))
-    let cache_read = __mtok_from_string(__row_value(row, indices?.cache_read_per_mtok))
-    let cache_write = __mtok_from_string(__row_value(row, indices?.cache_write_per_mtok))
-    let context = __context_window_from_string(__row_value(row, indices?.context_window))
-    var pricing = {}
+    const pricing_input = __mtok_from_string(__row_value(row, indices?.input_per_mtok))
+    const pricing_output = __mtok_from_string(__row_value(row, indices?.output_per_mtok))
+    const cache_read = __mtok_from_string(__row_value(row, indices?.cache_read_per_mtok))
+    const cache_write = __mtok_from_string(__row_value(row, indices?.cache_write_per_mtok))
+    const context = __context_window_from_string(__row_value(row, indices?.context_window))
+    let pricing = {}
     if pricing_input != nil {
       pricing = pricing + {input_per_mtok: pricing_input}
     }
@@ -182,12 +182,12 @@ pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
     if cache_write != nil {
       pricing = pricing + {cache_write_per_mtok: cache_write}
     }
-    let pricing_value = if len(pricing) == 0 {
+    const pricing_value = if len(pricing) == 0 {
       nil
     } else {
       pricing
     }
-    let provenance = {
+    const provenance = {
       source_url: url,
       source_kind: "html",
       source_owner: "provider",
@@ -197,7 +197,7 @@ pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
       requires_key: false,
       terms_notes: config?.terms_notes,
     }
-    let obs = observation(
+    const obs = observation(
       config.provider,
       model_id,
       {context_window: context, pricing: pricing_value},
@@ -228,17 +228,17 @@ pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
  *   "provider"), confidence (default "high"), terms_notes?.
  */
 pub fn json_api_adapter(env: dict, config: dict) -> dict {
-  let url = config.source_url
-  let response = web_fetch(url, env?.http_options ?? {})
+  const url = config.source_url
+  const response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
     return {
       run: __fetch_failure_run(config.id, "json", config?.source_owner ?? "aggregator", url, response),
       observations: [],
     }
   }
-  let payload = json_parse(response.body ?? "")
-  let entries = config.mapper(payload)
-  let provenance_base = {
+  const payload = json_parse(response.body ?? "")
+  const entries = config.mapper(payload)
+  const provenance_base = {
     source_url: url,
     source_kind: "json",
     source_owner: config?.source_owner ?? "aggregator",
@@ -248,13 +248,13 @@ pub fn json_api_adapter(env: dict, config: dict) -> dict {
     requires_key: false,
     terms_notes: config?.terms_notes,
   }
-  var observations = []
+  let observations = []
   for entry in entries {
     if entry?.model_id == nil || entry.model_id == "" {
       continue
     }
-    let provider = entry?.provider ?? config.provider
-    let obs = observation(
+    const provider = entry?.provider ?? config.provider
+    const obs = observation(
       provider,
       entry.model_id,
       {
@@ -288,8 +288,8 @@ pub fn json_api_adapter(env: dict, config: dict) -> dict {
  * removal.
  */
 pub fn key_required_adapter(env: dict, config: dict) -> dict {
-  let key_envs = config.key_envs ?? []
-  let secret = __first_available_secret(env, key_envs)
+  const key_envs = config.key_envs ?? []
+  const secret = __first_available_secret(env, key_envs)
   if secret == nil {
     return {
       run: __build_run(
@@ -303,9 +303,9 @@ pub fn key_required_adapter(env: dict, config: dict) -> dict {
       observations: [],
     }
   }
-  let adapter_env = __env_with_auth_header(env, config, secret)
-  let result = config.adapter(adapter_env)
-  let augmented = result.run + {requires_key: true, key_envs: key_envs}
+  const adapter_env = __env_with_auth_header(env, config, secret)
+  const result = config.adapter(adapter_env)
+  const augmented = result.run + {requires_key: true, key_envs: key_envs}
   return {run: augmented, observations: result.observations}
 }
 
@@ -332,13 +332,13 @@ pub fn key_required_adapter(env: dict, config: dict) -> dict {
  * surface to avoid spurious drift.
  */
 pub fn artificialanalysis_adapter(env: dict, config: dict) -> dict {
-  let url = config.source_url
-  let response = web_fetch(url, env?.http_options ?? {})
+  const url = config.source_url
+  const response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
     return {run: __fetch_failure_run(config.id, "html", "aggregator", url, response), observations: []}
   }
-  let doc = web_parse_html(response.body ?? "")
-  let benchmarks = __aa_extract_benchmarks(doc)
+  const doc = web_parse_html(response.body ?? "")
+  const benchmarks = __aa_extract_benchmarks(doc)
   if len(benchmarks) == 0 {
     return {
       run: __build_run(
@@ -356,7 +356,7 @@ pub fn artificialanalysis_adapter(env: dict, config: dict) -> dict {
       observations: [],
     }
   }
-  let provenance = {
+  const provenance = {
     source_url: url,
     source_kind: "html",
     source_owner: "aggregator",
@@ -366,7 +366,7 @@ pub fn artificialanalysis_adapter(env: dict, config: dict) -> dict {
     requires_key: false,
     terms_notes: "Benchmarks are published-snapshot at fetch time; AA refreshes monthly.",
   }
-  let obs = observation(config.provider, config.model_id, {benchmarks: benchmarks}, provenance)
+  const obs = observation(config.provider, config.model_id, {benchmarks: benchmarks}, provenance)
   return {
     run: __build_run(
       config.id,
@@ -385,19 +385,19 @@ fn __aa_extract_benchmarks(doc) {
   // We accept partial matches (any single numeric attribute is enough)
   // so the adapter still produces observations when only one of the
   // three benchmark surfaces is published for a given model.
-  var out = {}
-  let intel_text = doc.attr("[data-aa-intelligence-index]", "data-aa-intelligence-index")
-  let intel = __aa_to_float(intel_text)
+  let out = {}
+  const intel_text = doc.attr("[data-aa-intelligence-index]", "data-aa-intelligence-index")
+  const intel = __aa_to_float(intel_text)
   if intel != nil {
     out = out + {aa_intelligence_index: intel}
   }
-  let verified_text = doc.attr("[data-aa-swe-bench-verified]", "data-aa-swe-bench-verified")
-  let verified = __aa_to_float(verified_text)
+  const verified_text = doc.attr("[data-aa-swe-bench-verified]", "data-aa-swe-bench-verified")
+  const verified = __aa_to_float(verified_text)
   if verified != nil {
     out = out + {swe_bench_verified: verified}
   }
-  let pro_text = doc.attr("[data-aa-swe-bench-pro]", "data-aa-swe-bench-pro")
-  let pro = __aa_to_float(pro_text)
+  const pro_text = doc.attr("[data-aa-swe-bench-pro]", "data-aa-swe-bench-pro")
+  const pro = __aa_to_float(pro_text)
   if pro != nil {
     out = out + {swe_bench_pro: pro}
   }
@@ -408,7 +408,7 @@ fn __aa_to_float(text) {
   if text == nil {
     return nil
   }
-  let stripped = regex_replace("[^0-9.\\-]", "", to_string(text))
+  const stripped = regex_replace("[^0-9.\\-]", "", to_string(text))
   if stripped == "" || stripped == "-" {
     return nil
   }

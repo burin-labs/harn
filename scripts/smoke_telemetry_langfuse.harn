@@ -16,11 +16,11 @@
 import { compose_tool_callers, with_telemetry } from "std/llm/tool_middleware"
 
 pipeline default() {
-  let posted = atomic(0)
-  let errors = atomic(0)
+  const posted = atomic(0)
+  const errors = atomic(0)
   // Two-sink fan-out: one to Langfuse for real export, one to a local
   // counter so the smoke can be observed without polling Langfuse.
-  let stack = compose_tool_callers(
+  const stack = compose_tool_callers(
     [
       with_telemetry(
         {
@@ -45,7 +45,7 @@ pipeline default() {
   )
   // Two tools — a read and a write — so child spans surface both
   // status: "ok" and an executor field.
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "lookup",
@@ -77,18 +77,15 @@ pipeline default() {
     },
   )
   llm_mock({text: "Done. ##DONE##"})
-  let result = agent_loop(
-    "smoke telemetry",
-    nil,
-    {
-      provider: "mock",
-      tools: registry,
-      tool_format: "native",
-      max_iterations: 3,
-      loop_until_done: true,
-      tool_caller: stack,
-    },
-  )
+  const agent_options = {
+    provider: "mock",
+    tools: registry,
+    tool_format: "native",
+    max_iterations: 3,
+    loop_until_done: true,
+    tool_caller: stack,
+  }
+  const result = agent_loop("smoke telemetry", nil, agent_options)
   __io_println("status: " + to_string(result.status))
   __io_println("spans posted: " + to_string(atomic_get(posted)))
   __io_println("errors: " + to_string(atomic_get(errors)))

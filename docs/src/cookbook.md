@@ -29,7 +29,7 @@ the appropriate key for your provider) before running.
 
 ```harn
 pipeline default(task) {
-  let response = llm_call(
+  const response = llm_call(
     "Explain the builder pattern in three sentences.",
     "You are a software engineering tutor. Be concise."
   )
@@ -41,7 +41,7 @@ To switch provider or model, pass an options dict:
 
 ```harn
 pipeline default(task) {
-  let response = llm_call(
+  const response = llm_call(
     "Explain the builder pattern in three sentences.",
     "You are a software engineering tutor. Be concise.",
     {provider: "openai", model: "gpt-4o", max_tokens: 512}
@@ -58,7 +58,7 @@ attempt does not end the run.
 
 ```harn
 pipeline default(task) {
-  let system = """
+  const system = """
 You are a task planner. Given a task description, break it into steps.
 Respond with ONLY a JSON array of objects, each with "step" (string) and
 "priority" (int 1-5). No other text.
@@ -66,8 +66,8 @@ Respond with ONLY a JSON array of objects, each with "step" (string) and
 
   fn get_plan(task_desc) {
     retry 3 {
-      let raw = llm_call(task_desc, system)
-      let parsed = json_parse(raw.text)
+      const raw = llm_call(task_desc, system)
+      const parsed = json_parse(raw.text)
 
       guard type_of(parsed) == "list" else {
         throw "Expected a JSON array, got: ${type_of(parsed)}"
@@ -83,8 +83,8 @@ Respond with ONLY a JSON array of objects, each with "step" (string) and
     }
   }
 
-  let plan = get_plan("Build a REST API for a todo app")
-  let sorted = plan.filter({ s -> s.priority <= 3 })
+  const plan = get_plan("Build a REST API for a todo app")
+  const sorted = plan.filter({ s -> s.priority <= 3 })
   for step in sorted {
     log("[P${step.priority}] ${step.step}")
   }
@@ -100,13 +100,13 @@ For schema-validated JSON without the manual guards, use
 order.
 
 ```harn
-let prompts = [
+const prompts = [
   "Explain quicksort in two sentences.",
   "Explain mergesort in two sentences.",
   "Explain heapsort in two sentences."
 ]
 
-let responses = parallel each prompts { p ->
+const responses = parallel each prompts { p ->
   llm_call(p, "Be concise.")
 }
 
@@ -125,7 +125,7 @@ typed tools and Tool Vault, see [LLM tools](./llm/tools.md).
 
 ```harn
 pipeline default(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
 
   tools = tool_define(tools, "read", "Read a file from disk", {
     parameters: {path: {type: "string", description: "Path to read"}},
@@ -137,30 +137,30 @@ pipeline default(task) {
     parameters: {query: {type: "string", description: "Query to search"}},
     returns: {type: "string"},
     handler: { query ->
-      let result = exec("grep", "-r", query, "src/")
+      const result = exec("grep", "-r", query, "src/")
       return result.stdout
     }
   })
 
-  let system = tool_prompt(tools)
+  const system = tool_prompt(tools)
 
-  var messages = task
-  var done = false
-  var iterations = 0
+  let messages = task
+  let done = false
+  let iterations = 0
 
   while !done && iterations < 10 {
-    let response = llm_call(messages, system)
-    let calls = tool_parse_call(response.text)
+    const response = llm_call(messages, system)
+    const calls = tool_parse_call(response.text)
 
     if calls.count() == 0 {
       log(response)
       done = true
     } else {
-      var tool_output = ""
+      let tool_output = ""
       for call in calls {
-        let t = tool_find(tools, call.name)
-        let handler = t.handler
-        let result = handler(call.arguments[call.arguments.keys()[0]])
+        const t = tool_find(tools, call.name)
+        const handler = t.handler
+        const result = handler(call.arguments[call.arguments.keys()[0]])
         tool_output = tool_output + tool_format_result(call.name, result)
       }
       messages = tool_output
@@ -180,10 +180,10 @@ Spawn workers for different roles and collect their results.
 
 ```harn
 pipeline default(task) {
-  let roles = ["research", "analyze", "summarize"]
+  const roles = ["research", "analyze", "summarize"]
 
-  let results = parallel each roles { role ->
-    let agent = spawn_agent({
+  const results = parallel each roles { role ->
+    const agent = spawn_agent({
       name: role,
       task: "Handle ${role}: ${task}",
       node: {
@@ -241,7 +241,7 @@ queries accept any capture name.
 import "std/edit"
 
 pipeline default(task) {
-  let result = edit_apply_node({
+  const result = edit_apply_node({
     path: "src/lib.rs",
     query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
     replacement: "{ format!(\"hi {name}!\") }",
@@ -264,7 +264,7 @@ import "std/edit"
 
 pipeline default(task) {
   // Rewrite every `fn foo() { … }` body in a file.
-  let result = edit_apply_node({
+  const result = edit_apply_node({
     path: "src/lib.rs",
     query: "(function_item body: (block) @target)",
     replacement: "{ unimplemented!() }",
@@ -283,7 +283,7 @@ rejection.
 import "std/edit"
 
 pipeline default(task) {
-  let result = edit_apply_node({
+  const result = edit_apply_node({
     path: "src/lib.rs",
     query: "(function_item body: (block) @target)",
     replacement: "{ (",  // intentional syntax error
@@ -303,7 +303,7 @@ alongside any sibling staged writes.
 import "std/edit"
 
 pipeline default(task) {
-  let preview = edit_apply_node({
+  const preview = edit_apply_node({
     path: "src/lib.rs",
     query: "(function_item body: (block) @target)",
     replacement: "{ 42 }",
@@ -340,7 +340,7 @@ pipeline default(task) {
   //       fn one() {}
   //   }
   //
-  let result = edit_insert_at_anchor({
+  const result = edit_insert_at_anchor({
     path: "src/lib.rs",
     query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
     position: "last_child",
@@ -374,7 +374,7 @@ pipeline default(task) {
   //
   //   const x = 1;
   //
-  let result = edit_insert_at_anchor({
+  const result = edit_insert_at_anchor({
     path: "src/index.ts",
     // Anchor on the last existing import so the new line lands right
     // below it (and above any code).
@@ -406,8 +406,8 @@ has no tree-sitter grammar and you still need collision safety.
 import { edit_safe_text_patch } from "std/edit"
 
 pipeline default(task) {
-  let snapshot = hostlib_fs_read_text({path: "src/lib.rs"})
-  let result = edit_safe_text_patch({
+  const snapshot = hostlib_fs_read_text({path: "src/lib.rs"})
+  const result = edit_safe_text_patch({
     path: "src/lib.rs",
     expected_hash: snapshot.sha256,
     hunks: [
@@ -451,7 +451,7 @@ reviewer UI.
 import "std/edit"
 
 pipeline default(task) {
-  let bundle = edit_dry_run({
+  const bundle = edit_dry_run({
     plan: [
       {
         op: "apply_node",
@@ -509,7 +509,7 @@ can't end up with two identically named definitions in the same scope.
 import { edit_rename_symbol } from "std/edit"
 
 pipeline default(task) {
-  let result = edit_rename_symbol({
+  const result = edit_rename_symbol({
     symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
     new_name: "Gadget",
     scope: "workspace",
@@ -569,8 +569,8 @@ react to.
 import { edit_safe_text_patch } from "std/edit"
 
 pipeline default(task) {
-  let snapshot = hostlib_fs_read_text({path: "CHANGELOG.md"})
-  let result = edit_safe_text_patch({
+  const snapshot = hostlib_fs_read_text({path: "CHANGELOG.md"})
+  const result = edit_safe_text_patch({
     path: "CHANGELOG.md",
     expected_hash: snapshot.sha256,
     hunks: [
@@ -599,7 +599,7 @@ snippet survives the next turn but does not bloat the durable transcript.
 The canonical body and producer wiring:
 
 ```harn,ignore
-let edit_strategy_reminder = """
+const edit_strategy_reminder = """
 Prefer the AST-precise primitives in std/edit when modifying source:
 - edit_apply_node for replacing a node (function body, call, decl).
 - edit_insert_at_anchor for adding a sibling/child (test, import, arm).
@@ -609,7 +609,7 @@ Fall back to edit_safe_text_patch only when the language has no
 tree-sitter grammar or the change is purely textual.
 """
 
-let injected = transcript.inject_reminder(transcript(), {
+const injected = transcript.inject_reminder(transcript(), {
   body: edit_strategy_reminder,
   tags: ["edit_strategy"],
   dedupe_key: "edit_strategy:prefer_ast",
@@ -639,21 +639,21 @@ them. This example uses the filesystem MCP server.
 
 ```harn
 pipeline default(task) {
-  let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+  const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 
-  let info = mcp_server_info(client)
+  const info = mcp_server_info(client)
   log("Connected to: ${info.name}")
 
-  let tools = mcp_list_tools(client)
+  const tools = mcp_list_tools(client)
   for t in tools {
     log("Tool: ${t.name} - ${t.description}")
   }
 
   mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
-  let content = mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
+  const content = mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
   log("File content: ${content}")
 
-  let entries = mcp_call(client, "list_directory", {path: "/tmp"})
+  const entries = mcp_call(client, "list_directory", {path: "/tmp"})
   log(entries)
 
   mcp_disconnect(client)
@@ -678,10 +678,10 @@ chooses which to call.
 
 ```harn
 pipeline default(task) {
-  let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
-  let mcp_tool_list = mcp_list_tools(client)
+  const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+  const mcp_tool_list = mcp_list_tools(client)
 
-  var tools = tool_registry()
+  let tools = tool_registry()
   for t in mcp_tool_list {
     tools = tool_define(tools, t.name, t.description, {
       parameters: t.inputSchema?.properties ?? {},
@@ -690,7 +690,7 @@ pipeline default(task) {
     })
   }
 
-  let result = agent_loop(
+  const result = agent_loop(
     "List all files in /tmp and read the first one.",
     "You are a helpful file assistant.",
     {
@@ -714,13 +714,13 @@ you want them indexed by position.
 
 ```harn
 pipeline default(task) {
-  let prompts = [
+  const prompts = [
     "Write a haiku about Rust",
     "Write a haiku about concurrency",
     "Write a haiku about debugging"
   ]
 
-  let results = parallel(prompts.count) { i ->
+  const results = parallel(prompts.count) { i ->
     llm_call(prompts[i], "You are a poet.")
   }
 
@@ -742,22 +742,22 @@ than an unbounded queue.
 
 ```harn
 pipeline default(task) {
-  let ch = channel("work", 10)
-  let results_ch = channel("results", 10)
+  const ch = channel("work", 10)
+  const results_ch = channel("results", 10)
 
-  let producer = spawn {
-    let items = ["item_a", "item_b", "item_c"]
+  const producer = spawn {
+    const items = ["item_a", "item_b", "item_c"]
     for item in items {
       send(ch, item)
     }
     send(ch, "DONE")
   }
 
-  let consumer = spawn {
-    var processed = 0
-    var running = true
+  const consumer = spawn {
+    let processed = 0
+    let running = true
     while running {
-      let item = receive(ch)
+      const item = receive(ch)
       if item == "DONE" {
         running = false
       } else {
@@ -771,9 +771,9 @@ pipeline default(task) {
   await(producer)
   await(consumer)
 
-  var collecting = true
+  let collecting = true
   while collecting {
-    let msg = receive(results_ch)
+    const msg = receive(results_ch)
     if msg.starts_with("COMPLETE:") {
       log(msg)
       collecting = false
@@ -794,16 +794,16 @@ not overflow even across thousands of iterations.
 
 ```harn
 pipeline default(task) {
-  let items = ["Refactor auth module", "Add input validation", "Write unit tests"]
+  const items = ["Refactor auth module", "Add input validation", "Write unit tests"]
 
   fn process(remaining, results) {
     if remaining.count == 0 {
       return results
     }
-    let item = remaining.first
-    let rest = remaining.slice(1)
+    const item = remaining.first
+    const rest = remaining.slice(1)
 
-    let result = retry 3 {
+    const result = retry 3 {
       llm_call(
         "Plan how to: ${item}",
         "You are a senior engineer. Output a numbered list of steps."
@@ -813,7 +813,7 @@ pipeline default(task) {
     return process(rest, results + [{task: item, plan: result}])
   }
 
-  let plans = process(items, [])
+  const plans = process(items, [])
 
   for p in plans {
     log("=== ${p.task} ===")
@@ -857,7 +857,7 @@ pipeline default(task) {
   fn safe_llm_call(prompt, system) {
     retry 3 {
       try {
-        let raw = llm_call(prompt, system)
+        const raw = llm_call(prompt, system)
         return json_parse(raw.text)
       } catch (e) {
         log("LLM call failed: ${e}")
@@ -867,7 +867,7 @@ pipeline default(task) {
   }
 
   try {
-    let result = safe_llm_call(
+    const result = safe_llm_call(
       "Return a JSON object with keys 'summary' and 'score'.",
       "You are an evaluator. Always respond with valid JSON only."
     )
@@ -907,25 +907,25 @@ pipeline default(task) {
     }
   }
 
-  let sources = ["README.md", "CHANGELOG.md", "docs/architecture.md"]
+  const sources = ["README.md", "CHANGELOG.md", "docs/architecture.md"]
 
-  let contents = parallel each sources { path ->
+  const contents = parallel each sources { path ->
     {path: path, content: read_or_empty(path)}
   }
 
-  var context = {task: task, files: {}}
+  let context = {task: task, files: {}}
   for item in contents {
     if item.content != "" {
       context = context.merge({files: context.files.merge({[item.path]: item.content})})
     }
   }
 
-  var prompt = "Task: ${task}\n\n"
+  let prompt = "Task: ${task}\n\n"
   for entry in context.files {
     prompt += "=== ${entry.key} ===\n${entry.value}\n\n"
   }
 
-  let result = llm_call(prompt, "You are a helpful assistant. Use the provided files as context.")
+  const result = llm_call(prompt, "You are a helpful assistant. Use the provided files as context.")
   log(result)
 }
 ```
@@ -939,7 +939,7 @@ Split logic into reusable pipelines using `import` and `extends`. See
 
 ```harn
 fn gather_context(task) {
-  let readme = read_file("README.md")
+  const readme = read_file("README.md")
   return {
     task: task,
     readme: readme,
@@ -954,9 +954,9 @@ fn gather_context(task) {
 import "lib/context"
 
 pipeline review(task) {
-  let ctx = gather_context(task)
-  let prompt = "Review this project.\n\nREADME:\n${ctx.readme}\n\nTask: ${ctx.task}"
-  let result = llm_call(prompt, "You are a code reviewer.")
+  const ctx = gather_context(task)
+  const prompt = "Review this project.\n\nREADME:\n${ctx.readme}\n\nTask: ${ctx.task}"
+  const result = llm_call(prompt, "You are a code reviewer.")
   log(result)
 }
 ```
@@ -980,18 +980,18 @@ and sets.
 
 ```harn
 pipeline default(task) {
-  let allowed_extensions = [".rs", ".harn", ".toml"]
-  let files = list_dir("src")
+  const allowed_extensions = [".rs", ".harn", ".toml"]
+  const files = list_dir("src")
 
-  let relevant = files.filter({ f ->
-    let ext = extname(f)
+  const relevant = files.filter({ f ->
+    const ext = extname(f)
     ext in allowed_extensions
   })
 
   log("Relevant files: ${relevant}")
 
-  let config = {host: "localhost", port: 8080, debug: true, secret: "abc"}
-  let sensitive = ["secret", "password"]
+  const config = {host: "localhost", port: 8080, debug: true, secret: "abc"}
+  const sensitive = ["secret", "password"]
 
   for entry in config {
     if entry.key not in sensitive {
@@ -1008,7 +1008,7 @@ Sets give O(1)-style membership testing and are immutable —
 
 ```harn
 pipeline default(task) {
-  let urls = [
+  const urls = [
     "https://example.com/a",
     "https://example.com/b",
     "https://example.com/a",
@@ -1016,10 +1016,10 @@ pipeline default(task) {
     "https://example.com/b"
   ]
 
-  let unique_urls = to_list(set(urls))
+  const unique_urls = to_list(set(urls))
   log("${len(unique_urls)} unique URLs out of ${len(urls)} total")
 
-  var visited = set()
+  let visited = set()
   for url in unique_urls {
     if !set_contains(visited, url) {
       log("Processing: ${url}")
@@ -1027,11 +1027,11 @@ pipeline default(task) {
     }
   }
 
-  let batch_a = set("task-1", "task-2", "task-3")
-  let batch_b = set("task-2", "task-3", "task-4")
+  const batch_a = set("task-1", "task-2", "task-3")
+  const batch_b = set("task-2", "task-3", "task-4")
 
-  let already_done = set_intersect(batch_a, batch_b)
-  let new_work = set_difference(batch_b, batch_a)
+  const already_done = set_intersect(batch_a, batch_b)
+  const new_work = set_difference(batch_b, batch_a)
 
   log("Overlap: ${len(already_done)}, New: ${len(new_work)}")
 }
@@ -1046,11 +1046,11 @@ of these statically.
 ```harn,ignore
 pipeline default(task) {
   fn summarize(text: string, max_words: int) -> string {
-    let words = text.split(" ")
+    const words = text.split(" ")
     if words.count <= max_words {
       return text
     }
-    let truncated = words.slice(0, max_words)
+    const truncated = words.slice(0, max_words)
     return "${join(truncated, " ")}..."
   }
 
@@ -1087,8 +1087,8 @@ during agent execution.
 
 ```harn
 pipeline default(task) {
-  let result = llm_call(task, "Be concise.")
-  let usage = llm_usage()
+  const result = llm_call(task, "Be concise.")
+  const usage = llm_usage()
 
   eval_metric("cost_tokens", usage.input_tokens + usage.output_tokens)
   eval_metric("output_length", result.text.length, {model: result.model})

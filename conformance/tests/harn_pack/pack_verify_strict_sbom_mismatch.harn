@@ -1,12 +1,12 @@
 import "../_common"
 
 pipeline default() {
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  let root = path_join(harness.fs.temp_dir(), "harn_pack_strict_sbom_" + uuid_v7())
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn_pack_strict_sbom_" + uuid_v7())
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
-  let pack = exec_at(
+  const pack = exec_at(
     root,
     harn_bin,
     "pack",
@@ -16,10 +16,10 @@ pipeline default() {
     path_join(root, "hello.harnpack"),
   )
   __io_println(pack.success)
-  let unpack_dir = path_join(root, "unpack")
-  let unpack = exec_at(root, harn_bin, "pack", "unpack", "hello.harnpack", "--out", unpack_dir)
+  const unpack_dir = path_join(root, "unpack")
+  const unpack = exec_at(root, harn_bin, "pack", "unpack", "hello.harnpack", "--out", unpack_dir)
   __io_println(unpack.success)
-  let tamper = exec_at(
+  const tamper = exec_at(
     root,
     "python3",
     "-c",
@@ -28,9 +28,9 @@ pipeline default() {
     path_join(root, "unpack/sbom.spdx.json"),
   )
   __io_println(tamper.success)
-  let repack = exec_at(root, harn_bin, "pack", "repack", unpack_dir, "--out", "tampered.harnpack")
+  const repack = exec_at(root, harn_bin, "pack", "repack", unpack_dir, "--out", "tampered.harnpack")
   __io_println(repack.success)
-  let lenient = exec_at(
+  const lenient = exec_at(
     root,
     harn_bin,
     "pack",
@@ -40,9 +40,9 @@ pipeline default() {
     "--json",
   )
   __io_println(lenient.success)
-  let lenient_data = json_parse(lenient.stdout)
+  const lenient_data = json_parse(lenient.stdout)
   __io_println(lenient_data.ok)
-  let strict = exec_at(
+  const strict = exec_at(
     root,
     harn_bin,
     "pack",
@@ -53,7 +53,7 @@ pipeline default() {
     "--json",
   )
   __io_println(strict.success)
-  let strict_data = json_parse(strict.stdout)
+  const strict_data = json_parse(strict.stdout)
   __io_println(strict_data.ok)
   __io_println(strict_data.error.code)
 }

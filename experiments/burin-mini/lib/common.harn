@@ -17,7 +17,7 @@ pub fn evaluator_model() {
 }
 
 fn bool_env(value) {
-  let normalized = lowercase((value ?? "").trim())
+  const normalized = lowercase((value ?? "").trim())
   if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" {
     return true
   }
@@ -28,7 +28,7 @@ fn bool_env(value) {
 }
 
 fn reasoning_policy_for_model(harness: Harness, _provider, _model) {
-  let legacy = bool_env(harness.env.get_or("BURIN_MINI_THINKING", ""))
+  const legacy = bool_env(harness.env.get_or("BURIN_MINI_THINKING", ""))
   if legacy != nil && !legacy {
     return "off"
   }
@@ -44,9 +44,9 @@ fn reasoning_scale_for_model(harness: Harness, _provider, _model) {
 
 /** Apply the Burin Mini reasoning policy defaults to agent options. */
 pub fn apply_reasoning_policy(opts, task) {
-  let provider = opts?.provider ?? provider_name()
-  let model = opts?.model ?? generator_model()
-  let policy = reasoning_policy_for_model(harness, provider, model)
+  const provider = opts?.provider ?? provider_name()
+  const model = opts?.model ?? generator_model()
+  const policy = reasoning_policy_for_model(harness, provider, model)
   if policy == "manual_on" {
     return opts + {thinking: true}
   }
@@ -78,7 +78,7 @@ fn ensure_string_list(items) {
   if type_of(items) != "list" {
     return []
   }
-  var result = []
+  let result = []
   for item in items {
     if type_of(item) == "string" && item != "" {
       result = result + [item]
@@ -88,7 +88,7 @@ fn ensure_string_list(items) {
 }
 
 fn append_unique_strings(items, values) {
-  var result = ensure_string_list(items)
+  let result = ensure_string_list(items)
   for value in ensure_string_list(values) {
     if !list_contains(result, value) {
       result = result + [value]
@@ -105,7 +105,7 @@ fn trimmed_string(value) {
 }
 
 fn generic_action_task(value) {
-  let normalized = trimmed_string(value).lower()
+  const normalized = trimmed_string(value).lower()
   return normalized == "" || normalized == "write" || normalized == "edit" || normalized == "run"
     || normalized == "execute"
     || normalized == "verify"
@@ -115,16 +115,16 @@ fn action_is_verification_like(profile, title, task, command) {
   if profile?.mode == "read_only" {
     return false
   }
-  let verify_command = effective_verify_command(profile)
+  const verify_command = effective_verify_command(profile)
   if verify_command == "none" {
     return false
   }
-  let haystack = lowercase("${title}\n${task}\n${command}")
+  const haystack = lowercase("${title}\n${task}\n${command}")
   if command != "" && (command == verify_command || contains(haystack, lowercase(verify_command))) {
     return true
   }
-  let mentions_verify = contains(haystack, "verify") || contains(haystack, "verification")
-  let mentions_runner = contains(haystack, "script") || contains(haystack, "command")
+  const mentions_verify = contains(haystack, "verify") || contains(haystack, "verification")
+  const mentions_runner = contains(haystack, "script") || contains(haystack, "command")
     || contains(haystack, "contract")
     || contains(haystack, "success criteria")
     || contains(haystack, "confirm")
@@ -133,7 +133,7 @@ fn action_is_verification_like(profile, title, task, command) {
 
 /** Return the verifier command string for prompts and runtime configs. */
 pub fn effective_verify_command(profile) {
-  let command = trimmed_string(profile?.verify_command ?? "")
+  const command = trimmed_string(profile?.verify_command ?? "")
   if command {
     return command
   }
@@ -147,8 +147,8 @@ pub fn verification_contract(profile) {
 
 /** Render the verification contract as markdown bullets for prompt context. */
 pub fn render_verification_contract(profile) {
-  let contract = verification_contract(profile)
-  var lines = []
+  const contract = verification_contract(profile)
+  let lines = []
   for value in ensure_string_list(contract?.required_identifiers ?? []) {
     lines = lines + ["- required identifier: ${value}"]
   }
@@ -184,13 +184,13 @@ fn canonical_tool_name(name) {
 }
 
 fn normalize_tool_names(requested, fallback) {
-  let allowed = ensure_string_list(fallback)
+  const allowed = ensure_string_list(fallback)
   if len(allowed) == 0 {
     return []
   }
-  var picked = []
+  let picked = []
   for name in ensure_string_list(requested) {
-    let canonical = canonical_tool_name(name)
+    const canonical = canonical_tool_name(name)
     if list_contains(allowed, canonical) && !list_contains(picked, canonical) {
       picked = picked + [canonical]
     }
@@ -225,10 +225,10 @@ fn tools_fit_within(requested, allowed) {
 }
 
 fn infer_target_paths_from_text(profile, task, title) {
-  let haystack = lowercase("${title}\n${task}")
-  var target_paths = []
+  const haystack = lowercase("${title}\n${task}")
+  let target_paths = []
   for path in ensure_string_list(profile?.write_paths ?? []) {
-    let normalized = lowercase(path)
+    const normalized = lowercase(path)
     if contains(haystack, normalized) || contains(haystack, "/${normalized}") {
       target_paths = append_unique_strings(target_paths, path)
     }
@@ -243,7 +243,7 @@ fn normalize_question_entry(profile, item, index) {
   if type_of(item) != "dict" {
     return nil
   }
-  let tools = normalize_tool_names(item?.tools, default_research_tools(profile))
+  const tools = normalize_tool_names(item?.tools, default_research_tools(profile))
   return {
     id: item?.id ?? "q${index}",
     question: item?.question ?? item?.prompt ?? item?.text ?? "",
@@ -255,15 +255,15 @@ fn normalize_action_entry(profile, item, index) {
   if type_of(item) != "dict" {
     return nil
   }
-  var depends_on = ensure_string_list(item?.depends_on)
+  let depends_on = ensure_string_list(item?.depends_on)
   if len(depends_on) == 0 {
     depends_on = ensure_string_list(item?.dependencies)
   }
-  let title = trimmed_string(item?.title ?? item?.summary ?? "Action ${index}")
-  var task = trimmed_string(item?.task ?? item?.description ?? "")
-  let raw_command = trimmed_string(item?.command ?? "")
-  let verification_like = action_is_verification_like(profile, title, task, raw_command)
-  var allowed_tools = if verification_like {
+  const title = trimmed_string(item?.title ?? item?.summary ?? "Action ${index}")
+  let task = trimmed_string(item?.task ?? item?.description ?? "")
+  const raw_command = trimmed_string(item?.command ?? "")
+  const verification_like = action_is_verification_like(profile, title, task, raw_command)
+  let allowed_tools = if verification_like {
     ["run"]
   } else {
     normalize_tool_names(item?.allowed_tools, default_action_tools(profile))
@@ -272,7 +272,7 @@ fn normalize_action_entry(profile, item, index) {
     allowed_tools = ["read"] + allowed_tools
   }
   if list_contains(allowed_tools, "write") {
-    var scoped_tools = []
+    let scoped_tools = []
     for tool_name in allowed_tools {
       if tool_name != "run" {
         scoped_tools = scoped_tools + [tool_name]
@@ -280,7 +280,7 @@ fn normalize_action_entry(profile, item, index) {
     }
     allowed_tools = scoped_tools
   }
-  var target_paths = []
+  let target_paths = []
   target_paths = append_unique_strings(target_paths, item?.target_paths ?? [])
   target_paths = append_unique_strings(target_paths, item?.paths ?? [])
   target_paths = append_unique_strings(target_paths, item?.changed_paths ?? [])
@@ -289,7 +289,7 @@ fn normalize_action_entry(profile, item, index) {
   if verification_like {
     target_paths = []
   }
-  let command = if verification_like {
+  const command = if verification_like {
     trimmed_string(item?.command ?? profile?.verify_command ?? "")
   } else if list_contains(allowed_tools, "run") {
     if list_contains(allowed_tools, "write") {
@@ -331,15 +331,15 @@ fn append_verifier_hints_to_task(profile, task, target_paths, allowed_tools) {
   if !list_contains(allowed_tools, "write") {
     return task
   }
-  let contract = verification_contract(profile)
-  let required_paths = ensure_string_list(contract?.required_paths ?? [])
+  const contract = verification_contract(profile)
+  const required_paths = ensure_string_list(contract?.required_paths ?? [])
   if len(required_paths) != 1 || len(target_paths) != 1 || required_paths[0] != target_paths[0] {
     return task
   }
-  var hints = []
-  let required_identifiers = ensure_string_list(contract?.required_identifiers ?? [])
-  let required_text = ensure_string_list(contract?.required_text ?? [])
-  let notes = ensure_string_list(contract?.notes ?? [])
+  let hints = []
+  const required_identifiers = ensure_string_list(contract?.required_identifiers ?? [])
+  const required_text = ensure_string_list(contract?.required_text ?? [])
+  const notes = ensure_string_list(contract?.notes ?? [])
   if len(required_identifiers) > 0 {
     hints = hints
       + [
@@ -370,7 +370,7 @@ fn action_has_tool(action, name) {
 }
 
 fn action_is_research_like(profile, action) {
-  let tools = action?.allowed_tools ?? []
+  const tools = action?.allowed_tools ?? []
   if len(tools) == 0 {
     return false
   }
@@ -386,17 +386,17 @@ fn action_as_question(profile, action) {
 }
 
 fn infer_action_dependencies(actions) {
-  var write_ids = []
+  let write_ids = []
   for action in actions {
     if action_has_tool(action, "write") {
       write_ids = write_ids + [action?.id ?? ""]
     }
   }
-  var normalized = []
+  let normalized = []
   for action in actions {
-    var depends_on = action?.depends_on ?? []
+    let depends_on = action?.depends_on ?? []
     if len(depends_on) == 0 && action_has_tool(action, "run") && len(write_ids) > 0 {
-      var inferred = []
+      let inferred = []
       for dep in write_ids {
         if dep != action?.id {
           inferred = inferred + [dep]
@@ -421,7 +421,7 @@ fn infer_action_dependencies(actions) {
 }
 
 fn ensure_terminal_verify_action(profile, actions) {
-  let verify_command = effective_verify_command(profile)
+  const verify_command = effective_verify_command(profile)
   if profile?.mode == "read_only" || verify_command == "none" || len(actions) == 0 {
     return actions
   }
@@ -430,7 +430,7 @@ fn ensure_terminal_verify_action(profile, actions) {
       return actions
     }
   }
-  var depends_on = []
+  let depends_on = []
   for action in actions {
     if (action?.id ?? "") != "" {
       depends_on = depends_on + [action.id]
@@ -451,13 +451,13 @@ fn ensure_terminal_verify_action(profile, actions) {
 }
 
 fn collect_normalized_questions(profile, src) {
-  var questions = []
-  let raw_questions = src?.questions ?? src?.research_questions ?? []
+  let questions = []
+  const raw_questions = src?.questions ?? src?.research_questions ?? []
   if type_of(raw_questions) != "list" {
     return questions
   }
   for (index, item) in iter(raw_questions).enumerate() {
-    let normalized = normalize_question_entry(profile, item, index + 1)
+    const normalized = normalize_question_entry(profile, item, index + 1)
     if normalized != nil && (normalized.question ?? "") != "" {
       questions = questions + [normalized]
     }
@@ -466,13 +466,13 @@ fn collect_normalized_questions(profile, src) {
 }
 
 fn collect_normalized_actions(profile, src) {
-  var actions = []
-  let raw_actions = src?.actions ?? src?.action_list ?? []
+  let actions = []
+  const raw_actions = src?.actions ?? src?.action_list ?? []
   if type_of(raw_actions) != "list" {
     return actions
   }
   for (index, item) in iter(raw_actions).enumerate() {
-    let normalized = normalize_action_entry(profile, item, index + 1)
+    const normalized = normalize_action_entry(profile, item, index + 1)
     if normalized != nil && (normalized.task ?? "") != "" {
       actions = actions + [normalized]
     }
@@ -484,8 +484,8 @@ fn split_actions_for_stage(profile, actions, explicit_ready) {
   if profile?.mode == "read_only" || len(actions) == 0 {
     return {actions: actions, questions: []}
   }
-  var research_like = []
-  var executable = []
+  let research_like = []
+  let executable = []
   for action in actions {
     if action_is_research_like(profile, action) {
       research_like = research_like + [action]
@@ -515,7 +515,7 @@ fn actions_are_preparatory(profile, actions, explicit_ready) {
 }
 
 fn actions_as_questions(profile, actions) {
-  var questions = []
+  let questions = []
   for action in actions {
     questions = questions + [action_as_question(profile, action)]
   }
@@ -534,15 +534,15 @@ fn normalize_ready_value(explicit_ready, actions, final_response) {
 
 /** Normalize planner output from cheap models onto the experiment schema. */
 pub fn normalize_plan(profile, plan) {
-  let src = plan ?? {}
-  var questions = collect_normalized_questions(profile, src)
-  var actions = collect_normalized_actions(profile, src)
-  let explicit_ready = if type_of(src?.ready) == "bool" {
+  const src = plan ?? {}
+  let questions = collect_normalized_questions(profile, src)
+  let actions = collect_normalized_actions(profile, src)
+  const explicit_ready = if type_of(src?.ready) == "bool" {
     src?.ready
   } else {
     nil
   }
-  let stage_split = split_actions_for_stage(profile, actions, explicit_ready)
+  const stage_split = split_actions_for_stage(profile, actions, explicit_ready)
   questions = questions + actions_as_questions(profile, stage_split.questions ?? [])
   actions = stage_split.actions ?? []
   if actions_are_preparatory(profile, actions, explicit_ready) {
@@ -555,7 +555,7 @@ pub fn normalize_plan(profile, plan) {
   }
   actions = ensure_terminal_verify_action(profile, actions)
   actions = infer_action_dependencies(actions)
-  let final_response = src?.final_response ?? src?.answer ?? ""
+  const final_response = src?.final_response ?? src?.answer ?? ""
   return {
     ready: normalize_ready_value(explicit_ready, actions, final_response),
     plan_summary: src?.plan_summary ?? src?.summary ?? src?.reason ?? "",
@@ -567,7 +567,7 @@ pub fn normalize_plan(profile, plan) {
 }
 
 fn action_phase(action) {
-  let tools = action?.allowed_tools ?? []
+  const tools = action?.allowed_tools ?? []
   if tools_fit_within(tools, default_research_tools({mode: "scoped_write"})) {
     return "research"
   }
@@ -578,7 +578,7 @@ fn action_phase(action) {
 }
 
 fn action_tool_class(action) {
-  let phase = action_phase(action)
+  const phase = action_phase(action)
   if phase == "research" {
     return "read"
   }
@@ -593,7 +593,7 @@ fn action_tool_class(action) {
 
 /** Convert a normalized plan into a canonical action graph with rich metadata. */
 pub fn plan_to_action_graph(task, plan) {
-  var actions = []
+  let actions = []
   for action in plan?.actions ?? [] {
     actions = actions
       + [
@@ -617,7 +617,7 @@ pub fn plan_to_action_graph(task, plan) {
 
 /** Return the effective success criteria for evaluator prompts. */
 pub fn plan_success_criteria(profile, plan) {
-  let criteria = ensure_string_list(plan?.success_criteria ?? profile?.success_criteria ?? [])
+  const criteria = ensure_string_list(plan?.success_criteria ?? profile?.success_criteria ?? [])
   if len(criteria) > 0 {
     return criteria
   }
@@ -626,7 +626,7 @@ pub fn plan_success_criteria(profile, plan) {
 
 /** Normalize research-worker output onto a stable fact schema. */
 pub fn normalize_research_fact(question, fact) {
-  let src = fact ?? {}
+  const src = fact ?? {}
   return {
     question: src?.question ?? question?.question ?? "",
     answer: src?.answer ?? src?.summary ?? src?.fact ?? "",
@@ -637,7 +637,7 @@ pub fn normalize_research_fact(question, fact) {
 
 /** Normalize executor output onto a stable action-result schema. */
 pub fn normalize_action_result(action, result) {
-  let src = result ?? {}
+  const src = result ?? {}
   return {
     id: action?.id ?? src?.id ?? "",
     title: action?.title ?? src?.title ?? "",
@@ -652,7 +652,7 @@ pub fn render_list(items) {
   if len(items) == 0 {
     return "(none)"
   }
-  var lines = []
+  let lines = []
   for item in items {
     lines = lines + ["- ${item}"]
   }
@@ -672,7 +672,7 @@ pub fn render_facts(facts) {
   if len(facts) == 0 {
     return "- no research yet"
   }
-  var lines = []
+  let lines = []
   for fact in facts {
     lines = lines + ["- ${fact?.question}: ${fact?.answer}"]
     if len(fact?.evidence_paths ?? []) > 0 {
@@ -687,7 +687,7 @@ pub fn render_action_results(results) {
   if len(results) == 0 {
     return "- no executor actions ran"
   }
-  var lines = []
+  let lines = []
   for result in results {
     if result?.ok {
       lines = lines
@@ -758,7 +758,7 @@ pub fn research_schema() {
 
 /** Build common generator sub-agent options. */
 pub fn generator_options(system, tools, allowed_tools) {
-  let opts = {
+  const opts = {
     provider: provider_name(),
     model: generator_model(),
     system: system,
@@ -768,7 +768,7 @@ pub fn generator_options(system, tools, allowed_tools) {
     temperature: 0,
     max_iterations: 6,
   }
-  let task = if len(allowed_tools ?? []) > 0 {
+  const task = if len(allowed_tools ?? []) > 0 {
     "agent"
   } else {
     "code"
@@ -778,7 +778,7 @@ pub fn generator_options(system, tools, allowed_tools) {
 
 /** Build common evaluator sub-agent options. */
 pub fn evaluator_options(system, tools) {
-  let opts = {
+  const opts = {
     provider: provider_name(),
     model: evaluator_model(),
     system: system,
@@ -793,13 +793,13 @@ pub fn evaluator_options(system, tools) {
 
 /** Safely parse a JSON object from model output. */
 pub fn parse_json_object(text) {
-  let raw = text ?? ""
-  let parsed = safe_parse(raw)
+  const raw = text ?? ""
+  const parsed = safe_parse(raw)
   if parsed == nil {
-    let trimmed = raw.trim()
-    let unfenced = regex_replace("^```[A-Za-z0-9_-]*\\n", "", trimmed)
-    let unwrapped = regex_replace("\\n```$", "", unfenced)
-    let retried = safe_parse(unwrapped)
+    const trimmed = raw.trim()
+    const unfenced = regex_replace("^```[A-Za-z0-9_-]*\\n", "", trimmed)
+    const unwrapped = regex_replace("\\n```$", "", unfenced)
+    const retried = safe_parse(unwrapped)
     if retried == nil {
       return {}
     }

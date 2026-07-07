@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn semantic_token_lengths_are_utf16() {
-        let source = "let mood = \"😀\"\n";
+        let source = "const mood = \"😀\"\n";
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize_with_comments().unwrap();
         let semantic = build_semantic_tokens(&tokens, &[], source);

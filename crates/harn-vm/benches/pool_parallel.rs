@@ -11,8 +11,8 @@ fn crunch_function() -> String {
     format!(
         r#"
 fn crunch(seed) {{
-  var i = 0
-  var total = seed + 1
+  let i = 0
+  let total = seed + 1
   while i < {INNER_ITERS} {{
     total = ((total * 1664525) + i + 1013904223) % 2147483647
     i = i + 1
@@ -33,7 +33,7 @@ fn serial_source() -> String {
 {}
 
 pipeline default() {{
-  var results = []
+  let results = []
   for i in 0 to {TASKS} exclusive {{
     results = results.push(crunch(i))
   }}
@@ -53,7 +53,7 @@ import {{ pool_create, pool_wait }} from "std/lifecycle/pool"
 
 pipeline default() {{
   let pool = pool_create({{name: "pool-parallel-bench", max_concurrent: {max_concurrent}}})
-  var handles = []
+  let handles = []
   for i in 0 to {TASKS} exclusive {{
     let seed = i
     handles = handles.push(pool.submit({{ -> crunch(seed) }}))

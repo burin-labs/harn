@@ -21,7 +21,7 @@ fn events_of(events, kind) {
 }
 
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   // The error echoes a per-call `tag`, so successive runs carry DIFFERENT
   // failure signatures without relying on mutable closure state.
   tools = tool_define(
@@ -72,8 +72,8 @@ pipeline default() {
       llm_text("Stopping. ##DONE##"),
     ],
     { ->
-      let session = "repair-reset-streak-" + uuid()
-      let captured = agent_capture_events(
+      const session = "repair-reset-streak-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the failing test pass.",
@@ -98,7 +98,7 @@ pipeline default() {
           },
         ) },
       )
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
       __io_println(len(stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })))
       __io_println(len(stalls))
       __io_println(captured.result.status)

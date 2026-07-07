@@ -4,7 +4,7 @@
  * of int) is a valid substitute for an expected `fn(int) -> int`.
  */
 pipeline test(task) {
-  let wide = fn(x: float) { return 0 }
-  let _cb: fn(int) -> int = wide
+  const wide = fn(x: float) { return 0 }
+  const _cb: fn(int) -> int = wide
   __io_println("ok")
 }

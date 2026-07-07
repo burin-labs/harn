@@ -1,7 +1,7 @@
 // A `break` binding to the `while true` loop restores fall-through, so the
 // function must still return on the post-loop path.
 fn poll(limit: int) -> int {
-  var n = 0
+  let n = 0
   while true {
     n = n + 1
     if n > limit {

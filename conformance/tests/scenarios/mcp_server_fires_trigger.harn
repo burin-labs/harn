@@ -1,9 +1,9 @@
 import "../_common"
 
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn-mcp-fire-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-mcp-fire-" + uuid())
   harness.fs.mkdir(root)
-  let log_path = path_join(root, "trigger.log")
+  const log_path = path_join(root, "trigger.log")
   harness.fs
     .write_text(
     path_join(root, "harn.toml"),
@@ -16,10 +16,10 @@ pipeline default() {
       + log_path
       + "\"\n\npub fn on_ok(event: TriggerEvent) -> dict {\n  write_file(log_path, \"fired:\" + event.kind + \"\\n\")\n  return {kind: event.kind, event_id: event.id}\n}\n",
   )
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(harness, repo_root)
-  let helper = path_join(repo_root, "conformance/helpers/mcp_stdio_tool.py")
-  let result = exec(
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = resolve_harn_bin(harness, repo_root)
+  const helper = path_join(repo_root, "conformance/helpers/mcp_stdio_tool.py")
+  const result = exec(
     "python3",
     helper,
     harn_bin,
@@ -29,7 +29,7 @@ pipeline default() {
     "{\"trigger_id\":\"cron-ok\",\"payload\":{}}",
   )
   assert(result.success, "mcp helper failed")
-  let payload = json_parse(result.stdout.trim())
+  const payload = json_parse(result.stdout.trim())
   __io_println(payload.status == "dispatched")
   __io_println(payload.binding_id == "cron-ok")
   __io_println(harness.fs.exists(log_path))

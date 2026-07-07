@@ -29,7 +29,7 @@ import {
 } from "lib/workspace.harn"
 
 fn read_search_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "search",
@@ -56,7 +56,7 @@ fn read_search_tools() {
 }
 
 fn edit_tools() {
-  var tools = read_search_tools()
+  let tools = read_search_tools()
   tools = tool_define(
     tools,
     "write",
@@ -200,16 +200,16 @@ fn execute_system() {
 }
 
 fn run_planner(task, workspace_root, profile, facts, round_no, force_ready) {
-  let result = sub_agent_run(
+  const result = sub_agent_run(
     planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
     generator_options(planner_system(force_ready), tool_registry(), [])
       + {response_format: "json", returns: {schema: planner_schema()}},
   )
   if result?.ok {
-    let parsed = result?.data ?? parse_json_object(result?.summary ?? "")
+    const parsed = result?.data ?? parse_json_object(result?.summary ?? "")
     return {ok: true, error: nil, data: normalize_plan(profile, parsed)}
   }
-  let recovered = normalize_plan(profile, parse_json_object(result?.summary ?? ""))
+  const recovered = normalize_plan(profile, parse_json_object(result?.summary ?? ""))
   if type_of(recovered?.ready) == "bool" || len(recovered?.questions ?? []) > 0
     || len(recovered?.actions ?? []) > 0
     || trim(recovered?.plan_summary ?? "") != "" {
@@ -219,7 +219,7 @@ fn run_planner(task, workspace_root, profile, facts, round_no, force_ready) {
 }
 
 fn run_research(workspace_root, profile, question) {
-  let result = sub_agent_run(
+  const result = sub_agent_run(
     research_prompt(workspace_root, profile, question),
     generator_options(research_system(), read_search_tools(), question?.tools ?? [])
       + {
@@ -235,9 +235,9 @@ fn run_research(workspace_root, profile, question) {
 }
 
 fn collect_research_batch(workspace_root, profile, questions) {
-  var facts = []
+  let facts = []
   for question in questions {
-    let result = run_research(workspace_root, profile, question)
+    const result = run_research(workspace_root, profile, question)
     if result?.ok {
       facts = facts + [normalize_research_fact(question, result?.data ?? {})]
     }
@@ -246,11 +246,11 @@ fn collect_research_batch(workspace_root, profile, questions) {
 }
 
 fn bounded_questions(profile, questions) {
-  let limit = profile?.max_research_questions_per_round ?? 2
+  const limit = profile?.max_research_questions_per_round ?? 2
   if len(questions) <= limit {
     return questions
   }
-  var selected = []
+  let selected = []
   for (index, question) in iter(questions).enumerate() {
     if index >= limit {
       break
@@ -261,7 +261,7 @@ fn bounded_questions(profile, questions) {
 }
 
 fn research_artifacts(facts, profile) {
-  var artifacts = []
+  let artifacts = []
   for fact in facts {
     artifacts = artifacts
       + [
@@ -319,8 +319,8 @@ fn graph_execute_template() {
 }
 
 fn graph_verify_template(profile) {
-  let command = effective_verify_command(profile)
-  let contract = verification_contract(profile)
+  const command = effective_verify_command(profile)
+  const contract = verification_contract(profile)
   if command == "none" && len(keys(contract ?? {})) == 0 {
     return {}
   }
@@ -336,7 +336,7 @@ fn graph_verify_template(profile) {
 }
 
 fn execute_graph(task, profile, facts, plan) {
-  let graph = plan_to_action_graph(task, plan)
+  const graph = plan_to_action_graph(task, plan)
   return action_graph_run(
     task,
     graph,
@@ -355,7 +355,7 @@ fn execute_graph(task, profile, facts, plan) {
 }
 
 fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_response) {
-  let result = sub_agent_run(
+  const result = sub_agent_run(
     "[evaluator][task_id=${profile?.id}][token=final]\n"
       + "Original task: ${task}\n"
       + "Workspace root: ${workspace_root}\n"
@@ -375,7 +375,7 @@ fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_res
       + {response_format: "json"},
   )
   if result?.ok {
-    let data = result?.data ?? {}
+    const data = result?.data ?? {}
     return data
       + {verdict: lowercase(trim(data?.verdict ?? "unknown"))}
   }
@@ -383,7 +383,7 @@ fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_res
 }
 
 fn failed_stage_ids(execution) {
-  var failed = []
+  let failed = []
   for stage in execution?.run?.stages ?? [] {
     if stage?.status == "failed" {
       failed = failed + [stage?.node_id ?? stage?.kind ?? "unknown-stage"]
@@ -404,10 +404,10 @@ fn strip_done_sentinel(text) {
 }
 
 fn extract_user_response_text(text) {
-  let cleaned = strip_done_sentinel(text)
-  let matches = regex_captures("(?s)<user_response>(.*?)</user_response>", cleaned)
+  const cleaned = strip_done_sentinel(text)
+  const matches = regex_captures("(?s)<user_response>(.*?)</user_response>", cleaned)
   if len(matches) > 0 {
-    let tagged = (matches[0]?.groups ?? [])[0] ?? ""
+    const tagged = (matches[0]?.groups ?? [])[0] ?? ""
     if type_of(tagged) == "string" && tagged.trim() != "" {
       return tagged.trim()
     }
@@ -416,9 +416,9 @@ fn extract_user_response_text(text) {
 }
 
 fn stage_visible_outputs(execution) {
-  var outputs = []
+  let outputs = []
   for stage in execution?.run?.stages ?? [] {
-    let cleaned = extract_user_response_text(stage?.visible_text ?? "")
+    const cleaned = extract_user_response_text(stage?.visible_text ?? "")
     if cleaned == "" {
       continue
     }
@@ -429,25 +429,25 @@ fn stage_visible_outputs(execution) {
 }
 
 fn execution_visible_text(execution) {
-  let stage_outputs = stage_visible_outputs(execution)
+  const stage_outputs = stage_visible_outputs(execution)
   if len(stage_outputs) > 0 {
-    var summaries = []
+    let summaries = []
     for item in stage_outputs {
       summaries = summaries + [item?.text ?? ""]
     }
     return join(summaries, "\n")
   }
-  let direct = extract_user_response_text(workflow_result_text(execution))
+  const direct = extract_user_response_text(workflow_result_text(execution))
   if direct != "" {
     return direct
   }
-  let runtime_text = extract_user_response_text(workflow_result_text(execution?.runtime))
+  const runtime_text = extract_user_response_text(workflow_result_text(execution?.runtime))
   if runtime_text != "" {
     return runtime_text
   }
-  var latest = ""
+  let latest = ""
   for artifact in execution?.artifacts ?? [] {
-    let cleaned = extract_user_response_text(artifact?.text ?? "")
+    const cleaned = extract_user_response_text(artifact?.text ?? "")
     if cleaned != "" {
       latest = cleaned
     }
@@ -466,10 +466,10 @@ fn write_report(
   verdict,
   final_response,
 ) {
-  let generated_dir = path_join(source_dir(), "evals", "generated")
+  const generated_dir = path_join(source_dir(), "evals", "generated")
   harness.fs.mkdir(generated_dir)
-  let report_path = path_join(generated_dir, "${profile?.id}-latest.json")
-  let report = {
+  const report_path = path_join(generated_dir, "${profile?.id}-latest.json")
+  const report = {
     task_id: profile?.id,
     task: task,
     workspace_root: workspace_root,
@@ -496,13 +496,13 @@ fn write_report(
 }
 
 pipeline default() {
-  let request = harness.env.get_or("HARN_TASK", "")
-  let root = workspace_root()
-  let profile = profile_for_task(request)
-  var facts = []
-  var planning = run_planner(request, root, profile, facts, 1, false)?.data ?? {}
-  var rounds = 0
-  let max_rounds = profile?.max_rounds ?? 2
+  const request = harness.env.get_or("HARN_TASK", "")
+  const root = workspace_root()
+  const profile = profile_for_task(request)
+  let facts = []
+  let planning = run_planner(request, root, profile, facts, 1, false)?.data ?? {}
+  let rounds = 0
+  const max_rounds = profile?.max_rounds ?? 2
   while rounds < max_rounds {
     if planning?.ready {
       break
@@ -510,33 +510,33 @@ pipeline default() {
     if len(planning?.questions ?? []) == 0 {
       break
     }
-    let research_results = collect_research_batch(root, profile, bounded_questions(profile, planning?.questions ?? []))
+    const research_results = collect_research_batch(root, profile, bounded_questions(profile, planning?.questions ?? []))
     for fact in research_results {
       facts = facts + [fact]
     }
     rounds = rounds + 1
-    let plan_result = run_planner(request, root, profile, facts, rounds + 1, false)
+    const plan_result = run_planner(request, root, profile, facts, rounds + 1, false)
     planning = plan_result?.data ?? planning
     if !plan_result?.ok {
       break
     }
   }
   if !planning?.ready && len(facts) > 0 && profile?.mode != "read_only" {
-    let commit_result = run_planner(request, root, profile, facts, rounds + 2, true)
+    const commit_result = run_planner(request, root, profile, facts, rounds + 2, true)
     if commit_result?.ok {
       planning = commit_result?.data ?? planning
     }
   }
-  var execution = nil
-  var final_response = planning?.final_response ?? ""
-  var verdict = "unknown"
+  let execution = nil
+  let final_response = planning?.final_response ?? ""
+  let verdict = "unknown"
   if planning?.ready && len(planning?.actions ?? []) > 0 {
     execution = execute_graph(request, profile, facts, planning)
-    let visible = execution_visible_text(execution)
+    const visible = execution_visible_text(execution)
     if visible.trim() != "" {
       final_response = visible
     }
-    let failed = failed_stage_ids(execution)
+    const failed = failed_stage_ids(execution)
     verdict = if execution_completed_cleanly(execution) {
       "pass"
     } else {
@@ -546,13 +546,13 @@ pipeline default() {
       final_response = "Workflow finished with failed stages: ${join(failed, ", ")}"
     }
   } else if planning?.ready {
-    let evaluation = run_read_only_evaluator(request, root, profile, planning, facts, final_response)
+    const evaluation = run_read_only_evaluator(request, root, profile, planning, facts, final_response)
     verdict = evaluation?.verdict ?? "unknown"
   } else {
     verdict = "fail"
     final_response = "Planner never reached a concrete action list.\n\nLatest plan summary: ${planning?.plan_summary ?? "none"}"
   }
-  let report_path = write_report(harness, root, profile, request, planning, facts, execution, verdict, final_response)
+  const report_path = write_report(harness, root, profile, request, planning, facts, execution, verdict, final_response)
   __io_println("task_id=${profile?.id}")
   __io_println("plan_ready=${planning?.ready}")
   __io_println("research_items=${len(facts)}")

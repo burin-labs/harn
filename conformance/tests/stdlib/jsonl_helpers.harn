@@ -4,27 +4,27 @@
 import { append_jsonl, fold_jsonl, parse_jsonl, read_jsonl, write_jsonl } from "std/jsonl"
 
 pipeline default() {
-  let body = "{\"a\":1}\n\n{\"b\":2}\n  \n{\"c\":3}\n"
-  let parsed = parse_jsonl(body)
+  const body = "{\"a\":1}\n\n{\"b\":2}\n  \n{\"c\":3}\n"
+  const parsed = parse_jsonl(body)
   __io_println(len(parsed))
   __io_println(parsed[0].a)
   __io_println(parsed[1].b)
   __io_println(parsed[2].c)
-  let limited = parse_jsonl(body, {max_records: 2})
+  const limited = parse_jsonl(body, {max_records: 2})
   __io_println(len(limited))
-  let lenient = parse_jsonl("{\"ok\":1}\nNOT JSON\n{\"ok\":2}\n")
+  const lenient = parse_jsonl("{\"ok\":1}\nNOT JSON\n{\"ok\":2}\n")
   __io_println(len(lenient))
-  let path = path_join(harness.fs.temp_dir(), "harn-jsonl-roundtrip-" + uuid() + ".jsonl")
-  let written = write_jsonl(path, [{x: 1}, {x: 2}, {x: 3}])
+  const path = path_join(harness.fs.temp_dir(), "harn-jsonl-roundtrip-" + uuid() + ".jsonl")
+  const written = write_jsonl(path, [{x: 1}, {x: 2}, {x: 3}])
   __io_println(written)
-  let reread = read_jsonl(path)
+  const reread = read_jsonl(path)
   __io_println(len(reread))
   __io_println(reread[2].x)
   append_jsonl(path, {x: 4})
-  let after_append = read_jsonl(path)
+  const after_append = read_jsonl(path)
   __io_println(len(after_append))
   __io_println(after_append[3].x)
-  let total = fold_jsonl(
+  const total = fold_jsonl(
     body,
     0,
     fn(acc, record, index) {

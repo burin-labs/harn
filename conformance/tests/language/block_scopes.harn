@@ -1,14 +1,14 @@
 pipeline default() {
-  let outer = "outer"
+  const outer = "outer"
   if true {
-    let branch = "if-branch"
+    const branch = "if-branch"
     __io_println(branch)
   } else {
-    let branch = "else-branch"
+    const branch = "else-branch"
     __io_println(branch)
   }
   for item in [1, 2] {
-    let loop_label = "loop-${item}"
+    const loop_label = "loop-${item}"
     __io_println(loop_label)
   }
   try {

@@ -20,8 +20,8 @@ pipeline main() {
       },
     ],
     { ->
-      let session_id = "await-resumption-" + uuid()
-      let captured = agent_capture_events(
+      const session_id = "await-resumption-" + uuid()
+      const captured = agent_capture_events(
         session_id,
         fn() {
           let handle = sub_agent_run(
@@ -37,9 +37,9 @@ pipeline main() {
           return wait_agent(handle)
         },
       )
-      let suspended = captured.result
-      let payload = suspended?.result
-      let audit = captured.events
+      const suspended = captured.result
+      const payload = suspended?.result
+      const audit = captured.events
         .filter(
         { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
       )

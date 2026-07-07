@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("dlq_on_permanent_failure")
+  const result = trigger_test_harness("dlq_on_permanent_failure")
   __io_println(result.ok)
   __io_println(len(result.dlq) == 1)
   __io_println(result.dlq[0].state == "pending")

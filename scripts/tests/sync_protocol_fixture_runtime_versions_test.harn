@@ -25,7 +25,7 @@ pipeline test_json_literal(task) {
 
 @test
 pipeline test_count_old_values_string_leaf(task) {
-  let data = json_parse(r#"{"version":"0.8.71"}"#)
+  const data = json_parse(r#"{"version":"0.8.71"}"#)
   assert_eq(count_old_values(data, "0.8.71"), 1)
   assert_eq(count_old_values(data, "0.8.72"), 0)
 }
@@ -34,13 +34,13 @@ pipeline test_count_old_values_string_leaf(task) {
 pipeline test_count_old_values_nested(task) {
   // Two matching string leaves (a list element and a nested dict value); the
   // dict key "k0.8.71" and the integer must NOT count.
-  let data = json_parse(r#"{"a":"0.8.71","b":["0.8.71",1,{"c":"x"}],"k0.8.71":"y"}"#)
+  const data = json_parse(r#"{"a":"0.8.71","b":["0.8.71",1,{"c":"x"}],"k0.8.71":"y"}"#)
   assert_eq(count_old_values(data, "0.8.71"), 2)
 }
 
 @test
 pipeline test_count_old_values_no_match(task) {
-  let data = json_parse(r#"{"version":"0.9.0","items":[1,2,true,null]}"#)
+  const data = json_parse(r#"{"version":"0.9.0","items":[1,2,true,null]}"#)
   assert_eq(count_old_values(data, "0.8.71"), 0)
 }
 
@@ -48,16 +48,16 @@ pipeline test_count_old_values_no_match(task) {
 pipeline test_replace_literals_only_string_literals(task) {
   // Quoted occurrences are rewritten; a bare substring inside a longer token
   // (the key "k0.8.71") is not, because the replacement carries the quotes.
-  let text = r#"{"version": "0.8.71", "k0.8.71": "z"}"#
-  let out = replace_literals(text, "0.8.71", "0.8.72")
+  const text = r#"{"version": "0.8.71", "k0.8.71": "z"}"#
+  const out = replace_literals(text, "0.8.71", "0.8.72")
   assert_eq(out, r#"{"version": "0.8.72", "k0.8.71": "z"}"#)
 }
 
 @test
 pipeline test_replace_literals_preserves_formatting(task) {
   // Newlines, indentation, and array spacing are untouched.
-  let text = "{\n  \"version\": \"0.8.71\",\n  \"modes\": [\"a\", \"b\"]\n}\n"
-  let out = replace_literals(text, "0.8.71", "0.8.72")
+  const text = "{\n  \"version\": \"0.8.71\",\n  \"modes\": [\"a\", \"b\"]\n}\n"
+  const out = replace_literals(text, "0.8.71", "0.8.72")
   assert_eq(out, "{\n  \"version\": \"0.8.72\",\n  \"modes\": [\"a\", \"b\"]\n}\n")
 }
 
@@ -65,9 +65,9 @@ pipeline test_replace_literals_preserves_formatting(task) {
 pipeline test_replace_then_recount_is_zero(task) {
   // End-to-end of the write path's invariant: after replacing literals, the
   // re-parsed value has zero remaining old string leaves.
-  let text = r#"{"a":"0.8.71","b":["0.8.71"]}"#
-  let updated = replace_literals(text, "0.8.71", "0.8.72")
-  let reparsed = json_parse(updated)
+  const text = r#"{"a":"0.8.71","b":["0.8.71"]}"#
+  const updated = replace_literals(text, "0.8.71", "0.8.72")
+  const reparsed = json_parse(updated)
   assert_eq(count_old_values(reparsed, "0.8.71"), 0)
   assert_eq(count_old_values(reparsed, "0.8.72"), 2)
 }

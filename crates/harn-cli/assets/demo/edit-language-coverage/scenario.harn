@@ -26,7 +26,7 @@
 import { edit_apply_node, edit_capabilities } from "std/edit"
 
 fn count_supporting(rows, field) {
-  var total = 0
+  let total = 0
   for row in rows {
     if row[field] {
       total = total + 1
@@ -38,17 +38,17 @@ fn count_supporting(rows, field) {
 pipeline default(_task) {
   // The edit primitives that write to disk share the deterministic-tools
   // gate; enable it once before any apply_node call (even dry-run).
-  let _ = hostlib_enable("tools:deterministic")
+  const _ = hostlib_enable("tools:deterministic")
   // 1. Capability matrix — the onboarding contract, queryable.
-  let caps = edit_capabilities()
-  let rows = caps.languages
-  let apply_count = count_supporting(rows, "apply_node")
-  let rename_count = count_supporting(rows, "rename_symbol")
+  const caps = edit_capabilities()
+  const rows = caps.languages
+  const apply_count = count_supporting(rows, "apply_node")
+  const rename_count = count_supporting(rows, "rename_symbol")
   // 2. Graceful degradation for a language with no registered grammar.
-  let dockerfile = edit_capabilities({language: "dockerfile"})
+  const dockerfile = edit_capabilities({language: "dockerfile"})
   // 3. Real format-preserving edits against bundled data-format seeds.
-  let assets = asset_root()
-  let json_edit = edit_apply_node(
+  const assets = asset_root()
+  const json_edit = edit_apply_node(
     {
       path: assets + "/seed/config.json",
       query: "(pair value: (number) @target)",
@@ -56,7 +56,7 @@ pipeline default(_task) {
       dry_run: true,
     },
   )
-  let css_edit = edit_apply_node(
+  const css_edit = edit_apply_node(
     {
       path: assets + "/seed/theme.css",
       query: "(declaration (plain_value) @target)",
@@ -82,7 +82,7 @@ pipeline default(_task) {
     "css apply_node: " + css_edit.result + " — " + to_string(css_edit.match_count) + " edit(s)",
   )
   __io_println("")
-  let receipt = {
+  const receipt = {
     receipt_kind: "edit_language_coverage_receipt",
     language_count: len(rows),
     apply_node_count: apply_count,

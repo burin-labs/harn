@@ -5,8 +5,8 @@
  * by structural equality and bound the wrong values).
  */
 pipeline test(task) {
-  let xs = [[1, 2], [3, 4]]
-  let out = match xs {
+  const xs = [[1, 2], [3, 4]]
+  const out = match xs {
     [[a, b], [c, d]] -> { a + b + c + d }
     _ -> { -1 }
   }

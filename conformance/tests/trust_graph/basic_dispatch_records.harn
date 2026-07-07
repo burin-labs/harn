@@ -1,7 +1,7 @@
 import "std/triggers"
 
 fn handle_issue(event: TriggerEvent) -> dict {
-  let context = handler_context()
+  const context = handler_context()
   return {
     agent: context?.agent,
     action: context?.action,
@@ -12,10 +12,10 @@ fn handle_issue(event: TriggerEvent) -> dict {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let agent_id = "github-triage-bot-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const agent_id = "github-triage-bot-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: agent_id,
       kind: "issue.opened",
@@ -33,11 +33,11 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let fired: DispatchHandle = trigger_fire(
+  const fired: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  let records: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened"})
+  const records: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened"})
   __io_println(fired.status == "dispatched" && fired.error == nil)
   __io_println(fired.result?.agent == agent_id)
   __io_println(fired.result?.action == "github.issue.opened")

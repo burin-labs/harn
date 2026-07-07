@@ -5,7 +5,7 @@ import { agent_loop_options } from "std/agent/options"
 import { agent_turn_preamble_prompt } from "std/agent/prompts"
 
 fn __agent_turn_system(user_system, opts = nil) {
-  let preamble = agent_turn_preamble_prompt(opts)
+  const preamble = agent_turn_preamble_prompt(opts)
   if user_system == nil || user_system == "" {
     return preamble
   }
@@ -24,7 +24,7 @@ fn __agent_turn_native_natural_completion(opts) {
 }
 
 fn __agent_turn_options(options) {
-  var opts = options ?? {}
+  let opts = options ?? {}
   if type_of(opts) != "dict" {
     throw "agent_turn(prompt, opts?): opts must be a dict or nil"
   }
@@ -46,7 +46,7 @@ fn __agent_turn_options(options) {
   if !contains(opts.keys(), "loop_until_done") {
     opts = opts + {loop_until_done: true}
   }
-  let loop_opts = agent_loop_options(opts)
+  const loop_opts = agent_loop_options(opts)
   if loop_opts?.done_sentinel == nil && !__agent_turn_native_natural_completion(loop_opts) {
     throw "agent_turn: done_sentinel is required for non-native loops; pass a non-empty string or omit it"
   }
@@ -57,7 +57,7 @@ fn __agent_turn_options(options) {
 }
 
 fn __agent_turn_judge_decisions(events) {
-  var out = []
+  let out = []
   for event in events {
     if event?.type == "judge_decision" {
       out = out
@@ -80,28 +80,28 @@ fn __agent_turn_judge_decisions(events) {
 }
 
 fn __agent_turn_iteration_summaries(events) {
-  var iterations = {}
-  var order = []
+  let iterations = {}
+  let order = []
   for event in events {
     if event?.type == "iteration_start" {
-      let key = to_string(event.iteration)
+      const key = to_string(event.iteration)
       if iterations[key] == nil {
         iterations[key] = {iteration: event.iteration}
         order = order.push(key)
       }
-      var entry = iterations[key]
+      let entry = iterations[key]
       entry["started"] = true
       iterations[key] = entry
     }
     if event?.type == "iteration_end" {
-      let key = to_string(event.iteration)
+      const key = to_string(event.iteration)
       if iterations[key] == nil {
         iterations[key] = {iteration: event.iteration}
         order = order.push(key)
       }
-      var entry = iterations[key]
+      let entry = iterations[key]
       entry["ended"] = true
-      let info = event?.iteration_info ?? {}
+      const info = event?.iteration_info ?? {}
       if info?.tool_count != nil {
         entry["tool_count"] = info.tool_count
       }
@@ -111,7 +111,7 @@ fn __agent_turn_iteration_summaries(events) {
       iterations[key] = entry
     }
   }
-  var out = []
+  let out = []
   for key in order {
     out = out.push(iterations[key])
   }
@@ -126,13 +126,13 @@ fn __agent_turn_iteration_summaries(events) {
  * @api_stability: experimental
  */
 pub fn agent_turn(prompt, options = nil) {
-  let opts = options ?? {}
-  let loop_opts = __agent_turn_options(opts)
-  let captured = agent_capture_events(
+  const opts = options ?? {}
+  const loop_opts = __agent_turn_options(opts)
+  const captured = agent_capture_events(
     loop_opts.session_id,
     fn() { return agent_loop(prompt, __agent_turn_system(opts?.system, loop_opts), loop_opts) },
   )
-  let result = captured.result
+  const result = captured.result
   if type_of(result) != "dict" {
     return result
   }

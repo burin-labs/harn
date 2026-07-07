@@ -1,5 +1,5 @@
 pipeline main() {
-  let base = transcript_from_messages(
+  const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
       {role: "assistant", content: "two"},
@@ -7,17 +7,17 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  let durable = transcript
+  const durable = transcript
     .inject_reminder(
     base,
     {body: "durable", dedupe_key: "durable", ttl_turns: 2, preserve_on_compact: true},
   ).transcript
-  let mixed = transcript
+  const mixed = transcript
     .inject_reminder(
     durable,
     {body: "compactable", dedupe_key: "compactable", ttl_turns: 2, preserve_on_compact: false},
   ).transcript
-  let compacted = transcript_compact(
+  const compacted = transcript_compact(
     mixed,
     {
       strategy: "custom",
@@ -28,7 +28,7 @@ pipeline main() {
         + reminders[1].body },
     },
   )
-  let reminders = transcript_events_by_kind(compacted, "system_reminder")
+  const reminders = transcript_events_by_kind(compacted, "system_reminder")
   __io_println(transcript_summary(compacted)?.contains("2 reminders compactable"))
   __io_println(len(reminders))
   __io_println(reminders[0].reminder.body)

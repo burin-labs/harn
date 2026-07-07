@@ -1,11 +1,11 @@
 pipeline main() {
-  let older = transcript_reminder_event(
+  const older = transcript_reminder_event(
     {body: "older copy", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
   )
-  let newer = transcript_reminder_event(
+  const newer = transcript_reminder_event(
     {body: "newer copy", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
   )
-  let crafted = {
+  const crafted = {
     _type: "transcript",
     messages: [
       {role: "user", content: "one"},
@@ -15,8 +15,8 @@ pipeline main() {
     ],
     events: [older, newer],
   }
-  let compacted = transcript_compact(crafted, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  let reminders = transcript_events_by_kind(compacted, "system_reminder")
+  const compacted = transcript_compact(crafted, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const reminders = transcript_events_by_kind(compacted, "system_reminder")
   // Two reminders sharing the same dedupe_key collapse to one during
   // compaction, preserving the newest body and TTL.
   __io_println(len(reminders))

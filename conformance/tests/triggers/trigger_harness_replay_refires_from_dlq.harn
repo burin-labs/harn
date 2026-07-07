@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("replay_refires_from_dlq")
+  const result = trigger_test_harness("replay_refires_from_dlq")
   __io_println(result.ok)
   __io_println(len(result.emitted) == 1)
   __io_println(result.dlq[0].replayed)

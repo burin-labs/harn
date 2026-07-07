@@ -855,7 +855,7 @@ mod tests {
                 .load_module_from_source(
                     PathBuf::from("<test>/module_cycle.harn"),
                     r#"
-var payload = "x" * 1024
+let payload = "x" * 1024
 
 pub fn touch() {
   return len(payload)

@@ -1,15 +1,15 @@
 pipeline test(task) {
-  let long_body = "paragraph one sentence one.\nparagraph one sentence two.\n\n"
+  const long_body = "paragraph one sentence one.\nparagraph one sentence two.\n\n"
     + "paragraph two sentence one.\nparagraph two sentence two.\n\n"
     + "paragraph three sentence one.\nparagraph three sentence two.\n\n"
     + "paragraph four sentence one.\nparagraph four sentence two."
-  let short_a = artifact(
+  const short_a = artifact(
     {id: "short_a", kind: "summary", text: "parser drift diagnostics traced to tokenizer spans"},
   )
-  let short_b = artifact({id: "short_b", kind: "summary", text: "completely unrelated weather report on Tuesday"})
-  let large = artifact({id: "large", kind: "workspace_snapshot", text: long_body})
+  const short_b = artifact({id: "short_b", kind: "summary", text: "completely unrelated weather report on Tuesday"})
+  const large = artifact({id: "large", kind: "workspace_snapshot", text: long_body})
   // Relevance strategy with enough budget to include both short artifacts.
-  let packed = assemble_context(
+  const packed = assemble_context(
     {
       artifacts: [short_a, short_b, large],
       budget_tokens: 64,
@@ -24,7 +24,7 @@ pipeline test(task) {
   // short_a should score highest on the query and appear first.
   __io_println(packed.chunks[0].artifact_id == "short_a")
   // Chunk ids are content-addressed: same text → same id across calls.
-  let second = assemble_context(
+  const second = assemble_context(
     {
       artifacts: [short_a, short_b, large],
       budget_tokens: 64,
@@ -36,7 +36,7 @@ pipeline test(task) {
   )
   __io_println(packed.chunks[0].id == second.chunks[0].id)
   // Large artifact was microcompacted into multiple chunks.
-  var large_chunk_count = 0
+  let large_chunk_count = 0
   for chunk in packed.chunks {
     if chunk.artifact_id == "large" {
       large_chunk_count = large_chunk_count + 1
@@ -47,14 +47,14 @@ pipeline test(task) {
   __io_println(packed.reasons[0].strategy == "relevance")
   __io_println(packed.reasons[0].included)
   // Exact-duplicate dedup drops later copies.
-  let dup_a = artifact({id: "dup_a", kind: "summary", text: "shared body"})
-  let dup_b = artifact({id: "dup_b", kind: "summary", text: "shared body"})
-  let deduped = assemble_context(
+  const dup_a = artifact({id: "dup_a", kind: "summary", text: "shared body"})
+  const dup_b = artifact({id: "dup_b", kind: "summary", text: "shared body"})
+  const deduped = assemble_context(
     {artifacts: [dup_a, dup_b], budget_tokens: 10000, dedup: "chunked", strategy: "recency"},
   )
   __io_println(len(deduped.chunks) == 1)
   __io_println(len(deduped.dropped) >= 1)
-  var saw_duplicate = false
+  let saw_duplicate = false
   for entry in deduped.dropped {
     if entry.reason == "duplicate" {
       saw_duplicate = true
@@ -62,9 +62,9 @@ pipeline test(task) {
   }
   __io_println(saw_duplicate)
   // Round-robin interleaves artifacts.
-  let rr_a = artifact({id: "rr_a", kind: "summary", text: "alpha aaaa\n\nbeta bbbb\n\ngamma cc"})
-  let rr_b = artifact({id: "rr_b", kind: "summary", text: "delta dddd\n\nepsilon ee\n\nzeta ff"})
-  let rr = assemble_context(
+  const rr_a = artifact({id: "rr_a", kind: "summary", text: "alpha aaaa\n\nbeta bbbb\n\ngamma cc"})
+  const rr_b = artifact({id: "rr_b", kind: "summary", text: "delta dddd\n\nepsilon ee\n\nzeta ff"})
+  const rr = assemble_context(
     {
       artifacts: [rr_a, rr_b],
       budget_tokens: 10000,
@@ -79,7 +79,7 @@ pipeline test(task) {
   __io_println(rr.chunks[2].artifact_id == "rr_a")
   __io_println(rr.chunks[3].artifact_id == "rr_b")
   // Custom ranker callback overrides default keyword scoring.
-  let custom = assemble_context(
+  const custom = assemble_context(
     {
       artifacts: [short_a, short_b],
       budget_tokens: 14,
@@ -101,7 +101,7 @@ pipeline test(task) {
   __io_println(len(custom.chunks) == 1)
   __io_println(custom.chunks[0].artifact_id == "short_b")
   // Budget enforcement: chunks over budget get reported in dropped/reasons.
-  let tight = assemble_context(
+  const tight = assemble_context(
     {
       artifacts: [large],
       budget_tokens: 10,
@@ -111,7 +111,7 @@ pipeline test(task) {
     },
   )
   __io_println(tight.total_tokens <= 10)
-  var saw_budget = false
+  let saw_budget = false
   for r in tight.reasons {
     if !r.included && r.reason == "budget_exceeded" {
       saw_budget = true

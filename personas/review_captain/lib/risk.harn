@@ -7,10 +7,10 @@
 // hotspots without requiring an LLM hop.
 /** classify_risky_paths(changed_files, patterns) -> {hits, misses}. */
 pub fn classify_risky_paths(changed_files, patterns) {
-  let pats = patterns ?? []
-  let files = changed_files ?? []
-  var hits = []
-  var misses = []
+  const pats = patterns ?? []
+  const files = changed_files ?? []
+  let hits = []
+  let misses = []
   for file in files {
     if _matches_any(file, pats) {
       hits = hits + [file]
@@ -29,10 +29,10 @@ pub fn classify_risky_paths(changed_files, patterns) {
  * `tests/`, `__tests__`, `_test.swift`).
  */
 pub fn infer_missing_tests(changed_files, test_globs) {
-  let files = changed_files ?? []
-  let globs = test_globs ?? []
-  var test_files = []
-  var source_files = []
+  const files = changed_files ?? []
+  const globs = test_globs ?? []
+  let test_files = []
+  let source_files = []
   for file in files {
     if _looks_like_test(file, globs) {
       test_files = test_files + [file]
@@ -57,18 +57,18 @@ fn _matches_any(file, patterns) {
 
 fn _matches(file, pattern) {
   if ends_with(pattern, "*") {
-    let prefix = substring(pattern, 0, len(pattern) - 1)
+    const prefix = substring(pattern, 0, len(pattern) - 1)
     return starts_with(file, prefix)
   }
   if starts_with(pattern, "*.") {
-    let suffix = substring(pattern, 1, len(pattern))
+    const suffix = substring(pattern, 1, len(pattern))
     return ends_with(file, suffix)
   }
   return contains(file, pattern)
 }
 
 fn _looks_like_test(file, globs) {
-  let lowered = lowercase(file)
+  const lowered = lowercase(file)
   for glob in globs {
     if _matches(lowered, lowercase(glob)) {
       return true

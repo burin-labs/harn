@@ -1,5 +1,5 @@
 pipeline main() {
-  let tools = [
+  const tools = [
     {
       name: "read_file",
       parameters: {type: "object", required: ["path"]},
@@ -11,15 +11,15 @@ pipeline main() {
       annotations: {kind: "search", side_effect_level: "read_only"},
     },
   ]
-  let manifest = composition_binding_manifest(tools)
-  let dispatch = { name, input -> return if name == "read_file" {
+  const manifest = composition_binding_manifest(tools)
+  const dispatch = { name, input -> return if name == "read_file" {
     {kind: "text", path: input.path, content: "<" + input.path + ">"}
   } else if name == "search" {
     {kind: "matches", query: input.query, count: 2}
   } else {
     {error: "unknown binding " + name}
   } }
-  let report = composition_execute(
+  const report = composition_execute(
     "let readme = read_file({path: \"README.md\"})\nlet hits = search({query: readme.content})\nreturn {readme_content: readme.content, hits_query: hits.query, hits_count: hits.count}",
     manifest,
     {run_id: "conformance-dispatcher", dispatcher: dispatch},

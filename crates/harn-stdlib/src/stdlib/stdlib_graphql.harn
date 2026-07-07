@@ -15,9 +15,9 @@ fn __graphql_list(value) {
 }
 
 fn __graphql_payload(response) {
-  let body = response?.body ?? response
+  const body = response?.body ?? response
   if type_of(body) == "string" {
-    let parsed = try {
+    const parsed = try {
       json_parse(body)
     }
     if is_ok(parsed) {
@@ -35,7 +35,7 @@ fn __graphql_header(headers, name) {
   if headers[name] != nil {
     return headers[name]
   }
-  let lower = lowercase(name)
+  const lower = lowercase(name)
   for entry in headers {
     if lowercase(entry.key) == lower {
       return entry.value
@@ -45,11 +45,11 @@ fn __graphql_header(headers, name) {
 }
 
 fn __graphql_int_header(headers, name) {
-  let value = __graphql_header(headers, name)
+  const value = __graphql_header(headers, name)
   if value == nil || value == "" {
     return nil
   }
-  let parsed = try {
+  const parsed = try {
     to_int(value)
   }
   if is_ok(parsed) {
@@ -59,14 +59,14 @@ fn __graphql_int_header(headers, name) {
 }
 
 fn __graphql_operation_name(query, fallback = nil) {
-  let trimmed = trim(query ?? "")
+  const trimmed = trim(query ?? "")
   if trimmed == "" {
     return fallback
   }
   for keyword in ["query ", "mutation ", "subscription "] {
     if starts_with(trimmed, keyword) {
-      let rest = trim(substring(trimmed, len(keyword)))
-      let name = split(split(rest, "(")[0], " ")[0]
+      const rest = trim(substring(trimmed, len(keyword)))
+      const name = split(split(rest, "(")[0], " ")[0]
       if name != "" && name != "{" {
         return name
       }
@@ -76,16 +76,16 @@ fn __graphql_operation_name(query, fallback = nil) {
 }
 
 fn __graphql_root_field_from_query(query) {
-  let text = query ?? ""
-  let open = text.index_of("{")
+  const text = query ?? ""
+  const open = text.index_of("{")
   if open < 0 {
     return nil
   }
-  let rest = trim(substring(text, open + 1))
+  const rest = trim(substring(text, open + 1))
   if rest == "" {
     return nil
   }
-  let token = split(split(split(rest, "(")[0], "{")[0], " ")[0]
+  const token = split(split(split(rest, "(")[0], "{")[0], " ")[0]
   if token == "" || token == "..." {
     return nil
   }
@@ -109,7 +109,7 @@ pub fn graphql_introspection_query() {
  * @errors: []
  */
 pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
-  var headers = {"Content-Type": "application/json", Accept: "application/graphql-response+json, application/json"}
+  let headers = {"Content-Type": "application/json", Accept: "application/graphql-response+json, application/json"}
   if auth != nil {
     if type_of(auth) == "string" {
       headers = merge(headers, {Authorization: "Bearer " + auth})
@@ -120,7 +120,7 @@ pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
     } else if auth.api_key != nil {
       headers = merge(headers, {Authorization: auth.api_key})
     } else if auth.token != nil {
-      let scheme = auth.scheme ?? "Bearer"
+      const scheme = auth.scheme ?? "Bearer"
       headers = merge(headers, {Authorization: scheme + " " + auth.token})
     }
   }
@@ -161,8 +161,8 @@ pub fn graphql_rate_limit_meta(headers = nil) {
  * @errors: []
  */
 pub fn graphql_persisted_query(query, options = nil) {
-  let version = options?.version ?? 1
-  let hash = options?.sha256_hash ?? options?.sha256Hash ?? sha256(query)
+  const version = options?.version ?? 1
+  const hash = options?.sha256_hash ?? options?.sha256Hash ?? sha256(query)
   return {
     version: version,
     sha256_hash: hash,
@@ -177,10 +177,10 @@ pub fn graphql_persisted_query(query, options = nil) {
  * @errors: []
  */
 pub fn graphql_request_body(query, variables = nil, options = nil) {
-  var body = {}
-  let persisted = options?.persisted_query ?? options?.persistedQuery
+  let body = {}
+  const persisted = options?.persisted_query ?? options?.persistedQuery
   if persisted != nil {
-    let persisted_meta = if persisted {
+    const persisted_meta = if persisted {
       graphql_persisted_query(query)
     } else {
       persisted
@@ -195,7 +195,7 @@ pub fn graphql_request_body(query, variables = nil, options = nil) {
   if variables != nil {
     body = merge(body, {variables: variables})
   }
-  let op_name = options?.operation_name ?? options?.operationName ?? __graphql_operation_name(query)
+  const op_name = options?.operation_name ?? options?.operationName ?? __graphql_operation_name(query)
   if op_name != nil {
     body = merge(body, {operationName: op_name})
   }
@@ -209,12 +209,12 @@ pub fn graphql_request_body(query, variables = nil, options = nil) {
  * @errors: []
  */
 pub fn graphql_normalize_response(response, options = nil) {
-  let payload = __graphql_payload(response)
-  let status = response?.status ?? options?.status ?? 200
-  let headers = response?.headers ?? options?.headers ?? {}
-  let errors = __graphql_list(payload?.errors)
-  let has_errors = len(errors) > 0
-  let data = payload?.data
+  const payload = __graphql_payload(response)
+  const status = response?.status ?? options?.status ?? 200
+  const headers = response?.headers ?? options?.headers ?? {}
+  const errors = __graphql_list(payload?.errors)
+  const has_errors = len(errors) > 0
+  const data = payload?.data
   return {
     ok: status >= 200 && status < 300 && !has_errors,
     partial: data != nil && has_errors,
@@ -252,7 +252,7 @@ pub fn graphql_error_messages(envelope) {
  * @errors: []
  */
 pub fn graphql_assert_ok(envelope) {
-  let messages = graphql_error_messages(envelope)
+  const messages = graphql_error_messages(envelope)
   if envelope?.ok || (envelope?.ok == nil && len(messages) == 0) {
     return envelope
   }
@@ -269,9 +269,9 @@ pub fn graphql_assert_ok(envelope) {
  * @errors: []
  */
 pub fn graphql_extract(envelope, field, schema = nil) {
-  let value = envelope?.data?.[field]
+  const value = envelope?.data?.[field]
   if schema != nil {
-    let checked = schema_check(value, schema)
+    const checked = schema_check(value, schema)
     if is_err(checked) {
       throw_error(unwrap_err(checked).message)
     }
@@ -287,8 +287,8 @@ pub fn graphql_extract(envelope, field, schema = nil) {
  * @errors: []
  */
 pub fn graphql_page_info(connection) {
-  let page_info = connection?.pageInfo ?? {}
-  let nodes = connection?.nodes ?? connection?.edges?.map({ edge -> return edge.node }) ?? []
+  const page_info = connection?.pageInfo ?? {}
+  const nodes = connection?.nodes ?? connection?.edges?.map({ edge -> return edge.node }) ?? []
   return {
     nodes: nodes,
     edges: connection?.edges ?? [],
@@ -306,7 +306,7 @@ pub fn graphql_page_info(connection) {
  * @errors: []
  */
 pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") {
-  let page = graphql_page_info(connection)
+  const page = graphql_page_info(connection)
   if !page.has_next_page || page.end_cursor == nil {
     return nil
   }
@@ -320,10 +320,10 @@ pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") 
  * @errors: []
  */
 pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
-  let auth = options?.auth ?? options?.authorization
-  let headers = graphql_auth_headers(auth, options?.headers)
-  let body = graphql_request_body(query, variables, options)
-  let response = harness.net
+  const auth = options?.auth ?? options?.authorization
+  const headers = graphql_auth_headers(auth, options?.headers)
+  const body = graphql_request_body(query, variables, options)
+  const response = harness.net
     .request(
     "POST",
     endpoint,
@@ -371,18 +371,18 @@ pub fn graphql_operation(name, document, options = nil) {
  * @errors: []
  */
 pub fn graphql_execute_operation(client, operation, variables = nil, options = nil) {
-  let endpoint = if type_of(client) == "string" {
+  const endpoint = if type_of(client) == "string" {
     client
   } else {
     client.endpoint ?? client.url ?? client.api_base_url
   }
-  let client_options = if type_of(client) == "dict" {
+  const client_options = if type_of(client) == "dict" {
     client
   } else {
     {}
   }
-  let request_options = merge(client_options, options ?? {})
-  let checked_variables = if operation.variables_schema != nil {
+  const request_options = merge(client_options, options ?? {})
+  const checked_variables = if operation.variables_schema != nil {
     let checked = schema_check(variables ?? {}, operation.variables_schema)
     if is_err(checked) {
       throw_error(unwrap_err(checked).message)
@@ -391,7 +391,7 @@ pub fn graphql_execute_operation(client, operation, variables = nil, options = n
   } else {
     variables
   }
-  let envelope = graphql_request(
+  const envelope = graphql_request(
     endpoint,
     operation.document,
     checked_variables,
@@ -403,12 +403,12 @@ pub fn graphql_execute_operation(client, operation, variables = nil, options = n
       },
     ),
   )
-  let result = if operation.root_field != nil {
+  const result = if operation.root_field != nil {
     graphql_extract(envelope, operation.root_field, operation.result_schema)
   } else {
     envelope.data
   }
-  let shaped_result = if type_of(result) == "dict" {
+  const shaped_result = if type_of(result) == "dict" {
     merge(result, {meta: envelope.meta})
   } else {
     result
@@ -418,10 +418,10 @@ pub fn graphql_execute_operation(client, operation, variables = nil, options = n
 
 fn __graphql_type_header(line) {
   for kind in ["type", "input", "interface", "enum", "union", "scalar"] {
-    let prefix = kind + " "
+    const prefix = kind + " "
     if starts_with(line, prefix) {
-      let rest = trim(substring(line, len(prefix)))
-      var name = split(split(split(rest, " ")[0], "{")[0], "=")[0]
+      const rest = trim(substring(line, len(prefix)))
+      let name = split(split(split(rest, " ")[0], "{")[0], "=")[0]
       name = trim(name)
       if name != "" {
         return {kind: kind, name: name, fields: []}
@@ -432,9 +432,9 @@ fn __graphql_type_header(line) {
 }
 
 fn __graphql_field_from_line(line) {
-  let clean = trim(split(split(line, "#")[0], "@")[0])
-  let name = trim(split(split(clean, "(")[0], ":")[0])
-  let field_type = if contains(clean, ":") {
+  const clean = trim(split(split(line, "#")[0], "@")[0])
+  const name = trim(split(split(clean, "(")[0], ":")[0])
+  const field_type = if contains(clean, ":") {
     trim(split(clean, ":")[1])
   } else {
     nil
@@ -449,14 +449,14 @@ fn __graphql_field_from_line(line) {
  * @errors: []
  */
 pub fn graphql_parse_schema(schema_text) {
-  var types = []
-  var current: {kind: string, name: string, fields: list}? = nil
+  let types = []
+  let current: {kind: string, name: string, fields: list}? = nil
   for raw_line in split(schema_text ?? "", "\n") {
-    let line = trim(raw_line)
+    const line = trim(raw_line)
     if line == "" || starts_with(line, "#") {
       continue
     }
-    let header = __graphql_type_header(line)
+    const header = __graphql_type_header(line)
     if header != nil {
       if current != nil {
         types = types + [current]
@@ -468,7 +468,7 @@ pub fn graphql_parse_schema(schema_text) {
       }
       continue
     }
-    let open = current
+    const open = current
     if open != nil {
       if starts_with(line, "}") {
         types = types + [open]
@@ -491,8 +491,8 @@ pub fn graphql_parse_schema(schema_text) {
  * @errors: []
  */
 pub fn graphql_schema_from_introspection(payload) {
-  let source = __graphql_payload(payload)
-  let schema = source?.data?.__schema ?? source?.__schema ?? source
+  const source = __graphql_payload(payload)
+  const schema = source?.data?.__schema ?? source?.__schema ?? source
   return {
     format: "graphql-introspection",
     query_type: schema?.queryType?.name,
@@ -514,9 +514,9 @@ fn __graphql_harn_name(name) {
  * @errors: []
  */
 pub fn graphql_codegen_wrapper(operation, client_param = "client") {
-  let name = __graphql_harn_name(operation.name ?? operation.operation_name)
-  let operation_json = json_stringify(operation)
-  let operation_literal = json_stringify(operation_json)
+  const name = __graphql_harn_name(operation.name ?? operation.operation_name)
+  const operation_json = json_stringify(operation)
+  const operation_literal = json_stringify(operation_json)
   return "pub fn " + name + "(" + client_param + ", variables = nil, options = nil) {\n"
     + "  let operation = json_parse("
     + operation_literal
@@ -534,7 +534,7 @@ pub fn graphql_codegen_wrapper(operation, client_param = "client") {
  * @errors: []
  */
 pub fn graphql_generate_client(operations, options = nil) {
-  var source = "import { graphql_execute_operation } from \"std/graphql\"\n\n"
+  let source = "import { graphql_execute_operation } from \"std/graphql\"\n\n"
   for operation in operations {
     source = source + graphql_codegen_wrapper(operation, options?.client_param ?? "client") + "\n"
   }

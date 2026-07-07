@@ -1,7 +1,7 @@
 import { cheap_classify_then_escalate } from "std/personas/prelude"
 
 pipeline test(task) {
-  let opts = {
+  const opts = {
     persona: "triage_captain",
     step: "classify",
     trace_id: "trace-classify",
@@ -9,7 +9,7 @@ pipeline test(task) {
     completed_at: "2026-05-03T00:00:00Z",
     min_confidence: 0.7,
   }
-  let escalated = cheap_classify_then_escalate(
+  const escalated = cheap_classify_then_escalate(
     "PR-42",
     fn(input) { return {label: "maybe", confidence: 0.4, input: input} },
     fn(input) { return {label: "merge", confidence: 0.99, input: input} },
@@ -20,7 +20,7 @@ pipeline test(task) {
   __io_println(escalated.escalated)
   __io_println(escalated.result.label)
   __io_println(len(escalated.receipt.tool_calls))
-  let cheap = cheap_classify_then_escalate(
+  const cheap = cheap_classify_then_escalate(
     "PR-43",
     fn(input) { return {label: "ignore", confidence: 0.95, input: input} },
     fn(input) { return {label: "unused", confidence: 1.0, input: input} },

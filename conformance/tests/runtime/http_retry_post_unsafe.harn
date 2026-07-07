@@ -4,8 +4,8 @@ pipeline test(task) {
     "https://api.example.com/items",
     {responses: [{status: 503}, {status: 200, body: "created"}]},
   )
-  let no_retry = harness.net.post("https://api.example.com/items", "{}", {retry: {max: 1, backoff_ms: 0}})
-  let no_retry_calls = http_mock_calls()
+  const no_retry = harness.net.post("https://api.example.com/items", "{}", {retry: {max: 1, backoff_ms: 0}})
+  const no_retry_calls = http_mock_calls()
   assert_eq(no_retry.status, 503)
   assert_eq(len(no_retry_calls), 1)
   log("post default status: " + to_string(no_retry.status))
@@ -16,13 +16,13 @@ pipeline test(task) {
     "https://api.example.com/items",
     {responses: [{status: 503}, {status: 200, body: "created"}]},
   )
-  let with_retry = harness.net
+  const with_retry = harness.net
     .post(
     "https://api.example.com/items",
     "{}",
     {retry: {max: 1, backoff_ms: 0}, retry_methods: ["POST"]},
   )
-  let with_retry_calls = http_mock_calls()
+  const with_retry_calls = http_mock_calls()
   assert_eq(with_retry.status, 200)
   assert_eq(len(with_retry_calls), 2)
   log("post opt-in status: " + to_string(with_retry.status))

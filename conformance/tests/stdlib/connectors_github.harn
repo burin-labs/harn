@@ -31,11 +31,11 @@ pipeline test(task) {
     nil,
     "non-GitHub remotes do not parse",
   )
-  let repo = github_repo("git@github.com:octo-org/octo-repo.git")
+  const repo = github_repo("git@github.com:octo-org/octo-repo.git")
   assert_eq(repo.owner, "octo-org", "repo owner")
   assert_eq(repo.name, "octo-repo", "repo name")
   assert_eq(repo.full_name, "octo-org/octo-repo", "repo full name")
-  let forge = unwrap(
+  const forge = unwrap(
     forge_pull_request_event(
       {
         action: "opened",
@@ -46,7 +46,7 @@ pipeline test(task) {
   )
   assert_eq(forge.lifecycle, "opened", "forge lifecycle")
   assert_eq(forge.kind, "pull_request.opened", "forge event kind")
-  let writeback = forge_writeback_request(forge, "Preview ready")
+  const writeback = forge_writeback_request(forge, "Preview ready")
   assert_eq(writeback.method, "issues.create_comment", "forge writeback method")
   assert_eq(writeback.params.issue_number, 24, "forge writeback issue number")
   log("github stdlib ok")

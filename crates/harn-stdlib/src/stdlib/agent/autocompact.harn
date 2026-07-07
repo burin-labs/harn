@@ -5,7 +5,7 @@ fn __compaction_strategy_label(value) {
     return value
   }
   if type_of(value) == "dict" {
-    let label = value?.strategy ?? value?.kind ?? value?.type
+    const label = value?.strategy ?? value?.kind ?? value?.type
     if type_of(label) == "string" && label != "" {
       return label
     }
@@ -56,7 +56,7 @@ fn __compaction_policy_merge_fields(policy, fields) {
   if type_of(fields) != "dict" {
     return policy
   }
-  var merged = policy
+  let merged = policy
   if fields?.instructions != nil {
     merged = merged + {instructions: fields.instructions}
   }
@@ -85,8 +85,8 @@ fn __compaction_policy_from_options(opts) {
   if type_of(opts) != "dict" {
     return nil
   }
-  let nested = opts?.policy ?? opts?.compaction_policy ?? opts?.compaction_request
-  var policy = if type_of(nested?.policy) == "dict" {
+  const nested = opts?.policy ?? opts?.compaction_policy ?? opts?.compaction_request
+  let policy = if type_of(nested?.policy) == "dict" {
     nested.policy
   } else if type_of(nested) == "dict" {
     nested
@@ -95,11 +95,11 @@ fn __compaction_policy_from_options(opts) {
   }
   policy = __compaction_policy_merge_fields(policy, nested)
   policy = __compaction_policy_merge_fields(policy, opts)
-  let preserve = __compaction_policy_list(opts?.preserve ?? policy?.preserve)
+  const preserve = __compaction_policy_list(opts?.preserve ?? policy?.preserve)
   if len(preserve) > 0 {
     policy = policy + {preserve: preserve}
   }
-  let drop_items = __compaction_policy_list(opts?.drop ?? policy?.drop)
+  const drop_items = __compaction_policy_list(opts?.drop ?? policy?.drop)
   if len(drop_items) > 0 {
     policy = policy + {drop: drop_items}
   }
@@ -113,7 +113,7 @@ fn __compaction_instruction_mode(policy) {
   if type_of(policy) != "dict" {
     return "default"
   }
-  let has_directives = policy?.instructions != nil
+  const has_directives = policy?.instructions != nil
     || len(__compaction_policy_list(policy?.preserve)) > 0
     || len(__compaction_policy_list(policy?.drop)) > 0
   if !has_directives {
@@ -129,7 +129,7 @@ fn __compaction_policy_event_fields(policy) {
   if type_of(policy) != "dict" {
     return {instruction_mode: "default"}
   }
-  var fields = {
+  let fields = {
     instruction_mode: __compaction_instruction_mode(policy),
     compaction_policy: policy
       + {instruction_mode: __compaction_instruction_mode(policy)},
@@ -145,9 +145,9 @@ fn __compaction_policy_event_fields(policy) {
 }
 
 fn __compaction_keep_last(opts) {
-  let cfg = opts?.compaction
+  const cfg = opts?.compaction
   if type_of(cfg) == "dict" {
-    let keep = cfg?.keep_last_n ?? cfg?.keep_last
+    const keep = cfg?.keep_last_n ?? cfg?.keep_last
     if type_of(keep) == "int" {
       return keep
     }
@@ -159,8 +159,8 @@ fn __compaction_keep_last(opts) {
 }
 
 fn __compact_options(opts, engine_strategy, keep_last) {
-  let auto_cfg = opts?.auto_compact
-  var compact_opts = if type_of(auto_cfg) == "dict" {
+  const auto_cfg = opts?.auto_compact
+  let compact_opts = if type_of(auto_cfg) == "dict" {
     auto_cfg
   } else {
     {}
@@ -187,7 +187,7 @@ fn __compact_options(opts, engine_strategy, keep_last) {
   if !contains(compact_opts.keys(), "model") && opts?.model != nil {
     compact_opts = compact_opts + {model: opts.model}
   }
-  let policy = __compaction_policy_from_options(compact_opts)
+  const policy = __compaction_policy_from_options(compact_opts)
     ?? __compaction_policy_from_options({policy: opts?.compaction_policy})
     ?? __compaction_policy_from_options({policy: opts?.compaction?.policy})
   if policy != nil && !contains(compact_opts.keys(), "policy") {
@@ -197,8 +197,8 @@ fn __compact_options(opts, engine_strategy, keep_last) {
 }
 
 fn __compaction_enabled(opts) {
-  let auto_cfg = opts?.auto_compact
-  let policy_cfg = opts?.compaction
+  const auto_cfg = opts?.auto_compact
+  const policy_cfg = opts?.compaction
   if auto_cfg == nil && policy_cfg == nil && opts?.compact_threshold == nil {
     return false
   }
@@ -215,7 +215,7 @@ fn __compaction_enabled(opts) {
     return false
   }
   if type_of(policy_cfg) == "dict" {
-    let label = policy_cfg?.strategy ?? policy_cfg?.kind ?? policy_cfg?.type
+    const label = policy_cfg?.strategy ?? policy_cfg?.kind ?? policy_cfg?.type
     if type_of(label) == "string" && label == "none" {
       return false
     }
@@ -232,7 +232,7 @@ fn __compaction_enabled(opts) {
  * @example: compaction_policy("Preserve failing tests.", {author: "host"})
  */
 pub fn compaction_policy(instructions = nil, opts = nil) {
-  var base = if type_of(instructions) == "dict" && opts == nil {
+  let base = if type_of(instructions) == "dict" && opts == nil {
     instructions
   } else if type_of(opts) == "dict" {
     opts
@@ -242,7 +242,7 @@ pub fn compaction_policy(instructions = nil, opts = nil) {
   if type_of(instructions) == "string" && instructions != "" {
     base = base + {instructions: instructions}
   }
-  var policy = __compaction_policy_from_options(base)
+  let policy = __compaction_policy_from_options(base)
   if policy == nil {
     return {}
   }
@@ -261,12 +261,12 @@ pub fn compaction_policy(instructions = nil, opts = nil) {
  * @example: compact_for_bug_fix_resumption({author: "host"})
  */
 pub fn compact_for_bug_fix_resumption(opts = nil) {
-  let base = if type_of(opts) == "dict" {
+  const base = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  let extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
+  const extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
     "\n" + base.instructions
   } else {
     ""
@@ -291,12 +291,12 @@ pub fn compact_for_bug_fix_resumption(opts = nil) {
  * @api_stability: experimental
  */
 pub fn compact_preserving_test_failures(opts = nil) {
-  let base = if type_of(opts) == "dict" {
+  const base = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  let extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
+  const extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
     "\n" + base.instructions
   } else {
     ""
@@ -323,12 +323,12 @@ pub fn compact_preserving_test_failures(opts = nil) {
  * @example: compact_retaining_current_plan({author: "host"})
  */
 pub fn compact_retaining_current_plan(opts = nil) {
-  let base = if type_of(opts) == "dict" {
+  const base = if type_of(opts) == "dict" {
     opts
   } else {
     {}
   }
-  let extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
+  const extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
     "\n" + base.instructions
   } else {
     ""
@@ -363,24 +363,24 @@ pub fn agent_autocompact_if_needed(session, opts) {
   if !__compaction_enabled(opts) {
     return nil
   }
-  let policy_label = if opts?.compaction != nil {
+  const policy_label = if opts?.compaction != nil {
     __compaction_strategy_label(opts.compaction)
   } else {
     ""
   }
-  let engine_strategy = if policy_label != "" {
+  const engine_strategy = if policy_label != "" {
     __compaction_engine_strategy(policy_label)
   } else if type_of(opts?.compact_strategy) == "string" {
     opts.compact_strategy
   } else {
     "observation_mask"
   }
-  let keep_last = __compaction_keep_last(opts)
-  let compact_opts = __compact_options(opts, engine_strategy, keep_last)
-  let messages = __host_agent_session_messages(session.session_id)
-  let policy = __compaction_policy_from_options(compact_opts)
-  let policy_fields = __compaction_policy_event_fields(policy)
-  let pre_payload = {
+  const keep_last = __compaction_keep_last(opts)
+  const compact_opts = __compact_options(opts, engine_strategy, keep_last)
+  const messages = __host_agent_session_messages(session.session_id)
+  const policy = __compaction_policy_from_options(compact_opts)
+  const policy_fields = __compaction_policy_event_fields(policy)
+  const pre_payload = {
     session: {id: session.session_id},
     reason: "threshold",
     strategy: if policy_label != "" {
@@ -394,23 +394,23 @@ pub fn agent_autocompact_if_needed(session, opts) {
     estimated_tokens_before: estimate_tokens(messages),
   }
     + policy_fields
-  let pre_control = __host_fire_session_hook("pre_compact", pre_payload)
+  const pre_control = __host_fire_session_hook("pre_compact", pre_payload)
   if pre_control?.control == "block" {
     return nil
   }
-  let compact_result = transcript_auto_compact(messages, compact_opts)
-  let compacted = compact_result.messages
+  const compact_result = transcript_auto_compact(messages, compact_opts)
+  const compacted = compact_result.messages
   // Trust the engine's archived count, not a length delta: when exactly one
   // message is archived and one summary is inserted, len(before) == len(after),
   // so inferring "did compaction happen?" from the lengths discards a real
   // compaction. `archived == 0` means the engine did nothing. The engine also
   // returns the summary text it inserted (its index depends on keep_first), so
   // we no longer reverse-engineer it from messages[0].
-  let archived = compact_result.archived
-  let summary = compact_result.summary
+  const archived = compact_result.archived
+  const summary = compact_result.summary
   if archived > 0 {
     __host_agent_session_replace_messages(session.session_id, compacted, summary)
-    let metadata = {
+    const metadata = {
       mode: "auto",
       reason: "threshold",
       strategy: if policy_label != "" {
@@ -427,7 +427,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
     }
       + policy_fields
     agent_record_compaction(session.session_id, metadata)
-    let post_payload = pre_payload
+    const post_payload = pre_payload
       + {
       archived_messages: archived,
       new_summary_len: len(summary),
@@ -462,11 +462,11 @@ pub fn agent_autocompact_if_needed(session, opts) {
  * @api_stability: experimental
  */
 pub fn agent_emergency_compact(session, opts, attempt) {
-  let messages = __host_agent_session_messages(session.session_id)
+  const messages = __host_agent_session_messages(session.session_id)
   // Shrink the preserved tail as attempts escalate: a longer tail is tried
   // first (least lossy), collapsing toward keeping only the latest user turn so
   // a pathological recent observation can still be masked out.
-  let base_keep = if attempt <= 1 {
+  const base_keep = if attempt <= 1 {
     8
   } else if attempt == 2 {
     4
@@ -479,19 +479,19 @@ pub fn agent_emergency_compact(session, opts, attempt) {
   // which the loop reads as "irreducible" and gives up on prematurely. Leaving
   // at most a third of the messages guarantees forward progress while still
   // dropping the smallest tail it can.
-  let one_third = to_int(len(messages) / 3)
-  let ceiling = if one_third < 1 {
+  const one_third = to_int(len(messages) / 3)
+  const ceiling = if one_third < 1 {
     1
   } else {
     one_third
   }
-  let keep_last = if base_keep < ceiling {
+  const keep_last = if base_keep < ceiling {
     base_keep
   } else {
     ceiling
   }
-  let compact_opts = {compact_strategy: "observation_mask", compact_threshold: 1, keep_last: keep_last}
-  let pre_payload = {
+  const compact_opts = {compact_strategy: "observation_mask", compact_threshold: 1, keep_last: keep_last}
+  const pre_payload = {
     session: {id: session.session_id},
     reason: "context_overflow",
     strategy: "observation_mask",
@@ -502,17 +502,17 @@ pub fn agent_emergency_compact(session, opts, attempt) {
     estimated_tokens_before: estimate_tokens(messages),
   }
   __host_fire_session_hook("pre_compact", pre_payload)
-  let compact_result = transcript_auto_compact(messages, compact_opts)
-  let compacted = compact_result.messages
+  const compact_result = transcript_auto_compact(messages, compact_opts)
+  const compacted = compact_result.messages
   // Use the engine's true archived count. A length-delta heuristic reads an
   // archive-exactly-one emergency compaction as archived == 0, which the agent
   // loop treats as terminal/irreducible context_overflow and gives up on a
   // RECOVERABLE overflow. The engine also returns the inserted summary text.
-  let archived = compact_result.archived
-  let summary = compact_result.summary
+  const archived = compact_result.archived
+  const summary = compact_result.summary
   if archived > 0 {
     __host_agent_session_replace_messages(session.session_id, compacted, summary)
-    let metadata = {
+    const metadata = {
       mode: "emergency",
       reason: "context_overflow",
       strategy: "observation_mask",
@@ -525,7 +525,7 @@ pub fn agent_emergency_compact(session, opts, attempt) {
       estimated_tokens_after: estimate_tokens(compacted),
     }
     agent_record_compaction(session.session_id, metadata)
-    let post_payload = pre_payload
+    const post_payload = pre_payload
       + {
       archived_messages: archived,
       new_summary_len: len(summary),

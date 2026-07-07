@@ -17,11 +17,11 @@ import {
   success_message,
 } from "../verify_release_metadata.harn"
 
-let CARGO = "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
+const CARGO = "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
 
-let CHANGELOG = "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
+const CHANGELOG = "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
 
-let ACP_MANIFEST = "{\n"
+const ACP_MANIFEST = "{\n"
   + "  \"id\": \"harn\",\n"
   + "  \"version\": \"0.8.71\",\n"
   + "  \"distribution\": {\n"
@@ -43,13 +43,13 @@ pipeline test_current_version(task) {
 
 @test
 pipeline test_protocol_artifact_version(task) {
-  let manifest = "{\n  \"protocolVersion\": \"0.3.0\",\n  \"artifactVersion\": \"0.8.71\",\n  \"x\": 1\n}\n"
+  const manifest = "{\n  \"protocolVersion\": \"0.3.0\",\n  \"artifactVersion\": \"0.8.71\",\n  \"x\": 1\n}\n"
   assert_eq(protocol_artifact_version(manifest), "0.8.71")
 }
 
 @test
 pipeline test_protocol_artifact_version_missing(task) {
-  let r = try {
+  const r = try {
     protocol_artifact_version("{\n  \"protocolVersion\": \"0.3.0\"\n}\n")
   } catch (e) {
     e
@@ -64,7 +64,7 @@ pipeline test_acp_agent_manifest_version(task) {
 
 @test
 pipeline test_acp_agent_manifest_archive_versions(task) {
-  let versions = acp_agent_manifest_archive_versions(ACP_MANIFEST)
+  const versions = acp_agent_manifest_archive_versions(ACP_MANIFEST)
   assert_eq(versions[0].version, "0.8.71")
   assert_eq(
     versions[0].archive,
@@ -79,8 +79,8 @@ pipeline test_check_acp_agent_manifest_ok(task) {
 
 @test
 pipeline test_check_acp_agent_manifest_rejects_stale_version(task) {
-  let manifest = regex_replace(r#""version": "0\.8\.71""#, "\"version\": \"0.8.70\"", ACP_MANIFEST)
-  let r = try {
+  const manifest = regex_replace(r#""version": "0\.8\.71""#, "\"version\": \"0.8.70\"", ACP_MANIFEST)
+  const r = try {
     check_acp_agent_manifest(manifest, "0.8.71")
   } catch (e) {
     e
@@ -93,12 +93,12 @@ pipeline test_check_acp_agent_manifest_rejects_stale_version(task) {
 
 @test
 pipeline test_check_acp_agent_manifest_rejects_stale_archive(task) {
-  let manifest = regex_replace(
+  const manifest = regex_replace(
     "releases/download/v0\\.8\\.71/harn-x86_64-unknown-linux-gnu",
     "releases/download/v0.8.70/harn-x86_64-unknown-linux-gnu",
     ACP_MANIFEST,
   )
-  let r = try {
+  const r = try {
     check_acp_agent_manifest(manifest, "0.8.71")
   } catch (e) {
     e
@@ -113,7 +113,7 @@ pipeline test_check_acp_agent_manifest_rejects_stale_archive(task) {
 
 @test
 pipeline test_current_version_missing(task) {
-  let r = try {
+  const r = try {
     current_version("[workspace]\nname = \"x\"\n")
   } catch (e) {
     e
@@ -128,7 +128,7 @@ pipeline test_changelog_versions(task) {
 
 @test
 pipeline test_changelog_versions_ignores_two_component(task) {
-  let text = "## v0.5 series (0.5.0)\n\n## v1.2.3\n"
+  const text = "## v0.5 series (0.5.0)\n\n## v1.2.3\n"
   assert_eq(changelog_versions(text), ["1.2.3"])
 }
 
@@ -145,7 +145,7 @@ pipeline test_section_body_missing(task) {
 
 @test
 pipeline test_section_body_empty(task) {
-  let text = "## v1.0.0\n\n## v0.9.0\n\n- prior\n"
+  const text = "## v1.0.0\n\n## v0.9.0\n\n- prior\n"
   assert_eq(changelog_section_body(text, "1.0.0"), "")
 }
 
@@ -197,13 +197,13 @@ pipeline test_check_metadata_ok(task) {
 
 @test
 pipeline test_check_metadata_bump_ahead(task) {
-  let changelog = "# Changelog\n\n## v0.8.72\n\n- Next release.\n\n## v0.8.71\n\n- Prior.\n"
+  const changelog = "# Changelog\n\n## v0.8.72\n\n- Next release.\n\n## v0.8.71\n\n- Prior.\n"
   assert_eq(check_metadata(CARGO, changelog), "0.8.72")
 }
 
 @test
 pipeline test_check_metadata_no_versions(task) {
-  let r = try {
+  const r = try {
     check_metadata(CARGO, "# Changelog\n\nno versions here\n")
   } catch (e) {
     e
@@ -213,8 +213,8 @@ pipeline test_check_metadata_no_versions(task) {
 
 @test
 pipeline test_check_metadata_empty_body(task) {
-  let changelog = "# Changelog\n\n## v0.8.71\n\n## v0.8.70\n\n- Prior.\n"
-  let r = try {
+  const changelog = "# Changelog\n\n## v0.8.71\n\n## v0.8.70\n\n- Prior.\n"
+  const r = try {
     check_metadata(CARGO, changelog)
   } catch (e) {
     e
@@ -228,8 +228,8 @@ pipeline test_check_metadata_empty_body(task) {
 
 @test
 pipeline test_check_metadata_version_mismatch(task) {
-  let changelog = "# Changelog\n\n## v0.9.5\n\n- Far ahead.\n\n## v0.8.70\n\n- Prior.\n"
-  let r = try {
+  const changelog = "# Changelog\n\n## v0.9.5\n\n- Far ahead.\n\n## v0.8.70\n\n- Prior.\n"
+  const r = try {
     check_metadata(CARGO, changelog)
   } catch (e) {
     e
@@ -243,8 +243,8 @@ pipeline test_check_metadata_version_mismatch(task) {
 
 @test
 pipeline test_check_metadata_duplicate(task) {
-  let changelog = "# Changelog\n\n## v0.8.71\n\n- A.\n\n## v0.8.71\n\n- B.\n"
-  let r = try {
+  const changelog = "# Changelog\n\n## v0.8.71\n\n- A.\n\n## v0.8.71\n\n- B.\n"
+  const r = try {
     check_metadata(CARGO, changelog)
   } catch (e) {
     e
@@ -254,8 +254,8 @@ pipeline test_check_metadata_duplicate(task) {
 
 @test
 pipeline test_check_metadata_misformatted(task) {
-  let changelog = "# Changelog\n\n## v0.8.71 \n\n- A.\n"
-  let r = try {
+  const changelog = "# Changelog\n\n## v0.8.71 \n\n- A.\n"
+  const r = try {
     check_metadata(CARGO, changelog)
   } catch (e) {
     e
@@ -270,9 +270,9 @@ pipeline test_check_metadata_misformatted(task) {
 
 @test
 pipeline test_check_metadata_unsorted(task) {
-  let cargo = "[workspace.package]\nversion = \"0.8.70\"\n"
-  let changelog = "# Changelog\n\n## v0.8.70\n\n- A.\n\n## v0.8.71\n\n- B.\n"
-  let r = try {
+  const cargo = "[workspace.package]\nversion = \"0.8.70\"\n"
+  const changelog = "# Changelog\n\n## v0.8.70\n\n- A.\n\n## v0.8.71\n\n- B.\n"
+  const r = try {
     check_metadata(cargo, changelog)
   } catch (e) {
     e

@@ -60,7 +60,7 @@ fn typed_param_fed_dynamic_float_falls_back() {
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
   fn f(n: int) { return n * 2 }
-  let cell = shared_cell("k", 2.5)
+  const cell = shared_cell("k", 2.5)
   log("${f(shared_get(cell))}")
 }"#,
     );
@@ -73,8 +73,8 @@ fn annotated_let_initializer_from_dynamic_float_falls_back() {
     // the initializer is really a float. `x + 1` must fall back to generic add.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
-  let cell = shared_cell("k", 2.5)
-  let x: int = shared_get(cell)
+  const cell = shared_cell("k", 2.5)
+  const x: int = shared_get(cell)
   log("${x + 1}")
 }"#,
     );
@@ -88,8 +88,8 @@ fn annotated_var_initializer_from_dynamic_float_falls_back() {
     // is never reassigned; the runtime guard is what keeps it sound.)
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
-  let cell = shared_cell("k", 4.5)
-  var x: int = shared_get(cell)
+  const cell = shared_cell("k", 4.5)
+  let x: int = shared_get(cell)
   log("${x - 1}")
 }"#,
     );
@@ -102,8 +102,8 @@ fn typed_comparison_fed_dynamic_float_falls_back() {
     // comparison rather than throwing.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
-  let cell = shared_cell("k", 2.5)
-  let x: int = shared_get(cell)
+  const cell = shared_cell("k", 2.5)
+  const x: int = shared_get(cell)
   log("${x < 3}")
 }"#,
     );
@@ -116,8 +116,8 @@ fn typed_string_equality_fed_dynamic_int_falls_back() {
     // holds an int against a string literal is `false` generically, not a throw.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
-  let cell = shared_cell("k", 7)
-  let s: string = shared_get(cell)
+  const cell = shared_cell("k", 7)
+  const s: string = shared_get(cell)
   log("${s == "7"}")
 }"#,
     );
@@ -131,16 +131,16 @@ fn genuinely_incompatible_operands_error_identically() {
     // builds, so no optimized-only crash and no silent wrong answer.
     let optimized = run(
         r#"pipeline default(task) {
-  let cell = shared_cell("k", "hi")
-  let x: int = shared_get(cell)
+  const cell = shared_cell("k", "hi")
+  const x: int = shared_get(cell)
   log("${x + 1}")
 }"#,
         CompilerOptions::optimized(),
     );
     let baseline = run(
         r#"pipeline default(task) {
-  let cell = shared_cell("k", "hi")
-  let x: int = shared_get(cell)
+  const cell = shared_cell("k", "hi")
+  const x: int = shared_get(cell)
   log("${x + 1}")
 }"#,
         CompilerOptions::without_optimizations(),
@@ -154,8 +154,8 @@ fn monomorphic_fast_path_still_correct() {
     // The hot path (operands match the static guess) is unaffected.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(task) {
-  var i = 0
-  var total = 0
+  let i = 0
+  let total = 0
   while i < 10 {
     total = total + (i + 3) * 2 - 1
     i = i + 1

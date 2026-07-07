@@ -17,8 +17,8 @@ fn first_value(item) -> any {
 }
 
 pipeline default() {
-  let items = [{a: "one"}, {b: "two"}, {c: "three"}]
-  var picked = []
+  const items = [{a: "one"}, {b: "two"}, {c: "three"}]
+  let picked = []
   for item in items {
     picked = picked + [first_value(item)]
   }

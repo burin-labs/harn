@@ -65,7 +65,7 @@ pipeline default() {
   //     subtotal = base * qty   <- line 1
   //     audit(subtotal)         <- line 2
   //     ...
-  let preview = edit_extract_function({
+  const preview = edit_extract_function({
     path: "billing.py",
     range: { start_line: 1, end_line: 2 },
     new_name: "compute_subtotal",
@@ -94,7 +94,7 @@ pipeline default() {
   hostlib_enable("tools:deterministic")
   // fn scale(value: i64, factor: i64) -> i64 { ... }
   // called as scale(2, 3), scale(4, 5), scale(6, 7)
-  let result = edit_add_parameter({
+  const result = edit_add_parameter({
     path: "src/lib.rs",
     symbol: { name: "scale" },
     param: "offset: i64",
@@ -128,7 +128,7 @@ on disk. To verify behavior after an apply, run the project's own checks — for
 the `scale` example above:
 
 ```harn,ignore
-let check = run_command({ cmd: ["cargo", "check"], cwd: "." })
+const check = run_command({ cmd: ["cargo", "check"], cwd: "." })
 log(check.exit_code == 0 ? "callers still compile" : check.stderr)
 ```
 

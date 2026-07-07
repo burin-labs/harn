@@ -13,7 +13,7 @@ pipeline default() {
       llm_text("unreachable without a composed retry handler. ##DONE##"),
     ],
     { ->
-      let result = agent_loop("finish", nil, {provider: "mock"})
+      const result = agent_loop("finish", nil, {provider: "mock"})
       __io_println(result.status)
       __io_println(result.error.kind)
       __io_println(result.error.category)

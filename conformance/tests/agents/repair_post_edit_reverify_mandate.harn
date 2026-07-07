@@ -15,7 +15,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * feedback never appears.
  */
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_test",
@@ -68,8 +68,8 @@ fn run_scenario(repair_aware, post_edit_reverify) {
       llm_text("All set. ##DONE##"),
     ],
     { ->
-      let session = "repair-reverify-" + uuid()
-      let _result = agent_loop(
+      const session = "repair-reverify-" + uuid()
+      const _result = agent_loop(
         "Make the tests pass.",
         nil,
         {
@@ -89,7 +89,7 @@ fn run_scenario(repair_aware, post_edit_reverify) {
           },
         },
       )
-      let all_messages = json_stringify(llm_mock_calls())
+      const all_messages = json_stringify(llm_mock_calls())
       return contains(all_messages, REVERIFY_MARKER)
     },
   )
@@ -128,7 +128,7 @@ fn run_cap_scenario(verify_completion) {
       {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
     ],
     { ->
-      let session = "repair-reverify-cap-" + uuid()
+      const session = "repair-reverify-cap-" + uuid()
       return agent_capture_events(
         session,
         fn() { return agent_loop(
@@ -161,13 +161,13 @@ pipeline default() {
   __io_println(run_scenario(false, false))
   // Green post-edit verification can close a last-iteration edit without
   // requiring one more model turn just to say "done".
-  let cap_confirmed = run_cap_scenario(confirm_post_edit_reverify)
+  const cap_confirmed = run_cap_scenario(confirm_post_edit_reverify)
   __io_println(cap_confirmed.result.status)
   __io_println(cap_confirmed.result.stop_reason)
   // Red post-edit verification at the cap stays exhausted and carries the
   // current failure instead of silently completing.
-  let cap_vetoed = run_cap_scenario(veto_post_edit_reverify)
-  let budget_event = first_event(cap_vetoed.events, "budget_exhausted")
+  const cap_vetoed = run_cap_scenario(veto_post_edit_reverify)
+  const budget_event = first_event(cap_vetoed.events, "budget_exhausted")
   __io_println(cap_vetoed.result.status)
   __io_println(budget_event.kind)
   __io_println(cap_vetoed.result?.current_failure != nil)

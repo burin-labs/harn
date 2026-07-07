@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let err = try {
+  const err = try {
     llm_resolved_options({})
     nil
   } catch (e) {

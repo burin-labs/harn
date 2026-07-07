@@ -1,6 +1,6 @@
 pipeline main() {
   clear_session_hooks()
-  let session = agent_session_open("hook-session-idle-emits-reminder")
+  const session = agent_session_open("hook-session-idle-emits-reminder")
   agent_session_reset(session)
   register_session_hook(
     "session_idle",
@@ -11,7 +11,7 @@ pipeline main() {
     "session_idle",
     {session: {id: session}, iteration: 1, wake_interval_ms: 0},
   )
-  let events = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const events = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
   __io_println(len(events))
   __io_println(events[0].reminder.body)
   __io_println(events[0].reminder.tags[0])

@@ -20,7 +20,7 @@ if true {
 
 #[test]
 fn test_fix_empty_if_with_pure_condition() {
-    let source = "pipeline default(task) {\n  let x = 3\n  if x > 0 { }\n  log(\"done\")\n}";
+    let source = "pipeline default(task) {\n  const x = 3\n  if x > 0 { }\n  log(\"done\")\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "empty-block");
     assert!(
@@ -73,7 +73,7 @@ fn test_no_fix_for_empty_if_with_else_branch() {
     // Conservative: no fix when else_body is present.
     let source = r#"
 pipeline default(task) {
-  let y = 1
+  const y = 1
   if y > 0 { } else { log("y") }
   log("end")
 }
@@ -95,7 +95,7 @@ pipeline default(task) {
 
 #[test]
 fn test_fix_empty_for_with_pure_iterable() {
-    let source = "pipeline default(task) {\n  let items = [1, 2, 3]\n  for item in items { }\n  log(\"done\")\n}";
+    let source = "pipeline default(task) {\n  const items = [1, 2, 3]\n  for item in items { }\n  log(\"done\")\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "empty-block");
     assert!(

@@ -8,7 +8,7 @@ fn test_clean_code() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-let x = 1
+const x = 1
 log(x)
 }
 ",

@@ -3,10 +3,10 @@ pipeline default() {
   // Locks in two invariants at once:
   //   - formatter stability (via `make fmt-harn` running `harn fmt --check`)
   //   - runtime right-to-left fallback semantics (via the conformance runner).
-  let first_candidate_value_from_a_very_long_source = nil
-  let second_candidate_value_from_another_long_source = "beta"
-  let third_candidate_value_from_yet_another_long_source = "gamma"
-  let resolved = first_candidate_value_from_a_very_long_source
+  const first_candidate_value_from_a_very_long_source = nil
+  const second_candidate_value_from_another_long_source = "beta"
+  const third_candidate_value_from_yet_another_long_source = "gamma"
+  const resolved = first_candidate_value_from_a_very_long_source
     ?? second_candidate_value_from_another_long_source
     ?? third_candidate_value_from_yet_another_long_source
   __io_println(resolved)

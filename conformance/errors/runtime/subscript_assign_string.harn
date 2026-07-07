@@ -1,4 +1,4 @@
 pipeline test(task) {
-  var s = "ab"
+  let s = "ab"
   s[0] = "Z"
 }

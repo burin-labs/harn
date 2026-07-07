@@ -13,11 +13,11 @@ type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
 fn handle_msg(m: Msg) -> string {
   match m.kind {
     "ping" -> {
-      let pinned: {kind: "ping", ttl: int} = m
+      const pinned: {kind: "ping", ttl: int} = m
       return "ping " + to_string(pinned.ttl)
     }
     "pong" -> {
-      let pinned: {kind: "pong", latency_ms: int} = m
+      const pinned: {kind: "pong", latency_ms: int} = m
       return "pong " + to_string(pinned.latency_ms)
     }
   }
@@ -25,10 +25,10 @@ fn handle_msg(m: Msg) -> string {
 
 fn handle_msg_if(m: Msg) -> string {
   if m.kind == "ping" {
-    let pinned: {kind: "ping", ttl: int} = m
+    const pinned: {kind: "ping", ttl: int} = m
     return "if-ping " + to_string(pinned.ttl)
   }
-  let pinned: {kind: "pong", latency_ms: int} = m
+  const pinned: {kind: "pong", latency_ms: int} = m
   return "if-pong " + to_string(pinned.latency_ms)
 }
 
@@ -37,11 +37,11 @@ type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
 fn handle_event(e: Event) -> string {
   match e.type {
     "click" -> {
-      let pinned: {type: "click", x: int, y: int} = e
+      const pinned: {type: "click", x: int, y: int} = e
       return "click " + to_string(pinned.x) + "," + to_string(pinned.y)
     }
     "scroll" -> {
-      let pinned: {type: "scroll", dy: int} = e
+      const pinned: {type: "scroll", dy: int} = e
       return "scroll " + to_string(pinned.dy)
     }
   }
@@ -52,11 +52,11 @@ type Instr = {op: "add", lhs: int, rhs: int} | {op: "neg", arg: int}
 fn handle_instr(i: Instr) -> string {
   match i.op {
     "add" -> {
-      let pinned: {op: "add", lhs: int, rhs: int} = i
+      const pinned: {op: "add", lhs: int, rhs: int} = i
       return "add " + to_string(pinned.lhs + pinned.rhs)
     }
     "neg" -> {
-      let pinned: {op: "neg", arg: int} = i
+      const pinned: {op: "neg", arg: int} = i
       return "neg " + to_string(0 - pinned.arg)
     }
   }

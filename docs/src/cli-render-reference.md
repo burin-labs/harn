@@ -32,7 +32,7 @@ import { ansi_bold, ansi_color } from "std/ansi"
 import { render_table } from "std/table"
 
 fn main(harness: Harness) {
-  let result = {ok: true, items: [{provider: "anthropic", model: "claude-opus-4-7"}]}
+  const result = {ok: true, items: [{provider: "anthropic", model: "claude-opus-4-7"}]}
   if json_mode() {
     write_envelope(envelope({
       schema_version: 1,

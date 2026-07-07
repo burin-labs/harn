@@ -21,9 +21,9 @@ Use `mcp_connect` to spawn an MCP server process and perform the
 initialize handshake:
 
 ```harn
-let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 
-let info = mcp_server_info(client)
+const info = mcp_server_info(client)
 log("Connected to: ${info.name}")
 ```
 
@@ -36,12 +36,12 @@ harness wants to keep server-provided advice out of model context.
 ### Listing and calling tools
 
 ```harn
-let tools = mcp_list_tools(client)
+const tools = mcp_list_tools(client)
 for t in tools {
   log("${t.name}: ${t.description}")
 }
 
-let content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
+const content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
 log(content)
 ```
 
@@ -65,12 +65,12 @@ harn.mcp.configure({
   },
 })
 
-let client = mcp_connect("python3", ["./image-server.py"])
-let image = harn.mcp.upload_file(client, "photo.png", {
+const client = mcp_connect("python3", ["./image-server.py"])
+const image = harn.mcp.upload_file(client, "photo.png", {
   accept: ["image/png", "image/jpeg"],
   max_size: 5242880,
 })
-let result = mcp_call(client, "describe_image", {image: image})
+const result = mcp_call(client, "describe_image", {image: image})
 log(result)
 ```
 
@@ -86,7 +86,7 @@ against the declared media-type and size constraints before invoking the
 handler.
 
 ```harn
-var tools = tool_registry()
+let tools = tool_registry()
 
 tools = tool_define(tools, "inspect_upload", "Inspect a small text file", {
   parameters: {
@@ -111,11 +111,11 @@ point when MCP ratifies file input support.
 ### Resources and prompts
 
 ```harn
-let resources = mcp_list_resources(client)
-let data = mcp_read_resource(client, "file:///tmp/config.json")
+const resources = mcp_list_resources(client)
+const data = mcp_read_resource(client, "file:///tmp/config.json")
 
-let prompts = mcp_list_prompts(client)
-let prompt = mcp_get_prompt(client, "review", {code: "fn main() {}"})
+const prompts = mcp_list_prompts(client)
+const prompt = mcp_get_prompt(client, "review", {code: "fn main() {}"})
 ```
 
 ### MCP client support matrix
@@ -220,14 +220,14 @@ Explicit control from user code:
 
 ```harn
 // Start the lazy server and hold it open.
-let client = mcp_ensure_active("github")
-let issues = mcp_call(client, "list_issues", {repo: "burin-labs/harn"})
+const client = mcp_ensure_active("github")
+const issues = mcp_call(client, "list_issues", {repo: "burin-labs/harn"})
 
 // Release when done — lets the registry shut it down.
 mcp_release("github")
 
 // Inspect current state.
-let status = mcp_registry_status()
+const status = mcp_registry_status()
 for s in status {
   log("${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}")
 }
@@ -260,14 +260,14 @@ Fetch it from a pipeline:
 
 ```harn,ignore
 // Look up by registered server name.
-let card = mcp_server_card("notion")
+const card = mcp_server_card("notion")
 log(card.description)
 for t in card.tools {
   log("- ${t.name}")
 }
 
 // Or pass a URL / path directly.
-let card = mcp_server_card("./agents/my-agent-card.json")
+const card = mcp_server_card("./agents/my-agent-card.json")
 ```
 
 Cards are cached in-process with a 5-minute TTL, so repeated calls skip
@@ -313,8 +313,8 @@ Use them in your pipeline:
 
 ```harn
 pipeline default(task) {
-  let tools = mcp_list_tools(mcp.filesystem)
-  let content = mcp_call(mcp.filesystem, "read_file", {path: "/tmp/data.txt"})
+  const tools = mcp_list_tools(mcp.filesystem)
+  const content = mcp_call(mcp.filesystem, "read_file", {path: "/tmp/data.txt"})
   log(content)
 }
 ```
@@ -443,13 +443,13 @@ A complete example connecting to the filesystem MCP server, writing a
 file, and reading it back:
 
 ```harn
-let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 
 mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
-let content = mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
+const content = mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
 log(content)
 
-let entries = mcp_call(client, "list_directory", {path: "/tmp"})
+const entries = mcp_call(client, "list_directory", {path: "/tmp"})
 log(entries)
 
 mcp_disconnect(client)
@@ -468,7 +468,7 @@ them with `mcp_tools()`:
 
 ```harn
 pipeline main(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
 
   tools = tool_define(tools, "greet", "Greet someone", {
     parameters: {name: "string"},

@@ -1,5 +1,5 @@
 pipeline default(task) {
-  var sum = 0
+  let sum = 0
   for i in 1 to 6 exclusive {
     if i == 3 {
       continue

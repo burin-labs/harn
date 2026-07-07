@@ -32,14 +32,14 @@ fn pool_workers_run_on_multithread_runtime_without_localset() {
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
 pipeline main(task) {
-  let pool = pool_create({name: "multithread-no-localset", max_concurrent: 4})
-  var handles = []
+  const pool = pool_create({name: "multithread-no-localset", max_concurrent: 4})
+  let handles = []
   for i in 0 to 8 exclusive {
-    let seed = i
+    const seed = i
     handles = handles.push(pool.submit({ -> seed + 10 }))
   }
-  let results = pool_wait(handles)
-  var completed = 0
+  const results = pool_wait(handles)
+  let completed = 0
   for result in results {
     if result.status == "completed" && result.result >= 10 {
       completed = completed + 1
@@ -61,14 +61,14 @@ fn pool_worker_inherits_registry_for_nested_waits() {
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
 pipeline main(task) {
-  let pool = pool_create({name: "worker-nested-wait", max_concurrent: 2})
-  let inner = pool.submit({ -> "inner-ok" })
-  let outer = pool.submit({ ->
-    let done = pool_wait(inner)
+  const pool = pool_create({name: "worker-nested-wait", max_concurrent: 2})
+  const inner = pool.submit({ -> "inner-ok" })
+  const outer = pool.submit({ ->
+    const done = pool_wait(inner)
     return done.result
   })
-  let outer_done = pool_wait(outer)
-  let inner_done = pool_wait(inner)
+  const outer_done = pool_wait(outer)
+  const inner_done = pool_wait(inner)
   log(outer_done.status)
   log(outer_done.result)
   log(inner_done.result)

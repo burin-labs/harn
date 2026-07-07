@@ -8,5 +8,5 @@
  */
 pipeline test(task) {
   egress_policy({default: "deny"})
-  let _result = http_get("https://example.com/api")
+  const _result = http_get("https://example.com/api")
 }

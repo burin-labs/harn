@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let base = transcript_from_messages(
+  const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
       {role: "assistant", content: "two"},
@@ -7,7 +7,7 @@ pipeline test(task) {
       {role: "assistant", content: "four"},
     ],
   )
-  let compacted = transcript_compact(
+  const compacted = transcript_compact(
     base,
     {
       strategy: "custom",

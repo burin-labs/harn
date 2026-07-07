@@ -13,17 +13,17 @@ VM so nested pool operations see the same named budgets.
 ```harn,ignore
 import { fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
 
-let pool = pool_create({
+const pool = pool_create({
   name: "pr-review",
   max_concurrent: 5,
   queue: fair_round_robin("tenant_id"),
 })
 
-let handle = pool.submit({ ->
+const handle = pool.submit({ ->
   return agent_loop("review this PR", system_prompt: "...")
 }, {tenant_id: "tenant-acme", priority: 10})
 
-let result = pool_wait(handle)
+const result = pool_wait(handle)
 ```
 
 ## Creating a pool
@@ -79,8 +79,8 @@ return handles whose terminal snapshot has `status: "rejected"`,
 ```harn,ignore
 import { QueueStrategy, pool_create } from "std/lifecycle/pool"
 
-let queue = QueueStrategy()
-let pool = pool_create({
+const queue = QueueStrategy()
+const pool = pool_create({
   name: "tenant-work",
   max_concurrent: 2,
   queue: queue.fair_round_robin("tenant_id"),
@@ -101,8 +101,8 @@ let pool = pool_create({
 ```harn,ignore
 import { Backpressure, pool_create } from "std/lifecycle/pool"
 
-let backpressure = Backpressure()
-let pool = pool_create({
+const backpressure = Backpressure()
+const pool = pool_create({
   name: "review",
   max_concurrent: 2,
   backpressure: backpressure.queue(100, "fail_submitter"),
@@ -124,8 +124,8 @@ handles are recognised transparently so `wait_agent` is the one place
 callers need to learn.
 
 ```harn,ignore
-let handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
-let outcomes = pool_wait(handles)  // or: wait_agent(handles)
+const handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
+const outcomes = pool_wait(handles)  // or: wait_agent(handles)
 ```
 
 ## Inspection

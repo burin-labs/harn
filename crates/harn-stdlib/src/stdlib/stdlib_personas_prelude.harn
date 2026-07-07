@@ -5,7 +5,7 @@
  * compose them without depending on ambient host state.
  */
 fn __prelude_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -37,13 +37,13 @@ fn __prelude_error_message(error) -> string {
 }
 
 fn __prelude_as_result(value) {
-  let ok_probe = try {
+  const ok_probe = try {
     is_ok(value)
   }
   if is_ok(ok_probe) && unwrap(ok_probe) {
     return {ok: true, value: unwrap(value), error: nil}
   }
-  let err_probe = try {
+  const err_probe = try {
     is_err(value)
   }
   if is_ok(err_probe) && unwrap(err_probe) {
@@ -53,8 +53,8 @@ fn __prelude_as_result(value) {
     return {ok: value.ok, value: value?.value ?? value?.result, error: value?.error}
   }
   if type_of(value) == "dict" && value?.status != nil {
-    let status = lowercase(to_string(value.status))
-    let ok = contains(["ok", "pass", "passed", "success", "succeeded"], status)
+    const status = lowercase(to_string(value.status))
+    const ok = contains(["ok", "pass", "passed", "success", "succeeded"], status)
     return {
       ok: ok,
       value: value,
@@ -91,7 +91,7 @@ fn __prelude_receipt_id(opts, status, calls) -> string {
   if opts?.id != nil {
     return opts.id
   }
-  let seed = {
+  const seed = {
     persona: opts?.persona ?? "persona_prelude",
     step: opts?.step,
     trace_id: opts?.trace_id ?? "",
@@ -104,10 +104,10 @@ fn __prelude_receipt_id(opts, status, calls) -> string {
 }
 
 fn __prelude_receipt(opts, status, result, error, calls, approvals, side_effects) {
-  let options = opts ?? {}
-  let {started_at = date_iso(), completed_at = started_at, persona = "persona_prelude"} = options ?? {}
-  let input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
-  let output_digest = options?.outputs_digest ?? __prelude_digest(result)
+  const options = opts ?? {}
+  const {started_at = date_iso(), completed_at = started_at, persona = "persona_prelude"} = options ?? {}
+  const input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
+  const output_digest = options?.outputs_digest ?? __prelude_digest(result)
   return {
     schema: "harn.receipt.v1",
     id: __prelude_receipt_id(options + {started_at: started_at}, status, calls),
@@ -149,14 +149,14 @@ fn __prelude_call_record(name, status, value, error) {
  * @errors: []
  */
 pub fn verify_then_act(verifier, actor, options = nil) {
-  let opts = options ?? {}
-  let {started_at = date_iso(), verifier_name = "verifier", actor_name = "actor"} = opts ?? {}
-  let verified_raw = try {
+  const opts = options ?? {}
+  const {started_at = date_iso(), verifier_name = "verifier", actor_name = "actor"} = opts ?? {}
+  const verified_raw = try {
     verifier()
   }
   if is_err(verified_raw) {
-    let error = unwrap_err(verified_raw)
-    let calls = [__prelude_call_record(verifier_name, "failure", nil, error)]
+    const error = unwrap_err(verified_raw)
+    const calls = [__prelude_call_record(verifier_name, "failure", nil, error)]
     return {
       ok: false,
       status: "verification_error",
@@ -167,8 +167,8 @@ pub fn verify_then_act(verifier, actor, options = nil) {
       receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
     }
   }
-  let verified = __prelude_as_result(unwrap(verified_raw))
-  var calls = [
+  const verified = __prelude_as_result(unwrap(verified_raw))
+  let calls = [
     __prelude_call_record(
       verifier_name,
       if verified.ok {
@@ -191,11 +191,11 @@ pub fn verify_then_act(verifier, actor, options = nil) {
       receipt: __prelude_receipt(opts + {started_at: started_at}, "denied", nil, verified.error, calls, [], []),
     }
   }
-  let acted = try {
+  const acted = try {
     actor()
   }
   if is_err(acted) {
-    let error = unwrap_err(acted)
+    const error = unwrap_err(acted)
     calls = calls + [__prelude_call_record(actor_name, "failure", nil, error)]
     return {
       ok: false,
@@ -207,7 +207,7 @@ pub fn verify_then_act(verifier, actor, options = nil) {
       receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
     }
   }
-  let result = unwrap(acted)
+  const result = unwrap(acted)
   calls = calls + [__prelude_call_record(actor_name, "success", result, nil)]
   return {
     ok: true,
@@ -228,18 +228,18 @@ pub fn verify_then_act(verifier, actor, options = nil) {
  * @errors: []
  */
 pub fn bounded_loop(state_init, step_fn, options = nil) {
-  let opts = options ?? {}
-  let started_at = opts?.started_at ?? date_iso()
-  let started_ms = harness.clock.timestamp() * 1000
-  let {max_iterations = 10, max_duration_ms = opts?.max_duration, progress_required = false} = opts ?? {}
-  var state = nil
+  const opts = options ?? {}
+  const started_at = opts?.started_at ?? date_iso()
+  const started_ms = harness.clock.timestamp() * 1000
+  const {max_iterations = 10, max_duration_ms = opts?.max_duration, progress_required = false} = opts ?? {}
+  let state = nil
   if __prelude_is_callable(state_init) {
-    let init_outcome = try {
+    const init_outcome = try {
       state_init()
     }
     if is_err(init_outcome) {
-      let error = unwrap_err(init_outcome)
-      let calls = [__prelude_call_record("state_init", "failure", nil, error)]
+      const error = unwrap_err(init_outcome)
+      const calls = [__prelude_call_record("state_init", "failure", nil, error)]
       return {
         ok: false,
         status: "failure",
@@ -255,22 +255,22 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
   } else {
     state = state_init
   }
-  var history = []
-  var iterations = 0
-  var stopped_reason = "max_iterations"
+  let history = []
+  let iterations = 0
+  let stopped_reason = "max_iterations"
   while iterations < max_iterations {
     if max_duration_ms != nil && harness.clock.timestamp() * 1000 - started_ms >= max_duration_ms {
       stopped_reason = "max_duration"
       break
     }
-    let before_digest = __prelude_digest(state)
-    let step_outcome = try {
+    const before_digest = __prelude_digest(state)
+    const step_outcome = try {
       step_fn(state)
     }
     iterations += 1
     if is_err(step_outcome) {
-      let error = unwrap_err(step_outcome)
-      let calls = [__prelude_call_record("loop_step", "failure", nil, error)]
+      const error = unwrap_err(step_outcome)
+      const calls = [__prelude_call_record("loop_step", "failure", nil, error)]
       return {
         ok: false,
         status: "failure",
@@ -282,24 +282,24 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
         receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", state, error, calls, [], []),
       }
     }
-    let step_value = unwrap(step_outcome)
-    let is_envelope = type_of(step_value) == "dict"
+    const step_value = unwrap(step_outcome)
+    const is_envelope = type_of(step_value) == "dict"
       && (step_value?.state != nil || step_value?.done != nil || step_value?.progress != nil
       || step_value?.progress_made != nil)
-    let next_state = if is_envelope && step_value?.state != nil {
+    const next_state = if is_envelope && step_value?.state != nil {
       step_value.state
     } else {
       step_value
     }
-    let next_digest = __prelude_digest(next_state)
-    let progressed = if is_envelope && step_value?.progress != nil {
+    const next_digest = __prelude_digest(next_state)
+    const progressed = if is_envelope && step_value?.progress != nil {
       step_value.progress
     } else if is_envelope && step_value?.progress_made != nil {
       step_value.progress_made
     } else {
       next_digest != before_digest
     }
-    let done = is_envelope && (step_value?.done ?? false)
+    const done = is_envelope && (step_value?.done ?? false)
     history = history + [{iteration: iterations, progress: progressed, done: done}]
     state = next_state
     if done {
@@ -311,12 +311,12 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
       break
     }
   }
-  let status = if stopped_reason == "done" {
+  const status = if stopped_reason == "done" {
     "completed"
   } else {
     "stopped"
   }
-  let calls = [__prelude_call_record("bounded_loop", status, state, nil)]
+  const calls = [__prelude_call_record("bounded_loop", status, state, nil)]
   return {
     ok: status == "completed" || stopped_reason == "max_iterations" || stopped_reason == "no_progress",
     status: status,
@@ -341,13 +341,13 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
 }
 
 fn __prelude_invoke_model(input, model_spec, options) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if __prelude_is_callable(model_spec) {
     return model_spec(input)
   }
   if type_of(model_spec) == "dict" {
-    let prompt = to_string(model_spec?.prompt ?? input)
-    let system = model_spec?.system ?? opts?.system
+    const prompt = to_string(model_spec?.prompt ?? input)
+    const system = model_spec?.system ?? opts?.system
     return llm_call(prompt, system, opts + model_spec)
   }
   return llm_call(to_string(input), opts?.system, opts + {model: model_spec})
@@ -374,20 +374,20 @@ pub fn cheap_classify_then_escalate(
   escalation_predicate,
   options = nil,
 ) {
-  let opts = options ?? {}
-  let {started_at = date_iso(), min_confidence = 0.7} = opts ?? {}
-  let cheap_result = try {
+  const opts = options ?? {}
+  const {started_at = date_iso(), min_confidence = 0.7} = opts ?? {}
+  const cheap_result = try {
     __prelude_invoke_model(input, cheap_model, opts?.cheap_options ?? {})
   }
-  var calls = []
+  let calls = []
   if is_err(cheap_result) {
-    let cheap_error = unwrap_err(cheap_result)
+    const cheap_error = unwrap_err(cheap_result)
     calls = calls + [__prelude_call_record("cheap_classify", "failure", nil, cheap_error)]
-    let escalated_after_error = try {
+    const escalated_after_error = try {
       __prelude_invoke_model(input, escalate_model, opts?.escalate_options ?? {})
     }
     if is_err(escalated_after_error) {
-      let error = unwrap_err(escalated_after_error)
+      const error = unwrap_err(escalated_after_error)
       calls = calls + [__prelude_call_record("escalate_classify", "failure", nil, error)]
       return {
         ok: false,
@@ -399,7 +399,7 @@ pub fn cheap_classify_then_escalate(
         receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
       }
     }
-    let result = unwrap(escalated_after_error)
+    const result = unwrap(escalated_after_error)
     calls = calls + [__prelude_call_record("escalate_classify", "success", result, nil)]
     return {
       ok: true,
@@ -411,15 +411,15 @@ pub fn cheap_classify_then_escalate(
       receipt: __prelude_receipt(opts + {started_at: started_at}, "success", result, nil, calls, [], []),
     }
   }
-  let cheap = unwrap(cheap_result)
+  const cheap = unwrap(cheap_result)
   calls = calls + [__prelude_call_record("cheap_classify", "success", cheap, nil)]
-  var should_escalate = __prelude_confidence(cheap) < min_confidence
+  let should_escalate = __prelude_confidence(cheap) < min_confidence
   if __prelude_is_callable(escalation_predicate) {
-    let predicate_outcome = try {
+    const predicate_outcome = try {
       escalation_predicate(cheap)
     }
     if is_err(predicate_outcome) {
-      let predicate_error = unwrap_err(predicate_outcome)
+      const predicate_error = unwrap_err(predicate_outcome)
       calls = calls + [__prelude_call_record("escalation_predicate", "failure", nil, predicate_error)]
       should_escalate = true
     } else if unwrap(predicate_outcome) {
@@ -437,11 +437,11 @@ pub fn cheap_classify_then_escalate(
       receipt: __prelude_receipt(opts + {started_at: started_at}, "success", cheap, nil, calls, [], []),
     }
   }
-  let escalated = try {
+  const escalated = try {
     __prelude_invoke_model(input, escalate_model, opts?.escalate_options ?? {})
   }
   if is_err(escalated) {
-    let error = unwrap_err(escalated)
+    const error = unwrap_err(escalated)
     calls = calls + [__prelude_call_record("escalate_classify", "failure", nil, error)]
     return {
       ok: false,
@@ -453,7 +453,7 @@ pub fn cheap_classify_then_escalate(
       receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
     }
   }
-  let result = unwrap(escalated)
+  const result = unwrap(escalated)
   calls = calls + [__prelude_call_record("escalate_classify", "success", result, nil)]
   return {
     ok: true,
@@ -474,34 +474,34 @@ pub fn cheap_classify_then_escalate(
  * @errors: []
  */
 pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
-  let opts = options ?? {}
-  let started_at = opts?.started_at ?? date_iso()
-  var max_concurrent = opts?.max_concurrent ?? 4
+  const opts = options ?? {}
+  const started_at = opts?.started_at ?? date_iso()
+  let max_concurrent = opts?.max_concurrent ?? 4
   if max_concurrent < 1 {
     max_concurrent = 1
   }
-  let max_failures = opts?.max_failures ?? 1
-  var index = 0
-  var succeeded = 0
-  var failed = 0
-  var results = []
-  var broken = false
+  const max_failures = opts?.max_failures ?? 1
+  let index = 0
+  let succeeded = 0
+  let failed = 0
+  let results = []
+  let broken = false
   while index < len(items) {
-    var end_index = index + max_concurrent
+    let end_index = index + max_concurrent
     if end_index > len(items) {
       end_index = len(items)
     }
-    let batch = items[index:end_index]
-    let settled = parallel settle batch { item ->
+    const batch = items[index:end_index]
+    const settled = parallel settle batch { item ->
       step_fn(item)
     }
     for item_result in settled.results {
       if is_ok(item_result) {
-        let value = unwrap(item_result)
+        const value = unwrap(item_result)
         succeeded += 1
         results = results + [{ok: true, value: value, error: nil}]
       } else {
-        let error = unwrap_err(item_result)
+        const error = unwrap_err(item_result)
         failed += 1
         results = results + [{ok: false, value: nil, error: __prelude_error_object(error)}]
       }
@@ -512,16 +512,16 @@ pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
       break
     }
   }
-  let skipped = len(items) - index
+  const skipped = len(items) - index
   if broken && __prelude_is_callable(opts?.on_break) {
     opts.on_break({failed: failed, skipped: skipped, succeeded: succeeded})
   }
-  let status = if broken {
+  const status = if broken {
     "circuit_open"
   } else {
     "completed"
   }
-  let calls = [
+  const calls = [
     __prelude_call_record(
       "parallel_sweep",
       status,
@@ -560,15 +560,15 @@ pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
  * @errors: []
  */
 pub fn with_audit_receipt(step_fn, options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return fn() {
-    let started_at = opts?.started_at ?? date_iso()
-    let outcome = try {
+    const started_at = opts?.started_at ?? date_iso()
+    const outcome = try {
       step_fn()
     }
     if is_err(outcome) {
-      let error = unwrap_err(outcome)
-      let calls = [__prelude_call_record(opts?.step ?? "step", "failure", nil, error)]
+      const error = unwrap_err(outcome)
+      const calls = [__prelude_call_record(opts?.step ?? "step", "failure", nil, error)]
       return {
         ok: false,
         status: "failure",
@@ -577,8 +577,8 @@ pub fn with_audit_receipt(step_fn, options = nil) {
         receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
       }
     }
-    let result = unwrap(outcome)
-    let calls = [__prelude_call_record(opts?.step ?? "step", "success", result, nil)]
+    const result = unwrap(outcome)
+    const calls = [__prelude_call_record(opts?.step ?? "step", "success", result, nil)]
     return {
       ok: true,
       status: "success",
@@ -598,22 +598,22 @@ pub fn with_audit_receipt(step_fn, options = nil) {
  * @errors: []
  */
 pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return fn() {
-    let started_at = opts?.started_at ?? date_iso()
-    var approval = opts?.approval
+    const started_at = opts?.started_at ?? date_iso()
+    let approval = opts?.approval
     if approval == nil && (opts?.request_approval ?? false) {
-      let requested = try {
+      const requested = try {
         request_approval(to_string(approval_kind), opts?.approval_options ?? {})
       }
       if is_err(requested) {
-        let error = unwrap_err(requested)
-        let status = if __prelude_error_message(error).contains("timeout") {
+        const error = unwrap_err(requested)
+        const status = if __prelude_error_message(error).contains("timeout") {
           "suspended"
         } else {
           "denied"
         }
-        let calls = [__prelude_call_record("approval_gate", status, nil, error)]
+        const calls = [__prelude_call_record("approval_gate", status, nil, error)]
         return {
           ok: false,
           status: status,
@@ -639,7 +639,7 @@ pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
       approval = unwrap(requested)
     }
     if approval == nil {
-      let calls = [__prelude_call_record("approval_gate", "suspended", nil, nil)]
+      const calls = [__prelude_call_record("approval_gate", "suspended", nil, nil)]
       return {
         ok: false,
         status: "suspended",
@@ -659,8 +659,8 @@ pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
       }
     }
     if !(approval?.approved ?? false) {
-      let error = {message: approval?.reason ?? "approval denied"}
-      let calls = [__prelude_call_record("approval_gate", "denied", nil, error)]
+      const error = {message: approval?.reason ?? "approval denied"}
+      const calls = [__prelude_call_record("approval_gate", "denied", nil, error)]
       return {
         ok: false,
         status: "denied",
@@ -679,12 +679,12 @@ pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
         ),
       }
     }
-    let outcome = try {
+    const outcome = try {
       step_fn()
     }
     if is_err(outcome) {
-      let error = unwrap_err(outcome)
-      let calls = [
+      const error = unwrap_err(outcome)
+      const calls = [
         __prelude_call_record("approval_gate", "success", approval, nil),
         __prelude_call_record(opts?.step ?? "approved_step", "failure", nil, error),
       ]
@@ -706,8 +706,8 @@ pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
         ),
       }
     }
-    let result = unwrap(outcome)
-    let calls = [
+    const result = unwrap(outcome)
+    const calls = [
       __prelude_call_record("approval_gate", "success", approval, nil),
       __prelude_call_record(opts?.step ?? "approved_step", "success", result, nil),
     ]
@@ -740,8 +740,8 @@ fn __prelude_persona_repair_status(record) -> string {
 }
 
 fn __prelude_persona_repair_succeeded(record) -> bool {
-  let status = __prelude_persona_repair_status(record)
-  let validation_errors = record?.validation_errors ?? []
+  const status = __prelude_persona_repair_status(record)
+  const validation_errors = record?.validation_errors ?? []
   return (status == "completed" || status == "success") && len(validation_errors) == 0
 }
 
@@ -767,7 +767,7 @@ fn __prelude_persona_downstream_action(record) -> string {
 }
 
 fn __prelude_persona_input_shape(record) {
-  let bundle = record?.bundle ?? {}
+  const bundle = record?.bundle ?? {}
   return {
     kind: bundle?.kind ?? record?.kind ?? "repair",
     repo: bundle?.repo ?? record?.repo ?? "",
@@ -781,8 +781,8 @@ fn __prelude_persona_input_shape(record) {
 }
 
 fn __prelude_persona_output_shape(record) {
-  let output = record?.output ?? {}
-  let push = output?.push_result
+  const output = record?.output ?? {}
+  const push = output?.push_result
   return {
     diagnosis: output?.diagnosis ?? "",
     files_changed: output?.files_changed ?? [],
@@ -799,7 +799,7 @@ fn __prelude_persona_output_shape(record) {
 }
 
 fn __prelude_persona_pattern_key(record, opts) -> string {
-  let seed = {
+  const seed = {
     persona: __prelude_persona_repair_persona(record, opts),
     worker: record?.worker ?? record?.agent ?? "repair_worker",
     input_digest: __prelude_digest(__prelude_persona_input_shape(record)),
@@ -810,7 +810,7 @@ fn __prelude_persona_pattern_key(record, opts) -> string {
 }
 
 fn __prelude_persona_pattern_example(record, index, opts) {
-  let trace_id = record?.trace_id
+  const trace_id = record?.trace_id
     ?? record?.parent_receipt_ref?.sweep_id
     ?? record?.bundle?.parent?.sweep_id
     ?? ("repair-trace-" + to_string(index + 1))
@@ -827,7 +827,7 @@ fn __prelude_persona_pattern_example(record, index, opts) {
 }
 
 fn __prelude_persona_identifier(value) -> string {
-  var clean = regex_replace("[^A-Za-z0-9_]+", "_", lowercase(trim(to_string(value ?? "repair"))))
+  let clean = regex_replace("[^A-Za-z0-9_]+", "_", lowercase(trim(to_string(value ?? "repair"))))
   clean = regex_replace("^_+|_+$", "", clean)
   if clean == "" {
     return "repair"
@@ -839,28 +839,28 @@ fn __prelude_persona_identifier(value) -> string {
 }
 
 fn __prelude_persona_patch_for_group(group, opts) -> string {
-  let persona = __prelude_persona_identifier(group.persona)
-  let kind = __prelude_persona_identifier(group.repair_kind)
-  let downstream = __prelude_persona_identifier(group.downstream_action)
-  let {step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step"} = opts ?? {}
-  let key = group.key
-  let input_digest = group.input_digest
-  let output_digest = group.output_digest
-  let action = group.downstream_action
-  let anchor_step = opts?.anchor_step ?? "dispatch_repair_workers"
+  const persona = __prelude_persona_identifier(group.persona)
+  const kind = __prelude_persona_identifier(group.repair_kind)
+  const downstream = __prelude_persona_identifier(group.downstream_action)
+  const {step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step"} = opts ?? {}
+  const key = group.key
+  const input_digest = group.input_digest
+  const output_digest = group.output_digest
+  const action = group.downstream_action
+  const anchor_step = opts?.anchor_step ?? "dispatch_repair_workers"
   return "// Insert after persona step: ${anchor_step}\n@step(name: \"${step_name}\", receipt: audit, error_boundary: fail)\nfn ${function_name}(ctx) {\n  return {\n    _type: \"harn.persona.crystallized_repair.v1\",\n    pattern_key: \"${key}\",\n    status: \"matched\",\n    input_digest: \"${input_digest}\",\n    output_digest: \"${output_digest}\",\n    downstream_action: \"${action}\",\n    context: ctx,\n  }\n}"
 }
 
 fn __prelude_persona_candidate(group, opts) {
-  let step_name = opts?.step_name
+  const step_name = opts?.step_name
     ?? "crystallized_${__prelude_persona_identifier(group.persona)}_${__prelude_persona_identifier(group.repair_kind)}_${__prelude_persona_identifier(group.downstream_action)}"
-  let package_name = opts?.package_name ?? "${__prelude_persona_identifier(group.persona)}-workflows"
-  let model_calls = group.model_calls
-  let input_tokens = group.input_tokens
-  let output_tokens = group.output_tokens
-  let cost_usd = group.cost_usd
-  let wall_ms = group.wall_ms
-  let patch = __prelude_persona_patch_for_group(group, opts + {step_name: step_name})
+  const package_name = opts?.package_name ?? "${__prelude_persona_identifier(group.persona)}-workflows"
+  const model_calls = group.model_calls
+  const input_tokens = group.input_tokens
+  const output_tokens = group.output_tokens
+  const cost_usd = group.cost_usd
+  const wall_ms = group.wall_ms
+  const patch = __prelude_persona_patch_for_group(group, opts + {step_name: step_name})
   return {
     id: "candidate-" + substring(sha256(group.key), 0, 16),
     name: step_name,
@@ -913,10 +913,10 @@ fn __prelude_persona_candidate(group, opts) {
  * @errors: []
  */
 pub fn persona_crystallization_candidates(history, options = nil) {
-  let opts = options ?? {}
-  let min_examples = opts?.min_examples ?? 3
-  let hosted_history_days = opts?.hosted_history_days ?? 0
-  let min_hosted_history_days = opts?.min_hosted_history_days ?? 90
+  const opts = options ?? {}
+  const min_examples = opts?.min_examples ?? 3
+  const hosted_history_days = opts?.hosted_history_days ?? 0
+  const min_hosted_history_days = opts?.min_hosted_history_days ?? 90
   if hosted_history_days < min_hosted_history_days {
     return {
       ok: false,
@@ -930,20 +930,20 @@ pub fn persona_crystallization_candidates(history, options = nil) {
       warnings: ["persona crystallization requires hosted-run history before promotion"],
     }
   }
-  var groups = {}
-  var order = []
-  var rejected = []
-  var index = 0
+  let groups = {}
+  let order = []
+  let rejected = []
+  let index = 0
   for entry in history ?? [] {
-    let record = __prelude_persona_repair_record(entry)
+    const record = __prelude_persona_repair_record(entry)
     if !__prelude_persona_repair_succeeded(record) {
       rejected = rejected + [{index: index, reason: "repair run did not complete cleanly"}]
       index += 1
       continue
     }
-    let key = __prelude_persona_pattern_key(record, opts)
+    const key = __prelude_persona_pattern_key(record, opts)
     if groups[key] == nil {
-      let input_shape = __prelude_persona_input_shape(record)
+      const input_shape = __prelude_persona_input_shape(record)
       groups[key] = {
         key: key,
         count: 0,
@@ -961,12 +961,12 @@ pub fn persona_crystallization_candidates(history, options = nil) {
       }
       order = order + [key]
     }
-    let group = groups[key]
-    let model_calls_inc = record?.agent_loop?.model_calls ?? record?.agent_loop?.llm?.iterations ?? 1
-    let input_tokens_inc = record?.agent_loop?.input_tokens ?? record?.agent_loop?.llm?.input_tokens ?? 0
-    let output_tokens_inc = record?.agent_loop?.output_tokens ?? record?.agent_loop?.llm?.output_tokens ?? 0
-    let cost_usd_inc = record?.agent_loop?.cost_usd ?? 0.0
-    let wall_ms_inc = record?.agent_loop?.wall_ms ?? record?.duration_ms ?? 0
+    const group = groups[key]
+    const model_calls_inc = record?.agent_loop?.model_calls ?? record?.agent_loop?.llm?.iterations ?? 1
+    const input_tokens_inc = record?.agent_loop?.input_tokens ?? record?.agent_loop?.llm?.input_tokens ?? 0
+    const output_tokens_inc = record?.agent_loop?.output_tokens ?? record?.agent_loop?.llm?.output_tokens ?? 0
+    const cost_usd_inc = record?.agent_loop?.cost_usd ?? 0.0
+    const wall_ms_inc = record?.agent_loop?.wall_ms ?? record?.duration_ms ?? 0
     groups[key] = group
       + {
       count: group.count + 1,
@@ -979,9 +979,9 @@ pub fn persona_crystallization_candidates(history, options = nil) {
     }
     index += 1
   }
-  var candidates = []
+  let candidates = []
   for key in order {
-    let group = groups[key]
+    const group = groups[key]
     if group.count >= min_examples {
       candidates = candidates + [__prelude_persona_candidate(group, opts)]
     } else {
@@ -1014,8 +1014,8 @@ pub fn persona_crystallization_candidates(history, options = nil) {
  * @errors: []
  */
 pub fn persona_crystallization_bundle(history, options = nil) {
-  let opts = options ?? {}
-  let report = persona_crystallization_candidates(history, opts)
+  const opts = options ?? {}
+  const report = persona_crystallization_candidates(history, opts)
   if !report.ok {
     return {
       schema: "harn.crystallization.candidate.bundle",
@@ -1027,7 +1027,7 @@ pub fn persona_crystallization_bundle(history, options = nil) {
       warnings: report.warnings,
     }
   }
-  var candidate = report.candidates[0]
+  let candidate = report.candidates[0]
   for current in report.candidates {
     if len(current.examples) > len(candidate.examples)
       || (len(current.examples) == len(candidate.examples)

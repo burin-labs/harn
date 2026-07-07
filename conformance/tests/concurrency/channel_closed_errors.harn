@@ -1,20 +1,20 @@
 pipeline test(task) {
-  let recv_ch = channel("closed-receive", 1)
+  const recv_ch = channel("closed-receive", 1)
   close_channel(recv_ch)
-  let recv_result = try {
+  const recv_result = try {
     receive(recv_ch)
   }
   __io_println(is_err(recv_result))
-  let recv_err = unwrap_err(recv_result)
+  const recv_err = unwrap_err(recv_result)
   __io_println(recv_err.type)
   __io_println(error_category(recv_err))
-  let send_ch = channel("closed-send", 1)
+  const send_ch = channel("closed-send", 1)
   close_channel(send_ch)
-  let send_result = try {
+  const send_result = try {
     send(send_ch, "late")
   }
   __io_println(is_err(send_result))
-  let send_err = unwrap_err(send_result)
+  const send_err = unwrap_err(send_result)
   __io_println(send_err.type)
   __io_println(error_category(send_err))
 }

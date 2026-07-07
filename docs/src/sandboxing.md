@@ -133,7 +133,7 @@ For private registries, vendored SDKs, self-signed CA bundles outside the
 default roots, or offline caches, add process-only roots at the policy layer:
 
 ```harn,ignore
-let policy = {
+const policy = {
   capabilities: {workspace: ["read_text"], process: ["exec"]},
   workspace_roots: [project_root()],
   process_sandbox: {
@@ -186,7 +186,7 @@ is `Worktree`, so pipelines that want the strongest confinement
 include `sandbox_profile: "os_hardened"` in the policy literal:
 
 ```harn,ignore
-let policy = {
+const policy = {
   capabilities: {workspace: ["read_text"], process: ["exec"]},
   workspace_roots: [project_root()],
   sandbox_profile: "os_hardened",

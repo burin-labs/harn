@@ -6,7 +6,7 @@ pipeline test(task) {
     }
   }
   // Select-only-default in a loop should not hang
-  let items = [0, 1, 2]
+  const items = [0, 1, 2]
   for i in items {
     select {
       default {

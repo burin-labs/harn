@@ -1,16 +1,16 @@
 import { agent_lifecycle_tools } from "std/agent/workers"
 
 pipeline main() {
-  let base = tool_registry()
-  let lifecycle = agent_lifecycle_tools(base)
+  const base = tool_registry()
+  const lifecycle = agent_lifecycle_tools(base)
   __io_println(tool_find(lifecycle, "agent_await_resumption")?.name)
   __io_println(tool_find(lifecycle, "subagent_pause") == nil)
   __io_println(tool_find(lifecycle, "subagent_resume") == nil)
-  let parent = agent_lifecycle_tools(base, {subagents: true})
+  const parent = agent_lifecycle_tools(base, {subagents: true})
   __io_println(tool_find(parent, "agent_await_resumption")?.name)
   __io_println(tool_find(parent, "subagent_pause")?.name)
   __io_println(tool_find(parent, "subagent_resume")?.name)
   __io_println(tool_find(parent, "subagent_stop")?.name)
-  let reapplied = agent_lifecycle_tools(parent, {subagents: true})
+  const reapplied = agent_lifecycle_tools(parent, {subagents: true})
   __io_println(tool_count(reapplied) == tool_count(parent))
 }

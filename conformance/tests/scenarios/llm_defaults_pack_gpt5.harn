@@ -2,7 +2,7 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  let r = pack_for({model: "gpt-5", thinking: "high"})
+  const r = pack_for({model: "gpt-5", thinking: "high"})
   assert_eq(r.provider, "openai")
   // Effort patch sets reasoning_effort="medium" first, but the thinking
   // patch is layered second and overrides it to "high".

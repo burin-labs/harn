@@ -1364,7 +1364,7 @@ impl<'a> HandlerIrBuilder<'a> {
 
     fn build_stmt(&mut self, node: &SNode, incoming: Vec<NodeId>) -> Vec<NodeId> {
         match &node.node {
-            Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
+            Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. } => {
                 let exits = self.build_expr(value, incoming);
                 if let BindingPattern::Identifier(name) = pattern {
                     let assignment = self.push_node(
@@ -2476,7 +2476,7 @@ mod tests {
         let report = analyze(
             r#"
 fn main(harness: Harness) {
-  let body = harness.fs.read_text("notes.txt")
+  const body = harness.fs.read_text("notes.txt")
   harness.fs.mkdtemp("harn-ir-")
   harness.stdio.println(body)
 }

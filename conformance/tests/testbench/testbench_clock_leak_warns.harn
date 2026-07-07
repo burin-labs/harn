@@ -8,9 +8,9 @@
  */
 pipeline test(task) {
   mock_time(1767225600000)
-  let _stamp = date_iso()
-  let _stamp_again = date_iso()
-  let leaks = testbench_clock_leaks()
+  const _stamp = date_iso()
+  const _stamp_again = date_iso()
+  const leaks = testbench_clock_leaks()
   __io_println(len(leaks) == 1)
   __io_println(leaks[0].capability == "stdlib/date_iso")
   __io_println(leaks[0].count == 2)

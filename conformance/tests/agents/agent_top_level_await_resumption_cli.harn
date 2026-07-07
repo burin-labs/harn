@@ -1,7 +1,7 @@
 import "../_common"
 
 fn first_snapshot_line(text) {
-  let matches = regex_captures("snapshot=(.+)", text)
+  const matches = regex_captures("snapshot=(.+)", text)
   if len(matches) == 0 {
     return nil
   }
@@ -9,11 +9,11 @@ fn first_snapshot_line(text) {
 }
 
 pipeline main() {
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  let root = path_join(harness.fs.temp_dir(), "harn-top-level-resume-" + uuid_v7())
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn-top-level-resume-" + uuid_v7())
   harness.fs.mkdir(root)
-  let script = path_join(root, "top_level_suspend.harn")
+  const script = path_join(root, "top_level_suspend.harn")
   harness.fs
     .write_text(
     script,
@@ -26,23 +26,23 @@ pipeline main() {
       + "  __io_println(\"snapshot=\" + result.handle.snapshot_path)\n"
       + "}\n",
   )
-  let first = exec_at(root, harn_bin, "run", script)
+  const first = exec_at(root, harn_bin, "run", script)
   __io_println(first.success)
   __io_println(contains(first.stdout, "status=suspended"))
   __io_println(contains(first.stdout, "reason=waiting on operator"))
   __io_println(contains(first.stdout, "handle_status=suspended"))
-  let snapshot = first_snapshot_line(first.stdout)
+  const snapshot = first_snapshot_line(first.stdout)
   require snapshot != nil, "top-level suspend did not print a snapshot path"
-  let snapshot_path = if path_is_absolute(snapshot) {
+  const snapshot_path = if path_is_absolute(snapshot) {
     snapshot
   } else {
     path_join(root, snapshot)
   }
   __io_println(harness.fs.exists(snapshot_path))
-  let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
+  const second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
   __io_println(second.success)
-  let lines = second.stdout.trim().split("\n")
-  let final = json_parse(lines[len(lines) - 1])
+  const lines = second.stdout.trim().split("\n")
+  const final = json_parse(lines[len(lines) - 1])
   __io_println(final.data.event_type)
   __io_println(final.data.value.status)
   __io_println(contains(final.data.value.result.summary, "Mock response"))

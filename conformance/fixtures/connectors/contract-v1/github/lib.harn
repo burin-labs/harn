@@ -1,4 +1,4 @@
-var active_bindings = []
+let active_bindings = []
 
 pub fn provider_id() {
   return "github"
@@ -31,8 +31,8 @@ pub fn shutdown() {
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
-  let token = secret_get("github/contract-token")
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const token = secret_get("github/contract-token")
   event_log_emit(
     "connectors.github.contract",
     "normalize",

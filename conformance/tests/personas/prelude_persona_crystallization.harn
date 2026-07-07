@@ -32,7 +32,7 @@ fn repair_run(id, repo, status = "completed") {
 }
 
 pipeline test(task) {
-  let gated = persona_crystallization_candidates(
+  const gated = persona_crystallization_candidates(
     [
       repair_run("r1", "burin-labs/harn"),
       repair_run("r2", "burin-labs/harn"),
@@ -42,13 +42,13 @@ pipeline test(task) {
   )
   __io_println(gated.status)
   __io_println(len(gated.candidates))
-  let history = [
+  const history = [
     repair_run("r1", "burin-labs/harn"),
     repair_run("r2", "burin-labs/harn"),
     repair_run("r3", "burin-labs/harn"),
     repair_run("bad", "burin-labs/harn", "validators_failed"),
   ]
-  let bundle = persona_crystallization_bundle(
+  const bundle = persona_crystallization_bundle(
     history,
     {hosted_history_days: 91, min_examples: 3, package_name: "merge-captain-workflows"},
   )

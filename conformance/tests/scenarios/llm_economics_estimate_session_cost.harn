@@ -6,7 +6,7 @@
 import { estimate_session_cost, format_usd } from "std/llm/economics"
 
 pipeline default() {
-  let summary = estimate_session_cost(
+  const summary = estimate_session_cost(
     [
       {
         provider: "anthropic",

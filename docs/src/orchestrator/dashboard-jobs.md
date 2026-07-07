@@ -9,7 +9,7 @@ from normalized fields.
 ```harn
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
-let event = dashboard_job_event(
+const event = dashboard_job_event(
   "run.started",
   {
     job_id: "daily-digest",
@@ -19,7 +19,7 @@ let event = dashboard_job_event(
   },
 )
 
-let view = dashboard_jobs_view([event])
+const view = dashboard_jobs_view([event])
 log(view.jobs[0].status)
 ```
 
@@ -82,13 +82,13 @@ without a live scheduler or database.
 ```harn
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
-let events = [
+const events = [
   dashboard_job_event(
     "run.succeeded",
     {job_id: "daily-digest", run_id: "run-001", source_timestamp: "2026-05-11T14:03:00Z"},
   ),
 ]
-let view = dashboard_jobs_view(events, {emit: true, topic: "dashboard.jobs.events"})
+const view = dashboard_jobs_view(events, {emit: true, topic: "dashboard.jobs.events"})
 for job in view.jobs {
   log(job.job_id + ": " + job.status)
 }

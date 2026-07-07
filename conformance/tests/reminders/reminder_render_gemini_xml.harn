@@ -10,7 +10,7 @@ pipeline main() {
       evaluate: { _ctx -> return {reminder: {body: "gemini reminder", role_hint: "system"}} },
     },
   )
-  let session = agent_session_open("reminder-render-gemini")
+  const session = agent_session_open("reminder-render-gemini")
   agent_session_reset(session)
   agent_session_inject(session, {role: "user", content: "hello"})
   agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
@@ -27,8 +27,8 @@ pipeline main() {
           session_id: session,
         },
       )
-      let call = llm_mock_calls()[0]
-      let last = call.messages[len(call.messages) - 1]
+      const call = llm_mock_calls()[0]
+      const last = call.messages[len(call.messages) - 1]
       __io_println(contains(call.system, "base system"))
       __io_println(!contains(call.system, "<system-reminder>"))
       __io_println(contains(last.content, "<system-reminder>"))

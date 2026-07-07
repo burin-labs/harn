@@ -10,7 +10,7 @@
  * pointing at the client fallback as the fix.
  */
 pipeline test(task) {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "look",
@@ -33,7 +33,7 @@ pipeline test(task) {
   // path only gated on provider name, but mock now spoofs OpenAI
   // capability by model generation. `gpt-4o` is below the 5.4 cutoff
   // so the error still fires.
-  let native_err = try {
+  const native_err = try {
     llm_call(
       "hello",
       nil,

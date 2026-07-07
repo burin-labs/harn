@@ -33,11 +33,11 @@ pub fn worktree_noninteractive_env() -> dict {
  * the std/git ambient-env strip, and any caller overrides from `options`.
  */
 fn __worktree_git_options(cwd, options) -> dict {
-  let opts = options ?? {}
+  const opts = options ?? {}
   // Caller `env` overrides individual guard keys; `env_mode` defaults to
   // "merge" so inherited PATH/HOME/credentials survive.
-  let env = git_noninteractive_env() + (opts?.env ?? {})
-  var out = {
+  const env = git_noninteractive_env() + (opts?.env ?? {})
+  let out = {
     cwd: cwd,
     env: env,
     env_mode: opts?.env_mode ?? "merge",
@@ -76,14 +76,14 @@ pub fn worktree_default_path(repo, name) {
  * @errors: []
  */
 pub fn worktree_create(repo, name, base_ref, path, options = {}) {
-  let target = if path == nil || path == "" {
+  const target = if path == nil || path == "" {
     worktree_default_path(repo, name)
   } else {
     path
   }
   harness.fs.mkdir(repo + "/.harn")
   harness.fs.mkdir(repo + "/.harn/worktrees")
-  let result = __worktree_git(repo, ["worktree", "add", "-B", name, target, base_ref], options)
+  const result = __worktree_git(repo, ["worktree", "add", "-B", name, target, base_ref], options)
   return {repo: repo, name: name, path: target, base_ref: base_ref, result: result, success: result?.success}
 }
 

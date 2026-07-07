@@ -16,7 +16,7 @@ import { llm_text, with_llm_script } from "std/testing"
 // `edit` always rejects with a byte-identical error, modelling the live
 // 127×`Error: missing action` fan-out.
 fn rejecting_edit_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "edit",
@@ -36,7 +36,7 @@ fn rejecting_edit_tools() {
 // A read tool that always SUCCEEDS — distinct successful calls must never trip
 // the failing-fan-out cap.
 fn reading_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "look",
@@ -52,8 +52,8 @@ fn reading_tools() {
 }
 
 fn identical_edit_batch(n) {
-  var calls = []
-  var i = 0
+  let calls = []
+  let i = 0
   while i < n {
     calls = calls.push({id: "e" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
     i = i + 1
@@ -62,8 +62,8 @@ fn identical_edit_batch(n) {
 }
 
 fn two_group_edit_batch(n) {
-  var calls = []
-  var i = 0
+  let calls = []
+  let i = 0
   while i < n {
     calls = calls.push({id: "a" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
     i = i + 1
@@ -77,8 +77,8 @@ fn two_group_edit_batch(n) {
 }
 
 fn distinct_look_batch(n) {
-  var calls = []
-  var i = 0
+  let calls = []
+  let i = 0
   while i < n {
     calls = calls.push({id: "l" + to_string(i), name: "look", arguments: {path: "f" + to_string(i) + ".swift"}})
     i = i + 1
@@ -94,7 +94,7 @@ pipeline main() {
   with_llm_script(
     [{text: "", tool_calls: identical_edit_batch(10)}, llm_text("I see the edits were rejected.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Fan out identical failing edits.",
         nil,
         {
@@ -111,8 +111,8 @@ pipeline main() {
           intra_turn_resource_fail_fast: false,
         },
       )
-      let calls = llm_mock_calls()
-      let second_turn = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(contains(result.tools.rejected, "edit"))
       __io_println(contains(second_turn, "missing required parameter(s): action"))
@@ -124,7 +124,7 @@ pipeline main() {
   with_llm_script(
     [{text: "", tool_calls: identical_edit_batch(10)}, llm_text("I see the edits were rejected.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Fan out identical failing edits, flag off.",
         nil,
         {
@@ -136,8 +136,8 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      let calls = llm_mock_calls()
-      let second_turn = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(contains(result.tools.rejected, "edit"))
       __io_println(!contains(second_turn, "collapsed remaining identical failing"))
@@ -149,7 +149,7 @@ pipeline main() {
   with_llm_script(
     [{text: "", tool_calls: distinct_look_batch(6)}, llm_text("Read them all.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Fan out distinct successful reads.",
         nil,
         {
@@ -162,8 +162,8 @@ pipeline main() {
           intra_turn_failure_fanout_cap: 3,
         },
       )
-      let calls = llm_mock_calls()
-      let second_turn = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(contains(second_turn, "contents of f0.swift"))
       __io_println(contains(second_turn, "contents of f5.swift"))
@@ -179,7 +179,7 @@ pipeline main() {
   with_llm_script(
     [{text: "", tool_calls: two_group_edit_batch(6)}, llm_text("I see the edits were rejected.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Fan out two distinct identical failing edit groups.",
         nil,
         {
@@ -196,9 +196,9 @@ pipeline main() {
           intra_turn_resource_fail_fast: false,
         },
       )
-      let calls = llm_mock_calls()
-      let second_turn = json_stringify(calls[1].messages)
-      let marker = "collapsed remaining identical failing"
+      const calls = llm_mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
+      const marker = "collapsed remaining identical failing"
       __io_println(result.status)
       __io_println(to_string(second_turn.split(marker).count() - 1))
       __io_println(contains(second_turn, "a.swift"))

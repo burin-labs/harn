@@ -65,7 +65,7 @@ fn __tt_trace_id(session_id, call_id) {
 }
 
 fn __tt_status(result) {
-  let status = to_string(result?.status ?? "")
+  const status = to_string(result?.status ?? "")
   if status != "" {
     return status
   }
@@ -76,13 +76,13 @@ fn __tt_status(result) {
 }
 
 fn __tt_child_spans(audit) {
-  let layers = __tt_list(audit?.layers)
-  var spans = []
+  const layers = __tt_list(audit?.layers)
+  let spans = []
   for layer in layers {
     if type_of(layer) != "dict" {
       continue
     }
-    var span = {name: "tool_call." + to_string(layer?.name ?? "layer"), status: to_string(layer?.status ?? "ok")}
+    let span = {name: "tool_call." + to_string(layer?.name ?? "layer"), status: to_string(layer?.status ?? "ok")}
     if layer?.started_at != nil {
       span = span + {started_at: layer.started_at}
     }
@@ -95,7 +95,7 @@ fn __tt_child_spans(audit) {
     if layer?.elapsed_ms != nil {
       span = span + {duration_ms: layer.elapsed_ms}
     }
-    var attrs = {}
+    let attrs = {}
     if layer?.count != nil {
       attrs = attrs + {count: layer.count}
     }
@@ -117,11 +117,11 @@ fn __tt_child_spans(audit) {
 }
 
 fn __tt_events(result, start_ms, end_ms) {
-  var events = [
+  let events = [
     {name: "tool_call.dispatched", time_ms: start_ms},
     {name: "tool_call.result_returned", time_ms: end_ms},
   ]
-  let category = to_string(result?.error_category ?? "")
+  const category = to_string(result?.error_category ?? "")
   if category == "scope_violation" || category == "policy_blocked" {
     events = events
       .push(
@@ -152,14 +152,14 @@ fn __tt_events(result, start_ms, end_ms) {
  * @errors: []
  */
 pub fn tool_call_span(call, result, start_ms, end_ms, extras = nil) {
-  let opts = __tt_dict(extras)
-  let session_id = to_string(call?.turn?.session_id ?? "")
-  let iteration = call?.turn?.iteration ?? 0
-  let tool_name = to_string(call?.tool_name ?? "")
-  let call_id = to_string(call?.call_id ?? "")
-  let status = __tt_status(result)
-  let ok = result?.ok ?? false
-  var attributes = {
+  const opts = __tt_dict(extras)
+  const session_id = to_string(call?.turn?.session_id ?? "")
+  const iteration = call?.turn?.iteration ?? 0
+  const tool_name = to_string(call?.tool_name ?? "")
+  const call_id = to_string(call?.call_id ?? "")
+  const status = __tt_status(result)
+  const ok = result?.ok ?? false
+  let attributes = {
     tool_name: tool_name,
     tool_call_id: call_id,
     executor: result?.executor,
@@ -187,7 +187,7 @@ pub fn tool_call_span(call, result, start_ms, end_ms, extras = nil) {
   if type_of(opts?.extra_attributes) == "dict" {
     attributes = attributes + opts.extra_attributes
   }
-  let rendered = result?.rendered_result
+  const rendered = result?.rendered_result
   if type_of(rendered) == "string" {
     attributes = attributes + {rendered_result_size: len(rendered)}
   }
@@ -249,15 +249,15 @@ pub fn tool_call_span(call, result, start_ms, end_ms, extras = nil) {
  * @errors: []
  */
 pub fn langfuse_sink(opts = nil) {
-  let cfg = __tt_dict(opts)
-  let base_url = __tt_resolve_str(cfg?.base_url, "LANGFUSE_BASE_URL")
-  let public_key = __tt_resolve_str(cfg?.public_key, "LANGFUSE_PUBLIC_KEY")
-  let secret_key = __tt_resolve_str(cfg?.secret_key, "LANGFUSE_SECRET_KEY")
-  let project = cfg?.project
-  let environment = cfg?.environment
-  let release = cfg?.release
-  let timeout_ms = cfg?.timeout_ms ?? 5000
-  let on_error = cfg?.on_error
+  const cfg = __tt_dict(opts)
+  const base_url = __tt_resolve_str(cfg?.base_url, "LANGFUSE_BASE_URL")
+  const public_key = __tt_resolve_str(cfg?.public_key, "LANGFUSE_PUBLIC_KEY")
+  const secret_key = __tt_resolve_str(cfg?.secret_key, "LANGFUSE_SECRET_KEY")
+  const project = cfg?.project
+  const environment = cfg?.environment
+  const release = cfg?.release
+  const timeout_ms = cfg?.timeout_ms ?? 5000
+  const on_error = cfg?.on_error
   return { span ->
     if base_url == "" || public_key == "" || secret_key == "" {
       __tt_report_error(
@@ -267,10 +267,10 @@ pub fn langfuse_sink(opts = nil) {
       )
       return
     }
-    let body = __tt_langfuse_body(span, project, environment, release)
-    let endpoint = __tt_langfuse_endpoint(base_url)
-    let auth = "Basic " + base64_encode(public_key + ":" + secret_key)
-    let response_outcome = try {
+    const body = __tt_langfuse_body(span, project, environment, release)
+    const endpoint = __tt_langfuse_endpoint(base_url)
+    const auth = "Basic " + base64_encode(public_key + ":" + secret_key)
+    const response_outcome = try {
       harness.net
         .request(
         "POST",
@@ -286,7 +286,7 @@ pub fn langfuse_sink(opts = nil) {
       __tt_report_error(on_error, "langfuse_sink: " + to_string(unwrap_err(response_outcome)), span)
       return
     }
-    let response = unwrap(response_outcome)
+    const response = unwrap(response_outcome)
     if !(response?.ok ?? false) {
       __tt_report_error(
         on_error,
@@ -314,12 +314,12 @@ pub fn langfuse_sink(opts = nil) {
  * @errors: []
  */
 pub fn otel_sink(opts = nil) {
-  let cfg = __tt_dict(opts)
-  let custom = cfg?.sink
-  let prefix = to_string(cfg?.prefix ?? "[otel] ")
+  const cfg = __tt_dict(opts)
+  const custom = cfg?.sink
+  const prefix = to_string(cfg?.prefix ?? "[otel] ")
   return { span ->
-    let attrs = __tt_dict(span?.attributes)
-    let record = {
+    const attrs = __tt_dict(span?.attributes)
+    const record = {
       name: span?.name,
       kind: "INTERNAL",
       span_id: span?.span_id,
@@ -339,7 +339,7 @@ pub fn otel_sink(opts = nil) {
       },
     }
     if __tt_is_callable(custom) {
-      let _ = try {
+      const _ = try {
         custom(record)
       }
     } else {
@@ -361,8 +361,8 @@ pub fn otel_sink(opts = nil) {
  * @errors: []
  */
 pub fn stderr_sink(opts = nil) {
-  let cfg = __tt_dict(opts)
-  let prefix = to_string(cfg?.prefix ?? "[tool_telemetry] ")
+  const cfg = __tt_dict(opts)
+  const prefix = to_string(cfg?.prefix ?? "[tool_telemetry] ")
   return { span -> __io_write_stderr(prefix + json_stringify(span) + "\n") }
 }
 
@@ -384,7 +384,7 @@ pub fn noop_sink() {
 // -------------------------------------------------------------------------------------------------
 
 fn __tt_is_callable(value) {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -392,7 +392,7 @@ fn __tt_resolve_str(override_value, env_key) {
   if override_value != nil {
     return to_string(override_value)
   }
-  let raw = env_str(env_key)
+  const raw = env_str(env_key)
   if raw == nil {
     return ""
   }
@@ -406,20 +406,20 @@ fn __tt_report_error(on_error, message, span) {
   if !__tt_is_callable(on_error) {
     return
   }
-  let _ = try {
+  const _ = try {
     on_error(message, span)
   }
 }
 
 fn __tt_compose_sinks(sinks) {
-  let resolved = __tt_list(sinks)
+  const resolved = __tt_list(sinks)
   if len(resolved) == 0 {
     return noop_sink()
   }
   return { span ->
     for entry in resolved {
       if __tt_is_callable(entry) {
-        let _ = try {
+        const _ = try {
           entry(span)
         }
       }
@@ -454,9 +454,9 @@ pub fn resolve_telemetry_sink(value) {
   if type_of(value) != "dict" {
     throw "tool_telemetry: with_telemetry config must be callable, string, or dict; got " + type_of(value)
   }
-  let cfg = value
+  const cfg = value
   if type_of(cfg?.sinks) == "list" {
-    var resolved = []
+    let resolved = []
     for item in cfg.sinks {
       resolved = resolved.push(__tt_resolve_one(item, cfg))
     }
@@ -502,7 +502,7 @@ fn __tt_named_sink(name, opts) {
 // -------------------------------------------------------------------------------------------------
 
 fn __tt_langfuse_endpoint(base_url) {
-  let trimmed = if ends_with(base_url, "/") {
+  const trimmed = if ends_with(base_url, "/") {
     substring(base_url, 0, len(base_url) - 1)
   } else {
     base_url
@@ -511,8 +511,8 @@ fn __tt_langfuse_endpoint(base_url) {
 }
 
 fn __tt_langfuse_body(span, project, environment, release) {
-  let attrs = __tt_dict(span?.attributes)
-  var metadata = {
+  const attrs = __tt_dict(span?.attributes)
+  let metadata = {
     args_hash: attrs?.args_hash,
     iteration: attrs?.iteration,
     executor: attrs?.executor,
@@ -534,16 +534,16 @@ fn __tt_langfuse_body(span, project, environment, release) {
   if attrs?.mode != nil {
     metadata = metadata + {mode: attrs.mode}
   }
-  let level = if attrs?.ok ?? false {
+  const level = if attrs?.ok ?? false {
     "DEFAULT"
   } else {
     "ERROR"
   }
-  let observation_id = to_string(span?.span_id ?? "")
-  let trace_id = to_string(span?.trace_id ?? "")
-  let now_iso = date_now_iso()
-  let start_iso = span?.start_time_iso ?? now_iso
-  let end_iso = span?.end_time_iso ?? now_iso
+  const observation_id = to_string(span?.span_id ?? "")
+  const trace_id = to_string(span?.trace_id ?? "")
+  const now_iso = date_now_iso()
+  const start_iso = span?.start_time_iso ?? now_iso
+  const end_iso = span?.end_time_iso ?? now_iso
   return json_stringify(
     {
       batch: [
@@ -575,12 +575,12 @@ fn __tt_ms_to_nano(ms) {
 }
 
 fn __tt_otel_events(events) {
-  var converted = []
+  let converted = []
   for event in events {
     if type_of(event) != "dict" {
       continue
     }
-    var record = {name: to_string(event?.name ?? ""), time_unix_nano: __tt_ms_to_nano(event?.time_ms ?? 0)}
+    let record = {name: to_string(event?.name ?? ""), time_unix_nano: __tt_ms_to_nano(event?.time_ms ?? 0)}
     if type_of(event?.attributes) == "dict" {
       record = record + {attributes: event.attributes}
     }

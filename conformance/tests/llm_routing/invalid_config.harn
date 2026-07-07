@@ -3,28 +3,28 @@
  * when shape is wrong.
  */
 pipeline test(task) {
-  let r1 = try {
+  const r1 = try {
     routing_policy({chain: []})
     "no_error"
   } catch (e) {
     "empty_chain"
   }
   __io_println(r1)
-  let r2 = try {
+  const r2 = try {
     routing_policy({chain: [{provider: "mock"}]})
     "no_error"
   } catch (e) {
     "missing_model"
   }
   __io_println(r2)
-  let r3 = try {
+  const r3 = try {
     routing_policy({chain: [{provider: "mock", model: "mock"}], failover: {on_status: [99]}})
     "no_error"
   } catch (e) {
     "bad_status"
   }
   __io_println(r3)
-  let r4 = try {
+  const r4 = try {
     routing_policy({chain: [{provider: "mock", model: "mock"}], budget: {on_exceed: "explode"}})
     "no_error"
   } catch (e) {

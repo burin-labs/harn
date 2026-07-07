@@ -334,42 +334,42 @@ mod tests {
 
     #[test]
     fn inserts_trailing_comma_on_multiline_list() {
-        let src = "let xs = [\n  1,\n  2\n]\n";
-        assert_eq!(fix(src), "let xs = [\n  1,\n  2,\n]\n");
+        let src = "const xs = [\n  1,\n  2\n]\n";
+        assert_eq!(fix(src), "const xs = [\n  1,\n  2,\n]\n");
     }
 
     #[test]
     fn inserts_missing_comma_before_trailing_line_comment() {
-        let src = "let xs = [\n  1 // one\n]\n";
-        assert_eq!(fix(src), "let xs = [\n  1, // one\n]\n");
+        let src = "const xs = [\n  1 // one\n]\n";
+        assert_eq!(fix(src), "const xs = [\n  1, // one\n]\n");
     }
 
     #[test]
     fn preserves_existing_trailing_comma_before_line_comment() {
-        let src = "let xs = [\n  1, // one\n]\n";
+        let src = "const xs = [\n  1, // one\n]\n";
         assert_eq!(fix(src), src);
     }
 
     #[test]
     fn removes_trailing_comma_on_single_line_list() {
-        assert_eq!(fix("let xs = [1, 2,]\n"), "let xs = [1, 2]\n");
+        assert_eq!(fix("const xs = [1, 2,]\n"), "const xs = [1, 2]\n");
     }
 
     #[test]
     fn handles_multiline_dict_with_missing_comma() {
-        let src = "let d = {\n  a: 1,\n  b: 2\n}\n";
-        assert_eq!(fix(src), "let d = {\n  a: 1,\n  b: 2,\n}\n");
+        let src = "const d = {\n  a: 1,\n  b: 2\n}\n";
+        assert_eq!(fix(src), "const d = {\n  a: 1,\n  b: 2,\n}\n");
     }
 
     #[test]
     fn nested_lists_settle_in_one_call() {
-        let src = "let xs = [\n  [1, 2,],\n  [3, 4]\n]\n";
-        assert_eq!(fix(src), "let xs = [\n  [1, 2],\n  [3, 4],\n]\n");
+        let src = "const xs = [\n  [1, 2,],\n  [3, 4]\n]\n";
+        assert_eq!(fix(src), "const xs = [\n  [1, 2],\n  [3, 4],\n]\n");
     }
 
     #[test]
     fn ignores_function_body_block() {
-        let src = "fn f() {\n  let x = 1\n  x\n}\n";
+        let src = "fn f() {\n  const x = 1\n  x\n}\n";
         assert_eq!(fix(src), src);
     }
 
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn idempotent_on_clean_input() {
-        let src = "let xs = [1, 2, 3]\nlet d = {\n  a: 1,\n  b: 2,\n}\n";
+        let src = "const xs = [1, 2, 3]\nconst d = {\n  a: 1,\n  b: 2,\n}\n";
         assert_eq!(fix(src), src);
     }
 
@@ -402,16 +402,16 @@ mod tests {
 
     #[test]
     fn fires_on_method_call_args() {
-        let src = "fn f() {\n  let xs = [1, 2]\n  xs.map(fn(x) {\n    x + 1\n  })\n}\n";
+        let src = "fn f() {\n  const xs = [1, 2]\n  xs.map(fn(x) {\n    x + 1\n  })\n}\n";
         let _ = fix(src); // smoke test — the method call has args, span should be marked.
     }
 
     #[test]
     fn handles_struct_construction() {
-        let src = "fn f() {\n  let p = Point {\n    x: 1,\n    y: 2\n  }\n  p\n}\n";
+        let src = "fn f() {\n  const p = Point {\n    x: 1,\n    y: 2\n  }\n  p\n}\n";
         assert_eq!(
             fix(src),
-            "fn f() {\n  let p = Point {\n    x: 1,\n    y: 2,\n  }\n  p\n}\n"
+            "fn f() {\n  const p = Point {\n    x: 1,\n    y: 2,\n  }\n  p\n}\n"
         );
     }
 
@@ -423,10 +423,11 @@ mod tests {
 
     #[test]
     fn fires_on_computed_dict_key() {
-        let src = "fn f() {\n  let k = \"a\"\n  let d = {\n    [k]: 1,\n    b: 2\n  }\n  d\n}\n";
+        let src =
+            "fn f() {\n  const k = \"a\"\n  const d = {\n    [k]: 1,\n    b: 2\n  }\n  d\n}\n";
         assert_eq!(
             fix(src),
-            "fn f() {\n  let k = \"a\"\n  let d = {\n    [k]: 1,\n    b: 2,\n  }\n  d\n}\n"
+            "fn f() {\n  const k = \"a\"\n  const d = {\n    [k]: 1,\n    b: 2,\n  }\n  d\n}\n"
         );
     }
 }

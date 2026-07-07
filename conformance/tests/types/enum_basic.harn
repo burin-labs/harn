@@ -4,7 +4,7 @@ pipeline test(task) {
     Green
     Blue
   }
-  let c = Color.Red
+  const c = Color.Red
   log(c)
   log(c == Color.Red)
   log(c == Color.Blue)

@@ -8,11 +8,11 @@ import { runtime_pipeline_input } from "std/runtime"
 @persona(name: "oncall_captain", description: "Harn-native incident verification captain.", tools: [pagerduty, slack, mcp], autonomy: act_with_approval, receipts: required, triggers: [pagerduty.incident_triggered, slack.oncall_message])
 /** Static persona graph used by `harn persona inspect` to expose Oncall Captain's durable steps. */
 pub fn oncall_captain_persona(ctx) {
-  let input = resolve_incident_input_step(ctx)
-  let signals = collect_incident_signals_step(input)
-  let plan = build_verification_plan_step(signals)
-  let gated = require_human_approval_step(plan)
-  let receipt = emit_incident_receipt_step(gated)
+  const input = resolve_incident_input_step(ctx)
+  const signals = collect_incident_signals_step(input)
+  const plan = build_verification_plan_step(signals)
+  const gated = require_human_approval_step(plan)
+  const receipt = emit_incident_receipt_step(gated)
   return summarize_incident_step(receipt)
 }
 
@@ -57,16 +57,16 @@ fn _default_incident() {
 }
 
 fn _resolve_incident() {
-  let attempt = try {
+  const attempt = try {
     runtime_pipeline_input()
   }
-  let provided = if is_ok(attempt) {
+  const provided = if is_ok(attempt) {
     unwrap(attempt) ?? {}
   } else {
     {}
   }
-  let incident = provided.oncall_captain ?? provided
-  let defaults = _default_incident()
+  const incident = provided.oncall_captain ?? provided
+  const defaults = _default_incident()
   return {
     service: incident.service ?? defaults.service,
     hypothesis: incident.hypothesis ?? defaults.hypothesis,
@@ -77,8 +77,8 @@ fn _resolve_incident() {
 }
 
 pipeline run(task) {
-  let incident = _resolve_incident()
-  let result = {
+  const incident = _resolve_incident()
+  const result = {
     persona: "oncall_captain",
     execution_mode: "dry_run",
     approval_required: true,

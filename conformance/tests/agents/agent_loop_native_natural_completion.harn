@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lookup_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -24,7 +24,7 @@ pipeline main() {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"natural final text is complete\"}"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Inspect evidence and finish.",
         nil,
         {
@@ -36,7 +36,7 @@ pipeline main() {
           max_iterations: 4,
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(result.text)
       __io_println(result.llm.iterations)
@@ -56,8 +56,8 @@ pipeline main() {
         nil,
         {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
       )
-      let empty_calls = llm_mock_calls()
-      let empty_system = empty_calls[0].system ?? ""
+      const empty_calls = llm_mock_calls()
+      const empty_system = empty_calls[0].system ?? ""
       __io_println(!contains(empty_system, "Native tool protocol"))
       __io_println(!contains(empty_system, "<user_response>"))
     },

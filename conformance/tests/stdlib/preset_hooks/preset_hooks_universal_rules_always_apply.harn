@@ -11,34 +11,34 @@ import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/t
  * (rust, python, an unrecognized stack) plus an empty opt-in.
  */
 pipeline default() {
-  let inner = { args -> {ok: true, ran: args.command} }
+  const inner = { args -> {ok: true, ran: args.command} }
   /* rust-only wrapper: rm -rf / and force-push to main both denied. */
-  let rust_wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
-  let r1 = rust_wrapper({command: "rm -rf /"})
+  const rust_wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const r1 = rust_wrapper({command: "rm -rf /"})
   __io_println(r1.action)
   __io_println(r1.rule_id)
-  let r2 = rust_wrapper({command: "git push --force origin main"})
+  const r2 = rust_wrapper({command: "git push --force origin main"})
   __io_println(r2.action)
   __io_println(r2.rule_id)
   /* python-only wrapper: same universal rules still fire. */
-  let py_wrapper = preset_run_command({stacks: ["python"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
-  let r3 = py_wrapper({command: "rm -rf /"})
+  const py_wrapper = preset_run_command({stacks: ["python"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const r3 = py_wrapper({command: "rm -rf /"})
   __io_println(r3.action)
   __io_println(r3.rule_id)
   /* Unrecognized stack: __cat_for_stack returns nil so only the
    * universal catalogue ships. Universal denies still apply. */
-  let unknown_wrapper = preset_run_command(
+  const unknown_wrapper = preset_run_command(
     {stacks: ["fictional"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
   )
-  let r4 = unknown_wrapper({command: "rm -rf /"})
+  const r4 = unknown_wrapper({command: "rm -rf /"})
   __io_println(r4.action)
   __io_println(r4.rule_id)
   /* Empty stack list: still picks up universal. */
-  let empty_wrapper = preset_run_command({stacks: [], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
-  let r5 = empty_wrapper({command: "rm -rf /"})
+  const empty_wrapper = preset_run_command({stacks: [], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const r5 = empty_wrapper({command: "rm -rf /"})
   __io_println(r5.action)
   __io_println(r5.rule_id)
   /* Sanity: a benign command on every wrapper still passes through. */
-  let benign = rust_wrapper({command: "ls -la"})
+  const benign = rust_wrapper({command: "ls -la"})
   __io_println(benign?.result?.ran ?? benign?.ran ?? "MISSING")
 }

@@ -18,16 +18,16 @@
 //
 // Ported from scripts/sync_tree_sitter_keywords.py — behavior-identical
 // (same regexes, same set comparison, same generated file shape).
-let TOKEN_RS = "crates/harn-lexer/src/token.rs"
+const TOKEN_RS = "crates/harn-lexer/src/token.rs"
 
-let KEYWORDS_JS = "tree-sitter-harn/grammar/keywords.js"
+const KEYWORDS_JS = "tree-sitter-harn/grammar/keywords.js"
 
 /**
  * Extract every double-quoted string literal body from `text`. Mirrors
  * the Python `STRING_RE = r'"([^"\\]*)"'` findall.
  */
 pub fn quoted_strings(text: string) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   // Regex: "([^"\\]*)" — a double-quoted string body. The hashed raw
   // string keeps the embedded quotes escape-free.
   for m in regex_captures(r#""([^"\\]*)""#, text) {
@@ -42,7 +42,7 @@ pub fn quoted_strings(text: string) -> list<string> {
  * sorted view for output.
  */
 pub fn dedup(items: list<string>) -> list<string> {
-  var seen: list<string> = []
+  let seen: list<string> = []
   for item in items {
     if !seen.contains(item) {
       seen = seen + [item]
@@ -53,7 +53,7 @@ pub fn dedup(items: list<string>) -> list<string> {
 
 /** Items present in `a` but absent from `b` (set difference `a - b`). */
 pub fn difference(a: list<string>, b: list<string>) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for item in a {
     if !b.contains(item) {
       out = out + [item]
@@ -67,7 +67,7 @@ pub fn difference(a: list<string>, b: list<string>) -> list<string> {
  * The capture spans newlines, so it needs the `s` (DOTALL) flag.
  */
 pub fn lexer_keywords(text: string) -> list<string>? {
-  let m = regex_captures(r"pub const KEYWORDS:\s*&\[&str\]\s*=\s*&\[(.*?)\];", text, "s")
+  const m = regex_captures(r"pub const KEYWORDS:\s*&\[&str\]\s*=\s*&\[(.*?)\];", text, "s")
   if m.count == 0 {
     return nil
   }
@@ -80,18 +80,18 @@ pub fn lexer_keywords(text: string) -> list<string>? {
  * string literals.
  */
 pub fn grammar_keywords(text: string) -> list<string>? {
-  let m = regex_captures(r"module\.exports\s*=\s*\[(.*?)\];", text, "s")
+  const m = regex_captures(r"module\.exports\s*=\s*\[(.*?)\];", text, "s")
   if m.count == 0 {
     return nil
   }
-  let body = regex_replace_all(r"//[^\n]*", "", m[0].groups[0])
+  const body = regex_replace_all(r"//[^\n]*", "", m[0].groups[0])
   return dedup(quoted_strings(body))
 }
 
 /** Render the @generated keywords.js body from a keyword list. */
 pub fn render_keywords_js(keywords: list<string>) -> string {
-  let ordered = keywords.sort()
-  var lines = [
+  const ordered = keywords.sort()
+  let lines = [
     "// @generated from crates/harn-lexer/src/token.rs (KEYWORDS).",
     "// Regenerate with `make gen-tree-sitter-keywords`; the lexer is the",
     "// source of truth. `make check-tree-sitter-keywords` guards drift.",
@@ -113,7 +113,7 @@ pipeline main(task) {
     __io_eprintln("error: missing ${KEYWORDS_JS}")
     return 1
   }
-  let lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
+  const lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
   if lexer == nil {
     __io_eprintln("error: could not find `pub const KEYWORDS` in ${TOKEN_RS}")
     return 1
@@ -123,13 +123,13 @@ pipeline main(task) {
     __io_println("    Wrote ${lexer.count} keywords to ${KEYWORDS_JS}.")
     return 0
   }
-  let grammar = grammar_keywords(harness.fs.read_text(KEYWORDS_JS))
+  const grammar = grammar_keywords(harness.fs.read_text(KEYWORDS_JS))
   if grammar == nil {
     __io_eprintln("error: could not find `module.exports = [ ... ]` in ${KEYWORDS_JS}")
     return 1
   }
-  let missing = difference(lexer, grammar).sort()
-  let extra = difference(grammar, lexer).sort()
+  const missing = difference(lexer, grammar).sort()
+  const extra = difference(grammar, lexer).sort()
   if missing.count > 0 || extra.count > 0 {
     __io_eprintln(
       "error: tree-sitter keyword list is out of sync with the lexer (crates/harn-lexer/src/token.rs KEYWORDS):",

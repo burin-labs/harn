@@ -1,6 +1,6 @@
 pipeline default(task) {
-  var i = 0
-  var hits = 0
+  let i = 0
+  let hits = 0
   while i < 200000 {
     if i >= 0 && i <= 100000 {
       hits = hits + 1

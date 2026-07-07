@@ -1,12 +1,12 @@
 import { elapsed_ms, end_timing, start_timing, timing_event } from "std/timing"
 
 pipeline default() {
-  let handle = start_timing("provider.preflight", {provider: "ollama"})
+  const handle = start_timing("provider.preflight", {provider: "ollama"})
   timing_event(handle, "credentials.checked", {available: true})
   timing_event(handle, "model.warm", {cache: "hit"})
   // elapsed_ms returns monotonic time without closing the span
   __io_println(elapsed_ms(handle) >= 0)
-  let timing = end_timing(handle, {status: "ok", extra: "trace"})
+  const timing = end_timing(handle, {status: "ok", extra: "trace"})
   __io_println(timing.name)
   __io_println(timing.status)
   __io_println(timing.attributes.provider)
@@ -15,7 +15,7 @@ pipeline default() {
   __io_println(timing.events[0].name)
   __io_println(timing.events[1].name)
   // Duplicate close is idempotent — returns the same segment.
-  let again = end_timing(handle)
+  const again = end_timing(handle)
   __io_println(again.span_id == timing.span_id)
   __io_println(again.duration_ms == timing.duration_ms)
 }

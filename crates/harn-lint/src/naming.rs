@@ -77,7 +77,7 @@ pub(crate) fn is_top_level_item(node: &Node) -> bool {
             | Node::ImplBlock { .. }
             | Node::OverrideDecl { .. }
             | Node::LetBinding { .. }
-            | Node::VarBinding { .. }
+            | Node::ConstBinding { .. }
     )
 }
 

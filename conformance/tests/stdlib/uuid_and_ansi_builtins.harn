@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let id = uuid()
+  const id = uuid()
   log(id.count())
   log(id.contains("-"))
   // Force ANSI emission — conformance runs without a TTY, so the

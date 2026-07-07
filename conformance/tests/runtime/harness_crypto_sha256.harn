@@ -1,7 +1,7 @@
 fn main(harness: Harness) {
-  let empty = harness.crypto.sha256("")
-  let hello = harness.crypto.sha256("hello")
-  let hello_bytes = harness.crypto.sha256(bytes_from_string("hello"))
+  const empty = harness.crypto.sha256("")
+  const hello = harness.crypto.sha256("hello")
+  const hello_bytes = harness.crypto.sha256(bytes_from_string("hello"))
   harness.stdio.println(empty)
   harness.stdio.println(hello)
   harness.stdio.println(hello == hello_bytes)

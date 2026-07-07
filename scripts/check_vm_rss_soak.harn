@@ -14,12 +14,12 @@
 // Exits 0 on success (prints the `vm rss soak: OK ...` line); exits 1 with
 // an `error: ...` message on any failed check, mirroring the Python
 // `SystemExit` behavior.
-let FIXTURE = "benchmarks/vm_memory/module_cycle_entry.harn"
+const FIXTURE = "benchmarks/vm_memory/module_cycle_entry.harn"
 
-let DEFAULT_ITERATIONS = 24
+const DEFAULT_ITERATIONS = 24
 
 /* 32 * 1024 * 1024 */
-let DEFAULT_MAX_TAIL_GROWTH_BYTES = 33554432
+const DEFAULT_MAX_TAIL_GROWTH_BYTES = 33554432
 
 /**
  * Outcome of parsing a positive-integer environment variable.
@@ -32,11 +32,11 @@ pub fn parse_env_int(name: string, raw: string, fallback: int) -> dict {
   if raw == "" {
     return {ok: true, value: fallback, error: ""}
   }
-  let parsed = to_int(raw.trim())
+  const parsed = to_int(raw.trim())
   if parsed == nil {
     return {ok: false, value: 0, error: "${name} must be an integer, got '${raw}'"}
   }
-  let value = parsed ?? 0
+  const value = parsed ?? 0
   if value <= 0 {
     return {ok: false, value: 0, error: "${name} must be positive"}
   }
@@ -45,7 +45,7 @@ pub fn parse_env_int(name: string, raw: string, fallback: int) -> dict {
 
 /** Smallest element of a non-empty int list. */
 pub fn list_min(xs: list<int>) -> int {
-  var m = xs[0]
+  let m = xs[0]
   for x in xs {
     if x < m {
       m = x
@@ -61,10 +61,10 @@ pub fn list_min(xs: list<int>) -> int {
  * `isinstance(..., int)` filter.
  */
 pub fn extract_rss_samples(report: dict) -> list<int> {
-  let iterations = report?.iterations ?? []
-  var samples = []
+  const iterations = report?.iterations ?? []
+  let samples = []
   for iteration in iterations {
-    let rss = iteration?.rss_bytes
+    const rss = iteration?.rss_bytes
     if rss != nil && is_int(rss) {
       samples = samples + [rss]
     }
@@ -99,17 +99,17 @@ pub fn soak_outcome(samples: list<int>, max_tail_growth: int) -> dict {
   if samples.count < 3 {
     return {ok: false, too_few: true, tail_growth: 0, regressed: false, sample_count: samples.count}
   }
-  var warmup = samples.count / 3
+  let warmup = samples.count / 3
   if warmup < 1 {
     warmup = 1
   }
-  let tail = samples.slice(warmup, samples.count)
-  let last = tail[tail.count - 1]
-  var tail_growth = last - list_min(tail)
+  const tail = samples.slice(warmup, samples.count)
+  const last = tail[tail.count - 1]
+  let tail_growth = last - list_min(tail)
   if tail_growth < 0 {
     tail_growth = 0
   }
-  let regressed = tail_growth > max_tail_growth
+  const regressed = tail_growth > max_tail_growth
   return {
     ok: !regressed,
     too_few: false,
@@ -127,22 +127,22 @@ pub fn soak_outcome(samples: list<int>, max_tail_growth: int) -> dict {
  * on demand. Mirrors the Python `harn_binary()` build-on-demand intent.
  */
 fn harn_bench_argv() -> list<string> {
-  let bin_override = harness.env.get("HARN_CHECK_BIN")
+  const bin_override = harness.env.get("HARN_CHECK_BIN")
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? "", "bench"]
   }
-  let meta = harness.process
+  const meta = harness.process
     .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
   if meta.success {
-    let parsed = try {
+    const parsed = try {
       json_parse(meta.stdout)
     } catch (err) {
       nil
     }
-    let target_dir = parsed?.target_directory
+    const target_dir = parsed?.target_directory
     if target_dir != nil && target_dir != "" {
-      let dir = target_dir ?? ""
-      let bin = dir + "/debug/harn"
+      const dir = target_dir ?? ""
+      const bin = dir + "/debug/harn"
       if harness.fs.exists(bin) {
         return [bin, "bench"]
       }
@@ -152,7 +152,7 @@ fn harn_bench_argv() -> list<string> {
 }
 
 pipeline main(task) {
-  let iter_res = parse_env_int(
+  const iter_res = parse_env_int(
     "HARN_VM_RSS_SOAK_ITERATIONS",
     harness.env.get("HARN_VM_RSS_SOAK_ITERATIONS") ?? "",
     DEFAULT_ITERATIONS,
@@ -161,8 +161,8 @@ pipeline main(task) {
     __io_eprintln("error: ${iter_res.error}")
     return 1
   }
-  let iterations = iter_res.value
-  let growth_res = parse_env_int(
+  const iterations = iter_res.value
+  const growth_res = parse_env_int(
     "HARN_VM_RSS_SOAK_MAX_TAIL_GROWTH_BYTES",
     harness.env.get("HARN_VM_RSS_SOAK_MAX_TAIL_GROWTH_BYTES") ?? "",
     DEFAULT_MAX_TAIL_GROWTH_BYTES,
@@ -171,23 +171,23 @@ pipeline main(task) {
     __io_eprintln("error: ${growth_res.error}")
     return 1
   }
-  let max_tail_growth = growth_res.value
+  const max_tail_growth = growth_res.value
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the profile JSON lives there (and is removed afterward) rather than
    * under the system temp dir the Python version used. */
-  let mk = harness.process
+  const mk = harness.process
     .spawn_captured({cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]})
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     return 1
   }
-  let tmpbase = mk.stdout.trim()
-  let report_path = tmpbase + "/profile.json"
-  let argv_prefix = harn_bench_argv()
-  let bin = argv_prefix[0]
-  let bench_args = argv_prefix.slice(1, argv_prefix.count)
+  const tmpbase = mk.stdout.trim()
+  const report_path = tmpbase + "/profile.json"
+  const argv_prefix = harn_bench_argv()
+  const bin = argv_prefix[0]
+  const bench_args = argv_prefix.slice(1, argv_prefix.count)
     + [FIXTURE, "--iterations", "${iterations}", "--profile-json", report_path]
-  let bench = harness.process.spawn_captured({cmd: bin, args: bench_args})
+  const bench = harness.process.spawn_captured({cmd: bin, args: bench_args})
   /* Python inherits stdout/stderr for the bench child, so its (timing,
    * nondeterministic) output streams through. Re-emit the captured streams
    * to preserve that behavior and ordering before the verdict line. */
@@ -206,14 +206,14 @@ pipeline main(task) {
     __io_eprintln("error: benchmark profile did not contain enough rss_bytes samples")
     return 1
   }
-  let report = try {
+  const report = try {
     json_parse(harness.fs.read_text(report_path))
   } catch (err) {
     {}
   }
   harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
-  let samples = extract_rss_samples(report)
-  let outcome = soak_outcome(samples, max_tail_growth)
+  const samples = extract_rss_samples(report)
+  const outcome = soak_outcome(samples, max_tail_growth)
   if outcome.too_few {
     __io_eprintln("error: benchmark profile did not contain enough rss_bytes samples")
     return 1

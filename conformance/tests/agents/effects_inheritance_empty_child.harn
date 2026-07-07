@@ -8,7 +8,7 @@
  * pass-through path.
  */
 pipeline main() {
-  let _worker = spawn_agent(
+  const _worker = spawn_agent(
     {
       name: "opaque-child",
       task: "compute",

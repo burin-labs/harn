@@ -3,16 +3,16 @@
 import { with_retry } from "std/llm/handlers"
 
 pipeline default() {
-  let counter = atomic(0)
-  let synthetic = { _call ->
+  const counter = atomic(0)
+  const synthetic = { _call ->
     let n = atomic_add(counter, 1)
     if n < 2 {
       return {ok: false, status: "transient", error: "blip-" + to_string(n)}
     }
     return {ok: true, value: {text: "ok", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0}}
   }
-  let caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
-  let env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
+  const env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(env.ok)
   __io_println(env.value.text)
   __io_println(env.retries_attempted)

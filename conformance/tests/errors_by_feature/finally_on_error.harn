@@ -1,5 +1,5 @@
 pipeline test(task) {
-  var cleanup_ran = false
+  let cleanup_ran = false
   try {
     try {
       throw "error"

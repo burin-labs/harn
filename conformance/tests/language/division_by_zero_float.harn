@@ -7,7 +7,7 @@
  * runtime rather than folded.
  */
 pipeline test(task) {
-  let z = 0.0
+  const z = 0.0
   log(1.0 / z)
   log(-1.0 / z)
   log(z / z)

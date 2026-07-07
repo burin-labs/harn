@@ -9,11 +9,11 @@
 import { lifecycle_audit_log_take, on_finish_block_until_settled } from "std/lifecycle"
 
 pipeline default() {
-  let preset = on_finish_block_until_settled(15s)
+  const preset = on_finish_block_until_settled(15s)
   pipeline_on_finish(
     { harness, return_value ->
-      let result = preset(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const result = preset(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("result=" + to_string(result))
       harness.stdio.println("kind=" + audits[0].kind)
       harness.stdio.println("reason=" + audits[0].payload.reason)

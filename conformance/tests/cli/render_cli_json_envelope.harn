@@ -1,6 +1,6 @@
 import { cli_json_envelope } from "std/cli/render"
 
 fn main(harness: Harness) {
-  let env = cli_json_envelope({schema_version: 3, ok: true, data: {value: "ready"}})
+  const env = cli_json_envelope({schema_version: 3, ok: true, data: {value: "ready"}})
   harness.stdio.println(json_stringify(env))
 }

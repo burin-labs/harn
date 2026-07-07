@@ -31,7 +31,7 @@ import {
 
 /** Inner content of a doc-block line: text after the leading `*`. */
 fn _block_line_content(line) -> string {
-  var s = strip_ws(line)
+  let s = strip_ws(line)
   if s.starts_with("/**") {
     s = lstrip_ws(s.substring(3, s.len()))
   }
@@ -48,9 +48,9 @@ fn _block_line_content(line) -> string {
  * calls, multiple statements) is a real example and survives.
  */
 pub fn is_trivial_example(value, name) -> bool {
-  let ident = "[A-Za-z_][A-Za-z0-9_]*"
-  let args = "(?:${ident}(?:,\\s*${ident})*)?"
-  let pattern = "^(?:let ${ident} = )?${name}\\(${args}\\)$"
+  const ident = "[A-Za-z_][A-Za-z0-9_]*"
+  const args = "(?:${ident}(?:,\\s*${ident})*)?"
+  const pattern = "^(?:let ${ident} = )?${name}\\(${args}\\)$"
   return len(regex_captures(pattern, value)) > 0
 }
 
@@ -59,29 +59,29 @@ pub fn is_trivial_example(value, name) -> bool {
  * Single-line doc blocks pass through untouched. Returns {lines, stats}.
  */
 pub fn strip_block(block, fn_name) -> dict {
-  var allocation_removed = 0
-  var stability_removed = 0
-  var example_removed = 0
-  var example_kept = 0
+  let allocation_removed = 0
+  let stability_removed = 0
+  let example_removed = 0
+  let example_kept = 0
   if len(block) < 2 {
     return {
       lines: block,
       stats: {allocation_removed: 0, stability_removed: 0, example_removed: 0, example_kept: 0},
     }
   }
-  var kept = []
-  let n = len(block)
-  var i = 0
+  let kept = []
+  const n = len(block)
+  let i = 0
   while i < n {
-    let line = block[i]
-    let content = _block_line_content(line)
+    const line = block[i]
+    const content = _block_line_content(line)
     if content.starts_with("@allocation:") {
       allocation_removed = allocation_removed + 1
       i = i + 1
       continue
     }
     if content.starts_with("@api_stability:") {
-      let value = strip_ws(content.substring("@api_stability:".len(), content.len()))
+      const value = strip_ws(content.substring("@api_stability:".len(), content.len()))
       if value == "stable" {
         stability_removed = stability_removed + 1
         i = i + 1
@@ -89,14 +89,14 @@ pub fn strip_block(block, fn_name) -> dict {
       }
     }
     if content.starts_with("@example:") {
-      let value = strip_ws(content.substring("@example:".len(), content.len()))
+      const value = strip_ws(content.substring("@example:".len(), content.len()))
       /* Only a single-line example can be a signature echo: a
          continuation line is one that is not another @field, not a
          blank separator, and not the closing terminator. */
-      var has_continuation = false
+      let has_continuation = false
       if i + 1 < n {
-        let next = _block_line_content(block[i + 1])
-        let next_is_close = strip_ws(block[i + 1]).ends_with("*/")
+        const next = _block_line_content(block[i + 1])
+        const next_is_close = strip_ws(block[i + 1]).ends_with("*/")
         if next != "" && !next.starts_with("@") && !next_is_close {
           has_continuation = true
         }
@@ -113,18 +113,18 @@ pub fn strip_block(block, fn_name) -> dict {
   }
   /* Collapse separator damage: no doubled blank `*` lines, no blank
      line directly after `/**` or directly before `*/`. */
-  var cleaned = []
-  let m = len(kept)
-  var j = 0
+  let cleaned = []
+  const m = len(kept)
+  let j = 0
   while j < m {
-    let line = kept[j]
-    let is_blank_star = _block_line_content(line) == "" && lstrip_ws(line).starts_with("*")
+    const line = kept[j]
+    const is_blank_star = _block_line_content(line) == "" && lstrip_ws(line).starts_with("*")
       && !lstrip_ws(line).starts_with("*/")
     if is_blank_star {
-      let prev_blank_or_open = len(cleaned) == 0
+      const prev_blank_or_open = len(cleaned) == 0
         || _block_line_content(cleaned[len(cleaned) - 1]) == ""
-      let next_is_close = j + 1 < m && lstrip_ws(kept[j + 1]).starts_with("*/")
-      let last_is_open = len(cleaned) > 0
+      const next_is_close = j + 1 < m && lstrip_ws(kept[j + 1]).starts_with("*/")
+      const last_is_open = len(cleaned) > 0
         && lstrip_ws(cleaned[len(cleaned) - 1]).starts_with("/**")
       if prev_blank_or_open || next_is_close || last_is_open {
         j = j + 1
@@ -147,32 +147,32 @@ pub fn strip_block(block, fn_name) -> dict {
 
 /** Pure transform: text + path -> {text, stats}. */
 pub fn process_file(text, path) -> dict {
-  var allocation_removed = 0
-  var stability_removed = 0
-  var example_removed = 0
-  var example_kept = 0
-  let lines = text.split("\n")
-  var out = []
-  var i = 0
-  let n = len(lines)
+  let allocation_removed = 0
+  let stability_removed = 0
+  let example_removed = 0
+  let example_kept = 0
+  const lines = text.split("\n")
+  let out = []
+  let i = 0
+  const n = len(lines)
   while i < n {
-    let line = lines[i]
-    let name = match_pub_fn(line)
+    const line = lines[i]
+    const name = match_pub_fn(line)
     if name == "" {
       out = out + [line]
       i = i + 1
       continue
     }
-    let block_end = len(out)
-    let block_start = find_doc_block_start(out)
+    const block_end = len(out)
+    const block_start = find_doc_block_start(out)
     if block_start == -1 {
       out = out + [line]
       i = i + 1
       continue
     }
-    let block = out.slice(block_start, block_end)
-    let result = strip_block(block, name)
-    let st = result["stats"]
+    const block = out.slice(block_start, block_end)
+    const result = strip_block(block, name)
+    const st = result["stats"]
     allocation_removed = allocation_removed + st["allocation_removed"]
     stability_removed = stability_removed + st["stability_removed"]
     example_removed = example_removed + st["example_removed"]
@@ -193,22 +193,22 @@ pub fn process_file(text, path) -> dict {
 }
 
 pipeline main(task) {
-  let stdlib = "crates/harn-stdlib/src/stdlib"
-  var allocation_removed = 0
-  var stability_removed = 0
-  var example_removed = 0
-  var example_kept = 0
-  var files_changed = 0
-  let files = harness.fs.glob("${stdlib}/**/*.harn").sort()
+  const stdlib = "crates/harn-stdlib/src/stdlib"
+  let allocation_removed = 0
+  let stability_removed = 0
+  let example_removed = 0
+  let example_kept = 0
+  let files_changed = 0
+  const files = harness.fs.glob("${stdlib}/**/*.harn").sort()
   for path in files {
-    let text = harness.fs.read_text(path)
-    let result = process_file(text, path)
-    let st = result["stats"]
+    const text = harness.fs.read_text(path)
+    const result = process_file(text, path)
+    const st = result["stats"]
     allocation_removed = allocation_removed + st["allocation_removed"]
     stability_removed = stability_removed + st["stability_removed"]
     example_removed = example_removed + st["example_removed"]
     example_kept = example_kept + st["example_kept"]
-    let new_text = result["text"]
+    const new_text = result["text"]
     if new_text != text {
       harness.fs.write_text(path, new_text)
       files_changed = files_changed + 1

@@ -46,9 +46,9 @@
  * @api_stability: experimental
  */
 pub fn runtime_introspection_tools(registry = nil, options = nil) {
-  let base = registry ?? tool_registry()
-  let selected = __introspection_selected_names(options)
-  var tools = base
+  const base = registry ?? tool_registry()
+  const selected = __introspection_selected_names(options)
+  let tools = base
   for spec in __introspection_tool_specs() {
     if !__introspection_in_set(selected, spec.name) {
       continue
@@ -62,9 +62,9 @@ pub fn runtime_introspection_tools(registry = nil, options = nil) {
 }
 
 fn __introspection_tool_specs() {
-  let nullary_params = {}
-  let annotations = {introspection: true, structural: true, initiator: "model"}
-  let returns_object = {type: "object"}
+  const nullary_params = {}
+  const annotations = {introspection: true, structural: true, initiator: "model"}
+  const returns_object = {type: "object"}
   return [
     {
       name: "current_model",
@@ -105,8 +105,8 @@ fn __introspection_tool_specs() {
 }
 
 fn __introspection_all_names() {
-  let names = []
-  var collected = names
+  const names = []
+  let collected = names
   for spec in __introspection_tool_specs() {
     collected = collected + [spec.name]
   }
@@ -117,15 +117,15 @@ fn __introspection_selected_names(options) {
   if type_of(options) != "dict" {
     return __introspection_all_names()
   }
-  let only = options?.only
+  const only = options?.only
   if type_of(only) == "list" && len(only) > 0 {
     return only
   }
-  let exclude = options?.exclude
+  const exclude = options?.exclude
   if type_of(exclude) != "list" || len(exclude) == 0 {
     return __introspection_all_names()
   }
-  var keep = []
+  let keep = []
   for name in __introspection_all_names() {
     if !__introspection_in_set(exclude, name) {
       keep = keep + [name]
@@ -147,17 +147,17 @@ fn __introspection_in_set(names, candidate) {
 }
 
 fn __introspection_registry_has(registry, name) {
-  let entries = registry?.tools ?? []
+  const entries = registry?.tools ?? []
   if type_of(entries) != "list" {
     return false
   }
   for entry in entries {
     if type_of(entry) == "dict" {
-      let entry_name = entry?.name
+      const entry_name = entry?.name
       if entry_name != nil && to_string(entry_name) == name {
         return true
       }
-      let func = entry?.function
+      const func = entry?.function
       if type_of(func) == "dict" && to_string(func?.name ?? "") == name {
         return true
       }

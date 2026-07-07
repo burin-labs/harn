@@ -12,10 +12,10 @@ import "std/triggers"
  * dispatch.
  */
 pipeline test(task) {
-  let _ = lifecycle_audit_log_take()
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const _ = lifecycle_audit_log_take()
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-interrupt-closure-" + unique,
       kind: "issue.opened",
@@ -37,7 +37,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let dispatch = trigger_fire(
+  const dispatch = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
@@ -51,9 +51,9 @@ pipeline test(task) {
   __io_println(len(dispatch.result?.targets))
   __io_println(dispatch.result?.targets[0]?.outcome == "unknown")
   __io_println(dispatch.result?.targets[1]?.outcome == "unknown")
-  let audits = lifecycle_audit_log_take()
-  var summary_audits = 0
-  var per_worker_audits = 0
+  const audits = lifecycle_audit_log_take()
+  let summary_audits = 0
+  let per_worker_audits = 0
   for audit in audits {
     if audit.kind == "triggers.interrupt_and_suspend.audit" {
       if audit.payload?.target_count != nil {

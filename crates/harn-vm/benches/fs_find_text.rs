@@ -9,7 +9,7 @@ fn find_text_hits_chunk(root: &str, pattern: &str) -> Chunk {
     compile_source(&format!(
         r#"
 pipeline default(task) {{
-  let hits = find_text({root}, {pattern}, {{
+  const hits = find_text({root}, {pattern}, {{
     include: ["**/*.harn"],
     max_matches: 100,
   }})
@@ -64,7 +64,7 @@ fn bench_find_text_repo_scale(c: &mut Criterion) {
             };
             std::fs::write(
                 subdir.join(format!("file-{file}.harn")),
-                format!("fn main() {{\n  let value = \"{marker}\"\n}}\n"),
+                format!("fn main() {{\n  const value = \"{marker}\"\n}}\n"),
             )
             .unwrap();
         }
@@ -73,7 +73,7 @@ fn bench_find_text_repo_scale(c: &mut Criterion) {
     std::fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
     std::fs::write(
         dir.path().join("node_modules/pkg/ignored.harn"),
-        "fn main() {\n  let value = \"needle\"\n}\n",
+        "fn main() {\n  const value = \"needle\"\n}\n",
     )
     .unwrap();
 

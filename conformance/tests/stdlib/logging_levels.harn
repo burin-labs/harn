@@ -11,8 +11,8 @@ pipeline default() {
   log_warn("c", {n: 42})
   // Don't call log_error to keep output deterministic (it would emit JSON with a timestamp)
   // Test 3: Trace context builtins work
-  let span = trace_start("op")
-  let _tid = trace_id()
+  const span = trace_start("op")
+  const _tid = trace_id()
   trace_end(span)
   // Reset level for subsequent tests
   log_set_level("debug")

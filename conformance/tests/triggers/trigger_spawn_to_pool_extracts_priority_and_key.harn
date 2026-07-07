@@ -12,12 +12,12 @@ fn factory_for(tag) {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let pool_name = "spawn-to-pool-extractor-demo-" + unique
-  let _ = pool_create({name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")})
-  let trigger_id = "trigger-spawn-to-pool-extract-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const pool_name = "spawn-to-pool-extractor-demo-" + unique
+  const _ = pool_create({name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")})
+  const trigger_id = "trigger-spawn-to-pool-extract-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -41,7 +41,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let fired = trigger_fire(
+  const fired = trigger_fire(
     handle,
     {
       provider: "github",
@@ -59,14 +59,14 @@ pipeline test(task) {
   __io_println(fired.result?.key == "acme")
   // Missing paths fall back to defaults (priority 0, no key) rather than
   // failing the dispatch.
-  let fallback = trigger_fire(
+  const fallback = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fallback-" + unique}},
   )
   __io_println(fallback.status == "dispatched")
   __io_println(fallback.result?.priority == 0)
   __io_println(fallback.result?.key == nil)
-  let results = pool_wait([fired.result, fallback.result])
+  const results = pool_wait([fired.result, fallback.result])
   __io_println(len(results) == 2)
   __io_println(results[0].result == "seed")
   __io_println(results[1].result == "seed")

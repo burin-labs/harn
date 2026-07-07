@@ -11,8 +11,8 @@ import { safe_call } from "std/llm/safe"
 import { with_llm_mocks } from "std/testing"
 
 pipeline default() {
-  let caller = default_llm_caller()
-  let call = {
+  const caller = default_llm_caller()
+  const call = {
     prompt: "hi",
     system: "",
     opts: {provider: "mock", model: "m"},
@@ -21,14 +21,14 @@ pipeline default() {
   with_llm_mocks(
     [{error: {reason: "budget_exceeded", message: "over budget"}}],
     { ->
-      let env = caller(call)
+      const env = caller(call)
       __io_println("caller ok=${env.ok} status=${env.status} has_error=${env.error != nil}")
     },
   )
   with_llm_mocks(
     [{error: {reason: "budget_exceeded", message: "over budget"}}],
     { ->
-      let s = safe_call("hi", "", {provider: "mock", model: "m"})
+      const s = safe_call("hi", "", {provider: "mock", model: "m"})
       __io_println("safe   ok=${s.ok} status=${s.status} has_error=${s.error != nil}")
     },
   )

@@ -12,20 +12,20 @@
  */
 pipeline default() {
   hostlib_enable("tools:deterministic")
-  let base = path_join(
+  const base = path_join(
     harness.fs.temp_dir(),
     "harn_fs_path_scope_" + to_string(harness.random.gen_range(100000, 999999)),
   )
-  let root = path_join(base, "workspace")
+  const root = path_join(base, "workspace")
   harness.fs.mkdir(root)
-  let in_path = path_join(root, "in.txt")
-  let out_path = path_join(base, "outside.txt")
+  const in_path = path_join(root, "in.txt")
+  const out_path = path_join(base, "outside.txt")
   with_execution_policy(
     {sandbox_profile: "worktree", workspace_roots: [root]},
     { ->
-      let ok = hostlib_tools_write_file({path: in_path, content: "ok\n"})
+      const ok = hostlib_tools_write_file({path: in_path, content: "ok\n"})
       __io_println(ok.bytes_written)
-      let write_err = try {
+      const write_err = try {
         hostlib_tools_write_file({path: out_path, content: "nope\n"})
         nil
       } catch (e) {
@@ -35,7 +35,7 @@ pipeline default() {
       __io_println(write_err.builtin)
       __io_println(contains(write_err.message, "outside workspace_roots"))
       __io_println(contains(write_err.path, "outside.txt"))
-      let read_err = try {
+      const read_err = try {
         hostlib_fs_read_text({path: out_path})
         nil
       } catch (e) {

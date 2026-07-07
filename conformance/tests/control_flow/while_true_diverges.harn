@@ -1,7 +1,7 @@
 // A `while true { ... }` with no `break` binding to it diverges, so a
 // function whose tail is such a loop needs no unreachable trailing return.
 fn first_over(limit: int) -> int {
-  var n = 0
+  let n = 0
   while true {
     n = n + 7
     if n > limit {
@@ -13,9 +13,9 @@ fn first_over(limit: int) -> int {
 // Nested infinite loops: the inner `break` binds the inner loop, so the
 // outer `while true` still diverges and the tail needs no return.
 fn nested(limit: int) -> int {
-  var total = 0
+  let total = 0
   while true {
-    var step = 0
+    let step = 0
     while true {
       step = step + 1
       if step == 3 {

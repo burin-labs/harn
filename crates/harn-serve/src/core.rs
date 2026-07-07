@@ -1022,7 +1022,7 @@ pub fn greet(name: string) -> string {
 import { command_run } from "std/command"
 
 pub fn run_help(binary: string) -> int {
-  let result = command_run(
+  const result = command_run(
     {argv: [binary, "--help"]},
     {capture: {max_inline_bytes: 256}, timeout_ms: 5000},
   )

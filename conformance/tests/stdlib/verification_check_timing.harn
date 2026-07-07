@@ -14,7 +14,7 @@ pipeline test(task) {
       ],
     },
   )
-  let failed_result = {
+  const failed_result = {
     ok: false,
     success: false,
     status: "completed",
@@ -23,7 +23,7 @@ pipeline test(task) {
     stdout: "",
     stderr: "compile failed\nline 2",
   }
-  let observation = verification_observation_from_command_result(
+  const observation = verification_observation_from_command_result(
     failed_result,
     {warm: false, snapshot: {"src/main.harn": "hash-a"}, failure_signature_from: "stderr"},
   )
@@ -33,7 +33,7 @@ pipeline test(task) {
   assert(observation.snapshot != nil, "observation should carry supplied snapshot")
   assert_eq(observation.snapshot["src/main.harn"], "hash-a")
   assert_eq(observation.failureSignature, "compile failed\nline 2")
-  let recorded = verification_record_check_result(
+  const recorded = verification_record_check_result(
     "check/shell",
     failed_result,
     {warm: false, snapshot: {"src/main.harn": "hash-a"}, failure_signature_from: "stderr"},
@@ -43,7 +43,7 @@ pipeline test(task) {
   assert_eq(recorded.row.timings.samples, 1)
   assert_eq(recorded.row.lastRun.exit, 2)
   assert_eq(recorded.row.lastRun.snapshot["src/main.harn"], "hash-a")
-  let run = verification_run_check(
+  const run = verification_run_check(
     "check/shell",
     {mode: "shell", command: "echo verification-run"},
     {warm: true, command_options: {capture: {max_inline_bytes: 4096}}},
@@ -57,19 +57,19 @@ pipeline test(task) {
   assert(run.row.timings.warmMs.p50 != nil)
   assert_eq(run.row.lastRun.exit, 0)
   assert_eq(run.row.lastRun.failureSignature, nil)
-  let started = verification_start_check(
+  const started = verification_start_check(
     "check/shell",
     {mode: "shell", command: "echo verification-background"},
     {warm: true, command_options: {capture: {max_inline_bytes: 4096}}},
   )
   assert(started.started.handle_id != nil, "background check should return a handle")
-  let finished = verification_finish_check(started)
+  const finished = verification_finish_check(started)
   assert(finished.row != nil, "background profile row should be updated after finish")
   assert_eq(finished.result.success, true)
   assert_eq(trim(finished.result.stdout), "verification-background")
   assert_eq(finished.observation.warm, true)
   assert_eq(finished.row.timings.samples, 3)
-  let missing = verification_record_check_result("missing", failed_result, {warm: true})
+  const missing = verification_record_check_result("missing", failed_result, {warm: true})
   assert_eq(missing.row, nil)
   __io_println("verification check timing ok")
 }

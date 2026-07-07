@@ -1,23 +1,23 @@
 import { triage_emit, triage_normalize, triage_start_my_day } from "std/triage"
 
 fn fixture(harness: Harness, name) {
-  let root = project_root() ?? cwd()
+  const root = project_root() ?? cwd()
   return json_parse(harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
 }
 
 pipeline default() {
-  let github = fixture(harness, "github_issue")
-  let slack = fixture(harness, "slack_message")
-  let notion = fixture(harness, "notion_page")
-  let github_retry = github
+  const github = fixture(harness, "github_issue")
+  const slack = fixture(harness, "slack_message")
+  const notion = fixture(harness, "notion_page")
+  const github_retry = github
     + {
     dedupe_key: "github-delivery-1507-retry",
     provider_payload: github.provider_payload + {delivery_id: "github-delivery-1507-retry"},
   }
-  let github_event = triage_normalize(github)
-  let slack_event = triage_normalize(slack)
-  let notion_event = triage_normalize(notion)
-  let github_retry_event = triage_normalize(github_retry)
+  const github_event = triage_normalize(github)
+  const slack_event = triage_normalize(slack)
+  const notion_event = triage_normalize(notion)
+  const github_retry_event = triage_normalize(github_retry)
   __io_println(github_event.schema)
   __io_println(github_event.provider + ":" + github_event.source_kind)
   __io_println(slack_event.source_url.starts_with("slack://channel"))
@@ -28,13 +28,13 @@ pipeline default() {
   __io_println(
     github_event.action_intents.find({ intent -> intent.kind == "convert_to_task" }).requires_approval,
   )
-  let missing_source = try {
+  const missing_source = try {
     triage_normalize(
       {provider: "slack", kind: "message", provider_payload: {provider: "slack", event: "message"}},
     )
   }
   __io_println(is_err(missing_source))
-  let ungated_write = try {
+  const ungated_write = try {
     triage_normalize(
       github,
       {
@@ -51,15 +51,15 @@ pipeline default() {
     )
   }
   __io_println(is_err(ungated_write))
-  let feed = triage_start_my_day(
+  const feed = triage_start_my_day(
     [github, slack, notion, github_retry],
     {emit: true, topic: "triage.inbox.test", generated_at: "fixture"},
   )
   __io_println(len(feed.events))
   __io_println(len(feed.receipts))
-  let receipt = triage_emit(github_event, {topic: "triage.inbox.test.single"})
-  let stream = event_log.subscribe({topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1})
-  let logged = stream.next().value
+  const receipt = triage_emit(github_event, {topic: "triage.inbox.test.single"})
+  const stream = event_log.subscribe({topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1})
+  const logged = stream.next().value
   __io_println(logged.kind)
   __io_println(logged.payload.provider)
   __io_println(logged.headers.schema)

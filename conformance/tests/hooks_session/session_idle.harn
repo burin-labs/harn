@@ -5,7 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * idle wait. Advisory only: the hook can observe iteration count and
  * `wake_interval_ms` but cannot block the wait.
  */
-let idle_seen = atomic(0)
+const idle_seen = atomic(0)
 
 pipeline default() {
   clear_session_hooks()
@@ -22,7 +22,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("tick"), llm_text("tock")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "poll background",
         nil,
         {provider: "mock", daemon: true, max_iterations: 2, wake_interval_ms: 1},

@@ -3,14 +3,14 @@ pipeline test(task) {
     emit 1
     throw "stream failed"
   }
-  let stream = broken()
-  let first = stream.next()
+  const stream = broken()
+  const first = stream.next()
   __io_println(first.value)
   try {
     stream.next()
   } catch (err) {
     __io_println("caught ${err}")
   }
-  let final = stream.next()
+  const final = stream.next()
   __io_println(final.done)
 }

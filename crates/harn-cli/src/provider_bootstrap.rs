@@ -270,7 +270,7 @@ fn nodes_use_provider_llm(nodes: &[SNode], inherited_shadows: &HashSet<String>) 
 
     for node in nodes {
         match &node.node {
-            Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
+            Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. } => {
                 if pattern_uses_provider_llm(pattern, &shadows)
                     || node_uses_provider_llm(value, &shadows)
                 {
@@ -304,7 +304,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
         | Node::Block(body)
         | Node::Closure { body, .. } => nodes_use_provider_llm(body, shadows),
         Node::ImplBlock { methods, .. } => nodes_use_provider_llm(methods, shadows),
-        Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
+        Node::LetBinding { pattern, value, .. } => {
             pattern_uses_provider_llm(pattern, shadows) || node_uses_provider_llm(value, shadows)
         }
         Node::ConstBinding { value, .. } => node_uses_provider_llm(value, shadows),
@@ -573,7 +573,7 @@ mod tests {
             r#"__io_println("llm_call(\"x\")")"#
         ));
         assert!(source_text_uses_provider_llm(
-            r#"let response = llm_call("prompt", "system")"#
+            r#"const response = llm_call("prompt", "system")"#
         ));
         assert!(source_text_uses_provider_llm(
             r#"agent_loop("task", "system", {})"#
@@ -593,7 +593,7 @@ mod tests {
             "llm_stream",
             "llm_stream_call",
         ] {
-            let source = format!("let result = {builtin}(\"prompt\")");
+            let source = format!("const result = {builtin}(\"prompt\")");
             assert!(source_text_uses_provider_llm(&source), "{builtin}");
         }
     }
@@ -610,7 +610,7 @@ __io_println(llm_call("prompt", "system"))
         ));
         assert!(!source_text_uses_provider_llm(
             r#"
-let llm_call = { prompt, system -> "local" }
+const llm_call = { prompt, system -> "local" }
 __io_println(llm_call("prompt", "system"))
 "#
         ));

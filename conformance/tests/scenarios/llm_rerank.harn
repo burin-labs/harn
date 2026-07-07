@@ -2,7 +2,7 @@ import { pairwise_rerank, self_certainty } from "std/llm/rerank"
 import { llm_call_count, with_llm_mocks } from "std/testing"
 
 fn run_pairwise_rerank() {
-  let result = pairwise_rerank(["weak", "best", "ok"], {task: "Pick the strongest answer.", provider: "mock"})
+  const result = pairwise_rerank(["weak", "best", "ok"], {task: "Pick the strongest answer.", provider: "mock"})
   return {result: result, calls: llm_call_count()}
 }
 
@@ -15,7 +15,7 @@ fn run_mock_logprobs_call() {
 }
 
 pipeline default(task) {
-  let judged = with_llm_mocks(
+  const judged = with_llm_mocks(
     [
       {text: "{\"winner\":\"A\",\"confidence\":0.9,\"reasoning\":\"best beats ok\"}"},
       {text: "{\"winner\":\"B\",\"confidence\":0.8,\"reasoning\":\"best beats weak\"}"},
@@ -32,17 +32,17 @@ pipeline default(task) {
   __io_println(
     judged.result.scores[1].avg_confidence > 0.84 && judged.result.scores[1].avg_confidence < 0.86,
   )
-  let direct = self_certainty(
+  const direct = self_certainty(
     "ignored",
     {logprobs: [{token: "a", logprob: -0.6931471805599453}, {token: "b", logprob: -0.6931471805599453}]},
   )
   __io_println(direct > 0.49 && direct < 0.51)
-  let from_mock = with_llm_mocks(
+  const from_mock = with_llm_mocks(
     [{text: "calibrated", logprobs: [{token: "calibrated", logprob: 0.0}]}],
     run_mock_self_certainty,
   )
   __io_println(from_mock == 1.0)
-  let mocked_result = with_llm_mocks(
+  const mocked_result = with_llm_mocks(
     [{text: "visible", logprobs: [{token: "visible", logprob: 0.0}]}],
     run_mock_logprobs_call,
   )

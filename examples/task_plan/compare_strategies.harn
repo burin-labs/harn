@@ -101,7 +101,7 @@ fn __has_flag(args, name) {
 }
 
 fn __parse_int_arg(args, prefix, fallback) {
-  let raw = __parse_arg(args, prefix)
+  const raw = __parse_arg(args, prefix)
   if raw == nil || raw == "" {
     return fallback
   }
@@ -164,8 +164,8 @@ fn __typed_ir_prompt(task) {
 }
 
 fn __extract_json(text) {
-  let t = trim(text)
-  var start = -1
+  const t = trim(text)
+  let start = -1
   for i in range(0, len(t)) {
     if substring(t, i, i + 1) == "{" {
       start = i
@@ -175,11 +175,11 @@ fn __extract_json(text) {
   if start < 0 {
     return t
   }
-  var depth = 0
-  var in_string = false
-  var escaped = false
+  let depth = 0
+  let in_string = false
+  let escaped = false
   for i in range(start, len(t)) {
-    let ch = substring(t, i, i + 1)
+    const ch = substring(t, i, i + 1)
     if escaped {
       escaped = false
       continue
@@ -208,7 +208,7 @@ fn __extract_json(text) {
 
 fn __try_json(text) {
   try {
-    let value = json_parse(__extract_json(text))
+    const value = json_parse(__extract_json(text))
     return {ok: true, value: value, error: nil}
   } catch (e) {
     return {ok: false, value: nil, error: to_string(e)}
@@ -216,9 +216,9 @@ fn __try_json(text) {
 }
 
 fn __count_numbered_steps(text) {
-  var count = 0
+  let count = 0
   for n in range(1, 21) {
-    let marker = to_string(n) + "."
+    const marker = to_string(n) + "."
     if contains(text, marker + " ") {
       count = count + 1
     }
@@ -227,10 +227,10 @@ fn __count_numbered_steps(text) {
 }
 
 fn __count_bullet_lines(text) {
-  let lines = split(text, "\n")
-  var count = 0
+  const lines = split(text, "\n")
+  let count = 0
   for line in lines {
-    let t = trim(line)
+    const t = trim(line)
     if starts_with(t, "- ") || starts_with(t, "* ") {
       count = count + 1
     }
@@ -248,18 +248,18 @@ fn __mentions_any(text, needles) {
 }
 
 fn __score_baseline(call) {
-  let text = call.text
-  let chars = len(text)
-  let numbered = __count_numbered_steps(text)
-  let bullets = __count_bullet_lines(text)
-  let step_count = if numbered > bullets {
+  const text = call.text
+  const chars = len(text)
+  const numbered = __count_numbered_steps(text)
+  const bullets = __count_bullet_lines(text)
+  const step_count = if numbered > bullets {
     numbered
   } else {
     bullets
   }
-  let mentions_files = __mentions_any(text, [".rs", ".toml", ".md", ".harn", "src/", "tests/", "docs/", "examples/"])
-  let mentions_verify = __mentions_any(text, ["cargo test", "cargo check", "scripts/", "verify"])
-  let success = chars > 80 && (step_count > 0 || mentions_files)
+  const mentions_files = __mentions_any(text, [".rs", ".toml", ".md", ".harn", "src/", "tests/", "docs/", "examples/"])
+  const mentions_verify = __mentions_any(text, ["cargo test", "cargo check", "scripts/", "verify"])
+  const success = chars > 80 && (step_count > 0 || mentions_files)
   return {
     parse_ok: true,
     parse_error: nil,
@@ -283,7 +283,7 @@ fn __score_baseline(call) {
 }
 
 fn __plan_steps_len(plan) {
-  let steps = plan?.steps
+  const steps = plan?.steps
   if type_of(steps) == "list" {
     return len(steps)
   }
@@ -291,8 +291,8 @@ fn __plan_steps_len(plan) {
 }
 
 fn __score_burin(call) {
-  let text = call.text
-  let parsed = __try_json(text)
+  const text = call.text
+  const parsed = __try_json(text)
   if !parsed.ok {
     return {
       parse_ok: false,
@@ -315,27 +315,27 @@ fn __score_burin(call) {
       validate_error_messages: [parsed.error],
     }
   }
-  let raw = parsed.value
-  var artifact_error = nil
-  let artifact = try {
+  const raw = parsed.value
+  let artifact_error = nil
+  const artifact = try {
     plan_from(raw)
   } catch (e) {
     artifact_error = to_string(e)
     nil
   }
-  let steps = __plan_steps_len(raw)
-  let verification = if type_of(raw?.verification_commands) == "list" {
+  const steps = __plan_steps_len(raw)
+  const verification = if type_of(raw?.verification_commands) == "list" {
     len(raw.verification_commands)
   } else {
     0
   }
-  let assumptions = if type_of(raw?.assumptions) == "list" {
+  const assumptions = if type_of(raw?.assumptions) == "list" {
     len(raw.assumptions)
   } else {
     0
   }
-  let has_verify = verification > 0
-  let success = artifact != nil && steps > 0
+  const has_verify = verification > 0
+  const success = artifact != nil && steps > 0
   return {
     parse_ok: true,
     parse_error: nil,
@@ -378,22 +378,22 @@ const __DETERMINISTIC_KINDS: list<string> = [
 ]
 
 fn __collect_kind_counts(plan) {
-  var counts = {}
-  let nodes = plan?.nodes
+  let counts = {}
+  const nodes = plan?.nodes
   if type_of(nodes) != "dict" {
     return counts
   }
   for node_id in nodes.keys() {
-    let node = nodes[node_id]
-    let kind = node?.kind ?? "unknown"
-    let prior = counts[kind] ?? 0
+    const node = nodes[node_id]
+    const kind = node?.kind ?? "unknown"
+    const prior = counts[kind] ?? 0
     counts[kind] = prior + 1
   }
   return counts
 }
 
 fn __has_verify_node(plan) {
-  let nodes = plan?.nodes
+  const nodes = plan?.nodes
   if type_of(nodes) != "dict" {
     return false
   }
@@ -406,7 +406,7 @@ fn __has_verify_node(plan) {
 }
 
 fn __deterministic_count(counts) {
-  var total = 0
+  let total = 0
   for kind in __DETERMINISTIC_KINDS {
     total = total + (counts?.[kind] ?? 0)
   }
@@ -414,7 +414,7 @@ fn __deterministic_count(counts) {
 }
 
 fn __sum_counts(counts) {
-  var total = 0
+  let total = 0
   for k in counts.keys() {
     total = total + counts[k]
   }
@@ -422,8 +422,8 @@ fn __sum_counts(counts) {
 }
 
 fn __score_typed(call) {
-  let text = call.text
-  let parsed = __try_json(text)
+  const text = call.text
+  const parsed = __try_json(text)
   if !parsed.ok {
     return {
       parse_ok: false,
@@ -446,20 +446,20 @@ fn __score_typed(call) {
       validate_error_messages: [parsed.error],
     }
   }
-  let plan = parsed.value
-  let report = task_plan_validate(plan)
-  let compiled = task_plan_compile(plan)
-  let wf_report = if compiled.ok {
+  const plan = parsed.value
+  const report = task_plan_validate(plan)
+  const compiled = task_plan_compile(plan)
+  const wf_report = if compiled.ok {
     workflow_validate(compiled.workflow)
   } else {
     {valid: false, errors: [], warnings: []}
   }
-  let kinds = __collect_kind_counts(plan)
-  let total = __sum_counts(kinds)
-  let deterministic = __deterministic_count(kinds)
-  let has_verify = __has_verify_node(plan)
-  let has_caps = type_of(plan?.capabilities) == "dict"
-  let success = report.valid && compiled.ok && (wf_report?.valid ?? false)
+  const kinds = __collect_kind_counts(plan)
+  const total = __sum_counts(kinds)
+  const deterministic = __deterministic_count(kinds)
+  const has_verify = __has_verify_node(plan)
+  const has_caps = type_of(plan?.capabilities) == "dict"
+  const success = report.valid && compiled.ok && (wf_report?.valid ?? false)
   return {
     parse_ok: true,
     parse_error: nil,
@@ -483,7 +483,7 @@ fn __score_typed(call) {
 }
 
 fn __validation_messages(report, wf_report, compiled) {
-  var messages = []
+  let messages = []
   for error in report?.errors ?? [] {
     messages = messages
       + [to_string(error?.code ?? "validate_error") + ": " + to_string(error?.message ?? error)]
@@ -534,7 +534,7 @@ fn __schema_for_strategy(strategy) {
 }
 
 fn __model_capabilities(model) {
-  let info = try {
+  const info = try {
     llm_model_info(model)
   } catch (e) {
     nil
@@ -542,7 +542,7 @@ fn __model_capabilities(model) {
   if info?.capabilities != nil {
     return info.capabilities
   }
-  let resolved = try {
+  const resolved = try {
     llm_resolve_model(model)
   } catch (e) {
     nil
@@ -557,12 +557,12 @@ fn __structured_output_supported(caps) {
   if caps?.json_schema != nil || caps?.structured_output != nil {
     return true
   }
-  let mode = caps?.structured_output_mode
+  const mode = caps?.structured_output_mode
   return mode != nil && mode != "" && mode != "none"
 }
 
 fn __llm_options(model, max_tokens, schema, use_structured_output) {
-  var opts = {model: model, temperature: 0.0, max_tokens: max_tokens}
+  let opts = {model: model, temperature: 0.0, max_tokens: max_tokens}
   if use_structured_output && schema != nil {
     opts = opts
       + {
@@ -578,9 +578,9 @@ fn __llm_options(model, max_tokens, schema, use_structured_output) {
 }
 
 fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_output) {
-  let opts = __llm_options(model, max_tokens, schema, use_structured_output)
-  var used_structured_output = use_structured_output
-  let resp = try {
+  const opts = __llm_options(model, max_tokens, schema, use_structured_output)
+  let used_structured_output = use_structured_output
+  const resp = try {
     llm_call(prompt, system, opts)
   } catch (e) {
     if use_structured_output {
@@ -590,11 +590,11 @@ fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_o
       throw e
     }
   }
-  let telemetry = resp?.provider_telemetry ?? {}
-  let text = resp.text ?? ""
-  let input_tokens = resp.input_tokens ?? 0
-  let output_tokens = resp.output_tokens ?? 0
-  let cost = estimate_call_cost(
+  const telemetry = resp?.provider_telemetry ?? {}
+  const text = resp.text ?? ""
+  const input_tokens = resp.input_tokens ?? 0
+  const output_tokens = resp.output_tokens ?? 0
+  const cost = estimate_call_cost(
     {
       provider: resp.provider ?? "unknown",
       model: resp.model ?? model,
@@ -656,12 +656,12 @@ fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_len
   if !retry_on_length || !__is_length_finish(call.finish_reason) {
     return call + {retry_history: call?.retry_history ?? []}
   }
-  let continuation_prompt = "Original task:\n"
+  const continuation_prompt = "Original task:\n"
     + prompt
     + "\n\nThe previous response stopped because it reached the output budget. Previous response prefix:\n"
     + call.text
     + "\n\nContinue exactly where you left off. Do not add preamble, markdown fences, or a fresh opening object."
-  let continuation = __call_model_once(model, continuation_prompt, system, max_tokens, nil, false)
+  const continuation = __call_model_once(model, continuation_prompt, system, max_tokens, nil, false)
   return __merge_calls(
     call,
     continuation,
@@ -671,10 +671,10 @@ fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_len
 }
 
 fn __strategy_call(strategy, task, model, max_tokens, opts) {
-  let schema = __schema_for_strategy(strategy)
-  let use_structured = opts.structured_output && strategy != "baseline"
+  const schema = __schema_for_strategy(strategy)
+  const use_structured = opts.structured_output && strategy != "baseline"
     && __structured_output_supported(opts.capabilities)
-  var call = nil
+  let call = nil
   if strategy == "baseline" {
     call = __call_model_once(model, __baseline_prompt(task), __baseline_system(), max_tokens, nil, false)
     return __maybe_continue_length(
@@ -730,7 +730,7 @@ fn __needs_schema_repair(score) {
 }
 
 fn __repair_prompt(strategy, task, call, score) {
-  var messages = score.validate_error_messages
+  let messages = score.validate_error_messages
   if len(messages) == 0 && score.parse_error != nil {
     messages = [score.parse_error]
   }
@@ -750,14 +750,14 @@ fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
   if strategy == "baseline" || !opts.retry_on_schema_error || !__needs_schema_repair(score) {
     return {call: call, score: score}
   }
-  let schema = __schema_for_strategy(strategy)
-  let use_structured = opts.structured_output && __structured_output_supported(opts.capabilities)
-  let system = if strategy == "burin_plan" {
+  const schema = __schema_for_strategy(strategy)
+  const use_structured = opts.structured_output && __structured_output_supported(opts.capabilities)
+  const system = if strategy == "burin_plan" {
     __burin_system()
   } else {
     __typed_ir_system()
   }
-  let repair = __call_model_once(
+  const repair = __call_model_once(
     model,
     __repair_prompt(strategy, task, call, score),
     system,
@@ -765,16 +765,16 @@ fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
     schema,
     use_structured,
   )
-  let repaired = __merge_calls(call, repair, repair.text, (call?.retry_history ?? []) + ["schema_repair"])
+  const repaired = __merge_calls(call, repair, repair.text, (call?.retry_history ?? []) + ["schema_repair"])
   return {call: repaired, score: __strategy_score(strategy, repaired)}
 }
 
 fn __run_cell(strategy, task, trial, model, max_tokens, opts) {
-  let initial_call = __strategy_call(strategy, task, model, max_tokens, opts)
-  let initial_score = __strategy_score(strategy, initial_call)
-  let repaired = __maybe_repair_schema(strategy, task, model, max_tokens, opts, initial_call, initial_score)
-  let call = repaired.call
-  let score = repaired.score
+  const initial_call = __strategy_call(strategy, task, model, max_tokens, opts)
+  const initial_score = __strategy_score(strategy, initial_call)
+  const repaired = __maybe_repair_schema(strategy, task, model, max_tokens, opts, initial_call, initial_score)
+  const call = repaired.call
+  const score = repaired.score
   return {
     task_id: task.id,
     task_label: task.label,
@@ -816,15 +816,15 @@ fn __run_cell(strategy, task, trial, model, max_tokens, opts) {
 }
 
 fn main(harness: Harness) -> int {
-  let model = __parse_arg(argv, "--model=") ?? __DEFAULT_MODEL
-  let trials_arg = __parse_arg(argv, "--trials=")
-  let trials = if trials_arg == nil {
+  const model = __parse_arg(argv, "--model=") ?? __DEFAULT_MODEL
+  const trials_arg = __parse_arg(argv, "--trials=")
+  const trials = if trials_arg == nil {
     __DEFAULT_TRIALS
   } else {
     to_int(trials_arg)
   }
-  let global_max_tokens = __parse_arg(argv, "--max-tokens=")
-  let max_tokens = {
+  const global_max_tokens = __parse_arg(argv, "--max-tokens=")
+  const max_tokens = {
     baseline: __parse_int_arg(
       argv,
       "--max-tokens-baseline=",
@@ -853,20 +853,20 @@ fn main(harness: Harness) -> int {
       },
     ),
   }
-  let opts = {
+  const opts = {
     structured_output: __has_flag(argv, "--structured-output"),
     retry_on_length: __has_flag(argv, "--retry-on-length"),
     retry_on_schema_error: __has_flag(argv, "--retry-on-schema-error"),
     capabilities: __model_capabilities(model),
   }
-  let out_path = __parse_arg(argv, "--out=")
-  let strategies = ["baseline", "burin_plan", "typed_ir"]
-  var records = []
+  const out_path = __parse_arg(argv, "--out=")
+  const strategies = ["baseline", "burin_plan", "typed_ir"]
+  let records = []
   for task in __TASKS {
     for strategy in strategies {
       for trial in range(1, trials + 1) {
         harness.stdio.println("[run ] " + task.id + " / " + strategy + " / trial " + to_string(trial))
-        let record = __run_cell(strategy, task, trial, model, max_tokens[strategy], opts)
+        const record = __run_cell(strategy, task, trial, model, max_tokens[strategy], opts)
         records = records + [record]
         harness.stdio
           .println(
@@ -881,11 +881,11 @@ fn main(harness: Harness) -> int {
       }
     }
   }
-  var lines = []
+  let lines = []
   for record in records {
     lines = lines + [json_stringify(record)]
   }
-  let body = lines.join("\n") + "\n"
+  const body = lines.join("\n") + "\n"
   if out_path == nil || out_path == "" {
     harness.stdio.print(body)
   } else {

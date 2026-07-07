@@ -5,15 +5,15 @@ use super::*;
 
 #[test]
 fn test_fix_multiple_fixes_applied() {
-    let source = "pipeline default(task) {\n  var x = 10\n  let y = x == true\n  log(y)\n}";
+    let source = "pipeline default(task) {\n  const x = 10\n  const y = x == true\n  log(y)\n}";
     let diags = lint_source(source);
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let x = 10"),
-        "var should be fixed to let, got: {result}"
+        result.contains("const x = 10"),
+        "let should be fixed to let, got: {result}"
     );
     assert!(
-        result.contains("let y = x"),
+        result.contains("const y = x"),
         "comparison should be simplified, got: {result}"
     );
 }
@@ -21,7 +21,7 @@ fn test_fix_multiple_fixes_applied() {
 #[test]
 fn test_no_fix_when_source_unavailable() {
     // lint without source — fixes should be None
-    let source = "pipeline default(task) {\n  var x = 10\n  log(x)\n}";
+    let source = "pipeline default(task) {\n  const x = 10\n  log(x)\n}";
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);

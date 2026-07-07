@@ -282,7 +282,7 @@ buffer. Reads the last `limit` accepted deliveries from the topic.\n\
     out.push_str(
         "```harn\n\
 import \"std/triggers\"\n\n\
-let intake = webhook_intake_register({\n  \
+const intake = webhook_intake_register({\n  \
 id: \"github\",\n  \
 path: \"/hooks/github\",\n  \
 secret: secret_get(\"github/webhook-secret\"),\n  \
@@ -291,7 +291,7 @@ delivery_id_header: \"x-github-delivery\",\n  \
 topic: \"github.events\",\n\
 })\n\n\
 // In your inbound HTTP handler:\n\
-let outcome = webhook_intake_feed(intake.id, {\n  \
+const outcome = webhook_intake_feed(intake.id, {\n  \
 headers: request.headers,\n  \
 body: request.body,\n  \
 path: request.path,\n\

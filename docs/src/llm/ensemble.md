@@ -12,7 +12,7 @@ states. It supports breadth-first, depth-first, and beam search.
 ```harn
 import { tree_of_thoughts } from "std/llm/ensemble"
 
-let result = tree_of_thoughts({
+const result = tree_of_thoughts({
   initial_state: {steps: [], value: 0},
   search: "beam",
   k: 3,

@@ -12,7 +12,7 @@
  *   HARN_TRACE_OUTPUT — output path
  */
 fn __optional_string(obj, key) {
-  let v = obj[key]
+  const v = obj[key]
   if type_of(v) == "string" {
     return v
   }
@@ -20,7 +20,7 @@ fn __optional_string(obj, key) {
 }
 
 fn __optional_int(obj, key) {
-  let v = obj[key]
+  const v = obj[key]
   if type_of(v) == "int" {
     return v
   }
@@ -34,17 +34,17 @@ fn __coerce_tool_calls(value) -> list {
   if type_of(value) != "list" {
     throw "tool_calls must be an array"
   }
-  var out = []
-  var idx = 0
+  let out = []
+  let idx = 0
   for item in value {
     if type_of(item) != "dict" {
       throw "tool_calls[" + to_string(idx) + "] must be an object"
     }
-    let name = __optional_string(item, "name")
+    const name = __optional_string(item, "name")
     if name == nil {
       throw "tool_calls[" + to_string(idx) + "] is missing `name`"
     }
-    let args = item["arguments"] ?? item["args"] ?? {}
+    const args = item["arguments"] ?? item["args"] ?? {}
     out = out.push({name: name, args: args})
     idx = idx + 1
   }
@@ -63,11 +63,11 @@ fn __response_text(value) -> string {
     return value
   }
   if type_of(value) == "dict" {
-    let text = __optional_string(value, "text")
+    const text = __optional_string(value, "text")
     if text != nil {
       return text
     }
-    let content = __optional_string(value, "content")
+    const content = __optional_string(value, "content")
     if content != nil {
       return content
     }
@@ -86,38 +86,38 @@ fn __record_to_fixture(value, line_no) -> string {
   if value["prompt"] == nil {
     throw "trace line " + to_string(line_no) + " is missing `prompt`"
   }
-  let response = value["response"] ?? nil
-  let response_obj = __response_object(response)
-  let top_tool_calls = __coerce_tool_calls(value["tool_calls"])
-  let resp_tool_calls = __coerce_tool_calls(response_obj["tool_calls"])
-  let tool_calls = if len(top_tool_calls) > 0 {
+  const response = value["response"] ?? nil
+  const response_obj = __response_object(response)
+  const top_tool_calls = __coerce_tool_calls(value["tool_calls"])
+  const resp_tool_calls = __coerce_tool_calls(response_obj["tool_calls"])
+  const tool_calls = if len(top_tool_calls) > 0 {
     top_tool_calls
   } else {
     resp_tool_calls
   }
-  let text = __response_text(response)
-  var fixture = {}
+  const text = __response_text(response)
+  let fixture = {}
   if text != "" {
     fixture = fixture + {text: text}
   }
   if len(tool_calls) > 0 {
     fixture = fixture + {tool_calls: tool_calls}
   }
-  let model = __optional_string(value, "model")
+  const model = __optional_string(value, "model")
     ?? __optional_string(response_obj, "model")
     ?? "imported-trace"
   fixture = fixture + {model: model}
-  let provider = __optional_string(value, "provider")
+  const provider = __optional_string(value, "provider")
     ?? __optional_string(response_obj, "provider")
   if provider != nil {
     fixture = fixture + {provider: provider}
   }
-  let input_tokens = __optional_int(value, "input_tokens")
+  const input_tokens = __optional_int(value, "input_tokens")
     ?? __optional_int(response_obj, "input_tokens")
   if input_tokens != nil {
     fixture = fixture + {input_tokens: input_tokens}
   }
-  let output_tokens = __optional_int(value, "output_tokens")
+  const output_tokens = __optional_int(value, "output_tokens")
     ?? __optional_int(response_obj, "output_tokens")
   if output_tokens != nil {
     fixture = fixture + {output_tokens: output_tokens}
@@ -126,22 +126,22 @@ fn __record_to_fixture(value, line_no) -> string {
 }
 
 fn __convert_jsonl(content: string, trace_id: string) -> list<string> {
-  var fixtures = []
-  let lines = split(content, "\n")
-  var line_no = 0
+  let fixtures = []
+  const lines = split(content, "\n")
+  let line_no = 0
   for raw in lines {
     line_no = line_no + 1
-    let line = trim(raw)
+    const line = trim(raw)
     if line == "" {
       continue
     }
-    let value = try {
+    const value = try {
       json_parse(line)
     } catch (e) {
       throw "invalid JSON in trace line " + to_string(line_no) + ": " + to_string(e)
     }
     if trace_id != "" {
-      let actual = if type_of(value) == "dict" {
+      const actual = if type_of(value) == "dict" {
         __optional_string(value, "trace_id")
       } else {
         nil
@@ -159,31 +159,31 @@ fn __convert_jsonl(content: string, trace_id: string) -> list<string> {
 }
 
 fn main(harness: Harness) {
-  let trace_file = harness.env.get_or("HARN_TRACE_FILE", "")
-  let output = harness.env.get_or("HARN_TRACE_OUTPUT", "")
-  let trace_id = harness.env.get_or("HARN_TRACE_ID", "")
+  const trace_file = harness.env.get_or("HARN_TRACE_FILE", "")
+  const output = harness.env.get_or("HARN_TRACE_OUTPUT", "")
+  const trace_id = harness.env.get_or("HARN_TRACE_ID", "")
   if trace_file == "" || output == "" {
     harness.stdio.eprintln("trace import: HARN_TRACE_FILE and HARN_TRACE_OUTPUT must be set")
     exit(2)
   }
-  let content = try {
+  const content = try {
     harness.fs.read_text(trace_file)
   } catch (e) {
     harness.stdio.eprintln("failed to read " + trace_file + ": " + to_string(e))
     exit(1)
   }
-  let fixtures = try {
+  const fixtures = try {
     __convert_jsonl(content, trace_id)
   } catch (e) {
     harness.stdio.eprintln(to_string(e))
     exit(1)
   }
-  let body = if len(fixtures) == 0 {
+  const body = if len(fixtures) == 0 {
     ""
   } else {
     join(fixtures, "\n") + "\n"
   }
-  let parent = dirname(output)
+  const parent = dirname(output)
   if parent != "" && !harness.fs.exists(parent) {
     try {
       harness.fs.mkdir(parent)

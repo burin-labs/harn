@@ -1,8 +1,8 @@
 import { stream_validator } from "std/json"
 
 pipeline default(task) {
-  let validator = stream_validator({type: "list", items: {type: "int"}})
-  let status = validator.feed("{")
+  const validator = stream_validator({type: "list", items: {type: "int"}})
+  const status = validator.feed("{")
   __io_println(status.variant)
   __io_println(status.fields[0].path)
   __io_println(contains(status.fields[0].reason, "expected type 'list'"))

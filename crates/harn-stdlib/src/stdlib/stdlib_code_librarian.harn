@@ -91,7 +91,7 @@ type LibrarianFileHashSnapshot = dict
  * @example: code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
  */
 pub fn code_librarian_query(cypher: string) -> LibrarianCypherResult {
-  let raw = hostlib_code_index_cypher({query: cypher})
+  const raw = hostlib_code_index_cypher({query: cypher})
   return {rows: raw?.rows ?? [], overlay: raw?.overlay}
 }
 
@@ -110,13 +110,13 @@ pub fn code_librarian_outline(path: string, depth: int = 1) -> LibrarianOutline 
   if depth < 1 {
     throw "code_librarian_outline: depth must be >= 1"
   }
-  let file_id = hostlib_code_index_path_to_id({path: path})
+  const file_id = hostlib_code_index_path_to_id({path: path})
   if file_id == nil || file_id == 0 {
     return {file_id: 0, importers: [], imports: [], known: false, path: path, symbols: []}
   }
-  let symbols = hostlib_code_index_outline_get({file_id: file_id})
-  let imps = hostlib_code_index_imports_for({path: path})
-  let users = hostlib_code_index_importers_of({module: path})
+  const symbols = hostlib_code_index_outline_get({file_id: file_id})
+  const imps = hostlib_code_index_imports_for({path: path})
+  const users = hostlib_code_index_importers_of({module: path})
   return {
     file_id: file_id,
     importers: users?.importers ?? [],
@@ -144,11 +144,11 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
   if max_hops < 1 {
     throw "code_librarian_who_calls: max_hops must be >= 1"
   }
-  let cypher = "MATCH (f:Function {name: '" + symbol
+  const cypher = "MATCH (f:Function {name: '" + symbol
     + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.caller AS caller, f.name AS symbol"
-  let raw = hostlib_code_index_cypher({query: cypher})
-  let rows = raw?.rows ?? []
-  var out: list<LibrarianCallSite> = []
+  const raw = hostlib_code_index_cypher({query: cypher})
+  const rows = raw?.rows ?? []
+  let out: list<LibrarianCallSite> = []
   for row in rows {
     out = out + [{caller: row?.caller, path: row?.path ?? "", symbol: row?.symbol ?? symbol}]
   }
@@ -168,9 +168,9 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
  * @example: code_librarian_what_imports("src/util.ts")
  */
 pub fn code_librarian_what_imports(path: string) -> list<LibrarianImport> {
-  let users = hostlib_code_index_importers_of({module: path})
-  let importers = users?.importers ?? []
-  var out: list<LibrarianImport> = []
+  const users = hostlib_code_index_importers_of({module: path})
+  const importers = users?.importers ?? []
+  let out: list<LibrarianImport> = []
   for item in importers {
     out = out + [{importer: item, kind: "import"}]
   }
@@ -196,7 +196,7 @@ pub fn code_librarian_recent_changes(since_seq: int = 0) -> list<LibrarianFileCh
   if since_seq < 0 {
     throw "code_librarian_recent_changes: since_seq must be >= 0"
   }
-  let raw = hostlib_code_index_changes_since({seq: since_seq})
+  const raw = hostlib_code_index_changes_since({seq: since_seq})
   return raw ?? []
 }
 
@@ -295,15 +295,15 @@ const __DEFAULT_LLM_OPTIONS = {provider: "openrouter", model: "mistralai/devstra
  * @example: code_librarian_query_nl("which file defines formatDate?")
  */
 pub fn code_librarian_query_nl(text: string, options = nil) -> dict {
-  let opts = options ?? {}
-  let started_ms = __timing_now_monotonic_ms()
-  let cache_key = "v1:" + lowercase(trim(text))
-  let envelope = with_cache_envelope(
+  const opts = options ?? {}
+  const started_ms = __timing_now_monotonic_ms()
+  const cache_key = "v1:" + lowercase(trim(text))
+  const envelope = with_cache_envelope(
     cache_key,
     { -> __nl_resolve(text, opts) },
     {store: {backend: "mem", namespace: __NL_CACHE_NAMESPACE}, ttl_seconds: __NL_CACHE_TTL_SECONDS},
   )
-  let result = envelope.value
+  const result = envelope.value
   return {
     cache_hit: envelope.hit,
     cypher: result?.cypher,
@@ -316,9 +316,9 @@ pub fn code_librarian_query_nl(text: string, options = nil) -> dict {
 }
 
 fn __nl_resolve(text, opts) -> dict {
-  let compiled = __nl_compile(text, opts)
+  const compiled = __nl_compile(text, opts)
   if compiled.ok {
-    let rows = try {
+    const rows = try {
       let raw = hostlib_code_index_cypher({query: compiled.cypher})
       raw?.rows ?? []
     } catch (_) {
@@ -329,7 +329,7 @@ fn __nl_resolve(text, opts) -> dict {
     }
   }
   // Compile-path missed (parse error or zero rows). Fall back to MCTS.
-  let mcts = __nl_mcts(text, opts)
+  const mcts = __nl_mcts(text, opts)
   __nl_emit_fallback(opts, text, compiled?.cypher, mcts)
   return {
     cypher: compiled?.cypher,
@@ -341,11 +341,11 @@ fn __nl_resolve(text, opts) -> dict {
 }
 
 fn __nl_emit_fallback(opts, text, attempted_cypher, mcts) {
-  let session_id = to_string(opts?.session_id ?? "")
+  const session_id = to_string(opts?.session_id ?? "")
   if session_id == "" {
     return
   }
-  let _ = try {
+  const _ = try {
     agent_emit_event(
       session_id,
       "code_librarian_query_nl_fallback",
@@ -376,10 +376,10 @@ const __CYPHER_TEMPLATES = [
 const __CYPHER_PROMPT_PREAMBLE = "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Field, EnumCase, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, access_level, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
 
 fn __nl_compile(text, opts) -> dict {
-  let prompt = __nl_compile_prompt(text)
-  let schema = schema_object({cypher: schema_string()})
-  let call_opts = __nl_llm_options(opts)
-  let envelope = try {
+  const prompt = __nl_compile_prompt(text)
+  const schema = schema_object({cypher: schema_string()})
+  const call_opts = __nl_llm_options(opts)
+  const envelope = try {
     safe_structured_call(prompt, schema, call_opts)
   } catch (_) {
     return {cypher: nil, ok: false}
@@ -387,9 +387,9 @@ fn __nl_compile(text, opts) -> dict {
   if is_err(envelope) || !(envelope?.ok ?? false) {
     return {cypher: nil, ok: false}
   }
-  let value = envelope?.value ?? envelope?.data ?? {}
-  let cypher = to_string(value?.cypher ?? "")
-  let stripped = trim(cypher)
+  const value = envelope?.value ?? envelope?.data ?? {}
+  const cypher = to_string(value?.cypher ?? "")
+  const stripped = trim(cypher)
   if stripped == "" {
     return {cypher: nil, ok: false}
   }
@@ -397,12 +397,12 @@ fn __nl_compile(text, opts) -> dict {
 }
 
 fn __nl_compile_prompt(text) -> string {
-  let templates = join(__CYPHER_TEMPLATES, "\n")
+  const templates = join(__CYPHER_TEMPLATES, "\n")
   return __CYPHER_PROMPT_PREAMBLE + templates + "\n\nQuestion: " + text + "\nCypher:"
 }
 
 fn __nl_llm_options(opts) -> dict {
-  let overrides = if type_of(opts?.llm) == "dict" {
+  const overrides = if type_of(opts?.llm) == "dict" {
     opts.llm
   } else {
     {}
@@ -432,16 +432,16 @@ fn __nl_llm_options(opts) -> dict {
  * overlap heuristic suffices for the 30-question NL fixture.
  */
 fn __nl_mcts(text, opts) -> dict {
-  let depth_cap = to_int(opts?.mcts_depth_max ?? __MCTS_DEPTH_MAX_DEFAULT)
-  let expansion_cap = to_int(opts?.mcts_expansions_max ?? __MCTS_EXPANSIONS_MAX_DEFAULT)
-  let terms = __nl_terms(text)
-  var seen = {}
-  var ranked = []
-  var expansions = 0
-  var depth_reached = 0
+  const depth_cap = to_int(opts?.mcts_depth_max ?? __MCTS_DEPTH_MAX_DEFAULT)
+  const expansion_cap = to_int(opts?.mcts_expansions_max ?? __MCTS_EXPANSIONS_MAX_DEFAULT)
+  const terms = __nl_terms(text)
+  let seen = {}
+  let ranked = []
+  let expansions = 0
+  let depth_reached = 0
   for term in terms {
     if expansions < expansion_cap {
-      let probe = __nl_mcts_probe(term, terms, depth_cap, expansion_cap - expansions, seen)
+      const probe = __nl_mcts_probe(term, terms, depth_cap, expansion_cap - expansions, seen)
       seen = probe.seen
       expansions = expansions + probe.expansions
       depth_reached = max(depth_reached, probe.depth_reached)
@@ -450,9 +450,9 @@ fn __nl_mcts(text, opts) -> dict {
       }
     }
   }
-  let sorted = ranked.sort_by({ cand -> -cand.score })
-  let unique = __nl_dedupe_candidates(sorted)
-  let trimmed = if len(unique) > 10 {
+  const sorted = ranked.sort_by({ cand -> -cand.score })
+  const unique = __nl_dedupe_candidates(sorted)
+  const trimmed = if len(unique) > 10 {
     unique[:10]
   } else {
     unique
@@ -468,7 +468,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
   if budget <= 0 {
     return {candidates: [], depth_reached: 0, expansions: 0, seen: seen}
   }
-  let seeds = try {
+  const seeds = try {
     let raw = hostlib_code_index_cypher(
       {
         query: "MATCH (n) WHERE n.name = '" + __nl_escape(term)
@@ -479,13 +479,13 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
   } catch (_) {
     []
   }
-  var next_seen = seen
-  var candidates = []
-  var expansions = 0
-  var depth_reached = 0
+  let next_seen = seen
+  let candidates = []
+  let expansions = 0
+  let depth_reached = 0
   for seed in seeds {
     if expansions < budget {
-      let seed_key = __nl_node_key(seed)
+      const seed_key = __nl_node_key(seed)
       if next_seen[seed_key] == nil {
         next_seen = next_seen + {[seed_key]: true}
         expansions = expansions + 1
@@ -501,11 +501,11 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
       }
     }
   }
-  var depth = 1
+  let depth = 1
   while depth <= depth_cap && expansions < budget {
-    let cypher = "MATCH (s:Function {name: '" + __nl_escape(term) + "'})-[:CALLS*1.." + to_string(depth)
+    const cypher = "MATCH (s:Function {name: '" + __nl_escape(term) + "'})-[:CALLS*1.." + to_string(depth)
       + "]->(n) RETURN n.path AS path, n.name AS name, n.kind AS kind"
-    let hop = try {
+    const hop = try {
       let raw = hostlib_code_index_cypher({query: cypher})
       raw?.rows ?? []
     } catch (_) {
@@ -513,7 +513,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
     }
     for n in hop {
       if expansions < budget {
-        let key = __nl_node_key(n)
+        const key = __nl_node_key(n)
         if next_seen[key] == nil {
           next_seen = next_seen + {[key]: true}
           expansions = expansions + 1
@@ -534,9 +534,9 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
     }
     depth = depth + 1
   }
-  let callers_cypher = "MATCH (s:Function {name: '" + __nl_escape(term)
+  const callers_cypher = "MATCH (s:Function {name: '" + __nl_escape(term)
     + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.name AS name, c.kind AS kind"
-  let callers = try {
+  const callers = try {
     let raw = hostlib_code_index_cypher({query: callers_cypher})
     raw?.rows ?? []
   } catch (_) {
@@ -544,7 +544,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
   }
   for c in callers {
     if expansions < budget {
-      let key = __nl_node_key(c)
+      const key = __nl_node_key(c)
       if next_seen[key] == nil {
         next_seen = next_seen + {[key]: true}
         expansions = expansions + 1
@@ -568,10 +568,10 @@ fn __nl_node_key(row) -> string {
 }
 
 fn __nl_dedupe_candidates(cands) -> list {
-  var seen = {}
-  var out = []
+  let seen = {}
+  let out = []
   for c in cands {
-    let key = c.kind + ":" + c.path + ":" + c.name
+    const key = c.kind + ":" + c.path + ":" + c.name
     if seen[key] == nil {
       seen = seen + {[key]: true}
       out = out + [c]
@@ -581,10 +581,10 @@ fn __nl_dedupe_candidates(cands) -> list {
 }
 
 fn __nl_score(row, terms) -> int {
-  let blob = lowercase(
+  const blob = lowercase(
     to_string(row?.name ?? "") + " " + to_string(row?.path ?? "") + " " + to_string(row?.kind ?? ""),
   )
-  var score = 0
+  let score = 0
   for t in terms {
     if contains(blob, lowercase(t)) {
       score = score + 1
@@ -601,14 +601,14 @@ fn __nl_score(row, terms) -> int {
  * and dedupes.
  */
 fn __nl_terms(text) -> list {
-  let cleaned = regex_replace("[^A-Za-z0-9_/.]+", " ", text)
-  let raw = split(cleaned, " ")
-  var seen = {}
-  var out = []
+  const cleaned = regex_replace("[^A-Za-z0-9_/.]+", " ", text)
+  const raw = split(cleaned, " ")
+  let seen = {}
+  let out = []
   for word in raw {
-    let stripped = trim(word)
-    let lowered = lowercase(stripped)
-    let usable = stripped != "" && !__nl_is_stop_word(lowered) && seen[stripped] == nil
+    const stripped = trim(word)
+    const lowered = lowercase(stripped)
+    const usable = stripped != "" && !__nl_is_stop_word(lowered) && seen[stripped] == nil
     if usable {
       seen = seen + {[stripped]: true}
       out = out + [stripped]

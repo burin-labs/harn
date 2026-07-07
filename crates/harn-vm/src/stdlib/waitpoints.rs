@@ -677,11 +677,11 @@ mod tests {
                 let source = r#"
 pipeline test(task) {
   waitpoint_create("demo")
-  let completer = spawn {
+  const completer = spawn {
     sleep(20ms)
     waitpoint_complete("demo")
   }
-  let result = waitpoint_wait("demo", {wait_id: "wait-demo"})
+  const result = waitpoint_wait("demo", {wait_id: "wait-demo"})
   await(completer)
   __io_println(result.status)
   __io_println(result.waitpoints[0].completed_by)

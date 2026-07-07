@@ -15,7 +15,7 @@ pipeline test(task) {
       {approved: true, reviewer: "bob", reason: "approved"},
     ],
   )
-  let record: {approved: bool, reviewers: list<string>, approved_at: string, reason: string?, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval(action: "deploy production", quorum: 2, reviewers: ["alice", "bob", "carol"])
+  const record: {approved: bool, reviewers: list<string>, approved_at: string, reason: string?, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval(action: "deploy production", quorum: 2, reviewers: ["alice", "bob", "carol"])
   __io_println(record.approved)
   __io_println(len(record.reviewers))
   __io_println(record.reviewers[0])

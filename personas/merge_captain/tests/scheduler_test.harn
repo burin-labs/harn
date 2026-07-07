@@ -23,7 +23,7 @@ fn _default_repo() {
 }
 
 fn _pr(num, overrides) {
-  let base = {
+  const base = {
     repo: "x/y",
     number: num,
     title: "PR ${to_string(num)}",
@@ -42,7 +42,7 @@ fn _pr(num, overrides) {
     in_merge_queue: false,
     merge_group_active: false,
   }
-  let extras = overrides ?? {}
+  const extras = overrides ?? {}
   return base + extras
 }
 
@@ -56,15 +56,15 @@ fn _fail_check() {
 
 fn _open_handle(suffix) {
   // Unique per invocation so re-running tests does not see stale state.
-  let session = "scheduler-test-${suffix}-${to_string(now_ms())}"
+  const session = "scheduler-test-${suffix}-${to_string(now_ms())}"
   return open_checkpoints(".harn/test/merge-captain", session, "merge_captain_test")
 }
 
 pipeline test_sweep_classifies_clean_pr(task) {
-  let snapshot = _snapshot([_pr(1, {})], {"1": _ok_check()})
-  let adapter = fixture_adapter(snapshot)
-  let handle = _open_handle("classify-clean")
-  let summary = sweep(
+  const snapshot = _snapshot([_pr(1, {})], {"1": _ok_check()})
+  const adapter = fixture_adapter(snapshot)
+  const handle = _open_handle("classify-clean")
+  const summary = sweep(
     {
       adapter: adapter,
       policies: [_policy_for(_default_repo(), true)],
@@ -79,9 +79,9 @@ pipeline test_sweep_classifies_clean_pr(task) {
 }
 
 pipeline test_sweep_persists_checkpoints(task) {
-  let snapshot = _snapshot([_pr(1, {behind_by: 2, mergeable_state: "behind"})], {"1": _ok_check()})
-  let adapter = fixture_adapter(snapshot)
-  let handle = _open_handle("persist")
+  const snapshot = _snapshot([_pr(1, {behind_by: 2, mergeable_state: "behind"})], {"1": _ok_check()})
+  const adapter = fixture_adapter(snapshot)
+  const handle = _open_handle("persist")
   sweep(
     {
       adapter: adapter,
@@ -91,17 +91,17 @@ pipeline test_sweep_persists_checkpoints(task) {
       sweep_id: "test-persist",
     },
   )
-  let prior = prior_state_for(handle, _default_repo(), 1)
+  const prior = prior_state_for(handle, _default_repo(), 1)
   assert_eq(prior, "behind")
-  let all = list_all_checkpoints(handle)
+  const all = list_all_checkpoints(handle)
   assert_eq(len(all), 1)
 }
 
 pipeline test_resume_picks_up_new_pr(task) {
-  let policy = _policy_for(_default_repo(), true)
-  let snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
-  let snapshot2 = _snapshot([_pr(1, {}), _pr(2, {})], {"1": _ok_check(), "2": _ok_check()})
-  let handle = _open_handle("resume-add")
+  const policy = _policy_for(_default_repo(), true)
+  const snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
+  const snapshot2 = _snapshot([_pr(1, {}), _pr(2, {})], {"1": _ok_check(), "2": _ok_check()})
+  const handle = _open_handle("resume-add")
   // First sweep tracks PR 1 only.
   sweep(
     {
@@ -115,7 +115,7 @@ pipeline test_resume_picks_up_new_pr(task) {
   assert_eq(prior_state_for(handle, _default_repo(), 1), "queued")
   assert_eq(prior_state_for(handle, _default_repo(), 2), "discovered")
   // Second sweep absorbs the newly opened PR 2.
-  let summary = sweep(
+  const summary = sweep(
     {
       adapter: fixture_adapter(snapshot2),
       policies: [policy],
@@ -129,10 +129,10 @@ pipeline test_resume_picks_up_new_pr(task) {
 }
 
 pipeline test_disappeared_pr_gets_terminal_receipt(task) {
-  let policy = _policy_for(_default_repo(), true)
-  let snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
-  let snapshot2 = _snapshot([], {})
-  let handle = _open_handle("disappear")
+  const policy = _policy_for(_default_repo(), true)
+  const snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
+  const snapshot2 = _snapshot([], {})
+  const handle = _open_handle("disappear")
   sweep(
     {
       adapter: fixture_adapter(snapshot1),
@@ -142,7 +142,7 @@ pipeline test_disappeared_pr_gets_terminal_receipt(task) {
       sweep_id: "test-disappear-1",
     },
   )
-  let summary = sweep(
+  const summary = sweep(
     {
       adapter: fixture_adapter(snapshot2),
       policies: [policy],
@@ -155,12 +155,12 @@ pipeline test_disappeared_pr_gets_terminal_receipt(task) {
   assert_eq(summary.pr_count, 1)
   assert_eq(summary.by_state.closed, 1)
   // Checkpoint was forgotten so the next sweep stays clean.
-  let all = list_all_checkpoints(handle)
+  const all = list_all_checkpoints(handle)
   assert_eq(len(all), 0)
 }
 
 pipeline test_failing_ci_with_local_verify_runs_dry(task) {
-  let policy_extra = with_defaults(
+  const policy_extra = with_defaults(
     {
       repo: _default_repo(),
       merge_queue_enabled: true,
@@ -168,9 +168,9 @@ pipeline test_failing_ci_with_local_verify_runs_dry(task) {
       local_verification: [{name: "tests", command: "true"}],
     },
   )
-  let snapshot = _snapshot([_pr(1, {})], {"1": _fail_check()})
-  let handle = _open_handle("local-verify")
-  let summary = sweep(
+  const snapshot = _snapshot([_pr(1, {})], {"1": _fail_check()})
+  const handle = _open_handle("local-verify")
+  const summary = sweep(
     {
       adapter: fixture_adapter(snapshot),
       policies: [policy_extra],
@@ -182,11 +182,11 @@ pipeline test_failing_ci_with_local_verify_runs_dry(task) {
   assert_eq(summary.by_state.local_repair, 1)
   assert_eq(summary.by_action.run_local_verification, 1)
   // Per-PR receipt records the (skipped) command.
-  let receipt = summary.receipts[0]
+  const receipt = summary.receipts[0]
   assert_eq(len(receipt.commands_run), 1)
-  let cmd = receipt.commands_run[0]
+  const cmd = receipt.commands_run[0]
   assert_eq(cmd.action, "run_local_verification")
-  let local_results = cmd.results
+  const local_results = cmd.results
   assert_eq(local_results[0].status, "skipped_dry_run")
 }
 
@@ -211,7 +211,7 @@ fn _ok_repair_output() {
 }
 
 pipeline test_repair_worker_dispatch_attaches_run_to_receipt(task) {
-  let policy_with_worker = with_defaults(
+  const policy_with_worker = with_defaults(
     {
       repo: _default_repo(),
       merge_queue_enabled: true,
@@ -225,9 +225,9 @@ pipeline test_repair_worker_dispatch_attaches_run_to_receipt(task) {
       },
     },
   )
-  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  let handle = _open_handle("repair-worker-attach")
-  let summary = sweep(
+  const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
+  const handle = _open_handle("repair-worker-attach")
+  const summary = sweep(
     {
       adapter: fixture_adapter(snapshot),
       policies: [policy_with_worker],
@@ -239,14 +239,14 @@ pipeline test_repair_worker_dispatch_attaches_run_to_receipt(task) {
     },
   )
   assert_eq(summary.pr_count, 1)
-  let receipt = summary.receipts[0]
+  const receipt = summary.receipts[0]
   // The classifier still says local_repair / run_local_verification —
   // the scheduler upgrades the action transparently and records it as
   // run_repair_worker in the commands list.
   assert_eq(receipt.classification.state, "local_repair")
   assert_eq(receipt.classification.action, "run_local_verification")
   assert_eq(len(receipt.commands_run), 1)
-  let cmd = receipt.commands_run[0]
+  const cmd = receipt.commands_run[0]
   assert_eq(cmd.action, "run_repair_worker")
   assert_eq(cmd.bundle_kind, "ci_failure")
   assert_eq(cmd.status, "completed")
@@ -262,7 +262,7 @@ pipeline test_repair_worker_dispatch_attaches_run_to_receipt(task) {
 }
 
 pipeline test_repair_worker_blocked_when_human_required(task) {
-  let policy = with_defaults(
+  const policy = with_defaults(
     {
       repo: _default_repo(),
       merge_queue_enabled: true,
@@ -271,14 +271,14 @@ pipeline test_repair_worker_blocked_when_human_required(task) {
       repair_worker: {enabled: true, handles_kinds: ["ci_failure"], require_human_for: ["semantic_repair"]},
     },
   )
-  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  let handle = _open_handle("repair-worker-blocked")
-  var executor_calls = 0
-  let executor = { _bundle, _options ->
+  const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
+  const handle = _open_handle("repair-worker-blocked")
+  let executor_calls = 0
+  const executor = { _bundle, _options ->
     executor_calls = executor_calls + 1
     {ok: true, output: _ok_repair_output(), raw: "should_not_run"}
   }
-  let summary = sweep(
+  const summary = sweep(
     {
       adapter: fixture_adapter(snapshot),
       policies: [policy],
@@ -289,8 +289,8 @@ pipeline test_repair_worker_blocked_when_human_required(task) {
       repair_extras_for: { _obs -> {allowed_write_scope: ["src/**"]} },
     },
   )
-  let receipt = summary.receipts[0]
-  let cmd = receipt.commands_run[0]
+  const receipt = summary.receipts[0]
+  const cmd = receipt.commands_run[0]
   assert_eq(cmd.status, "blocked_pending_approval")
   assert(cmd.blocking_actions.contains("semantic_repair"))
   assert_eq(executor_calls, 0)
@@ -299,7 +299,7 @@ pipeline test_repair_worker_blocked_when_human_required(task) {
 
 pipeline test_repair_worker_disabled_falls_back_to_local_verify(task) {
   // Policy without repair_worker block keeps the existing path working.
-  let policy = with_defaults(
+  const policy = with_defaults(
     {
       repo: _default_repo(),
       merge_queue_enabled: true,
@@ -307,9 +307,9 @@ pipeline test_repair_worker_disabled_falls_back_to_local_verify(task) {
       local_verification: [{name: "tests", command: "true"}],
     },
   )
-  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  let handle = _open_handle("repair-worker-disabled")
-  let summary = sweep(
+  const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
+  const handle = _open_handle("repair-worker-disabled")
+  const summary = sweep(
     {
       adapter: fixture_adapter(snapshot),
       policies: [policy],
@@ -318,14 +318,14 @@ pipeline test_repair_worker_disabled_falls_back_to_local_verify(task) {
       sweep_id: "test-repair-disabled",
     },
   )
-  let receipt = summary.receipts[0]
-  let cmd = receipt.commands_run[0]
+  const receipt = summary.receipts[0]
+  const cmd = receipt.commands_run[0]
   assert_eq(cmd.action, "run_local_verification")
   assert_eq(receipt.repair_run, nil)
 }
 
 pipeline test_repair_worker_validators_fail_writes_outside_scope(task) {
-  let policy = with_defaults(
+  const policy = with_defaults(
     {
       repo: _default_repo(),
       merge_queue_enabled: true,
@@ -339,10 +339,10 @@ pipeline test_repair_worker_validators_fail_writes_outside_scope(task) {
       },
     },
   )
-  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  let handle = _open_handle("repair-worker-violations")
-  let bad_output = _ok_repair_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
-  let summary = sweep(
+  const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
+  const handle = _open_handle("repair-worker-violations")
+  const bad_output = _ok_repair_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
+  const summary = sweep(
     {
       adapter: fixture_adapter(snapshot),
       policies: [policy],
@@ -353,8 +353,8 @@ pipeline test_repair_worker_validators_fail_writes_outside_scope(task) {
       repair_extras_for: { _obs -> {allowed_write_scope: ["src/**"]} },
     },
   )
-  let receipt = summary.receipts[0]
-  let cmd = receipt.commands_run[0]
+  const receipt = summary.receipts[0]
+  const cmd = receipt.commands_run[0]
   assert_eq(cmd.status, "validators_failed")
   assert_eq(receipt.repair_run.status, "validators_failed")
   assert(receipt.repair_run.validation_errors[0].contains("unexpected write scope"))

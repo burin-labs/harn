@@ -17,18 +17,18 @@ hinges on), and `no_compact` (a block marked keep-verbatim).
 ```harn,ignore
 import { pin, pin_reminder, with_pin_roots, pin_compaction_policy } from "std/agent/pins"
 
-let pins = [
+const pins = [
   pin("goal", "Ship the auth migration", {dedupe_key: "pin/goal"}),
   pin("artifact_ref", "src/auth/session.rs"),
 ]
 
 // (1) Survive compaction by construction: inject each pin as a
 //     preserve_on_compact reminder, or hand the summarizer a preserve policy.
-let policy = pin_compaction_policy(pins)
+const policy = pin_compaction_policy(pins)
 
 // (2) Double as reachability-GC roots: any stale tool result that references a
 //     pinned path/identifier is kept, not reclaimed.
-let projected = transcript_project(t, with_pin_roots({policy: "reachability_gc"}, pins))
+const projected = transcript_project(t, with_pin_roots({policy: "reachability_gc"}, pins))
 ```
 
 `pin(kind, content, opts?)` validates the kind and normalizes the value;
@@ -43,7 +43,7 @@ Hosts that emit a literal `[no-compact]` heading marker can convert it to a pin:
 ```harn,ignore
 import { recognize_no_compact } from "std/agent/pins"
 
-let maybe_pin = recognize_no_compact("## Session goal [no-compact]\nObjective: X")
+const maybe_pin = recognize_no_compact("## Session goal [no-compact]\nObjective: X")
 ```
 
 `recognize_no_compact` returns a `no_compact` pin with the marker stripped, or
@@ -67,7 +67,7 @@ machine-checkable (a deterministic floor) instead of LLM-judged.
 ```harn,ignore
 import { goal, with_goal, goal_judge, goal_check, goal_reloop } from "std/agent/goal"
 
-let g = goal({
+const g = goal({
   objective: "Fix the flaky login test",
   success_criteria: [
     "the suite passes twice in a row",
@@ -78,10 +78,10 @@ let g = goal({
 })
 
 // Render the goal into every outbound request (existing fragment channel):
-let result = agent_loop("Proceed.", nil, with_goal({provider: "anthropic", done_judge: goal_judge(g)}, g))
+const result = agent_loop("Proceed.", nil, with_goal({provider: "anthropic", done_judge: goal_judge(g)}, g))
 
 // The machine-checkable floor:
-let floor = goal_check(g, {ci_green: false})   // {done: false, unmet: ["green"], ...}
+const floor = goal_check(g, {ci_green: false})   // {done: false, unmet: ["green"], ...}
 ```
 
 - `with_goal(opts, goal)` renders the objective, criteria, and constraints into

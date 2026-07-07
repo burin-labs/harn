@@ -3,17 +3,17 @@ pipeline default() {
   // no field type — identical to `opts?.count ?? 0` / `opts?.label ?? "x"`. The
   // annotations below type-check only because `count` infers `int` and `label`
   // infers `string`.
-  let opts = {}
-  let {count = 0, label = "x"} = opts
-  let n: int = count
-  let s: string = label
+  const opts = {}
+  const {count = 0, label = "x"} = opts
+  const n: int = count
+  const s: string = label
   __io_println(n)
   __io_println(s)
   // Inference from a typed (shape) source: `port` is `int`, `host` is `string`.
-  let cfg = {host: "localhost", port: 8080}
-  let {host = "0.0.0.0", port = 80} = cfg
-  let h: string = host
-  let p: int = port
+  const cfg = {host: "localhost", port: 8080}
+  const {host = "0.0.0.0", port = 80} = cfg
+  const h: string = host
+  const p: int = port
   __io_println(h)
   __io_println(p)
 }

@@ -1,14 +1,14 @@
 import { with_llm_script } from "std/testing"
 
 fn delegated_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate",
     "Start a nested child agent.",
     {
       handler: { _args ->
-        let child = sub_agent_run(
+        const child = sub_agent_run(
           "Nested child should be rejected by the remaining recursion budget.",
           {provider: "mock", max_iterations: 1},
         )
@@ -30,7 +30,7 @@ pipeline main() {
   with_llm_script(
     [{tool_calls: [{id: "delegate_1", name: "delegate", arguments: {}}]}],
     { ->
-      let parent = agent_loop(
+      const parent = agent_loop(
         "Ask the tool to delegate.",
         nil,
         {
@@ -44,7 +44,7 @@ pipeline main() {
       )
       __io_println(contains(parent?.tools?.successful ?? [], "delegate"))
       __io_println(len(parent?.tools?.rejected ?? []) == 0)
-      let flow = workflow_graph(
+      const flow = workflow_graph(
         {
           name: "budgeted_workflow",
           entry: "act",
@@ -60,9 +60,9 @@ pipeline main() {
           edges: [],
         },
       )
-      let workflow = workflow_execute("Nested workflow stage should be rejected.", flow, [], {max_steps: 1})
-      let stage = workflow?.run?.stages[0]
-      let artifact = stage?.artifacts[0]?.data
+      const workflow = workflow_execute("Nested workflow stage should be rejected.", flow, [], {max_steps: 1})
+      const stage = workflow?.run?.stages[0]
+      const artifact = stage?.artifacts[0]?.data
       __io_println(stage?.status == "failed")
       __io_println(stage?.outcome == "blocked")
       __io_println(stage?.branch == "failed")

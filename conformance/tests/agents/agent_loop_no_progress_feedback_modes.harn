@@ -2,7 +2,7 @@ import { llm_text, with_llm_script } from "std/testing"
 import { agent_loop } from "../../../crates/harn-stdlib/src/stdlib/agent/loop.harn"
 
 fn note_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -18,7 +18,7 @@ fn note_tools() {
 }
 
 fn failing_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "explode",
@@ -47,7 +47,7 @@ pipeline default() {
       llm_text("<user_response>done</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      let text_result = agent_loop(
+      const text_result = agent_loop(
         "Write notes.txt.",
         nil,
         {
@@ -60,7 +60,7 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let text_retry = messages_for_streak_retry(llm_mock_calls())
+      const text_retry = messages_for_streak_retry(llm_mock_calls())
       __io_println("text.status=" + text_result.status)
       __io_println("text.has_streak=" + to_string(contains(text_retry, "no_progress_streak")))
       __io_println("text.has_tool_call_tag=" + to_string(contains(text_retry, "<tool_call>")))
@@ -75,7 +75,7 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      let native_result = agent_loop(
+      const native_result = agent_loop(
         "Write notes.txt.",
         nil,
         {
@@ -89,7 +89,7 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let native_retry = messages_for_streak_retry(llm_mock_calls())
+      const native_retry = messages_for_streak_retry(llm_mock_calls())
       __io_println("native.status=" + native_result.status)
       __io_println("native.has_streak=" + to_string(contains(native_retry, "no_progress_streak")))
       __io_println(
@@ -107,7 +107,7 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      let rejected_result = agent_loop(
+      const rejected_result = agent_loop(
         "Call the failing tool twice, then finish.",
         nil,
         {
@@ -121,7 +121,7 @@ pipeline default() {
           tools: failing_tools(),
         },
       )
-      let rejected_retry = json_stringify(llm_mock_calls()[2].messages)
+      const rejected_retry = json_stringify(llm_mock_calls()[2].messages)
       __io_println("rejected.status=" + rejected_result.status)
       __io_println(
         "rejected.has_failure=" + to_string(contains(rejected_retry, "boom from tool handler")),

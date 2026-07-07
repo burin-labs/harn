@@ -4,7 +4,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("<user_response>Visible answer.</user_response>##DONE##")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "finish cleanly",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 3, done_sentinel: "##DONE##"},

@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let nums = [3, 1, 4, 1, 5, 9]
+  const nums = [3, 1, 4, 1, 5, 9]
   log(nums.sort())
   log(nums.reverse())
   log([1, 2, 3].join(", "))

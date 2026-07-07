@@ -51,16 +51,16 @@ pub fn defaults() {
  * `defaults()` so the caller only has to fill in what it knows.
  */
 pub fn build(args) {
-  let d = defaults()
-  let kind = args.kind ?? "ci_failure"
-  let parent = {
+  const d = defaults()
+  const kind = args.kind ?? "ci_failure"
+  const parent = {
     sweep_id: args.parent?.sweep_id ?? "",
     repo: args.parent?.repo ?? args.repo ?? "",
     pr_number: args.parent?.pr_number ?? args.pr_number ?? 0,
     prior_state: args.parent?.prior_state ?? "discovered",
     classification_reason: args.parent?.classification_reason ?? "",
   }
-  let push_target = {
+  const push_target = {
     remote: args.push_target?.remote ?? d.push_target.remote,
     branch: args.push_target?.branch ?? args.head_ref ?? d.push_target.branch,
     force_with_lease: args.push_target?.force_with_lease ?? d.push_target.force_with_lease,

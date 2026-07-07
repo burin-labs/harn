@@ -10,7 +10,7 @@ pipeline default() {
       llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}"),
     ],
     { ->
-      let r = llm_call(
+      const r = llm_call(
         "Grade this",
         nil,
         {

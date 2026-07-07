@@ -7,7 +7,7 @@ fn __input_guardrail_bool(value, fallback) {
   if type_of(value) == "bool" {
     return value
   }
-  let normalized = lowercase(trim(to_string(value)))
+  const normalized = lowercase(trim(to_string(value)))
   if contains(
     ["true", "yes", "y", "1", "block", "blocked", "deny", "halt", "tripwire", "unsafe"],
     normalized,
@@ -21,7 +21,7 @@ fn __input_guardrail_bool(value, fallback) {
 }
 
 fn __input_guardrail_action(value) {
-  let normalized = lowercase(trim(to_string(value ?? "")))
+  const normalized = lowercase(trim(to_string(value ?? "")))
   if contains(["block", "blocked", "deny", "halt", "stop", "tripwire"], normalized) {
     return "tripwire"
   }
@@ -33,7 +33,7 @@ fn __input_guardrail_action(value) {
 
 fn __input_guardrail_reason(raw, fallback) {
   if type_of(raw) == "string" {
-    let text = trim(raw)
+    const text = trim(raw)
     if text != "" {
       return text
     }
@@ -42,7 +42,7 @@ fn __input_guardrail_reason(raw, fallback) {
     return fallback
   }
   for key in ["reason", "message", "evidence", "rationale", "explanation"] {
-    let value = trim(to_string(raw[key] ?? ""))
+    const value = trim(to_string(raw[key] ?? ""))
     if value != "" {
       return value
     }
@@ -51,7 +51,7 @@ fn __input_guardrail_reason(raw, fallback) {
 }
 
 fn __input_guardrail_confidence(value) {
-  let parsed = to_float(value ?? 0.0)
+  const parsed = to_float(value ?? 0.0)
   if parsed == nil {
     return 0.0
   }
@@ -65,7 +65,7 @@ fn __input_guardrail_confidence(value) {
 }
 
 fn __input_guardrail_threshold(value) {
-  let threshold = to_float(value ?? 0.0)
+  const threshold = to_float(value ?? 0.0)
   if threshold == nil || threshold < 0.0 || threshold > 1.0 {
     throw "agent_input_guardrail: confidence_threshold must be between 0.0 and 1.0"
   }
@@ -86,8 +86,8 @@ fn __input_guardrail_schema() {
 }
 
 fn __input_guardrail_prompt(payload, opts) {
-  let policy = trim(to_string(opts?.policy ?? opts?.system ?? ""))
-  let prefix = if policy == "" {
+  const policy = trim(to_string(opts?.policy ?? opts?.system ?? ""))
+  const prefix = if policy == "" {
     "Classify whether the user request should trip an input guardrail before an agent spends a main model turn."
   } else {
     policy
@@ -120,20 +120,20 @@ fn __input_guardrail_context_value(raw, context, key, fallback = nil) {
  * @api_stability: internal
  */
 pub fn __agent_input_guardrail_normalize(raw, opts = nil, context = nil) {
-  let options = opts ?? {}
-  let threshold_source = options?.confidence_threshold
+  const options = opts ?? {}
+  const threshold_source = options?.confidence_threshold
     ?? if type_of(raw) == "dict" {
     raw?.confidence_threshold ?? raw?.threshold
   } else {
     nil
   }
-  let threshold = __input_guardrail_threshold(threshold_source)
-  let action = if type_of(raw) == "dict" {
+  const threshold = __input_guardrail_threshold(threshold_source)
+  const action = if type_of(raw) == "dict" {
     __input_guardrail_action(raw?.action ?? raw?.verdict ?? raw?.label)
   } else {
     ""
   }
-  let explicit = if type_of(raw) == "dict" {
+  const explicit = if type_of(raw) == "dict" {
     raw?.tripwire ?? raw?.blocked ?? raw?.halt ?? raw?.unsafe ?? raw?.flagged
   } else if type_of(raw) == "bool" {
     raw
@@ -142,26 +142,26 @@ pub fn __agent_input_guardrail_normalize(raw, opts = nil, context = nil) {
   } else {
     false
   }
-  let confidence = if type_of(raw) == "dict" && raw.confidence == nil {
+  const confidence = if type_of(raw) == "dict" && raw.confidence == nil {
     1.0
   } else if type_of(raw) == "dict" {
     __input_guardrail_confidence(raw.confidence)
   } else {
     1.0
   }
-  let action_tripwire = if action == "" {
+  const action_tripwire = if action == "" {
     false
   } else {
     action == "tripwire"
   }
-  let raw_tripwire = __input_guardrail_bool(explicit, action_tripwire)
-  let tripwire = raw_tripwire && confidence >= threshold
-  let fallback_reason = if tripwire {
+  const raw_tripwire = __input_guardrail_bool(explicit, action_tripwire)
+  const tripwire = raw_tripwire && confidence >= threshold
+  const fallback_reason = if tripwire {
     "input guardrail tripwire"
   } else {
     "input guardrail allowed"
   }
-  let label = if type_of(raw) == "dict" {
+  const label = if type_of(raw) == "dict" {
     trim(to_string(raw?.label ?? raw?.category ?? action ?? ""))
   } else if tripwire {
     "tripwire"
@@ -190,7 +190,7 @@ pub fn __agent_input_guardrail_normalize(raw, opts = nil, context = nil) {
  * @api_stability: internal
  */
 pub fn __agent_input_guardrail_fail_open(err, opts = nil, context = nil) {
-  let options = opts ?? {}
+  const options = opts ?? {}
   if options?.fail_open ?? true {
     return {
       tripwire: false,
@@ -222,25 +222,25 @@ pub fn __agent_input_guardrail_fail_open(err, opts = nil, context = nil) {
  * @example: agent_loop(task, nil, base_opts + agent_input_guardrail(classifier))
  */
 pub fn agent_input_guardrail(classifier = nil, options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if type_of(opts) != "dict" {
     throw "agent_input_guardrail: options must be a dict or nil; got " + type_of(opts)
   }
   if classifier != nil && type_of(classifier) != "closure" {
     throw "agent_input_guardrail: classifier must be a closure or nil; got " + type_of(classifier)
   }
-  let enabled = opts?.enabled ?? true
+  const enabled = opts?.enabled ?? true
   if type_of(enabled) != "bool" {
     throw "agent_input_guardrail: enabled must be a bool"
   }
-  let model = trim(to_string(opts?.model ?? ""))
-  let provider = trim(to_string(opts?.provider ?? ""))
-  let classifier_kind = if classifier != nil {
+  const model = trim(to_string(opts?.model ?? ""))
+  const provider = trim(to_string(opts?.provider ?? ""))
+  const classifier_kind = if classifier != nil {
     "custom"
   } else {
     "llm"
   }
-  let guardrail = { payload ->
+  const guardrail = { payload ->
     if !enabled {
       return {
         tripwire: false,
@@ -270,7 +270,7 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
       )
     }
     let schema = opts?.output_schema ?? __input_guardrail_schema()
-    var llm_opts = {
+    let llm_opts = {
       output_schema: schema,
       max_tokens: opts?.max_tokens ?? 256,
       temperature: opts?.temperature ?? 0.0,
@@ -326,6 +326,6 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
  * @example: agent_input_guardrail_check(task, classifier)
  */
 pub fn agent_input_guardrail_check(task, classifier = nil, options = nil) {
-  let bundle = agent_input_guardrail(classifier, options)
+  const bundle = agent_input_guardrail(classifier, options)
   return bundle.input_guardrail({task: task, user_message: task, messages: [], recent_context: []})
 }

@@ -6,12 +6,12 @@ import { llm_text, with_llm_script } from "std/testing"
  * `llm_call_safe` but with `.data` pre-unwrapped.
  */
 pipeline default() {
-  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   // Success path: parsed data surfaces in `.data`, error is nil.
   with_llm_script(
     [llm_text("{\"verdict\": \"PASS\"}")],
     { ->
-      let ok = llm_call_structured_safe("Grade", schema, {provider: "mock"})
+      const ok = llm_call_structured_safe("Grade", schema, {provider: "mock"})
       __io_println(ok.ok)
       __io_println(ok.data.verdict)
       __io_println(ok.error == nil)
@@ -20,7 +20,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"other\": \"nope\"}")],
     { ->
-      let bad = llm_call_structured_safe("Grade", schema, {provider: "mock", retries: 0})
+      const bad = llm_call_structured_safe("Grade", schema, {provider: "mock", retries: 0})
       __io_println(bad.ok)
       __io_println(bad.data == nil)
       __io_println(bad.error.category)
@@ -29,7 +29,7 @@ pipeline default() {
   with_llm_script(
     [{error: {category: "rate_limit", message: "429 slow down"}}],
     { ->
-      let rate = llm_call_structured_safe("Grade", schema, {provider: "mock"})
+      const rate = llm_call_structured_safe("Grade", schema, {provider: "mock"})
       __io_println(rate.ok)
       __io_println(rate.error.category)
       __io_println(contains(rate.error.message, "429"))

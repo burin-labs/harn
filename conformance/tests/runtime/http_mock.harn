@@ -9,14 +9,14 @@ pipeline test(task) {
   // Register a mock for POST with glob pattern
   http_mock("POST", "https://api.example.com/*", {status: 201, body: "{\"created\": true}"})
   // Make a GET request - should hit mock
-  let resp = harness.net.get("https://api.example.com/users")
+  const resp = harness.net.get("https://api.example.com/users")
   assert_eq(resp.status, 200)
   log("get status: " + to_string(resp.status))
-  let data = json_parse(resp.body)
+  const data = json_parse(resp.body)
   assert_eq(len(data.users), 2)
   log("users: " + to_string(len(data.users)))
   // Make a POST request - should hit glob mock
-  let post_resp = harness.net
+  const post_resp = harness.net
     .post(
     "https://api.example.com/items",
     "{\"name\": \"test\"}",
@@ -25,7 +25,7 @@ pipeline test(task) {
   assert_eq(post_resp.status, 201)
   log("post status: " + to_string(post_resp.status))
   // Check recorded calls
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 2)
   assert_eq(calls[0].method, "GET")
   assert_eq(calls[1].method, "POST")
@@ -35,7 +35,7 @@ pipeline test(task) {
   log("calls: " + to_string(len(calls)))
   // Clear mocks
   http_mock_clear()
-  let cleared = http_mock_calls()
+  const cleared = http_mock_calls()
   assert_eq(len(cleared), 0)
   log("cleared")
 }

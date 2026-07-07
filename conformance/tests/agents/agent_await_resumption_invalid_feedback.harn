@@ -17,7 +17,7 @@ pipeline main() {
       {text: "Recovered. ##DONE##", input_tokens: 5, output_tokens: 2},
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Finish without parking.",
         nil,
         {
@@ -28,8 +28,8 @@ pipeline main() {
           max_iterations: 3,
         },
       )
-      let calls = llm_mock_calls()
-      let followup = json_stringify(calls[1]?.messages ?? [])
+      const calls = llm_mock_calls()
+      const followup = json_stringify(calls[1]?.messages ?? [])
       __io_println(result.status)
       __io_println(len(calls))
       __io_println(contains(followup, "HARN-SUS-002"))

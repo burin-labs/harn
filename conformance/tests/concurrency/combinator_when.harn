@@ -9,22 +9,22 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
 import { when } from "std/lifecycle/combinators"
 
 pipeline default() {
-  let cb = { harness, return_value ->
+  const cb = { harness, return_value ->
     harness.emit_audit("ran", {value: return_value})
     return return_value + "_handled"
   }
-  let is_truthy_seed = { _harness, return_value -> return return_value == "seed" }
-  let always_false = { _harness, _return_value -> return false }
+  const is_truthy_seed = { _harness, return_value -> return return_value == "seed" }
+  const always_false = { _harness, _return_value -> return false }
   pipeline_on_finish(
     { harness, return_value ->
-      let truthy_guard = when(is_truthy_seed, cb)
-      let truthy_result = truthy_guard(harness, return_value)
-      let truthy_audits = lifecycle_audit_log_take()
+      const truthy_guard = when(is_truthy_seed, cb)
+      const truthy_result = truthy_guard(harness, return_value)
+      const truthy_audits = lifecycle_audit_log_take()
       harness.stdio.println("truthy=" + truthy_result)
       harness.stdio.println("truthy_audit_kind=" + truthy_audits[0].kind)
-      let falsy_guard = when(always_false, cb)
-      let falsy_result = falsy_guard(harness, return_value)
-      let falsy_audits = lifecycle_audit_log_take()
+      const falsy_guard = when(always_false, cb)
+      const falsy_result = falsy_guard(harness, return_value)
+      const falsy_audits = lifecycle_audit_log_take()
       harness.stdio.println("falsy=" + falsy_result)
       harness.stdio.println("falsy_audit_count=" + to_string(len(falsy_audits)))
       return return_value

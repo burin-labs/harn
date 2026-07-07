@@ -1,7 +1,7 @@
 import "std/context"
 
 pipeline default() {
-  let primary = context_artifact(
+  const primary = context_artifact(
     {
       id: "parser-conventions",
       kind: "convention_fact",
@@ -23,7 +23,7 @@ pipeline default() {
       redaction: {sensitivity: "internal", redacted: true},
     },
   )
-  let duplicate = context_artifact(
+  const duplicate = context_artifact(
     {
       id: "parser-conventions-old",
       kind: "convention_fact",
@@ -38,7 +38,7 @@ pipeline default() {
       body: "Stale duplicate body.",
     },
   )
-  let digest = context_artifact_from_burin_digest(
+  const digest = context_artifact_from_burin_digest(
     ".burin/context-digests/parser.md",
     "# Parser digest\nUse Pratt parsing for expressions.",
     {
@@ -48,7 +48,7 @@ pipeline default() {
       metadata: {legacy_source: "scan"},
     },
   )
-  let merged = context_artifact_merge(
+  const merged = context_artifact_merge(
     primary,
     context_artifact(
       {
@@ -65,18 +65,18 @@ pipeline default() {
     ),
     {merge_body: true},
   )
-  let secret = context_artifact({id: "api-key", kind: "secret", body: "TOKEN<abc>", sensitivity: "secret"})
-  let redaction_override = context_artifact(
+  const secret = context_artifact({id: "api-key", kind: "secret", body: "TOKEN<abc>", sensitivity: "secret"})
+  const redaction_override = context_artifact(
     {id: "secret-option", kind: "secret", body: "TOKEN<option>", sensitivity: "internal"},
     {redaction: {sensitivity: "secret", redacted: false}},
   )
-  let xml_escape = context_artifact({id: "xml", kind: "note", body: "Use <span> tags."})
-  let ctx_with_artifact = context_add_artifact(context([], {artifacts: []}), primary)
-  let same_body_a = context_artifact({kind: "note", path: "a.md", body: "shared body"})
-  let same_body_b = context_artifact({kind: "note", path: "b.md", body: "shared body"})
-  let overlap_hash_a = context_artifact({kind: "note", body: "left", source_hashes: ["sha256:left", "sha256:shared"]})
-  let overlap_hash_b = context_artifact({kind: "note", body: "right", source_hashes: ["sha256:right", "sha256:shared"]})
-  let budgeted = context_artifact_budget(
+  const xml_escape = context_artifact({id: "xml", kind: "note", body: "Use <span> tags."})
+  const ctx_with_artifact = context_add_artifact(context([], {artifacts: []}), primary)
+  const same_body_a = context_artifact({kind: "note", path: "a.md", body: "shared body"})
+  const same_body_b = context_artifact({kind: "note", path: "b.md", body: "shared body"})
+  const overlap_hash_a = context_artifact({kind: "note", body: "left", source_hashes: ["sha256:left", "sha256:shared"]})
+  const overlap_hash_b = context_artifact({kind: "note", body: "right", source_hashes: ["sha256:right", "sha256:shared"]})
+  const budgeted = context_artifact_budget(
     [duplicate, primary, digest],
     {
       role: "implementer",
@@ -117,7 +117,7 @@ pipeline default() {
   __io_println(
     contains(context_render_artifacts([primary], {variant: "plain"}), "Context Artifacts:"),
   )
-  let packed = assemble_context(
+  const packed = assemble_context(
     {
       artifacts: budgeted.artifacts,
       budget_tokens: 40,
@@ -130,7 +130,7 @@ pipeline default() {
   __io_println(context_render_artifacts([primary], {variant: "markdown"}))
   __io_println(context_render_artifacts([primary], {capabilities: {prefers_xml_scaffolding: true}}))
   __io_println(context_render_artifacts([primary, digest], {variant: "compact", max_tokens: 100}))
-  let prompt = prompt_compose(
+  const prompt = prompt_compose(
     "Fix parser spans.",
     context([], {artifacts: [primary]}),
     {capabilities: {prefers_markdown_scaffolding: true}, task_label: "Parser Task"},

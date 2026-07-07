@@ -6,9 +6,9 @@ import "std/agent/hypothesis"
  * in-place status update, unknown-id handling, and delete.
  */
 pipeline default() {
-  let root = path_join(".harn", "tmp", "harn-hyp-" + uuid())
-  let sid = "agent.hypotheses"
-  let o = {root: root}
+  const root = path_join(".harn", "tmp", "harn-hyp-" + uuid())
+  const sid = "agent.hypotheses"
+  const o = {root: root}
   hypothesis_open(sid, {id: "h1", statement: "flaky test is timing"}, o)
   hypothesis_open(sid, {id: "h2", statement: "cache bug", status: "verifying"}, o)
   __io_println(hypothesis_get(sid, "h1", o).status)

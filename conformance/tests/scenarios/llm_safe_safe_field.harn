@@ -4,7 +4,7 @@
 import { safe_field } from "std/llm/safe"
 
 pipeline default() {
-  let env = {a: nil, B: "hi"}
+  const env = {a: nil, B: "hi"}
   __io_println(safe_field(env, ["a", "b"], "miss"))
   __io_println(safe_field({}, ["x"], "miss"))
   __io_println(safe_field({Verdict: ""}, ["verdict"], "skipped"))

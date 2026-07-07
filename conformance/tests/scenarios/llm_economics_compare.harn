@@ -4,7 +4,7 @@
 import { compare_model_costs } from "std/llm/economics"
 
 pipeline default() {
-  let ranked = compare_model_costs(
+  const ranked = compare_model_costs(
     [
       "claude-sonnet-4-20250514",
       "gpt-4o",
@@ -25,7 +25,7 @@ pipeline default() {
     )
   }
   // Dict candidate form with explicit provider override and `calls` multiplier.
-  let scaled = compare_model_costs(
+  const scaled = compare_model_costs(
     [
       {provider: "anthropic", model: "claude-sonnet-4-20250514"},
       {provider: "openai", model: "gpt-4o-mini"},

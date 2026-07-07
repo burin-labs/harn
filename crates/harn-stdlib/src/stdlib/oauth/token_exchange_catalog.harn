@@ -4,23 +4,23 @@
  * Keep this module declarative: helpers that interpret rows live in
  * `std/oauth/token_exchange`.
  */
-let __JWT = "urn:ietf:params:oauth:token-type:jwt"
+const __JWT = "urn:ietf:params:oauth:token-type:jwt"
 
-let __ACCESS_TOKEN = "urn:ietf:params:oauth:token-type:access_token"
+const __ACCESS_TOKEN = "urn:ietf:params:oauth:token-type:access_token"
 
-let __REFRESH_TOKEN = "urn:ietf:params:oauth:token-type:refresh_token"
+const __REFRESH_TOKEN = "urn:ietf:params:oauth:token-type:refresh_token"
 
-let __ID_TOKEN = "urn:ietf:params:oauth:token-type:id_token"
+const __ID_TOKEN = "urn:ietf:params:oauth:token-type:id_token"
 
-let __SAML2 = "urn:ietf:params:oauth:token-type:saml2"
+const __SAML2 = "urn:ietf:params:oauth:token-type:saml2"
 
-let __ID_JAG = "urn:ietf:params:oauth:token-type:id-jag"
+const __ID_JAG = "urn:ietf:params:oauth:token-type:id-jag"
 
-let __TXN_TOKEN = "urn:ietf:params:oauth:token-type:txn_token"
+const __TXN_TOKEN = "urn:ietf:params:oauth:token-type:txn_token"
 
-let __SELF_SIGNED = "urn:ietf:params:oauth:token-type:self_signed"
+const __SELF_SIGNED = "urn:ietf:params:oauth:token-type:self_signed"
 
-let __UNSIGNED_JSON = "urn:ietf:params:oauth:token-type:unsigned_json"
+const __UNSIGNED_JSON = "urn:ietf:params:oauth:token-type:unsigned_json"
 
 /**
  * token_exchange_capability_rows returns the shipped capability catalog.

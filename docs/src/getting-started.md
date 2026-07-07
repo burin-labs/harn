@@ -150,7 +150,7 @@ runtime executes the `default` pipeline (or the first one declared):
 
 ```harn
 pipeline default(task) {
-  let name = "Harn"
+  const name = "Harn"
   log("Hello from ${name}!")
 }
 ```
@@ -182,7 +182,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ```harn
-let response = llm_call(
+const response = llm_call(
   "Explain quicksort in two sentences.",
   "You are a computer science tutor.",
   {provider: "anthropic", model: "claude-sonnet-5"}
@@ -206,8 +206,8 @@ For production callers, wrap with retry middleware from
 ```harn,ignore
 import {default_llm_caller, with_retry} from "std/llm/handlers"
 
-let caller = with_retry(default_llm_caller(), {max_attempts: 4})
-let result = agent_loop(task, system, {llm_caller: caller, loop_until_done: true})
+const caller = with_retry(default_llm_caller(), {max_attempts: 4})
+const result = agent_loop(task, system, {llm_caller: caller, loop_until_done: true})
 ```
 
 See [Composable callers and middleware](./stdlib/llm-handlers.md) for
@@ -294,7 +294,7 @@ And call it from a program:
 
 ```harn,ignore
 fn main(harness: Harness) {
-  let pages = mcp_call(mcp.notion, "search", {query: "release notes"})
+  const pages = mcp_call(mcp.notion, "search", {query: "release notes"})
   harness.stdio.println(json_stringify_pretty(pages))
 }
 ```

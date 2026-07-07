@@ -2,7 +2,7 @@ import "std/triggers"
 
 /** Handle a Notion poll or webhook change notification. */
 pub fn on_database_change(event: TriggerEvent) -> dict {
-  let raw = event.provider_payload.raw
+  const raw = event.provider_payload.raw
   return {
     action: "notion_database_change",
     kind: event.kind,

@@ -9,7 +9,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Still working."), llm_text("Finished. ##DONE##")],
     { ->
-      let observe_caller = { call ->
+      const observe_caller = { call ->
         __io_println("turn=" + to_string(call.turn.iteration) + " attempt=" + to_string(call.turn.attempt))
         let result = try {
           llm_call(call.prompt, call.system, call.opts)
@@ -19,7 +19,7 @@ pipeline default() {
         }
         return {ok: false, status: "exception", error: unwrap_err(result)}
       }
-      let result = agent_loop(
+      const result = agent_loop(
         "finish",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 2, llm_caller: observe_caller},

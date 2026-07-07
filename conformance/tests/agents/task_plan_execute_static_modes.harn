@@ -4,12 +4,12 @@ import { clear_host_mocks, mock_host_response } from "std/testing"
 pipeline main() {
   clear_host_mocks()
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
-  let argv = if platform() == "windows" {
+  const argv = if platform() == "windows" {
     ["cmd", "/C", "echo|set /p=task-plan-command-ok"]
   } else {
     ["printf", "task-plan-command-ok"]
   }
-  let plan = {
+  const plan = {
     schema_version: "1",
     objective: "Execute static task-plan modes",
     entry: "gate",
@@ -33,11 +33,11 @@ pipeline main() {
     edges: [{from: "gate", to: "cmd", branch: "approved"}, {from: "cmd", to: "compact"}],
     capabilities: {tools: ["run"], side_effect_level: "runs_commands"},
   }
-  let compiled = task_plan_compile(plan)
+  const compiled = task_plan_compile(plan)
   __io_println(compiled.ok)
-  let validation = workflow_validate(compiled.workflow)
+  const validation = workflow_validate(compiled.workflow)
   __io_println(validation.valid)
-  let result = workflow_execute(
+  const result = workflow_execute(
     "Execute static task-plan modes",
     compiled.workflow,
     [{id: "seed", kind: "summary", text: "seed artifact"}],
@@ -45,9 +45,9 @@ pipeline main() {
   )
   __io_println(result.status)
   __io_println(len(result.run.stages))
-  let gate = result.run.stages[0]
-  let cmd = result.run.stages[1]
-  let compact = result.run.stages[2]
+  const gate = result.run.stages[0]
+  const cmd = result.run.stages[1]
+  const compact = result.run.stages[2]
   __io_println(gate.branch)
   __io_println(gate.artifacts[0].data.approval_id)
   __io_println(cmd.outcome)

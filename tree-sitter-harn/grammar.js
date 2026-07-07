@@ -349,13 +349,14 @@ module.exports = grammar({
         field("value", choice($.struct_construct, $._expression))
       ),
 
-    // Compile-time-evaluated binding (`const NAME [: Type] = EXPR`).
-    // The right-hand side must fold under the bounded const-evaluator;
-    // see issue #1791 for the sandbox rules.
+    // Immutable binding (`const PATTERN [: Type] = EXPR`). The default,
+    // immutable binding form; when the initializer is in the pure const-eval
+    // subset over a plain identifier it is folded at compile time. A
+    // destructuring pattern is permitted (only identifier bindings fold).
     const_binding: ($) =>
       seq(
         "const",
-        field("name", $.identifier),
+        field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
         field("value", choice($.struct_construct, $._expression))

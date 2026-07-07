@@ -10,18 +10,18 @@ import {
 } from "std/connectors/shared"
 
 pipeline test(task) {
-  let signature = "sha256=" + hmac_sha256("secret", "payload")
+  const signature = "sha256=" + hmac_sha256("secret", "payload")
   __io_println(verify_hmac_signature("payload", signature, "secret", "sha256"))
   __io_println(verify_hmac_signature("payload", signature, "wrong", "sha256"))
-  let legacy_signature = "sha1=" + hmac_sha1("secret", "payload")
+  const legacy_signature = "sha1=" + hmac_sha1("secret", "payload")
   __io_println(verify_hmac_signature("payload", legacy_signature, "secret", "sha1"))
   __io_println(
     verify_hmac_signature("payload", legacy_signature, "secret", "sha1", {allow_legacy_sha1: true}),
   )
-  let root = project_root() ?? cwd()
-  let private_key = harness.fs.read_text(path_join(root, "conformance/helpers/github_app_test_key.pem"))
-  let token = jwt_sign("RS256", {iss: "issuer", aud: "audience", exp: 4102444800}, private_key)
-  let jwt_result = verify_jwt(
+  const root = project_root() ?? cwd()
+  const private_key = harness.fs.read_text(path_join(root, "conformance/helpers/github_app_test_key.pem"))
+  const token = jwt_sign("RS256", {iss: "issuer", aud: "audience", exp: 4102444800}, private_key)
+  const jwt_result = verify_jwt(
     token,
     nil,
     {
@@ -40,16 +40,16 @@ pipeline test(task) {
   )
   __io_println(jwt_result.ok)
   __io_println(jwt_result.claims.iss)
-  let config = {capacity: 1, refill_tokens: 1, refill_interval_ms: 1000}
-  let first = rate_limit_token_bucket(nil, config, 1000)
-  let second = rate_limit_token_bucket(first.state, config, 1000)
-  let third = rate_limit_token_bucket(second.state, config, 2000)
+  const config = {capacity: 1, refill_tokens: 1, refill_interval_ms: 1000}
+  const first = rate_limit_token_bucket(nil, config, 1000)
+  const second = rate_limit_token_bucket(first.state, config, 1000)
+  const third = rate_limit_token_bucket(second.state, config, 2000)
   __io_println(first.allowed)
   __io_println(second.allowed)
   __io_println(second.retry_after_ms)
   __io_println(third.allowed)
-  let pages = [{results: [{id: "a"}], next_cursor: "page-2"}, {results: [{id: "b"}], next_cursor: nil}]
-  let paged = paginate_cursor(
+  const pages = [{results: [{id: "a"}], next_cursor: "page-2"}, {results: [{id: "b"}], next_cursor: nil}]
+  const paged = paginate_cursor(
     "https://api.example/items",
     { _url, cursor ->
       if cursor == nil {
@@ -62,7 +62,7 @@ pipeline test(task) {
   __io_println(len(paged.items))
   __io_println(paged.items[1].id)
   __io_println(paged.complete)
-  let github_forge = unwrap(
+  const github_forge = unwrap(
     git_forge_pull_request_event(
       "github",
       {
@@ -84,11 +84,11 @@ pipeline test(task) {
   __io_println(github_forge.lifecycle)
   __io_println(github_forge.repository.full_name)
   __io_println(github_forge.pull_request.head_ref)
-  let github_writeback = git_forge_writeback_request(github_forge, "Preview ready")
+  const github_writeback = git_forge_writeback_request(github_forge, "Preview ready")
   __io_println(github_writeback.method)
   __io_println(github_writeback.params.owner + "/" + github_writeback.params.repo)
   __io_println(github_writeback.params.issue_number)
-  let gitlab_forge = unwrap(
+  const gitlab_forge = unwrap(
     git_forge_pull_request_event(
       "gitlab",
       {
@@ -110,7 +110,7 @@ pipeline test(task) {
   __io_println(gitlab_forge.lifecycle)
   __io_println(gitlab_forge.repository.full_name)
   __io_println(gitlab_forge.pull_request.number)
-  let gitea_forge = unwrap(
+  const gitea_forge = unwrap(
     git_forge_pull_request_event(
       "gitea",
       {
@@ -135,10 +135,10 @@ pipeline test(task) {
     "https://auth.example/token",
     {status: 200, body: "{\"access_token\":\"new-token\",\"expires_in\":3600}", headers: {}},
   )
-  let refreshed = oauth2_token_refresh("client-id", "client-secret", "refresh-token", "https://auth.example/token")
+  const refreshed = oauth2_token_refresh("client-id", "client-secret", "refresh-token", "https://auth.example/token")
   __io_println(refreshed.ok)
   __io_println(refreshed.access_token)
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   __io_println(contains(calls[0].body, "grant_type=refresh_token"))
   __io_println(calls[0].headers["content-type"])
 }

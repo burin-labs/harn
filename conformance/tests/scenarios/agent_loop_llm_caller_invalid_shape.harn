@@ -3,13 +3,13 @@
  * diagnostic from __validate_caller_result.
  */
 pipeline default() {
-  let bad_string_caller = { _call -> return "totally not a dict" }
-  let bad_value_caller = { _call -> return {ok: true, value: 42} }
-  let r1 = try {
+  const bad_string_caller = { _call -> return "totally not a dict" }
+  const bad_value_caller = { _call -> return {ok: true, value: 42} }
+  const r1 = try {
     agent_loop("hi", nil, {provider: "mock", llm_caller: bad_string_caller})
   }
   __io_println(unwrap_err(r1))
-  let r2 = try {
+  const r2 = try {
     agent_loop("hi", nil, {provider: "mock", llm_caller: bad_value_caller})
   }
   __io_println(unwrap_err(r2))

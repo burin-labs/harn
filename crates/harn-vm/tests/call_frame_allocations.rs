@@ -66,7 +66,7 @@ fn user_fn_loop(n: usize) -> String {
     format!(
         "pipeline t(task) {{\n\
          fn f(x) {{ return x + 1 }}\n\
-         var s = 0\n\
+         let s = 0\n\
          for i in 0 to {n} {{ s = s + f(i) }}\n\
          return s\n\
          }}"
@@ -78,7 +78,7 @@ fn user_fn_loop(n: usize) -> String {
 fn bare_loop(n: usize) -> String {
     format!(
         "pipeline t(task) {{\n\
-         var s = 0\n\
+         let s = 0\n\
          for i in 0 to {n} {{ s = s + (i + 1) }}\n\
          return s\n\
          }}"

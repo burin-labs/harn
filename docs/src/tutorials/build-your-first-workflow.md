@@ -27,7 +27,7 @@ That's the only prerequisite. The `mock` provider ships in the binary.
 The smallest useful thing is a single request. Save this as `fix.harn`:
 
 ```harn
-let answer = llm_call(
+const answer = llm_call(
   "The test test_add expects add(2, 2) == 4 but got 5. What's the likely bug?",
   "You are a careful Rust engineer.",
   {provider: "mock"},
@@ -58,7 +58,7 @@ it's done. You give it a task, a system prompt, and a set of tools. It owns the
 loop, the budget, and deciding when "done" means done.
 
 ```harn
-let result = agent_loop(
+const result = agent_loop(
   "Fix the failing test test_add in src/math.rs, then run the test to confirm.",
   "You are a senior engineer. Make the smallest change that turns the test green.",
   {provider: "mock", loop_until_done: true},
@@ -81,7 +81,7 @@ the ready-made `write_file` / `edit_file` / `run` set; the shape is:
 ```harn,ignore
 import { agent_edit_tools } from "std/agent/host_tools"
 
-let result = agent_loop(task, system, {
+const result = agent_loop(task, system, {
   provider: "ollama",
   model: "qwen3-coder",
   tools: agent_edit_tools(),
@@ -104,7 +104,7 @@ tries the fix, and a `verify` stage that runs the test and reads the exit code.
 ```harn
 import { workflow_stages } from "std/workflow/patterns"
 
-let graph = workflow_stages({
+const graph = workflow_stages({
   name: "fix-the-test",
   stages: [
     {id: "act", kind: "stage", mode: "agent", model_policy: {provider: "mock"}},
@@ -113,7 +113,7 @@ let graph = workflow_stages({
   ],
 })
 
-let run = workflow_execute("Fix the failing test test_add.", graph)
+const run = workflow_execute("Fix the failing test test_add.", graph)
 log(run.status)
 log(run.path)
 ```
@@ -145,7 +145,7 @@ slate.
 ```harn
 import { workflow_stages } from "std/workflow/patterns"
 
-let graph = workflow_stages({
+const graph = workflow_stages({
   name: "fix-the-test",
   stages: [
     {id: "act", kind: "stage", mode: "agent",
@@ -156,7 +156,7 @@ let graph = workflow_stages({
   ],
 })
 
-let run = workflow_execute("Fix the failing test test_add.", graph)
+const run = workflow_execute("Fix the failing test test_add.", graph)
 log(run.status)
 ```
 

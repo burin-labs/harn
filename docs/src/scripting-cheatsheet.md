@@ -14,8 +14,8 @@ literals, and triple-quoted `"""..."""` for multiline prose like
 system prompts:
 
 ```harn
-let greeting = "Hello, ${name}!"
-let prompt = """
+const greeting = "Hello, ${name}!"
+const prompt = """
 You are a strict grader.
 Emit exactly one verdict.
 """
@@ -32,13 +32,13 @@ source-relative prompt assets, and `render_string(template, bindings)`
 when the template should live inline in the module:
 
 ```harn
-let template = """
+const template = """
 pub fn {{ fn_name }}({{ for p in params }}{{ p }}{{ if !loop.last }}, {{ end }}{{ end }}) {
   return "{{ fn_name }}"
 }
 """
 
-let src = render_string(template, {
+const src = render_string(template, {
   fn_name: "hello",
   params: ["name", "title = nil"],
 })
@@ -54,9 +54,9 @@ See `prompt-templating.md` for the full reference.
 End-exclusive slicing works on strings and lists:
 
 ```harn
-let head = content[0:400]
-let tail = content[len(content) - 400:len(content)]
-let sub = xs[1:4]
+const head = content[0:400]
+const tail = content[len(content) - 400:len(content)]
+const sub = xs[1:4]
 ```
 
 `substring(s, start, end)` exists too. Its second argument is an
@@ -70,8 +70,8 @@ large source file is O(n²). To scan source text, materialize once with
 char) and index the resulting list, which is O(1):
 
 ```harn
-let cs = chars(src)
-var i = 0
+const cs = chars(src)
+let i = 0
 while i < cs.count {
   if cs[i] == "{" { /* ... */ }
   i = i + 1
@@ -84,7 +84,7 @@ while i < cs.count {
 argument, or a `return`:
 
 ```harn
-let body = if len(content) > 2400 {
+const body = if len(content) > 2400 {
   content[0:400] + "..." + content[len(content) - 400:len(content)]
 } else {
   content
@@ -98,16 +98,16 @@ let body = if len(content) > 2400 {
 `stream.collect`, `stream.fold`, or `stream.first` pulls from them.
 
 ```harn
-let first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
+const first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
 
-let tool_events = stream.collect(
+const tool_events = stream.collect(
   stream.filter(agent_events, { ev -> ev?.topic == "tool_call" }),
   {max: 100}
 )
 
-let winner = stream.first(stream.race(primary_stream, fallback_stream))
+const winner = stream.first(stream.race(primary_stream, fallback_stream))
 
-let total = stream.fold(
+const total = stream.fold(
   stream.merge(worker_a, worker_b, worker_c),
   0,
   { acc, item -> acc + item.cost }
@@ -126,11 +126,11 @@ compose retry / fallback / shadow / logging / budget behavior:
 ```harn,ignore
 import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
 
-let caller = compose([
+const caller = compose([
   with_retry({max_attempts: 4, base_ms: 250, backoff: "exponential"}),
 ])(default_llm_caller())
 
-let result = agent_loop(task, system, {
+const result = agent_loop(task, system, {
   loop_until_done: true,
   llm_caller: caller,
 })
@@ -151,7 +151,7 @@ functions defined in the same file — no wrapping in a getter fn
 needed:
 
 ```harn
-let GRADER_SYSTEM = """
+const GRADER_SYSTEM = """
 You are a strict grader...
 """
 
@@ -170,9 +170,9 @@ atomics: `atomic(0)`, `atomic_add(a, 1)`, `atomic_get(a)`.)
 ## Results and error handling
 
 ```harn
-let r = try { llm_call(prompt, nil, opts) }
+const r = try { llm_call(prompt, nil, opts) }
 // Optional chaining short-circuits on Result.Err.
-let text = r?.prose ?? "no response"
+const text = r?.prose ?? "no response"
 // Explicit error inspection.
 if unwrap_err(r) != "" {
   log("failed")
@@ -181,25 +181,25 @@ if unwrap_err(r) != "" {
 // `try/catch` also works as an expression — the whole form evaluates to
 // the try body's tail value on success or the catch handler's tail value
 // on a caught throw, so simple fallbacks don't need Result gymnastics.
-let prose = try { llm_call(prompt, nil, opts).prose } catch (e) { "fallback" }
+const prose = try { llm_call(prompt, nil, opts).prose } catch (e) { "fallback" }
 ```
 
 ## Concurrency
 
 ```harn,ignore
 // Spawn a task, collect its result.
-let h = spawn { long_work() }
-let value = await(h)
+const h = spawn { long_work() }
+const value = await(h)
 
 // parallel each: concurrent map over a list.
-let doubled = parallel each xs { x -> x * 2 }
+const doubled = parallel each xs { x -> x * 2 }
 
 // parallel settle: concurrent map that collects per-item Ok/Err.
-let outcome = parallel settle paths { p -> grade(p) }
+const outcome = parallel settle paths { p -> grade(p) }
 log(outcome.succeeded)
 
 // Cap in-flight workers so you don't overwhelm the backend.
-let results = parallel settle paths with { max_concurrent: 4 } { p ->
+const results = parallel settle paths with { max_concurrent: 4 } { p ->
   llm_call(p, nil, opts)
 }
 ```
@@ -252,10 +252,10 @@ args were given.
 ## Regex
 
 ```harn
-let matches  = regex_match("[0-9]+", "abc 42 def 7")
-let swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-let same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-let captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
+const matches  = regex_match("[0-9]+", "abc 42 def 7")
+const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+const same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 ```
 
 Both `regex_replace` and `regex_replace_all` replace every match;
@@ -264,7 +264,7 @@ both support `$1`, `$2`, `${name}` backrefs from the `regex` crate.
 ## LLM calls
 
 ```harn
-let r = llm_call(prompt, system, {
+const r = llm_call(prompt, system, {
   provider: "auto",        // infers from model prefix
   model: "local-gemma4-e4b",
   output_schema: schema,

@@ -5,14 +5,14 @@ pipeline default() {
   with_llm_script(
     [llm_text("Paris is the capital.")],
     { ->
-      let r1 = llm_call("What is the capital?", nil, {provider: "mock"})
+      const r1 = llm_call("What is the capital?", nil, {provider: "mock"})
       __io_println(r1.text)
     },
   )
   with_llm_script(
     [{tool_calls: [{name: "read_file", arguments: {path: "main.rs"}}]}],
     { ->
-      let r2 = llm_call("Read the file", nil, {provider: "mock"})
+      const r2 = llm_call("Read the file", nil, {provider: "mock"})
       __io_println(len(r2.tool_calls))
       __io_println(r2.tool_calls[0].name)
     },
@@ -20,7 +20,7 @@ pipeline default() {
   with_llm_script(
     [{text: "Checking file.", tool_calls: [{name: "search", arguments: {query: "test"}}]}],
     { ->
-      let r3 = llm_call("Search", nil, {provider: "mock"})
+      const r3 = llm_call("Search", nil, {provider: "mock"})
       __io_println(r3.text)
       __io_println(r3.tool_calls[0].name)
     },
@@ -30,7 +30,7 @@ pipeline default() {
     { ->
       __io_println(llm_call("a", nil, {provider: "mock"}).text)
       __io_println(llm_call("b", nil, {provider: "mock"}).text)
-      let fb = llm_call("hello world", nil, {provider: "mock"})
+      const fb = llm_call("hello world", nil, {provider: "mock"})
       __io_println(contains(fb.text, "Mock response"))
     },
   )
@@ -49,7 +49,7 @@ pipeline default() {
     { ->
       __io_println(llm_call("step once", nil, {provider: "mock"}).text)
       __io_println(llm_call("step twice", nil, {provider: "mock"}).text)
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(len(calls) > 0)
     },
   )

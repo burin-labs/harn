@@ -10,7 +10,7 @@
 import { agent_session_messages } from "std/agent/state"
 
 fn summarize(messages) {
-  var out = []
+  let out = []
   for msg in messages {
     out = out.push(to_string(msg?.role ?? "") + "=" + to_string(msg?.content ?? ""))
   }
@@ -18,7 +18,7 @@ fn summarize(messages) {
 }
 
 pipeline test() {
-  let caller = { call -> return {
+  const caller = { call -> return {
     ok: true,
     value: {
       text: "SEEN[" + summarize(call.opts.messages) + "]",
@@ -28,26 +28,26 @@ pipeline test() {
       output_tokens: 0,
     },
   } }
-  let history = [
+  const history = [
     {role: "user", content: "Remember this: the codeword is pixel."},
     {role: "assistant", content: "Understood, the codeword is pixel."},
   ]
-  let session = "agent-history-seed-conformance"
-  let result = agent_loop(
+  const session = "agent-history-seed-conformance"
+  const result = agent_loop(
     "What is the codeword?",
     nil,
     {session_id: session, provider: "mock", llm_caller: caller, history: history, max_iterations: 1},
   )
   // The first outbound request carried the seeded turns in order, ahead of the
   // fresh user question — exactly as `llm_call`'s `messages` array would.
-  let expected_first_call = "SEEN[user=Remember this: the codeword is pixel. | "
+  const expected_first_call = "SEEN[user=Remember this: the codeword is pixel. | "
     + "assistant=Understood, the codeword is pixel. | user=What is the codeword?]"
   assert(
     contains(result.visible_text, expected_first_call),
     "first LLM call must include seeded history in order; saw: " + result.visible_text,
   )
   // The seeded turns are ordinary transcript turns.
-  let transcript = agent_session_messages(session)
+  const transcript = agent_session_messages(session)
   assert(len(transcript) >= 3, "transcript should retain seeded turns plus the question")
   assert(transcript[0].role == "user", "seed turn 0 role")
   assert(transcript[0].content == "Remember this: the codeword is pixel.", "seed turn 0 content")
@@ -56,13 +56,13 @@ pipeline test() {
   assert(transcript[2].content == "What is the codeword?", "fresh user question content")
   // Blank-message shape: when `history` carries the latest user turn and the
   // task message is empty, no trailing empty user turn is appended.
-  let blank_history = [
+  const blank_history = [
     {role: "user", content: "Remember: the codeword is pixel."},
     {role: "assistant", content: "Understood."},
     {role: "user", content: "What is the codeword?"},
   ]
-  let blank_session = "agent-history-seed-blank-conformance"
-  let blank_result = agent_loop(
+  const blank_session = "agent-history-seed-blank-conformance"
+  const blank_result = agent_loop(
     "",
     nil,
     {
@@ -73,7 +73,7 @@ pipeline test() {
       max_iterations: 1,
     },
   )
-  let blank_expected = "SEEN[user=Remember: the codeword is pixel. | "
+  const blank_expected = "SEEN[user=Remember: the codeword is pixel. | "
     + "assistant=Understood. | user=What is the codeword?]"
   assert(
     contains(blank_result.visible_text, blank_expected),
@@ -82,7 +82,7 @@ pipeline test() {
   // No empty user turn was appended: the trailing `]` in the asserted SEEN
   // output above proves the seeded question was the last outbound turn. The
   // first three transcript turns are exactly the seeded history.
-  let blank_transcript = agent_session_messages(blank_session)
+  const blank_transcript = agent_session_messages(blank_session)
   assert(blank_transcript[0].content == "Remember: the codeword is pixel.", "blank seed turn 0")
   assert(blank_transcript[2].role == "user", "blank seed question role")
   assert(blank_transcript[2].content == "What is the codeword?", "blank seed question content")

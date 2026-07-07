@@ -9,7 +9,7 @@ pipeline test(task) {
   with_llm_script(
     [{text: "should never run", model: "mock", provider: "mock"}],
     { ->
-      let out = try {
+      const out = try {
         llm_call(
           "hi",
           nil,

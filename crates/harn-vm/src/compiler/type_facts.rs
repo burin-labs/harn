@@ -484,17 +484,19 @@ impl Compiler {
             return;
         }
 
-        // 1. Gather primitive-typed `var name = init` candidates declared at the
+        // 1. Gather primitive-typed `let name = init` candidates declared at the
         //    top level of this scope. The first declaration of a name wins; a
-        //    later same-name `var` in this block is a redeclaration we leave on
+        //    later same-name `let` in this block is a redeclaration we leave on
         //    the generic path (it would not be reached as a candidate here).
+        //    (`let` is the mutable binding form; `const` is immutable and never
+        //    a monomorphic-var candidate.)
         let mut order: Vec<String> = Vec::new();
         let mut tag: std::collections::HashMap<String, &'static str> =
             std::collections::HashMap::new();
         let mut span: std::collections::HashMap<String, harn_lexer::Span> =
             std::collections::HashMap::new();
         for sn in stmts {
-            let Node::VarBinding {
+            let Node::LetBinding {
                 pattern: BindingPattern::Identifier(name),
                 value,
                 type_ann,
@@ -634,19 +636,19 @@ impl Compiler {
         for sn in stmts {
             harn_parser::visit::walk_node(sn, &mut |node| {
                 let (name, declared) = match &node.node {
-                    Node::LetBinding {
+                    Node::ConstBinding {
                         pattern: BindingPattern::Identifier(name),
                         type_ann,
                         value,
                     }
-                    | Node::VarBinding {
+                    | Node::LetBinding {
                         pattern: BindingPattern::Identifier(name),
                         type_ann,
                         value,
                     } => {
-                        // A reassigned `var` is not stable; `let` is immutable so
+                        // A reassigned `let` is not stable; `const` is immutable so
                         // it always is, even though they share this arm.
-                        if matches!(node.node, Node::VarBinding { .. }) && reassigned.contains(name)
+                        if matches!(node.node, Node::LetBinding { .. }) && reassigned.contains(name)
                         {
                             return;
                         }
@@ -655,14 +657,6 @@ impl Compiler {
                             type_ann.clone().or_else(|| self.infer_expr_type(value)),
                         )
                     }
-                    Node::ConstBinding {
-                        name,
-                        type_ann,
-                        value,
-                    } => (
-                        name,
-                        type_ann.clone().or_else(|| self.infer_expr_type(value)),
-                    ),
                     Node::ForIn {
                         pattern: BindingPattern::Identifier(name),
                         iterable,

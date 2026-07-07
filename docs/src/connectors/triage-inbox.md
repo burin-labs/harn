@@ -8,7 +8,7 @@ Slack-, Notion-, or GitHub-specific branching.
 ```harn
 import { triage_emit, triage_start_my_day } from "std/triage"
 
-let feed = triage_start_my_day(
+const feed = triage_start_my_day(
   [github_event, slack_event, notion_event],
   {emit: true, topic: "triage.inbox.start_my_day"},
 )
@@ -55,7 +55,7 @@ Use `triage_dedupe_events(events)` before rendering or emitting a feed:
 ```harn
 import { triage_dedupe_events } from "std/triage"
 
-let _unique = triage_dedupe_events([github_delivery, github_delivery_retry])
+const _unique = triage_dedupe_events([github_delivery, github_delivery_retry])
 ```
 
 ## EventLog receipts

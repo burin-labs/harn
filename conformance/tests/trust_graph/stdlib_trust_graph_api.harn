@@ -1,10 +1,10 @@
 import "std/triggers"
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let agent_id = "trust-graph-api-" + unique
-  let entry_id: TrustEntryId = trust_graph_record(
+  const agent_id = "trust-graph-api-" + unique
+  const entry_id: TrustEntryId = trust_graph_record(
     {
       agent: agent_id,
       action: "deploy.prod",
@@ -16,10 +16,10 @@ pipeline test(task) {
       metadata: {ticket: "INC-1"},
     },
   )
-  let score: TrustScore = trust_graph_query(agent_id, "deploy.prod")
-  let policy: CapabilityPolicy = trust_graph_policy_for(agent_id)
-  let report: TrustChainReport = trust_graph_verify_chain()
-  let records: list<TrustRecord> = trust_query({agent: agent_id, action: "deploy.prod"})
+  const score: TrustScore = trust_graph_query(agent_id, "deploy.prod")
+  const policy: CapabilityPolicy = trust_graph_policy_for(agent_id)
+  const report: TrustChainReport = trust_graph_verify_chain()
+  const records: list<TrustRecord> = trust_query({agent: agent_id, action: "deploy.prod"})
   __io_println(len(records) == 1)
   __io_println(entry_id == records[0].record_id)
   __io_println(records[0].chain_index > 0 && records[0].entry_hash != "")

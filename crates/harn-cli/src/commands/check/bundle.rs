@@ -497,9 +497,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             false_expr,
         } => vec![condition.as_ref(), true_expr.as_ref(), false_expr.as_ref()],
         Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => args.iter().collect(),
-        Node::LetBinding { value, .. }
-        | Node::VarBinding { value, .. }
-        | Node::ConstBinding { value, .. } => vec![value.as_ref()],
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => vec![value.as_ref()],
         Node::RangeExpr { start, end, .. } => vec![start.as_ref(), end.as_ref()],
         Node::ImplBlock { methods, .. } => methods.iter().collect(),
         Node::ImportDecl { .. }

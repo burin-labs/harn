@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  let png_path = "vision_fixture.png"
+  const png_path = "vision_fixture.png"
   harness.fs
     .write_bytes(
     png_path,
@@ -9,13 +9,13 @@ pipeline test(task) {
       "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
     ),
   )
-  let png = harness.fs.read_bytes(png_path)
-  let image_base64 = bytes_to_base64(png)
+  const png = harness.fs.read_bytes(png_path)
+  const image_base64 = bytes_to_base64(png)
   harness.fs.delete(png_path)
   with_llm_script(
     [llm_text("seen")],
     { ->
-      let result = llm_call(
+      const result = llm_call(
         "",
         nil,
         {
@@ -34,15 +34,15 @@ pipeline test(task) {
         },
       )
       assert_eq(result.text, "seen")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert_eq(len(calls), 1)
-      let blocks = calls[0].messages[0].content
+      const blocks = calls[0].messages[0].content
       assert_eq(blocks[0].type, "text")
       assert_eq(blocks[1].type, "image")
       assert_eq(blocks[1].media_type, "image/png")
       assert_eq(blocks[1].base64, image_base64)
       assert_eq(blocks[1].detail, "low")
-      let gate_error = try {
+      const gate_error = try {
         llm_call("plain", nil, {provider: "mock", model: "gpt-3.5-turbo", vision: true})
         "unreachable"
       } catch (e) {

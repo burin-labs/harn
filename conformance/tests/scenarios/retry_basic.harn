@@ -1,5 +1,5 @@
 pipeline default() {
-  var attempts = 0
+  let attempts = 0
   retry 3 {
     attempts = attempts + 1
     if attempts < 3 {
@@ -8,7 +8,7 @@ pipeline default() {
   }
   __io_println(attempts)
   // retry with all attempts exhausted
-  var failed = false
+  let failed = false
   try {
     retry 2 {
       throw "always fails"

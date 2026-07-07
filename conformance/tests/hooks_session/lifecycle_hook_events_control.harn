@@ -13,13 +13,13 @@ pipeline default() {
   clear_session_hooks()
   // PreSuspend Block.
   register_session_hook("pre_suspend", { _event -> return {block: true, reason: "operator hold"} })
-  let pre_suspend = __host_fire_session_hook("pre_suspend", {worker: {id: "w1"}, reason: "self-park"})
+  const pre_suspend = __host_fire_session_hook("pre_suspend", {worker: {id: "w1"}, reason: "self-park"})
   __io_println("pre_suspend.control=" + pre_suspend.control)
   __io_println("pre_suspend.reason=" + pre_suspend.reason)
   clear_session_hooks()
   // PreResume Modify rewrites resume_input.
   register_session_hook("pre_resume", { _event -> return {modify: {resume_input: "amended task"}} })
-  let pre_resume = __host_fire_session_hook("pre_resume", {worker: {id: "w1"}, resume_input: "original task"})
+  const pre_resume = __host_fire_session_hook("pre_resume", {worker: {id: "w1"}, resume_input: "original task"})
   __io_println("pre_resume.control=" + pre_resume.control)
   __io_println("pre_resume.modify.resume_input=" + pre_resume.modify.resume_input)
   clear_session_hooks()
@@ -28,7 +28,7 @@ pipeline default() {
     "on_drain_decision",
     { _event -> return {block: true, reason: "policy violation"} },
   )
-  let drain = __host_fire_session_hook("on_drain_decision", {action: "resume", item: {id: "envelope_1"}})
+  const drain = __host_fire_session_hook("on_drain_decision", {action: "resume", item: {id: "envelope_1"}})
   __io_println("on_drain_decision.control=" + drain.control)
   __io_println("on_drain_decision.reason=" + drain.reason)
   clear_session_hooks()
@@ -37,7 +37,7 @@ pipeline default() {
     "on_unsettled_detected",
     { _event -> return {block: true, reason: "settle before exit"} },
   )
-  let unsettled = __host_fire_session_hook("on_unsettled_detected", {unsettled: {suspended_subagents: [{id: "w1"}]}})
+  const unsettled = __host_fire_session_hook("on_unsettled_detected", {unsettled: {suspended_subagents: [{id: "w1"}]}})
   __io_println("on_unsettled_detected.control=" + unsettled.control)
   __io_println("on_unsettled_detected.reason=" + unsettled.reason)
   clear_session_hooks()

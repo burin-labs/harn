@@ -7,20 +7,20 @@ import "std/triggers"
  * reached.
  */
 fn handle_batch(event) {
-  let batch_len = if event.batch == nil {
+  const batch_len = if event.batch == nil {
     0
   } else {
     len(event.batch)
   }
-  let first = event.batch[0]
-  let repo = first.provider_payload.payload.repo
+  const first = event.batch[0]
+  const repo = first.provider_payload.payload.repo
   emit_channel("batch.key.fired", {repo: repo, batch_size: batch_len})
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "batch-key-" + unique,
       kind: "channel.emit",
@@ -39,16 +39,16 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("batch.key.input", {repo: "repoA", seq: 1})
-  let _ = emit_channel("batch.key.input", {repo: "repoB", seq: 1})
-  let only_a = channel_events("batch.key.fired")
+  const _ = emit_channel("batch.key.input", {repo: "repoA", seq: 1})
+  const _ = emit_channel("batch.key.input", {repo: "repoB", seq: 1})
+  const only_a = channel_events("batch.key.fired")
   __io_println("after-one-each:" + to_string(len(only_a)))
-  let _ = emit_channel("batch.key.input", {repo: "repoA", seq: 2})
-  let one_fired = channel_events("batch.key.fired")
+  const _ = emit_channel("batch.key.input", {repo: "repoA", seq: 2})
+  const one_fired = channel_events("batch.key.fired")
   __io_println("after-repoA-pair:" + to_string(len(one_fired)))
   __io_println("first-fired-repo:" + one_fired[0].payload.repo)
-  let _ = emit_channel("batch.key.input", {repo: "repoB", seq: 2})
-  let both_fired = channel_events("batch.key.fired")
+  const _ = emit_channel("batch.key.input", {repo: "repoB", seq: 2})
+  const both_fired = channel_events("batch.key.fired")
   __io_println("after-repoB-pair:" + to_string(len(both_fired)))
   __io_println("second-fired-repo:" + both_fired[1].payload.repo)
 }

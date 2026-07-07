@@ -1,13 +1,13 @@
 import "../_common"
 
 fn wait_for_readyz(harness: Harness, url, pid) {
-  var attempts = 0
+  let attempts = 0
   while attempts < 200 {
     if !process_alive(pid) {
       return false
     }
     try {
-      let response = harness.net.request("GET", url + "/readyz", {timeout_ms: 250})
+      const response = harness.net.request("GET", url + "/readyz", {timeout_ms: 250})
       if response.status == 200 {
         return true
       }
@@ -19,7 +19,7 @@ fn wait_for_readyz(harness: Harness, url, pid) {
 }
 
 pipeline test(task) {
-  let root = path_join(harness.fs.temp_dir(), "harn-orchestrator-recover-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-recover-" + uuid())
   harness.fs.mkdir(root)
   harness.fs
     .write_text(
@@ -31,21 +31,21 @@ pipeline test(task) {
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> string {\n  return event.kind\n}\n",
   )
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(harness, repo_root)
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  let crash_start = shell_at(
+  const crash_start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX=1 "
       + harn_bin
       + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator-crash.log </dev/null & echo $!",
   )
-  let crash_pid = crash_start.stdout.trim()
+  const crash_pid = crash_start.stdout.trim()
   assert(crash_start.success && crash_pid != "", "failed to start crashing orchestrator")
-  let crash_url = wait_for_listener_url(harness, path_join(root, "orchestrator-crash.log"))
+  const crash_url = wait_for_listener_url(harness, path_join(root, "orchestrator-crash.log"))
   assert(crash_url != nil, "crashing listener URL did not appear in log")
   assert(wait_for_readyz(harness, crash_url, crash_pid), "crashing listener did not become ready")
-  let response = harness.net
+  const response = harness.net
     .request(
     "POST",
     crash_url + "/a2a/review",
@@ -54,31 +54,31 @@ pipeline test(task) {
       headers: {"Content-Type": "application/json", Authorization: "Bearer test-key"},
     },
   )
-  let crash_exited = wait_for_exit(crash_pid)
+  const crash_exited = wait_for_exit(crash_pid)
   if !crash_exited && process_alive(crash_pid) {
     // Under heavy CI load the dispatcher can be scheduling-starved past
     // the wait_for_exit timeout. Force-kill so the restart orchestrator
     // doesn't race the still-alive crash process for the state dir; the
     // assertion below still reflects whether the crash happened
     // naturally under HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX.
-    let _ = shell("kill -KILL " + crash_pid)
+    const _ = shell("kill -KILL " + crash_pid)
     wait_for_exit(crash_pid)
   }
   __io_println(response.status == 200 && crash_exited)
-  let restart = shell_at(
+  const restart = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
       + harn_bin
       + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator-restart.log </dev/null & echo $!",
   )
-  let restart_pid = restart.stdout.trim()
+  const restart_pid = restart.stdout.trim()
   assert(restart.success && restart_pid != "", "failed to restart orchestrator")
-  let restart_url = wait_for_listener_url(harness, path_join(root, "orchestrator-restart.log"))
+  const restart_url = wait_for_listener_url(harness, path_join(root, "orchestrator-restart.log"))
   assert(restart_url != nil, "restart listener URL did not appear in log")
   assert(wait_for_readyz(harness, restart_url, restart_pid), "restart listener did not become ready")
-  let state_dir = path_join(root, "state")
-  let config_path = path_join(root, "harn.toml")
-  let queue = shell_at(
+  const state_dir = path_join(root, "state")
+  const config_path = path_join(root, "harn.toml")
+  const queue = shell_at(
     root,
     "env HARN_EVENT_LOG_BACKEND=file "
       + harn_bin
@@ -93,7 +93,7 @@ pipeline test(task) {
       && queue.stdout.contains("Stranded envelopes:")
       && !queue.stdout.contains("dispatch_succeeded"),
   )
-  let recover = shell_at(
+  const recover = shell_at(
     root,
     "env HARN_EVENT_LOG_BACKEND=file "
       + harn_bin
@@ -109,7 +109,7 @@ pipeline test(task) {
       && recover.stdout.contains("Candidates:")
       && recover.stdout.contains("event_id=trigger_evt_"),
   )
-  let _ = shell("kill -TERM " + restart_pid)
+  const _ = shell("kill -TERM " + restart_pid)
   wait_for_exit(restart_pid)
   harness.fs.delete(root)
 }

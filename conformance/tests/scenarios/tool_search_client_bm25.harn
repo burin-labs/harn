@@ -16,7 +16,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *      "client"` so replayers can distinguish path-1 from path-2).
  */
 pipeline test(task) {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "look",
@@ -57,7 +57,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Ship the release",
         nil,
         {
@@ -68,22 +68,22 @@ pipeline test(task) {
           max_iterations: 5,
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(len(calls) >= 2, "at least two LLM calls happened")
-      let first_system = calls[0].system
+      const first_system = calls[0].system
       assert(contains(first_system, "__harn_tool_search"), "synthetic tool advertised on turn 1")
       assert(contains(first_system, "look"), "non-deferred `look` tool on turn 1")
       assert(!contains(first_system, "deploy_service"), "deferred `deploy_service` hidden on turn 1")
       assert(!contains(first_system, "query_metrics"), "deferred `query_metrics` hidden on turn 1")
-      let second_system = calls[1].system
+      const second_system = calls[1].system
       assert(
         contains(second_system, "deploy_service"),
         "BM25 must promote `deploy_service` into turn 2's contract prompt",
       )
       assert(!contains(second_system, "query_metrics"), "non-matching deferred tools must stay hidden")
-      let events = transcript_events(result?.transcript)
-      var query_events = 0
-      var result_events = 0
+      const events = transcript_events(result?.transcript)
+      let query_events = 0
+      let result_events = 0
       for ev in events {
         if ev.kind == "tool_search_query" {
           query_events = query_events + 1
@@ -94,8 +94,8 @@ pipeline test(task) {
         if ev.kind == "tool_search_result" {
           result_events = result_events + 1
           assert(ev.metadata?.mode == "client", "result event tagged client mode")
-          let promoted = ev.metadata?.promoted
-          var has_deploy = false
+          const promoted = ev.metadata?.promoted
+          let has_deploy = false
           for name in promoted {
             if name == "deploy_service" {
               has_deploy = true

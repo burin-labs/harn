@@ -9,7 +9,7 @@ pipeline main() {
       evaluate: { _ctx -> return {reminder: {body: "worker spawned"}} },
     },
   )
-  let session = agent_session_open("reminder-hook-worker-unsupported-event")
+  const session = agent_session_open("reminder-hook-worker-unsupported-event")
   agent_session_reset(session)
   agent_reminder_providers_fire(session, "WorkerSpawned", {session: {id: session}}, {})
   clear_reminder_providers()

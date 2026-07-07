@@ -11,10 +11,10 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(task) {
-  let topic = "oauth.client.audit"
-  let cursor = event_log.latest(topic) ?? 0
-  let store = memory()
-  let provider = custom(
+  const topic = "oauth.client.audit"
+  const cursor = event_log.latest(topic) ?? 0
+  const store = memory()
+  const provider = custom(
     {
       id: "mock",
       auth_url: "https://mock-idp.example/authorize",
@@ -22,7 +22,7 @@ pipeline test(task) {
       default_scopes: ["repo"],
     },
   )
-  let cli = client(
+  const cli = client(
     provider,
     {
       client_id: "cli-id",
@@ -33,7 +33,7 @@ pipeline test(task) {
       token_auth_method: "client_secret_post",
     },
   )
-  let pkce = start_authorization(cli)
+  const pkce = start_authorization(cli)
   assert(contains(pkce.url, "code_challenge_method=S256"), "S256 challenge method in URL")
   assert(contains(pkce.url, "code_challenge="), "code_challenge param present")
   assert(contains(pkce.url, "response_type=code"), "response_type=code")
@@ -53,27 +53,27 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  let token_set = exchange_code(cli, pkce, "abc123", pkce.state)
+  const token_set = exchange_code(cli, pkce, "abc123", pkce.state)
   assert_eq(token_set.access_token, "AAA", "access token returned to caller")
   assert_eq(token_set.refresh_token, "RRR", "refresh token returned to caller")
   assert_eq(token_set.token_type, "Bearer", "token_type recorded")
   assert_eq(token_set.expires_in, 3600, "expires_in propagated")
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "single token exchange call")
   assert_eq(calls[0].method, "POST", "exchange was POST")
-  let body = calls[0].body
+  const body = calls[0].body
   assert(contains(body, "grant_type=authorization_code"), "grant_type body")
   assert(contains(body, "code=abc123"), "code body")
   assert(contains(body, "code_verifier=" + pkce.code_verifier), "verifier in body")
   assert(contains(body, "client_secret=cli-secret"), "client_secret in body for client_secret_post")
   assert(contains(body, "redirect_uri="), "redirect_uri in body")
   assert(contains(body, "scope=repo%20user"), "scopes in body")
-  let access = token(cli)
+  const access = token(cli)
   assert_eq(access, "AAA", "token() returns stored access token without refreshing")
-  let calls_after_token = http_mock_calls({include_sensitive: true})
+  const calls_after_token = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls_after_token), 1, "token() did not re-issue token call")
-  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
-  let logged = stream.next().value
+  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const logged = stream.next().value
   assert_eq(logged.kind, "token_exchanged", "audit event kind")
   assert_eq(logged.payload.provider, "mock", "audit provider id")
   assert_eq(logged.payload.storage_key, "mock", "audit storage_key")
@@ -81,9 +81,9 @@ pipeline test(task) {
   assert_eq(logged.payload.next.has_refresh_token, true, "audit records refresh presence")
   assert(logged.payload.next?.access_token == nil, "audit does NOT leak access_token")
   assert(logged.payload.next?.refresh_token == nil, "audit does NOT leak refresh_token")
-  var threw = false
+  let threw = false
   try {
-    let _ = exchange_code(cli, pkce, "abc123", "WRONG-STATE")
+    const _ = exchange_code(cli, pkce, "abc123", "WRONG-STATE")
   } catch (err) {
     if contains(to_string(err), "state mismatch") {
       threw = true

@@ -10,9 +10,9 @@
  * keys.
  */
 pipeline default() {
-  let _ = mock_time(1700000001000)
-  let original_input = {approved: true, comment: "ship it", reviewer: "alice"}
-  let receipt = lifecycle_receipt_record_resumption(
+  const _ = mock_time(1700000001000)
+  const original_input = {approved: true, comment: "ship it", reviewer: "alice"}
+  const receipt = lifecycle_receipt_record_resumption(
     {
       handle: "worker://triage/42",
       session_id: "session-a",
@@ -23,23 +23,23 @@ pipeline default() {
     },
   )
   // Replay with identical payload — succeeds, returns cached input.
-  let hit = lifecycle_replay_resume_input(receipt.payload, original_input)
+  const hit = lifecycle_replay_resume_input(receipt.payload, original_input)
   __io_println("hit_ok=" + to_string(hit.ok))
   __io_println("hit_input_approved=" + to_string(hit.input?.approved))
   __io_println("hit_input_reviewer=" + hit.input?.reviewer)
   // Replay with reordered keys — canonical hash matches.
-  let reordered = {reviewer: "alice", approved: true, comment: "ship it"}
-  let reorder_hit = lifecycle_replay_resume_input(receipt.payload, reordered)
+  const reordered = {reviewer: "alice", approved: true, comment: "ship it"}
+  const reorder_hit = lifecycle_replay_resume_input(receipt.payload, reordered)
   __io_println("reorder_ok=" + to_string(reorder_hit.ok))
   // Replay with a drifted payload — mismatch, HARN-SUS-011.
-  let drifted = {approved: false, comment: "ship it", reviewer: "alice"}
-  let miss = lifecycle_replay_resume_input(receipt.payload, drifted)
+  const drifted = {approved: false, comment: "ship it", reviewer: "alice"}
+  const miss = lifecycle_replay_resume_input(receipt.payload, drifted)
   __io_println("miss_ok=" + to_string(miss.ok))
   __io_println("miss_code=" + miss.code)
   // Hash is stable across orderings.
-  let h1 = lifecycle_resume_input_hash(original_input)
-  let h2 = lifecycle_resume_input_hash(reordered)
+  const h1 = lifecycle_resume_input_hash(original_input)
+  const h2 = lifecycle_resume_input_hash(reordered)
   __io_println("hash_canonical=" + to_string(h1 == h2))
-  let _ = unmock_time()
+  const _ = unmock_time()
   return "ok"
 }

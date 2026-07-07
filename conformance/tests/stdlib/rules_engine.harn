@@ -8,33 +8,33 @@ import { rules_apply, rules_diagnostics, rules_report, rules_search, rules_visit
  */
 pipeline default() {
   hostlib_enable("tools:deterministic")
-  let finder = "id = \"find-calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
-  let src = "foo();\nbar();\n"
+  const finder = "id = \"find-calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
+  const src = "foo();\nbar();\n"
   // 1) Search returns matches with capture bindings.
-  let r = rules_search({rule: finder, source: src, language: "typescript"})
+  const r = rules_search({rule: finder, source: src, language: "typescript"})
   __io_println(r.ok && r.match_count == 2)
   __io_println(r.matches[0].captures.FN == "foo")
   __io_println(r.matches[1].captures.FN == "bar")
   // 2) Report-only mode yields a data table with a per-match summary.
-  let rep = rules_report({rule: finder, source: src, language: "typescript", path: "a.ts"})
+  const rep = rules_report({rule: finder, source: src, language: "typescript", path: "a.ts"})
   __io_println(rep.summary.total_rows == 2)
   __io_println(rep.rule_id == "find-calls")
   // 3) A codemod in dry-run previews without writing; the
   //    `behavior-preserving` safety makes it machine-applicable.
-  let codemod = "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n"
-  let ap = rules_apply({rule: codemod, source: "foo();\n", language: "typescript", dry_run: true})
+  const codemod = "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n"
+  const ap = rules_apply({rule: codemod, source: "foo();\n", language: "typescript", dry_run: true})
   __io_println(ap.ok && ap.files[0].changed && !ap.files[0].applied)
   __io_println(ap.files[0].preview == "bar();\n")
   __io_println(ap.auto_applicable)
   // 4) A declarative lint rule (a `message`, no `fix`) emits diagnostics.
-  let lint = "id = \"calls\"\nlanguage = \"typescript\"\nmessage = \"function call\"\n[rule]\npattern = \"$FN()\"\n"
-  let decl = rules_diagnostics({rule: lint, source: src, language: "typescript", path: "a.ts"})
+  const lint = "id = \"calls\"\nlanguage = \"typescript\"\nmessage = \"function call\"\n[rule]\npattern = \"$FN()\"\n"
+  const decl = rules_diagnostics({rule: lint, source: src, language: "typescript", path: "a.ts"})
   __io_println(decl.ok && decl.diagnostic_count == 2)
   __io_println(decl.diagnostics[0].message == "function call")
   // 5) An imperative visitor over the *same matcher* returning the *same*
   //    static message produces IDENTICAL diagnostics (the #2878 acceptance):
   //    same message, severity, applicability, and spans.
-  let imp = rules_visit(
+  const imp = rules_visit(
     {
       rule: finder,
       source: src,
@@ -51,7 +51,7 @@ pipeline default() {
   __io_println(imp.diagnostics[1].start_row == decl.diagnostics[1].start_row)
   // 6) Imperative-only power: compute a message from the captured metavar —
   //    something a declarative rule (with only a static message) cannot.
-  let computed = rules_visit(
+  const computed = rules_visit(
     {
       rule: finder,
       source: src,
@@ -62,7 +62,7 @@ pipeline default() {
   __io_println(computed.diagnostics[0].message == "call to foo")
   __io_println(computed.diagnostics[1].message == "call to bar")
   // 7) The visitor controls flow: returning nil skips a match.
-  let filtered = rules_visit(
+  const filtered = rules_visit(
     {
       rule: finder,
       source: src,

@@ -65,7 +65,7 @@ fn envelope(name, call_id, session_id) {
 
 pipeline default() {
   // (1) Callable sink receives the standardized span shape.
-  let mw = with_telemetry(
+  const mw = with_telemetry(
     { s ->
       __io_println(s.name)
       __io_println(s.kind)
@@ -90,11 +90,11 @@ pipeline default() {
       __io_println(s.child_spans[1].attributes.cap)
     },
   )
-  let ok = mw(envelope("read", "call_1", "sess_alpha"), ok_next())
+  const ok = mw(envelope("read", "call_1", "sess_alpha"), ok_next())
   __io_println(ok.ok)
   __io_println(ok.status)
   // (2) Scope-violation errors raise a tool_call.scope_violation event.
-  let scope_mw = with_telemetry(
+  const scope_mw = with_telemetry(
     { s ->
       __io_println(s.status)
       __io_println(s.attributes.error_category)
@@ -103,14 +103,14 @@ pipeline default() {
       __io_println(s.events[2].attributes.category)
     },
   )
-  let denied = scope_mw(envelope("shell.exec", "call_2", "sess_beta"), scope_violation_next())
+  const denied = scope_mw(envelope("shell.exec", "call_2", "sess_beta"), scope_violation_next())
   __io_println(denied.ok)
   // (3) When the envelope has no session_id, the trace_id falls back
   // to "tool_call:<call_id>".
-  let traceless_mw = with_telemetry({ s -> __io_println(s.trace_id) })
-  let _ = traceless_mw(envelope("read", "call_3", ""), ok_next())
+  const traceless_mw = with_telemetry({ s -> __io_println(s.trace_id) })
+  const _ = traceless_mw(envelope("read", "call_3", ""), ok_next())
   // (4) Dict config: persona + mode + extra_attributes ride along.
-  let attr_mw = with_telemetry(
+  const attr_mw = with_telemetry(
     {
       sink: { s ->
         __io_println(s.attributes.persona)
@@ -122,11 +122,11 @@ pipeline default() {
       extra_attributes: {env: "dev"},
     },
   )
-  let _ = attr_mw(envelope("read", "call_4", "sess_gamma"), ok_next())
+  const _ = attr_mw(envelope("read", "call_4", "sess_gamma"), ok_next())
   // (5) Fan-out: `sinks: [..]` invokes every sink.
-  let left = atomic(0)
-  let right = atomic(0)
-  let fanout = with_telemetry(
+  const left = atomic(0)
+  const right = atomic(0)
+  const fanout = with_telemetry(
     {
       sinks: [
         { _s ->
@@ -138,16 +138,16 @@ pipeline default() {
       ],
     },
   )
-  let _ = fanout(envelope("read", "call_5", "sess_delta"), ok_next())
+  const _ = fanout(envelope("read", "call_5", "sess_delta"), ok_next())
   __io_println(atomic_get(left))
   __io_println(atomic_get(right))
   // (6) Unknown built-in name raises a clear error.
-  let bad = try {
+  const bad = try {
     resolve_telemetry_sink("kaboom")
   }
   __io_println(is_err(bad))
   // (7) tool_call_span(...) is callable directly for ad-hoc reporting.
-  let direct = tool_call_span(
+  const direct = tool_call_span(
     envelope("read", "call_6", "sess_epsilon"),
     {ok: true, status: "ok", executor: "harn", result: nil},
     1000,

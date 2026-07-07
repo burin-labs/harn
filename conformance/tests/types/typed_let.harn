@@ -1,8 +1,8 @@
 pipeline test(task) {
-  let x: int = 42
+  const x: int = 42
   log(x)
-  let name: string = "hello"
+  const name: string = "hello"
   log(name)
-  let flag: bool = true
+  const flag: bool = true
   log(flag)
 }

@@ -6,7 +6,7 @@ import {
 } from "std/workflow/patterns"
 
 pipeline default() {
-  let command_verify = workflow_command_verify_graph(
+  const command_verify = workflow_command_verify_graph(
     {
       name: "edit_verify",
       model_policy: {provider: "mock", model: "gpt-4o", iteration_budget: {max: 3}},
@@ -22,13 +22,13 @@ pipeline default() {
   __io_println(command_verify.nodes.repair.model_policy.model)
   __io_println(len(command_verify.edges))
   __io_println(command_verify.edges[1].branch)
-  let self_verify = workflow_self_verifying_graph({act_id: "draft", verify_id: "check", verify: {assert_text: "ok"}})
+  const self_verify = workflow_self_verifying_graph({act_id: "draft", verify_id: "check", verify: {assert_text: "ok"}})
   __io_println(self_verify.entry)
   __io_println(self_verify.edges[0].to)
-  let verify_only = workflow_verification_only_graph({verify_id: "gate", verify: {assert_text: "ok"}})
+  const verify_only = workflow_verification_only_graph({verify_id: "gate", verify: {assert_text: "ok"}})
   __io_println(verify_only.entry)
   __io_println(len(verify_only.edges))
-  let repair_stage = workflow_repair_stage_graph({verify: {assert_text: "ok"}, retry_policy: {feedback: true}})
+  const repair_stage = workflow_repair_stage_graph({verify: {assert_text: "ok"}, retry_policy: {feedback: true}})
   __io_println(repair_stage.entry)
   __io_println(repair_stage.nodes.repair.kind)
   __io_println(repair_stage.nodes.repair.retry_policy.max_attempts)

@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lookup_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -24,7 +24,7 @@ pipeline default() {
       llm_text("<user_response>All good.</user_response>"),
     ],
     { ->
-      let early = agent_loop(
+      const early = agent_loop(
         "Inspect alpha",
         nil,
         {
@@ -53,7 +53,7 @@ pipeline default() {
       llm_text("<user_response>Done after extension.</user_response>"),
     ],
     { ->
-      let extended = agent_loop(
+      const extended = agent_loop(
         "Inspect everything",
         nil,
         {
@@ -82,7 +82,7 @@ pipeline default() {
       {tool_calls: [{id: "tE", name: "lookup", arguments: {query: "q"}}]},
     ],
     { ->
-      let capped = agent_loop(
+      const capped = agent_loop(
         "Keep working",
         nil,
         {
@@ -104,7 +104,7 @@ pipeline default() {
       {tool_calls: [{id: "early2", name: "lookup", arguments: {query: "now"}}]},
     ],
     { ->
-      let controlled = agent_loop(
+      const controlled = agent_loop(
         "Inspect stop",
         nil,
         {
@@ -133,7 +133,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Plain final answer.")],
     { ->
-      let legacy = agent_loop(
+      const legacy = agent_loop(
         "Do nothing fancy.",
         nil,
         {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},

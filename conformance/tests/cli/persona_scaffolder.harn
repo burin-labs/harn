@@ -1,11 +1,11 @@
 import "../_common"
 
 pipeline default() {
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  let root = path_join(harness.fs.temp_dir(), "harn_persona_scaffolder_" + uuid_v7())
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn_persona_scaffolder_" + uuid_v7())
   harness.fs.mkdir(root)
-  let created = exec_at(
+  const created = exec_at(
     root,
     harn_bin,
     "persona",
@@ -15,18 +15,18 @@ pipeline default() {
     "deterministic-sweeper",
   )
   __io_println(created.success)
-  let persona_dir = path_join(root, "personas/my_release_captain")
+  const persona_dir = path_join(root, "personas/my_release_captain")
   __io_println(harness.fs.exists(path_join(persona_dir, "harn.toml")))
   __io_println(harness.fs.exists(path_join(persona_dir, "src/my_release_captain.harn")))
   __io_println(harness.fs.exists(path_join(persona_dir, "tests/my_release_captain_smoke.harn")))
   __io_println(harness.fs.exists(path_join(persona_dir, "tests/my_release_captain_smoke.expected")))
   __io_println(harness.fs.exists(path_join(persona_dir, "fixtures/happy_path.json")))
   __io_println(harness.fs.exists(path_join(persona_dir, "evals/smoke.eval.json")))
-  let doctor = exec_at(root, harn_bin, "persona", "doctor", "my_release_captain", "--json")
+  const doctor = exec_at(root, harn_bin, "persona", "doctor", "my_release_captain", "--json")
   __io_println(doctor.success)
-  let report = json_parse(doctor.stdout)
+  const report = json_parse(doctor.stdout)
   __io_println(report.persona)
   __io_println(len(report.checks) >= 6)
-  let smoke = exec_at(persona_dir, harn_bin, "test", "tests/my_release_captain_smoke.harn")
+  const smoke = exec_at(persona_dir, harn_bin, "test", "tests/my_release_captain_smoke.harn")
   __io_println(smoke.success)
 }

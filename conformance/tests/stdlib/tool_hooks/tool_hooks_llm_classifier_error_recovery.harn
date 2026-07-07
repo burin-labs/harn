@@ -17,14 +17,14 @@ pipeline default() {
   with_llm_script(
     [llm_text("I am a chatty model and I do not return JSON.")],
     { ->
-      let inner = { args -> {ok: true, ran: args.command} }
-      let wrapper = preset_run_command(
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
         {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
       )
-      let r = wrapper({command: "echo hi"})
+      const r = wrapper({command: "echo hi"})
       __io_println(r.ok)
       __io_println(r.ran)
-      let log = pipeline_lifecycle_audit_log_take()
+      const log = pipeline_lifecycle_audit_log_take()
       __io_println(len(log))
       __io_println(log[0].kind)
       __io_println(log[0].payload.kind)

@@ -5,7 +5,7 @@ fn __agent_host_options(options) {
 }
 
 fn __agent_host_root(options) {
-  let opts = __agent_host_options(options)
+  const opts = __agent_host_options(options)
   return opts?.root ?? opts?.cwd
 }
 
@@ -38,14 +38,14 @@ fn __agent_host_string_list(value, label) {
 }
 
 fn __agent_host_tool_enabled(options, key, group) {
-  let opts = __agent_host_options(options)
-  let enabled = opts?.enabled_tools ?? opts?.tools
+  const opts = __agent_host_options(options)
+  const enabled = opts?.enabled_tools ?? opts?.tools
   if enabled != nil && !__agent_host_list_contains(enabled, "all")
     && !__agent_host_list_contains(enabled, group)
     && !__agent_host_list_contains(enabled, key) {
     return false
   }
-  let disabled = opts?.disabled_tools ?? []
+  const disabled = opts?.disabled_tools ?? []
   if __agent_host_list_contains(disabled, group) || __agent_host_list_contains(disabled, key) {
     return false
   }
@@ -53,16 +53,16 @@ fn __agent_host_tool_enabled(options, key, group) {
 }
 
 fn __agent_host_lifecycle_tool_enabled(options, key) {
-  let opts = __agent_host_options(options)
-  let enabled = opts?.enabled_tools ?? opts?.tools
-  let explicitly_enabled = __agent_host_list_contains(enabled, key)
+  const opts = __agent_host_options(options)
+  const enabled = opts?.enabled_tools ?? opts?.tools
+  const explicitly_enabled = __agent_host_list_contains(enabled, key)
     || __agent_host_list_contains(enabled, "command_lifecycle")
-  let opted_in = opts?.background_commands ?? opts?.enable_background_commands ?? opts?.command_lifecycle_tools
+  const opted_in = opts?.background_commands ?? opts?.enable_background_commands ?? opts?.command_lifecycle_tools
     ?? false
   if !opted_in && !explicitly_enabled {
     return false
   }
-  let disabled = opts?.disabled_tools ?? []
+  const disabled = opts?.disabled_tools ?? []
   if __agent_host_list_contains(disabled, "command")
     || __agent_host_list_contains(disabled, "command_lifecycle")
     || __agent_host_list_contains(disabled, key) {
@@ -76,33 +76,33 @@ fn __agent_host_lifecycle_tool_enabled(options, key) {
 }
 
 fn __agent_host_name(options, key, default_name) {
-  let opts = __agent_host_options(options)
+  const opts = __agent_host_options(options)
   return opts?.names?.[key] ?? opts[key + "_name"] ?? default_name
 }
 
 fn __agent_host_description(options, key, default_description) {
-  let opts = __agent_host_options(options)
+  const opts = __agent_host_options(options)
   return opts?.descriptions?.[key] ?? default_description
 }
 
 fn __agent_host_annotations(options, key, defaults) {
-  let opts = __agent_host_options(options)
-  let shared = opts?.annotations?.["*"] ?? {}
-  let local = opts?.annotations?.[key] ?? {}
+  const opts = __agent_host_options(options)
+  const shared = opts?.annotations?.["*"] ?? {}
+  const local = opts?.annotations?.[key] ?? {}
   return defaults + shared + local
 }
 
 fn __agent_host_config(options, key, config) {
-  let opts = __agent_host_options(options)
-  var out = config
+  const opts = __agent_host_options(options)
+  let out = config
   if opts?.defer_loading != nil {
     out = out + {defer_loading: opts.defer_loading}
   }
   if opts?.namespace != nil {
     out = out + {namespace: opts.namespace}
   }
-  let shared = opts?.tool_config?.["*"] ?? {}
-  let local = opts?.tool_config?.[key] ?? {}
+  const shared = opts?.tool_config?.["*"] ?? {}
+  const local = opts?.tool_config?.[key] ?? {}
   out = out + shared + local
   return out
 }
@@ -117,16 +117,16 @@ fn __agent_host_path_has_parent_segment(path) {
 }
 
 fn __agent_host_resolve_path(path, options) {
-  let opts = __agent_host_options(options)
-  let raw = trim(path ?? "")
+  const opts = __agent_host_options(options)
+  const raw = trim(path ?? "")
   if raw == "" {
     throw "agent_host_tools: path must be a non-empty string"
   }
-  let normalized = raw.replace("\\", "/")
+  const normalized = raw.replace("\\", "/")
   if __agent_host_path_has_parent_segment(normalized) {
     throw "agent_host_tools: path must not contain '..' segments"
   }
-  let root = __agent_host_root(opts)
+  const root = __agent_host_root(opts)
   if starts_with(normalized, "/") {
     if root != nil && (normalized == root || starts_with(normalized, root + "/")) {
       return normalized
@@ -143,12 +143,12 @@ fn __agent_host_resolve_path(path, options) {
 }
 
 fn __agent_host_render(value, options, key) {
-  let opts = __agent_host_options(options)
-  let formatter = opts?.formatters?.[key] ?? opts?.result_formatter
+  const opts = __agent_host_options(options)
+  const formatter = opts?.formatters?.[key] ?? opts?.result_formatter
   if formatter != nil {
     return formatter(value, key)
   }
-  let format = opts?.output_format ?? "json"
+  const format = opts?.output_format ?? "json"
   if format == "value" {
     return value
   }
@@ -159,7 +159,7 @@ fn __agent_host_render(value, options, key) {
 }
 
 fn __agent_host_read_file_request(args, options) {
-  var req = {path: __agent_host_resolve_path(args.path, options)}
+  let req = {path: __agent_host_resolve_path(args.path, options)}
   if args?.offset != nil {
     req = req + {offset: args.offset}
   }
@@ -173,13 +173,13 @@ fn __agent_host_read_file_request(args, options) {
 }
 
 fn __agent_host_list_directory_request(args, options) {
-  let raw_path = trim(args?.path ?? ".")
-  let path = if raw_path == "" {
+  const raw_path = trim(args?.path ?? ".")
+  const path = if raw_path == "" {
     "."
   } else {
     raw_path
   }
-  var req = {path: __agent_host_resolve_path(path, options)}
+  let req = {path: __agent_host_resolve_path(path, options)}
   if args?.include_hidden != nil {
     req = req + {include_hidden: args.include_hidden}
   }
@@ -190,7 +190,7 @@ fn __agent_host_list_directory_request(args, options) {
 }
 
 fn __agent_host_file_outline_request(args, options) {
-  var req = {path: __agent_host_resolve_path(args.path, options)}
+  let req = {path: __agent_host_resolve_path(args.path, options)}
   if args?.max_depth != nil {
     req = req + {max_depth: args.max_depth}
   }
@@ -198,28 +198,28 @@ fn __agent_host_file_outline_request(args, options) {
 }
 
 fn __agent_host_search_request(args, options) {
-  var req = {pattern: args.pattern}
-  let raw_path = trim(args?.path ?? ".")
-  let search_path = if raw_path == "" {
+  let req = {pattern: args.pattern}
+  const raw_path = trim(args?.path ?? ".")
+  const search_path = if raw_path == "" {
     "."
   } else {
     raw_path
   }
   req = req + {path: __agent_host_resolve_path(search_path, options)}
-  let default_max_matches = __agent_host_options(options)?.search_max_matches
+  const default_max_matches = __agent_host_options(options)?.search_max_matches
     ?? __agent_host_options(options)?.max_search_matches
     ?? 50
   if args?.max_matches == nil && default_max_matches != nil {
     req = req + {max_matches: default_max_matches}
   }
-  let default_max_line_bytes = __agent_host_options(options)?.search_max_line_bytes
+  const default_max_line_bytes = __agent_host_options(options)?.search_max_line_bytes
     ?? __agent_host_options(options)?.max_search_line_bytes
   if args?.max_line_bytes == nil && default_max_line_bytes != nil {
     req = req + {max_line_bytes: default_max_line_bytes}
   }
-  let configured_exclude_globs = __agent_host_options(options)?.search_exclude_globs
+  const configured_exclude_globs = __agent_host_options(options)?.search_exclude_globs
     ?? __agent_host_options(options)?.exclude_globs
-  let exclude_globs = __agent_host_string_list(configured_exclude_globs, "exclude_globs")
+  const exclude_globs = __agent_host_string_list(configured_exclude_globs, "exclude_globs")
     + __agent_host_string_list(args?.exclude_globs, "exclude_globs")
   if len(exclude_globs) > 0 {
     req = req + {exclude_globs: exclude_globs}
@@ -242,11 +242,11 @@ fn __agent_host_search_request(args, options) {
 }
 
 fn __agent_host_safe_relative_path(path) {
-  let raw = path ?? ""
+  const raw = path ?? ""
   if raw == "" {
     return raw
   }
-  let normalized = raw.replace("\\", "/")
+  const normalized = raw.replace("\\", "/")
   if starts_with(normalized, "/") || __agent_host_path_has_parent_segment(normalized) {
     throw "agent_host_tools: git path must be relative and must not contain '..' segments"
   }
@@ -254,8 +254,8 @@ fn __agent_host_safe_relative_path(path) {
 }
 
 fn __agent_host_git_request(args, options) {
-  var req = {operation: args.operation}
-  let repo = args?.repo ?? __agent_host_root(options)
+  let req = {operation: args.operation}
+  const repo = args?.repo ?? __agent_host_root(options)
   if repo != nil && repo != "" {
     req = req + {repo: __agent_host_resolve_path(repo, options)}
   }
@@ -280,7 +280,7 @@ fn __agent_host_prefix_matches(argv, prefix) {
   if len(prefix) > len(argv) {
     return false
   }
-  var index = 0
+  let index = 0
   while index < len(prefix) {
     if argv[index] != prefix[index] {
       return false
@@ -291,7 +291,7 @@ fn __agent_host_prefix_matches(argv, prefix) {
 }
 
 fn __agent_host_argv_allowed(argv, options) {
-  let prefixes = __agent_host_options(options)?.allow_argv_prefixes
+  const prefixes = __agent_host_options(options)?.allow_argv_prefixes
   if prefixes == nil || len(prefixes) == 0 {
     return true
   }
@@ -325,8 +325,8 @@ fn __agent_host_policy_blocked(reason, request, args, options) {
 }
 
 fn __agent_host_policy_requires_approval(verdict, request, args) {
-  let approval_request = verdict?.request ?? verdict?.rewrite ?? request
-  var out = {
+  const approval_request = verdict?.request ?? verdict?.rewrite ?? request
+  let out = {
     requires_approval: true,
     status: "requires_approval",
     reason: verdict?.reason ?? "command_policy requires approval",
@@ -340,12 +340,12 @@ fn __agent_host_policy_requires_approval(verdict, request, args) {
 }
 
 fn __agent_host_apply_command_policy(request, args, options) {
-  let opts = __agent_host_options(options)
-  let policy = opts?.command_policy ?? opts?.allow_command
+  const opts = __agent_host_options(options)
+  const policy = opts?.command_policy ?? opts?.allow_command
   if policy == nil {
     return request
   }
-  let verdict = policy(request, args)
+  const verdict = policy(request, args)
   if verdict == nil {
     return request
   }
@@ -355,12 +355,12 @@ fn __agent_host_apply_command_policy(request, args, options) {
     }
     return __agent_host_policy_blocked("command_policy rejected command", request, args, opts)
   }
-  let kind = type_of(verdict)
+  const kind = type_of(verdict)
   if kind == "string" {
     return __agent_host_policy_blocked(verdict, request, args, opts)
   }
   if kind == "dict" {
-    let approval_value = verdict?.require_approval ?? verdict?.requires_approval
+    const approval_value = verdict?.require_approval ?? verdict?.requires_approval
     if type_of(approval_value) == "bool" && approval_value {
       return __agent_host_policy_requires_approval(verdict, request, args)
     }
@@ -370,8 +370,8 @@ fn __agent_host_apply_command_policy(request, args, options) {
     if verdict?.rewrite != nil {
       return verdict.rewrite
     }
-    let allow_value = verdict?.allow
-    let blocked_value = verdict?.blocked
+    const allow_value = verdict?.allow
+    const blocked_value = verdict?.blocked
     if (type_of(allow_value) == "bool" && !allow_value)
       || (type_of(blocked_value) == "bool" && blocked_value) {
       return __agent_host_policy_blocked(
@@ -388,8 +388,8 @@ fn __agent_host_apply_command_policy(request, args, options) {
 }
 
 fn __agent_host_command_cwd(args, options) {
-  let opts = __agent_host_options(options)
-  let cwd = args?.cwd ?? opts?.cwd ?? opts?.root
+  const opts = __agent_host_options(options)
+  const cwd = args?.cwd ?? opts?.cwd ?? opts?.root
   if cwd == nil || cwd == "" {
     return nil
   }
@@ -416,7 +416,7 @@ fn __agent_host_resolve_argv(args) {
   // send the array under `command`. Accept both spellings so the tool works
   // regardless of which field carries the list; a string `command` still
   // routes to shell mode below.
-  let argv = args?.argv
+  const argv = args?.argv
   if type_of(argv) == "list" && len(argv) > 0 {
     return argv
   }
@@ -428,7 +428,7 @@ fn __agent_host_resolve_argv(args) {
 }
 
 fn __agent_host_append_unique_string(values, value) {
-  let text = trim(value ?? "")
+  const text = trim(value ?? "")
   if text == "" {
     return values
   }
@@ -441,9 +441,9 @@ fn __agent_host_append_unique_string(values, value) {
 }
 
 fn __agent_host_command_sandbox_roots(request, options) {
-  let opts = __agent_host_options(options)
-  var roots = []
-  let configured_root = __agent_host_root(opts)
+  const opts = __agent_host_options(options)
+  let roots = []
+  const configured_root = __agent_host_root(opts)
   if configured_root != nil && trim(configured_root) != "" {
     if starts_with(trim(configured_root).replace("\\", "/"), "/") {
       roots = __agent_host_append_unique_string(roots, configured_root)
@@ -458,30 +458,30 @@ fn __agent_host_command_sandbox_roots(request, options) {
 }
 
 fn __agent_host_command_request(args, options) {
-  let opts = __agent_host_options(options)
-  let resolved_argv = __agent_host_resolve_argv(args)
+  const opts = __agent_host_options(options)
+  const resolved_argv = __agent_host_resolve_argv(args)
   if resolved_argv != nil {
     if !__agent_host_list_of_strings(resolved_argv) {
       throw "run_command: argv must be a non-empty list of strings"
     }
-    let argv = resolved_argv
+    const argv = resolved_argv
     if !__agent_host_argv_allowed(argv, opts) {
       return __agent_host_blocked_command(argv, opts)
     }
-    var req = {mode: "argv", argv: argv}
-    let command_cwd = __agent_host_command_cwd(args, opts)
+    let req = {mode: "argv", argv: argv}
+    const command_cwd = __agent_host_command_cwd(args, opts)
     if command_cwd != nil && command_cwd != "" {
       req = req + {cwd: command_cwd}
     }
     return __agent_host_apply_command_policy(__agent_host_command_request_common(req, args, opts), args, opts)
   }
   if (opts?.allow_shell ?? false) && type_of(args?.command) == "string" && trim(args.command) != "" {
-    var req = {mode: "shell", command: args.command}
-    let shell_cwd = __agent_host_command_cwd(args, opts)
+    let req = {mode: "shell", command: args.command}
+    const shell_cwd = __agent_host_command_cwd(args, opts)
     if shell_cwd != nil && shell_cwd != "" {
       req = req + {cwd: shell_cwd}
     }
-    let shell_id = args?.shell_id ?? opts?.shell_id
+    const shell_id = args?.shell_id ?? opts?.shell_id
     if shell_id != nil {
       req = req + {shell_id: shell_id}
     }
@@ -503,10 +503,10 @@ fn __agent_host_command_request(args, options) {
 }
 
 fn __agent_host_command_request_common(base_request, args, options) {
-  let opts = __agent_host_options(options)
-  let behavior = opts?.command_behavior ?? opts?.run_command_behavior ?? {}
-  var req = base_request
-  let timeout = args?.timeout_ms ?? opts?.timeout_ms
+  const opts = __agent_host_options(options)
+  const behavior = opts?.command_behavior ?? opts?.run_command_behavior ?? {}
+  let req = base_request
+  const timeout = args?.timeout_ms ?? opts?.timeout_ms
   if timeout != nil {
     req = req + {timeout_ms: timeout}
   }
@@ -519,10 +519,10 @@ fn __agent_host_command_request_common(base_request, args, options) {
   if args?.env_mode != nil {
     req = req + {env_mode: args.env_mode}
   }
-  var capture = args?.capture ?? {}
-  let requested_max_inline = capture?.max_inline_bytes ?? args?.max_inline_bytes
-  let configured_max_inline = opts?.max_inline_bytes
-  let max_inline = if requested_max_inline != nil && configured_max_inline != nil {
+  let capture = args?.capture ?? {}
+  const requested_max_inline = capture?.max_inline_bytes ?? args?.max_inline_bytes
+  const configured_max_inline = opts?.max_inline_bytes
+  const max_inline = if requested_max_inline != nil && configured_max_inline != nil {
     if requested_max_inline < configured_max_inline {
       requested_max_inline
     } else {
@@ -538,12 +538,12 @@ fn __agent_host_command_request_common(base_request, args, options) {
     req = req + {capture: capture}
   }
   for key in ["background", "background_after_ms", "progress_interval_ms", "progress_max_inline_bytes"] {
-    let value = args?.[key] ?? behavior[key]
+    const value = args?.[key] ?? behavior[key]
     if value != nil {
       req = req + {[key]: value}
     }
   }
-  let sandbox_roots = __agent_host_command_sandbox_roots(req, opts)
+  const sandbox_roots = __agent_host_command_sandbox_roots(req, opts)
   if len(sandbox_roots) > 0 {
     req = req + {sandbox: {workspace_roots: sandbox_roots}}
   }
@@ -551,7 +551,7 @@ fn __agent_host_command_request_common(base_request, args, options) {
 }
 
 fn __agent_host_reader_locator(args) {
-  var req = {}
+  let req = {}
   if args?.command_id != nil {
     req = req + {command_id: args.command_id}
   }
@@ -568,7 +568,7 @@ fn __agent_host_reader_locator(args) {
 }
 
 fn __agent_host_read_command_request(args, options) {
-  var req = __agent_host_reader_locator(args)
+  let req = __agent_host_reader_locator(args)
   req = req
     + {
     offset: args?.offset ?? 0,
@@ -578,10 +578,10 @@ fn __agent_host_read_command_request(args, options) {
 }
 
 fn __agent_host_tail_command_request(args, options) {
-  let locator = __agent_host_reader_locator(args)
-  let length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
-  let meta = hostlib_tools_read_command_output(locator + {offset: 0, length: 0})
-  let offset = if meta.total_bytes > length {
+  const locator = __agent_host_reader_locator(args)
+  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  const meta = hostlib_tools_read_command_output(locator + {offset: 0, length: 0})
+  const offset = if meta.total_bytes > length {
     meta.total_bytes - length
   } else {
     0
@@ -590,10 +590,10 @@ fn __agent_host_tail_command_request(args, options) {
 }
 
 fn __agent_host_tail_file_request(harness: Harness, args, options) {
-  let path = __agent_host_resolve_path(args.path, options)
-  let length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
-  let info = harness.fs.stat(path)
-  let offset = if info.size > length {
+  const path = __agent_host_resolve_path(args.path, options)
+  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  const info = harness.fs.stat(path)
+  const offset = if info.size > length {
     info.size - length
   } else {
     0
@@ -602,7 +602,7 @@ fn __agent_host_tail_file_request(harness: Harness, args, options) {
 }
 
 fn __agent_host_command_result_readers(options, read_name, tail_name) {
-  var readers = []
+  let readers = []
   if __agent_host_tool_enabled(options, "read_command_output", "command") {
     readers = readers + [read_name]
   }
@@ -613,7 +613,7 @@ fn __agent_host_command_result_readers(options, read_name, tail_name) {
 }
 
 fn __agent_host_command_handle_id(args, tool_name: string) -> string {
-  let handle_id = trim(to_string(args?.handle_id ?? args?.handle ?? ""))
+  const handle_id = trim(to_string(args?.handle_id ?? args?.handle ?? ""))
   if handle_id != "" {
     return handle_id
   }
@@ -621,7 +621,7 @@ fn __agent_host_command_handle_id(args, tool_name: string) -> string {
 }
 
 fn __agent_host_wait_command_request(args, tool_name: string, timeout_ms) {
-  var req = {handle_id: __agent_host_command_handle_id(args, tool_name)}
+  let req = {handle_id: __agent_host_command_handle_id(args, tool_name)}
   if timeout_ms != nil {
     req = req + {timeout_ms: timeout_ms}
   }
@@ -632,7 +632,7 @@ fn __agent_host_wait_command_request(args, tool_name: string, timeout_ms) {
 }
 
 fn __agent_host_cancel_command_request(args) {
-  var req = {handle_id: __agent_host_command_handle_id(args, "kill_command")}
+  let req = {handle_id: __agent_host_command_handle_id(args, "kill_command")}
   if args?.wait_result_ms != nil {
     req = req + {wait_result_ms: args.wait_result_ms}
   }
@@ -650,11 +650,11 @@ fn __agent_host_cancel_command_request(args) {
  * @api_stability: stable
  */
 pub fn agent_read_tools(registry = nil, options = nil) {
-  let opts = __agent_host_options(options)
-  let _ = hostlib_enable("tools:deterministic")
-  var tools = registry ?? tool_registry()
+  const opts = __agent_host_options(options)
+  const _ = hostlib_enable("tools:deterministic")
+  let tools = registry ?? tool_registry()
   if __agent_host_tool_enabled(opts, "read_file", "read") {
-    let key = "read_file"
+    const key = "read_file"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "read_file"),
@@ -681,7 +681,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "read_file_tail", "read") {
-    let key = "read_file_tail"
+    const key = "read_file_tail"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "read_file_tail"),
@@ -707,7 +707,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "list_directory", "read") {
-    let key = "list_directory"
+    const key = "list_directory"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "list_directory"),
@@ -737,7 +737,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "get_file_outline", "read") {
-    let key = "get_file_outline"
+    const key = "get_file_outline"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "get_file_outline"),
@@ -763,7 +763,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "search_files", "read") {
-    let key = "search_files"
+    const key = "search_files"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "search_files"),
@@ -797,7 +797,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "git_inspect", "read") {
-    let key = "git_inspect"
+    const key = "git_inspect"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "git_inspect"),
@@ -839,14 +839,14 @@ pub fn agent_read_tools(registry = nil, options = nil) {
  * @api_stability: stable
  */
 pub fn agent_command_tools(registry = nil, options = nil) {
-  let opts = __agent_host_options(options)
-  let _ = hostlib_enable("tools:deterministic")
-  var tools = registry ?? tool_registry()
-  let read_name = __agent_host_name(opts, "read_command_output", "read_command_output")
-  let tail_name = __agent_host_name(opts, "read_command_output_tail", "read_command_output_tail")
-  let result_readers = __agent_host_command_result_readers(opts, read_name, tail_name)
+  const opts = __agent_host_options(options)
+  const _ = hostlib_enable("tools:deterministic")
+  let tools = registry ?? tool_registry()
+  const read_name = __agent_host_name(opts, "read_command_output", "read_command_output")
+  const tail_name = __agent_host_name(opts, "read_command_output_tail", "read_command_output_tail")
+  const result_readers = __agent_host_command_result_readers(opts, read_name, tail_name)
   if __agent_host_tool_enabled(opts, "run_command", "command") {
-    let key = "run_command"
+    const key = "run_command"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "run_command"),
@@ -889,18 +889,18 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             },
           ),
           handler: { args ->
-            let req = __agent_host_command_request(args, opts)
+            const req = __agent_host_command_request(args, opts)
             if (req?.blocked ?? false) || (req?.requires_approval ?? false) {
               return __agent_host_render(req, opts, key)
             }
-            let planned = if opts?.preserve_filtered_output ?? true {
+            const planned = if opts?.preserve_filtered_output ?? true {
               command_capture_plan_request(req)
             } else {
               nil
             }
-            let run_req = planned?.run_request ?? req
-            let result = hostlib_tools_run_command(run_req)
-            let final_result = if planned != nil {
+            const run_req = planned?.run_request ?? req
+            const result = hostlib_tools_run_command(run_req)
+            const final_result = if planned != nil {
               command_capture_annotate(result, planned.plan)
             } else {
               result
@@ -912,7 +912,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_lifecycle_tool_enabled(opts, "poll_command") {
-    let key = "poll_command"
+    const key = "poll_command"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "poll_command"),
@@ -942,7 +942,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_lifecycle_tool_enabled(opts, "wait_command") {
-    let key = "wait_command"
+    const key = "wait_command"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "wait_command"),
@@ -979,7 +979,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_lifecycle_tool_enabled(opts, "kill_command") {
-    let key = "kill_command"
+    const key = "kill_command"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "kill_command"),
@@ -1010,7 +1010,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "read_command_output", "command") {
-    let key = "read_command_output"
+    const key = "read_command_output"
     tools = tool_define(
       tools,
       read_name,
@@ -1042,7 +1042,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "read_command_output_tail", "command") {
-    let key = "read_command_output_tail"
+    const key = "read_command_output_tail"
     tools = tool_define(
       tools,
       tail_name,
@@ -1082,14 +1082,14 @@ pub fn agent_command_tools(registry = nil, options = nil) {
  * never appear by default.
  */
 fn __agent_host_code_mode_enabled(options) {
-  let opts = __agent_host_options(options)
-  let enabled = opts?.enabled_tools ?? opts?.tools
-  let explicitly_enabled = __agent_host_list_contains(enabled, "code_mode")
-  let opted_in = opts?.code_mode ?? false
+  const opts = __agent_host_options(options)
+  const enabled = opts?.enabled_tools ?? opts?.tools
+  const explicitly_enabled = __agent_host_list_contains(enabled, "code_mode")
+  const opted_in = opts?.code_mode ?? false
   if !opted_in && !explicitly_enabled {
     return false
   }
-  let disabled = opts?.disabled_tools ?? []
+  const disabled = opts?.disabled_tools ?? []
   if __agent_host_list_contains(disabled, "code_mode") {
     return false
   }
@@ -1110,10 +1110,10 @@ fn __agent_host_code_mode_enabled(options) {
  * @api_stability: stable
  */
 pub fn agent_composition_tools(registry = nil, options = nil) {
-  let opts = __agent_host_options(options)
-  var tools = registry ?? tool_registry()
+  const opts = __agent_host_options(options)
+  let tools = registry ?? tool_registry()
   if __agent_host_code_mode_enabled(opts) {
-    let key = "code_mode"
+    const key = "code_mode"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "code_mode"),
@@ -1155,20 +1155,20 @@ pub fn agent_composition_tools(registry = nil, options = nil) {
  * is a hard error so the model never silently edits the wrong span.
  */
 fn __agent_host_edit_file_apply(args, options) {
-  let opts = __agent_host_options(options)
-  let path = __agent_host_resolve_path(args.path, opts)
-  let old_string = args?.old_string
-  let new_string = args?.new_string ?? ""
-  let replace_all = args?.replace_all ?? false
+  const opts = __agent_host_options(options)
+  const path = __agent_host_resolve_path(args.path, opts)
+  const old_string = args?.old_string
+  const new_string = args?.new_string ?? ""
+  const replace_all = args?.replace_all ?? false
   if type_of(old_string) != "string" || old_string == "" {
     throw "edit_file: old_string must be a non-empty string"
   }
   if old_string == new_string {
     throw "edit_file: old_string and new_string are identical; nothing to change"
   }
-  let current = hostlib_tools_read_file({path: path})
-  let content = current?.content ?? ""
-  let occurrences = len(split(content, old_string)) - 1
+  const current = hostlib_tools_read_file({path: path})
+  const content = current?.content ?? ""
+  const occurrences = len(split(content, old_string)) - 1
   if occurrences == 0 {
     throw "edit_file: old_string not found in " + args.path
   }
@@ -1179,8 +1179,8 @@ fn __agent_host_edit_file_apply(args, options) {
       + to_string(occurrences)
       + " matches); pass replace_all: true or include more surrounding context to disambiguate"
   }
-  let updated = replace(content, old_string, new_string)
-  let write = hostlib_tools_write_file({path: path, content: updated, overwrite: true})
+  const updated = replace(content, old_string, new_string)
+  const write = hostlib_tools_write_file({path: path, content: updated, overwrite: true})
   return {
     bytes_written: write?.bytes_written,
     path: write?.path ?? path,
@@ -1212,11 +1212,11 @@ fn __agent_host_edit_file_apply(args, options) {
  * @api_stability: stable
  */
 pub fn agent_edit_tools(registry = nil, options = nil) {
-  let opts = __agent_host_options(options)
-  let _ = hostlib_enable("tools:deterministic")
-  var tools = registry ?? tool_registry()
+  const opts = __agent_host_options(options)
+  const _ = hostlib_enable("tools:deterministic")
+  let tools = registry ?? tool_registry()
   if __agent_host_tool_enabled(opts, "write_file", "edit") {
-    let key = "write_file"
+    const key = "write_file"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "write_file"),
@@ -1242,7 +1242,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "edit_file", "edit") {
-    let key = "edit_file"
+    const key = "edit_file"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "edit_file"),
@@ -1269,7 +1269,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "create_directory", "edit") {
-    let key = "create_directory"
+    const key = "create_directory"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "create_directory"),
@@ -1286,7 +1286,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
           returns: {type: "object"},
           annotations: __agent_host_annotations(opts, key, {kind: "edit", side_effect_level: "workspace_write"}),
           handler: { args ->
-            let path = __agent_host_resolve_path(args.path, opts)
+            const path = __agent_host_resolve_path(args.path, opts)
             harness.fs.mkdir(path, true)
             return __agent_host_render({created: true, path: path}, opts, key)
           },
@@ -1295,7 +1295,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
     )
   }
   if __agent_host_tool_enabled(opts, "delete_path", "edit") {
-    let key = "delete_path"
+    const key = "delete_path"
     tools = tool_define(
       tools,
       __agent_host_name(opts, key, "delete_path"),
@@ -1333,7 +1333,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
  * @api_stability: stable
  */
 pub fn agent_host_tools(registry = nil, options = nil) {
-  var tools = agent_read_tools(registry, options)
+  let tools = agent_read_tools(registry, options)
   tools = agent_command_tools(tools, options)
   tools = agent_composition_tools(tools, options)
   return tools

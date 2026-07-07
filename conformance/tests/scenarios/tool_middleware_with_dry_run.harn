@@ -33,23 +33,23 @@ fn envelope(name) {
 }
 
 pipeline default() {
-  let next = next_marker()
+  const next = next_marker()
   // (1) dry-run everything.
-  let dry = with_dry_run()
-  let r1 = dry(envelope("write"), next)
+  const dry = with_dry_run()
+  const r1 = dry(envelope("write"), next)
   __io_println(r1.ok)
   __io_println(r1.status)
   __io_println(r1.result.dry_run)
   // (2) `except` allows specific tools to actually run.
-  let dry_except_read = with_dry_run({except: ["read"]})
-  let r2 = dry_except_read(envelope("read"), next)
-  let r3 = dry_except_read(envelope("write"), next)
+  const dry_except_read = with_dry_run({except: ["read"]})
+  const r2 = dry_except_read(envelope("read"), next)
+  const r3 = dry_except_read(envelope("write"), next)
   __io_println(r2.result)
   __io_println(r3.status)
   // (3) `only` runs dry-run only for listed tools.
-  let dry_only_write = with_dry_run({only: ["write"]})
-  let r4 = dry_only_write(envelope("read"), next)
-  let r5 = dry_only_write(envelope("write"), next)
+  const dry_only_write = with_dry_run({only: ["write"]})
+  const r4 = dry_only_write(envelope("read"), next)
+  const r5 = dry_only_write(envelope("write"), next)
   __io_println(r4.result)
   __io_println(r5.status)
 }

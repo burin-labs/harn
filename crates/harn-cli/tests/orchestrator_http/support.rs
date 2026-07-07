@@ -288,7 +288,7 @@ pub(super) fn echo_handler_module(marker_path: &Path) -> String {
 import "std/triggers"
 
 pub fn on_echo(event: TriggerEvent) {{
-  let ping = connector_call("echo", "ping", {{
+  const ping = connector_call("echo", "ping", {{
     message: event.provider_payload.raw.body.message,
   }})
   write_file({marker:?}, json_stringify({{
@@ -325,7 +325,7 @@ pub fn on_stream(event: TriggerEvent) {{
 
 pub(super) fn echo_connector_module() -> &'static str {
     r#"
-var active_bindings = []
+let active_bindings = []
 
 pub fn provider_id() {
   return "echo"
@@ -364,8 +364,8 @@ pub fn shutdown() {
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
-  let token = secret_get("echo/api-token")
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const token = secret_get("echo/api-token")
   metrics_inc("echo_normalize_calls")
   event_log_emit("connectors.echo.lifecycle", "normalize", {
     binding_id: raw.binding_id,
@@ -426,7 +426,7 @@ pub fn activate(bindings) {
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
+  const body = raw.body_json ?? json_parse(raw.body_text)
   event_log_emit("connectors.github.override", "normalize", {
     id: body.id,
     action: body.action,
@@ -463,11 +463,11 @@ pub fn payload_schema() {
 }
 
 pub fn normalize_inbound(raw) {
-  let decoded = base64_decode(raw.body_base64)
-  let timestamp = raw.headers["X-Slack-Request-Timestamp"] ?? raw.headers["x-slack-request-timestamp"] ?? ""
-  let signature = raw.headers["X-Slack-Signature"] ?? raw.headers["x-slack-signature"] ?? ""
-  let secret = secret_get("slack/signing-secret")
-  let expected = "v0=" + hmac_sha256(secret, "v0:" + timestamp + ":" + decoded)
+  const decoded = base64_decode(raw.body_base64)
+  const timestamp = raw.headers["X-Slack-Request-Timestamp"] ?? raw.headers["x-slack-request-timestamp"] ?? ""
+  const signature = raw.headers["X-Slack-Signature"] ?? raw.headers["x-slack-signature"] ?? ""
+  const secret = secret_get("slack/signing-secret")
+  const expected = "v0=" + hmac_sha256(secret, "v0:" + timestamp + ":" + decoded)
   if !constant_time_eq(signature, expected) {
     return {
       type: "reject",
@@ -478,7 +478,7 @@ pub fn normalize_inbound(raw) {
     }
   }
 
-  let body = raw.body_json ?? json_parse(decoded)
+  const body = raw.body_json ?? json_parse(decoded)
   if body.type == "url_verification" {
     return {
       type: "immediate_response",
@@ -490,9 +490,9 @@ pub fn normalize_inbound(raw) {
     }
   }
 
-  let event_type = body.event.type ?? "event_callback"
-  let channel_type = body.event.channel_type ?? ""
-  let kind = if event_type == "message" && channel_type != "" {
+  const event_type = body.event.type ?? "event_callback"
+  const channel_type = body.event.channel_type ?? ""
+  const kind = if event_type == "message" && channel_type != "" {
     event_type + "." + channel_type
   } else {
     event_type
@@ -529,8 +529,8 @@ pub fn payload_schema() {
 }
 
 pub fn normalize_inbound(raw) {
-  let decoded = base64_decode(raw.body_base64)
-  let body = raw.body_json ?? json_parse(decoded)
+  const decoded = base64_decode(raw.body_base64)
+  const body = raw.body_json ?? json_parse(decoded)
   if (body.verification_token ?? "") != "" {
     return {
       type: "immediate_response",
@@ -544,9 +544,9 @@ pub fn normalize_inbound(raw) {
     }
   }
 
-  let secret = secret_get("notion/verification-token")
-  let signature = raw.headers["X-Notion-Signature"] ?? raw.headers["x-notion-signature"] ?? ""
-  let expected = "sha256=" + hmac_sha256(secret, decoded)
+  const secret = secret_get("notion/verification-token")
+  const signature = raw.headers["X-Notion-Signature"] ?? raw.headers["x-notion-signature"] ?? ""
+  const expected = "sha256=" + hmac_sha256(secret, decoded)
   if !constant_time_eq(signature, expected) {
     return {
       type: "reject",

@@ -1,13 +1,13 @@
 import { parse_args } from "std/cli"
 
 fn __load_cell_summaries(harness: Harness, results_dir: string) {
-  let entries = harness.fs.list_dir(results_dir)
-  var summaries = []
+  const entries = harness.fs.list_dir(results_dir)
+  let summaries = []
   for entry in entries {
-    let path = path_join(results_dir, entry)
-    let summary_path = path_join(path, "summary.json")
+    const path = path_join(results_dir, entry)
+    const summary_path = path_join(path, "summary.json")
     if harness.fs.exists(summary_path) {
-      let parsed = json_parse(harness.fs.read_text(summary_path))
+      const parsed = json_parse(harness.fs.read_text(summary_path))
       summaries = summaries.push({label: entry, summary: parsed})
     }
   }
@@ -17,9 +17,9 @@ fn __load_cell_summaries(harness: Harness, results_dir: string) {
 fn __cell_from_label(label: string) {
   // Labels look like "asymmetric-r2" or "probe-rubric-adversarial".
   // Strip trailing "-rN" suffix to recover the cell name.
-  let parts = split(label, "-")
+  const parts = split(label, "-")
   if len(parts) >= 2 {
-    let last = parts[len(parts) - 1]
+    const last = parts[len(parts) - 1]
     if starts_with(last, "r") && len(last) > 1 {
       return join(parts.take(len(parts) - 1), "-")
     }
@@ -28,23 +28,23 @@ fn __cell_from_label(label: string) {
 }
 
 fn __cell_stats(cell_summaries) {
-  var total_runs = 0
-  var passed_runs = 0
-  var total_cost = 0.0
-  var total_input_tokens = 0
-  var total_output_tokens = 0
+  let total_runs = 0
+  let passed_runs = 0
+  let total_cost = 0.0
+  let total_input_tokens = 0
+  let total_output_tokens = 0
   for entry in cell_summaries {
-    let s = entry.summary
+    const s = entry.summary
     total_runs = total_runs + (s?.total_runs ?? 0)
     passed_runs = passed_runs + (s?.passed_runs ?? 0)
     total_cost = total_cost + (s?.total_cost_usd ?? 0.0)
-    let runs = s?.runs ?? []
+    const runs = s?.runs ?? []
     for run in runs {
       total_input_tokens = total_input_tokens + (run?.input_tokens ?? 0)
       total_output_tokens = total_output_tokens + (run?.output_tokens ?? 0)
     }
   }
-  let pass_rate = if total_runs > 0 {
+  const pass_rate = if total_runs > 0 {
     passed_runs * 100 / total_runs
   } else {
     0
@@ -60,17 +60,17 @@ fn __cell_stats(cell_summaries) {
 }
 
 fn __group_by_cell(summaries) {
-  var groups = {}
+  let groups = {}
   for entry in summaries {
-    let cell = __cell_from_label(entry.label)
-    let bucket = groups[cell] ?? []
+    const cell = __cell_from_label(entry.label)
+    const bucket = groups[cell] ?? []
     groups = groups + {[cell]: bucket.push(entry)}
   }
   return groups
 }
 
 fn __format_md(groups, results_dir: string) {
-  var lines = []
+  let lines = []
   lines = lines.push("# Step-Judge Experiment Report")
   lines = lines.push("")
   lines = lines.push("Source: `" + results_dir + "`")
@@ -80,11 +80,11 @@ fn __format_md(groups, results_dir: string) {
   lines = lines
     .push("| Cell | Runs | Pass | Pass% | Cost USD | Input tok | Output tok |")
   lines = lines.push("|---|---:|---:|---:|---:|---:|---:|")
-  let cell_order = ["baseline-cheap", "symmetric-cheap", "asymmetric", "symmetric-strong"]
-  var baseline_pass_rate = nil
+  const cell_order = ["baseline-cheap", "symmetric-cheap", "asymmetric", "symmetric-strong"]
+  let baseline_pass_rate = nil
   for cell in cell_order {
     if groups?.[cell] != nil {
-      let stats = __cell_stats(groups[cell])
+      const stats = __cell_stats(groups[cell])
       if cell == "baseline-cheap" {
         baseline_pass_rate = stats.pass_rate_pct
       }
@@ -110,15 +110,15 @@ fn __format_md(groups, results_dir: string) {
     lines = lines.push("|---|---:|")
     for cell in cell_order {
       if cell != "baseline-cheap" && groups?.[cell] != nil {
-        let stats = __cell_stats(groups[cell])
-        let lift = stats.pass_rate_pct - baseline_pass_rate
+        const stats = __cell_stats(groups[cell])
+        const lift = stats.pass_rate_pct - baseline_pass_rate
         lines = lines.push("| " + cell + " | " + to_string(lift) + " |")
       }
     }
     lines = lines.push("")
   }
   // Probes (any cell not in the main 4).
-  var probe_cells = []
+  let probe_cells = []
   for cell in groups.keys() {
     if !contains(cell_order, cell) {
       probe_cells = probe_cells.push(cell)
@@ -130,7 +130,7 @@ fn __format_md(groups, results_dir: string) {
     lines = lines.push("| Probe | Runs | Pass | Pass% | Cost USD |")
     lines = lines.push("|---|---:|---:|---:|---:|")
     for cell in probe_cells {
-      let stats = __cell_stats(groups[cell])
+      const stats = __cell_stats(groups[cell])
       lines = lines
         .push(
         "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
@@ -154,7 +154,7 @@ fn __format_md(groups, results_dir: string) {
 }
 
 fn main(harness: Harness) {
-  let args = parse_args(
+  const args = parse_args(
     argv,
     [
       {kind: "option", name: "results_dir", flags: ["--results-dir"], required: true},
@@ -164,12 +164,12 @@ fn main(harness: Harness) {
   if len(args._errors) > 0 {
     throw join(args._errors, "\n")
   }
-  let summaries = __load_cell_summaries(harness, args.results_dir)
+  const summaries = __load_cell_summaries(harness, args.results_dir)
   if len(summaries) == 0 {
     throw "no summary.json files found under " + args.results_dir
   }
-  let groups = __group_by_cell(summaries)
-  let md = __format_md(groups, args.results_dir)
+  const groups = __group_by_cell(summaries)
+  const md = __format_md(groups, args.results_dir)
   harness.fs.write_text(args.output, md)
   harness.stdio.println("wrote " + args.output)
   return 0

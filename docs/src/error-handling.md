@@ -25,7 +25,7 @@ Catch errors with an optional error binding:
 
 ```harn
 try {
-  let data = json_parse(raw_input)
+  const data = json_parse(raw_input)
 } catch (e) {
   log("Parse failed: ${e}")
 }
@@ -56,7 +56,7 @@ out of the enclosing pipeline or function as expected.
 ```harn,ignore
 fn find_user(id) {
   try {
-    let user = lookup(id)
+    const user = lookup(id)
     return user  // this returns from find_user, not caught
   } catch (e) {
     return nil
@@ -133,8 +133,8 @@ Automatically retry a block up to N times:
 
 ```harn
 retry 3 {
-  let response = http_post(url, payload)
-  let parsed = json_parse(response.body)
+  const response = http_post(url, payload)
+  const parsed = json_parse(response.body)
   parsed
 }
 ```
@@ -152,19 +152,19 @@ evaluates the body and returns a `Result`:
 - On error: `Result.Err(error)`
 
 ```harn
-let result = try { json_parse(raw_input) }
+const result = try { json_parse(raw_input) }
 ```
 
 This is useful when you want to capture an error as a value rather than
 crashing or needing a full `try`/`catch`:
 
 ```harn
-let parsed = try { json_parse(input) }
+const parsed = try { json_parse(input) }
 if is_err(parsed) {
   log("Bad input, using defaults")
   parsed = Ok({})
 }
-let data = unwrap(parsed)
+const data = unwrap(parsed)
 ```
 
 ## Try/catch expression
@@ -176,7 +176,7 @@ inferred automatically, and an explicit type annotation on the `let` binds
 the result:
 
 ```harn,ignore
-let parsed: dict = try { json_parse(input) } catch (e) { default_config() }
+const parsed: dict = try { json_parse(input) } catch (e) { default_config() }
 ```
 
 Typed catches work identically in expression position; when the thrown
@@ -184,7 +184,7 @@ error's type does not match the catch's type filter, the throw propagates
 past the expression and the `let` binding is never established:
 
 ```harn,ignore
-let user: User = try {
+const user: User = try {
   fetch_user(id)
 } catch (e: NetworkError) {
   cached_user(id)
@@ -201,9 +201,9 @@ enter Result-land and `?` to propagate within it:
 
 ```harn
 fn fetch_json(url) {
-  let body = try { http_get(url) }
-  let text = unwrap(body)?
-  let data = try { json_parse(text) }
+  const body = try { http_get(url) }
+  const text = unwrap(body)?
+  const data = try { json_parse(text) }
   return data
 }
 ```
@@ -247,11 +247,11 @@ representing success and failure as values. A `Result` is either
 `Result<T, E>`.
 
 ```harn
-let ok = Ok(42)
-let err = Err("something failed")
+const ok = Ok(42)
+const err = Err("something failed")
 
-let typed_ok: Result<int, string> = ok
-let typed_err: Result<int, string> = err
+const typed_ok: Result<int, string> = ok
+const typed_err: Result<int, string> = err
 
 log(ok)   // Result.Ok(42)
 log(err)  // Result.Err(something failed)
@@ -271,7 +271,7 @@ The shorthand constructors `Ok(value)` and `Err(value)` are equivalent to
 | `unwrap_err(r)` | Returns the `Err` value, throws if `r` is `Ok` |
 
 ```harn
-let r = Ok(42)
+const r = Ok(42)
 log(is_ok(r))           // true
 log(is_err(r))          // false
 log(unwrap(r))          // 42
@@ -308,12 +308,12 @@ fn divide(a, b) {
 }
 
 fn compute(x) {
-  let result = divide(x, 2)?   // unwraps Ok, or returns Err early
+  const result = divide(x, 2)?   // unwraps Ok, or returns Err early
   return Ok(result + 10)
 }
 
-let r1 = compute(20)  // Result.Ok(20)
-let r2 = compute(0)   // Result.Err(division by zero)
+const r1 = compute(20)  // Result.Ok(20)
+const r2 = compute(0)   // Result.Err(division by zero)
 ```
 
 The `?` operator has the same precedence as `.`, `[]`, and `()`, so it
@@ -321,8 +321,8 @@ chains naturally:
 
 ```harn
 fn fetch_and_parse(url) {
-  let response = http_get(url)?
-  let data = json_parse(response)?
+  const response = http_get(url)?
+  const data = json_parse(response)?
   return Ok(data)
 }
 ```
@@ -343,7 +343,7 @@ fn transform(data) { return data }
 
 fn safe_parse(input) {
   try {
-    let data = json_parse(input)
+    const data = json_parse(input)
     return Ok(data)
   } catch (e) {
     return Err("parse error: ${e}")
@@ -351,7 +351,7 @@ fn safe_parse(input) {
 }
 
 fn process(raw) {
-  let data = safe_parse(raw)?   // propagate Err if parse fails
+  const data = safe_parse(raw)?   // propagate Err if parse fails
   return Ok(transform(data))
 }
 ```
@@ -390,8 +390,8 @@ at a higher level.
 ```harn
 retry 3 {
   try {
-    let result = llm_call(prompt, system)
-    let parsed = json_parse(result.text)
+    const result = llm_call(prompt, system)
+    const parsed = json_parse(result.text)
     return parsed
   } catch (e) {
     log("Attempt failed: ${e}")

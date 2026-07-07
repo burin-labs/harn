@@ -387,10 +387,10 @@ fn __invoke_llm_with_autocontinue(
   session_id,
   iteration_index,
 ) {
-  var call = __invoke_llm(message, turn_system, llm_opts)
+  let call = __invoke_llm(message, turn_system, llm_opts)
   let max_continuations = __autocontinue_max_continuations(llm_opts)
-  var attempts = 0
-  var cap = llm_opts?.max_tokens ?? 0
+  let attempts = 0
+  let cap = llm_opts?.max_tokens ?? 0
   while attempts < max_continuations && __autocontinue_should_continue(call, turn_opts) {
     let raised = __autocontinue_raised_cap(cap, llm_opts)
     // No headroom left to raise — re-issuing would just truncate again at the
@@ -476,8 +476,8 @@ fn __agent_loop_recover_context_overflow(
   iteration_index,
 ) {
   let max_recoveries = __agent_loop_context_overflow_max_recoveries(llm_opts)
-  var current = call
-  var attempt = 0
+  let current = call
+  let attempt = 0
   while attempt < max_recoveries && !current.ok
     && __agent_loop_is_context_overflow(current?.error) {
     attempt = attempt + 1
@@ -1006,7 +1006,7 @@ fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
 }
 
 fn __visible_text(parsed, raw_text) {
-  var text = raw_text
+  let text = raw_text
   if parsed?.user_response != nil && parsed.user_response != "" {
     text = parsed.user_response
   } else if parsed?.prose != nil && parsed.prose != "" {
@@ -1105,8 +1105,8 @@ fn __tool_call_name_is_blank(call) -> bool {
  * is preserved so order-sensitive parsers/parallel dispatch stay correct.
  */
 fn __filter_blank_name_tool_calls(calls) {
-  var kept = []
-  var dropped = 0
+  let kept = []
+  let dropped = 0
   for call in calls ?? [] {
     if __tool_call_name_is_blank(call) {
       dropped = dropped + 1
@@ -1159,7 +1159,7 @@ fn __agent_loop_record_await_tool_results(session, await_call, tool_calls, reaso
     await_reason,
   )
   let await_id = to_string(await_call?.id ?? await_call?.tool_call_id ?? "")
-  var siblings = []
+  let siblings = []
   for call in tool_calls ?? [] {
     if to_string(call?.id ?? call?.tool_call_id ?? "") != await_id {
       siblings = siblings.push(call)
@@ -1690,7 +1690,7 @@ fn __intra_turn_annotation_path_params(annotations) {
 }
 
 fn __intra_turn_normalize_resource_path(raw) -> string {
-  var path = trim(to_string(raw ?? ""))
+  let path = trim(to_string(raw ?? ""))
   while starts_with(path, "./") {
     path = substring(path, 2)
   }
@@ -1711,7 +1711,7 @@ fn __intra_turn_push_resource_key(keys, value) {
 
 fn __intra_turn_push_resource_value(keys, value) {
   if type_of(value) == "list" {
-    var out = keys
+    let out = keys
     for item in value {
       out = __intra_turn_push_resource_key(out, item)
     }
@@ -1735,7 +1735,7 @@ const __INTRA_TURN_FALLBACK_PATH_ARGS = [
 ]
 
 fn __intra_turn_fallback_resource_keys(args) {
-  var keys = []
+  let keys = []
   for name in __INTRA_TURN_FALLBACK_PATH_ARGS {
     if args?.[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
@@ -1752,7 +1752,7 @@ fn __intra_turn_resource_keys(call, tools, options = {}) {
     return []
   }
   let args = __intra_turn_call_args(call)
-  var keys = []
+  let keys = []
   for param in __intra_turn_annotation_path_params(annotations) {
     let name = to_string(param)
     if name != "" && args?.[name] != nil {
@@ -1775,7 +1775,7 @@ fn __intra_turn_intersects(keys, failed_keys) -> bool {
 }
 
 fn __intra_turn_add_failed_keys(failed_keys, keys) {
-  var out = failed_keys
+  let out = failed_keys
   for key in keys {
     if !contains(out, key) {
       out = out.push(key)
@@ -1937,7 +1937,7 @@ fn __callable(value) {
 }
 
 fn __audit_flushes_from_result(result) {
-  var flushes = []
+  let flushes = []
   let single = result?._audit_flush
   if __callable(single) {
     flushes = flushes.push(single)
@@ -1954,7 +1954,7 @@ fn __audit_flushes_from_result(result) {
 }
 
 fn __collect_audit_flushes(dispatch) {
-  var flushes = []
+  let flushes = []
   for result in __dispatch_results_list(dispatch) {
     for flush in __audit_flushes_from_result(result) {
       flushes = flushes.push(flush)
@@ -1967,7 +1967,7 @@ fn __strip_internal_tool_result(result) {
   if type_of(result) != "dict" {
     return result
   }
-  var clean = {}
+  let clean = {}
   for key in result.keys() {
     if !starts_with(key, "_") {
       clean = clean + {[key]: result[key]}
@@ -1978,7 +1978,7 @@ fn __strip_internal_tool_result(result) {
 
 fn __strip_internal_dispatch(dispatch) {
   if type_of(dispatch) == "list" {
-    var clean_results = []
+    let clean_results = []
     for result in dispatch {
       clean_results = clean_results.push(__strip_internal_tool_result(result))
     }
@@ -1987,14 +1987,14 @@ fn __strip_internal_dispatch(dispatch) {
   if type_of(dispatch) != "dict" {
     return dispatch
   }
-  var clean_dispatch = {}
+  let clean_dispatch = {}
   for key in dispatch.keys() {
     if !starts_with(key, "_") {
       clean_dispatch = clean_dispatch + {[key]: dispatch[key]}
     }
   }
   if type_of(dispatch?.results) == "list" {
-    var clean_results = []
+    let clean_results = []
     for result in dispatch.results {
       clean_results = clean_results.push(__strip_internal_tool_result(result))
     }
@@ -2004,7 +2004,7 @@ fn __strip_internal_dispatch(dispatch) {
 }
 
 fn __spawn_audit_flushes(tasks, flushes) {
-  var out = tasks
+  let out = tasks
   for flush in flushes {
     let task = spawn {
       let _ = try {
@@ -2091,13 +2091,13 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     // DIFFERENT signature, resets the streak, so a batch of distinct or
     // non-failing calls is never capped.
     let fanout_cap = options?._intra_turn_failure_fanout_cap ?? 0
-    var results = []
-    var streak_signature = nil
-    var streak_count = 0
-    var capped_call_signature = nil
-    var capped_sample = nil
-    var collapsed_emitted = false
-    var failed_resource_keys = []
+    let results = []
+    let streak_signature = nil
+    let streak_count = 0
+    let capped_call_signature = nil
+    let capped_sample = nil
+    let collapsed_emitted = false
+    let failed_resource_keys = []
     for (index, call) in iter(tool_calls).enumerate() {
       let resource_keys = if resource_fail_fast {
         __intra_turn_resource_keys(call, tools, options)
@@ -2161,14 +2161,14 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     }
     return results
   }
-  var indexed = []
+  let indexed = []
   for (index, call) in iter(tool_calls).enumerate() {
     indexed = indexed.push({index: index, call: call})
   }
   let settled = parallel settle indexed with { max_concurrent: cap } { entry ->
     __invoke_tool_with_index(entry.call, entry.index, tools, options)
   }
-  var results = []
+  let results = []
   for r in settled.results {
     if is_ok(r) {
       results = results.push(unwrap(r))
@@ -2305,7 +2305,7 @@ fn __tool_result_name(result) {
 
 fn __tool_names_by_status(dispatch, want_ok) {
   let results = __dispatch_results_list(dispatch)
-  var names = []
+  let names = []
   for result in results {
     let name = __tool_result_name(result)
     if name != "" && __tool_result_ok(result) == want_ok {
@@ -2394,7 +2394,7 @@ fn __agent_loop_should_spend_reserve(
 }
 
 fn __merge_tool_names(existing, additions) {
-  var merged = existing ?? []
+  let merged = existing ?? []
   let values = additions ?? []
   for name in values {
     if name != "" && !contains(merged, name) {
@@ -2421,7 +2421,7 @@ fn __strip_internal_keys(patch) {
   if type_of(patch) != "dict" {
     return patch
   }
-  var clean = {}
+  let clean = {}
   for key in patch.keys() {
     if !starts_with(key, "_") {
       clean = clean + {[key]: patch[key]}
@@ -2431,7 +2431,7 @@ fn __strip_internal_keys(patch) {
 }
 
 fn __apply_post_turn_options(opts, outcome) {
-  var updated = opts
+  let updated = opts
   let next_patch = __strip_internal_keys(outcome?.next_options)
   updated = __merge_hook_dict(updated, next_patch, "next_options")
   let narrowing = outcome?.narrowing
@@ -2538,7 +2538,7 @@ fn __agent_loop_build_turn_prompt(session, opts, iteration) {
     opts,
     { effective ->
       let fragments = agent_build_turn_system_fragments(session, effective, iteration)
-      var parts = []
+      let parts = []
       for fragment in fragments {
         parts = parts.push(fragment.body)
       }
@@ -3027,7 +3027,7 @@ fn __agent_loop_checkpoint_modes(kind) {
  */
 fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
   let modes = __agent_loop_checkpoint_modes(kind)
-  var delivered = 0
+  let delivered = 0
   if modes.immediate {
     let result = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
     delivered = delivered + (result?.delivered ?? 0)
@@ -3041,7 +3041,7 @@ fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
     let result = agent_session_drain_bridge_injections(session_id, "audit_only")
     delivered = delivered + (result?.delivered ?? 0)
   }
-  var inbox_delivered = 0
+  let inbox_delivered = 0
   if modes.inbox {
     let pending = agent_session_drain_feedback(session_id)
     for note in pending {
@@ -3111,12 +3111,12 @@ fn __scope_classifier_recent_context(messages, limit) {
     3
   }
   let total = len(messages)
-  var start = total - cap
+  let start = total - cap
   if start < 0 {
     start = 0
   }
-  var out = []
-  var i = start
+  let out = []
+  let i = start
   while i < total {
     let msg = messages[i]
     out = out
@@ -3340,7 +3340,7 @@ fn __scope_classifier_mounted_roots(anchor) {
   if type_of(roots) != "list" || len(roots) == 0 {
     return "  (none)"
   }
-  var lines = []
+  let lines = []
   for root in roots {
     lines = lines
       .push(
@@ -3504,7 +3504,7 @@ fn __agent_loop_terminal_callback_extend_by(budget) {
 }
 
 fn __agent_loop_tool_call_names(tool_calls) {
-  var names = []
+  let names = []
   for call in tool_calls ?? [] {
     let name = __tool_call_name(call)
     if name != "" && !contains(names, name) {
@@ -3616,7 +3616,7 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     transcript_projection: opts?.transcript_projection,
   }
   let turn_prompt = __agent_loop_build_turn_prompt(session, wrapup_opts, iteration)
-  var turn_system_parts = []
+  let turn_system_parts = []
   if trim(turn_prompt.system ?? "") != "" {
     turn_system_parts = turn_system_parts.push(turn_prompt.system)
   }
@@ -3689,7 +3689,7 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
  * servers, which keeps the flag-off path untouched.
  */
 fn __agent_loop_active_skill_mcp_specs(active_skills) {
-  var specs = []
+  let specs = []
   for active_skill in active_skills ?? [] {
     for spec in active_skill?.mcp ?? [] {
       specs = specs + [spec]
@@ -3780,37 +3780,37 @@ fn __agent_loop_apply_output_schema(final_result, opts, session, message, iterat
 
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
-  var opts = initial_opts
-  var iteration = 0
-  var session_finalized = false
-  var audit_background_tasks = []
+  let opts = initial_opts
+  let iteration = 0
+  let session_finalized = false
+  let audit_background_tasks = []
   let run = try {
     opts = agent_mcp_bootstrap_if_needed(session, opts)
     let primary_llm_opts = __agent_loop_effective_llm_options(opts)
     let primary_provider = to_string(primary_llm_opts?.provider ?? "")
     let primary_model = to_string(primary_llm_opts?.model ?? "")
     let primary_tool_format = to_string(primary_llm_opts?.tool_format ?? "")
-    var escalation_retry_pending = false
-    var stop_reason = nil
-    var final_status = ""
-    var terminal_error = nil
-    var verify_attempts = 0
-    var done_judge_invocations = 0
-    var done_judge_vetoes = 0
-    var verify_completion_judge_invocations = 0
-    var verify_completion_judge_vetoes = 0
-    var step_judge_attempts = 0
-    var structural_validator_attempts = 0
-    var consecutive_text_only = 0
-    var turns_since_progress = 0
-    var fallback_index = 0
-    var successful_tools_seen = []
-    var rejected_tools_seen = []
-    var suspend_result = nil
-    var stall_state = agent_stall_initial_state()
-    var stall_enabled_seen = false
-    var stall_prev_dispatch = nil
-    var stall_hard_stop_rescues = 0
+    let escalation_retry_pending = false
+    let stop_reason = nil
+    let final_status = ""
+    let terminal_error = nil
+    let verify_attempts = 0
+    let done_judge_invocations = 0
+    let done_judge_vetoes = 0
+    let verify_completion_judge_invocations = 0
+    let verify_completion_judge_vetoes = 0
+    let step_judge_attempts = 0
+    let structural_validator_attempts = 0
+    let consecutive_text_only = 0
+    let turns_since_progress = 0
+    let fallback_index = 0
+    let successful_tools_seen = []
+    let rejected_tools_seen = []
+    let suspend_result = nil
+    let stall_state = agent_stall_initial_state()
+    let stall_enabled_seen = false
+    let stall_prev_dispatch = nil
+    let stall_hard_stop_rescues = 0
     let max_verify_attempts = opts?.max_verify_attempts ?? 20
     let budget = opts?.iteration_budget
       ?? {
@@ -3823,22 +3823,22 @@ fn __agent_loop_run(message, session, initial_opts) {
       total_cost_usd: nil,
       consecutive_failures: nil,
     }
-    var current_max = budget.initial
-    var extensions_used = 0
-    var budget_decisions = []
-    var consecutive_failure_count = 0
-    var budget_exhausted_emitted = false
-    var last_tool_count = 0
+    let current_max = budget.initial
+    let extensions_used = 0
+    let budget_decisions = []
+    let consecutive_failure_count = 0
+    let budget_exhausted_emitted = false
+    let last_tool_count = 0
     let loop_start_ms = __agent_loop_clock_now_ms()
     let __reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
-    var terminal_write_unverified = false
-    var terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify {
+    let terminal_write_unverified = false
+    let terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify {
       __reserve_cfg.reserved_terminal_verify_iterations
     } else {
       0
     }
-    var in_terminal_verify_reserve = false
-    var terminal_callback_continues = 0
+    let in_terminal_verify_reserve = false
+    let terminal_callback_continues = 0
     while true {
       while iteration < current_max {
         let boundary_exhaustion = __agent_loop_budget_exhaustion(
@@ -3887,7 +3887,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           nil
         }
         __agent_loop_checkpoint(session.session_id, "iteration_start", {iteration: iteration_index + 1})
-        var turn_opts = agent_skills_match(session, iteration_opts, iteration_index)
+        let turn_opts = agent_skills_match(session, iteration_opts, iteration_index)
         if turn_opts?._skill_activated_this_turn ?? false {
           opts = agent_reset_tool_surface_narrowing(opts)
           turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
@@ -3951,7 +3951,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           primary_model,
           opts,
         )
-        var call = __invoke_llm_with_autocontinue(
+        let call = __invoke_llm_with_autocontinue(
           message,
           turn_prompt.system,
           llm_opts,
@@ -4080,7 +4080,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           iteration_index,
         )
         fallback_index = fallback_outcome.fallback_index
-        var tool_calls = if fallback_outcome.triggered {
+        let tool_calls = if fallback_outcome.triggered {
           fallback_outcome.calls ?? []
         } else {
           __resolve_tool_calls(llm_result, parsed)
@@ -4673,9 +4673,9 @@ fn __agent_loop_run(message, session, initial_opts) {
         if __turn_made_edit(dispatch, opts?.tools) {
           terminal_write_unverified = true
         }
-        var should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
-        var verdict_record = nil
-        var post_edit_reverify_confirmed = false
+        let should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
+        let verdict_record = nil
+        let post_edit_reverify_confirmed = false
         if should_continue && reverify_mandated && verify_attempts < max_verify_attempts {
           let reverify_opts = turn_opts
             + {
@@ -5046,7 +5046,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     } else {
       agent_required_tools_enforce(result_with_stalls, opts)
     }
-    var final_result = enforced
+    let final_result = enforced
     if opts?.verify_completion_judge != nil {
       final_result = final_result
         + {
@@ -5189,7 +5189,7 @@ fn __agent_loop_run(message, session, initial_opts) {
  * @api_stability: experimental
  */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
-  var opts = agent_loop_options(agent_progress_apply_options(options))
+  let opts = agent_loop_options(agent_progress_apply_options(options))
   opts = opts + {tools: agent_lifecycle_tools(opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {
     opts = opts + {system: system_prompt}

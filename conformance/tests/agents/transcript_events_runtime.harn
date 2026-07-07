@@ -1,5 +1,5 @@
 pipeline main() {
-  let result = llm_call("hello world", nil, {provider: "mock"})
+  const result = llm_call("hello world", nil, {provider: "mock"})
   __io_println(result.provider)
   __io_println(result.visible_text != "")
   __io_println(result.private_reasoning == nil)

@@ -4,24 +4,24 @@ import {
 } from "std/agent/state"
 
 pipeline main() {
-  let session = agent_session_open("reminder-provider-token-pressure")
+  const session = agent_session_open("reminder-provider-token-pressure")
   agent_session_reset(session)
-  let opts = {reminders: {config: {token_pressure: {context_window: 100}}}}
-  let first = agent_reminder_providers_fire(
+  const opts = {reminders: {config: {token_pressure: {context_window: 100}}}}
+  const first = agent_reminder_providers_fire(
     session,
     "on_budget_threshold",
     {session: {id: session}, iteration: 4, tokens_used: 75, model: "test-model"},
     opts,
   )
-  let second = agent_reminder_providers_fire(
+  const second = agent_reminder_providers_fire(
     session,
     "on_budget_threshold",
     {session: {id: session}, iteration: 5, tokens_used: 96, model: "test-model"},
     opts,
   )
-  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  let ttl = agent_session_apply_reminder_post_turn(session, 6)
-  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const ttl = agent_session_apply_reminder_post_turn(session, 6)
+  const after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
   __io_println(first.fired_count)
   __io_println(second.reports[0].deduped_count)
   __io_println(len(before))

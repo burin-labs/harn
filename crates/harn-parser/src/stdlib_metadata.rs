@@ -159,7 +159,7 @@ pub fn synthesize_example(
         // Only bind the result when the signature declares a non-nil
         // return; an untyped fn may well be a statement-style helper.
         Some(TypeExpr::Named(n)) if n == "nil" => call,
-        Some(_) => format!("let out = {call}"),
+        Some(_) => format!("const out = {call}"),
         None => call,
     }
 }
@@ -461,7 +461,7 @@ pub fn read_file(path) {
         let ret = TypeExpr::Named("string".to_string());
         assert_eq!(
             synthesize_example("read_file", &params, Some(&ret)),
-            "let out = read_file(path, limit)",
+            "const out = read_file(path, limit)",
         );
     }
 

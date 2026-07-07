@@ -1,7 +1,7 @@
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 pipeline test(task) {
-  let data: unknown = {verdict: "pass", summary: "looks good"}
+  const data: unknown = {verdict: "pass", summary: "looks good"}
   if schema_is(data, GraderOut) {
     // data is narrowed to GraderOut here.
     __io_println(data.verdict)
@@ -16,7 +16,7 @@ pipeline test(task) {
   }
   // Negative narrowing: a value that fails validation does not reach
   // the then-branch.
-  let bogus: unknown = {verdict: "maybe", summary: "x"}
+  const bogus: unknown = {verdict: "maybe", summary: "x"}
   if schema_is(bogus, GraderOut) {
     __io_println("unreachable")
   } else {

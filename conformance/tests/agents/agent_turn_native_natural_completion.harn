@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools() {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "lookup",
@@ -24,11 +24,11 @@ pipeline main() {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
     ],
     { ->
-      let result = agent_turn(
+      const result = agent_turn(
         "Use the lookup tool and finish.",
         {provider: "mock", tools: tools(), tool_format: "native", max_iterations: 3},
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(result.visible_text)
       __io_println(result.llm.iterations)

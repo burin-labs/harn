@@ -13,20 +13,20 @@
  * @errors: []
  */
 pub fn wait_for(timeout_ms, interval_ms, predicate) {
-  let end_time = harness.clock.timestamp() * 1000 + timeout_ms
+  const end_time = harness.clock.timestamp() * 1000 + timeout_ms
   let interval = interval_ms
   if interval <= 0 {
     interval = 100
   }
   while harness.clock.timestamp() * 1000 < end_time {
-    let value = predicate()
+    const value = predicate()
     if value {
       return Ok(value)
     }
     sleep(interval)
   }
   // One final check after deadline
-  let value = predicate()
+  const value = predicate()
   if value {
     return Ok(value)
   }
@@ -43,9 +43,9 @@ pub fn wait_for(timeout_ms, interval_ms, predicate) {
  * @errors: []
  */
 pub fn retry_until(max_attempts, predicate) {
-  var i = 0
+  let i = 0
   while i < max_attempts {
-    let value = predicate()
+    const value = predicate()
     if value {
       return Ok(value)
     }
@@ -64,15 +64,15 @@ pub fn retry_until(max_attempts, predicate) {
  * @errors: []
  */
 pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
-  var attempt = 0
+  let attempt = 0
   while attempt < max_attempts {
-    let value = predicate()
+    const value = predicate()
     if value {
       return Ok(value)
     }
     attempt = attempt + 1
     if attempt < max_attempts {
-      let delay = base_ms * pow(2, attempt - 1)
+      const delay = base_ms * pow(2, attempt - 1)
       sleep(delay)
     }
   }
@@ -91,11 +91,11 @@ pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
  * @errors: []
  */
 pub fn circuit_call(name, closure) {
-  let state = circuit_check(name)
+  const state = circuit_check(name)
   if state == "open" {
     return Err("circuit_open")
   }
-  let result = try {
+  const result = try {
     closure()
   }
   if is_ok(result) {

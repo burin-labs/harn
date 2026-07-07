@@ -8,14 +8,14 @@ import { llm_text, with_llm_script } from "std/testing"
  * skipped when extract_json_from_text doesn't change the input).
  */
 pipeline default() {
-  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
     [llm_text("{\"verdict\": \"pass\"}")],
     { ->
-      let r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
+      const r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
       __io_println(r.ok)
       __io_println(r.stage)
-      let data = r.data
+      const data = r.data
       if data != nil {
         __io_println(data.verdict)
       }

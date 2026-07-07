@@ -1,6 +1,6 @@
 /** Verifies eprint/eprintln/read_stdin/read_line and the stdin/tty mocks. */
 fn legacy_line() {
-  let line = __io_read_line({})
+  const line = __io_read_line({})
   if line.ok {
     return line.value
   }
@@ -27,7 +27,7 @@ pipeline test(task) {
   __io_eprint("warn: ")
   __io_eprintln("disk full")
   __io_eprintln("retry in 5s")
-  let captured = capture_stderr_take()
+  const captured = capture_stderr_take()
   log(captured)
   // tty mocks are honored by is_*_tty
   mock_tty("stdin", true)

@@ -16,9 +16,9 @@ Both the backslash and the newline are removed from the token stream, so the two
 physical lines are treated as a single logical line by the lexer.
 
 ```harn
-let total = 1 + 2 \
+const total = 1 + 2 \
   + 3 + 4
-// equivalent to: let total = 1 + 2 + 3 + 4
+// equivalent to: const total = 1 + 2 + 3 + 4
 ```
 
 This is useful for breaking long expressions that do not involve a binary operator
@@ -136,8 +136,8 @@ anywhere an expression is expected:
 ```harn
 sleep(500ms)
 deadline 30s { /* ... */ }
-let one_day = 1d       // 86400000
-let two_weeks = 2w     // 1209600000
+const one_day = 1d       // 86400000
+const two_weeks = 2w     // 1209600000
 ```
 
 ### String literals
@@ -175,8 +175,8 @@ Raw strings are useful for regex patterns and file paths where backslashes are
 common:
 
 ```harn
-let pattern = r"\d+\.\d+"
-let path = r"C:\Users\alice\docs"
+const pattern = r"\d+\.\d+"
+const path = r"C:\Users\alice\docs"
 ```
 
 To embed a literal double quote, use the *hashed* form `r#"..."#`. The literal
@@ -188,7 +188,7 @@ escape-free:
 
 ```harn
 // A regex matching a double-quoted string body, with no backslash soup:
-let caps = regex_captures(r#""([^"\\]*)""#, "name=\"value\"")
+const caps = regex_captures(r#""([^"\\]*)""#, "name=\"value\"")
 log("first body: ${caps[0].groups[0]}")
 ```
 
@@ -208,8 +208,8 @@ stripping. If at least one `${...}` interpolation is present, the result is an
 Use `\${` for a literal `${` sequence inside a multi-line string.
 
 ```harn
-let name = "world"
-let doc = """
+const name = "world"
+const doc = """
   Hello, ${name}!
   Today is ${timestamp()}.
 """

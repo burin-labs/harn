@@ -6,7 +6,7 @@ import { agent_scratchpad_reorganize } from "std/agent/scratchpad"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn observe_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "observe",
@@ -26,7 +26,7 @@ pipeline default() {
       llm_text("Finished with the observation. ##DONE##"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "complete the scratchpad task",
         "You are a test agent.",
         {
@@ -39,7 +39,7 @@ pipeline default() {
           scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println("status:" + result.status)
       __io_println("calls:" + to_string(len(calls)))
       __io_println("first_has_scratchpad:" + to_string(contains(calls[0].system, "## Agent scratchpad")))
@@ -59,7 +59,7 @@ pipeline default() {
       __io_println("snapshot_fact:" + result.transcript.metadata.agent_scratchpad.facts[0].text)
     },
   )
-  let manual_id = agent_session_open("scratchpad-invalid-source")
+  const manual_id = agent_session_open("scratchpad-invalid-source")
   agent_session_set_scratchpad(
     manual_id,
     {
@@ -77,7 +77,7 @@ pipeline default() {
       ),
     ],
     { ->
-      let rejected = agent_scratchpad_reorganize(
+      const rejected = agent_scratchpad_reorganize(
         {session_id: manual_id, task: "manual task"},
         {provider: "mock", scratchpad: {enabled: true, reorganizer: {provider: "mock"}}},
         1,

@@ -1,5 +1,5 @@
 pipeline main() {
-  let evt = transcript_resumption_event(
+  const evt = transcript_resumption_event(
     {
       handle: "worker://triage/42",
       initiator: "drain_agent",

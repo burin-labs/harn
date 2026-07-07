@@ -39,7 +39,7 @@ pub fn schema_enum(values) {
 }
 
 pub fn schema_list(item_schema = nil, options = nil) {
-  var out = {type: "list"}
+  let out = {type: "list"}
   if item_schema != nil {
     out = out + {items: item_schema}
   }
@@ -54,7 +54,7 @@ pub fn schema_array(item_schema = nil, options = nil) {
 }
 
 pub fn schema_dict(value_schema = nil, options = nil) {
-  var out = {type: "dict"}
+  let out = {type: "dict"}
   if value_schema != nil {
     out = out + {additional_properties: value_schema}
   }
@@ -69,18 +69,18 @@ pub fn schema_field(schema, required = true) {
 }
 
 pub fn schema_object(fields, options = nil) {
-  var properties = {}
-  var required = []
+  let properties = {}
+  let required = []
   for entry in fields {
-    let raw_schema = entry.value
-    let is_required = raw_schema.required == nil || raw_schema.required
-    let field_schema = schema_omit(raw_schema, ["required"])
+    const raw_schema = entry.value
+    const is_required = raw_schema.required == nil || raw_schema.required
+    const field_schema = schema_omit(raw_schema, ["required"])
     properties = properties + {[entry.key]: field_schema}
     if is_required {
       required = required + [entry.key]
     }
   }
-  var out = {type: "dict", properties: properties}
+  let out = {type: "dict", properties: properties}
   if len(required) > 0 {
     out = out + {required: required}
   }
@@ -184,7 +184,7 @@ pub fn get_typed_errors(value, schema, apply_defaults = false) {
  * @errors: ["schema validation failure"]
  */
 pub fn get_typed_value(value, schema, apply_defaults = false) {
-  let report = get_typed_report(value, schema, apply_defaults)
+  const report = get_typed_report(value, schema, apply_defaults)
   if report.ok {
     return report.value
   }

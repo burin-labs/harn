@@ -4,7 +4,7 @@
  * /source/body/fired_at_turn) on a normalized transcript event.
  */
 pipeline main() {
-  let evt = transcript_reminder_event(
+  const evt = transcript_reminder_event(
     {
       body: "Approaching context window cap.",
       tags: ["token_pressure", "memory"],

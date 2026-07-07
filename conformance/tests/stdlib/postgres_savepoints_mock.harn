@@ -7,7 +7,7 @@ import "std/postgres"
  * the mock fixture matcher (no real Postgres required).
  */
 pipeline default() {
-  let db = pg_mock_pool(
+  const db = pg_mock_pool(
     [
       {sql: "SAVEPOINT \"step1\"", rows_affected: 0},
       {sql: "RELEASE SAVEPOINT \"step1\"", rows_affected: 0},
@@ -17,7 +17,7 @@ pipeline default() {
   __io_println(pg_savepoint(db, "step1"))
   __io_println(pg_release_savepoint(db, "step1"))
   __io_println(pg_rollback_to_savepoint(db, "step1"))
-  let calls = pg_mock_calls(db)
+  const calls = pg_mock_calls(db)
   __io_println(len(calls))
   for call in calls {
     __io_println(call.sql)

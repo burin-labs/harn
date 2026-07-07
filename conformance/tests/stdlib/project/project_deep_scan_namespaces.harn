@@ -2,16 +2,16 @@ import "std/project"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  let suffix = uuid()
-  let alpha_namespace = "alpha-${suffix}"
-  let beta_namespace = "beta-${suffix}"
-  let root = path_join(harness.fs.temp_dir(), "project-deep-scan-ns-" + suffix)
+  const suffix = uuid()
+  const alpha_namespace = "alpha-${suffix}"
+  const beta_namespace = "beta-${suffix}"
+  const root = path_join(harness.fs.temp_dir(), "project-deep-scan-ns-" + suffix)
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
   with_llm_script(
     [llm_text("{\"purpose\":\"alpha root\"}"), llm_text("{\"purpose\":\"beta root\"}")],
     { ->
-      let alpha = project_deep_scan(
+      const alpha = project_deep_scan(
         root,
         {
           namespace: alpha_namespace,
@@ -21,7 +21,7 @@ pipeline test(task) {
           enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
         },
       )
-      let beta = project_deep_scan(
+      const beta = project_deep_scan(
         root,
         {
           namespace: beta_namespace,
@@ -31,7 +31,7 @@ pipeline test(task) {
           enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
         },
       )
-      let alpha_cached = project_deep_scan(
+      const alpha_cached = project_deep_scan(
         root,
         {
           namespace: alpha_namespace,
@@ -41,7 +41,7 @@ pipeline test(task) {
           enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
         },
       )
-      let beta_cached = project_deep_scan(
+      const beta_cached = project_deep_scan(
         root,
         {
           namespace: beta_namespace,

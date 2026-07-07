@@ -51,7 +51,7 @@ type GitForgeWritebackRequest = {
 }
 
 fn __strip_signature_prefix(signature) {
-  let trimmed = trim(signature ?? "")
+  const trimmed = trim(signature ?? "")
   if starts_with(trimmed, "sha256=") {
     return split(trimmed, "sha256=")[1]
   }
@@ -69,9 +69,9 @@ fn __strip_signature_prefix(signature) {
  * @errors: []
  */
 pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", options = nil) {
-  let alg = lowercase(trim(algorithm ?? "sha256"))
-  let provided = __strip_signature_prefix(signature)
-  let opts = options ?? {}
+  const alg = lowercase(trim(algorithm ?? "sha256"))
+  const provided = __strip_signature_prefix(signature)
+  const opts = options ?? {}
   if alg == "sha1" || alg == "hmac-sha1" {
     if !(opts.allow_legacy_sha1 ?? false) {
       return false
@@ -81,7 +81,7 @@ pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", opti
   if alg != "sha256" && alg != "hmac-sha256" {
     return false
   }
-  let expected = hmac_sha256(secret, body)
+  const expected = hmac_sha256(secret, body)
   return constant_time_eq(expected, provided)
 }
 
@@ -92,13 +92,13 @@ pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", opti
  * @errors: []
  */
 pub fn verify_jwt(token, jwks_url, options = nil) {
-  let opts = options ?? {}
-  var jwks = opts.inline_jwks
+  const opts = options ?? {}
+  let jwks = opts.inline_jwks
   if jwks == nil {
     if jwks_url == nil || trim(jwks_url) == "" {
       return {ok: false, claims: nil, error: "jwks_url is required unless options.inline_jwks is provided"}
     }
-    let response = harness.net.get(jwks_url, {headers: {Accept: "application/json"}})
+    const response = harness.net.get(jwks_url, {headers: {Accept: "application/json"}})
     if !(response.ok ?? false) {
       return {ok: false, claims: nil, error: response.body, status: response.status}
     }
@@ -111,7 +111,7 @@ pub fn verify_jwt(token, jwks_url, options = nil) {
 }
 
 fn __form_body(params) {
-  var parts = []
+  let parts = []
   for entry in params {
     parts = parts + [url_encode(entry.key) + "=" + url_encode(to_string(entry.value))]
   }
@@ -119,7 +119,7 @@ fn __form_body(params) {
 }
 
 fn __connector_http_pad2(value) {
-  let text = to_string(to_int(value) ?? 0)
+  const text = to_string(to_int(value) ?? 0)
   if len(text) == 1 {
     return "0" + text
   }
@@ -127,7 +127,7 @@ fn __connector_http_pad2(value) {
 }
 
 fn __connector_http_month_number(name) {
-  let months = {
+  const months = {
     apr: "04",
     aug: "08",
     dec: "12",
@@ -145,19 +145,19 @@ fn __connector_http_month_number(name) {
 }
 
 fn __connector_http_parse_http_date_ms(raw) {
-  let matches = regex_captures(
+  const matches = regex_captures(
     "^[A-Za-z]{3},\\s+(\\d{1,2})\\s+([A-Za-z]{3})\\s+(\\d{4})\\s+(\\d{2}):(\\d{2}):(\\d{2})\\s+GMT$",
     raw,
   )
   if len(matches) == 0 {
     return nil
   }
-  let parts = matches[0].groups
-  let month = __connector_http_month_number(parts[1])
+  const parts = matches[0].groups
+  const month = __connector_http_month_number(parts[1])
   if month == nil {
     return nil
   }
-  let iso = parts[2] + "-" + month + "-" + __connector_http_pad2(parts[0])
+  const iso = parts[2] + "-" + month + "-" + __connector_http_pad2(parts[0])
     + "T"
     + parts[3]
     + ":"
@@ -165,13 +165,13 @@ fn __connector_http_parse_http_date_ms(raw) {
     + ":"
     + parts[5]
     + "Z"
-  let parsed = try {
+  const parsed = try {
     date_parse(iso)
   }
   if is_err(parsed) {
     return nil
   }
-  let delta_seconds = to_float(unwrap(parsed)) - harness.clock.timestamp()
+  const delta_seconds = to_float(unwrap(parsed)) - harness.clock.timestamp()
   if delta_seconds <= 0.0 {
     return 0
   }
@@ -179,22 +179,22 @@ fn __connector_http_parse_http_date_ms(raw) {
 }
 
 fn __connector_http_parse_retry_after_ms(value) {
-  let raw = trim(to_string(value ?? ""))
+  const raw = trim(to_string(value ?? ""))
   if raw == "" {
     return nil
   }
-  let seconds = to_float(raw)
+  const seconds = to_float(raw)
   if seconds != nil {
     if seconds <= 0.0 {
       return 0
     }
     return to_int(seconds * 1000.0)
   }
-  let parsed = try {
+  const parsed = try {
     date_parse(raw)
   }
   if is_ok(parsed) {
-    let delta_seconds = to_float(unwrap(parsed)) - harness.clock.timestamp()
+    const delta_seconds = to_float(unwrap(parsed)) - harness.clock.timestamp()
     if delta_seconds <= 0.0 {
       return 0
     }
@@ -204,22 +204,22 @@ fn __connector_http_parse_retry_after_ms(value) {
 }
 
 fn __connector_http_retry_options(options) {
-  let opts = options ?? {}
-  let policy = opts.retry_policy ?? opts.retry ?? {}
-  var max_attempts = to_int(policy?.max_attempts ?? opts?.max_attempts)
+  const opts = options ?? {}
+  const policy = opts.retry_policy ?? opts.retry ?? {}
+  let max_attempts = to_int(policy?.max_attempts ?? opts?.max_attempts)
   if max_attempts == nil {
-    let low_level_retries = to_int(policy?.max)
+    const low_level_retries = to_int(policy?.max)
     if low_level_retries != nil {
       max_attempts = low_level_retries + 1
     } else {
       max_attempts = 1
     }
   }
-  var base_ms = to_int(policy?.base_ms ?? policy?.backoff_ms ?? opts?.base_ms ?? opts?.backoff_ms ?? 200)
+  let base_ms = to_int(policy?.base_ms ?? policy?.backoff_ms ?? opts?.base_ms ?? opts?.backoff_ms ?? 200)
   if base_ms == nil || base_ms < 0 {
     base_ms = 0
   }
-  var cap_ms = to_int(policy?.cap_ms ?? opts?.cap_ms ?? 30000)
+  let cap_ms = to_int(policy?.cap_ms ?? opts?.cap_ms ?? 30000)
   if cap_ms == nil || cap_ms < 0 {
     cap_ms = 0
   }
@@ -236,8 +236,8 @@ fn __connector_http_retry_options(options) {
 }
 
 fn __connector_http_retry_delay_ms(policy, attempt) {
-  var delay = policy.base_ms
-  var i = 0
+  let delay = policy.base_ms
+  let i = 0
   while i < attempt {
     delay = delay * 2
     i = i + 1
@@ -286,12 +286,12 @@ fn __connector_http_category(status) {
 }
 
 fn __connector_http_safe_method(method) {
-  let normalized = uppercase(trim(to_string(method ?? "")))
+  const normalized = uppercase(trim(to_string(method ?? "")))
   return contains(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"], normalized)
 }
 
 fn __connector_http_has_idempotency_key(headers) {
-  let value = connector_http_header(headers ?? {}, "Idempotency-Key")
+  const value = connector_http_header(headers ?? {}, "Idempotency-Key")
   return value != nil && trim(to_string(value)) != ""
 }
 
@@ -299,8 +299,8 @@ fn __connector_http_retry_allowed(method, headers, options) {
   if __connector_http_safe_method(method) {
     return true
   }
-  let normalized = uppercase(trim(to_string(method ?? "")))
-  let retry_unsafe = options?.retry_unsafe ?? false
+  const normalized = uppercase(trim(to_string(method ?? "")))
+  const retry_unsafe = options?.retry_unsafe ?? false
   if normalized == "POST" || normalized == "PATCH" {
     return __connector_http_has_idempotency_key(headers) || retry_unsafe
   }
@@ -308,12 +308,12 @@ fn __connector_http_retry_allowed(method, headers, options) {
 }
 
 fn __connector_http_headers(options) {
-  let opts = options ?? {}
-  var headers = {}
+  const opts = options ?? {}
+  let headers = {}
   for entry in (opts.headers ?? {}).entries() {
     headers[entry.key] = entry.value
   }
-  let idempotency_key = opts.idempotency_key
+  const idempotency_key = opts.idempotency_key
   if idempotency_key != nil && trim(to_string(idempotency_key)) != ""
     && !__connector_http_has_idempotency_key(headers) {
     headers["Idempotency-Key"] = to_string(idempotency_key)
@@ -322,9 +322,9 @@ fn __connector_http_headers(options) {
 }
 
 fn __connector_http_request_options(options, headers) {
-  let opts = options ?? {}
-  var out = {}
-  let internal = set(
+  const opts = options ?? {}
+  let out = {}
+  const internal = set(
     [
       "base_ms",
       "backoff_ms",
@@ -361,13 +361,13 @@ fn __connector_http_has_fields(value) {
 }
 
 fn __connector_http_error_from_response(response, options, retryable) {
-  let status = to_int(response?.status) ?? 0
-  let rate_limit = connector_http_rate_limit(response)
-  var error = {category: __connector_http_category(status), status: status, retryable: retryable}
+  const status = to_int(response?.status) ?? 0
+  const rate_limit = connector_http_rate_limit(response)
+  let error = {category: __connector_http_category(status), status: status, retryable: retryable}
   if rate_limit?.retry_after_ms != nil {
     error["retry_after_ms"] = rate_limit.retry_after_ms
   }
-  let body = __connector_http_error_body(response, options)
+  const body = __connector_http_error_body(response, options)
   if body != nil {
     error["body"] = body
   }
@@ -384,10 +384,10 @@ fn __connector_http_error_from_response(response, options, retryable) {
 }
 
 fn __connector_http_error_from_exception(error, options) {
-  let message = to_string(error)
-  let lowered = lowercase(message)
-  var category = "transient_network"
-  var retryable = true
+  const message = to_string(error)
+  const lowered = lowercase(message)
+  let category = "transient_network"
+  let retryable = true
   if contains(lowered, "egress") {
     category = "egress_blocked"
     retryable = false
@@ -416,8 +416,8 @@ fn __connector_http_error_from_exception(error, options) {
 }
 
 fn __connector_http_error_envelope(response, error) {
-  var envelope = {ok: false, error: error}
-  let status = response?.status ?? error?.status
+  let envelope = {ok: false, error: error}
+  const status = response?.status ?? error?.status
   if status != nil {
     envelope["status"] = status
   }
@@ -449,8 +449,8 @@ fn __connector_http_error_envelope(response, error) {
 }
 
 fn __connector_http_success_envelope(response) {
-  let rate_limit = connector_http_rate_limit(response)
-  var envelope = {ok: true, status: response.status, headers: response.headers ?? {}, body: response.body ?? ""}
+  const rate_limit = connector_http_rate_limit(response)
+  let envelope = {ok: true, status: response.status, headers: response.headers ?? {}, body: response.body ?? ""}
   if response?.final_url != nil {
     envelope["final_url"] = response.final_url
   }
@@ -470,12 +470,12 @@ fn __connector_http_should_retry_response(response, retry_policy, retry_allowed)
   if response?.ok ?? false {
     return false
   }
-  let status = to_int(response?.status) ?? 0
+  const status = to_int(response?.status) ?? 0
   return __connector_http_retryable_status(status, retry_policy.retry_on)
 }
 
 fn __connector_http_sleep_before_retry(retry_policy, attempt, retry_after_ms) {
-  var delay = __connector_http_retry_delay_ms(retry_policy, attempt)
+  let delay = __connector_http_retry_delay_ms(retry_policy, attempt)
   if retry_policy.respect_retry_after && retry_after_ms != nil {
     if retry_after_ms > retry_policy.cap_ms {
       return false
@@ -509,13 +509,13 @@ pub fn connector_http_header(headers_or_response, name) {
  * @errors: []
  */
 pub fn connector_http_rate_limit(headers_or_response) {
-  let retry_after = connector_http_header(headers_or_response, "Retry-After")
-  let limit = connector_http_header(headers_or_response, "RateLimit-Limit")
-  let remaining = connector_http_header(headers_or_response, "RateLimit-Remaining")
-  let reset = connector_http_header(headers_or_response, "RateLimit-Reset")
-  let x_limit = connector_http_header(headers_or_response, "X-RateLimit-Limit")
-  let x_remaining = connector_http_header(headers_or_response, "X-RateLimit-Remaining")
-  let x_reset = connector_http_header(headers_or_response, "X-RateLimit-Reset")
+  const retry_after = connector_http_header(headers_or_response, "Retry-After")
+  const limit = connector_http_header(headers_or_response, "RateLimit-Limit")
+  const remaining = connector_http_header(headers_or_response, "RateLimit-Remaining")
+  const reset = connector_http_header(headers_or_response, "RateLimit-Reset")
+  const x_limit = connector_http_header(headers_or_response, "X-RateLimit-Limit")
+  const x_remaining = connector_http_header(headers_or_response, "X-RateLimit-Remaining")
+  const x_reset = connector_http_header(headers_or_response, "X-RateLimit-Reset")
   return filter_nil(
     {
       retry_after: retry_after,
@@ -541,21 +541,21 @@ pub fn connector_http_rate_limit(headers_or_response) {
  * @example: connector_http_request("GET", url, {retry: {max_attempts: 3}})
  */
 pub fn connector_http_request(method, url, options = nil) {
-  let opts = options ?? {}
-  let resolved_method = uppercase(trim(to_string(method ?? "GET")))
-  let headers = __connector_http_headers(opts)
-  let retry_policy = __connector_http_retry_options(opts)
-  let retry_allowed = __connector_http_retry_allowed(resolved_method, headers, opts)
-  let request_options = __connector_http_request_options(opts, headers)
-  var attempt = 0
+  const opts = options ?? {}
+  const resolved_method = uppercase(trim(to_string(method ?? "GET")))
+  const headers = __connector_http_headers(opts)
+  const retry_policy = __connector_http_retry_options(opts)
+  const retry_allowed = __connector_http_retry_allowed(resolved_method, headers, opts)
+  const request_options = __connector_http_request_options(opts, headers)
+  let attempt = 0
   while attempt < retry_policy.max_attempts {
-    let result = try {
+    const result = try {
       harness.net.request(resolved_method, url, request_options)
     }
     if is_err(result) {
-      let error = __connector_http_error_from_exception(unwrap_err(result), opts)
-      let error_retryable = error.retryable ?? false
-      let can_retry = retry_allowed && error_retryable && attempt + 1 < retry_policy.max_attempts
+      const error = __connector_http_error_from_exception(unwrap_err(result), opts)
+      const error_retryable = error.retryable ?? false
+      const can_retry = retry_allowed && error_retryable && attempt + 1 < retry_policy.max_attempts
       if !can_retry {
         return __connector_http_error_envelope(nil, error)
       }
@@ -565,13 +565,13 @@ pub fn connector_http_request(method, url, options = nil) {
       attempt = attempt + 1
       continue
     }
-    let response = unwrap(result)
+    const response = unwrap(result)
     if response.ok ?? false {
       return __connector_http_success_envelope(response)
     }
-    let should_retry = __connector_http_should_retry_response(response, retry_policy, retry_allowed)
-    let retry_after_ms = connector_http_rate_limit(response)?.retry_after_ms
-    let error = __connector_http_error_from_response(response, opts, should_retry)
+    const should_retry = __connector_http_should_retry_response(response, retry_policy, retry_allowed)
+    const retry_after_ms = connector_http_rate_limit(response)?.retry_after_ms
+    const error = __connector_http_error_from_response(response, opts, should_retry)
     if !should_retry || attempt + 1 >= retry_policy.max_attempts {
       return __connector_http_error_envelope(response, error)
     }
@@ -600,21 +600,21 @@ pub fn connector_http_request(method, url, options = nil) {
  * @example: connector_http_json("GET", url, {retry: {max_attempts: 3}})
  */
 pub fn connector_http_json(method, url, options = nil) {
-  let response = connector_http_request(method, url, options)
+  const response = connector_http_request(method, url, options)
   if !(response.ok ?? false) {
     return response
   }
   if trim(to_string(response?.body ?? "")) == "" {
     return response + {json: nil}
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(response.body)
   }
   if is_ok(parsed) {
     return response + {json: unwrap(parsed)}
   }
-  let opts = options ?? {}
-  let error = filter_nil(
+  const opts = options ?? {}
+  const error = filter_nil(
     {
       category: "invalid_json",
       status: response.status,
@@ -638,8 +638,8 @@ pub fn connector_http_json(method, url, options = nil) {
  * @errors: []
  */
 pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options = nil) {
-  let opts = options ?? {}
-  let params = filter_nil(
+  const opts = options ?? {}
+  const params = filter_nil(
     merge(
       {
         grant_type: "refresh_token",
@@ -650,12 +650,12 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
       opts.extra_params ?? {},
     ),
   )
-  let headers = merge(
+  const headers = merge(
     {Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded"},
     opts.headers ?? {},
   )
-  let response = harness.net.post(token_url, __form_body(params), {headers: headers})
-  let parsed = safe_parse(response.body)
+  const response = harness.net.post(token_url, __form_body(params), {headers: headers})
+  const parsed = safe_parse(response.body)
   if !(response.ok ?? false) {
     return {ok: false, status: response.status, error: parsed ?? response.body}
   }
@@ -669,31 +669,31 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
  * @errors: []
  */
 pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
-  let cfg = config ?? {}
-  var capacity = cfg.capacity ?? 60
+  const cfg = config ?? {}
+  let capacity = cfg.capacity ?? 60
   if capacity < 1 {
     capacity = 1
   }
-  var refill_tokens = cfg.refill_tokens ?? 1
+  let refill_tokens = cfg.refill_tokens ?? 1
   if refill_tokens <= 0 {
     refill_tokens = 1
   }
-  var refill_interval_ms = cfg.refill_interval_ms ?? 1000
+  let refill_interval_ms = cfg.refill_interval_ms ?? 1000
   if refill_interval_ms < 1 {
     refill_interval_ms = 1
   }
-  let now = now_ms ?? to_int(harness.clock.timestamp() * 1000)
-  let last_refill_ms = state?.last_refill_ms ?? now
-  let elapsed_ms = now - last_refill_ms
-  var tokens = state?.tokens ?? capacity
+  const now = now_ms ?? to_int(harness.clock.timestamp() * 1000)
+  const last_refill_ms = state?.last_refill_ms ?? now
+  const elapsed_ms = now - last_refill_ms
+  let tokens = state?.tokens ?? capacity
   if elapsed_ms > 0 {
     tokens = tokens + elapsed_ms / refill_interval_ms * refill_tokens
     if tokens > capacity {
       tokens = capacity
     }
   }
-  var allowed = false
-  var retry_after_ms = 0
+  let allowed = false
+  let retry_after_ms = 0
   if tokens >= 1 {
     tokens = tokens - 1
     allowed = true
@@ -720,15 +720,15 @@ fn __page_items(page, items_path) {
  * @errors: []
  */
 pub fn paginate_cursor(initial_url, fetch_fn, cursor_path, options = nil) {
-  let opts = options ?? {}
-  let max_pages = opts.max_pages ?? 100
-  let items_path = opts.items_path
-  var cursor = opts.initial_cursor
-  var pages = []
-  var items = []
-  var page_count = 0
+  const opts = options ?? {}
+  const max_pages = opts.max_pages ?? 100
+  const items_path = opts.items_path
+  let cursor = opts.initial_cursor
+  let pages = []
+  let items = []
+  let page_count = 0
   while page_count < max_pages {
-    let page = fetch_fn(initial_url, cursor)
+    const page = fetch_fn(initial_url, cursor)
     pages = pages + [page]
     for item in __page_items(page, items_path) {
       items = items + [item]
@@ -746,7 +746,7 @@ fn __git_forge_text(value) {
   if value == nil {
     return nil
   }
-  let text = trim(to_string(value))
+  const text = trim(to_string(value))
   if text == "" {
     return nil
   }
@@ -757,7 +757,7 @@ fn __git_forge_bool(value) {
   if type_of(value) == "bool" {
     return value
   }
-  let text = lowercase(trim(to_string(value ?? "")))
+  const text = lowercase(trim(to_string(value ?? "")))
   if text == "true" {
     return true
   }
@@ -787,7 +787,7 @@ fn __git_forge_provider(provider, payload, options) {
 }
 
 fn __git_forge_lifecycle(provider, action, change) {
-  let normalized = lowercase(trim(to_string(action ?? "")))
+  const normalized = lowercase(trim(to_string(action ?? "")))
   if contains(["opened", "open"], normalized) {
     return "opened"
   }
@@ -840,7 +840,7 @@ fn __git_forge_author(user) {
 }
 
 fn __git_forge_delivery_id(raw) {
-  let headers = raw?.headers ?? {}
+  const headers = raw?.headers ?? {}
   return __git_forge_text(
     raw?.delivery_id
       ?? connector_http_header(headers, "X-GitHub-Delivery")
@@ -851,18 +851,18 @@ fn __git_forge_delivery_id(raw) {
 }
 
 fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePullRequestEvent? {
-  let number = to_int(pr?.number ?? pr?.iid ?? pr?.index)
+  const number = to_int(pr?.number ?? pr?.iid ?? pr?.index)
   if number == nil {
     return nil
   }
-  let kind = "pull_request." + lifecycle
-  let repository = __git_forge_repo_from_full_name(
+  const kind = "pull_request." + lifecycle
+  const repository = __git_forge_repo_from_full_name(
     provider,
     repo?.full_name,
     repo?.id,
     repo?.web_url ?? repo?.html_url,
   )
-  let pull_request: GitForgePullRequestRef = filter_nil(
+  const pull_request: GitForgePullRequestRef = filter_nil(
     {
       number: number,
       id: __git_forge_text(pr?.id),
@@ -878,7 +878,7 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePul
       merged: __git_forge_bool(pr?.merged),
     },
   )
-  let writeback: GitForgeWritebackTarget = filter_nil(
+  const writeback: GitForgeWritebackTarget = filter_nil(
     {
       provider: provider,
       repository_full_name: repository.full_name,
@@ -887,7 +887,7 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePul
       web_url: pull_request.web_url,
     },
   )
-  let provider_metadata: dict<string, any> = filter_nil(merge(raw?.provider_metadata ?? {}, options?.provider_metadata ?? {}))
+  const provider_metadata: dict<string, any> = filter_nil(merge(raw?.provider_metadata ?? {}, options?.provider_metadata ?? {}))
   return {
     topic: GIT_FORGE_PULL_REQUEST_TOPIC,
     event: "pull_request",
@@ -905,13 +905,13 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePul
 }
 
 fn __git_forge_github_event(payload, options) {
-  let raw = payload?.raw ?? payload
-  let repo = payload?.repository ?? raw?.repository
-  let pr = payload?.pull_request ?? raw?.pull_request
+  const raw = payload?.raw ?? payload
+  const repo = payload?.repository ?? raw?.repository
+  const pr = payload?.pull_request ?? raw?.pull_request
   if pr == nil {
     return nil
   }
-  let normalized_pr = merge(
+  const normalized_pr = merge(
     pr,
     {
       author: __git_forge_author(pr?.user),
@@ -922,18 +922,18 @@ fn __git_forge_github_event(payload, options) {
       web_url: pr?.html_url ?? pr?.url,
     },
   )
-  let lifecycle = __git_forge_lifecycle("github", payload?.action ?? raw?.action, normalized_pr)
+  const lifecycle = __git_forge_lifecycle("github", payload?.action ?? raw?.action, normalized_pr)
   return __git_forge_event("github", lifecycle, repo, normalized_pr, payload, options)
 }
 
 fn __git_forge_gitlab_event(payload, options) {
-  let raw = payload?.raw ?? payload
-  let attrs = raw?.object_attributes ?? raw?.merge_request
+  const raw = payload?.raw ?? payload
+  const attrs = raw?.object_attributes ?? raw?.merge_request
   if attrs == nil {
     return nil
   }
-  let repo = {full_name: raw?.project?.path_with_namespace, id: raw?.project?.id, web_url: raw?.project?.web_url}
-  let pr = merge(
+  const repo = {full_name: raw?.project?.path_with_namespace, id: raw?.project?.id, web_url: raw?.project?.web_url}
+  const pr = merge(
     attrs,
     {
       number: attrs?.iid,
@@ -944,22 +944,22 @@ fn __git_forge_gitlab_event(payload, options) {
       web_url: attrs?.url,
     },
   )
-  let lifecycle = __git_forge_lifecycle("gitlab", attrs?.action ?? raw?.action, pr)
+  const lifecycle = __git_forge_lifecycle("gitlab", attrs?.action ?? raw?.action, pr)
   return __git_forge_event("gitlab", lifecycle, repo, pr, payload, options)
 }
 
 fn __git_forge_gitea_event(payload, options) {
-  let raw = payload?.raw ?? payload
-  let pr = raw?.pull_request
+  const raw = payload?.raw ?? payload
+  const pr = raw?.pull_request
   if pr == nil {
     return nil
   }
-  let repo = {
+  const repo = {
     full_name: raw?.repository?.full_name,
     id: raw?.repository?.id,
     web_url: raw?.repository?.html_url ?? raw?.repository?.website,
   }
-  let normalized_pr = merge(
+  const normalized_pr = merge(
     pr,
     {
       author: __git_forge_author(pr?.user),
@@ -970,7 +970,7 @@ fn __git_forge_gitea_event(payload, options) {
       web_url: pr?.html_url ?? pr?.url,
     },
   )
-  let lifecycle = __git_forge_lifecycle("gitea", raw?.action, normalized_pr)
+  const lifecycle = __git_forge_lifecycle("gitea", raw?.action, normalized_pr)
   return __git_forge_event("gitea", lifecycle, repo, normalized_pr, payload, options)
 }
 
@@ -994,9 +994,9 @@ pub fn git_forge_pull_request_topic() {
  * @example: git_forge_pull_request_event("github", payload)
  */
 pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForgePullRequestEvent? {
-  let opts = options ?? {}
-  let value = __git_forge_payload(payload)
-  let resolved_provider = __git_forge_provider(provider, value, opts)
+  const opts = options ?? {}
+  const value = __git_forge_payload(payload)
+  const resolved_provider = __git_forge_provider(provider, value, opts)
   if resolved_provider == "github" {
     return __git_forge_github_event(value, opts)
   }
@@ -1004,7 +1004,7 @@ pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForg
     return __git_forge_gitlab_event(value, opts)
   }
   if resolved_provider == "gitea" || resolved_provider == "forgejo" {
-    let event = __git_forge_gitea_event(value, opts)
+    const event = __git_forge_gitea_event(value, opts)
     if event == nil || resolved_provider == "gitea" {
       return event
     }
@@ -1021,11 +1021,11 @@ pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForg
 }
 
 fn __git_forge_repo_parts(full_name) {
-  let text = __git_forge_text(full_name)
+  const text = __git_forge_text(full_name)
   if text == nil || !contains(text, "/") {
     return nil
   }
-  let parts = split(text, "/")
+  const parts = split(text, "/")
   if len(parts) < 2 {
     return nil
   }
@@ -1040,13 +1040,13 @@ fn __git_forge_repo_parts(full_name) {
  * @errors: []
  */
 pub fn git_forge_writeback_request(event: GitForgePullRequestEvent, body: string, options = nil) -> GitForgeWritebackRequest {
-  let opts = options ?? {}
-  let provider = lowercase(trim(to_string(opts?.provider ?? event.provider)))
-  let target = event.writeback
-  let comment_body = to_string(body ?? "")
+  const opts = options ?? {}
+  const provider = lowercase(trim(to_string(opts?.provider ?? event.provider)))
+  const target = event.writeback
+  const comment_body = to_string(body ?? "")
   if provider == "github" {
-    let repo = __git_forge_repo_parts(target.repository_full_name)
-    let params = filter_nil(
+    const repo = __git_forge_repo_parts(target.repository_full_name)
+    const params = filter_nil(
       {owner: repo?.owner, repo: repo?.repo, issue_number: target.pull_request_number, body: comment_body},
     )
     return {provider: "github", method: "issues.create_comment", params: params, target: target}
@@ -1067,6 +1067,6 @@ pub fn git_forge_writeback_request(event: GitForgePullRequestEvent, body: string
  * @errors: []
  */
 pub fn git_forge_writeback_comment(event: GitForgePullRequestEvent, body: string, options = nil) {
-  let request = git_forge_writeback_request(event, body, options)
+  const request = git_forge_writeback_request(event, body, options)
   return connector_call(request.provider, request.method, request.params)
 }

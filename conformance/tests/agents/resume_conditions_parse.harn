@@ -1,7 +1,7 @@
 import { parse_resume_conditions } from "std/agent/workers"
 
 pipeline main() {
-  let trigger = parse_resume_conditions(
+  const trigger = parse_resume_conditions(
     {
       trigger: {
         id: "resume-review",
@@ -13,11 +13,11 @@ pipeline main() {
   )
   __io_println(trigger?.trigger?.kind)
   __io_println(trigger?.trigger?.match?.events[0])
-  let timeout = parse_resume_conditions({timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}})
+  const timeout = parse_resume_conditions({timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}})
   __io_println(timeout?.timeout?.duration_minutes)
   __io_println(timeout?.timeout?.on_timeout)
-  let event = parse_resume_conditions({on_event: "operator.resume"})
+  const event = parse_resume_conditions({on_event: "operator.resume"})
   __io_println(event?.on_event)
-  let default_timeout = parse_resume_conditions({timeout: {duration_minutes: 5}})
+  const default_timeout = parse_resume_conditions({timeout: {duration_minutes: 5}})
   __io_println(default_timeout?.timeout?.on_timeout)
 }

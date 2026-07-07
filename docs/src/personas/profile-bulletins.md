@@ -14,7 +14,7 @@ import {
   bulletin_render_for_prompt,
 } from "std/personas/bulletins"
 
-let bulletin = bulletin_propose(
+const bulletin = bulletin_propose(
   {
     scope: "user",
     scope_key: "kenneth@example.com",
@@ -30,8 +30,8 @@ let bulletin = bulletin_propose(
     privacy: {sync: "local_only"},
   },
 )
-let proposal = bulletin_emit(bulletin)
-let decision = bulletin_accept(bulletin, {decided_by: "user"})
+const proposal = bulletin_emit(bulletin)
+const decision = bulletin_accept(bulletin, {decided_by: "user"})
 ```
 
 ## Envelope
@@ -94,7 +94,7 @@ Bulletins must never silently enter context as durable fact:
   boundary. Pass `{include_proposed: false}` to drop proposals entirely.
 
 ```harn,ignore
-let prompt_text = bulletin_render_for_prompt(known_bulletins)
+const prompt_text = bulletin_render_for_prompt(known_bulletins)
 ```
 
 ## Replay and dedupe

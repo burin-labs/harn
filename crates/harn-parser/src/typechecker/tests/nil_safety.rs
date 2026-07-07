@@ -14,7 +14,7 @@ fn has(msgs: &[String], needle: &str) -> bool {
 
 #[test]
 fn subscript_on_nil_is_error() {
-    let errs = errors("pipeline t(task) { let x: nil = nil\nlog(x[\"k\"]) }");
+    let errs = errors("pipeline t(task) { const x: nil = nil\nlog(x[\"k\"]) }");
     assert!(
         has(&errs, "cannot access an index on `nil`"),
         "got: {errs:?}"
@@ -23,7 +23,7 @@ fn subscript_on_nil_is_error() {
 
 #[test]
 fn subscript_on_nilable_is_error() {
-    let errs = errors("pipeline t(task) { let xs: list | nil = nil\nlog(xs[0]) }");
+    let errs = errors("pipeline t(task) { const xs: list | nil = nil\nlog(xs[0]) }");
     assert!(
         has(&errs, "cannot access an index on nilable type"),
         "got: {errs:?}"
@@ -32,7 +32,7 @@ fn subscript_on_nilable_is_error() {
 
 #[test]
 fn subscript_on_unknown_is_warning() {
-    let warns = warnings("pipeline t(task) { let u: unknown = task\nlog(u[\"k\"]) }");
+    let warns = warnings("pipeline t(task) { const u: unknown = task\nlog(u[\"k\"]) }");
     assert!(
         has(&warns, "subscript access on an `unknown` value"),
         "got: {warns:?}"
@@ -41,8 +41,8 @@ fn subscript_on_unknown_is_warning() {
 
 #[test]
 fn subscript_on_any_is_silent() {
-    let errs = errors("pipeline t(task) { let x: any = task\nlog(x[\"k\"]) }");
-    let warns = warnings("pipeline t(task) { let x: any = task\nlog(x[\"k\"]) }");
+    let errs = errors("pipeline t(task) { const x: any = task\nlog(x[\"k\"]) }");
+    let warns = warnings("pipeline t(task) { const x: any = task\nlog(x[\"k\"]) }");
     assert!(
         !has(&errs, "index") && !has(&warns, "subscript"),
         "any should opt out; errs={errs:?} warns={warns:?}"
@@ -60,7 +60,7 @@ fn optional_subscript_on_nil_is_allowed() {
 
 #[test]
 fn legacy_optional_subscript_on_nil_is_allowed() {
-    let errs = errors("pipeline t(task) { let x: list | nil = nil\nlog(x?[0]) }");
+    let errs = errors("pipeline t(task) { const x: list | nil = nil\nlog(x?[0]) }");
     assert!(
         !has(&errs, "cannot access an index"),
         "?[ ] should suppress the nil error; got: {errs:?}"
@@ -73,8 +73,8 @@ fn subscript_on_intersection_resolves_member_type() {
     // (the subscript path used to fall through to gradual, silently
     // accepting any assignment).
     let errs = errors(
-        "pipeline t(task) { let x: {a: int} & {b: string} = {a: 1, b: \"s\"}\n\
-         let y: string = x[\"a\"] }",
+        "pipeline t(task) { const x: {a: int} & {b: string} = {a: 1, b: \"s\"}\n\
+         const y: string = x[\"a\"] }",
     );
     assert!(has(&errs, "expected string"), "got: {errs:?}");
 }
@@ -91,8 +91,8 @@ fn optional_subscript_unknown_shape_key_infers_nil() {
 
 #[test]
 fn subscript_on_concrete_list_is_silent() {
-    let errs = errors("pipeline t(task) { let xs: list = []\nlog(xs[0]) }");
-    let warns = warnings("pipeline t(task) { let xs: list = []\nlog(xs[0]) }");
+    let errs = errors("pipeline t(task) { const xs: list = []\nlog(xs[0]) }");
+    let warns = warnings("pipeline t(task) { const xs: list = []\nlog(xs[0]) }");
     assert!(
         errs.is_empty() && warns.is_empty(),
         "errs={errs:?} warns={warns:?}"
@@ -103,7 +103,7 @@ fn subscript_on_concrete_list_is_silent() {
 
 #[test]
 fn method_on_nil_is_error() {
-    let errs = errors("pipeline t(task) { let x: nil = nil\nlog(x.foo()) }");
+    let errs = errors("pipeline t(task) { const x: nil = nil\nlog(x.foo()) }");
     assert!(
         has(&errs, "cannot access method `foo` on `nil`"),
         "got: {errs:?}"
@@ -112,7 +112,7 @@ fn method_on_nil_is_error() {
 
 #[test]
 fn method_on_nilable_is_error() {
-    let errs = errors("pipeline t(task) { let s: string | nil = nil\nlog(s.upper()) }");
+    let errs = errors("pipeline t(task) { const s: string | nil = nil\nlog(s.upper()) }");
     assert!(
         has(&errs, "cannot access method `upper` on nilable type"),
         "got: {errs:?}"
@@ -121,7 +121,7 @@ fn method_on_nilable_is_error() {
 
 #[test]
 fn method_on_unknown_is_warning() {
-    let warns = warnings("pipeline t(task) { let u: unknown = task\nlog(u.run()) }");
+    let warns = warnings("pipeline t(task) { const u: unknown = task\nlog(u.run()) }");
     assert!(
         has(&warns, "method call `.run()` on an `unknown` value"),
         "got: {warns:?}"
@@ -130,8 +130,8 @@ fn method_on_unknown_is_warning() {
 
 #[test]
 fn method_on_any_is_silent() {
-    let errs = errors("pipeline t(task) { let x: any = task\nlog(x.run()) }");
-    let warns = warnings("pipeline t(task) { let x: any = task\nlog(x.run()) }");
+    let errs = errors("pipeline t(task) { const x: any = task\nlog(x.run()) }");
+    let warns = warnings("pipeline t(task) { const x: any = task\nlog(x.run()) }");
     assert!(
         !has(&errs, "method") && !has(&warns, "method call"),
         "any should opt out; errs={errs:?} warns={warns:?}"
@@ -140,7 +140,7 @@ fn method_on_any_is_silent() {
 
 #[test]
 fn optional_method_on_nilable_is_allowed() {
-    let errs = errors("pipeline t(task) { let s: string | nil = nil\nlog(s?.upper()) }");
+    let errs = errors("pipeline t(task) { const s: string | nil = nil\nlog(s?.upper()) }");
     assert!(
         !has(&errs, "cannot access method"),
         "?.m() should suppress the nil error; got: {errs:?}"
@@ -149,7 +149,7 @@ fn optional_method_on_nilable_is_allowed() {
 
 #[test]
 fn method_on_concrete_string_is_silent() {
-    let errs = errors("pipeline t(task) { let s: string = \"x\"\nlog(s.upper()) }");
+    let errs = errors("pipeline t(task) { const s: string = \"x\"\nlog(s.upper()) }");
     assert!(!has(&errs, "cannot access method"), "got: {errs:?}");
 }
 
@@ -157,7 +157,7 @@ fn method_on_concrete_string_is_silent() {
 
 #[test]
 fn property_on_nil_still_errors() {
-    let errs = errors("pipeline t(task) { let x: nil = nil\nlog(x.foo) }");
+    let errs = errors("pipeline t(task) { const x: nil = nil\nlog(x.foo) }");
     assert!(
         has(&errs, "cannot access property `foo` on `nil`"),
         "got: {errs:?}"
@@ -166,7 +166,7 @@ fn property_on_nil_still_errors() {
 
 #[test]
 fn property_on_unknown_still_warns() {
-    let warns = warnings("pipeline t(task) { let u: unknown = task\nlog(u.field) }");
+    let warns = warnings("pipeline t(task) { const u: unknown = task\nlog(u.field) }");
     assert!(
         has(&warns, "property access `.field` on an `unknown` value"),
         "got: {warns:?}"
@@ -180,7 +180,7 @@ fn optional_chain_guard_narrows_base() {
     // `o?.a != nil` proves `o` is non-nil on the truthy branch, so a plain
     // `o.a` read inside the guard must not fire the nilable-receiver error.
     let errs = errors(
-        "pipeline t(task) { let o: {a?: string} | nil = nil\n\
+        "pipeline t(task) { const o: {a?: string} | nil = nil\n\
          if o?.a != nil {\nlog(o.a)\n} }",
     );
     assert!(
@@ -194,7 +194,7 @@ fn optional_chain_guard_does_not_narrow_wrong_branch() {
     // `o?.a == nil` is satisfiable with `o` itself nil, so the truthy branch
     // must NOT be narrowed — the strict receiver error still fires.
     let errs = errors(
-        "pipeline t(task) { let o: {a?: string} | nil = nil\n\
+        "pipeline t(task) { const o: {a?: string} | nil = nil\n\
          if o?.a == nil {\nlog(o.a)\n} }",
     );
     assert!(
@@ -210,8 +210,8 @@ fn coalesce_strips_nil_through_named_alias() {
     // worked; this is the alias parity fix).
     let errs = errors(
         "type Opts = {a?: string} | nil\n\
-         pipeline t(task) { let o: Opts = nil\n\
-         let p = o ?? {}\nlog(p.a) }",
+         pipeline t(task) { const o: Opts = nil\n\
+         const p = o ?? {}\nlog(p.a) }",
     );
     assert!(
         !has(&errs, "cannot access property"),
@@ -223,8 +223,8 @@ fn coalesce_strips_nil_through_named_alias() {
 
 #[test]
 fn dict_literal_subscript_stays_loose() {
-    let errs = errors("pipeline t(task) { let d = {a: 1}\nlog(d[\"b\"]) }");
-    let warns = warnings("pipeline t(task) { let d = {a: 1}\nlog(d[\"b\"]) }");
+    let errs = errors("pipeline t(task) { const d = {a: 1}\nlog(d[\"b\"]) }");
+    let warns = warnings("pipeline t(task) { const d = {a: 1}\nlog(d[\"b\"]) }");
     assert!(
         !has(&errs, "index") && !has(&warns, "subscript"),
         "ambient dict idiom should stay loose; errs={errs:?} warns={warns:?}"

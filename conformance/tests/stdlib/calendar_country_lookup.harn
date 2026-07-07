@@ -1,7 +1,7 @@
 import "std/calendar"
 
 pipeline default() {
-  let us: CalendarCountry = country_info("us")
+  const us: CalendarCountry = country_info("us")
     ?? {
     code: "US",
     name: "missing",
@@ -17,6 +17,6 @@ pipeline default() {
   __io_println(default_timezone_for_country("GB"))
   __io_println(default_timezone_for_country("US") == nil)
   __io_println(country_info("ZZ") == nil)
-  let all_countries: list<CalendarCountry> = countries()
+  const all_countries: list<CalendarCountry> = countries()
   __io_println(all_countries.find({ country -> country.code == "JP" }).currency_code)
 }

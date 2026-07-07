@@ -1,6 +1,6 @@
 pipeline default() {
-  let name = "world"
-  let age = 42
+  const name = "world"
+  const age = 42
   __io_println(format("Hello, {}!", name))
   __io_println(format("{} is {} years old", name, age))
   __io_println(format("no placeholders"))

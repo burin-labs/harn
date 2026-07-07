@@ -15,7 +15,7 @@ fn failing_command() {
 }
 
 pipeline default() {
-  let step = command_step(
+  const step = command_step(
     "say hello",
     no_newline_echo("hello"),
     {capture: {max_inline_bytes: 100}, tail_bytes: 100},
@@ -30,10 +30,10 @@ pipeline default() {
   assert(step.command_id != nil)
   assert(step.output_path != nil)
   assert(step.artifacts.combined == step.output_path)
-  let tail = command_output_tail(step, {length: 3})
+  const tail = command_output_tail(step, {length: 3})
   assert_eq(tail.content, "llo")
   assert_eq(tail.eof, true)
-  let failed = command_step("fail", failing_command(), {capture: {max_inline_bytes: 100}, tail_bytes: 100})
+  const failed = command_step("fail", failing_command(), {capture: {max_inline_bytes: 100}, tail_bytes: 100})
   assert_eq(failed.success, false)
   assert_eq(failed.ok, false)
   assert_eq(failed.status, "completed")

@@ -17,14 +17,14 @@ pipeline test(task) {
     when_to_use "Use beta for beta-shaped work"
     prompt "Beta instructions."
   }
-  let registry = skill_define(alpha, "beta", skill_find(beta, "beta") ?? {})
+  const registry = skill_define(alpha, "beta", skill_find(beta, "beta") ?? {})
   with_llm_script(
     [
       {tool_calls: [{id: "load-alpha", name: "load_skill", arguments: {name: "alpha"}}]},
       llm_text("Alpha loaded."),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "alpha please",
         "Host-rendered cards mention `alpha`.",
         {
@@ -36,7 +36,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "manual skill loop completes")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(len(calls) == 2, "load_skill creates a second model turn")
       assert(!contains(calls[0].system, "## Available skills"), "manual strategy suppresses catalog")
       assert(

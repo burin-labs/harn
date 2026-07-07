@@ -24,19 +24,19 @@
 import "./provider_catalog_refresh.harn"
 import "./provider_catalog_sources.harn"
 
-let RUN_OUTPUT_DIR = ".harn-runs/provider_catalog"
+const RUN_OUTPUT_DIR = ".harn-runs/provider_catalog"
 
-let FIXTURE_DIR = "scripts/provider_catalog_fixtures"
+const FIXTURE_DIR = "scripts/provider_catalog_fixtures"
 
-let EXPECTED_REPORT_PATH = "scripts/provider_catalog_fixtures/expected_drift_report.md"
+const EXPECTED_REPORT_PATH = "scripts/provider_catalog_fixtures/expected_drift_report.md"
 
-let EXPECTED_CANDIDATE_PATH = "scripts/provider_catalog_fixtures/expected_candidate.toml"
+const EXPECTED_CANDIDATE_PATH = "scripts/provider_catalog_fixtures/expected_candidate.toml"
 
-let BASELINE_CATALOG_PATH = "scripts/provider_catalog_fixtures/baseline_catalog.json"
+const BASELINE_CATALOG_PATH = "scripts/provider_catalog_fixtures/baseline_catalog.json"
 
-let FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
+const FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
 
-let FIXED_FETCHED_AT = "fixture-time"
+const FIXED_FETCHED_AT = "fixture-time"
 
 fn __install_fixture_mocks(harness: Harness) {
   http_mock_clear()
@@ -139,28 +139,28 @@ fn __rate_per_mtok_from_per_token(value) {
 }
 
 fn __openrouter_mapper(payload) {
-  var entries = []
+  let entries = []
   for record in payload?.data ?? [] {
-    let id = record?.id
+    const id = record?.id
     if id == nil || id == "" {
       continue
     }
-    let pricing = record?.pricing
-    var pricing_dict = {}
-    let input_rate = __rate_per_mtok_from_per_token(pricing?.prompt)
-    let output_rate = __rate_per_mtok_from_per_token(pricing?.completion)
+    const pricing = record?.pricing
+    let pricing_dict = {}
+    const input_rate = __rate_per_mtok_from_per_token(pricing?.prompt)
+    const output_rate = __rate_per_mtok_from_per_token(pricing?.completion)
     if input_rate != nil {
       pricing_dict = pricing_dict + {input_per_mtok: input_rate}
     }
     if output_rate != nil {
       pricing_dict = pricing_dict + {output_per_mtok: output_rate}
     }
-    let pricing_value = if len(pricing_dict) == 0 {
+    const pricing_value = if len(pricing_dict) == 0 {
       nil
     } else {
       pricing_dict
     }
-    let entry = {
+    const entry = {
       provider: record?.provider ?? "openrouter",
       model_id: id,
       name: record?.name,
@@ -176,10 +176,10 @@ fn __pricing_from_per_token_record(pricing) {
   if pricing == nil {
     return nil
   }
-  var pricing_dict = {}
-  let input_rate = __rate_per_mtok_from_per_token(pricing?.prompt ?? pricing?.input)
-  let output_rate = __rate_per_mtok_from_per_token(pricing?.completion ?? pricing?.output)
-  let cache_read = __rate_per_mtok_from_per_token(pricing?.input_cache_read ?? pricing?.cache_read)
+  let pricing_dict = {}
+  const input_rate = __rate_per_mtok_from_per_token(pricing?.prompt ?? pricing?.input)
+  const output_rate = __rate_per_mtok_from_per_token(pricing?.completion ?? pricing?.output)
+  const cache_read = __rate_per_mtok_from_per_token(pricing?.input_cache_read ?? pricing?.cache_read)
   if input_rate != nil {
     pricing_dict = pricing_dict + {input_per_mtok: input_rate}
   }
@@ -199,10 +199,10 @@ fn __pricing_from_mtok_record(record) {
   if record == nil {
     return nil
   }
-  var pricing_dict = {}
-  let input_rate = record?.input_per_mtok ?? record?.input_per_million_tokens
-  let output_rate = record?.output_per_mtok ?? record?.output_per_million_tokens
-  let cache_read = record?.cache_read_per_mtok ?? record?.cached_input_per_mtok
+  let pricing_dict = {}
+  const input_rate = record?.input_per_mtok ?? record?.input_per_million_tokens
+  const output_rate = record?.output_per_mtok ?? record?.output_per_million_tokens
+  const cache_read = record?.cache_read_per_mtok ?? record?.cached_input_per_mtok
   if input_rate != nil {
     pricing_dict = pricing_dict + {input_per_mtok: to_float(input_rate)}
   }
@@ -219,27 +219,27 @@ fn __pricing_from_mtok_record(record) {
 }
 
 fn __generic_models_mapper(payload) {
-  var entries = []
-  let records = if type_of(payload) == "list" {
+  let entries = []
+  const records = if type_of(payload) == "list" {
     payload
   } else {
     payload?.data ?? payload?.models ?? []
   }
   for record in records {
-    let id = record?.id ?? record?.slug ?? record?.model_name ?? record?.name
+    const id = record?.id ?? record?.slug ?? record?.model_name ?? record?.name
     if id == nil || id == "" {
       continue
     }
-    let context = record?.context_length
+    const context = record?.context_length
       ?? record?.context_window
       ?? record?.max_context_length
       ?? record?.max_model_len
       ?? record?.max_input_tokens
-    var pricing_value = __pricing_from_per_token_record(record?.pricing)
+    let pricing_value = __pricing_from_per_token_record(record?.pricing)
     if pricing_value == nil {
       pricing_value = __pricing_from_mtok_record(record)
     }
-    let entry = {
+    const entry = {
       model_id: id,
       name: record?.display_name ?? record?.name ?? record?.id,
       context_window: context,
@@ -251,7 +251,7 @@ fn __generic_models_mapper(payload) {
 }
 
 fn __fireworks_mapper(payload) {
-  var entries = []
+  let entries = []
   for record in payload?.data ?? [] {
     if record?.id != nil {
       entries = entries + [{model_id: record.id, name: record?.name}]
@@ -261,7 +261,7 @@ fn __fireworks_mapper(payload) {
 }
 
 fn __fireworks_adapter(env) {
-  let config = {
+  const config = {
     id: "fireworks-models-api",
     provider: "fireworks",
     source_url: "https://api.fireworks.ai/inference/v1/models",
@@ -280,7 +280,7 @@ fn __keyed_models_spec(
   key_envs: list<string>,
   options: dict,
 ) -> dict {
-  let config = {
+  const config = {
     id: id,
     kind: "json",
     provider: provider,
@@ -318,7 +318,7 @@ fn __keyed_models_spec(
 }
 
 fn __anthropic_spec() {
-  let config = {
+  const config = {
     id: "anthropic-pricing-page",
     provider: "anthropic",
     source_url: "https://www.anthropic.com/pricing",
@@ -337,7 +337,7 @@ fn __anthropic_spec() {
 }
 
 fn __openai_spec() {
-  let config = {
+  const config = {
     id: "openai-pricing-page",
     provider: "openai",
     source_url: "https://platform.openai.com/docs/pricing",
@@ -355,7 +355,7 @@ fn __openai_spec() {
 }
 
 fn __openrouter_spec() {
-  let config = {
+  const config = {
     id: "openrouter-models-api",
     provider: "openrouter",
     source_url: "https://openrouter.ai/api/v1/models",
@@ -368,7 +368,7 @@ fn __openrouter_spec() {
 }
 
 fn __fireworks_spec() {
-  let config = {
+  const config = {
     id: "fireworks-models-api",
     kind: "json",
     source_owner: "provider",
@@ -579,10 +579,10 @@ fn __load_secrets(harness: Harness, live: bool, specs: list<dict>) -> dict {
   if !live {
     return {}
   }
-  var secrets = {}
+  let secrets = {}
   for spec in specs {
     for name in spec?.key_envs ?? [] {
-      let value = harness.env.get(name)
+      const value = harness.env.get(name)
       if value != nil {
         secrets = secrets + {[name]: value}
       }
@@ -596,10 +596,10 @@ fn __load_secrets(harness: Harness, live: bool, specs: list<dict>) -> dict {
  * plus the flat list of raw observations they emitted.
  */
 pub fn run_adapters(env: dict, specs: list<dict>) -> dict {
-  var runs = []
-  var raw = []
+  let runs = []
+  let raw = []
   for spec in specs {
-    let result = spec.run_fn(env)
+    const result = spec.run_fn(env)
     runs = runs + [result.run]
     for obs in result.observations {
       raw = raw + [obs]
@@ -619,10 +619,10 @@ fn __build_meta(run_mode: string, observed_at: string) -> dict {
 }
 
 fn __compose_report(env: dict, specs: list<dict>, catalog: dict, run_mode: string) -> dict {
-  let adapter_outcome = run_adapters(env, specs)
-  let normalized = normalize_observations(adapter_outcome.observations)
-  let drift = build_drift(normalized.observations, catalog)
-  let meta = __build_meta(run_mode, env.observed_at)
+  const adapter_outcome = run_adapters(env, specs)
+  const normalized = normalize_observations(adapter_outcome.observations)
+  const drift = build_drift(normalized.observations, catalog)
+  const meta = __build_meta(run_mode, env.observed_at)
   return {
     report: render_markdown_report(drift, normalized.conflicts, adapter_outcome.runs, meta),
     candidate: render_candidate_toml(drift, meta),
@@ -646,12 +646,12 @@ fn __check_against_golden(harness: Harness, outcome: dict, update: bool) -> int 
     __io_println("Updated " + EXPECTED_CANDIDATE_PATH)
     return 0
   }
-  let expected_report = if harness.fs.exists(EXPECTED_REPORT_PATH) {
+  const expected_report = if harness.fs.exists(EXPECTED_REPORT_PATH) {
     harness.fs.read_text(EXPECTED_REPORT_PATH)
   } else {
     ""
   }
-  let expected_candidate = if harness.fs.exists(EXPECTED_CANDIDATE_PATH) {
+  const expected_candidate = if harness.fs.exists(EXPECTED_CANDIDATE_PATH) {
     harness.fs.read_text(EXPECTED_CANDIDATE_PATH)
   } else {
     ""
@@ -670,15 +670,15 @@ fn __check_against_golden(harness: Harness, outcome: dict, update: bool) -> int 
 }
 
 pipeline main(task) {
-  let live = argv.contains("--live")
-  let check = argv.contains("--check")
-  let update = argv.contains("--update")
-  let specs = if live {
+  const live = argv.contains("--live")
+  const check = argv.contains("--check")
+  const update = argv.contains("--update")
+  const specs = if live {
     __adapter_specs(live) + __live_adapter_specs()
   } else {
     __adapter_specs(live)
   }
-  let observed_at = if live {
+  const observed_at = if live {
     date_now_iso()
   } else {
     FIXED_OBSERVED_AT
@@ -688,7 +688,7 @@ pipeline main(task) {
   } else {
     __install_live_egress_policy()
   }
-  let env_data = {
+  const env_data = {
     observed_at: observed_at,
     secrets: __load_secrets(harness, live, specs),
     http_options: if live {
@@ -697,17 +697,17 @@ pipeline main(task) {
       {fetched_at: FIXED_FETCHED_AT}
     },
   }
-  let run_mode = if live {
+  const run_mode = if live {
     "live"
   } else {
     "fixtures"
   }
-  let catalog = if live {
+  const catalog = if live {
     llm_provider_catalog()
   } else {
     json_parse(harness.fs.read_text(BASELINE_CATALOG_PATH))
   }
-  let outcome = __compose_report(env_data, specs, catalog, run_mode)
+  const outcome = __compose_report(env_data, specs, catalog, run_mode)
   if check {
     return __check_against_golden(harness, outcome, update)
   }

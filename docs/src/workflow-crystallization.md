@@ -119,7 +119,7 @@ shadow/replay comparison.
 
 ```harn
 pipeline version_bump(repo_path, version, branch_name, release_target) {
-  let review_warnings = []
+  const review_warnings = []
   // Step 1: tool_call git.checkout_branch
   // side_effect: git_ref release-branch
   log("crystallized step 1: git.checkout_branch")

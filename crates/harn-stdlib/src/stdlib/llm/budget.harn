@@ -14,7 +14,7 @@ fn __llm_budget_heuristic_tokens(text) {
   if text == "" {
     return 0
   }
-  let divisor = if regex_match("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]", text) {
+  const divisor = if regex_match("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]", text) {
     1.0
   } else if contains(text, "```") || contains(text, "=>") || contains(text, "->")
     || contains(text, "{")
@@ -42,7 +42,7 @@ fn __llm_budget_text(text) {
 }
 
 fn __ceil_int(x) {
-  let f = floor(x)
+  const f = floor(x)
   if x == f {
     return to_int(f)
   }
@@ -66,9 +66,9 @@ pub fn token_count_encoder(model) {
  * @errors: []
  */
 pub fn estimate_text_tokens(text, model = nil) {
-  let normalized = __llm_budget_text(text)
-  let model_id = __llm_budget_model(model)
-  let info = tiktoken_tokenizer_info(model_id)
+  const normalized = __llm_budget_text(text)
+  const model_id = __llm_budget_model(model)
+  const info = tiktoken_tokenizer_info(model_id)
   if info.known_model_family {
     return tiktoken_count_tokens(normalized, model_id)
   }
@@ -82,9 +82,9 @@ pub fn estimate_text_tokens(text, model = nil) {
  * @errors: []
  */
 pub fn estimate_text_tokens_detail(text, model = nil) {
-  let normalized = __llm_budget_text(text)
-  let model_id = __llm_budget_model(model)
-  let info = tiktoken_tokenizer_info(model_id)
+  const normalized = __llm_budget_text(text)
+  const model_id = __llm_budget_model(model)
+  const info = tiktoken_tokenizer_info(model_id)
   if info.known_model_family {
     return info + {tokens: tiktoken_count_tokens(normalized, model_id)}
   }
@@ -101,21 +101,21 @@ pub fn estimate_text_tokens_detail(text, model = nil) {
  * @errors: []
  */
 pub fn context_window_for(model) {
-  let info = try {
+  const info = try {
     llm_model_info(model)
   }
   if is_err(info) {
     return 8192
   }
-  let resolved = unwrap(info)
+  const resolved = unwrap(info)
   if type_of(resolved) != "dict" {
     return 8192
   }
-  let catalog = resolved?.catalog
+  const catalog = resolved?.catalog
   if type_of(catalog) != "dict" {
     return 8192
   }
-  let cw = catalog?.runtime_context_window ?? catalog?.context_window
+  const cw = catalog?.runtime_context_window ?? catalog?.context_window
   if cw == nil {
     return 8192
   }
@@ -123,21 +123,21 @@ pub fn context_window_for(model) {
 }
 
 fn __model_max_output_tokens(model) {
-  let info = try {
+  const info = try {
     llm_model_info(model)
   }
   if is_err(info) {
     return 16384
   }
-  let resolved = unwrap(info)
+  const resolved = unwrap(info)
   if type_of(resolved) != "dict" {
     return 16384
   }
-  let catalog = resolved?.catalog
+  const catalog = resolved?.catalog
   if type_of(catalog) != "dict" {
     return 16384
   }
-  let mot = catalog?.max_output_tokens
+  const mot = catalog?.max_output_tokens
   if mot == nil {
     return 16384
   }
@@ -146,8 +146,8 @@ fn __model_max_output_tokens(model) {
 
 fn __task_clamp(kind, capped, used, summary_ratio) {
   if kind == "summarize" {
-    let ratio_floor = __ceil_int(used * summary_ratio)
-    let upper = if ratio_floor > 256 {
+    const ratio_floor = __ceil_int(used * summary_ratio)
+    const upper = if ratio_floor > 256 {
       ratio_floor
     } else {
       256
@@ -191,19 +191,19 @@ pub fn recommend_max_output_tokens(opts) {
   if opts?.model == nil || opts.model == "" {
     throw "recommend_max_output_tokens: opts.model is required"
   }
-  let model = opts.model
-  let headroom = opts?.headroom ?? 0.1
-  let kind = opts?.task_kind ?? "chat"
-  let summary_ratio = opts?.summary_ratio ?? 0.3
-  let ctx = context_window_for(model)
-  let prompt_tokens = estimate_text_tokens(opts.prompt, model)
-  let system_tokens = estimate_text_tokens(opts?.system ?? "", model)
-  let used = prompt_tokens + system_tokens
-  let headroom_tokens = __ceil_int(ctx * headroom)
-  let raw_remaining = ctx - used - headroom_tokens
-  let model_cap = __model_max_output_tokens(model)
-  let capped = min(raw_remaining, model_cap)
-  let clamped = __task_clamp(kind, capped, used, summary_ratio)
+  const model = opts.model
+  const headroom = opts?.headroom ?? 0.1
+  const kind = opts?.task_kind ?? "chat"
+  const summary_ratio = opts?.summary_ratio ?? 0.3
+  const ctx = context_window_for(model)
+  const prompt_tokens = estimate_text_tokens(opts.prompt, model)
+  const system_tokens = estimate_text_tokens(opts?.system ?? "", model)
+  const used = prompt_tokens + system_tokens
+  const headroom_tokens = __ceil_int(ctx * headroom)
+  const raw_remaining = ctx - used - headroom_tokens
+  const model_cap = __model_max_output_tokens(model)
+  const capped = min(raw_remaining, model_cap)
+  const clamped = __task_clamp(kind, capped, used, summary_ratio)
   if clamped < 64 {
     return 64
   }
@@ -221,35 +221,35 @@ pub fn budget_summary(opts) {
   if type_of(opts) != "dict" {
     throw "budget_summary: opts must be a dict"
   }
-  let model = opts?.model ?? ""
-  let info = llm_model_info(model)
-  let provider = if type_of(info) == "dict" {
+  const model = opts?.model ?? ""
+  const info = llm_model_info(model)
+  const provider = if type_of(info) == "dict" {
     to_string(info?.provider ?? "")
   } else {
     ""
   }
-  let catalog = if type_of(info) == "dict" {
+  const catalog = if type_of(info) == "dict" {
     info?.catalog
   } else {
     nil
   }
-  var assumptions = []
-  let ctx = if type_of(catalog) == "dict" && catalog?.context_window != nil {
+  let assumptions = []
+  const ctx = if type_of(catalog) == "dict" && catalog?.context_window != nil {
     to_int(catalog.context_window)
   } else {
     assumptions = assumptions.push("context_window unknown - using 8192 fallback")
     8192
   }
-  let headroom = opts?.headroom ?? 0.1
-  let kind = opts?.task_kind ?? "chat"
-  let summary_ratio = opts?.summary_ratio ?? 0.3
-  let prompt_tokens = estimate_text_tokens(opts?.prompt ?? "", model)
-  let system_tokens = estimate_text_tokens(opts?.system ?? "", model)
-  let headroom_tokens = __ceil_int(ctx * headroom)
-  let remaining = ctx - prompt_tokens - system_tokens - headroom_tokens
-  let model_cap = __model_max_output_tokens(model)
-  let capped = min(remaining, model_cap)
-  var clamped = __task_clamp(kind, capped, prompt_tokens + system_tokens, summary_ratio)
+  const headroom = opts?.headroom ?? 0.1
+  const kind = opts?.task_kind ?? "chat"
+  const summary_ratio = opts?.summary_ratio ?? 0.3
+  const prompt_tokens = estimate_text_tokens(opts?.prompt ?? "", model)
+  const system_tokens = estimate_text_tokens(opts?.system ?? "", model)
+  const headroom_tokens = __ceil_int(ctx * headroom)
+  const remaining = ctx - prompt_tokens - system_tokens - headroom_tokens
+  const model_cap = __model_max_output_tokens(model)
+  const capped = min(remaining, model_cap)
+  let clamped = __task_clamp(kind, capped, prompt_tokens + system_tokens, summary_ratio)
   if clamped < 64 {
     clamped = 64
   }
@@ -275,8 +275,8 @@ pub fn budget_summary(opts) {
  * @errors: []
  */
 pub fn fits_in_context(text, model, headroom = 0.1) {
-  let ctx = context_window_for(model)
-  let used = estimate_text_tokens(text, model)
-  let reserved = __ceil_int(ctx * headroom)
+  const ctx = context_window_for(model)
+  const used = estimate_text_tokens(text, model)
+  const reserved = __ceil_int(ctx * headroom)
   return used + reserved <= ctx
 }

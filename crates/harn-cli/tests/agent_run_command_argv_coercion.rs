@@ -58,10 +58,10 @@ fn capture(request, args) {
 }
 
 pipeline main(_) {
-  let opts = {root: "/workspace", command_policy: capture, output_format: "value"}
-  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
-  let from_command = h({command: ["bash", "-lc", "ls -1"]})
-  let from_argv = h({argv: ["bash", "-lc", "ls -1"]})
+  const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
+  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const from_command = h({command: ["bash", "-lc", "ls -1"]})
+  const from_argv = h({argv: ["bash", "-lc", "ls -1"]})
   __io_println("COMMAND_REASON=" + from_command.reason)
   __io_println("ARGV_REASON=" + from_argv.reason)
   __io_println("EQUAL=" + to_string(from_command.reason == from_argv.reason))
@@ -89,9 +89,9 @@ fn capture(request, args) {
 }
 
 pipeline main(_) {
-  let opts = {root: "/workspace", command_policy: capture, output_format: "value"}
-  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
-  let r = h({argv: ["echo", "hi"]})
+  const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
+  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const r = h({argv: ["echo", "hi"]})
   __io_println("REASON=" + r.reason)
 }
 "#;
@@ -115,9 +115,9 @@ fn capture(request, args) {
 }
 
 pipeline main(_) {
-  let opts = {root: "/workspace", command_policy: capture, output_format: "value"}
-  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
-  let r = h({argv: ["echo", "hi"]})
+  const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
+  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const r = h({argv: ["echo", "hi"]})
   __io_println("REASON=" + r.reason)
 }
 "#;
@@ -139,9 +139,9 @@ fn require_approval(request, args) {
 }
 
 pipeline main(_) {
-  let opts = {root: "/workspace", command_policy: require_approval, output_format: "value"}
-  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
-  let r = h({argv: ["definitely-not-run-command-policy-sentinel"]})
+  const opts = {root: "/workspace", command_policy: require_approval, output_format: "value"}
+  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const r = h({argv: ["definitely-not-run-command-policy-sentinel"]})
   __io_println("STATUS=" + to_string(r.status))
   __io_println("REQUIRES=" + to_string(r.requires_approval))
   __io_println("REASON=" + r.reason)
@@ -186,9 +186,9 @@ fn capture(request, args) {
 }
 
 pipeline main(_) {
-  let opts = {root: "/workspace", allow_shell: false, command_policy: capture, output_format: "value"}
-  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
-  let r = h({command: ["bash", "-lc", "ls"]})
+  const opts = {root: "/workspace", allow_shell: false, command_policy: capture, output_format: "value"}
+  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const r = h({command: ["bash", "-lc", "ls"]})
   __io_println("REASON=" + r.reason)
 }
 "#;
@@ -207,9 +207,9 @@ fn non_string_command_list_is_rejected() {
 import { agent_command_tools } from "std/agent/host_tools"
 
 pipeline main(_) {
-  let opts = {root: "/workspace", allow_shell: true, output_format: "value"}
-  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
-  let r = try { h({command: ["bash", 7]}) }
+  const opts = {root: "/workspace", allow_shell: true, output_format: "value"}
+  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const r = try { h({command: ["bash", 7]}) }
   if is_ok(r) {
     __io_println("OUTCOME=unexpected-ok")
   } else {
@@ -233,9 +233,9 @@ fn shell_string_with_shell_disabled_gives_actionable_error() {
 import { agent_command_tools } from "std/agent/host_tools"
 
 pipeline main(_) {
-  let opts = {root: "/workspace", allow_shell: false, output_format: "value"}
-  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
-  let r = try { h({command: "echo hi"}) }
+  const opts = {root: "/workspace", allow_shell: false, output_format: "value"}
+  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const r = try { h({command: "echo hi"}) }
   if is_ok(r) {
     __io_println("OUTCOME=unexpected-ok")
   } else {

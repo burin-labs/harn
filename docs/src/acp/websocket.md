@@ -68,7 +68,7 @@ upgrade route directly from Harn:
 
 ```harn
 pipeline acp_websocket_echo() {
-  let server = websocket_server("127.0.0.1:8787", {})
+  const server = websocket_server("127.0.0.1:8787", {})
   websocket_route(server, "/acp", {
     auth: {bearer: env("ACP_TOKEN")},
     max_message_bytes: 1048576,
@@ -77,15 +77,15 @@ pipeline acp_websocket_echo() {
   })
 
   while true {
-    let accepted = websocket_accept(server, 30000)
+    const accepted = websocket_accept(server, 30000)
     if accepted == nil || accepted?.type == "timeout" {
       continue
     }
-    let conn = accepted ?? {}
+    const conn = accepted ?? {}
 
-    let frame = websocket_receive(conn, 30000) ?? {}
+    const frame = websocket_receive(conn, 30000) ?? {}
     if frame?.type == "text" {
-      let request = json_parse(frame.data)
+      const request = json_parse(frame.data)
       websocket_send(conn, json_stringify({
         jsonrpc: "2.0",
         id: request.id,

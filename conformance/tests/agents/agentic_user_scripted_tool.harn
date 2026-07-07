@@ -11,12 +11,12 @@ pipeline main() {
       llm_text("Created index.test.ts with Vitest edge coverage."),
     ],
     { ->
-      let answerer = scripted_user(
+      const answerer = scripted_user(
         [{match: "*test runner*", reply: "Use Vitest and cover empty, invalid, and boundary inputs."}],
         {max_replies: 2},
       )
-      let session = "agentic-user-scripted-tool"
-      let captured = agent_capture_events(
+      const session = "agentic-user-scripted-tool"
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Create index.test.ts with edge coverage.",
@@ -31,12 +31,12 @@ pipeline main() {
           },
         ) },
       )
-      let simulated_audit = captured.events
+      const simulated_audit = captured.events
         .find(
         { event -> return event.type == "tool_call_audit" && event.audit.event_type == "simulated_user_reply" },
       )
-      let calls = llm_mock_calls()
-      let status = simulated_user_status(answerer)
+      const calls = llm_mock_calls()
+      const status = simulated_user_status(answerer)
       __io_println(captured.result.status)
       __io_println(contains(captured.result.text, "Vitest edge coverage"))
       __io_println(status.state.replies)

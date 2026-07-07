@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * continues instead of stopping — the edit was re-verified, not taken on faith.
  */
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_test",
@@ -56,8 +56,8 @@ pipeline default() {
       llm_text("Done for real. ##DONE##"),
     ],
     { ->
-      let session = "repair-no-stop-" + uuid()
-      let captured = agent_capture_events(
+      const session = "repair-no-stop-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the tests pass, then finish.",

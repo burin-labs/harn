@@ -1,5 +1,5 @@
 pipeline main() {
-  let all_flow = workflow_graph(
+  const all_flow = workflow_graph(
     {
       entry: "map",
       nodes: {
@@ -12,9 +12,9 @@ pipeline main() {
       edges: [],
     },
   )
-  let all_result = workflow_execute("map all", all_flow, [], {max_steps: 1})
+  const all_result = workflow_execute("map all", all_flow, [], {max_steps: 1})
   __io_println(len(all_result?.artifacts))
-  let first_flow = workflow_graph(
+  const first_flow = workflow_graph(
     {
       entry: "map",
       nodes: {
@@ -27,9 +27,9 @@ pipeline main() {
       edges: [],
     },
   )
-  let first_result = workflow_execute("map first", first_flow, [], {max_steps: 1})
+  const first_result = workflow_execute("map first", first_flow, [], {max_steps: 1})
   __io_println(len(first_result?.artifacts))
-  let quorum_flow = workflow_graph(
+  const quorum_flow = workflow_graph(
     {
       entry: "map",
       nodes: {
@@ -42,6 +42,6 @@ pipeline main() {
       edges: [],
     },
   )
-  let quorum_result = workflow_execute("map quorum", quorum_flow, [], {max_steps: 1})
+  const quorum_result = workflow_execute("map quorum", quorum_flow, [], {max_steps: 1})
   __io_println(len(quorum_result?.artifacts))
 }

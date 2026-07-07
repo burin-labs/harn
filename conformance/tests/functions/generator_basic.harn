@@ -1,24 +1,24 @@
 pipeline test(task) {
   fn count_up(start, end) {
-    var i = start
+    let i = start
     while i < end {
       yield i
       i = i + 1
     }
   }
   // Test .next() method
-  let gen = count_up(1, 4)
-  let r1 = gen.next()
+  const gen = count_up(1, 4)
+  const r1 = gen.next()
   __io_println(r1.value)
   __io_println(r1.done)
-  let r2 = gen.next()
+  const r2 = gen.next()
   __io_println(r2.value)
   __io_println(r2.done)
-  let r3 = gen.next()
+  const r3 = gen.next()
   __io_println(r3.value)
   __io_println(r3.done)
   // After exhaustion
-  let r4 = gen.next()
+  const r4 = gen.next()
   __io_println(r4.value)
   __io_println(r4.done)
   // Test for-in with generator
@@ -30,8 +30,8 @@ pipeline test(task) {
     yield
     yield
   }
-  let g2 = empty_yields()
-  let e1 = g2.next()
+  const g2 = empty_yields()
+  const e1 = g2.next()
   __io_println(e1.value)
   __io_println(e1.done)
 }

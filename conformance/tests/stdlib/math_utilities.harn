@@ -14,7 +14,7 @@ pipeline default(task) {
   __io_println(is_infinite(1.0))
   __io_println(is_infinite(0.0))
   // atan2
-  let result = atan2(1.0, 1.0)
+  const result = atan2(1.0, 1.0)
   // atan2(1,1) = pi/4 ~ 0.785
   __io_println(result > 0.78)
   __io_println(result < 0.79)

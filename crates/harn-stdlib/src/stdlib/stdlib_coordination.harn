@@ -7,19 +7,19 @@ import { filter_nil } from "std/collections"
 import { ensure_parent_dir, read_json, write_json } from "std/fs"
 import { memory_store } from "std/memory"
 
-let __COORD_SCHEMA = "harn.coordination.message.v1"
+const __COORD_SCHEMA = "harn.coordination.message.v1"
 
-let __COORD_RECEIPT_SCHEMA = "harn.coordination.receipt.v1"
+const __COORD_RECEIPT_SCHEMA = "harn.coordination.receipt.v1"
 
-let __COORD_DIR_LOCK_SCHEMA = "harn.coordination.dir_lock.v1"
+const __COORD_DIR_LOCK_SCHEMA = "harn.coordination.dir_lock.v1"
 
-let __COORD_CHANNEL_PREFIX = "coord"
+const __COORD_CHANNEL_PREFIX = "coord"
 
-let __COORD_KINDS = ["status", "claim", "handoff", "blocker", "decision", "request", "fact"]
+const __COORD_KINDS = ["status", "claim", "handoff", "blocker", "decision", "request", "fact"]
 
-let __COORD_DIR_LOCK_TTL_MS = 10 * 60 * 1000
+const __COORD_DIR_LOCK_TTL_MS = 10 * 60 * 1000
 
-let __COORD_DIR_LOCK_REAPER_TTL_MS = 60 * 1000
+const __COORD_DIR_LOCK_REAPER_TTL_MS = 60 * 1000
 
 fn __coord_string(value) {
   if value == nil {
@@ -52,12 +52,12 @@ fn __coord_dict(value) {
 }
 
 fn __coord_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
 fn __coord_ctx() {
-  let ctx = runtime_context()
+  const ctx = runtime_context()
   if type_of(ctx) == "dict" {
     return ctx
   }
@@ -65,7 +65,7 @@ fn __coord_ctx() {
 }
 
 fn __coord_normalized_scope(scope) {
-  let value = lowercase(trim(__coord_string(scope)))
+  const value = lowercase(trim(__coord_string(scope)))
   if value == "" {
     return "session"
   }
@@ -76,7 +76,7 @@ fn __coord_normalized_scope(scope) {
 }
 
 fn __coord_validate_component(label, value) {
-  let text = trim(__coord_string(value))
+  const text = trim(__coord_string(value))
   if text == "" {
     throw "std/coordination: " + label + " is required"
   }
@@ -91,7 +91,7 @@ fn __coord_topic_component(value) {
 }
 
 fn __coord_channel_name(parts) {
-  var normalized = [__COORD_CHANNEL_PREFIX]
+  let normalized = [__COORD_CHANNEL_PREFIX]
   for part in parts {
     normalized = normalized + [__coord_topic_component(part)]
   }
@@ -109,7 +109,7 @@ fn __coord_scope_id(scope, opts, ctx) {
       ?? "session"
   }
   if scope == "pipeline" {
-    let id = opts?.pipeline_id ?? opts?.scope_id ?? ctx?.workflow_id ?? ctx?.run_id
+    const id = opts?.pipeline_id ?? opts?.scope_id ?? ctx?.workflow_id ?? ctx?.run_id
     if id == nil || trim(__coord_string(id)) == "" {
       throw "std/coordination: pipeline scope requires pipeline_id, workflow_id, or run_id"
     }
@@ -125,13 +125,13 @@ fn __coord_scope_id(scope, opts, ctx) {
 }
 
 fn __coord_resolution(scope, room, options) {
-  let opts = __coord_dict(options)
-  let ctx = __coord_ctx()
-  let logical_scope = __coord_normalized_scope(scope)
-  let room_name = __coord_validate_component("room", room)
-  let logical_scope_id = __coord_validate_component("scope id", __coord_scope_id(logical_scope, opts, ctx))
+  const opts = __coord_dict(options)
+  const ctx = __coord_ctx()
+  const logical_scope = __coord_normalized_scope(scope)
+  const room_name = __coord_validate_component("room", room)
+  const logical_scope_id = __coord_validate_component("scope id", __coord_scope_id(logical_scope, opts, ctx))
   if logical_scope == "workspace" {
-    let tenant_id = __coord_validate_component("tenant id", opts?.tenant_id ?? ctx?.tenant_id ?? "default")
+    const tenant_id = __coord_validate_component("tenant id", opts?.tenant_id ?? ctx?.tenant_id ?? "default")
     return {
       logical_scope: logical_scope,
       logical_scope_id: logical_scope_id,
@@ -142,7 +142,7 @@ fn __coord_resolution(scope, room, options) {
     }
   }
   if logical_scope == "task" {
-    let session_id = __coord_validate_component("session id", __coord_scope_id("session", opts, ctx))
+    const session_id = __coord_validate_component("session id", __coord_scope_id("session", opts, ctx))
     return {
       logical_scope: logical_scope,
       logical_scope_id: logical_scope_id,
@@ -163,8 +163,8 @@ fn __coord_resolution(scope, room, options) {
 }
 
 fn __coord_channel_options(resolution, options, id = nil) {
-  let opts = __coord_dict(options)
-  var out = {scope: resolution.channel_scope}
+  const opts = __coord_dict(options)
+  let out = {scope: resolution.channel_scope}
   if id != nil {
     out = out + {id: id}
   }
@@ -175,15 +175,15 @@ fn __coord_channel_options(resolution, options, id = nil) {
   } else if resolution.channel_scope == "tenant" {
     out = out + {tenant_id: resolution.channel_scope_id}
   }
-  let ttl = opts?.ttl
+  const ttl = opts?.ttl
   if ttl != nil {
     out = out + {ttl: ttl}
   }
-  let limit = opts?.limit
+  const limit = opts?.limit
   if limit != nil {
     out = out + {limit: limit}
   }
-  let cursor = opts?.from_cursor ?? opts?.cursor
+  const cursor = opts?.from_cursor ?? opts?.cursor
   if cursor != nil {
     out = out + {from_cursor: cursor}
   }
@@ -204,7 +204,7 @@ fn __coord_nonnegative_int(value, fallback, label) {
   if value == nil {
     return fallback
   }
-  let parsed = to_int(value)
+  const parsed = to_int(value)
   if parsed == nil || parsed < 0 {
     throw "std/coordination: " + label + " must be a non-negative int"
   }
@@ -215,7 +215,7 @@ fn __coord_positive_int(value, fallback, label) {
   if value == nil {
     return fallback
   }
-  let parsed = to_int(value)
+  const parsed = to_int(value)
   if parsed == nil || parsed <= 0 {
     throw "std/coordination: " + label + " must be a positive int"
   }
@@ -242,9 +242,9 @@ fn __coord_address_identifier(address) {
 }
 
 fn __coord_consumer_id(options, fallback = nil) {
-  let opts = __coord_dict(options)
-  let ctx = __coord_ctx()
-  let address_id = __coord_address_identifier(opts?.to ?? opts?.recipient)
+  const opts = __coord_dict(options)
+  const ctx = __coord_ctx()
+  const address_id = __coord_address_identifier(opts?.to ?? opts?.recipient)
   return __coord_validate_component(
     "consumer id",
     opts?.consumer_id
@@ -260,7 +260,7 @@ fn __coord_consumer_id(options, fallback = nil) {
 }
 
 fn __coord_text_matches(value, expected) {
-  let needle = trim(__coord_string(expected))
+  const needle = trim(__coord_string(expected))
   if needle == "" {
     return true
   }
@@ -276,7 +276,7 @@ fn __coord_text_matches(value, expected) {
 }
 
 fn __coord_address_matches(address, expected) {
-  let needle = trim(__coord_string(__coord_address_identifier(expected) ?? expected))
+  const needle = trim(__coord_string(__coord_address_identifier(expected) ?? expected))
   if needle == "" {
     return true
   }
@@ -316,14 +316,14 @@ fn __coord_kind_matches(kind, expected) {
 }
 
 fn __coord_message_from_input(value, options) {
-  let opts = __coord_dict(options)
+  const opts = __coord_dict(options)
   if type_of(value) == "dict" {
-    let message = value?.message ?? value
+    const message = value?.message ?? value
     if type_of(message) == "dict" && trim(__coord_string(message?.id)) != "" {
       return message
     }
   }
-  let id = trim(__coord_string(value))
+  const id = trim(__coord_string(value))
   if id == "" {
     throw "std/coordination: request id is required"
   }
@@ -331,9 +331,9 @@ fn __coord_message_from_input(value, options) {
 }
 
 fn __coord_wait_reply_options(request, options) {
-  let opts = __coord_dict(options)
-  let fallback_consumer = "reply." + request.id
-  let consumer_id = __coord_consumer_id(opts, fallback_consumer)
+  const opts = __coord_dict(options)
+  const fallback_consumer = "reply." + request.id
+  const consumer_id = __coord_consumer_id(opts, fallback_consumer)
   return filter_nil(
     opts
       + {
@@ -349,7 +349,7 @@ fn __coord_wait_reply_options(request, options) {
 }
 
 fn __coord_message_matches(message, options, default_to) {
-  let opts = __coord_dict(options)
+  const opts = __coord_dict(options)
   if !__coord_kind_matches(message?.kind, opts?.kind) {
     return false
   }
@@ -372,7 +372,7 @@ fn __coord_message_matches(message, options, default_to) {
 }
 
 fn __coord_kind(message, options) {
-  let kind = lowercase(trim(__coord_string(options?.kind ?? message?.kind ?? "status")))
+  const kind = lowercase(trim(__coord_string(options?.kind ?? message?.kind ?? "status")))
   if !contains(__COORD_KINDS, kind) {
     throw "std/coordination: unsupported message kind `" + kind + "`"
   }
@@ -380,12 +380,12 @@ fn __coord_kind(message, options) {
 }
 
 fn __coord_dir_lock_path(resource_path, options) {
-  let opts = __coord_dict(options)
-  let explicit = trim(__coord_string(opts?.lock_path))
+  const opts = __coord_dict(options)
+  const explicit = trim(__coord_string(opts?.lock_path))
   if explicit != "" {
     return explicit
   }
-  let resource = trim(__coord_string(resource_path))
+  const resource = trim(__coord_string(resource_path))
   if resource == "" {
     throw "std/coordination: lock resource path is required"
   }
@@ -401,19 +401,19 @@ fn __coord_dir_lock_reaper_path(lock_path) {
 }
 
 fn __coord_dir_lock_owner(owner, options) {
-  let opts = __coord_dict(options)
-  let ctx = __coord_ctx()
-  let raw = if type_of(owner) == "dict" {
+  const opts = __coord_dict(options)
+  const ctx = __coord_ctx()
+  const raw = if type_of(owner) == "dict" {
     owner
   } else {
     {}
   }
-  let explicit = if type_of(owner) == "string" {
+  const explicit = if type_of(owner) == "string" {
     owner
   } else {
     nil
   }
-  var owner_id = trim(
+  let owner_id = trim(
     __coord_string(
       raw?.id
         ?? raw?.owner_id
@@ -443,9 +443,9 @@ fn __coord_dir_lock_owner(owner, options) {
 }
 
 fn __coord_dir_lock_record(resource_path, lock_path, owner, options, now_ms) {
-  let opts = __coord_dict(options)
-  let ttl_ms = __coord_nonnegative_int(opts?.ttl_ms ?? opts?.lease_ms, __COORD_DIR_LOCK_TTL_MS, "ttl_ms")
-  let token = trim(__coord_string(opts?.token))
+  const opts = __coord_dict(options)
+  const ttl_ms = __coord_nonnegative_int(opts?.ttl_ms ?? opts?.lease_ms, __COORD_DIR_LOCK_TTL_MS, "ttl_ms")
+  const token = trim(__coord_string(opts?.token))
   return filter_nil(
     {
       schema: __COORD_DIR_LOCK_SCHEMA,
@@ -472,19 +472,19 @@ fn __coord_dir_lock_same_record(record, expected) {
   if type_of(record) != "dict" || type_of(expected) != "dict" {
     return false
   }
-  let token = record?.token
+  const token = record?.token
   return token != nil && token == expected?.token && record?.acquired_at_ms == expected?.acquired_at_ms
 }
 
 fn __coord_dir_lock_existing(lock_path, now_ms) {
-  let record_path = __coord_dir_lock_record_path(lock_path)
+  const record_path = __coord_dir_lock_record_path(lock_path)
   if !harness.fs.exists(lock_path) {
     return {status: "absent", lock_path: lock_path, record_path: record_path}
   }
   if !harness.fs.exists(record_path) {
     return {status: "unrecorded", lock_path: lock_path, record_path: record_path}
   }
-  let record = read_json(record_path, nil)
+  const record = read_json(record_path, nil)
   if type_of(record) != "dict" || record?.schema != __COORD_DIR_LOCK_SCHEMA {
     return {status: "malformed", lock_path: lock_path, record_path: record_path, record: record}
   }
@@ -501,7 +501,7 @@ fn __coord_dir_lock_existing(lock_path, now_ms) {
 }
 
 fn __coord_dir_lock_clear_if_same(lock_path, expected_record) {
-  let current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+  const current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
   if current.status == "absent" {
     return true
   }
@@ -513,13 +513,13 @@ fn __coord_dir_lock_clear_if_same(lock_path, expected_record) {
 }
 
 fn __coord_dir_lock_stale(record, now_ms) {
-  let expires_at_ms = to_int(record?.expires_at_ms)
+  const expires_at_ms = to_int(record?.expires_at_ms)
   return expires_at_ms != nil && expires_at_ms <= now_ms
 }
 
 fn __coord_dir_lock_conflict(resource_path, lock_path, existing, options) {
-  let opts = __coord_dict(options)
-  let result = filter_nil(
+  const opts = __coord_dict(options)
+  const result = filter_nil(
     {
       schema: __COORD_DIR_LOCK_SCHEMA,
       acquired: false,
@@ -539,8 +539,8 @@ fn __coord_dir_lock_conflict(resource_path, lock_path, existing, options) {
 }
 
 fn __coord_dir_lock_reaper_options(options, lock_path) {
-  let opts = __coord_dict(options)
-  let ttl_ms = __coord_positive_int(opts?.reaper_ttl_ms, __COORD_DIR_LOCK_REAPER_TTL_MS, "reaper_ttl_ms")
+  const opts = __coord_dict(options)
+  const ttl_ms = __coord_positive_int(opts?.reaper_ttl_ms, __COORD_DIR_LOCK_REAPER_TTL_MS, "reaper_ttl_ms")
   return opts
     + {
     lock_path: __coord_dir_lock_reaper_path(lock_path),
@@ -551,40 +551,40 @@ fn __coord_dir_lock_reaper_options(options, lock_path) {
 }
 
 fn __coord_dir_lock_reaper_conflict(resource_path, lock_path, options) {
-  let opts = __coord_dict(options)
-  let reaper_path = __coord_dir_lock_reaper_path(lock_path)
-  let reaper = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
+  const opts = __coord_dict(options)
+  const reaper_path = __coord_dir_lock_reaper_path(lock_path)
+  const reaper = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
   if reaper.status == "absent" {
     return nil
   }
   if reaper.status == "stale" && (opts?.take_stale ?? true) {
-    let cleared = __coord_dir_lock_clear_if_same(reaper_path, reaper.record)
+    const cleared = __coord_dir_lock_clear_if_same(reaper_path, reaper.record)
     if cleared {
       return nil
     }
   }
-  let refreshed = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
+  const refreshed = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
   return __coord_dir_lock_conflict(resource_path, reaper_path, refreshed, opts)
 }
 
 fn __coord_dir_lock_take_stale(resource_path, lock_path, owner, options, existing) {
-  let opts = __coord_dict(options)
-  let reaper_opts = __coord_dir_lock_reaper_options(opts, lock_path)
-  let reaper_path = __coord_dir_lock_reaper_path(lock_path)
-  let reaper = __coord_dir_lock_try_acquire(resource_path, reaper_path, owner, reaper_opts)
+  const opts = __coord_dict(options)
+  const reaper_opts = __coord_dir_lock_reaper_options(opts, lock_path)
+  const reaper_path = __coord_dir_lock_reaper_path(lock_path)
+  const reaper = __coord_dir_lock_try_acquire(resource_path, reaper_path, owner, reaper_opts)
   if reaper == nil {
-    let active_reaper = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
+    const active_reaper = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
     return __coord_dir_lock_conflict(resource_path, reaper_path, active_reaper, opts)
   }
-  var acquired = nil
-  let current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+  let acquired = nil
+  const current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
   if current.status == "stale" && __coord_dir_lock_same_record(current.record, existing.record) {
-    let cleared = __coord_dir_lock_clear_if_same(lock_path, existing.record)
+    const cleared = __coord_dir_lock_clear_if_same(lock_path, existing.record)
     if cleared {
       acquired = __coord_dir_lock_try_acquire(resource_path, lock_path, owner, opts, current.record)
     }
   }
-  let _ = try {
+  const _ = try {
     coord_release_dir_lock(reaper)
   } catch (_e) {
     nil
@@ -592,16 +592,16 @@ fn __coord_dir_lock_take_stale(resource_path, lock_path, owner, options, existin
   if acquired != nil {
     return acquired
   }
-  let refreshed = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+  const refreshed = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
   return __coord_dir_lock_conflict(resource_path, lock_path, refreshed, opts)
 }
 
 fn __coord_dir_lock_try_acquire(resource_path, lock_path, owner, options, stale_removed = nil) {
-  let opts = __coord_dict(options)
+  const opts = __coord_dict(options)
   if opts?.ensure_parent ?? true {
     ensure_parent_dir(lock_path)
   }
-  let created = try {
+  const created = try {
     harness.fs.mkdir(lock_path, false)
     true
   } catch (_e) {
@@ -610,8 +610,8 @@ fn __coord_dir_lock_try_acquire(resource_path, lock_path, owner, options, stale_
   if !created {
     return nil
   }
-  let now_ms = harness.clock.now_ms()
-  let record = __coord_dir_lock_record(resource_path, lock_path, owner, opts, now_ms)
+  const now_ms = harness.clock.now_ms()
+  const record = __coord_dir_lock_record(resource_path, lock_path, owner, opts, now_ms)
   write_json(record.record_path, record, {pretty: true, ensure_parent: false})
   return filter_nil(
     {
@@ -631,7 +631,7 @@ fn __coord_dir_lock_try_acquire(resource_path, lock_path, owner, options, stale_
 }
 
 fn __coord_actor(message, options, ctx) {
-  let raw = __coord_dict(options?.from ?? message?.from)
+  const raw = __coord_dict(options?.from ?? message?.from)
   return filter_nil(
     raw
       + {
@@ -656,11 +656,11 @@ fn __coord_body(message, options) {
 }
 
 fn __coord_subject(message, options, body) {
-  let explicit = options?.subject ?? message?.subject ?? message?.title
+  const explicit = options?.subject ?? message?.subject ?? message?.title
   if explicit != nil {
     return trim(__coord_string(explicit))
   }
-  let first_line = split(body ?? "", "\n")[0] ?? ""
+  const first_line = split(body ?? "", "\n")[0] ?? ""
   if len(first_line) > 96 {
     return substring(first_line, 0, 96)
   }
@@ -668,17 +668,17 @@ fn __coord_subject(message, options, body) {
 }
 
 fn __coord_envelope(scope, room, message, options) {
-  let msg = __coord_dict(message)
-  let opts = __coord_dict(options)
-  let ctx = __coord_ctx()
-  let resolution = __coord_resolution(scope, room, opts)
-  let id = __coord_validate_component(
+  const msg = __coord_dict(message)
+  const opts = __coord_dict(options)
+  const ctx = __coord_ctx()
+  const resolution = __coord_resolution(scope, room, opts)
+  const id = __coord_validate_component(
     "message id",
     opts?.id ?? opts?.dedupe_key ?? msg?.id ?? ("coord-" + uuid_v7()),
   )
-  let body = __coord_body(message, opts)
-  let subject = __coord_subject(msg, opts, body)
-  let kind = __coord_kind(msg, opts)
+  const body = __coord_body(message, opts)
+  const subject = __coord_subject(msg, opts, body)
+  const kind = __coord_kind(msg, opts)
   return filter_nil(
     {
       schema: __COORD_SCHEMA,
@@ -716,9 +716,9 @@ fn __coord_envelope(scope, room, message, options) {
  * @errors: [runtime]
  */
 pub fn coord_request(scope, room, recipient, message, options = nil) {
-  let msg = __coord_dict(message)
-  let opts = __coord_dict(options)
-  let request_id = __coord_validate_component(
+  const msg = __coord_dict(message)
+  const opts = __coord_dict(options)
+  const request_id = __coord_validate_component(
     "request id",
     opts?.id ?? opts?.dedupe_key ?? msg?.id ?? ("coord-" + uuid_v7()),
   )
@@ -772,13 +772,13 @@ pub fn coord_dir_lock_reaper_path(lock_path: string) -> string {
  * @errors: []
  */
 pub fn coord_dir_lock_conflict_message(conflict) -> string {
-  let state = conflict?.reason ?? conflict?.status ?? "active"
-  let holder = conflict?.holder ?? conflict?.record
-  let owner = holder?.owner ?? {}
-  let owner_id = owner?.id ?? holder?.owner_id ?? "unknown"
-  let expires = holder?.expires_at_ms
-  let lock_path = conflict?.lock_path ?? holder?.lock_path ?? "unknown"
-  var message = "coordination directory lock is held: " + lock_path + " (state: " + state + ")"
+  const state = conflict?.reason ?? conflict?.status ?? "active"
+  const holder = conflict?.holder ?? conflict?.record
+  const owner = holder?.owner ?? {}
+  const owner_id = owner?.id ?? holder?.owner_id ?? "unknown"
+  const expires = holder?.expires_at_ms
+  const lock_path = conflict?.lock_path ?? holder?.lock_path ?? "unknown"
+  let message = "coordination directory lock is held: " + lock_path + " (state: " + state + ")"
   message = message + "\n- owner: " + __coord_string(owner_id)
   if owner?.run_id != nil {
     message = message + "\n- run: " + __coord_string(owner.run_id)
@@ -809,19 +809,19 @@ pub fn coord_dir_lock_conflict_message(conflict) -> string {
  * @errors: [runtime]
  */
 pub fn coord_acquire_dir_lock(resource_path: string, owner = nil, options = nil) {
-  let opts = __coord_dict(options)
-  let lock_path = __coord_dir_lock_path(resource_path, opts)
-  let normalized_owner = __coord_dir_lock_owner(owner, opts)
-  let reaper_conflict = __coord_dir_lock_reaper_conflict(resource_path, lock_path, opts)
+  const opts = __coord_dict(options)
+  const lock_path = __coord_dir_lock_path(resource_path, opts)
+  const normalized_owner = __coord_dir_lock_owner(owner, opts)
+  const reaper_conflict = __coord_dir_lock_reaper_conflict(resource_path, lock_path, opts)
   if reaper_conflict != nil {
     return reaper_conflict
   }
-  let acquired = __coord_dir_lock_try_acquire(resource_path, lock_path, normalized_owner, opts)
+  const acquired = __coord_dir_lock_try_acquire(resource_path, lock_path, normalized_owner, opts)
   if acquired != nil {
     return acquired
   }
-  let now_ms = harness.clock.now_ms()
-  let existing = __coord_dir_lock_existing(lock_path, now_ms)
+  const now_ms = harness.clock.now_ms()
+  const existing = __coord_dir_lock_existing(lock_path, now_ms)
   if existing.status == "stale" && (opts?.take_stale ?? true) {
     return __coord_dir_lock_take_stale(resource_path, lock_path, normalized_owner, opts, existing)
   }
@@ -838,8 +838,8 @@ pub fn coord_acquire_dir_lock(resource_path: string, owner = nil, options = nil)
  * @errors: [runtime]
  */
 pub fn coord_release_dir_lock(lock, options = nil) {
-  let opts = __coord_dict(options)
-  let lock_path = if type_of(lock) == "string" {
+  const opts = __coord_dict(options)
+  const lock_path = if type_of(lock) == "string" {
     lock
   } else {
     lock?.lock_path ?? lock?.record?.lock_path
@@ -851,10 +851,10 @@ pub fn coord_release_dir_lock(lock, options = nil) {
     return {released: false, status: "absent", lock_path: lock_path}
   }
   if opts?.strict ?? true {
-    let expected = lock?.token ?? lock?.record?.token
+    const expected = lock?.token ?? lock?.record?.token
     if expected != nil {
-      let current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
-      let actual = current?.record?.token
+      const current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+      const actual = current?.record?.token
       if actual != expected {
         throw "std/coordination: refusing to release directory lock owned by another token"
       }
@@ -880,16 +880,16 @@ pub fn coord_with_dir_lock(resource_path: string, body, owner = nil, options = n
   if !__coord_is_callable(body) {
     throw "std/coordination: coord_with_dir_lock body must be callable; got " + type_of(body)
   }
-  let lock = coord_acquire_dir_lock(resource_path, owner, options)
+  const lock = coord_acquire_dir_lock(resource_path, owner, options)
   if !(lock?.acquired ?? false) {
     throw lock?.message ?? "std/coordination: directory lock was not acquired"
   }
   try {
-    let value = body(lock)
+    const value = body(lock)
     coord_release_dir_lock(lock)
     return value
   } catch (e) {
-    let _ = try {
+    const _ = try {
       coord_release_dir_lock(lock)
     } catch (_release_error) {
       nil
@@ -909,7 +909,7 @@ pub fn coord_with_dir_lock(resource_path: string, body, owner = nil, options = n
  * @errors: [runtime]
  */
 pub fn coord_send(scope, room, recipient, message, options = nil) {
-  let opts = __coord_dict(options)
+  const opts = __coord_dict(options)
   return coord_post(scope, room, message, opts + {to: recipient})
 }
 
@@ -924,12 +924,12 @@ pub fn coord_send(scope, room, recipient, message, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_reply(scope, room, original, message, options = nil) {
-  let opts = __coord_dict(options)
-  let parent = original?.message ?? original
+  const opts = __coord_dict(options)
+  const parent = original?.message ?? original
   if type_of(parent) != "dict" || trim(__coord_string(parent?.id)) == "" {
     throw "std/coordination: coord_reply expects a coordination message or receipt"
   }
-  let related = __coord_list(opts?.related_ids ?? message?.related_ids) + [parent.id]
+  const related = __coord_list(opts?.related_ids ?? message?.related_ids) + [parent.id]
   return coord_post(
     scope,
     room,
@@ -955,10 +955,10 @@ pub fn coord_reply(scope, room, original, message, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_post(scope, room, message, options = nil) {
-  let opts = __coord_dict(options)
-  let resolution = __coord_resolution(scope, room, opts)
-  let envelope = __coord_envelope(scope, room, message, opts)
-  let channel = emit_channel(
+  const opts = __coord_dict(options)
+  const resolution = __coord_resolution(scope, room, opts)
+  const envelope = __coord_envelope(scope, room, message, opts)
+  const channel = emit_channel(
     resolution.channel_name,
     envelope,
     __coord_channel_options(resolution, opts, envelope.id),
@@ -1003,20 +1003,20 @@ pub fn coord_post(scope, room, message, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_wait_reply(scope, room, request_or_id, options = nil) {
-  let opts = __coord_dict(options)
-  let request = __coord_message_from_input(request_or_id, opts)
-  let wait_opts = __coord_wait_reply_options(request, opts)
-  let consumer_id = wait_opts.consumer_id
-  let timeout_ms = __coord_nonnegative_int(opts?.timeout_ms ?? opts?.budget_ms, 2000, "timeout_ms")
-  let poll_interval_ms = __coord_positive_int(opts?.poll_interval_ms, 50, "poll_interval_ms")
-  let started = harness.clock.monotonic_ms()
-  var last_inbox = nil
+  const opts = __coord_dict(options)
+  const request = __coord_message_from_input(request_or_id, opts)
+  const wait_opts = __coord_wait_reply_options(request, opts)
+  const consumer_id = wait_opts.consumer_id
+  const timeout_ms = __coord_nonnegative_int(opts?.timeout_ms ?? opts?.budget_ms, 2000, "timeout_ms")
+  const poll_interval_ms = __coord_positive_int(opts?.poll_interval_ms, 50, "poll_interval_ms")
+  const started = harness.clock.monotonic_ms()
+  let last_inbox = nil
   while true {
-    let inbox = coord_inbox(scope, room, wait_opts)
+    const inbox = coord_inbox(scope, room, wait_opts)
     last_inbox = inbox
     if len(inbox.messages) > 0 {
-      let elapsed = harness.clock.monotonic_ms() - started
-      let acked = if opts?.ack ?? false {
+      const elapsed = harness.clock.monotonic_ms() - started
+      const acked = if opts?.ack ?? false {
         coord_ack(scope, room, consumer_id, inbox.next_cursor, opts)
       } else {
         nil
@@ -1038,7 +1038,7 @@ pub fn coord_wait_reply(scope, room, request_or_id, options = nil) {
         },
       )
     }
-    let elapsed = harness.clock.monotonic_ms() - started
+    const elapsed = harness.clock.monotonic_ms() - started
     if timeout_ms == 0 || elapsed >= timeout_ms {
       return filter_nil(
         {
@@ -1070,8 +1070,8 @@ pub fn coord_wait_reply(scope, room, request_or_id, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_cursor(scope, room, consumer_id, options = nil) {
-  let opts = __coord_dict(options)
-  let resolution = __coord_resolution(scope, room, opts)
+  const opts = __coord_dict(options)
+  const resolution = __coord_resolution(scope, room, opts)
   return channel_consumer_cursor(
     resolution.channel_name,
     __coord_consumer_id(opts, consumer_id),
@@ -1089,8 +1089,8 @@ pub fn coord_cursor(scope, room, consumer_id, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_ack(scope, room, consumer_id, cursor, options = nil) {
-  let opts = __coord_dict(options)
-  let resolution = __coord_resolution(scope, room, opts)
+  const opts = __coord_dict(options)
+  const resolution = __coord_resolution(scope, room, opts)
   return channel_ack(
     resolution.channel_name,
     __coord_consumer_id(opts, consumer_id),
@@ -1116,15 +1116,15 @@ pub fn coord_ack(scope, room, consumer_id, cursor, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_inbox(scope, room, options = nil) {
-  let opts = __coord_dict(options)
-  let consumer_id = __coord_consumer_id(opts)
-  let from_cursor = opts?.from_cursor ?? opts?.cursor ?? coord_cursor(scope, room, consumer_id, opts)
-  let scanned = coord_read(scope, room, filter_nil(opts + {include_events: true, from_cursor: from_cursor}))
-  var messages = []
-  var last_scanned_cursor = from_cursor
+  const opts = __coord_dict(options)
+  const consumer_id = __coord_consumer_id(opts)
+  const from_cursor = opts?.from_cursor ?? opts?.cursor ?? coord_cursor(scope, room, consumer_id, opts)
+  const scanned = coord_read(scope, room, filter_nil(opts + {include_events: true, from_cursor: from_cursor}))
+  let messages = []
+  let last_scanned_cursor = from_cursor
   for item in scanned {
-    let event = item?.event ?? {}
-    let message = item?.message ?? item
+    const event = item?.event ?? {}
+    const message = item?.message ?? item
     if event?.cursor != nil {
       last_scanned_cursor = event.cursor
     }
@@ -1156,10 +1156,10 @@ pub fn coord_inbox(scope, room, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_read(scope, room, options = nil) {
-  let opts = __coord_dict(options)
-  let resolution = __coord_resolution(scope, room, opts)
-  let events = channel_events(resolution.channel_name, __coord_channel_options(resolution, opts))
-  var out = []
+  const opts = __coord_dict(options)
+  const resolution = __coord_resolution(scope, room, opts)
+  const events = channel_events(resolution.channel_name, __coord_channel_options(resolution, opts))
+  let out = []
   for event in events {
     if opts?.include_events ?? false {
       out = out + [{event: event, message: event.payload}]
@@ -1180,8 +1180,8 @@ pub fn coord_read(scope, room, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_subscribe(scope, room, options = nil) {
-  let opts = __coord_dict(options)
-  let resolution = __coord_resolution(scope, room, opts)
+  const opts = __coord_dict(options)
+  const resolution = __coord_resolution(scope, room, opts)
   return channel_subscribe(resolution.channel_name, __coord_channel_options(resolution, opts))
 }
 
@@ -1196,13 +1196,13 @@ pub fn coord_subscribe(scope, room, options = nil) {
  * @errors: [runtime]
  */
 pub fn coord_remember(message_or_receipt, options = nil) {
-  let opts = __coord_dict(options)
-  let message = message_or_receipt?.message ?? message_or_receipt
+  const opts = __coord_dict(options)
+  const message = message_or_receipt?.message ?? message_or_receipt
   if type_of(message) != "dict" || message?.schema != __COORD_SCHEMA {
     throw "std/coordination: coord_remember expects a coordination message or receipt"
   }
-  let namespace = opts?.namespace ?? ("coordination/" + message.scope + "/" + message.room)
-  let key = opts?.key ?? message.id
-  let tags = opts?.tags ?? ["coordination", message.kind, message.scope]
+  const namespace = opts?.namespace ?? ("coordination/" + message.scope + "/" + message.room)
+  const key = opts?.key ?? message.id
+  const tags = opts?.tags ?? ["coordination", message.kind, message.scope]
   return memory_store(namespace, key, message, tags, opts?.memory_options)
 }

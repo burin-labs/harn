@@ -1,15 +1,15 @@
 pipeline test(task) {
-  let local = llm_resolve_model("local:gemma-4-e4b-it")
+  const local = llm_resolve_model("local:gemma-4-e4b-it")
   assert_eq(local.id, "gemma-4-e4b-it")
   assert_eq(local.provider, "ollama")
-  let ollama = llm_model_info("ollama:qwen3:30b-a3b")
+  const ollama = llm_model_info("ollama:qwen3:30b-a3b")
   assert_eq(ollama.id, "qwen3:30b-a3b")
   assert_eq(ollama.provider, "ollama")
   assert_eq(ollama.tool_format, "native")
   assert(ollama.auth_available, "ollama should not require API auth")
-  let known = llm_known_models()
+  const known = llm_known_models()
   assert(len(known.filter({ name -> name == "mid" })) == 1, "known aliases include mid")
-  let available = llm_available_providers()
+  const available = llm_available_providers()
   assert(
     len(available.filter({ name -> name == "ollama" })) == 1,
     "available providers include keyless ollama",
@@ -18,26 +18,26 @@ pipeline test(task) {
     len(available.filter({ name -> name == "local" })) == 1,
     "available providers include keyless local",
   )
-  let catalog = llm_provider_catalog()
+  const catalog = llm_provider_catalog()
   assert(len(catalog.providers) >= 6, "catalog exposes providers")
   assert(len(catalog.aliases) >= 1, "catalog exposes alias mappings")
   assert(len(catalog.models) >= 1, "catalog exposes model metadata")
   assert(len(catalog.routing_routes) >= 1, "catalog exposes routing routes")
   assert(catalog.qc_defaults.ollama != nil, "catalog exposes QC defaults")
-  let mid = llm_model_info("mid")
+  const mid = llm_model_info("mid")
   assert_eq(mid.id, "qwen/qwen3-coder-next")
   assert_eq(mid.provider, "openrouter")
   assert_eq(mid.family, "qwen")
   assert_eq(mid.lineage, "qwen3")
   assert_eq(mid.tool_format, "text")
-  let hosted_claude = llm_model_info("anthropic/claude-sonnet-4-6")
+  const hosted_claude = llm_model_info("anthropic/claude-sonnet-4-6")
   assert_eq(hosted_claude.provider, "openrouter")
   assert_eq(hosted_claude.family, "anthropic-claude")
   assert_eq(mid.catalog.pricing.input_per_mtok, 0.11)
   assert_eq(mid.catalog.family, "qwen")
   assert(mid.capabilities.native_tools != nil, "capability lookup is present")
-  let mid_route_model = mid.catalog?.wire_model ?? mid.id
-  let mid_routes = catalog.routing_routes
+  const mid_route_model = mid.catalog?.wire_model ?? mid.id
+  const mid_routes = catalog.routing_routes
     .filter({ route -> route.provider == mid.provider && route.model == mid_route_model })
   assert_eq(len(mid_routes), 1)
   assert_eq(mid_routes[0].family, mid.family)
@@ -45,11 +45,11 @@ pipeline test(task) {
     mid_routes[0].capabilities.contains("text_tools"),
     "routing route exposes tool envelope capability",
   )
-  let reviewer = llm_complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
+  const reviewer = llm_complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
   assert_eq(reviewer.fallback, false)
   assert(reviewer.reviewer.family != reviewer.author.family, "reviewer uses a different family")
   assert(reviewer.estimated_incremental_cost.total_per_mtok > 0.0, "reviewer exposes estimated cost")
-  let capped = llm_complementary_reviewer(
+  const capped = llm_complementary_reviewer(
     {author_model: "gpt-4o-mini", intent: "review", max_price_multiplier: 0.01},
   )
   assert_eq(capped.fallback, true)

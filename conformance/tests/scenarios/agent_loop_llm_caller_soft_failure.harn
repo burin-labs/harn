@@ -4,7 +4,7 @@
  * when llm_call throws a budget_exceeded reason).
  */
 pipeline default() {
-  let budget_caller = { _call -> return {ok: false, status: "budget_exhausted"} }
-  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: budget_caller})
+  const budget_caller = { _call -> return {ok: false, status: "budget_exhausted"} }
+  const result = agent_loop("hi", nil, {provider: "mock", llm_caller: budget_caller})
   __io_println(result.status)
 }

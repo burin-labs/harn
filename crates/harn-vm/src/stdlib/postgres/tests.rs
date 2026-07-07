@@ -495,11 +495,11 @@ fn harn_transaction_commits_rolls_back_and_applies_settings_when_env_url_is_set(
     let source = r#"
 import "std/postgres"
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "create temporary table if not exists harn_pg_tx_test(value int) on commit preserve rows", [])
 pg_execute(db, "truncate table harn_pg_tx_test", [])
 
-let tenant = pg_transaction(
+const tenant = pg_transaction(
   db,
   { tx ->
     pg_execute(tx, "insert into harn_pg_tx_test(value) values ($1)", [1])
@@ -509,7 +509,7 @@ let tenant = pg_transaction(
 )
 __io_println(tenant)
 
-let rolled = try {
+const rolled = try {
   pg_transaction(db, { tx ->
     pg_execute(tx, "insert into harn_pg_tx_test(value) values ($1)", [2])
     throw_error("force rollback")
@@ -553,7 +553,7 @@ fn savepoint_rollback_preserves_outer_writes_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_sp_test", [])
 pg_execute(db, "CREATE TABLE harn_pg_sp_test (id int PRIMARY KEY, label text NOT NULL)", [])
 
@@ -567,7 +567,7 @@ pg_transaction(db, { tx ->
   return 0
 })
 
-let rows = pg_query(db, "SELECT id, label FROM harn_pg_sp_test ORDER BY id", [])
+const rows = pg_query(db, "SELECT id, label FROM harn_pg_sp_test ORDER BY id", [])
 for row in rows {
   __io_println(to_string(row.id) + ":" + row.label)
 }
@@ -630,23 +630,23 @@ fn migrate_applies_synthetic_dir_and_is_idempotent_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
-let first = pg_migrate(db, {{dir: "{migration_dir}"}})
+const first = pg_migrate(db, {{dir: "{migration_dir}"}})
 __io_println(len(first.applied))
 __io_println(len(first.skipped))
 
-let second = pg_migrate(db, {{dir: "{migration_dir}"}})
+const second = pg_migrate(db, {{dir: "{migration_dir}"}})
 __io_println(len(second.applied))
 __io_println(len(second.skipped))
 
-let count = pg_query_one(db, "SELECT count(*)::int8 AS c FROM widgets", [])
+const count = pg_query_one(db, "SELECT count(*)::int8 AS c FROM widgets", [])
 __io_println(count.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
@@ -700,14 +700,14 @@ fn migrate_harn_detects_checksum_drift_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
-let first = pg_migrate(db, {{dir: "{migration_dir}"}})
+const first = pg_migrate(db, {{dir: "{migration_dir}"}})
 __io_println(len(first.applied))
 pg_close(db)
 "#,
@@ -728,9 +728,9 @@ pg_close(db)
         r#"
 import "std/postgres"
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
-let second = pg_migrate(db, {{dir: "{migration_dir}"}})
+const second = pg_migrate(db, {{dir: "{migration_dir}"}})
 __io_println(len(second.applied))
 pg_close(db)
 "#,
@@ -745,7 +745,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(admin)
 "#,
@@ -773,19 +773,19 @@ fn migrate_loads_harn_cloud_store_migrations_when_env_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
-let result = pg_migrate(db, {{dir: "{dir}"}})
+const result = pg_migrate(db, {{dir: "{dir}"}})
 __io_println(len(result.applied))
 __io_println(len(result.skipped))
 
-let tables = pg_query(
+const tables = pg_query(
   db,
   "SELECT table_name FROM information_schema.tables WHERE table_schema = $1",
   ["{schema}"],
@@ -838,8 +838,8 @@ fn transaction_settings_reject_privileged_gucs_when_env_url_is_set() {
     // `role` is rejected before any SQL runs.
     let reject_role = r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
-let r = pg_transaction(db, { tx -> return 1 }, {settings: {"role": "postgres"}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const r = pg_transaction(db, { tx -> return 1 }, {settings: {"role": "postgres"}})
 pg_close(db)
 "#;
     let err = run_harn_source_expect_err(reject_role);
@@ -852,8 +852,8 @@ pg_close(db)
     reset_postgres_state();
     let reject_nil = r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
-let r = pg_transaction(db, { tx -> return 1 }, {settings: {"app.current_tenant_id": nil}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const r = pg_transaction(db, { tx -> return 1 }, {settings: {"app.current_tenant_id": nil}})
 pg_close(db)
 "#;
     let err = run_harn_source_expect_err(reject_nil);
@@ -866,8 +866,8 @@ pg_close(db)
     reset_postgres_state();
     let allow_legit = r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
-let tenant = pg_transaction(db, { tx ->
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const tenant = pg_transaction(db, { tx ->
   return pg_query_one(tx, "SELECT current_setting('app.current_tenant_id', true) AS t", []).t
 }, {settings: {"app.current_tenant_id": "tenant-xyz", "app.bypass_rls": "on", "statement_timeout": "5000"}})
 __io_println(tenant)
@@ -889,7 +889,7 @@ fn constraint_violation_surfaces_stable_category_when_env_url_is_set() {
     let source = format!(
         r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
@@ -914,7 +914,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
@@ -936,13 +936,13 @@ fn int_bind_into_int4_column_when_env_url_is_set() {
     let ok_source = format!(
         r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_execute(db, "CREATE TABLE narrow (a int4, b int2)", [])
 pg_execute(db, "INSERT INTO narrow (a, b) VALUES ($1, $2)", [2000000000, 30000])
-let row = pg_query_one(db, "SELECT a, b FROM narrow WHERE a = $1", [2000000000])
+const row = pg_query_one(db, "SELECT a, b FROM narrow WHERE a = $1", [2000000000])
 __io_println(row.a)
 __io_println(row.b)
 pg_close(db)
@@ -960,7 +960,7 @@ pg_close(db)
     let overflow_source = format!(
         r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_execute(db, "INSERT INTO narrow (a) VALUES ($1)", [5000000000])
 pg_close(db)
@@ -975,7 +975,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
@@ -1027,7 +1027,7 @@ fn migrate_recycles_statement_cache_after_ddl_when_env_url_is_set() {
     let source = format!(
         r#"
 import "std/postgres"
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
@@ -1037,16 +1037,16 @@ pg_close(admin)
 // would deterministically reproduce 0A000 unless the migrate recycled it.
 // (max_connections: 1 also keeps the `SET search_path` session setting on the
 // same connection migrate/queries reuse.)
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_migrate(db, {{dir: "{dir1}"}})
 // Warm + cache a plan that selects v as text on the pooled connection.
-let warm = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
+const warm = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
 __io_println(warm.v)
 // Apply the retype DDL through pg_migrate (which recycles caches).
 pg_migrate(db, {{dir: "{dir2}"}})
 // This reuse would hit 0A000 if the cache were not recycled.
-let after = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
+const after = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
 __io_println(after.v)
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -1092,7 +1092,7 @@ fn concurrent_migrate_serializes_on_advisory_lock_when_env_url_is_set() {
     let setup = format!(
         r#"
 import "std/postgres"
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
@@ -1104,9 +1104,9 @@ pg_close(admin)
         format!(
             r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
-let r = pg_migrate(db, {{dir: "{migration_dir}"}})
+const r = pg_migrate(db, {{dir: "{migration_dir}"}})
 __io_println("{label}:" + to_string(len(r.applied)))
 pg_close(db)
 "#,
@@ -1168,7 +1168,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
@@ -1265,32 +1265,32 @@ fn migrate_sqlx_applies_into_sqlx_migrations_table_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
-let result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(result.applied))
 __io_println(len(result.available))
 __io_println(result.table)
 
-let cols = pg_query(db, "SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='_sqlx_migrations' ORDER BY column_name", ["{schema}"])
+const cols = pg_query(db, "SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='_sqlx_migrations' ORDER BY column_name", ["{schema}"])
 __io_println(len(cols))
 
-let rows = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+const rows = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
 __io_println(rows.c)
 
-let badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
+const badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
 __io_println(badlen.c)
 
-let failed = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE success = false", [])
+const failed = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE success = false", [])
 __io_println(failed.c)
 
-let versions = pg_query(db, "SELECT version FROM _sqlx_migrations ORDER BY version", [])
+const versions = pg_query(db, "SELECT version FROM _sqlx_migrations ORDER BY version", [])
 __io_println(len(versions))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
@@ -1322,26 +1322,26 @@ fn migrate_sqlx_is_idempotent_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
-let first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(first.applied))
 __io_println(len(first.skipped))
 
-let count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+const count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
 __io_println(count1.c)
 
-let second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(second.applied))
 __io_println(len(second.skipped))
 
-let count2 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+const count2 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
 __io_println(count2.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
@@ -1390,12 +1390,12 @@ fn migrate_sqlx_no_fork_against_preseeded_ledger_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 // Replicate exactly what `sqlx migrate run` would have written, including
@@ -1409,16 +1409,16 @@ pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, che
 pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260423100000, 'seed widget', TRUE, decode('{seed_sum}', 'hex'), 1)", [])
 pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260424000000, 'add gadgets', TRUE, decode('{gadgets_sum}', 'hex'), 1)", [])
 
-let before = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
+const before = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
 
-let result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(result.applied))
 __io_println(len(result.skipped))
 
-let after = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
+const after = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
 if before.h == after.h {{ __io_println("checksums-identical") }} else {{ __io_println("checksums-CHANGED") }}
 
-let count = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+const count = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
 __io_println(count.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
@@ -1448,21 +1448,21 @@ fn migrate_sqlx_detects_checksum_mismatch_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
-let first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(first.applied))
 
 // Corrupt the recorded checksum for the first migration.
 pg_execute(db, "UPDATE _sqlx_migrations SET checksum = decode('deadbeef', 'hex') WHERE version = 20260419170000", [])
 
-let second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(second.applied))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
@@ -1489,18 +1489,18 @@ fn migrate_sqlx_detects_dirty_ledger_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 pg_execute(db, "CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMPTZ NOT NULL DEFAULT now(), success BOOLEAN NOT NULL, checksum BYTEA NOT NULL, execution_time BIGINT NOT NULL)", [])
 pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260419170000, 'bootstrap', FALSE, decode('deadbeef', 'hex'), -1)", [])
 
-let result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(result.applied))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
@@ -1536,25 +1536,25 @@ fn migrate_sqlx_applies_real_cloud_dir_and_is_idempotent_when_env_set() {
         r#"
 import "std/postgres"
 
-let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
-let first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(first.applied))
 __io_println(len(first.skipped))
 
-let count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+const count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
 __io_println(count1.c)
 
-let badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
+const badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
 __io_println(badlen.c)
 
-let second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+const second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
 __io_println(len(second.applied))
 __io_println(len(second.skipped))
 
@@ -1594,8 +1594,8 @@ fn execute_reports_duration_ms_on_real_pool_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
-let result = pg_execute(db, "SELECT pg_sleep(0.05)", [])
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const result = pg_execute(db, "SELECT pg_sleep(0.05)", [])
 __io_println(result.duration_ms)
 pg_close(db)
 "#;
@@ -1638,16 +1638,16 @@ fn v2_surface_smoke_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
 
 // --- Pool observability --------------------------------------------------
-let stats = pg_pool_stats(db)
+const stats = pg_pool_stats(db)
 __io_println(stats.circuit_state)
 __io_println(stats.max_connections)
 __io_println(stats.read_routing_policy)
 __io_println(stats.replicas)
 
-let clear_result = pg_stmt_cache_clear(db)
+const clear_result = pg_stmt_cache_clear(db)
 __io_println(clear_result.pools)
 __io_println(clear_result.connections_cleared >= 1)
 __io_println(clear_result.connections_skipped)
@@ -1661,42 +1661,42 @@ pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (1, ARRAY['alpha','beta'])
 pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (2, ARRAY[]::text[])", [])
 
 // --- Advisory lock inside a transaction ----------------------------------
-let locked_label = pg_transaction(db, {{ tx ->
+const locked_label = pg_transaction(db, {{ tx ->
   pg_advisory_xact_lock(tx, 0x4861_726E_5632_AABB)
   return pg_query_one(tx, "SELECT 'locked' AS label", []).label
 }})
 __io_println(locked_label)
 
 // --- pg_with_advisory_lock (RAII helper, exercises run_managed_transaction) ----
-let with_label = pg_with_advisory_lock(db, "release-cut", {{ tx ->
+const with_label = pg_with_advisory_lock(db, "release-cut", {{ tx ->
   return pg_query_one(tx, "SELECT 'raii' AS label", []).label
 }})
 __io_println(with_label)
 
 // --- Schema introspection ------------------------------------------------
-let tables = pg_introspect_tables(db, {{schema: "{schema}"}})
+const tables = pg_introspect_tables(db, {{schema: "{schema}"}})
 __io_println(len(tables))
 __io_println(tables[0].kind)
 
-let cols = pg_introspect_columns(db, "{schema}.widgets")
+const cols = pg_introspect_columns(db, "{schema}.widgets")
 __io_println(len(cols))
 __io_println(cols[0].column + ":" + cols[0].type)
 __io_println(cols[1].column + ":" + cols[1].type)
 
-let idx = pg_introspect_indexes(db, "{schema}.widgets")
+const idx = pg_introspect_indexes(db, "{schema}.widgets")
 __io_println(len(idx))
 
 // --- Array decoding ------------------------------------------------------
-let row = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [1])
+const row = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [1])
 __io_println(row.tags[0] + "," + row.tags[1])
 
-let empty = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [2])
+const empty = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [2])
 __io_println(len(empty.tags))
 
 // --- LISTEN/NOTIFY round-trip --------------------------------------------
-let listener = pg_listen(db, "harn_v2_test")
+const listener = pg_listen(db, "harn_v2_test")
 pg_notify(db, "harn_v2_test", "hello")
-let notification = pg_listener_recv(listener, 5000)
+const notification = pg_listener_recv(listener, 5000)
 __io_println(notification.channel + ":" + notification.payload)
 pg_listener_close(listener)
 
@@ -2203,15 +2203,15 @@ fn tx_describe_probe_failure_keeps_tx_alive_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_probe", [])
 pg_execute(db, "CREATE TABLE harn_pg_tx_probe (id int PRIMARY KEY, note text)", [])
 
-let probed = pg_transaction(db, { tx ->
+const probed = pg_transaction(db, { tx ->
   // Ambiguous nil query: the describe probe fails. The savepoint must roll
   // back only the probe, the bind falls back to a text NULL, and the result
   // ($1 IS NULL) is true.
-  let r = pg_query_one(tx, "SELECT $1 IS NULL AS v", [nil])
+  const r = pg_query_one(tx, "SELECT $1 IS NULL AS v", [nil])
   // The tx must still be USABLE after the failed probe: this write must work.
   pg_execute(tx, "INSERT INTO harn_pg_tx_probe (id, note) VALUES ($1, $2)", [1, "after-probe"])
   return to_string(r.v)
@@ -2219,7 +2219,7 @@ let probed = pg_transaction(db, { tx ->
 __io_println(probed)
 
 // The commit must have persisted the post-probe write.
-let row = pg_query_one(db, "SELECT note FROM harn_pg_tx_probe WHERE id = 1", [])
+const row = pg_query_one(db, "SELECT note FROM harn_pg_tx_probe WHERE id = 1", [])
 __io_println(row.note)
 pg_execute(db, "DROP TABLE harn_pg_tx_probe", [])
 pg_close(db)
@@ -2305,7 +2305,7 @@ fn nil_in_transaction_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_nil", [])
 pg_execute(db, "CREATE TABLE harn_pg_tx_nil (id int PRIMARY KEY, a int, b text)", [])
 
@@ -2315,9 +2315,9 @@ pg_transaction(db, { tx ->
   return 0
 })
 
-let r1 = pg_query_one(db, "SELECT (a IS NULL) AS a_null, b FROM harn_pg_tx_nil WHERE id = 1", [])
+const r1 = pg_query_one(db, "SELECT (a IS NULL) AS a_null, b FROM harn_pg_tx_nil WHERE id = 1", [])
 __io_println(to_string(r1.a_null) + ":" + r1.b)
-let r2 = pg_query_one(db, "SELECT a, (b IS NULL) AS b_null FROM harn_pg_tx_nil WHERE id = 2", [])
+const r2 = pg_query_one(db, "SELECT a, (b IS NULL) AS b_null FROM harn_pg_tx_nil WHERE id = 2", [])
 __io_println(to_string(r2.a) + ":" + to_string(r2.b_null))
 pg_execute(db, "DROP TABLE harn_pg_tx_nil", [])
 pg_close(db)

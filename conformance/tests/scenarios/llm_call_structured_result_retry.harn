@@ -6,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * attempts=2 and ok=true.
  */
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["verdict"],
     properties: {verdict: {type: "string"}, note: {type: "string"}},
@@ -14,7 +14,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"note\": \"hmm\"}"), llm_text("{\"verdict\": \"PASS\", \"note\": \"\"}")],
     { ->
-      let r = llm_call_structured_result("Grade", schema, {provider: "mock"})
+      const r = llm_call_structured_result("Grade", schema, {provider: "mock"})
       __io_println(r.ok)
       __io_println(r.data.verdict)
       __io_println(r.attempts)

@@ -16,8 +16,8 @@ pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("staging-pipeline", {note: "drain test"})
-      let result = on_finish_drain(harness, return_value)
-      let audits = lifecycle_audit_log_take()
+      const result = on_finish_drain(harness, return_value)
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("result_status=" + result.status)
       harness.stdio.println("result_method=" + result.method)
       harness.stdio.println("audit_count=" + to_string(len(audits)))

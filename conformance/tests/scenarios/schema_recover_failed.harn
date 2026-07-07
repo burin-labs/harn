@@ -5,8 +5,8 @@
  * `{llm_repair: false}` knob keeps recovery fully deterministic.
  */
 pipeline default() {
-  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
-  let r = schema_recover("nothing useful here at all", schema, {llm_repair: false})
+  const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  const r = schema_recover("nothing useful here at all", schema, {llm_repair: false})
   __io_println(r.ok)
   __io_println(r.stage)
   __io_println(r.error_category)

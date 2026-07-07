@@ -51,7 +51,7 @@ fn __repair_bool(value, fallback) {
 }
 
 fn __repair_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -70,10 +70,10 @@ fn __repair_verification_findings(verification) {
   if type_of(verification?.findings) == "list" {
     return verification.findings
   }
-  var out = []
+  let out = []
   for check in __repair_list(verification?.checks) {
     if !__repair_bool(check?.ok, true) {
-      let kind = __repair_string(check?.kind, "check")
+      const kind = __repair_string(check?.kind, "check")
       out = out.push(kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual))
     }
   }
@@ -87,16 +87,16 @@ fn __repair_verification_findings(verification) {
  */
 fn __repair_command_verifier(spec) {
   return { _result ->
-    let cmd = spec?.command
-    let run_spec = if type_of(cmd) == "list" {
+    const cmd = spec?.command
+    const run_spec = if type_of(cmd) == "list" {
       {mode: "argv", argv: cmd}
     } else {
       {mode: "shell", command: to_string(cmd)}
     }
-    let out = command_run(run_spec, {capture: {max_inline_bytes: 65536}})
-    let expected = __repair_int(spec?.expect_status) ?? 0
-    let code = __repair_int(out?.exit_code) ?? __repair_int(out?.exit_status) ?? -1
-    let detail = __repair_string(out?.combined, __repair_string(out?.stdout, ""))
+    const out = command_run(run_spec, {capture: {max_inline_bytes: 65536}})
+    const expected = __repair_int(spec?.expect_status) ?? 0
+    const code = __repair_int(out?.exit_code) ?? __repair_int(out?.exit_status) ?? -1
+    const detail = __repair_string(out?.combined, __repair_string(out?.stdout, ""))
     return if code == expected {
       {ok: true, findings: []}
     } else {
@@ -192,21 +192,21 @@ pub type ValidateRepairConfig = {
  * @api_stability: stable
  */
 pub fn workflow_run_repair(config: ValidateRepairConfig) {
-  let cfg = __repair_dict(config)
-  let task = __repair_string(cfg?.task, __repair_string(cfg?.prompt, ""))
-  let verify = __repair_resolve_verify(cfg?.verify)
-  let base_retry = {max_attempts: __repair_int(cfg?.max_attempts) ?? 2}
+  const cfg = __repair_dict(config)
+  const task = __repair_string(cfg?.task, __repair_string(cfg?.prompt, ""))
+  const verify = __repair_resolve_verify(cfg?.verify)
+  const base_retry = {max_attempts: __repair_int(cfg?.max_attempts) ?? 2}
   // A repair_prompt_builder takes full control of the retry prompt; otherwise
   // findings are threaded via the bounded feedback template (defaulted on).
-  let retry_repair = if __repair_is_callable(cfg?.repair_prompt_builder) {
+  const retry_repair = if __repair_is_callable(cfg?.repair_prompt_builder) {
     {repair_prompt_builder: cfg.repair_prompt_builder}
   } else if cfg?.feedback != nil {
     {feedback: cfg.feedback}
   } else {
     {feedback: true}
   }
-  let retry_cfg = base_retry + retry_repair
-  let graph = workflow_repair_stage_graph(
+  const retry_cfg = base_retry + retry_repair
+  const graph = workflow_repair_stage_graph(
     {
       id: cfg?.id,
       name: cfg?.name,
@@ -219,19 +219,19 @@ pub fn workflow_run_repair(config: ValidateRepairConfig) {
       output_kind: cfg?.output_kind,
     },
   )
-  let run_options = workflow_execute_options({max_steps: __repair_int(cfg?.max_steps) ?? 8})
-  let run = workflow_execute(task, graph, __repair_list(cfg?.artifacts), run_options)
-  let stage = run?.run?.stages[0]
-  let attempts = __repair_list(stage?.attempts)
-  let last = if len(attempts) > 0 {
+  const run_options = workflow_execute_options({max_steps: __repair_int(cfg?.max_steps) ?? 8})
+  const run = workflow_execute(task, graph, __repair_list(cfg?.artifacts), run_options)
+  const stage = run?.run?.stages[0]
+  const attempts = __repair_list(stage?.attempts)
+  const last = if len(attempts) > 0 {
     attempts[len(attempts) - 1]
   } else {
     {}
   }
-  let verification = stage?.verification ?? last?.verification
+  const verification = stage?.verification ?? last?.verification
   // A subagent stage exposes its final output on the produced artifact, not on
   // a top-level `result`; fall back through the shapes other stage kinds use.
-  let text = __repair_string(
+  const text = __repair_string(
     stage?.result?.visible_text,
     __repair_string(stage?.visible_text, __repair_string(stage?.artifacts[0]?.text, "")),
   )

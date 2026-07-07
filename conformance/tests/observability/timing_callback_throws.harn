@@ -1,7 +1,7 @@
 import { timed } from "std/timing"
 
 pipeline default() {
-  var caught = nil
+  let caught = nil
   try {
     timed(
       "work.fragile",

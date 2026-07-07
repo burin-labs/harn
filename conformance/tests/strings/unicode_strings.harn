@@ -1,6 +1,6 @@
 /** Unicode string operations: slicing, contains, split, replace, interpolation */
 pipeline default(task) {
-  let emoji = "Hello 🌍🔥 World"
+  const emoji = "Hello 🌍🔥 World"
   // len counts characters, not bytes
   log(len(emoji))
   // contains with multi-byte
@@ -14,13 +14,13 @@ pipeline default(task) {
   log("café".starts_with("caf"))
   log("café".ends_with("fé"))
   // interpolation with multi-byte
-  let name = "André"
+  const name = "André"
   log("Hello ${name}!")
   // CJK characters
-  let cjk = "中文测试"
+  const cjk = "中文测试"
   log(len(cjk))
   log(cjk.contains("文"))
   // Accented characters
-  let accented = "naïve résumé"
+  const accented = "naïve résumé"
   log(accented.replace("é", "e"))
 }

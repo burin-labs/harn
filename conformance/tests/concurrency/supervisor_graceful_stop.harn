@@ -1,6 +1,6 @@
 pipeline default() {
-  let drained = atomic(0)
-  let sup = supervisor_start(
+  const drained = atomic(0)
+  const sup = supervisor_start(
     {
       name: "persona",
       strategy: "one_for_one",
@@ -25,7 +25,7 @@ pipeline default() {
     },
   )
   sleep(1ms)
-  let stopped = supervisor_stop(sup, 50ms)
+  const stopped = supervisor_stop(sup, 50ms)
   __io_println(stopped.status)
   __io_println(stopped.children[0].status)
   __io_println(atomic_get(drained))

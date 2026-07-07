@@ -3,7 +3,7 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  let r = pack_for({model: "qwen3:8b", thinking: "off"})
+  const r = pack_for({model: "qwen3:8b", thinking: "off"})
   assert_eq(r.provider, "ollama")
   assert_eq(r.has("thinking"), false)
   // No reasoning_effort or thinkingBudget either — qwen3 path is a no-op.

@@ -16,13 +16,13 @@ pub(crate) fn simple_ident_discard_fix(
     let src = source?;
     let region = src.get(span.start..span.end)?;
 
-    // Bail when there is no `let`/`var` keyword (e.g. a `for`-loop head).
-    let (keyword_len, after_keyword_is_boundary) = if region.starts_with("let") {
+    // Bail when there is no `const`/`let` keyword (e.g. a `for`-loop head).
+    let (keyword_len, after_keyword_is_boundary) = if region.starts_with("const") {
         (
-            3,
-            region.as_bytes().get(3).is_some_and(|b| !is_ident_byte(*b)),
+            5,
+            region.as_bytes().get(5).is_some_and(|b| !is_ident_byte(*b)),
         )
-    } else if region.starts_with("var") {
+    } else if region.starts_with("let") {
         (
             3,
             region.as_bytes().get(3).is_some_and(|b| !is_ident_byte(*b)),

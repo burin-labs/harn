@@ -20,8 +20,8 @@ fn completed_run(id: string) -> dict {
 }
 
 fn pack(expected_status: string) -> dict {
-  let pass_run = completed_run("run_pass")
-  let fail_run = completed_run("run_fail") + {status: "failed"}
+  const pass_run = completed_run("run_pass")
+  const fail_run = completed_run("run_fail") + {status: "failed"}
   return {
     id: "trial-pack",
     trials: 3,
@@ -42,7 +42,7 @@ fn pack(expected_status: string) -> dict {
 }
 
 pipeline test(_task) {
-  let manifest = eval_pack_manifest(pack("completed"))
+  const manifest = eval_pack_manifest(pack("completed"))
   assert_eq(manifest.trials, 3)
   assert(manifest.cases[0].case_fingerprint != "", "case fingerprint is stamped")
   assert(
@@ -53,10 +53,10 @@ pipeline test(_task) {
     manifest.cases[0].case_fingerprint
       != eval_pack_manifest(pack("failed")).cases[0].case_fingerprint,
   )
-  let split = eval_pack_validate_split(manifest)
+  const split = eval_pack_validate_split(manifest)
   assert_eq(split.valid, true)
   assert_eq(split.covered_count, 2)
-  let report = eval_pack_run(manifest)
+  const report = eval_pack_run(manifest)
   assert_eq(report.trial_count, 6)
   assert_eq(report.harness_config_fingerprint, report.cases[0].harness_config_fingerprint)
   assert_eq(report.cases[0].trial_count, 3)
@@ -68,8 +68,8 @@ pipeline test(_task) {
   assert_eq(report.cases[1].stats_row.fails, 3)
   assert_eq(report.stats.macro_pass_at_1, 0.5)
   assert_eq(len(report.stats_rows), 2)
-  let baseline = [report.stats_rows[0]]
-  let mismatch = [report.stats_rows[0] + {harness_config_fingerprint: "other-config"}]
+  const baseline = [report.stats_rows[0]]
+  const mismatch = [report.stats_rows[0] + {harness_config_fingerprint: "other-config"}]
   assert_eq(paired_case_deltas(baseline, mismatch), [])
   log("eval pack trials ok")
 }

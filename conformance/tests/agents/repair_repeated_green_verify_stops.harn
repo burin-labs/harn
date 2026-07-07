@@ -12,7 +12,7 @@ fn events_of(events, kind) {
 }
 
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "apply_fix",
@@ -52,8 +52,8 @@ pipeline default() {
       call("test-4", "run_test"),
     ],
     { ->
-      let session = "repair-repeated-green-" + uuid()
-      let captured = agent_capture_events(
+      const session = "repair-repeated-green-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Fix the bug and run the tests.",
@@ -69,8 +69,8 @@ pipeline default() {
           },
         ) },
       )
-      let decisions = events_of(captured.events, "loop_control_decision")
-      let extensions = decisions.filter({ decision -> decision.action == "extend" })
+      const decisions = events_of(captured.events, "loop_control_decision")
+      const extensions = decisions.filter({ decision -> decision.action == "extend" })
       __io_println(captured.result.status)
       __io_println(captured.result.stop_reason)
       __io_println(captured.result.llm.iterations)

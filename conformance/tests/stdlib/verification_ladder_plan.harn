@@ -66,8 +66,8 @@ pipeline test(task) {
       ],
     },
   )
-  let query = {path: "src/a.tx", language: "toolchainx", task: "post_edit"}
-  let matches = verification_profile_matches(query)
+  const query = {path: "src/a.tx", language: "toolchainx", task: "post_edit"}
+  const matches = verification_profile_matches(query)
   assert_eq(matches[0].row.id, "tx/parse")
   assert_eq(matches[1].row.id, "tx/unit")
   assert_eq(matches[2].row.id, "tx/full-stale")
@@ -78,7 +78,7 @@ pipeline test(task) {
   assert_eq(matches[7].row.id, "tx/r0-fast-moderate")
   assert_eq(matches[8].row.id, "tx/r1-fast")
   assert_eq(matches[9].row.id, "any/full")
-  let plan = verification_ladder_plan(query, {resource_classes: ["cheap", "moderate"], allow_stale_prone: false})
+  const plan = verification_ladder_plan(query, {resource_classes: ["cheap", "moderate"], allow_stale_prone: false})
   assert_eq(plan.schema, "harn.verification.ladder_plan.v1")
   assert_eq(plan.reason, "profile_rows_selected")
   assert_eq(len(plan.selected), 5)
@@ -106,24 +106,24 @@ pipeline test(task) {
   assert_eq(plan.skipped[3].reason, "stale_prone_filtered")
   assert_eq(plan.skipped[4].row_id, "any/full")
   assert_eq(plan.skipped[4].reason, "resource_class_filtered")
-  let bounded = verification_ladder_plan(query, {max_rung: "R1"})
+  const bounded = verification_ladder_plan(query, {max_rung: "R1"})
   assert_eq(len(bounded.selected), 5)
   assert_eq(bounded.selected[0].row_id, "tx/parse")
-  let numeric_bounded = verification_ladder_plan(
+  const numeric_bounded = verification_ladder_plan(
     query,
     {min_rung: 1, max_rung: 2, resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
   )
   assert_eq(len(numeric_bounded.selected), 2)
   assert_eq(numeric_bounded.selected[0].row_id, "tx/r1-fast")
   assert_eq(numeric_bounded.selected[1].row_id, "tx/unit")
-  let limited = verification_ladder_plan(
+  const limited = verification_ladder_plan(
     query,
     {resource_classes: ["cheap", "moderate"], allow_stale_prone: false, limit: 3},
   )
   assert_eq(len(limited.selected), 3)
   assert_eq(limited.selected[2].row_id, "tx/r0-fast-moderate")
   verification_profiles_set({rows: []})
-  let empty = verification_ladder_plan(query)
+  const empty = verification_ladder_plan(query)
   assert_eq(empty.fallback, true)
   assert_eq(empty.reason, "no_profile_rows")
   __io_println("verification ladder plan ok")

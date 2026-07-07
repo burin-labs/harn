@@ -1,12 +1,12 @@
 pipeline test(task) {
-  let template = """
+  const template = """
 // Auto-generated code - do not edit.
 pub fn {{ fn_name }}() -> dict {
   return {}
 }
 """
-  let name = "build"
-  let report = """
+  const name = "build"
+  const report = """
 root:
   title: ${name}
   nested:

@@ -17,7 +17,7 @@ fn __text(value) -> string {
 
 fn __field(row: dict, keys: list) {
   for key in keys {
-    let value = row[key]
+    const value = row[key]
     if value != nil {
       return value
     }
@@ -26,8 +26,8 @@ fn __field(row: dict, keys: list) {
 }
 
 fn __pow10_int(digits: int) -> int {
-  var factor = 1
-  var i = 0
+  let factor = 1
+  let i = 0
   while i < digits {
     factor = factor * 10
     i = i + 1
@@ -36,7 +36,7 @@ fn __pow10_int(digits: int) -> int {
 }
 
 fn __round_digits(value: float, digits: int) -> float {
-  let factor = __float(__pow10_int(digits))
+  const factor = __float(__pow10_int(digits))
   if factor <= 0.0 {
     return value
   }
@@ -47,7 +47,7 @@ fn __mean(values: list) -> float {
   if len(values) == 0 {
     return 0.0
   }
-  var total = 0.0
+  let total = 0.0
   for value in values {
     total = total + __float(value)
   }
@@ -58,19 +58,19 @@ fn __stdev(values: list) -> float {
   if len(values) == 0 {
     return 0.0
   }
-  let mean = __mean(values)
-  var squares = []
+  const mean = __mean(values)
+  let squares = []
   for value in values {
-    let diff = __float(value) - mean
+    const diff = __float(value) - mean
     squares = squares + [diff * diff]
   }
   return sqrt(__mean(squares))
 }
 
 fn __present_numbers(values: list) -> list {
-  var out = []
+  let out = []
   for value in values {
-    let number = to_float(value)
+    const number = to_float(value)
     if number != nil {
       out = out + [number]
     }
@@ -79,7 +79,7 @@ fn __present_numbers(values: list) -> list {
 }
 
 fn __mean_or_nil(values: list) {
-  let known = __present_numbers(values)
+  const known = __present_numbers(values)
   if len(known) == 0 {
     return nil
   }
@@ -87,7 +87,7 @@ fn __mean_or_nil(values: list) {
 }
 
 fn __stdev_or_nil(values: list) {
-  let known = __present_numbers(values)
+  const known = __present_numbers(values)
   if len(known) == 0 {
     return nil
   }
@@ -107,7 +107,7 @@ fn __row_timeouts(row: dict) -> int {
 }
 
 fn __row_trials(row: dict) -> int {
-  let explicit = __field(row, ["trials", "trial_count", "trialCount"])
+  const explicit = __field(row, ["trials", "trial_count", "trialCount"])
   if explicit != nil {
     return __int(explicit)
   }
@@ -115,11 +115,11 @@ fn __row_trials(row: dict) -> int {
 }
 
 fn __row_fails(row: dict) -> int {
-  let explicit = __field(row, ["fails", "fail_count", "failCount"])
+  const explicit = __field(row, ["fails", "fail_count", "failCount"])
   if explicit != nil {
     return __int(explicit)
   }
-  let inferred = __row_trials(row) - __row_passes(row) - __row_skips(row)
+  const inferred = __row_trials(row) - __row_passes(row) - __row_skips(row)
   if inferred < 0 {
     return 0
   }
@@ -131,11 +131,11 @@ fn __row_decided(row: dict) -> int {
 }
 
 fn __row_pass_rate(row: dict) -> float {
-  let explicit = __field(row, ["pass_rate", "passRate"])
+  const explicit = __field(row, ["pass_rate", "passRate"])
   if explicit != nil {
     return __float(explicit)
   }
-  let trials = __row_trials(row)
+  const trials = __row_trials(row)
   if trials <= 0 {
     return 0.0
   }
@@ -165,7 +165,7 @@ fn __row_harness_fingerprint(row: dict) -> string {
 }
 
 fn __group_prefix(name: string) -> string {
-  let parts = split(name ?? "", "-")
+  const parts = split(name ?? "", "-")
   if len(parts) == 0 {
     return name ?? ""
   }
@@ -173,7 +173,7 @@ fn __group_prefix(name: string) -> string {
 }
 
 fn __row_group(row: dict) -> string {
-  let explicit = __text(__field(row, ["group", "language", "bucket"]))
+  const explicit = __text(__field(row, ["group", "language", "bucket"]))
   if explicit != "" {
     return explicit
   }
@@ -181,11 +181,11 @@ fn __row_group(row: dict) -> string {
 }
 
 fn __row_total_cost_usd(row: dict) -> float {
-  let total = __field(row, ["total_cost_usd", "totalCostUsd", "costUsd", "cost_usd"])
+  const total = __field(row, ["total_cost_usd", "totalCostUsd", "costUsd", "cost_usd"])
   if total != nil {
     return __float(total)
   }
-  let mean = __field(row, ["mean_cost_usd", "meanCostUsd"])
+  const mean = __field(row, ["mean_cost_usd", "meanCostUsd"])
   if mean != nil {
     return __float(mean) * __float(__row_trials(row))
   }
@@ -201,7 +201,7 @@ fn __row_all_failed(row: dict) -> bool {
 }
 
 fn __row_escalated(row: dict) -> bool {
-  let explicit = __field(row, ["escalated", "agent_lane_escalated", "agentLaneEscalated"])
+  const explicit = __field(row, ["escalated", "agent_lane_escalated", "agentLaneEscalated"])
   if explicit != nil {
     return explicit
   }
@@ -214,7 +214,7 @@ fn __is_no_decision(row: dict) -> bool {
 }
 
 fn __decided_rows(rows: list) -> list {
-  var out = []
+  let out = []
   for row in rows {
     if !__is_no_decision(row) {
       out = out + [row]
@@ -224,7 +224,7 @@ fn __decided_rows(rows: list) -> list {
 }
 
 fn __pass_rates(rows: list) -> list {
-  var out = []
+  let out = []
   for row in rows {
     out = out + [__row_pass_rate(row)]
   }
@@ -239,9 +239,9 @@ fn __rate(count: int, denom: int) -> float {
 }
 
 fn __rows_by_case(rows: list) -> dict {
-  var out = {}
+  let out = {}
   for row in rows {
-    let name = __row_case_name(row)
+    const name = __row_case_name(row)
     if name != "" && out[name] == nil {
       out = out + {[name]: row}
     }
@@ -250,10 +250,10 @@ fn __rows_by_case(rows: list) -> dict {
 }
 
 fn __unique_rows_by_case(rows: list) -> list {
-  var seen = {}
-  var out = []
+  let seen = {}
+  let out = []
   for row in rows {
-    let name = __row_case_name(row)
+    const name = __row_case_name(row)
     if name == "" || (seen[name] ?? false) {
       continue
     }
@@ -264,12 +264,12 @@ fn __unique_rows_by_case(rows: list) -> list {
 }
 
 fn __fingerprints_match(lhs: dict, rhs: dict) -> bool {
-  let left = __row_fingerprint(lhs)
-  let right = __row_fingerprint(rhs)
-  let case_matches = left == "" || right == "" || left == right
-  let left_harness = __row_harness_fingerprint(lhs)
-  let right_harness = __row_harness_fingerprint(rhs)
-  let harness_matches = left_harness == "" || right_harness == "" || left_harness == right_harness
+  const left = __row_fingerprint(lhs)
+  const right = __row_fingerprint(rhs)
+  const case_matches = left == "" || right == "" || left == right
+  const left_harness = __row_harness_fingerprint(lhs)
+  const right_harness = __row_harness_fingerprint(rhs)
+  const harness_matches = left_harness == "" || right_harness == "" || left_harness == right_harness
   return case_matches && harness_matches
 }
 
@@ -292,7 +292,7 @@ fn __outcome_verification(outcome: dict) -> string {
 }
 
 fn __outcome_timed_out(outcome: dict) -> bool {
-  let explicit = __field(outcome, ["timedOut", "timed_out", "timeout"])
+  const explicit = __field(outcome, ["timedOut", "timed_out", "timeout"])
   if explicit != nil {
     return explicit
   }
@@ -311,15 +311,15 @@ fn __outcome_number(outcome: dict, keys: list) {
  * @example: aggregate_trials("case", [{verification: "PASS", wallTimeSeconds: 1.0, costUsd: 0.01}], {group: "python"})
  */
 pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> dict {
-  var pass_count = 0
-  var fail_count = 0
-  var skip_count = 0
-  var timeout_count = 0
-  var wall_seconds = []
-  var costs = []
-  var total_cost = 0.0
+  let pass_count = 0
+  let fail_count = 0
+  let skip_count = 0
+  let timeout_count = 0
+  let wall_seconds = []
+  let costs = []
+  let total_cost = 0.0
   for outcome in outcomes {
-    let verification = __outcome_verification(outcome)
+    const verification = __outcome_verification(outcome)
     if verification == "PASS" {
       pass_count = pass_count + 1
     } else if verification == "FAIL" {
@@ -331,16 +331,16 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
       timeout_count = timeout_count + 1
     }
     wall_seconds = wall_seconds + [__float(__outcome_number(outcome, ["wallTimeSeconds", "wall_time_seconds"]))]
-    let cost = __outcome_number(outcome, ["costUsd", "cost_usd"])
+    const cost = __outcome_number(outcome, ["costUsd", "cost_usd"])
     if cost != nil {
-      let cost_float = __float(cost)
+      const cost_float = __float(cost)
       costs = costs + [cost_float]
       total_cost = total_cost + cost_float
     }
   }
-  let decided = pass_count + fail_count
-  var status = "skip"
-  var majority = nil
+  const decided = pass_count + fail_count
+  let status = "skip"
+  let majority = nil
   if decided == 0 {
     status = "skip"
   } else if fail_count == 0 {
@@ -355,19 +355,19 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
       "FAIL"
     }
   }
-  let trials = len(outcomes)
-  let pass_rate = if trials <= 0 {
+  const trials = len(outcomes)
+  const pass_rate = if trials <= 0 {
     0.0
   } else {
     __round_digits(__float(pass_count) / __float(trials), 4)
   }
-  let mean_wall = __round_digits(__mean(wall_seconds), 2)
-  let stdev_wall = __round_digits(__stdev(wall_seconds), 2)
-  let mean_cost = __mean_or_nil(costs)
-  let stdev_cost = __stdev_or_nil(costs)
-  let group = __text(metadata?.group ?? metadata?.language ?? "")
-  let case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint ?? nil
-  let harness_config_fingerprint = metadata?.harnessConfigFingerprint
+  const mean_wall = __round_digits(__mean(wall_seconds), 2)
+  const stdev_wall = __round_digits(__stdev(wall_seconds), 2)
+  const mean_cost = __mean_or_nil(costs)
+  const stdev_cost = __stdev_or_nil(costs)
+  const group = __text(metadata?.group ?? metadata?.language ?? "")
+  const case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint ?? nil
+  const harness_config_fingerprint = metadata?.harnessConfigFingerprint
     ?? metadata?.harness_config_fingerprint
     ?? metadata?.harnessFingerprint
     ?? metadata?.harness_fingerprint
@@ -414,38 +414,38 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
  * @example: bootstrap_mean_ci([0.0, 1.0], 100, 0.05, 42)
  */
 pub fn bootstrap_mean_ci(values: list, resamples: int, alpha: float, seed: int) -> dict {
-  let n = len(values)
+  const n = len(values)
   if n == 0 {
     return {mean: 0.0, lo: 0.0, hi: 0.0, std: 0.0, n: 0}
   }
   if resamples <= 0 {
-    let point = __mean(values)
+    const point = __mean(values)
     return {mean: point, lo: point, hi: point, std: 0.0, n: n}
   }
-  var state = if seed <= 0 {
+  let state = if seed <= 0 {
     1
   } else {
     seed
   }
-  var means = []
-  var b = 0
+  let means = []
+  let b = 0
   while b < resamples {
-    var sum = 0.0
-    var i = 0
+    let sum = 0.0
+    let i = 0
     while i < n {
       state = __lcg_next(state)
       // Use the high-order state bits. Low bits of this LCG cycle too evenly
       // for power-of-two sample sizes and can collapse bootstrap variance.
-      let idx = __clamp_index(to_int(__float(state) / 2147483648.0 * __float(n)) ?? 0, n)
+      const idx = __clamp_index(to_int(__float(state) / 2147483648.0 * __float(n)) ?? 0, n)
       sum = sum + __float(values[idx])
       i = i + 1
     }
     means = means + [sum / __float(n)]
     b = b + 1
   }
-  let sorted = means.sort()
-  let lo_idx = __clamp_index(to_int(round(alpha / 2.0 * __float(resamples))) ?? 0, resamples)
-  let hi_idx = __clamp_index(to_int(round((1.0 - alpha / 2.0) * __float(resamples))) ?? (resamples - 1), resamples)
+  const sorted = means.sort()
+  const lo_idx = __clamp_index(to_int(round(alpha / 2.0 * __float(resamples))) ?? 0, resamples)
+  const hi_idx = __clamp_index(to_int(round((1.0 - alpha / 2.0) * __float(resamples))) ?? (resamples - 1), resamples)
   return {
     mean: __mean(values),
     lo: __float(sorted[lo_idx]),
@@ -463,7 +463,7 @@ pub fn bootstrap_mean_ci(values: list, resamples: int, alpha: float, seed: int) 
  * @example: macro_pass_at_1([{passes: 1, trials: 1, skips: 0}, {passes: 0, trials: 1, skips: 0}])
  */
 pub fn macro_pass_at_1(rows: list) -> float {
-  let decided = __decided_rows(rows)
+  const decided = __decided_rows(rows)
   if len(decided) == 0 {
     return 0.0
   }
@@ -478,7 +478,7 @@ pub fn macro_pass_at_1(rows: list) -> float {
  * @example: reliability_breakdown([{passes: 1, trials: 1, skips: 0}])
  */
 pub fn reliability_breakdown(rows: list) -> dict {
-  let n = len(rows)
+  const n = len(rows)
   if n == 0 {
     return {
       all_pass: 0.0,
@@ -493,13 +493,13 @@ pub fn reliability_breakdown(rows: list) -> dict {
       decided_cases: 0,
     }
   }
-  var all_pass = 0
-  var flaky = 0
-  var all_fail = 0
-  var no_decision = 0
+  let all_pass = 0
+  let flaky = 0
+  let all_fail = 0
+  let no_decision = 0
   for row in rows {
-    let passes = __row_passes(row)
-    let decided = __row_decided(row)
+    const passes = __row_passes(row)
+    const decided = __row_decided(row)
     if __is_no_decision(row) {
       no_decision = no_decision + 1
     } else if passes == decided {
@@ -510,7 +510,7 @@ pub fn reliability_breakdown(rows: list) -> dict {
       flaky = flaky + 1
     }
   }
-  let denom = __float(n)
+  const denom = __float(n)
   return {
     all_pass: __float(all_pass) / denom,
     flaky: __float(flaky) / denom,
@@ -533,7 +533,7 @@ pub fn reliability_breakdown(rows: list) -> dict {
  * @example: pass_caret_k([{passes: 2, trials: 2, skips: 0}])
  */
 pub fn pass_caret_k(rows: list) -> float {
-  let rel = reliability_breakdown(rows)
+  const rel = reliability_breakdown(rows)
   if rel.decided_cases <= 0 {
     return 0.0
   }
@@ -562,9 +562,9 @@ pub fn skip_rate(rows: list) -> float {
   if len(rows) == 0 {
     return 0.0
   }
-  var fractions = []
+  let fractions = []
   for row in rows {
-    let trials = __float(__row_trials(row))
+    const trials = __float(__row_trials(row))
     fractions = fractions
       + [
       if trials > 0.0 {
@@ -588,9 +588,9 @@ pub fn timeout_rate(rows: list) -> float {
   if len(rows) == 0 {
     return 0.0
   }
-  var fractions = []
+  let fractions = []
   for row in rows {
-    let trials = __float(__row_trials(row))
+    const trials = __float(__row_trials(row))
     fractions = fractions
       + [
       if trials > 0.0 {
@@ -611,8 +611,8 @@ pub fn timeout_rate(rows: list) -> float {
  * @example: cost_per_solved([{passes: 1, trials: 1, skips: 0, costUsd: 0.25}])
  */
 pub fn cost_per_solved(rows: list) {
-  var solved_cases = 0
-  var total_cost = 0.0
+  let solved_cases = 0
+  let total_cost = 0.0
   for row in rows {
     total_cost = total_cost + __row_total_cost_usd(row)
     if __row_solved(row) {
@@ -645,16 +645,16 @@ pub fn estimate_cost_usd(pricing, usage: dict) {
   if pricing == nil {
     return nil
   }
-  let input_tokens = to_float(usage?.inputTokens ?? 0) ?? 0.0
-  let output_tokens = to_float(usage?.outputTokens ?? 0) ?? 0.0
-  let cache_read_tokens = to_float(usage?.cacheReadTokens ?? 0) ?? 0.0
-  let cache_write_tokens = to_float(usage?.cacheWriteTokens ?? usage?.cacheCreationInputTokens ?? 0) ?? 0.0
-  let billable_input_tokens = max(input_tokens - cache_read_tokens - cache_write_tokens, 0.0)
-  let input_cost = billable_input_tokens / 1000000.0 * (to_float(pricing?.inputPerMTok ?? 0) ?? 0.0)
-  let output_cost = output_tokens / 1000000.0 * (to_float(pricing?.outputPerMTok ?? 0) ?? 0.0)
-  let cache_read_cost = cache_read_tokens / 1000000.0
+  const input_tokens = to_float(usage?.inputTokens ?? 0) ?? 0.0
+  const output_tokens = to_float(usage?.outputTokens ?? 0) ?? 0.0
+  const cache_read_tokens = to_float(usage?.cacheReadTokens ?? 0) ?? 0.0
+  const cache_write_tokens = to_float(usage?.cacheWriteTokens ?? usage?.cacheCreationInputTokens ?? 0) ?? 0.0
+  const billable_input_tokens = max(input_tokens - cache_read_tokens - cache_write_tokens, 0.0)
+  const input_cost = billable_input_tokens / 1000000.0 * (to_float(pricing?.inputPerMTok ?? 0) ?? 0.0)
+  const output_cost = output_tokens / 1000000.0 * (to_float(pricing?.outputPerMTok ?? 0) ?? 0.0)
+  const cache_read_cost = cache_read_tokens / 1000000.0
     * (to_float(pricing?.cacheReadPerMTok ?? pricing?.inputPerMTok ?? 0) ?? 0.0)
-  let cache_write_cost = cache_write_tokens / 1000000.0
+  const cache_write_cost = cache_write_tokens / 1000000.0
     * (to_float(pricing?.cacheWritePerMTok ?? pricing?.inputPerMTok ?? 0) ?? 0.0)
   return __round_digits(input_cost + output_cost + cache_read_cost + cache_write_cost, 6)
 }
@@ -684,9 +684,9 @@ pub fn realized_trial_cost_usd(derived_cost_usd, cache_replay: bool) {
  * @example: worst_group([{group: "a", passes: 0, trials: 1, skips: 0}])
  */
 pub fn worst_group(rows: list) -> dict {
-  var groups = []
+  let groups = []
   for row in rows {
-    let group = __row_group(row)
+    const group = __row_group(row)
     if !contains(groups, group) {
       groups = groups + [group]
     }
@@ -694,17 +694,17 @@ pub fn worst_group(rows: list) -> dict {
   if len(groups) == 0 {
     return {group: nil, pass_rate: 0.0, cases: 0}
   }
-  var worst = nil
-  var worst_rate = 2.0
-  var worst_cases = 0
+  let worst = nil
+  let worst_rate = 2.0
+  let worst_cases = 0
   for group in groups {
-    var grouped = []
+    let grouped = []
     for row in rows {
       if __row_group(row) == group {
         grouped = grouped + [row]
       }
     }
-    let rate = macro_pass_at_1(grouped)
+    const rate = macro_pass_at_1(grouped)
     if rate < worst_rate {
       worst_rate = rate
       worst = group
@@ -730,16 +730,16 @@ pub fn worst_group(rows: list) -> dict {
  * @example: paired_case_deltas([{name: "a", passes: 0, trials: 1}], [{name: "a", passes: 1, trials: 1}])
  */
 pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list {
-  var baseline = {}
+  let baseline = {}
   for row in __decided_rows(baseline_rows) {
-    let name = __row_case_name(row)
+    const name = __row_case_name(row)
     baseline = baseline + {[name]: row}
   }
-  var deltas = []
+  let deltas = []
   for row in __decided_rows(current_rows) {
-    let name = __row_case_name(row)
-    let base = baseline[name]
-    let comparable = base != nil && __fingerprints_match(base, row)
+    const name = __row_case_name(row)
+    const base = baseline[name]
+    const comparable = base != nil && __fingerprints_match(base, row)
     if comparable {
       deltas = deltas + [__row_pass_rate(row) - __row_pass_rate(base)]
     }
@@ -760,7 +760,7 @@ pub fn paired_delta_report(
   resamples: int = 2000,
   seed: int = 1234567,
 ) -> dict {
-  let deltas = paired_case_deltas(baseline_rows, current_rows)
+  const deltas = paired_case_deltas(baseline_rows, current_rows)
   if len(deltas) == 0 {
     return {
       n_cases: 0,
@@ -773,13 +773,13 @@ pub fn paired_delta_report(
       status: "inconclusive",
     }
   }
-  let ci = bootstrap_mean_ci(deltas, resamples, 0.05, seed)
-  let baseline_macro = macro_pass_at_1(baseline_rows)
-  let current_macro = macro_pass_at_1(current_rows)
-  let baseline_ci = bootstrap_mean_ci(__pass_rates(__decided_rows(baseline_rows)), resamples, 0.05, 987654)
-  let threshold = baseline_macro - baseline_ci.std
-  let improved = ci.lo > 0.0
-  let regression = current_macro < threshold
+  const ci = bootstrap_mean_ci(deltas, resamples, 0.05, seed)
+  const baseline_macro = macro_pass_at_1(baseline_rows)
+  const current_macro = macro_pass_at_1(current_rows)
+  const baseline_ci = bootstrap_mean_ci(__pass_rates(__decided_rows(baseline_rows)), resamples, 0.05, 987654)
+  const threshold = baseline_macro - baseline_ci.std
+  const improved = ci.lo > 0.0
+  const regression = current_macro < threshold
   return {
     n_cases: len(deltas),
     mean_delta: ci.mean,
@@ -810,11 +810,11 @@ pub fn paired_delta_report(
  * @example: regression_gate([{passes: 1, trials: 1}], [{passes: 0, trials: 1}])
  */
 pub fn regression_gate(baseline_rows: list, current_rows: list, k: float = 1.0) -> dict {
-  let baseline_macro = macro_pass_at_1(baseline_rows)
-  let current_macro = macro_pass_at_1(current_rows)
-  let ci = bootstrap_mean_ci(__pass_rates(__decided_rows(baseline_rows)), 2000, 0.05, 987654)
-  let threshold = baseline_macro - k * ci.std
-  let passed = current_macro >= threshold
+  const baseline_macro = macro_pass_at_1(baseline_rows)
+  const current_macro = macro_pass_at_1(current_rows)
+  const ci = bootstrap_mean_ci(__pass_rates(__decided_rows(baseline_rows)), 2000, 0.05, 987654)
+  const threshold = baseline_macro - k * ci.std
+  const passed = current_macro >= threshold
   return {
     baseline_macro: baseline_macro,
     current_macro: current_macro,
@@ -837,25 +837,25 @@ pub fn regression_gate(baseline_rows: list, current_rows: list, k: float = 1.0) 
  * @example: routing_calibration_report([{name: "a"}], [{name: "a"}], [{name: "a"}])
  */
 pub fn routing_calibration_report(cheap_rows: list, ladder_rows: list, frontier_rows: list) -> dict {
-  let cheap_index = __rows_by_case(cheap_rows)
-  let frontier_index = __rows_by_case(frontier_rows)
-  var paired_ladder = []
-  var paired_cheap = []
-  var paired_frontier = []
-  var escalated_ladder = []
-  var paired_case_names = []
-  var missing_reference_cases = []
-  var fingerprint_mismatch_cases = []
-  var over_escalated_case_names = []
-  var under_escalated_case_names = []
-  var escalated_cases = 0
-  var non_escalated_cases = 0
-  var over_escalated_cases = 0
-  var under_escalated_cases = 0
+  const cheap_index = __rows_by_case(cheap_rows)
+  const frontier_index = __rows_by_case(frontier_rows)
+  let paired_ladder = []
+  let paired_cheap = []
+  let paired_frontier = []
+  let escalated_ladder = []
+  let paired_case_names = []
+  let missing_reference_cases = []
+  let fingerprint_mismatch_cases = []
+  let over_escalated_case_names = []
+  let under_escalated_case_names = []
+  let escalated_cases = 0
+  let non_escalated_cases = 0
+  let over_escalated_cases = 0
+  let under_escalated_cases = 0
   for ladder in __unique_rows_by_case(ladder_rows) {
-    let name = __row_case_name(ladder)
-    let cheap = cheap_index[name]
-    let frontier = frontier_index[name]
+    const name = __row_case_name(ladder)
+    const cheap = cheap_index[name]
+    const frontier = frontier_index[name]
     if cheap == nil || frontier == nil {
       missing_reference_cases = missing_reference_cases + [name]
       continue

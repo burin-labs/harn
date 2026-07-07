@@ -3,8 +3,8 @@ import { agent_progress } from "std/agent/progress"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
 pipeline default() {
-  let session_id = "agent-progress-replace-" + uuid()
-  let captured = agent_capture_events(
+  const session_id = "agent-progress-replace-" + uuid()
+  const captured = agent_capture_events(
     session_id,
     fn() {
       let session = agent_session_init("progress replace", nil, {session_id: session_id})
@@ -14,7 +14,7 @@ pipeline default() {
       return nil
     },
   )
-  let events = captured.events.filter({ event -> event.type == "progress_reported" })
+  const events = captured.events.filter({ event -> event.type == "progress_reported" })
   require len(events) == 2, "replace semantics should emit both updates"
   __io_println("replace_count=" + to_string(len(events)))
   __io_println("first_replace=" + to_string(events[0].replace))

@@ -111,7 +111,7 @@ fn __chat_tool_name(entry) {
 }
 
 fn __chat_has_tool(registry, name) {
-  let entries = registry?.tools ?? []
+  const entries = registry?.tools ?? []
   if type_of(entries) != "list" {
     return false
   }
@@ -131,7 +131,7 @@ fn __chat_has_tool(registry, name) {
  * @api_stability: experimental
  */
 pub fn agent_chat_wait_for_user_tools(registry = nil) {
-  let tools = registry ?? tool_registry()
+  const tools = registry ?? tool_registry()
   if __chat_has_tool(tools, "wait_for_user") {
     return tools
   }
@@ -156,7 +156,7 @@ pub fn agent_chat_wait_for_user_tools(registry = nil) {
 }
 
 fn __chat_default_help(handlers = nil) {
-  var commands = ["/exit", "/quit", "/help", "/?"]
+  let commands = ["/exit", "/quit", "/help", "/?"]
   if type_of(handlers) == "dict" {
     for key in handlers.keys() {
       if starts_with(key, "/") && !contains(commands, key) {
@@ -175,23 +175,23 @@ fn __chat_default_help(handlers = nil) {
  * @api_stability: experimental
  */
 pub fn agent_chat_route_input(line, state = nil, handlers = nil) {
-  let current = __chat_dict(state)
-  let text = trim(to_string(line ?? ""))
+  const current = __chat_dict(state)
+  const text = trim(to_string(line ?? ""))
   if text == "" {
     return {kind: "handled", state: current}
   }
   if !starts_with(text, "/") {
     return {kind: "send", message: text, state: current}
   }
-  let parts = split(text, " ")
-  let command = parts[0]
+  const parts = split(text, " ")
+  const command = parts[0]
   if command == "/exit" || command == "/quit" {
     return {kind: "exit", reason: "operator_exit", command: command, state: current}
   }
   if command == "/help" || command == "/?" {
     return {kind: "handled", command: command, message: __chat_default_help(handlers), state: current}
   }
-  let handler = if type_of(handlers) == "dict" {
+  const handler = if type_of(handlers) == "dict" {
     handlers[command]
   } else {
     nil
@@ -215,7 +215,7 @@ pub fn agent_chat_route_input(line, state = nil, handlers = nil) {
 }
 
 fn __chat_default_user_input(opts, state) {
-  let line = read_line()
+  const line = read_line()
   if !line.ok {
     return {kind: "exit", reason: "eof", state: state}
   }
@@ -232,7 +232,7 @@ fn __chat_normalize_user_decision(decision, state) {
   if type_of(decision) != "dict" {
     throw "agent_chat_loop: on_user_input must return a dict, string, or nil"
   }
-  let kind = decision?.kind ?? if decision?.message != nil {
+  const kind = decision?.kind ?? if decision?.message != nil {
     "send"
   } else {
     "handled"
@@ -240,7 +240,7 @@ fn __chat_normalize_user_decision(decision, state) {
   if kind != "send" && kind != "handled" && kind != "exit" {
     throw "agent_chat_loop: on_user_input kind must be send, handled, or exit"
   }
-  let next_state = if decision?.state != nil {
+  const next_state = if decision?.state != nil {
     __chat_dict(decision.state)
   } else {
     state
@@ -261,10 +261,10 @@ fn __chat_wait_for_user_callback(user_callback) {
 }
 
 fn __chat_turn_options(opts, decision, session_id) {
-  let top_level = pick_keys(opts ?? {}, __chat_agent_option_keys(), {drop_nil: true})
-  let configured = __chat_dict(opts?.agent_options) + __chat_dict(opts?.options)
-  let per_turn = __chat_dict(decision?.next_options)
-  var merged = top_level + configured + per_turn + {session_id: session_id}
+  const top_level = pick_keys(opts ?? {}, __chat_agent_option_keys(), {drop_nil: true})
+  const configured = __chat_dict(opts?.agent_options) + __chat_dict(opts?.options)
+  const per_turn = __chat_dict(decision?.next_options)
+  let merged = top_level + configured + per_turn + {session_id: session_id}
   if opts?.wait_for_user_tool ?? true {
     merged = merged + {tools: agent_chat_wait_for_user_tools(merged?.tools)}
   }
@@ -280,13 +280,13 @@ fn __chat_state(state, session_id, turns, input_events, last_result = nil) {
 }
 
 fn __chat_wait_question(result) {
-  let calls = result?.tools?.calls ?? []
+  const calls = result?.tools?.calls ?? []
   if type_of(calls) != "list" {
     return nil
   }
-  var question = nil
+  let question = nil
   for call in calls {
-    let name = call?.name ?? call?.tool_name
+    const name = call?.name ?? call?.tool_name
     if name == "wait_for_user" {
       question = call?.arguments?.question ?? call?.input?.question ?? question
     }
@@ -301,7 +301,7 @@ fn __chat_after_model(callback, result, state) {
   if type_of(callback) != "closure" {
     throw "agent_chat_loop: on_model_turn must be a closure or nil"
   }
-  let update = callback(result, state)
+  const update = callback(result, state)
   if update == nil {
     return state
   }
@@ -324,8 +324,8 @@ fn __chat_finish(
   close_session,
   transcript_path,
 ) {
-  let transcript = agent_session_snapshot(session_id)
-  let final_state = __chat_state(state, session_id, turns, input_events, last_result)
+  const transcript = agent_session_snapshot(session_id)
+  const final_state = __chat_state(state, session_id, turns, input_events, last_result)
   if close_session {
     agent_session_close(session_id, {reason: stop_reason})
   }
@@ -349,19 +349,19 @@ fn __chat_finish(
  * @api_stability: experimental
  */
 pub fn agent_chat_loop(opts = nil) {
-  let config = __chat_dict(opts)
-  let session_id = agent_session_open(config?.session_id)
-  let max_turns = config?.max_turns ?? 0
-  let max_input_events = config?.max_input_events
-  let {close_session = true, transcript_path = config?.llm_transcript_dir} = config ?? {}
-  let user_input = config?.on_user_input
+  const config = __chat_dict(opts)
+  const session_id = agent_session_open(config?.session_id)
+  const max_turns = config?.max_turns ?? 0
+  const max_input_events = config?.max_input_events
+  const {close_session = true, transcript_path = config?.llm_transcript_dir} = config ?? {}
+  const user_input = config?.on_user_input
   if user_input != nil && type_of(user_input) != "closure" {
     throw "agent_chat_loop: on_user_input must be a closure or nil"
   }
-  var turns = 0
-  var input_events = 0
-  var last_result = nil
-  var state = __chat_state(config?.state ?? config?.initial_state, session_id, turns, input_events)
+  let turns = 0
+  let input_events = 0
+  let last_result = nil
+  let state = __chat_state(config?.state ?? config?.initial_state, session_id, turns, input_events)
   while max_turns <= 0 || turns < max_turns {
     if max_input_events != nil && input_events >= max_input_events {
       return __chat_finish(
@@ -375,13 +375,13 @@ pub fn agent_chat_loop(opts = nil) {
         transcript_path,
       )
     }
-    let raw_decision = if user_input == nil {
+    const raw_decision = if user_input == nil {
       __chat_default_user_input(config, state)
     } else {
       user_input(state)
     }
     input_events = input_events + 1
-    let decision = __chat_normalize_user_decision(raw_decision, state)
+    const decision = __chat_normalize_user_decision(raw_decision, state)
     state = __chat_state(decision.state, session_id, turns, input_events, last_result)
     if decision.kind == "exit" {
       return __chat_finish(
@@ -398,12 +398,12 @@ pub fn agent_chat_loop(opts = nil) {
     if decision.kind == "handled" {
       continue
     }
-    let message = to_string(decision?.message ?? "")
+    const message = to_string(decision?.message ?? "")
     if trim(message) == "" {
       continue
     }
-    let turn_options = __chat_turn_options(config, decision, session_id)
-    let run = try {
+    const turn_options = __chat_turn_options(config, decision, session_id)
+    const run = try {
       agent_loop(message, config?.system_prompt ?? config?.system, turn_options)
     }
     if is_err(run) {
@@ -415,9 +415,9 @@ pub fn agent_chat_loop(opts = nil) {
       }
       throw unwrap_err(run)
     }
-    let result = unwrap(run)
+    const result = unwrap(run)
     turns = turns + 1
-    let wait_question = __chat_wait_question(result)
+    const wait_question = __chat_wait_question(result)
     state = state + filter_nil({last_wait_for_user_question: wait_question})
     state = __chat_state(state, session_id, turns, input_events, result)
     state = __chat_after_model(config?.on_model_turn, result, state)

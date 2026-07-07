@@ -31,17 +31,17 @@ pipeline default(_task) {
   // which is also where the seed workspaces ship. That gives us a
   // sandbox-safe absolute path for the code-index rebuild without
   // depending on the caller's cwd.
-  let assets = asset_root()
-  let seed_root = assets + "/seed"
-  let conflict_root = assets + "/seed-conflict"
+  const assets = asset_root()
+  const seed_root = assets + "/seed"
+  const conflict_root = assets + "/seed-conflict"
   // The symbol graph is per-workspace; rebuild seeds the index before
   // any rename runs.
-  let _ = hostlib_code_index_rebuild({root: seed_root})
+  const _ = hostlib_code_index_rebuild({root: seed_root})
   // 1. Dry-run rename: planning only, no disk writes. The plan walks
   //    the typed symbol graph (#2434) from the `Widget` Type node and
   //    re-parses every in-scope file with tree-sitter to collect the
   //    identifier-context byte spans that would be rewritten.
-  let planned = edit_rename_symbol(
+  const planned = edit_rename_symbol(
     {
       symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
       new_name: "Gadget",
@@ -52,8 +52,8 @@ pipeline default(_task) {
   // 2. Conflict path: re-target the rebuilder at the conflict seed,
   //    where Widget and Gadget already share the same file. The host
   //    detects the shadow site and refuses to touch disk.
-  let _ = hostlib_code_index_rebuild({root: conflict_root})
-  let conflict = edit_rename_symbol(
+  const _ = hostlib_code_index_rebuild({root: conflict_root})
+  const conflict = edit_rename_symbol(
     {
       symbol_ref: {name: "Widget", path: "src/main.rs", kind: "Type"},
       new_name: "Gadget",
@@ -73,7 +73,7 @@ pipeline default(_task) {
       + " shadow site(s) reported",
   )
   __io_println("")
-  let receipt = {
+  const receipt = {
     receipt_kind: "edit_rename_symbol_receipt",
     planned_result: planned.result,
     planned_match_count: planned.match_count,

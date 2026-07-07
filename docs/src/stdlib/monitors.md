@@ -6,7 +6,7 @@ preserving deterministic replay records.
 ```harn,ignore
 import { wait_for } from "std/monitors"
 
-let result = wait_for({
+const result = wait_for({
   timeout: 30m,
   poll_interval: 10s,
   source: {

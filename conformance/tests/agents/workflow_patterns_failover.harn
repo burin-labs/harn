@@ -1,7 +1,7 @@
 import { workflow_failover } from "std/workflow/patterns"
 
 pipeline default() {
-  let result = workflow_failover(
+  const result = workflow_failover(
     {
       routes: [{id: "cap-miss"}, {id: "retryable"}, {id: "winner"}],
       max_attempts: 2,
@@ -34,7 +34,7 @@ pipeline default() {
   __io_println(result.attempts[0].reason)
   __io_println(result.attempts[1].decision)
   __io_println(result.attempts[2].decision)
-  let terminal = workflow_failover(
+  const terminal = workflow_failover(
     {
       routes: [{id: "blocked"}],
       call: { _route, _ctx -> return {ok: false, status: 400} },

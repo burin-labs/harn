@@ -29,7 +29,7 @@
  *     dispatch wedge still sets it for symmetry with peer scripts.
  */
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_PROVIDER_CATALOG_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_PROVIDER_CATALOG_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_PROVIDER_CATALOG_PAYLOAD_JSON not set by dispatch shim")

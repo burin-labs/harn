@@ -23,23 +23,23 @@ fn no_newline_echo(text) {
 }
 
 pipeline default() {
-  let direct = command_json(no_newline_echo("{\"direct\":true}"), {capture: {max_inline_bytes: 100}})
+  const direct = command_json(no_newline_echo("{\"direct\":true}"), {capture: {max_inline_bytes: 100}})
   assert_eq(direct.direct, true)
-  let parsed = command_json(["fake-json"], {runner: json_runner("{\"name\":\"harn\",\"count\":2}")})
+  const parsed = command_json(["fake-json"], {runner: json_runner("{\"name\":\"harn\",\"count\":2}")})
   assert_eq(parsed.name, "harn")
   assert_eq(parsed.count, 2)
-  let empty = command_json(["empty"], {runner: json_runner(""), allow_empty: true})
+  const empty = command_json(["empty"], {runner: json_runner(""), allow_empty: true})
   assert_eq(empty, nil)
-  let empty_record = command_json(["empty"], {runner: json_runner(""), result: "record"})
+  const empty_record = command_json(["empty"], {runner: json_runner(""), result: "record"})
   assert_eq(empty_record.ok, false)
   assert_eq(empty_record.error.category, "empty_output")
   assert_eq(empty_record.step.status, "empty_output")
-  let failed_record = command_json(["fail"], {runner: fail_runner(7, "denied"), result: "record"})
+  const failed_record = command_json(["fail"], {runner: fail_runner(7, "denied"), result: "record"})
   assert_eq(failed_record.ok, false)
   assert_eq(failed_record.error.category, "command_failed")
   assert_eq(failed_record.step.exit_code, 7)
   assert(contains(failed_record.error.message, "denied"))
-  let malformed = command_json(["bad-json"], {runner: json_runner("{ nope"), result: "record"})
+  const malformed = command_json(["bad-json"], {runner: json_runner("{ nope"), result: "record"})
   assert_eq(malformed.ok, false)
   assert_eq(malformed.error.category, "invalid_json")
   assert_eq(malformed.step.status, "invalid_json")
@@ -48,7 +48,7 @@ pipeline default() {
     { -> command_json(["bad-json"], {runner: json_runner("{ nope")}) },
     "invalid JSON",
   )
-  let step = command_json_step(
+  const step = command_json_step(
     "structured probe",
     ["fake-step"],
     {
@@ -66,7 +66,7 @@ pipeline default() {
   assert_eq(step.json.ok, true)
   assert_eq(len(step.json.items), 3)
   assert_eq(step.classification.kind, "clean")
-  let fallback = command_try(
+  const fallback = command_try(
     [
       {source: "connector", run: fn() { return nil }},
       {source: "cli", run: fn() { return {items: [1, 2]} }},
@@ -81,7 +81,7 @@ pipeline default() {
   assert_eq(fallback.attempts[0].status, "nil_result")
   assert_eq(fallback.value.source, "cli")
   assert_eq(fallback.value.count, 2)
-  let spec_fallback = command_try(
+  const spec_fallback = command_try(
     [
       {
         source: "cli-spec",
@@ -93,7 +93,7 @@ pipeline default() {
   assert_eq(spec_fallback.ok, true)
   assert_eq(spec_fallback.value.ok, false)
   assert_eq(spec_fallback.value.payload, 42)
-  let exhausted = command_try(
+  const exhausted = command_try(
     [
       {source: "a", run: fn() { return {ok: false, status: "missing", error: {category: "missing"}} }},
       {

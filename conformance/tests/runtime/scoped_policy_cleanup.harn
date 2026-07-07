@@ -1,5 +1,5 @@
 fn scoped_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -14,9 +14,9 @@ fn scoped_tools() {
 }
 
 pipeline main() {
-  let tools = scoped_tools()
-  let call = {name: "write_note", arguments: {path: "notes.txt"}}
-  let denied = with_approval_policy({auto_deny: ["write*"]}, fn() { return agent_dispatch_tool_call(call, tools) })
+  const tools = scoped_tools()
+  const call = {name: "write_note", arguments: {path: "notes.txt"}}
+  const denied = with_approval_policy({auto_deny: ["write*"]}, fn() { return agent_dispatch_tool_call(call, tools) })
   __io_println(denied.ok)
   __io_println(denied.error_category)
   try {
@@ -29,7 +29,7 @@ pipeline main() {
   } catch (e) {
     __io_println("caught")
   }
-  let allowed = agent_dispatch_tool_call(call, tools)
+  const allowed = agent_dispatch_tool_call(call, tools)
   __io_println(allowed.ok)
   __io_println(allowed.rendered_result)
 }

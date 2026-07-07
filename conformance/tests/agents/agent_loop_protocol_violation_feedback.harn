@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn note_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -24,7 +24,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write notes.txt.",
         nil,
         {
@@ -36,8 +36,8 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
-      let retry_messages = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const retry_messages = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(result.tools.successful[0])
       __io_println(contains(retry_messages, "parse_guidance"))
@@ -51,7 +51,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("write_note({ path: \"notes.txt\" })"), llm_text("<done>##DONE##</done>")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write notes.txt.",
         nil,
         {
@@ -63,8 +63,8 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
-      let next_messages = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const next_messages = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(result.tools.successful[0])
       __io_println(!contains(next_messages, "parse_guidance"))
@@ -74,7 +74,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("_call>_call>"), llm_text("##DONE##")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write notes.txt.",
         nil,
         {
@@ -88,8 +88,8 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
-      let retry_messages = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const retry_messages = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(!contains(retry_messages, "parse_guidance"))
       __io_println(!contains(retry_messages, "Stray text outside response tags"))
@@ -108,7 +108,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write a.txt.",
         nil,
         {
@@ -120,8 +120,8 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
-      let retry_messages = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const retry_messages = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(result.tools.successful[0])
       __io_println(contains(retry_messages, "parse_guidance"))
@@ -144,7 +144,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Write one note.",
         nil,
         {
@@ -156,8 +156,8 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      let calls = llm_mock_calls()
-      let retry_messages = json_stringify(calls[1].messages)
+      const calls = llm_mock_calls()
+      const retry_messages = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(result.tools.successful[0])
       __io_println(len(result.tools.successful))

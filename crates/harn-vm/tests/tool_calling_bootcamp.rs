@@ -79,7 +79,7 @@ fn resolve_snippet(provider: &str, model: &str, requested: &str) -> String {
         r#"
 import {{ agent_tool_format_resolution, agent_tool_format }} from "std/agent/options"
 pipeline main(task) {{
-  let r = agent_tool_format_resolution({opts})
+  const r = agent_tool_format_resolution({opts})
   log("tool_format=" + to_string(r.tool_format))
   log("source=" + to_string(r.source))
   log("effective=" + to_string(agent_tool_format({opts})))
@@ -222,7 +222,7 @@ fn capability_facts(provider: &str, model: &str) -> (bool, bool, String) {
     let src = format!(
         r#"
 pipeline main(task) {{
-  let c = provider_capabilities("{provider}", "{model}")
+  const c = provider_capabilities("{provider}", "{model}")
   log("native=" + to_string(c.native_tools))
   log("text=" + to_string(c.text_tool_wire_format_supported))
   log("parity=" + to_string(c.tool_mode_parity))
@@ -438,7 +438,7 @@ text_tool_wire_format_supported = true
 import {{ agent_tool_format_resolution, agent_tool_format }} from "std/agent/options"
 pipeline main(task) {{
   provider_capabilities_install({install:?})
-  let auto = agent_tool_format_resolution({{
+  const auto = agent_tool_format_resolution({{
     model: "bootcamp-unpinned-text-1",
     provider: "bootcamp",
     tool_format: "auto",

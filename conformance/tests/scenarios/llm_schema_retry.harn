@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["verdict"],
     properties: {verdict: {type: "string"}, improvement: {type: "string"}},
@@ -14,7 +14,7 @@ pipeline default() {
       llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
     ],
     { ->
-      let r = llm_call(
+      const r = llm_call(
         "Grade this",
         nil,
         {
@@ -26,21 +26,21 @@ pipeline default() {
         },
       )
       __io_println(r.data.verdict)
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(len(calls))
-      let second_msgs = calls[1].messages
-      let last_msg = second_msgs[len(second_msgs) - 1]
+      const second_msgs = calls[1].messages
+      const last_msg = second_msgs[len(second_msgs) - 1]
       __io_println(contains(last_msg.content, "schema"))
       __io_println(len(second_msgs) == len(calls[0].messages) + 1)
-      var has_assistant = false
+      let has_assistant = false
       for msg in second_msgs {
         if msg.role == "assistant" {
           has_assistant = true
         }
       }
       __io_println(has_assistant)
-      let trace = agent_trace()
-      var retry_event = nil
+      const trace = agent_trace()
+      let retry_event = nil
       for ev in trace {
         if ev.type == "schema_retry" {
           retry_event = ev
@@ -56,7 +56,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"improvement\": \"try again\"}")],
     { ->
-      let err = try {
+      const err = try {
         llm_call(
           "Grade again",
           nil,
@@ -79,7 +79,7 @@ pipeline default() {
       llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
     ],
     { ->
-      let bare = llm_call(
+      const bare = llm_call(
         "Grade with bare retry",
         nil,
         {
@@ -92,9 +92,9 @@ pipeline default() {
         },
       )
       __io_println(bare.data.verdict)
-      let bare_calls = llm_mock_calls()
+      const bare_calls = llm_mock_calls()
       __io_println(len(bare_calls))
-      let bare_second = bare_calls[1].messages
+      const bare_second = bare_calls[1].messages
       __io_println(bare_second[len(bare_second) - 1].role)
       __io_println(len(bare_second) == len(bare_calls[0].messages))
     },
@@ -102,7 +102,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Analyzing the user task"), llm_text("Examining the failed run")],
     { ->
-      let prose_err = try {
+      const prose_err = try {
         llm_call(
           "Grade prose-only output",
           nil,

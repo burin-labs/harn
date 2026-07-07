@@ -1,11 +1,11 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
     [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"pass\"}")],
     { ->
-      let structured = agent_loop(
+      const structured = agent_loop(
         "grade this",
         nil,
         {provider: "mock", profile: "verifier", output_schema: schema, output_validation: "error"},
@@ -18,7 +18,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Needs another pass.")],
     { ->
-      let verifier = agent_loop("verify this", nil, {provider: "mock", profile: "verifier", loop_until_done: true})
+      const verifier = agent_loop("verify this", nil, {provider: "mock", profile: "verifier", loop_until_done: true})
       __io_println(verifier.status)
       __io_println(verifier.llm.iterations)
       assert(verifier.status == "stuck", "verifier max_nudges default should stop immediately")
@@ -28,7 +28,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Still working."), llm_text("Finished. ##DONE##")],
     { ->
-      let overridden = agent_loop(
+      const overridden = agent_loop(
         "finish in two",
         nil,
         {provider: "mock", profile: "completer", loop_until_done: true, max_iterations: 2, max_nudges: 2},

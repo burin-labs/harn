@@ -8,7 +8,7 @@ pipeline default(task) {
   with_llm_script(
     [{error: {category: "rate_limit", message: "429 Too Many Requests"}}],
     { ->
-      let r = llm_call_safe("hello", nil, {provider: "mock"})
+      const r = llm_call_safe("hello", nil, {provider: "mock"})
       __io_println(r.ok)
       __io_println(r.response == nil)
       __io_println(r.error.category)

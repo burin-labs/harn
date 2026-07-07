@@ -68,7 +68,7 @@ fn __binder_is_callable(value) -> bool {
 
 fn __binder_drop_key(args, field) {
   let source = __binder_dict(args)
-  var cleaned = {}
+  let cleaned = {}
   for key in source.keys() {
     if key != field {
       cleaned = cleaned + {[key]: source[key]}

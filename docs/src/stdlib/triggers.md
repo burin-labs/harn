@@ -83,7 +83,7 @@ fn handle_issue(event: TriggerEvent) -> dict {
   return {kind: event.kind, provider: event.provider}
 }
 
-let handle: TriggerHandle = trigger_register({
+const handle: TriggerHandle = trigger_register({
   id: "github-new-issue",
   kind: "issue.opened",
   provider: "github",
@@ -210,12 +210,12 @@ and cached classifier steps.
 import "std/triggers"
 
 pub fn on_quotes(event: TriggerEvent) -> dict {
-  let forked = stream_fork([event.provider_payload.raw], ["risk", "ledger"])
-  let windowed = window_by(
+  const forked = stream_fork([event.provider_payload.raw], ["risk", "ledger"])
+  const windowed = window_by(
     [event.provider_payload.raw],
     {mode: "sliding", key: "event.provider_payload.key", size: "5m", every: "1m", gap: nil, max_items: 500},
   )
-  let classified = llm_classify(event.provider_payload.raw, ["ignore", "review"], {cache: "quotes:v1"})
+  const classified = llm_classify(event.provider_payload.raw, ["ignore", "review"], {cache: "quotes:v1"})
   return {forked: forked, windowed: windowed, classified: classified}
 }
 ```
@@ -283,7 +283,7 @@ fn fail_handler(event: TriggerEvent) -> any {
   throw("manual failure: " + event.kind)
 }
 
-let handle = trigger_register({
+const handle = trigger_register({
   id: "manual-dlq",
   kind: "issue.opened",
   provider: "github",
@@ -300,9 +300,9 @@ let handle = trigger_register({
   package_name: nil,
 })
 
-let fired = trigger_fire(handle, {provider: "github", kind: "issue.opened"})
-let dlq = trigger_inspect_dlq().filter({ entry -> entry.binding_id == handle.id })
-let replay = trigger_replay(fired.event_id)
+const fired = trigger_fire(handle, {provider: "github", kind: "issue.opened"})
+const dlq = trigger_inspect_dlq().filter({ entry -> entry.binding_id == handle.id })
+const replay = trigger_replay(fired.event_id)
 
 log(fired.status)                  // "dlq"
 log(len(dlq[0].retry_history))     // 1

@@ -73,7 +73,7 @@ That means common agent code can usually say:
 import "std/agent_state"
 
 pipeline default() {
-  let state = agent_state_init(".harn/state", {writer_id: "planner"})
+  const state = agent_state_init(".harn/state", {writer_id: "planner"})
   agent_state_write(state, "plan.md", "# Plan")
 }
 ```
@@ -88,7 +88,7 @@ Keys are always **relative** to the session root. Nested paths are fine:
 import "std/agent_state"
 
 pipeline default() {
-  let state = agent_state_init(".harn/state", {writer_id: "planner"})
+  const state = agent_state_init(".harn/state", {writer_id: "planner"})
   agent_state_write(state, "plan.md", "# Plan")
   agent_state_write(state, "evidence/files.json", "{\"paths\":[]}")
 }
@@ -159,7 +159,7 @@ Each handle can carry a writer identity and conflict policy:
 ```harn
 import "std/agent_state"
 
-let state = agent_state_init(".harn/state", {
+const state = agent_state_init(".harn/state", {
   session_id: "demo",
   writer_id: "planner",
   conflict_policy: "error"
@@ -199,7 +199,7 @@ in without changing the Harn-facing handle semantics.
 import "std/agent_state"
 
 pipeline default() {
-  let state = agent_state_init(".harn/state", {
+  const state = agent_state_init(".harn/state", {
     session_id: "review-42",
     writer_id: "triage"
   })
@@ -210,7 +210,7 @@ pipeline default() {
     next_stage: "implement"
   })
 
-  let resumed = agent_state_resume(".harn/state", "review-42", {
+  const resumed = agent_state_resume(".harn/state", "review-42", {
     writer_id: "implement"
   })
   log(agent_state_read(resumed, "plan.md"))

@@ -14,7 +14,7 @@ pipeline default() {
       llm_text("The answer is Paris, France."),
     ],
     { ->
-      let result = debate(
+      const result = debate(
         {
           prompt: "What is the capital of France?",
           debaters: ["alpha", "beta"],

@@ -254,8 +254,8 @@ fn __task_plan_blank_report(plan) {
 }
 
 fn __task_plan_collect_node_ids(plan) {
-  var ids = []
-  let nodes = plan?.nodes ?? {}
+  let ids = []
+  const nodes = plan?.nodes ?? {}
   for entry in nodes {
     ids = ids + [entry.key]
   }
@@ -263,14 +263,14 @@ fn __task_plan_collect_node_ids(plan) {
 }
 
 fn __task_plan_validate_structure(plan, report) {
-  var out = report
-  let {nodes = {}, edges = []} = plan ?? {}
-  let node_ids = __task_plan_collect_node_ids(plan)
+  let out = report
+  const {nodes = {}, edges = []} = plan ?? {}
+  const node_ids = __task_plan_collect_node_ids(plan)
   if len(node_ids) == 0 {
     out = __task_plan_push_error(out, "no_nodes", "nodes", "plan has no nodes")
     return out
   }
-  let entry = plan?.entry
+  const entry = plan?.entry
   if entry == nil || entry == "" {
     out = __task_plan_push_error(out, "entry_missing", "entry", "plan.entry is required")
   } else if !contains(node_ids, entry) {
@@ -282,8 +282,8 @@ fn __task_plan_validate_structure(plan, report) {
     )
   }
   for node_id in node_ids {
-    let node = nodes[node_id]
-    let declared_id = node?.id
+    const node = nodes[node_id]
+    const declared_id = node?.id
     if declared_id != nil && declared_id != "" && declared_id != node_id {
       out = __task_plan_push_error(
         out,
@@ -323,13 +323,13 @@ fn __task_plan_validate_structure(plan, report) {
 }
 
 fn __task_plan_validate_kind_fields(plan, report) {
-  var out = report
-  let nodes = plan?.nodes ?? {}
+  let out = report
+  const nodes = plan?.nodes ?? {}
   for entry in nodes {
-    let node_id = entry.key
-    let node = entry.value
-    let path = "nodes." + node_id
-    let kind = node?.kind
+    const node_id = entry.key
+    const node = entry.value
+    const path = "nodes." + node_id
+    const kind = node?.kind
     if kind == "agent_loop" && (node?.prompt == nil || node.prompt == "") {
       out = __task_plan_push_error(
         out,
@@ -385,10 +385,10 @@ fn __task_plan_validate_kind_fields(plan, report) {
 }
 
 fn __task_plan_write_kinds_in_use(plan) {
-  let nodes = plan?.nodes ?? {}
-  var seen = []
+  const nodes = plan?.nodes ?? {}
+  let seen = []
   for entry in nodes {
-    let kind = entry.value?.kind
+    const kind = entry.value?.kind
     if contains(__TASK_PLAN_WRITE_KINDS, kind) && !contains(seen, kind) {
       seen = seen + [kind]
     }
@@ -397,7 +397,7 @@ fn __task_plan_write_kinds_in_use(plan) {
 }
 
 fn __task_plan_validate_node_count_budget(node_count, merged, report) {
-  var out = report
+  let out = report
   if node_count > merged.max_nodes {
     out = __task_plan_push_error(
       out,
@@ -413,10 +413,10 @@ fn __task_plan_validate_node_count_budget(node_count, merged, report) {
 }
 
 fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) {
-  var out = report
-  let caps = plan?.capabilities ?? {}
-  let cap_tools = caps?.tools ?? []
-  let allow_writes = contains(cap_tools, "edit")
+  let out = report
+  const caps = plan?.capabilities ?? {}
+  const cap_tools = caps?.tools ?? []
+  const allow_writes = contains(cap_tools, "edit")
     || contains(cap_tools, "run")
     || caps?.side_effect_level == "writes_files"
     || caps?.side_effect_level == "runs_commands"
@@ -434,7 +434,7 @@ fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) 
 }
 
 fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
-  var out = report
+  let out = report
   if explicit?.wall_clock_ms != nil
     && (type_of(explicit.wall_clock_ms) != "int" || explicit.wall_clock_ms < 1) {
     out = __task_plan_push_error(
@@ -444,7 +444,7 @@ fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
       "budgets.wall_clock_ms must be a positive integer",
     )
   }
-  let total_cost_kind = type_of(explicit?.total_cost_usd)
+  const total_cost_kind = type_of(explicit?.total_cost_usd)
   if explicit?.total_cost_usd != nil
     && ((total_cost_kind != "float" && total_cost_kind != "int")
     || to_float(explicit.total_cost_usd) <= 0.0) {
@@ -466,7 +466,7 @@ fn __task_plan_failure_kinds(failures) {
 }
 
 fn __task_plan_validate_failure_kind_items(kinds, report) {
-  var out = report
+  let out = report
   if type_of(kinds) != "list" || len(kinds) == 0 {
     return __task_plan_push_error(
       out,
@@ -489,8 +489,8 @@ fn __task_plan_validate_failure_kind_items(kinds, report) {
 }
 
 fn __task_plan_validate_consecutive_failure_budget(explicit, report) {
-  var out = report
-  let failures = explicit?.consecutive_failures
+  let out = report
+  const failures = explicit?.consecutive_failures
   if failures == nil {
     return out
   }
@@ -524,11 +524,11 @@ fn __task_plan_validate_consecutive_failure_budget(explicit, report) {
 }
 
 fn __task_plan_validate_budgets(plan, report) {
-  var out = report
-  let explicit = plan?.budgets ?? {}
-  let merged = __TASK_PLAN_DEFAULT_BUDGETS + explicit
-  let node_count = len(__task_plan_collect_node_ids(plan))
-  let write_kinds_seen = __task_plan_write_kinds_in_use(plan)
+  let out = report
+  const explicit = plan?.budgets ?? {}
+  const merged = __TASK_PLAN_DEFAULT_BUDGETS + explicit
+  const node_count = len(__task_plan_collect_node_ids(plan))
+  const write_kinds_seen = __task_plan_write_kinds_in_use(plan)
   out = __task_plan_validate_node_count_budget(node_count, merged, out)
   out = __task_plan_validate_write_capability_budget(plan, write_kinds_seen, out)
   out = __task_plan_validate_scalar_loop_budgets(explicit, out)
@@ -537,8 +537,8 @@ fn __task_plan_validate_budgets(plan, report) {
 }
 
 fn __task_plan_validate_promotion(plan, report) {
-  var out = report
-  let promotion = plan?.promotion_policy ?? {}
+  let out = report
+  const promotion = plan?.promotion_policy ?? {}
   if promotion?.shadow_runs_required != nil && promotion.shadow_runs_required < 0 {
     out = __task_plan_push_error(
       out,
@@ -560,16 +560,16 @@ fn __task_plan_validate_promotion(plan, report) {
 }
 
 fn __task_plan_reachability(plan) {
-  let {nodes = {}, edges = []} = plan ?? {}
-  let node_ids = __task_plan_collect_node_ids(plan)
-  let entry = plan?.entry
+  const {nodes = {}, edges = []} = plan ?? {}
+  const node_ids = __task_plan_collect_node_ids(plan)
+  const entry = plan?.entry
   if entry == nil || !contains(node_ids, entry) {
     return {reachable: [], unreachable: node_ids}
   }
-  var seen = [entry]
-  var stack = [entry]
+  let seen = [entry]
+  let stack = [entry]
   while len(stack) > 0 {
-    let current = stack[len(stack) - 1]
+    const current = stack[len(stack) - 1]
     stack = stack.slice(0, len(stack) - 1)
     for edge in edges {
       if edge?.from == current && edge?.to != nil && !contains(seen, edge.to) {
@@ -578,7 +578,7 @@ fn __task_plan_reachability(plan) {
       }
     }
   }
-  var unreachable = []
+  let unreachable = []
   for id in node_ids {
     if !contains(seen, id) {
       unreachable = unreachable + [id]
@@ -588,8 +588,8 @@ fn __task_plan_reachability(plan) {
 }
 
 fn __task_plan_validate_reachability(plan, report) {
-  var out = report
-  let reach = __task_plan_reachability(plan)
+  let out = report
+  const reach = __task_plan_reachability(plan)
   for id in reach.unreachable {
     out = __task_plan_push_warning(out, "node_unreachable", "nodes." + id, "node is unreachable from entry")
   }
@@ -632,10 +632,10 @@ pub fn task_plan_validate(plan) {
       promotion_summary: {},
     }
   }
-  let shape = schema_check(plan, task_plan_schema())
-  var report = __task_plan_blank_report(plan)
+  const shape = schema_check(plan, task_plan_schema())
+  let report = __task_plan_blank_report(plan)
   if is_err(shape) {
-    let err = unwrap_err(shape)
+    const err = unwrap_err(shape)
     for entry in err.errors ?? [] {
       report = __task_plan_push_error(report, "shape", entry?.path ?? "", entry?.message ?? to_string(entry))
     }
@@ -676,7 +676,7 @@ fn __task_plan_workflow_kind(ir_kind) {
 }
 
 fn __task_plan_workflow_mode(node) {
-  let kind = node?.kind
+  const kind = node?.kind
   if kind == "human_gate" {
     return "manual"
   } else if kind == "deterministic_command" {
@@ -692,8 +692,8 @@ fn __task_plan_workflow_mode(node) {
 }
 
 fn __task_plan_loop_budget_policy(plan) {
-  let budgets = plan?.budgets ?? {}
-  var policy = {}
+  const budgets = plan?.budgets ?? {}
+  let policy = {}
   if budgets?.wall_clock_ms != nil {
     policy = policy + {wall_clock_ms: budgets.wall_clock_ms}
   }
@@ -710,8 +710,8 @@ fn __task_plan_merge_iteration_budget(model_policy, budget_policy) {
   if len(budget_policy) == 0 {
     return model_policy
   }
-  let raw = model_policy?.iteration_budget
-  let existing = if type_of(raw) == "dict" {
+  const raw = model_policy?.iteration_budget
+  const existing = if type_of(raw) == "dict" {
     raw
   } else if raw != nil {
     {mode: raw}
@@ -729,8 +729,8 @@ fn __task_plan_mode_budget_policy(mode, budget_policy) {
 }
 
 fn __task_plan_model_policy(node, budget_policy) {
-  let model = node?.model ?? {}
-  var policy = {}
+  const model = node?.model ?? {}
+  let policy = {}
   if model?.provider != nil {
     policy = policy + {provider: model.provider}
   }
@@ -750,8 +750,8 @@ fn __task_plan_model_policy(node, budget_policy) {
 }
 
 fn __task_plan_capability_policy(node) {
-  let {tools = [], effects = []} = node ?? {}
-  var policy = {}
+  const {tools = [], effects = []} = node ?? {}
+  let policy = {}
   if len(tools) > 0 {
     policy = policy + {tools: tools}
   }
@@ -762,7 +762,7 @@ fn __task_plan_capability_policy(node) {
 }
 
 fn __task_plan_kind_metadata(node) {
-  let kind = node?.kind
+  const kind = node?.kind
   if kind == "agent_loop" && node?.agent_loop != nil {
     return {agent_loop: node.agent_loop}
   }
@@ -791,8 +791,8 @@ fn __task_plan_kind_metadata(node) {
 }
 
 fn __task_plan_map_policy(node) {
-  let map = node?.map ?? {}
-  var policy = {}
+  const map = node?.map ?? {}
+  let policy = {}
   if map?.items != nil {
     policy = policy + {items: map.items}
   }
@@ -806,7 +806,7 @@ fn __task_plan_map_policy(node) {
 }
 
 fn __task_plan_compact_policy(node) {
-  var policy = {enabled: true}
+  let policy = {enabled: true}
   if node?.compact?.threshold_tokens != nil {
     policy = policy + {token_threshold: node.compact.threshold_tokens}
   }
@@ -814,8 +814,8 @@ fn __task_plan_compact_policy(node) {
 }
 
 fn __task_plan_kind_fields(node) {
-  let kind = node?.kind
-  var fields = {}
+  const kind = node?.kind
+  let fields = {}
   if kind == "human_gate" {
     fields = fields + {output_contract: {output_kinds: ["approval"]}}
   } else if kind == "deterministic_command" {
@@ -839,13 +839,13 @@ fn __task_plan_kind_fields(node) {
 }
 
 fn __task_plan_compile_node(node_id, node, budget_policy) {
-  let mode = __task_plan_workflow_mode(node)
-  let model_policy = __task_plan_model_policy(node, __task_plan_mode_budget_policy(mode, budget_policy))
-  let capability_policy = __task_plan_capability_policy(node)
-  let base_meta = {task_plan_kind: node?.kind, task_plan_purpose: node?.purpose ?? ""}
+  const mode = __task_plan_workflow_mode(node)
+  const model_policy = __task_plan_model_policy(node, __task_plan_mode_budget_policy(mode, budget_policy))
+  const capability_policy = __task_plan_capability_policy(node)
+  const base_meta = {task_plan_kind: node?.kind, task_plan_purpose: node?.purpose ?? ""}
     + (node?.metadata ?? {})
     + __task_plan_kind_metadata(node)
-  var workflow_node = {id: node_id, kind: __task_plan_workflow_kind(node?.kind), metadata: base_meta}
+  let workflow_node = {id: node_id, kind: __task_plan_workflow_kind(node?.kind), metadata: base_meta}
   if mode != nil {
     workflow_node = workflow_node + {mode: mode}
   }
@@ -869,8 +869,8 @@ fn __task_plan_compile_node(node_id, node, budget_policy) {
 }
 
 fn __task_plan_compile_nodes(plan) {
-  var compiled = {}
-  let budget_policy = __task_plan_loop_budget_policy(plan)
+  let compiled = {}
+  const budget_policy = __task_plan_loop_budget_policy(plan)
   for entry in plan?.nodes ?? {} {
     compiled = compiled + {[entry.key]: __task_plan_compile_node(entry.key, entry.value, budget_policy)}
   }
@@ -878,9 +878,9 @@ fn __task_plan_compile_nodes(plan) {
 }
 
 fn __task_plan_compile_edges(plan) {
-  var edges = []
+  let edges = []
   for edge in plan?.edges ?? [] {
-    var compiled = {from: edge.from, to: edge.to}
+    let compiled = {from: edge.from, to: edge.to}
     if edge?.branch != nil {
       compiled = compiled + {branch: edge.branch}
     }
@@ -893,8 +893,8 @@ fn __task_plan_compile_edges(plan) {
 }
 
 fn __task_plan_compile_workflow_capability(plan) {
-  let caps = plan?.capabilities ?? {}
-  var policy = {}
+  const caps = plan?.capabilities ?? {}
+  let policy = {}
   if caps?.tools != nil {
     policy = policy + {tools: caps.tools}
   }
@@ -943,14 +943,14 @@ fn __task_plan_metadata(plan, validation) {
  * @api_stability: experimental
  */
 pub fn task_plan_compile(plan) {
-  let validation = task_plan_validate(plan)
+  const validation = task_plan_validate(plan)
   if !validation.valid {
     return {ok: false, validation: validation}
   }
-  let nodes = __task_plan_compile_nodes(plan)
-  let edges = __task_plan_compile_edges(plan)
-  let capability_policy = __task_plan_compile_workflow_capability(plan)
-  var input = {
+  const nodes = __task_plan_compile_nodes(plan)
+  const edges = __task_plan_compile_edges(plan)
+  const capability_policy = __task_plan_compile_workflow_capability(plan)
+  let input = {
     name: plan?.objective ?? "task_plan",
     entry: plan?.entry,
     nodes: nodes,
@@ -960,7 +960,7 @@ pub fn task_plan_compile(plan) {
   if len(capability_policy) > 0 {
     input = input + {capability_policy: capability_policy}
   }
-  let graph = workflow_graph(input)
+  const graph = workflow_graph(input)
   return {ok: true, workflow: graph, validation: validation}
 }
 
@@ -978,13 +978,13 @@ pub fn task_plan_compile(plan) {
  * @api_stability: experimental
  */
 pub fn task_plan_render_mermaid(plan) {
-  var lines = ["flowchart TD"]
+  let lines = ["flowchart TD"]
   for entry in plan?.nodes ?? {} {
-    let node_id = entry.key
-    let node = entry.value
-    let kind = node?.kind ?? "stage"
-    let label = node?.purpose ?? node_id
-    let shape_open = if kind == "verify" {
+    const node_id = entry.key
+    const node = entry.value
+    const kind = node?.kind ?? "stage"
+    const label = node?.purpose ?? node_id
+    const shape_open = if kind == "verify" {
       "{{"
     } else if kind == "human_gate" {
       "(("
@@ -995,7 +995,7 @@ pub fn task_plan_render_mermaid(plan) {
     } else {
       "["
     }
-    let shape_close = if kind == "verify" {
+    const shape_close = if kind == "verify" {
       "}}"
     } else if kind == "human_gate" {
       "))"
@@ -1013,7 +1013,7 @@ pub fn task_plan_render_mermaid(plan) {
     ]
   }
   for edge in plan?.edges ?? [] {
-    let arrow = if edge?.branch == nil {
+    const arrow = if edge?.branch == nil {
       " --> "
     } else {
       " -- " + edge.branch + " --> "

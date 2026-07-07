@@ -10,7 +10,7 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("{\"ok\":true}")],
     { ->
-      let result = llm_call(
+      const result = llm_call(
         "return a structured answer",
         nil,
         {
@@ -41,9 +41,9 @@ pipeline test(task) {
         },
       )
       assert(result.text == "{\"ok\":true}", "mock response returned")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(len(calls) == 1, "one LLM call recorded")
-      let call = calls[0]
+      const call = calls[0]
       assert(call.api_mode == "responses", "Responses mode recorded")
       assert(call.output_format.kind == "json_schema", "structured output kind recorded")
       assert(call.output_format.schema.properties.ok.type == "boolean", "schema recorded")

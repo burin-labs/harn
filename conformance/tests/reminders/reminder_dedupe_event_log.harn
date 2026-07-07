@@ -1,16 +1,16 @@
 pipeline main() {
-  let topic = "transcript.reminder.lifecycle"
-  let cursor = event_log.latest(topic)
-  let first = transcript
+  const topic = "transcript.reminder.lifecycle"
+  const cursor = event_log.latest(topic)
+  const first = transcript
     .inject_reminder(transcript(), {body: "old reminder", dedupe_key: "context-slot", ttl_turns: 2})
-  let second = transcript
+  const second = transcript
     .inject_reminder(
     first.transcript,
     {body: "new reminder", dedupe_key: "context-slot", ttl_turns: 3},
   )
-  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
-  let injected = stream.next().value
-  let logged = stream.next().value
+  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const injected = stream.next().value
+  const logged = stream.next().value
   __io_println(second.deduped_count)
   __io_println(injected.kind)
   __io_println(logged.kind)

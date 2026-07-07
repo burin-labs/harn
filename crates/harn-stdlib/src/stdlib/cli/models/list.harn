@@ -18,7 +18,7 @@
  *                                     human-readable table.
  */
 fn __dict_get_list(d: dict, key: string) -> list {
-  let v = d[key]
+  const v = d[key]
   if type_of(v) == "list" {
     return v
   }
@@ -26,7 +26,7 @@ fn __dict_get_list(d: dict, key: string) -> list {
 }
 
 fn __dict_get_string(d: dict, key: string, fallback: string) -> string {
-  let v = d[key]
+  const v = d[key]
   if type_of(v) == "string" {
     return v
   }
@@ -34,7 +34,7 @@ fn __dict_get_string(d: dict, key: string, fallback: string) -> string {
 }
 
 fn __dict_get_bool(d: dict, key: string, fallback: bool) -> bool {
-  let v = d[key]
+  const v = d[key]
   if type_of(v) == "bool" {
     return v
   }
@@ -48,7 +48,7 @@ fn __dict_get_bool(d: dict, key: string, fallback: bool) -> bool {
  * a quadratic blowup if the catalog grows.
  */
 fn __string_set(items: list) -> dict {
-  var out = {}
+  let out = {}
   for item in items {
     if type_of(item) == "string" {
       out = out + {[item]: true}
@@ -71,26 +71,26 @@ fn __group_by_provider(
   installed_only: bool,
   installed_ollama: dict,
 ) -> dict {
-  var groups = {}
+  let groups = {}
   for entry in catalog {
     if type_of(entry) != "dict" {
       continue
     }
-    let provider = __dict_get_string(entry, "provider", "")
-    let id = __dict_get_string(entry, "id", "")
+    const provider = __dict_get_string(entry, "provider", "")
+    const id = __dict_get_string(entry, "id", "")
     if provider == "" || id == "" {
       continue
     }
     if provider_filter != "" && provider != provider_filter {
       continue
     }
-    let installed = provider == "ollama" && (installed_ollama[id] ?? false)
+    const installed = provider == "ollama" && (installed_ollama[id] ?? false)
     if installed_only && !installed {
       continue
     }
-    let capabilities = __dict_get_list(entry, "capabilities")
-    let item = {id: id, capabilities: capabilities, installed: installed}
-    let prior = if groups[provider] == nil {
+    const capabilities = __dict_get_list(entry, "capabilities")
+    const item = {id: id, capabilities: capabilities, installed: installed}
+    const prior = if groups[provider] == nil {
       []
     } else {
       groups[provider]
@@ -105,25 +105,25 @@ fn __group_by_provider(
  * so users still see local models before curated metadata exists.
  */
 fn __augment_with_unknown_ollama(groups: dict, provider_filter: string, installed_ollama_list: list) -> dict {
-  let show_ollama = provider_filter == "" || provider_filter == "ollama"
+  const show_ollama = provider_filter == "" || provider_filter == "ollama"
   if !show_ollama {
     return groups
   }
-  let existing = if groups["ollama"] == nil {
+  const existing = if groups["ollama"] == nil {
     []
   } else {
     groups["ollama"]
   }
-  var known_ids = {}
+  let known_ids = {}
   for item in existing {
     if type_of(item) == "dict" {
-      let id = __dict_get_string(item, "id", "")
+      const id = __dict_get_string(item, "id", "")
       if id != "" {
         known_ids = known_ids + {[id]: true}
       }
     }
   }
-  var augmented = existing
+  let augmented = existing
   for id in installed_ollama_list {
     if type_of(id) != "string" {
       continue
@@ -146,30 +146,30 @@ fn __augment_with_unknown_ollama(groups: dict, provider_filter: string, installe
  * the stdlib doesn't expose to scripts yet.
  */
 fn __sorted_strings(items: list) -> list {
-  var out = []
+  let out = []
   for item in items {
-    var idx = 0
+    let idx = 0
     while idx < len(out) && out[idx] < item {
       idx = idx + 1
     }
-    let head = out[0:idx]
-    let tail = out[idx:len(out)]
+    const head = out[0:idx]
+    const tail = out[idx:len(out)]
     out = head.push(item) + tail
   }
   return out
 }
 
 fn __sort_models_by_id(models: list) -> list {
-  var out = []
+  let out = []
   for model in models {
-    let id = if type_of(model) == "dict" {
+    const id = if type_of(model) == "dict" {
       __dict_get_string(model, "id", "")
     } else {
       ""
     }
-    var idx = 0
+    let idx = 0
     while idx < len(out) {
-      let other_id = if type_of(out[idx]) == "dict" {
+      const other_id = if type_of(out[idx]) == "dict" {
         __dict_get_string(out[idx], "id", "")
       } else {
         ""
@@ -179,8 +179,8 @@ fn __sort_models_by_id(models: list) -> list {
       }
       idx = idx + 1
     }
-    let head = out[0:idx]
-    let tail = out[idx:len(out)]
+    const head = out[0:idx]
+    const tail = out[idx:len(out)]
     out = head.push(model) + tail
   }
   return out
@@ -192,24 +192,24 @@ fn __sort_models_by_id(models: list) -> list {
  * marker, then a blank line.
  */
 fn __render_human(groups: dict) -> string {
-  let provider_names = __sorted_strings(keys(groups))
+  const provider_names = __sorted_strings(keys(groups))
   if len(provider_names) == 0 {
     return "(no models match)\n"
   }
-  var out = ""
+  let out = ""
   for provider in provider_names {
     out = out + provider + "\n"
-    let models = __sort_models_by_id(groups[provider])
+    const models = __sort_models_by_id(groups[provider])
     for model in models {
-      let id = __dict_get_string(model, "id", "")
-      let installed = __dict_get_bool(model, "installed", false)
-      let suffix = if installed {
+      const id = __dict_get_string(model, "id", "")
+      const installed = __dict_get_bool(model, "installed", false)
+      const suffix = if installed {
         " [installed]"
       } else {
         ""
       }
-      let tags = __dict_get_list(model, "capabilities")
-      let tag_text = if len(tags) == 0 {
+      const tags = __dict_get_list(model, "capabilities")
+      const tag_text = if len(tags) == 0 {
         ""
       } else {
         "  (" + join(tags, ", ") + ")"
@@ -228,15 +228,15 @@ fn __render_human(groups: dict) -> string {
  * lexicographic; model order within each provider preserves catalog order.
  */
 fn __render_envelope(groups: dict) -> string {
-  let provider_names = __sorted_strings(keys(groups))
-  var provider_list = []
+  const provider_names = __sorted_strings(keys(groups))
+  let provider_list = []
   for name in provider_names {
-    let models = groups[name]
-    var rendered = []
+    const models = groups[name]
+    let rendered = []
     for model in models {
-      let id = __dict_get_string(model, "id", "")
-      let tags = __dict_get_list(model, "capabilities")
-      let entry = if name == "ollama" {
+      const id = __dict_get_string(model, "id", "")
+      const tags = __dict_get_list(model, "capabilities")
+      const entry = if name == "ollama" {
         {id: id, tags: tags, installed: __dict_get_bool(model, "installed", false)}
       } else {
         {id: id, tags: tags}
@@ -249,12 +249,12 @@ fn __render_envelope(groups: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let catalog = harness.llm.catalog()
-  let provider_filter = harness.env.get_or("HARN_MODELS_LIST_PROVIDER", "")
-  let installed_only = harness.env.get_or("HARN_MODELS_LIST_INSTALLED_ONLY", "0") == "1"
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
-  let installed_raw = harness.env.get_or("HARN_MODELS_INSTALLED_OLLAMA", "[]")
-  let installed_ollama_list = try {
+  const catalog = harness.llm.catalog()
+  const provider_filter = harness.env.get_or("HARN_MODELS_LIST_PROVIDER", "")
+  const installed_only = harness.env.get_or("HARN_MODELS_LIST_INSTALLED_ONLY", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const installed_raw = harness.env.get_or("HARN_MODELS_INSTALLED_OLLAMA", "[]")
+  const installed_ollama_list = try {
     json_parse(installed_raw)
   } catch (e) {
     harness.stdio
@@ -265,21 +265,21 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("internal error: HARN_MODELS_INSTALLED_OLLAMA must be a JSON list")
     return 70
   }
-  let installed_ollama_set = __string_set(installed_ollama_list)
-  let grouped = __group_by_provider(catalog, provider_filter, installed_only, installed_ollama_set)
+  const installed_ollama_set = __string_set(installed_ollama_list)
+  const grouped = __group_by_provider(catalog, provider_filter, installed_only, installed_ollama_set)
   // Synthesised entries are themselves installed, so they pass
   // `--installed-only` too. Run the pass regardless of the flag; the
   // dedup inside `__augment_with_unknown_ollama` keeps it idempotent.
-  let augmented = __augment_with_unknown_ollama(grouped, provider_filter, installed_ollama_list)
+  const augmented = __augment_with_unknown_ollama(grouped, provider_filter, installed_ollama_list)
   if json_mode {
     harness.stdio.println(__render_envelope(augmented))
     return 0
   }
-  let text = __render_human(augmented)
+  const text = __render_human(augmented)
   // Provider listings end with a blank line; `(no models match)` does
   // not. Strip the final newline so `harness.stdio.println` re-adds
   // exactly one.
-  let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+  const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
     text[0:len(text) - 1]
   } else {
     text

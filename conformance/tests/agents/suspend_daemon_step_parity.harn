@@ -12,12 +12,12 @@
  * then asserts the snapshot fields directly.
  */
 pipeline main() {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let dir = path_join(harness.fs.temp_dir(), "harn-daemon-parity-" + unique)
+  const dir = path_join(harness.fs.temp_dir(), "harn-daemon-parity-" + unique)
   harness.fs.mkdir(dir)
-  let snapshot_path = path_join(dir, "daemon.json")
-  let result = agent_loop(
+  const snapshot_path = path_join(dir, "daemon.json")
+  const result = agent_loop(
     "Poll for background work",
     "You are helpful",
     {
@@ -34,7 +34,7 @@ pipeline main() {
       compact_callback: { archived -> {summary: "daemon parity summary " + to_string(len(archived))} },
     },
   )
-  let saved = json_parse(harness.fs.read_text(snapshot_path))
+  const saved = json_parse(harness.fs.read_text(snapshot_path))
   // Loop-level shape parity (matches the existing daemon test).
   __io_println("loop_status=" + result.status)
   __io_println("loop_daemon_state=" + result.daemon_state)

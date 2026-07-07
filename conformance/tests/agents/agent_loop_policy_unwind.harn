@@ -2,7 +2,7 @@ import { agent_session_finalize } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(task) {
-  let failed = try {
+  const failed = try {
     agent_loop(
       "This loop should fail during bootstrap",
       nil,
@@ -15,7 +15,7 @@ pipeline main(task) {
     )
   }
   __io_println(is_err(failed))
-  let stale_finalize = try {
+  const stale_finalize = try {
     agent_session_finalize(
       "failed-bootstrap-cleanup",
       {final_status: "done", stop_reason: "test", iterations: 0},
@@ -25,7 +25,7 @@ pipeline main(task) {
   with_llm_script(
     [llm_text("<done>##DONE##</done>")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "A later loop should not inherit failed-loop state",
         nil,
         {provider: "mock", max_iterations: 1},

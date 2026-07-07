@@ -1,16 +1,16 @@
 import "std/calendar"
 
 pipeline default() {
-  let jan1 = date_parse("2021-01-01T12:34:56Z")
-  let week: CalendarIsoWeek = iso_week(jan1)
+  const jan1 = date_parse("2021-01-01T12:34:56Z")
+  const week: CalendarIsoWeek = iso_week(jan1)
   __io_println(to_string(week.year) + "-W" + to_string(week.week))
   __io_println(quarter(date_parse("2024-02-29T12:00:00Z")))
   __io_println(date_to_zone(start_of_week(jan1), "UTC"))
   __io_println(date_to_zone(start_of_month(date_parse("2024-02-29T12:00:00Z")), "UTC"))
   __io_println(date_to_zone(end_of_month(date_parse("2024-02-29T12:00:00Z")), "UTC"))
   __io_println(date_to_zone(start_of_quarter(date_parse("2024-05-15T12:00:00Z")), "UTC"))
-  let range_options: CalendarDateRangeOptions = {max_items: 10}
-  let range: list<CalendarTimestamp> = date_range("2024-02-27", "2024-03-02", "day", "UTC", range_options)
+  const range_options: CalendarDateRangeOptions = {max_items: 10}
+  const range: list<CalendarTimestamp> = date_range("2024-02-27", "2024-03-02", "day", "UTC", range_options)
   __io_println(len(range))
   __io_println(date_format(range[2], "%Y-%m-%d", "UTC"))
   __io_println(date_format(next_weekday("2024-02-29", "monday", "UTC"), "%Y-%m-%d", "UTC"))

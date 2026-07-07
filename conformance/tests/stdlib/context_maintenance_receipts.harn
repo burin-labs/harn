@@ -7,8 +7,8 @@ import {
 } from "std/context/maintenance"
 
 pipeline default() {
-  let event = {event: "FileEdited", session: {id: "session-1"}, path: "src/lib.rs"}
-  let queued = context_maintenance_queue_receipt(
+  const event = {event: "FileEdited", session: {id: "session-1"}, path: "src/lib.rs"}
+  const queued = context_maintenance_queue_receipt(
     "context.refresh",
     event,
     {
@@ -22,14 +22,14 @@ pipeline default() {
   __io_println(queued.lifecycle_event)
   __io_println(queued.affected_paths[0])
   __io_println(queued.retry_hint.retryable)
-  let running = context_maintenance_transition(
+  const running = context_maintenance_transition(
     queued,
     "running",
     {started_at: "2026-05-16T18:00:01Z", duration_ms: 1},
   )
   __io_println(running.status)
   __io_println(running.run_id == queued.run_id)
-  let succeeded = context_maintenance_transition(
+  const succeeded = context_maintenance_transition(
     running,
     "succeeded",
     {
@@ -41,7 +41,7 @@ pipeline default() {
   __io_println(succeeded.status)
   __io_println(succeeded.duration_ms)
   __io_println(len(succeeded.artifact_ids))
-  let failed = context_maintenance_transition(
+  const failed = context_maintenance_transition(
     running,
     "failed",
     {
@@ -52,17 +52,17 @@ pipeline default() {
   )
   __io_println(failed.status)
   __io_println(failed.retry_hint.reason)
-  let skipped = context_maintenance_replay_decision(succeeded, {mode: "skip", reason: "fixture covers it"})
+  const skipped = context_maintenance_replay_decision(succeeded, {mode: "skip", reason: "fixture covers it"})
   __io_println(skipped.should_run)
   __io_println(skipped.receipt.status)
   __io_println(skipped.receipt.error)
-  let included = context_maintenance_replay_decision(succeeded, {mode: "include"})
+  const included = context_maintenance_replay_decision(succeeded, {mode: "include"})
   __io_println(included.should_run)
-  let invalid = try {
+  const invalid = try {
     context_maintenance_receipt("context.refresh", "paused", {})
   }
   __io_println(is_err(invalid))
-  let key_a = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["b", "a", "a"], "session-1")
-  let key_b = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["a", "b"], "session-1")
+  const key_a = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["b", "a", "a"], "session-1")
+  const key_b = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["a", "b"], "session-1")
   __io_println(key_a == key_b)
 }

@@ -7,8 +7,8 @@
 import { with_retry } from "std/llm/handlers"
 
 pipeline default() {
-  let counter = atomic(0)
-  let synthetic = { _call ->
+  const counter = atomic(0)
+  const synthetic = { _call ->
     let n = atomic_add(counter, 1)
     if n < 2 {
       __io_println("attempt " + to_string(n + 1) + " -> transient")
@@ -27,8 +27,8 @@ pipeline default() {
       },
     }
   }
-  let caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
-  let env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
+  const env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println("final ok = " + to_string(env.ok))
   __io_println("final text = " + env.value.text)
   __io_println("retries_attempted = " + to_string(env.retries_attempted))

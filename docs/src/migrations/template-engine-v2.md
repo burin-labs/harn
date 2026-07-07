@@ -32,11 +32,11 @@ Expected: {{expected_output}}
 **Before** — build a string in `.harn` and inject it as a single variable:
 
 ```harn,ignore
-let block = ""
+const block = ""
 for sample in samples {
   block = "${block}### ${sample.path}\n\`\`\`\n${sample.content}\n\`\`\`\n\n"
 }
-let prompt = render("enrichment.prompt", {block: block, ...})
+const prompt = render("enrichment.prompt", {block: block, ...})
 ```
 
 ```text
@@ -48,7 +48,7 @@ let prompt = render("enrichment.prompt", {block: block, ...})
 **After** — iterate in the template:
 
 ```harn,ignore
-let prompt = render("enrichment.prompt", {samples: samples, ...})
+const prompt = render("enrichment.prompt", {samples: samples, ...})
 ```
 
 ````text
@@ -91,7 +91,7 @@ Pass stage-specific overrides with `with`:
 **Before** — uppercase, join lists, JSON-stringify in `.harn` before rendering:
 
 ```harn,ignore
-let tags_str = join(map(tags, fn(t) { return uppercase(t) }), ", ")
+const tags_str = join(map(tags, fn(t) { return uppercase(t) }), ", ")
 render("x.prompt", {tags: tags_str})
 ```
 

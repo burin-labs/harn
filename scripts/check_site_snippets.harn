@@ -7,9 +7,9 @@
 //
 // Usage:
 //   harn run scripts/check_site_snippets.harn
-let SITE_SNIPPET_GLOB = "website/src/examples/*.harn.txt"
+const SITE_SNIPPET_GLOB = "website/src/examples/*.harn.txt"
 
-let GALLERY_SCENARIOS: list<string> = [
+const GALLERY_SCENARIOS: list<string> = [
   "crates/harn-cli/assets/demo/mcp-host/scenario.harn",
   "crates/harn-cli/assets/demo/merge-captain/scenario.harn",
   "crates/harn-cli/assets/demo/stdlib-toolkit/scenario.harn",
@@ -17,7 +17,7 @@ let GALLERY_SCENARIOS: list<string> = [
 
 /** Repo-relative form of a glob result (strip the `/./` marker). */
 pub fn rel_path(path: string) -> string {
-  let idx = path.index_of("/./")
+  const idx = path.index_of("/./")
   if idx >= 0 {
     return path.substring(idx + 3, path.len())
   }
@@ -35,15 +35,15 @@ pub fn summary_line(checked: int, failures: int) -> string {
  * missing) — the same ladder as the bash original.
  */
 fn resolve_harn_bin() -> string {
-  let env_bin = harness.env.get("HARN_BIN")
+  const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
   }
-  var target_dir = ""
-  let meta = harness.process
+  let target_dir = ""
+  const meta = harness.process
     .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
   if meta.success {
-    let parsed = try {
+    const parsed = try {
       json_parse(meta.stdout)
     } catch (err) {
       nil
@@ -56,10 +56,10 @@ fn resolve_harn_bin() -> string {
   if target_dir == "" {
     target_dir = "target"
   }
-  let bin = "${target_dir}/debug/harn"
+  const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    let build = harness.process
+    const build = harness.process
       .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       __io_eprint(build.stderr)
@@ -70,17 +70,17 @@ fn resolve_harn_bin() -> string {
 }
 
 pipeline main(task) {
-  let harn_bin = resolve_harn_bin()
-  var site_snippets: list<string> = []
+  const harn_bin = resolve_harn_bin()
+  let site_snippets: list<string> = []
   for g in harness.fs.glob(SITE_SNIPPET_GLOB) {
     site_snippets = site_snippets + [rel_path(g)]
   }
   site_snippets = site_snippets.sort()
-  var checked = 0
-  var failures = 0
+  let checked = 0
+  let failures = 0
   for snippet in site_snippets + GALLERY_SCENARIOS {
     checked = checked + 1
-    let res = harness.process.spawn_captured({cmd: harn_bin, args: ["check", snippet]})
+    const res = harness.process.spawn_captured({cmd: harn_bin, args: ["check", snippet]})
     __io_print(res.stdout)
     __io_eprint(res.stderr)
     if !res.success {

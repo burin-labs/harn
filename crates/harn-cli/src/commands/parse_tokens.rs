@@ -121,15 +121,15 @@ mod tests {
 
     #[test]
     fn text_token_line_includes_span_kind_and_lexeme() {
-        let source = "let x = 1\n";
+        let source = "const x = 1\n";
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize().expect("tokenize");
 
         let line = format_token_line(source, &tokens[0]);
 
         assert!(line.contains("1:1"));
-        assert!(line.contains("0..3"));
-        assert!(line.contains("Let"));
-        assert!(line.contains("\"let\""));
+        assert!(line.contains("0..5"));
+        assert!(line.contains("Const"));
+        assert!(line.contains("\"const\""));
     }
 }

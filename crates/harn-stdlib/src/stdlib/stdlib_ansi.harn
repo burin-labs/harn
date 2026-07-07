@@ -1,9 +1,9 @@
 // std/ansi - terminal styling helpers with deterministic no-color fallbacks.
-let __ANSI_ESC = hex_decode("1b")
+const __ANSI_ESC = hex_decode("1b")
 
-let __ANSI_BEL = hex_decode("07")
+const __ANSI_BEL = hex_decode("07")
 
-let __ANSI_RESET = __ANSI_ESC + "[0m"
+const __ANSI_RESET = __ANSI_ESC + "[0m"
 
 type AnsiOptions = {stream?: string, mode?: string, enabled?: bool}
 
@@ -31,7 +31,7 @@ fn __ansi_options(options) {
 }
 
 fn __ansi_color_index(name) {
-  let n = lowercase(replace(name ?? "", "-", "_"))
+  const n = lowercase(replace(name ?? "", "-", "_"))
   if n == "black" {
     return 0
   }
@@ -84,19 +84,19 @@ fn __ansi_color_index(name) {
 }
 
 fn __ansi_color_code(name, background) {
-  let index = __ansi_color_index(name)
+  const index = __ansi_color_index(name)
   if index == nil {
     return nil
   }
   if index >= 8 {
-    let bright_base = if background {
+    const bright_base = if background {
       100
     } else {
       90
     }
     return to_string(bright_base + index - 8)
   }
-  let base = if background {
+  const base = if background {
     40
   } else {
     30
@@ -105,8 +105,8 @@ fn __ansi_color_code(name, background) {
 }
 
 fn __ansi_codes(style) {
-  let s = style ?? {}
-  var codes = []
+  const s = style ?? {}
+  let codes = []
   if s?.bold ?? false {
     codes = codes.push("1")
   }
@@ -125,13 +125,13 @@ fn __ansi_codes(style) {
   if s?.strikethrough ?? false {
     codes = codes.push("9")
   }
-  let fg = s?.fg ?? s?.color
-  let fg_code = __ansi_color_code(fg, false)
+  const fg = s?.fg ?? s?.color
+  const fg_code = __ansi_color_code(fg, false)
   if fg_code != nil {
     codes = codes.push(fg_code)
   }
-  let bg = s?.bg ?? s?.background
-  let bg_code = __ansi_color_code(bg, true)
+  const bg = s?.bg ?? s?.background
+  const bg_code = __ansi_color_code(bg, true)
   if bg_code != nil {
     codes = codes.push(bg_code)
   }
@@ -145,11 +145,11 @@ fn __ansi_codes(style) {
  * @errors: []
  */
 pub fn ansi_enabled(options: AnsiOptions = {}) -> bool {
-  let opts = __ansi_options(options)
+  const opts = __ansi_options(options)
   if opts?.enabled != nil {
     return opts.enabled ? true : false
   }
-  let mode = lowercase(opts?.mode ?? "auto")
+  const mode = lowercase(opts?.mode ?? "auto")
   if mode == "always" {
     return true
   }
@@ -186,10 +186,10 @@ pub fn ansi_reset() -> string {
  * @errors: []
  */
 pub fn ansi_strip(text: string) -> string {
-  let value = text ?? ""
-  let csi = __ANSI_ESC + "\\[[0-9;?]*[ -/]*[@-~]"
-  let without_csi = regex_replace_all(csi, "", value)
-  let osc = __ANSI_ESC + "\\][^" + __ANSI_BEL + "]*(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
+  const value = text ?? ""
+  const csi = __ANSI_ESC + "\\[[0-9;?]*[ -/]*[@-~]"
+  const without_csi = regex_replace_all(csi, "", value)
+  const osc = __ANSI_ESC + "\\][^" + __ANSI_BEL + "]*(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
   return regex_replace_all(osc, "", without_csi)
 }
 
@@ -210,11 +210,11 @@ pub fn ansi_visible_len(text: string) -> int {
  * @errors: []
  */
 pub fn ansi_style(text: string, style: AnsiStyle = {}, options: AnsiOptions = {}) -> string {
-  let value = text ?? ""
+  const value = text ?? ""
   if !ansi_enabled(options) {
     return value
   }
-  let codes = __ansi_codes(style)
+  const codes = __ansi_codes(style)
   if len(codes) == 0 {
     return value
   }
@@ -328,7 +328,7 @@ pub fn ansi_muted(text: string, options: AnsiOptions = {}) -> string {
  * @errors: []
  */
 pub fn ansi_link(label: string, url: string, options: AnsiOptions = {}) -> string {
-  let text = label ?? ""
+  const text = label ?? ""
   if !ansi_enabled(options) || trim(url ?? "") == "" {
     return text
   }
@@ -342,12 +342,12 @@ pub fn ansi_link(label: string, url: string, options: AnsiOptions = {}) -> strin
  * @errors: []
  */
 pub fn ansi_truncate(text: string, max_chars: int, marker: string = "...") -> string {
-  let plain = ansi_strip(text ?? "")
-  let limit = max_chars ?? 0
+  const plain = ansi_strip(text ?? "")
+  const limit = max_chars ?? 0
   if limit <= 0 || len(plain) <= limit {
     return plain
   }
-  let suffix = marker ?? "..."
+  const suffix = marker ?? "..."
   if limit <= len(suffix) {
     return substring(suffix, 0, limit)
   }

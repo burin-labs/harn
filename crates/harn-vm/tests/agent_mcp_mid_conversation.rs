@@ -109,22 +109,22 @@ fn mid_conversation_mount_bootstraps_only_the_delta() {
     let source = r#"
 import { agent_mcp_bootstrap_if_needed, agent_mcp_mount_additional } from "std/agent/mcp"
 pipeline main(task) {
-  let session = {session_id: "sess-midconv"}
+  const session = {session_id: "sess-midconv"}
   // Initial loop-entry bootstrap of the pre-configured server `alpha`.
-  let opts = {
+  const opts = {
     mcp_servers: [{name: "alpha", command: "true"}],
     tools: {_type: "tool_registry", tools: [{name: "look"}]},
     policy: {tools: ["look"]},
   }
-  let booted = agent_mcp_bootstrap_if_needed(session, opts)
+  const booted = agent_mcp_bootstrap_if_needed(session, opts)
 
   // A skill activates mid-conversation declaring `alpha` (already mounted)
   // and `beta` (new). Mount only the delta.
-  let skill_specs = [{name: "alpha", command: "true"}, {name: "beta", command: "true"}]
-  let out = agent_mcp_mount_additional(session, booted, skill_specs)
+  const skill_specs = [{name: "alpha", command: "true"}, {name: "beta", command: "true"}]
+  const out = agent_mcp_mount_additional(session, booted, skill_specs)
 
-  let catalog = (out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") })
-  let ceiling = out?.policy?.tools ?? []
+  const catalog = (out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") })
+  const ceiling = out?.policy?.tools ?? []
   log("catalog=" + join(catalog, ","))
   log("ceiling=" + join(ceiling, ","))
   log("delta_nonnil=" + to_string(out?._mcp_delta_bootstrap != nil))
@@ -166,17 +166,17 @@ fn mounting_already_active_server_is_a_noop() {
     let source = r#"
 import { agent_mcp_bootstrap_if_needed, agent_mcp_mount_additional } from "std/agent/mcp"
 pipeline main(task) {
-  let session = {session_id: "sess-noop"}
-  let opts = {
+  const session = {session_id: "sess-noop"}
+  const opts = {
     mcp_servers: [{name: "alpha", command: "true"}],
     tools: {_type: "tool_registry", tools: [{name: "look"}]},
     policy: {tools: ["look"]},
   }
-  let booted = agent_mcp_bootstrap_if_needed(session, opts)
-  let out = agent_mcp_mount_additional(session, booted, [{name: "alpha", command: "true"}])
+  const booted = agent_mcp_bootstrap_if_needed(session, opts)
+  const out = agent_mcp_mount_additional(session, booted, [{name: "alpha", command: "true"}])
 
-  let catalog = (out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") })
-  let ceiling = out?.policy?.tools ?? []
+  const catalog = (out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") })
+  const ceiling = out?.policy?.tools ?? []
   log("catalog=" + join(catalog, ","))
   log("ceiling=" + join(ceiling, ","))
   log("delta_nonnil=" + to_string(out?._mcp_delta_bootstrap != nil))
@@ -211,9 +211,9 @@ fn mid_conversation_mount_keeps_open_ceiling_open() {
     let source = r#"
 import { agent_mcp_mount_additional } from "std/agent/mcp"
 pipeline main(task) {
-  let session = {session_id: "sess-open"}
-  let opts = {tools: {_type: "tool_registry", tools: [{name: "look"}]}, policy: {tools: []}}
-  let out = agent_mcp_mount_additional(session, opts, [{name: "beta", command: "true"}])
+  const session = {session_id: "sess-open"}
+  const opts = {tools: {_type: "tool_registry", tools: [{name: "look"}]}, policy: {tools: []}}
+  const out = agent_mcp_mount_additional(session, opts, [{name: "beta", command: "true"}])
   log("catalog=" + join((out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") }), ","))
   log("ceiling_len=" + to_string(len(out?.policy?.tools ?? [])))
 }

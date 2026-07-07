@@ -2,7 +2,7 @@ pipeline test(task) {
   // Test that return inside try-finally runs the finally block
   // and correctly returns the value.
   fn get_value() {
-    var result = 0
+    let result = 0
     try {
       result = 42
       return result
@@ -12,6 +12,6 @@ pipeline test(task) {
       log("finally ran")
     }
   }
-  let v = get_value()
+  const v = get_value()
   log("result: ${v}")
 }

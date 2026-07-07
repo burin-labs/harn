@@ -9,11 +9,11 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
  * instead of completing serially.
  */
 pipeline default() {
-  let pool = pool_create({name: "cap-demo", max_concurrent: 2})
-  let in_flight = atomic(0)
-  let peak = atomic(0)
-  let gate = channel(nil, 8)
-  let body = { ->
+  const pool = pool_create({name: "cap-demo", max_concurrent: 2})
+  const in_flight = atomic(0)
+  const peak = atomic(0)
+  const gate = channel(nil, 8)
+  const body = { ->
     let now = atomic_add(in_flight, 1) + 1
     if now > atomic_get(peak) {
       atomic_set(peak, now)
@@ -22,7 +22,7 @@ pipeline default() {
     atomic_add(in_flight, -1)
     return now
   }
-  var handles = []
+  let handles = []
   for _i in 0 to 6 exclusive {
     handles = handles.push(pool.submit(body))
   }

@@ -36,7 +36,7 @@ type TriggerEvent = {
     let program = parse_program(
         r#"
 pipeline t(task) {
-  let event: TriggerEvent = {
+  const event: TriggerEvent = {
     provider_payload: {
       provider: "github",
       action: "opened",
@@ -48,16 +48,16 @@ pipeline t(task) {
     },
   }
 
-  let payload = event.provider_payload
+  const payload = event.provider_payload
   if payload.provider == "github" {
-    let action: string | nil = payload.action
+    const action: string | nil = payload.action
   } else {
-    let subtype: string | nil = payload.subtype
+    const subtype: string | nil = payload.subtype
   }
 
-  let status = event.signature_status
+  const status = event.signature_status
   if status.state == "failed" {
-    let reason: string = status.reason
+    const reason: string = status.reason
   }
 }
 "#,
@@ -87,7 +87,7 @@ struct HeaderRecord {
     let program = parse_program(
         r"
 fn use_header(header: HeaderRecord) {
-  let value: string = header.value
+  const value: string = header.value
 }
 
 pipeline t(task) {

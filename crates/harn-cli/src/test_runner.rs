@@ -1414,7 +1414,7 @@ Review instructions.
             r#"
 pipeline test_cli_skills(task) {
   assert_eq(skill_count(skills), 1)
-  let found = skill_find(skills, "review")
+  const found = skill_find(skills, "review")
   assert_eq(found.name, "review")
 }
 "#,
@@ -1778,7 +1778,7 @@ pipeline test_a_pins_clock(task) {
 }
 
 pipeline test_b_clock_is_fresh(task) {
-  let ms = now_ms()
+  const ms = now_ms()
   assert(ms < 5000000000000, "clock mock leaked from previous test")
 }
 "#,

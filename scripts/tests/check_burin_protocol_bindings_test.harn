@@ -2,8 +2,8 @@ import { with_temp_dir } from "std/testing"
 import "../check_burin_protocol_bindings.harn"
 
 fn mkdirs(path: string) -> nil {
-  let parts = split(path_normalize(path), "/")
-  var current = if path.starts_with("/") {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
     "/"
   } else {
     ""
@@ -25,7 +25,7 @@ fn mkdirs(path: string) -> nil {
 }
 
 fn write_text(root: string, rel: string, text: string) -> nil {
-  let path = path_join(root, rel)
+  const path = path_join(root, rel)
   mkdirs(dirname(path) ?? root)
   harness.fs.write_text(path, text)
   return nil
@@ -52,11 +52,11 @@ pipeline test_normalize_protocol_text_line_endings(task) {
 pipeline test_matching_bindings_pass_with_line_ending_normalization(task) {
   with_temp_dir(
     { root ->
-      let harn_root = path_join(root, "harn")
-      let burin_root = path_join(root, "burin-code")
+      const harn_root = path_join(root, "harn")
+      const burin_root = path_join(root, "burin-code")
       write_sources(harn_root, "swift\n", "type Foo = string\n")
       write_burin(burin_root, "swift\r\n", "type Foo = string\r\n")
-      let report = check_burin_protocol_bindings(burin_root, true, harn_root)
+      const report = check_burin_protocol_bindings(burin_root, true, harn_root)
       assert_eq(report.ok, true)
       assert_eq(report.status, "ok")
       assert_eq(report.stale_count, 0)
@@ -69,12 +69,12 @@ pipeline test_matching_bindings_pass_with_line_ending_normalization(task) {
 pipeline test_stale_and_missing_bindings_are_reported_in_target_order(task) {
   with_temp_dir(
     { root ->
-      let harn_root = path_join(root, "harn")
-      let burin_root = path_join(root, "burin-code")
+      const harn_root = path_join(root, "harn")
+      const burin_root = path_join(root, "burin-code")
       write_sources(harn_root, "swift source\n", "ts source\n")
       write_text(burin_root, "Sources/BurinCore/ACP/HarnProtocol.generated.swift", "swift stale\n")
       mkdirs(path_join(burin_root, "server/src/generated"))
-      let report = check_burin_protocol_bindings(burin_root, true, harn_root)
+      const report = check_burin_protocol_bindings(burin_root, true, harn_root)
       assert_eq(report.ok, false)
       assert_eq(report.status, "stale")
       assert_eq(report.stale_count, 2)
@@ -88,12 +88,12 @@ pipeline test_stale_and_missing_bindings_are_reported_in_target_order(task) {
 pipeline test_missing_root_respects_required_flag(task) {
   with_temp_dir(
     { root ->
-      let missing = path_join(root, "missing-burin")
-      let optional = check_burin_protocol_bindings(missing, false, root)
+      const missing = path_join(root, "missing-burin")
+      const optional = check_burin_protocol_bindings(missing, false, root)
       assert_eq(optional.ok, true)
       assert_eq(optional.skipped, true)
       assert_eq(optional.status, "missing_root")
-      let required = check_burin_protocol_bindings(missing, true, root)
+      const required = check_burin_protocol_bindings(missing, true, root)
       assert_eq(required.ok, false)
       assert_eq(required.skipped, false)
       assert_eq(required.status, "missing_root")

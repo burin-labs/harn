@@ -20,14 +20,14 @@ so existing scripts keep working without migration:
 
 ```harn,ignore
 // Named-argument form (recommended)
-let record = request_approval(
+const record = request_approval(
   action: "deploy production",
   quorum: 2,
   reviewers: ["alice", "bob", "carol"],
 )
 
 // Positional form (kept for back-compat with the original stdlib API)
-let record = request_approval(
+const record = request_approval(
   "deploy production",
   {quorum: 2, reviewers: ["alice", "bob", "carol"]},
 )
@@ -81,7 +81,7 @@ type Choice = {
   environment: "staging" | "prod",
 }
 
-let choice: Choice = ask_user(
+const choice: Choice = ask_user(
   "Where should this deploy?",
   {schema: schema_of(Choice)},
 )
@@ -302,7 +302,7 @@ reused from those events during replay.
 Catch denials explicitly:
 
 ```harn
-let result = try {
+const result = try {
   request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob"]})
 }
 if is_err(result) && unwrap_err(result).name == "ApprovalDeniedError" {
@@ -313,7 +313,7 @@ if is_err(result) && unwrap_err(result).name == "ApprovalDeniedError" {
 Gate a destructive step behind dual control:
 
 ```harn,ignore
-let deleted = dual_control(2, 3, {
+const deleted = dual_control(2, 3, {
   delete_file("prod.db")
   return true
 }, ["alice", "bob", "carol"])

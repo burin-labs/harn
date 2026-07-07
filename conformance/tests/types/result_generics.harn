@@ -6,11 +6,11 @@ pipeline test(task) {
     return Result.Ok(a / b)
   }
   fn halve_division(a: int, b: int) -> Result<int, string> {
-    let value: int = divide(a, b)?
+    const value: int = divide(a, b)?
     return Result.Ok(value / 2)
   }
-  let ok: Result<int, string> = halve_division(12, 3)
-  let err: Result<int, string> = halve_division(12, 0)
+  const ok: Result<int, string> = halve_division(12, 3)
+  const err: Result<int, string> = halve_division(12, 0)
   log(ok)
   log(err)
   match ok {

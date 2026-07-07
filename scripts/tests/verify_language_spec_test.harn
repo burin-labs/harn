@@ -104,8 +104,8 @@ pipeline test_snippet_filename(task) {
 
 @test
 pipeline test_extract_single_harn_fence(task) {
-  let md = "# Intro\n\n```harn\nlet x = 1\n```\n"
-  let fences = extract_harn_fences(md)
+  const md = "# Intro\n\n```harn\nlet x = 1\n```\n"
+  const fences = extract_harn_fences(md)
   assert_eq(fences.count, 1)
   assert_eq(fences[0].heading, "Intro")
   assert_eq(fences[0].line, 4)
@@ -114,22 +114,22 @@ pipeline test_extract_single_harn_fence(task) {
 
 @test
 pipeline test_extract_skips_other_languages(task) {
-  let md = "## A\n\n```rust\nfn main(){}\n```\n\n```ebnf\nrule = x\n```\n"
-  let fences = extract_harn_fences(md)
+  const md = "## A\n\n```rust\nfn main(){}\n```\n\n```ebnf\nrule = x\n```\n"
+  const fences = extract_harn_fences(md)
   assert_eq(fences.count, 0)
 }
 
 @test
 pipeline test_extract_skips_harn_ignore(task) {
-  let md = "```harn,ignore\nbroken on purpose\n```\n"
-  let fences = extract_harn_fences(md)
+  const md = "```harn,ignore\nbroken on purpose\n```\n"
+  const fences = extract_harn_fences(md)
   assert_eq(fences.count, 0)
 }
 
 @test
 pipeline test_extract_multiple_with_headings(task) {
-  let md = "# First\n\n```harn\na\n```\n\n## Second\n\n```harn\nb\nc\n```\n"
-  let fences = extract_harn_fences(md)
+  const md = "# First\n\n```harn\na\n```\n\n## Second\n\n```harn\nb\nc\n```\n"
+  const fences = extract_harn_fences(md)
   assert_eq(fences.count, 2)
   assert_eq(fences[0].heading, "First")
   assert_eq(fences[0].snippet, "a\n")
@@ -139,15 +139,15 @@ pipeline test_extract_multiple_with_headings(task) {
 
 @test
 pipeline test_extract_empty_fence_dropped(task) {
-  let md = "```harn\n\n\n```\n"
-  let fences = extract_harn_fences(md)
+  const md = "```harn\n\n\n```\n"
+  const fences = extract_harn_fences(md)
   assert_eq(fences.count, 0)
 }
 
 @test
 pipeline test_extract_default_heading_is_spec(task) {
-  let md = "```harn\nlet x = 1\n```\n"
-  let fences = extract_harn_fences(md)
+  const md = "```harn\nlet x = 1\n```\n"
+  const fences = extract_harn_fences(md)
   assert_eq(fences.count, 1)
   assert_eq(fences[0].heading, "spec")
 }

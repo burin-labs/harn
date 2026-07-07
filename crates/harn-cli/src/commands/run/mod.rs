@@ -842,12 +842,12 @@ pub(crate) async fn run_resume_with_skill_dirs(
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
 pipeline main(task) {
-  let input = if len(argv) > 1 {
+  const input = if len(argv) > 1 {
     argv[1]
   } else {
     nil
   }
-  let handle = resume_agent(argv[0], input, true)
+  const handle = resume_agent(argv[0], input, true)
   return wait_agent(handle)
 }
 "#;

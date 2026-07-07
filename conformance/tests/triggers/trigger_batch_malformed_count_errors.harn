@@ -10,7 +10,7 @@ fn handler(event) {
 }
 
 pipeline test(task) {
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "batch-bad-count",
       kind: "channel.emit",

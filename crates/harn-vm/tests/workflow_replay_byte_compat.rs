@@ -95,8 +95,8 @@ fn pre_inversion_record_replays_byte_identical() {
 
     let source = format!(
         r#"pipeline default() {{
-  let graph = {GRAPH}
-  let replayed = workflow_execute(
+  const graph = {GRAPH}
+  const replayed = workflow_execute(
     "byte compat probe",
     graph,
     [],
@@ -151,8 +151,8 @@ fn live_default_policy_attempts_match_pre_inversion_bytes() {
 
     let source = format!(
         r#"pipeline default() {{
-  let graph = {GRAPH}
-  let live = workflow_execute("byte compat probe", graph, [], {{max_steps: 1, persist_path: "{out}"}})
+  const graph = {GRAPH}
+  const live = workflow_execute("byte compat probe", graph, [], {{max_steps: 1, persist_path: "{out}"}})
   __io_println(live.run.stages[0].status)
 }}"#,
         out = out_path.display(),

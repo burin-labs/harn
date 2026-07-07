@@ -12,10 +12,10 @@ pipeline default() {
   llm_mock({text: "medium length"})
   // Closure judge: pick the candidate with the longest text. The judge
   // receives the list of valid samples (each {ok, index, text, value}).
-  let longest_judge = { samples ->
-    var best_i = samples[0].index
-    var best_len = len(samples[0].text)
-    var i = 1
+  const longest_judge = { samples ->
+    let best_i = samples[0].index
+    let best_len = len(samples[0].text)
+    let i = 1
     while i < len(samples) {
       let l = len(samples[i].text)
       if l > best_len {
@@ -26,7 +26,7 @@ pipeline default() {
     }
     return {best_index: best_i, reasoning: "longest text wins"}
   }
-  let result = best_of_n(
+  const result = best_of_n(
     "Tell me a story.",
     "",
     {n: 3, parallel: false, judge: longest_judge, call_opts: {provider: "mock"}},

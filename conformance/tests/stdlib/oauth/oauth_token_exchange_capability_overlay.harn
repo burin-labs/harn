@@ -9,9 +9,9 @@ import {
 } from "std/oauth/token_exchange"
 
 fn catches_message(label, fn_call, needle) {
-  var matched = false
+  let matched = false
   try {
-    let _ = fn_call()
+    const _ = fn_call()
   } catch (err) {
     matched = contains(to_string(err), needle)
   }
@@ -19,10 +19,10 @@ fn catches_message(label, fn_call, needle) {
 }
 
 pipeline test(task) {
-  let subject_type = token_type("access_token")
-  let actor_type = token_type("jwt")
-  let requested_type = token_type("access_token")
-  let overlay_row = {
+  const subject_type = token_type("access_token")
+  const actor_type = token_type("jwt")
+  const requested_type = token_type("access_token")
+  const overlay_row = {
     id: "enterprise-as",
     supported: true,
     token_url: "https://idp.example/exchange",
@@ -34,7 +34,7 @@ pipeline test(task) {
     impersonation: false,
     notes: ["test overlay"],
   }
-  let catalog = token_exchange_catalog([overlay_row])
+  const catalog = token_exchange_catalog([overlay_row])
   assert_eq(
     catalog["enterprise-as"].token_url,
     "https://idp.example/exchange",
@@ -90,10 +90,10 @@ pipeline test(task) {
     { -> token_exchange_catalog({broken: true}) },
     "must be a dict",
   )
-  let overlay_capability = token_exchange_capability("enterprise-as", [overlay_row])
+  const overlay_capability = token_exchange_capability("enterprise-as", [overlay_row])
   assert(overlay_capability != nil, "overlay capability should exist")
   assert_eq(overlay_capability?.actor_token_types, [actor_type], "overlay lookup by id")
-  let bare_provider = custom(
+  const bare_provider = custom(
     {
       id: "enterprise-as",
       auth_url: "https://idp.example/authorize",
@@ -101,7 +101,7 @@ pipeline test(task) {
       default_scopes: [],
     },
   )
-  let bare_cli = client(bare_provider, {client_id: "cli-id", storage: memory()})
+  const bare_cli = client(bare_provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "unsupported provider should fail closed",
     { -> token_exchange(
@@ -110,7 +110,7 @@ pipeline test(task) {
     ) },
     "not supported",
   )
-  let incomplete_provider = custom(
+  const incomplete_provider = custom(
     {
       id: "incomplete-as",
       auth_url: "https://idp.example/authorize",
@@ -119,7 +119,7 @@ pipeline test(task) {
       token_exchange: {supported: true},
     },
   )
-  let incomplete_cli = client(incomplete_provider, {client_id: "cli-id", storage: memory()})
+  const incomplete_cli = client(incomplete_provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "capability rows without token types fail closed",
     { -> token_exchange(
@@ -128,7 +128,7 @@ pipeline test(task) {
     ) },
     "subject_token_type",
   )
-  let provider = custom(
+  const provider = custom(
     {
       id: "enterprise-as",
       auth_url: "https://idp.example/authorize",
@@ -137,7 +137,7 @@ pipeline test(task) {
       token_exchange: overlay_row,
     },
   )
-  let cli = client(provider, {client_id: "cli-id", storage: memory()})
+  const cli = client(provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "overlay can disable impersonation",
     { -> token_exchange(
@@ -193,7 +193,7 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  let exchanged = token_exchange(
+  const exchanged = token_exchange(
     cli,
     {
       subject_token: "subject",
@@ -207,7 +207,7 @@ pipeline test(task) {
   )
   assert_eq(exchanged.access_token, "delegated-access", "overlay exchange returned token")
   assert_eq(exchanged.token_exchange_mode, "delegation", "overlay exchange mode")
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "one overlay token exchange call")
   assert_eq(calls[0].url, "https://idp.example/exchange", "overlay token_url used")
   assert(contains(calls[0].body, "actor_token=actor"), "actor token sent")

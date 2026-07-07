@@ -18,11 +18,11 @@ pipeline test_is_trivial_example(task) {
 
 @test
 pipeline test_strip_removes_retired_tags(task) {
-  let input = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @allocation: heap\n * @errors: [FileNotFound]\n * @api_stability: stable\n * @example: read_file(path)\n */\npub fn read_file(path) {\n  return path\n}\n"
-  let expected = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @errors: [FileNotFound]\n */\npub fn read_file(path) {\n  return path\n}\n"
-  let result = process_file(input, "x.harn")
+  const input = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @allocation: heap\n * @errors: [FileNotFound]\n * @api_stability: stable\n * @example: read_file(path)\n */\npub fn read_file(path) {\n  return path\n}\n"
+  const expected = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @errors: [FileNotFound]\n */\npub fn read_file(path) {\n  return path\n}\n"
+  const result = process_file(input, "x.harn")
   assert_eq(result["text"], expected)
-  let st = result["stats"]
+  const st = result["stats"]
   assert_eq(st["allocation_removed"], 1)
   assert_eq(st["stability_removed"], 1)
   assert_eq(st["example_removed"], 1)
@@ -31,11 +31,11 @@ pipeline test_strip_removes_retired_tags(task) {
 
 @test
 pipeline test_strip_keeps_experimental_and_rich_examples(task) {
-  let input = "/**\n * Run the loop.\n *\n * @effects: [llm.call]\n * @allocation: heap\n * @errors: []\n * @api_stability: experimental\n * @example: run_loop({model: \"opus\"})\n */\npub fn run_loop(opts) {\n  return opts\n}\n"
-  let expected = "/**\n * Run the loop.\n *\n * @effects: [llm.call]\n * @errors: []\n * @api_stability: experimental\n * @example: run_loop({model: \"opus\"})\n */\npub fn run_loop(opts) {\n  return opts\n}\n"
-  let result = process_file(input, "x.harn")
+  const input = "/**\n * Run the loop.\n *\n * @effects: [llm.call]\n * @allocation: heap\n * @errors: []\n * @api_stability: experimental\n * @example: run_loop({model: \"opus\"})\n */\npub fn run_loop(opts) {\n  return opts\n}\n"
+  const expected = "/**\n * Run the loop.\n *\n * @effects: [llm.call]\n * @errors: []\n * @api_stability: experimental\n * @example: run_loop({model: \"opus\"})\n */\npub fn run_loop(opts) {\n  return opts\n}\n"
+  const result = process_file(input, "x.harn")
   assert_eq(result["text"], expected)
-  let st = result["stats"]
+  const st = result["stats"]
   assert_eq(st["stability_removed"], 0)
   assert_eq(st["example_removed"], 0)
   assert_eq(st["example_kept"], 1)
@@ -45,8 +45,8 @@ pipeline test_strip_keeps_experimental_and_rich_examples(task) {
 pipeline test_strip_keeps_multiline_examples(task) {
   // A continuation line under @example marks a rich example even when
   // the first line looks like a signature echo.
-  let input = "/**\n * Open then read.\n *\n * @effects: [fs.read]\n * @errors: []\n * @example: open(path)\n *   read(handle)\n */\npub fn open(path) {\n  return path\n}\n"
-  let result = process_file(input, "x.harn")
+  const input = "/**\n * Open then read.\n *\n * @effects: [fs.read]\n * @errors: []\n * @example: open(path)\n *   read(handle)\n */\npub fn open(path) {\n  return path\n}\n"
+  const result = process_file(input, "x.harn")
   assert_eq(result["text"], input)
   assert_eq(result["stats"]["example_kept"], 1)
 }
@@ -55,23 +55,23 @@ pipeline test_strip_keeps_multiline_examples(task) {
 pipeline test_strip_collapses_dangling_separators(task) {
   // When the removals leave a blank `*` directly before the terminator
   // (or doubled blanks), the separators collapse.
-  let input = "/**\n * Pure helper.\n *\n * @effects: []\n * @errors: []\n *\n * @allocation: heap\n * @api_stability: stable\n * @example: pure(x)\n */\npub fn pure(x) {\n  return x\n}\n"
-  let expected = "/**\n * Pure helper.\n *\n * @effects: []\n * @errors: []\n */\npub fn pure(x) {\n  return x\n}\n"
-  let result = process_file(input, "x.harn")
+  const input = "/**\n * Pure helper.\n *\n * @effects: []\n * @errors: []\n *\n * @allocation: heap\n * @api_stability: stable\n * @example: pure(x)\n */\npub fn pure(x) {\n  return x\n}\n"
+  const expected = "/**\n * Pure helper.\n *\n * @effects: []\n * @errors: []\n */\npub fn pure(x) {\n  return x\n}\n"
+  const result = process_file(input, "x.harn")
   assert_eq(result["text"], expected)
 }
 
 @test
 pipeline test_strip_leaves_prose_only_blocks_alone(task) {
-  let input = "/**\n * Just prose, nothing structured.\n */\npub fn helper(x) {\n  return x\n}\n\n/** Single-line prose. */\npub fn other(y) {\n  return y\n}\n"
-  let result = process_file(input, "x.harn")
+  const input = "/**\n * Just prose, nothing structured.\n */\npub fn helper(x) {\n  return x\n}\n\n/** Single-line prose. */\npub fn other(y) {\n  return y\n}\n"
+  const result = process_file(input, "x.harn")
   assert_eq(result["text"], input)
 }
 
 @test
 pipeline test_strip_is_idempotent(task) {
-  let input = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @allocation: heap\n * @errors: []\n * @api_stability: stable\n * @example: read_file(path)\n */\npub fn read_file(path) {\n  return path\n}\n"
-  let once = process_file(input, "x.harn")["text"]
-  let twice = process_file(once, "x.harn")["text"]
+  const input = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @allocation: heap\n * @errors: []\n * @api_stability: stable\n * @example: read_file(path)\n */\npub fn read_file(path) {\n  return path\n}\n"
+  const once = process_file(input, "x.harn")["text"]
+  const twice = process_file(once, "x.harn")["text"]
   assert_eq(twice, once)
 }

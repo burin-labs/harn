@@ -252,7 +252,7 @@ pipeline default(task) {
         let diags = lint(
             r#"
 pipeline default(task) {
-    let provider = choose_provider()
+    const provider = choose_provider()
     register_reminder_provider({
         id: "custom",
         subscribes_to: ["session_idle"],

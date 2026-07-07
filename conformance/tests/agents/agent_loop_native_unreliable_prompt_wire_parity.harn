@@ -21,7 +21,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * native channel) and accept a text-format `emit_judgment` tool call.
  */
 fn judge_tools() {
-  let tools = tool_registry()
+  const tools = tool_registry()
   return tool_define(
     tools,
     "emit_judgment",
@@ -54,7 +54,7 @@ tool_mode_parity = "native_unreliable"
       llm_text("<user_response>graded</user_response>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Judge the candidate and call emit_judgment.",
         "You are a judge.",
         {
@@ -67,7 +67,7 @@ tool_mode_parity = "native_unreliable"
           session_id: "native-unreliable-parity-" + uuid(),
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(contains(calls[0].system, "<tool_call>"))
       __io_println(!contains(calls[0].system, "native tool-calling channel"))
       __io_println(len(calls[0].tools ?? []))

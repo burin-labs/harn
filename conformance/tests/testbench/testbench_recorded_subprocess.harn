@@ -8,10 +8,10 @@
  * paused clock is installed automatically by the conformance runner.
  */
 pipeline test(task) {
-  let git_out = exec("git", "status")
+  const git_out = exec("git", "status")
   __io_println(git_out.success)
   __io_println(trim(git_out.stdout))
-  let echo_out = exec("echo", "hi")
+  const echo_out = exec("echo", "hi")
   __io_println(echo_out.success)
   __io_println(trim(echo_out.stdout))
 }

@@ -6,28 +6,28 @@ import { llm_text, with_llm_script } from "std/testing"
  * thread-local queue and drain at agent-loop turn boundaries so VM
  * closures invoke inside an async builtin context.
  */
-let edits_seen = atomic(0)
+const edits_seen = atomic(0)
 
 pipeline default() {
   clear_session_hooks()
   register_session_hook(
     "file_edited",
     { event ->
-      let op = to_string(event?.metadata?.operation ?? "")
+      const op = to_string(event?.metadata?.operation ?? "")
       if op == "write" || op == "append" {
         atomic_add(edits_seen, 1)
       }
       return nil
     },
   )
-  let tmp = path_join(harness.fs.temp_dir(), "hooks_session_file_edited-" + uuid() + ".txt")
+  const tmp = path_join(harness.fs.temp_dir(), "hooks_session_file_edited-" + uuid() + ".txt")
   harness.fs.write_text(tmp, "hello")
   harness.fs.append(tmp, " world")
   notify_file_edited(tmp, {operation: "append", bytes: 11})
   with_llm_script(
     [llm_text("ok")],
     { ->
-      let result = agent_loop("touch some files", nil, {provider: "mock"})
+      const result = agent_loop("touch some files", nil, {provider: "mock"})
       __io_println(result.status)
       __io_println(atomic_get(edits_seen))
       if harness.fs.exists(tmp) {

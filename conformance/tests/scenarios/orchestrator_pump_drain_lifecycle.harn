@@ -1,14 +1,14 @@
 import "../_common"
 
 pipeline default() {
-  let unique = uuid()
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let base = path_join(harness.fs.temp_dir(), "harn-orchestrator-pump-drain-lifecycle-" + unique)
-  let workspace = path_join(base, "workspace")
-  let state_dir = path_join(base, "state")
-  let binary = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const unique = uuid()
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-pump-drain-lifecycle-" + unique)
+  const workspace = path_join(base, "workspace")
+  const state_dir = path_join(base, "state")
+  const binary = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   require harness.fs.exists(binary), "missing built harn binary at " + binary
-  let script = """
+  const script = """
     set -eu
 
     base="${base}"
@@ -126,12 +126,12 @@ pipeline default() {
     )
     PY
     """
-  let result = shell(script)
+  const result = shell(script)
   __io_println(result.success)
   if !result.success {
     return
   }
-  let summary = json_parse(result.stdout.trim())
+  const summary = json_parse(result.stdout.trim())
   __io_println(summary.pending_started)
   __io_println(summary.waitpoint_started)
   __io_println(summary.stopped)

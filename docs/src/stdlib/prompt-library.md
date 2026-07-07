@@ -6,10 +6,10 @@ hotspot proposals for repeated context prefixes.
 ```harn,ignore
 import "std/prompt_library"
 
-let library = prompt_library_load("prompts.toml")
-let prompt_library = prompt_library_api(library)
+const library = prompt_library_load("prompts.toml")
+const prompt_library = prompt_library_api(library)
 
-let system_prefix = prompt_library.inject(
+const system_prefix = prompt_library.inject(
   "rust-repo-conventions-v1",
   {crate: "harn-vm"},
 )
@@ -35,7 +35,7 @@ Embedded stdlib prompt fragments can be loaded directly with `std/...harn.prompt
 paths because `read_file` exposes their raw template source:
 
 ```harn,ignore
-let library = prompt_library_load("std/agent/prompts/tool_contract_text.harn.prompt")
+const library = prompt_library_load("std/agent/prompts/tool_contract_text.harn.prompt")
 ```
 
 Single `.harn.prompt` files can carry TOML front matter:
@@ -81,7 +81,7 @@ deterministic bag-of-words vector over prompt-setup terms. That keeps the stdlib
 worker testable without requiring an embedding provider.
 
 ```harn,ignore
-let proposals = prompt_library_hotspots(recent_conversations, {
+const proposals = prompt_library_hotspots(recent_conversations, {
   tenant_id: "tenant-a",
   max_prefix_tokens: 1200,
   min_fraction: 0.8,
@@ -91,8 +91,8 @@ let proposals = prompt_library_hotspots(recent_conversations, {
   min_monthly_savings_usd: 5.0,
 })
 
-let review_library = prompt_library(proposals)
-let queue = prompt_library_review_queue(review_library)
+const review_library = prompt_library(proposals)
+const queue = prompt_library_review_queue(review_library)
 ```
 
 The function filters to the requested `tenant_id` before clustering. Proposed

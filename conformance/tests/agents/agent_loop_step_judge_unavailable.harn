@@ -34,8 +34,8 @@ pipeline default() {
       {error: {category: "generic", message: "judge backend 503"}},
     ],
     { ->
-      let session = "step-judge-unavail-" + uuid()
-      let captured = agent_capture_events(
+      const session = "step-judge-unavail-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "What is 2 + 2?",
@@ -49,8 +49,8 @@ pipeline default() {
           },
         ) },
       )
-      let decisions = judge_decisions(captured)
-      let unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
+      const decisions = judge_decisions(captured)
+      const unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
       __io_println(len(unavailable))
       __io_println(unavailable[0].reason)
       __io_println(unavailable[0].verdict)
@@ -64,8 +64,8 @@ pipeline default() {
       llm_text("{\"verdict\":\"pass\",\"reasoning\":\"correct\",\"critique\":\"\",\"confidence\":0.95}"),
     ],
     { ->
-      let session = "step-judge-pass-" + uuid()
-      let captured = agent_capture_events(
+      const session = "step-judge-pass-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "What is 2 + 2?",
@@ -79,9 +79,9 @@ pipeline default() {
           },
         ) },
       )
-      let decisions = judge_decisions(captured)
-      let unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
-      let passes = decisions.filter({ d -> d.verdict == "pass" })
+      const decisions = judge_decisions(captured)
+      const unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
+      const passes = decisions.filter({ d -> d.verdict == "pass" })
       __io_println(len(unavailable))
       __io_println(len(passes) > 0)
     },

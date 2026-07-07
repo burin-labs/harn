@@ -24,23 +24,23 @@ import {
 } from "std/cli/render"
 
 fn __render_human(harness: Harness, report: dict) {
-  let base = safe_dict(report["base"])
-  let request = safe_dict(report["request"])
-  let tool_calling = safe_dict(report["tool_calling"])
-  let training = safe_dict(report["training"])
-  let training_contract = safe_dict(training["contract"])
-  let precision = safe_dict(report["precision"])
-  let template = safe_dict(report["template"])
-  let data = safe_dict(report["data"])
-  let corpus_refresh = safe_dict(report["corpus_refresh"])
-  let evaluation = safe_dict(report["evaluation"])
-  let evidence = safe_dict(evaluation["evidence_contract"])
-  let batch_ready = safe_dict(evidence["batch_ready"])
-  let serving = safe_dict(report["serving"])
-  let launch = safe_dict(report["launch"])
-  let warnings = safe_list(report["warnings"])
-  let base_id = safe_string(base["id"], "")
-  let provider = safe_string(base["provider"], "")
+  const base = safe_dict(report["base"])
+  const request = safe_dict(report["request"])
+  const tool_calling = safe_dict(report["tool_calling"])
+  const training = safe_dict(report["training"])
+  const training_contract = safe_dict(training["contract"])
+  const precision = safe_dict(report["precision"])
+  const template = safe_dict(report["template"])
+  const data = safe_dict(report["data"])
+  const corpus_refresh = safe_dict(report["corpus_refresh"])
+  const evaluation = safe_dict(report["evaluation"])
+  const evidence = safe_dict(evaluation["evidence_contract"])
+  const batch_ready = safe_dict(evidence["batch_ready"])
+  const serving = safe_dict(report["serving"])
+  const launch = safe_dict(report["launch"])
+  const warnings = safe_list(report["warnings"])
+  const base_id = safe_string(base["id"], "")
+  const provider = safe_string(base["provider"], "")
   harness.stdio.println("LoRA plan for " + base_id + " via " + provider)
   harness.stdio.println("  base selector: " + safe_string(base["selector"], ""))
   harness.stdio
@@ -51,11 +51,11 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_string(request["requested_tool_format"], "auto")
       + ")",
   )
-  let correction = safe_string(request["tool_format_correction"], "")
+  const correction = safe_string(request["tool_format_correction"], "")
   if correction != "" {
     harness.stdio.println("  tool format correction: " + correction)
   }
-  let native_tools = if safe_bool(tool_calling["native_tools"], false) {
+  const native_tools = if safe_bool(tool_calling["native_tools"], false) {
     "yes"
   } else {
     "no"
@@ -103,7 +103,7 @@ fn __render_human(harness: Harness, report: dict) {
     .println("  precision policy: " + safe_string(precision["compatibility_policy"], ""))
   harness.stdio.println("  loss scope: " + safe_string(training["loss_scope"], ""))
   harness.stdio.println("  packing: " + safe_string(training["packing"], ""))
-  let target_modules = safe_list(training["target_modules"])
+  const target_modules = safe_list(training["target_modules"])
   if len(target_modules) > 0 {
     harness.stdio
       .println(
@@ -119,7 +119,7 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  template: " + safe_string(template["name"], ""))
   harness.stdio.println("  template source: " + safe_string(template["source"], ""))
   harness.stdio.println("  supervised target: " + safe_string(template["supervised_target"], ""))
-  let corpus = safe_string(request["corpus"], "")
+  const corpus = safe_string(request["corpus"], "")
   if corpus != "" {
     harness.stdio.println("  corpus: " + corpus)
   }
@@ -131,8 +131,8 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_string(request["requested_corpus_strategy"], "auto")
       + ")",
   )
-  let teacher = safe_dict(request["teacher"])
-  let teacher_id = safe_string(teacher["id"], "")
+  const teacher = safe_dict(request["teacher"])
+  const teacher_id = safe_string(teacher["id"], "")
   if teacher_id != "" {
     harness.stdio
       .println(
@@ -152,8 +152,8 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "provenance manifest", safe_list(corpus_refresh["provenance_manifest_fields"]))
   print_list(harness, "hard negatives", safe_list(corpus_refresh["hard_negative_slices"]))
   print_list(harness, "corpus gates", safe_list(corpus_refresh["acceptance_gates"]))
-  let model_aware = safe_dict(corpus_refresh["model_aware_selection"])
-  let objective = safe_string(model_aware["objective"], "")
+  const model_aware = safe_dict(corpus_refresh["model_aware_selection"])
+  const objective = safe_string(model_aware["objective"], "")
   if objective != "" {
     harness.stdio.println("  model-aware selection: " + objective)
   }
@@ -189,7 +189,7 @@ fn __render_human(harness: Harness, report: dict) {
   render_command(harness, "inspect adapter", safe_list(launch["inspect_command"]))
   render_command(harness, "local launch", safe_list(launch["local_launch_command"]))
   for warning in warnings {
-    let text = safe_string(warning, "")
+    const text = safe_string(warning, "")
     if text != "" {
       harness.stdio.println("  warning: " + text)
     }
@@ -197,8 +197,8 @@ fn __render_human(harness: Harness, report: dict) {
 }
 
 fn __render_json(report: dict) -> string {
-  let ok = safe_bool(report["ok"], false)
-  let envelope = if ok {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
     cli_json_envelope({schema_version: 1, ok: true, data: report})
   } else {
     cli_json_envelope(
@@ -217,19 +217,19 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_MODELS_LORA_PLAN_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_MODELS_LORA_PLAN_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PLAN_PAYLOAD_JSON not set")
     return 70
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse LoRA plan payload: " + to_string(e))
     return 70
   }
-  let ok = safe_bool(report["ok"], false)
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const ok = safe_bool(report["ok"], false)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {

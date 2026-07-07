@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools() {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "lookup",
@@ -20,7 +20,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"query\":\"x\"}}\n```"), llm_text("evidence")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Use lookup.",
         nil,
         {

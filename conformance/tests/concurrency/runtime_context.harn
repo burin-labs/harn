@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let root = runtime_context()
+  const root = runtime_context()
   assert_eq(root.task_id, "task_root")
   assert_eq(root.parent_task_id, nil)
   assert_eq(root.root_task_id, "task_root")
@@ -9,7 +9,7 @@ pipeline test(task) {
   assert_eq(runtime_context_set("tenant", "acme"), nil)
   assert_eq(runtime_context_get("tenant"), "acme")
   assert_eq(runtime_context_get("missing", "fallback"), "fallback")
-  let handle = spawn {
+  const handle = spawn {
     let child = task_current()
     assert_eq(child.task_id, "task_root:spawn:1")
     assert_eq(child.parent_task_id, "task_root")
@@ -22,7 +22,7 @@ pipeline test(task) {
   }
   assert_eq(await(handle), "task_root:spawn:1")
   assert_eq(runtime_context_get("tenant"), "acme")
-  let fanout = parallel 2 { i ->
+  const fanout = parallel 2 { i ->
     let ctx = runtime_context()
     assert_eq(ctx.parent_task_id, "task_root")
     assert_eq(ctx.root_task_id, "task_root")

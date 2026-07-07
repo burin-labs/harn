@@ -395,8 +395,8 @@ pub fn payload_schema() {
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
-  let token = secret_get("echo/api-token")
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const token = secret_get("echo/api-token")
   metrics_inc("echo_normalize_calls")
   event_log_emit("connectors.echo.lifecycle", "normalize", {
     binding_id: raw.binding_id,
@@ -609,12 +609,12 @@ import {
 } from "std/connectors/shared"
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
-  let forge = git_forge_pull_request_event("github", body)
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const forge = git_forge_pull_request_event("github", body)
   if forge != nil {
     event_log_emit(git_forge_pull_request_topic(), forge.kind, forge, {provider: "github"})
   }
-  let kind = if body.action == nil {
+  const kind = if body.action == nil {
     "pull_request"
   } else {
     "pull_request." + body.action
@@ -697,11 +697,11 @@ service clients, paginators, waiters, Smithy generation, and live AWS tests stay
 out of scope for connector packages.
 
 ```harn
-let body = "{\"TableName\":\"Items\"}"
-let url = "https://dynamodb.us-east-1.amazonaws.com/"
+const body = "{\"TableName\":\"Items\"}"
+const url = "https://dynamodb.us-east-1.amazonaws.com/"
 http_mock("POST", url, {status: 200, body: "{\"ok\":true}", headers: {}})
 
-let signed = aws_sigv4_headers({
+const signed = aws_sigv4_headers({
   method: "POST",
   url: url,
   service: "dynamodb",
@@ -717,7 +717,7 @@ let signed = aws_sigv4_headers({
   timestamp: "20260429T120000Z",
 })
 
-let response = harness.net.request("POST", url, {
+const response = harness.net.request("POST", url, {
   body: body,
   headers: signed.headers,
 })

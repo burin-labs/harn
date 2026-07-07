@@ -4,8 +4,8 @@
 // error. Before typed destructuring the binding was untyped and this slipped
 // through unchecked.
 pipeline default() {
-  let opts = {}
-  let { count = 0 } = opts
-  let bad: string = count
+  const opts = {}
+  const { count = 0 } = opts
+  const bad: string = count
   __io_println(bad)
 }

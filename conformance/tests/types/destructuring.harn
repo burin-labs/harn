@@ -1,31 +1,31 @@
 pipeline default() {
   // Dict destructuring
-  let {name, age} = {name: "Alice", age: 30}
+  const {name, age} = {name: "Alice", age: 30}
   __io_println(name)
   __io_println(age)
   // List destructuring
-  let [first, second, third] = [10, 20, 30]
+  const [first, second, third] = [10, 20, 30]
   __io_println(first)
   __io_println(second)
   __io_println(third)
   // Dict with rename
-  let {name: user_name} = {name: "Bob"}
+  const {name: user_name} = {name: "Bob"}
   __io_println(user_name)
   // List rest
-  let [head, ...tail] = [1, 2, 3, 4]
+  const [head, ...tail] = [1, 2, 3, 4]
   __io_println(head)
   __io_println(tail)
   // Dict rest
-  let {name: n, ...extras} = {name: "Carol", age: 25, role: "dev"}
+  const {name: n, ...extras} = {name: "Carol", age: 25, role: "dev"}
   __io_println(n)
   __io_println(extras)
   // For-in with destructuring
-  let entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
+  const entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
   for {name: label, val: v} in entries {
     __io_println("${label}=${v}")
   }
   // Var destructuring
-  var {x, y} = {x: 1, y: 2}
+  let {x, y} = {x: 1, y: 2}
   __io_println(x + y)
   x = 10
   y = 20
@@ -34,14 +34,14 @@ pipeline default() {
   fn get_point() {
     return {x: 42, y: 99}
   }
-  let {x: px, y: py} = get_point()
+  const {x: px, y: py} = get_point()
   __io_println(px)
   __io_println(py)
   // List destructuring from function
   fn get_triple() {
     return [100, 200, 300]
   }
-  let [a, b, c] = get_triple()
+  const [a, b, c] = get_triple()
   __io_println(a)
   __io_println(b)
   __io_println(c)

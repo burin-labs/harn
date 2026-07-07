@@ -1,7 +1,7 @@
 /** Test circuit breaker builtins */
 pipeline default(task) {
   // Create a circuit breaker with threshold=3
-  let cb = circuit_breaker("test_cb", 3, 60000)
+  const cb = circuit_breaker("test_cb", 3, 60000)
   __io_println(type_of(cb))
   __io_println(cb)
   // Initially closed

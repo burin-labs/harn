@@ -6,11 +6,11 @@
 import { select_from } from "std/tui"
 
 fn show(result) {
-  let value_kind = type_of(result?.value)
-  let value_repr = if value_kind == "dict" {
+  const value_kind = type_of(result?.value)
+  const value_repr = if value_kind == "dict" {
     result.value?.id ?? to_string(result.value)
   } else if value_kind == "list" {
-    var parts = []
+    let parts = []
     for entry in result.value {
       let part = if type_of(entry) == "dict" {
         entry?.id ?? to_string(entry)
@@ -27,7 +27,7 @@ fn show(result) {
 }
 
 pipeline default() {
-  let items = [{id: "alpha", label: "Alpha — recent"}, {id: "beta", title: "Beta"}, "gamma"]
+  const items = [{id: "alpha", label: "Alpha — recent"}, {id: "beta", title: "Beta"}, "gamma"]
   // 1) Pick the second item by typing "2".
   mock_stdin("2\n")
   show(select_from(items, {prefer_external: "none", prompt: "Pick"}))

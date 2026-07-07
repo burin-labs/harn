@@ -1,14 +1,14 @@
 pipeline default() {
   // Quoted string keys (JSON-style)
-  let d = {name: "Alice", age: 30}
+  const d = {name: "Alice", age: 30}
   __io_println(d.name)
   __io_println(d.age)
   // Mixed: quoted and unquoted
-  let mixed = {unquoted: 1, quoted: 2}
+  const mixed = {unquoted: 1, quoted: 2}
   __io_println(mixed.unquoted)
   __io_println(mixed.quoted)
   // Quoted keys with special characters
-  let special = {"content-type": "json", "x-api-key": "abc"}
+  const special = {"content-type": "json", "x-api-key": "abc"}
   __io_println(special["content-type"])
   __io_println(special["x-api-key"])
 }

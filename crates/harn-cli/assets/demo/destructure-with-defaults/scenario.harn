@@ -30,11 +30,11 @@ pipeline default(_task) {
   __io_println("")
   // BEFORE: capture the optional input, then one `let` per field — each line
   // repeats the source and the optional-chain + null-coalesce dance.
-  let raw = pipeline_input()
-  let path_old = raw?.path ?? "."
-  let namespace_old = raw?.namespace ?? nil
-  let retries_old = raw?.retries ?? 0
-  let verbose_old = raw?.verbose ?? false
+  const raw = pipeline_input()
+  const path_old = raw?.path ?? "."
+  const namespace_old = raw?.namespace ?? nil
+  const retries_old = raw?.retries ?? 0
+  const verbose_old = raw?.verbose ?? false
   __io_println("before — 4 lines, source repeated 4x:")
   __io_println(
     "  path=${path_old} namespace=${namespace_old} retries=${retries_old} verbose=${verbose_old}",
@@ -43,12 +43,12 @@ pipeline default(_task) {
   // AFTER: one destructuring bind over the same `?? {}` source. Present keys
   // (`path`, `retries`) win; missing keys (`namespace`, `verbose`) fall to
   // their defaults.
-  let {namespace = nil, path = ".", retries = 0, verbose = false} = pipeline_input() ?? {}
+  const {namespace = nil, path = ".", retries = 0, verbose = false} = pipeline_input() ?? {}
   __io_println("after — 1 line, source named once:")
   __io_println("  path=${path} namespace=${namespace} retries=${retries} verbose=${verbose}")
   __io_println("")
   // Defaults apply per-key from an empty source, too.
-  let {host = "0.0.0.0", port = 8080} = {}
+  const {host = "0.0.0.0", port = 8080} = {}
   __io_println("empty source -> every default applies: host=${host} port=${port}")
   __io_println("")
   __io_println("Both blocks bind identical values. The type checker now infers")

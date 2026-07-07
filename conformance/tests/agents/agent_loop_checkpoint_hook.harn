@@ -6,17 +6,17 @@
  */
 pipeline main() {
   clear_session_hooks()
-  let observed = shared_cell({scope: "task_group", key: "checkpoint-kinds", initial: ""})
+  const observed = shared_cell({scope: "task_group", key: "checkpoint-kinds", initial: ""})
   register_checkpoint_hook(
     ["iteration_start", "pre_tool_dispatch", "loop_exit"],
     { event ->
-      let snap = shared_snapshot(observed)
+      const snap = shared_snapshot(observed)
       shared_set(observed, snap.value + event.kind + ",")
       return nil
     },
   )
-  let one_shot_caller = { _call -> return {ok: true, value: {text: "ack ##DONE##", tool_calls: [], provider: "mock", model: "mock"}} }
-  let result = agent_loop(
+  const one_shot_caller = { _call -> return {ok: true, value: {text: "ack ##DONE##", tool_calls: [], provider: "mock", model: "mock"}} }
+  const result = agent_loop(
     "hi",
     nil,
     {

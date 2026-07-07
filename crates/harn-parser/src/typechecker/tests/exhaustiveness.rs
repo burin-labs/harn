@@ -7,7 +7,7 @@ fn test_exhaustive_match_no_warning() {
     let warns = warnings(
         r#"pipeline t(task) {
   enum Color { Red, Green, Blue }
-  let c = Color.Red
+  const c = Color.Red
   match c.variant {
 "Red" -> { log("r") }
 "Green" -> { log("g") }
@@ -27,7 +27,7 @@ fn test_non_exhaustive_match_errors() {
     let errs = errors(
         r#"pipeline t(task) {
   enum Color { Red, Green, Blue }
-  let c = Color.Red
+  const c = Color.Red
   match c.variant {
 "Red" -> { log("r") }
 "Green" -> { log("g") }
@@ -47,7 +47,7 @@ fn test_non_exhaustive_multiple_missing_errors() {
     let errs = errors(
         r#"pipeline t(task) {
   enum Status { Active, Inactive, Pending }
-  let s = Status.Active
+  const s = Status.Active
   match s.variant {
 "Active" -> { log("a") }
   }
@@ -237,7 +237,7 @@ fn test_non_exhaustive_match_wildcard_silences_error() {
     let errs = errors(
         r#"pipeline t(task) {
   enum Color { Red, Green, Blue }
-  let c = Color.Red
+  const c = Color.Red
   match c.variant {
     "Red" -> { log("r") }
     _ -> { log("?") }
@@ -379,7 +379,7 @@ fn test_enum_construct_type_inference() {
     let errs = errors(
         r"pipeline t(task) {
   enum Color { Red, Green, Blue }
-  let c: Color = Color.Red
+  const c: Color = Color.Red
 }",
     );
     assert!(errs.is_empty());
@@ -390,8 +390,8 @@ fn test_nil_coalescing_strips_nil() {
     // After ??, nil should be stripped from the type
     let errs = errors(
         r#"pipeline t(task) {
-  let x: string | nil = nil
-  let y: string = x ?? "default"
+  const x: string | nil = nil
+  const y: string = x ?? "default"
 }"#,
     );
     assert!(errs.is_empty());
@@ -401,7 +401,7 @@ fn test_nil_coalescing_strips_nil() {
 fn test_shape_mismatch_detail_missing_field() {
     let errs = errors(
         r#"pipeline t(task) {
-  let x: {name: string, age: int} = {name: "hello"}
+  const x: {name: string, age: int} = {name: "hello"}
 }"#,
     );
     assert_eq!(errs.len(), 1);
@@ -416,7 +416,7 @@ fn test_shape_mismatch_detail_missing_field() {
 fn test_shape_mismatch_detail_wrong_type() {
     let errs = errors(
         r"pipeline t(task) {
-  let x: {name: string, age: int} = {name: 42, age: 10}
+  const x: {name: string, age: int} = {name: 42, age: 10}
 }",
     );
     assert_eq!(errs.len(), 1);
@@ -431,7 +431,7 @@ fn test_shape_mismatch_detail_wrong_type() {
 fn test_match_pattern_string_against_int() {
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: int = 42
+  const x: int = 42
   match x {
 "hello" -> { log("bad") }
 42 -> { log("ok") }
@@ -450,7 +450,7 @@ fn test_match_pattern_string_against_int() {
 fn test_match_pattern_int_against_string() {
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: string = "hello"
+  const x: string = "hello"
   match x {
 42 -> { log("bad") }
 "hello" -> { log("ok") }
@@ -469,7 +469,7 @@ fn test_match_pattern_int_against_string() {
 fn test_match_pattern_bool_against_int() {
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: int = 42
+  const x: int = 42
   match x {
 true -> { log("bad") }
 42 -> { log("ok") }
@@ -488,7 +488,7 @@ true -> { log("bad") }
 fn test_match_pattern_float_against_string() {
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: string = "hello"
+  const x: string = "hello"
   match x {
 3.14 -> { log("bad") }
 "hello" -> { log("ok") }
@@ -508,7 +508,7 @@ fn test_match_pattern_int_against_float_ok() {
     // int and float are compatible for match patterns
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: float = 3.14
+  const x: float = 3.14
   match x {
 42 -> { log("ok") }
 _ -> { log("default") }
@@ -527,7 +527,7 @@ fn test_match_pattern_float_against_int_ok() {
     // float and int are compatible for match patterns
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: int = 42
+  const x: int = 42
   match x {
 3.14 -> { log("close") }
 _ -> { log("default") }
@@ -545,7 +545,7 @@ _ -> { log("default") }
 fn test_match_pattern_correct_types_no_warning() {
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: int = 42
+  const x: int = 42
   match x {
 1 -> { log("one") }
 2 -> { log("two") }
@@ -564,7 +564,7 @@ _ -> { log("other") }
 fn test_match_pattern_wildcard_no_warning() {
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: int = 42
+  const x: int = 42
   match x {
 _ -> { log("catch all") }
   }
@@ -582,7 +582,7 @@ fn test_match_pattern_untyped_no_warning() {
     // When value has no known type, no warning should be emitted
     let warns = warnings(
         r#"pipeline t(task) {
-  let x = some_unknown_fn()
+  const x = some_unknown_fn()
   match x {
 "hello" -> { log("string") }
 42 -> { log("int") }
@@ -698,7 +698,7 @@ fn test_or_pattern_enum_exhaustive() {
     let errs = errors(
         r#"pipeline t(task) {
   enum Color { Red, Green, Blue }
-  let c = Color.Red
+  const c = Color.Red
   match c.variant {
 "Red" | "Green" -> { log("warm-ish") }
 "Blue" -> { log("cool") }

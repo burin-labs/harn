@@ -5,6 +5,6 @@
 type User = {name: string, email: string, age: int}
 
 pipeline default(_) {
-  let u: User = {name: "Ada", email: "ada@x", age: 36}
+  const u: User = {name: "Ada", email: "ada@x", age: 36}
   __io_println(u.emial)
 }

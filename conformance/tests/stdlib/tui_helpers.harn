@@ -5,7 +5,7 @@ pipeline test(task) {
   __io_println(rule("ab", 3))
   __io_println(terminal_width(1) > 0)
   mock_tty("stdout", false)
-  let result = page({title: "Report", body: "alpha\nbeta", format: "markdown"})
+  const result = page({title: "Report", body: "alpha\nbeta", format: "markdown"})
   __io_println("paged=" + to_string(result.paged))
   __io_println("ok=" + to_string(result.ok))
   unmock_tty()

@@ -11,9 +11,9 @@
  */
 import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
 
-let observed_active = atomic(0)
+const observed_active = atomic(0)
 
-let observed_inactive = atomic(0)
+const observed_inactive = atomic(0)
 
 pipeline default() {
   clear_session_hooks()
@@ -31,10 +31,10 @@ pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("nightly-drain", {note: "alpha"})
-      let pre = __host_settlement_agent_active()
-      let result = on_finish_drain(harness, return_value)
-      let post = __host_settlement_agent_active()
-      let _audits = lifecycle_audit_log_take()
+      const pre = __host_settlement_agent_active()
+      const result = on_finish_drain(harness, return_value)
+      const post = __host_settlement_agent_active()
+      const _audits = lifecycle_audit_log_take()
       harness.stdio.println("pre_active=" + to_string(pre))
       harness.stdio.println("post_active=" + to_string(post))
       harness.stdio.println("observed_active=" + to_string(atomic_get(observed_active)))

@@ -49,7 +49,7 @@ Three anti-patterns worth calling out:
 ```harn,ignore
 import { pool_create } from "std/lifecycle/pool"
 
-let pool = pool_create({
+const pool = pool_create({
   name: "pr-review",
   max_concurrent: 5,
 })
@@ -103,7 +103,7 @@ child-VM isolates with their own execution stacks and the same VM-scoped
 pool registry handle.
 
 ```harn,ignore
-let handle = pool.submit({ ->
+const handle = pool.submit({ ->
   return agent_loop("review this PR", "You are a careful reviewer.")
 }, {
   priority: 10,
@@ -156,8 +156,8 @@ all of them:
 ```harn,ignore
 import { pool_wait } from "std/lifecycle/pool"
 
-let handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
-let outcomes = pool_wait(handles)
+const handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
+const outcomes = pool_wait(handles)
 ```
 
 `wait_agent(handle)` from `std/agent/workers` recognises pool task
@@ -179,8 +179,8 @@ as `pool_create({queue: <strategy>})`:
 ```harn,ignore
 import { QueueStrategy, pool_create } from "std/lifecycle/pool"
 
-let queue = QueueStrategy()
-let pool = pool_create({
+const queue = QueueStrategy()
+const pool = pool_create({
   name: "tenant-work",
   max_concurrent: 4,
   queue: queue.fair_round_robin("tenant_id"),
@@ -217,8 +217,8 @@ turn.
 ```harn,ignore
 import { Backpressure, pool_create } from "std/lifecycle/pool"
 
-let bp = Backpressure()
-let pool = pool_create({
+const bp = Backpressure()
+const pool = pool_create({
   name: "webhook-intake",
   max_concurrent: 10,
   backpressure: bp.ring_buffer(100),
@@ -282,8 +282,8 @@ idempotent. Two submits with the same `(pool_id, idempotency_key)`
 return the *same* task handle:
 
 ```harn,ignore
-let first = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
-let second = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
+const first = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
+const second = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
 log(first.id == second.id)   // true
 ```
 
@@ -301,7 +301,7 @@ Use the `SpawnToPool` handler variant from `std/triggers`:
 import { trigger_register, SpawnToPool } from "std/triggers"
 import { pool_create, fair_round_robin } from "std/lifecycle/pool"
 
-let pool = pool_create({
+const pool = pool_create({
   name: "webhook-work",
   max_concurrent: 10,
   queue: fair_round_robin("source"),
@@ -387,7 +387,7 @@ child agents and collect their results** — `std/agent/workers` exposes
 ```harn,ignore
 import { agent_fanout } from "std/agent/workers"
 
-let results = agent_fanout(
+const results = agent_fanout(
   [
     {task: "Port src/a to the new API", options: child_opts_a, label: "a"},
     {task: "Port src/b to the new API", options: child_opts_b, label: "b"},

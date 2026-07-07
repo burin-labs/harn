@@ -1,4 +1,4 @@
 pipeline default() {
-  let user: {name: string, age: int} = {name: 42, age: 30}
+  const user: {name: string, age: int} = {name: 42, age: 30}
   println(user)
 }

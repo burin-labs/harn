@@ -10,7 +10,7 @@ fn __budget_envelope(opts) {
  * @api_stability: experimental
  */
 pub fn agent_budget_pre_call_blocked(session, opts) {
-  let envelope = __budget_envelope(opts)
+  const envelope = __budget_envelope(opts)
   if envelope == nil {
     return false
   }
@@ -25,7 +25,7 @@ pub fn agent_budget_pre_call_blocked(session, opts) {
  * @api_stability: experimental
  */
 pub fn agent_budget_post_call_blocked(totals, opts) {
-  let envelope = __budget_envelope(opts)
+  const envelope = __budget_envelope(opts)
   if envelope == nil && opts?.token_budget == nil {
     return false
   }

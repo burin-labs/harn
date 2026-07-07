@@ -2,7 +2,7 @@ import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn on_delta_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "note",
@@ -20,7 +20,7 @@ pipeline default() {
   with_llm_script(
     [llm_tool_call("note", {text: "remember"}), llm_text("All done.")],
     { ->
-      let opts: AgentLoopOptions = {
+      const opts: AgentLoopOptions = {
         provider: "mock",
         tools: on_delta_tools(),
         tool_format: "native",
@@ -28,8 +28,8 @@ pipeline default() {
         max_iterations: 3,
         on_delta: { delta -> __io_println("delta=[" + delta + "]") },
       }
-      let result = agent_loop("take a note then finish", nil, opts)
-      let calls = llm_mock_calls()
+      const result = agent_loop("take a note then finish", nil, opts)
+      const calls = llm_mock_calls()
       __io_println(result.status)
       __io_println(len(calls))
       __io_println(contains(json_stringify(calls[1].messages), "noted"))

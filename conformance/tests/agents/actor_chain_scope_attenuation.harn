@@ -1,5 +1,5 @@
 pipeline main(task) {
-  let narrower = actor_chain_validate_scope_attenuation(
+  const narrower = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
       scopes: ["repo:read", "repo:write"],
@@ -8,7 +8,7 @@ pipeline main(task) {
     {raise: false, alert: false},
   )
   __io_println(narrower.ok)
-  let equal = actor_chain_validate_scope_attenuation(
+  const equal = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
       scope: "repo:read repo:write",
@@ -17,7 +17,7 @@ pipeline main(task) {
     {raise: false, alert: false},
   )
   __io_println(equal.ok)
-  let widened = actor_chain_validate_scope_attenuation(
+  const widened = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
       scopes: ["repo:read"],
@@ -31,7 +31,7 @@ pipeline main(task) {
   __io_println(widened.error.parent_subject)
   __io_println(widened.error.child_subject)
   __io_println(widened.error.extra_scopes[0])
-  let strict = actor_chain_validate_scope_attenuation(
+  const strict = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
       scopes: ["repo:read", "repo:write"],

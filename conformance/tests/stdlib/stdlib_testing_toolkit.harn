@@ -15,7 +15,7 @@ import {
 } from "std/testing"
 
 fn capture_llm() {
-  let r = llm_call("ask", nil, {provider: "mock"})
+  const r = llm_call("ask", nil, {provider: "mock"})
   return {text: r.text, count: llm_call_count()}
 }
 
@@ -33,26 +33,26 @@ pipeline test_testing_toolkit(task) {
   // Explicit id is honored; missing args default to {}.
   assert_eq(llm_tool_call("read", nil, "c1"), {tool_calls: [{id: "c1", name: "read", arguments: {}}]})
   // Parallel tool calls auto-index ids when absent and honor explicit ones.
-  let multi = llm_tool_calls([{name: "a", args: {x: 1}}, {name: "b", id: "bb"}])
+  const multi = llm_tool_calls([{name: "a", args: {x: 1}}, {name: "b", id: "bb"}])
   assert_eq(len(multi.tool_calls), 2)
   assert_eq(multi.tool_calls[0], {id: "a_0", name: "a", arguments: {x: 1}})
   assert_eq(multi.tool_calls[1], {id: "bb", name: "b", arguments: {}})
   // === with_llm_script drives a scoped, ordered mock script ===
   llm_mock_clear()
-  let scripted = with_llm_script([llm_text("scoped")], capture_llm)
+  const scripted = with_llm_script([llm_text("scoped")], capture_llm)
   assert_eq(scripted.text, "scoped")
   assert_eq(scripted.count, 1)
   // Scope restored after the body.
   assert_eq(llm_call_count(), 0)
   // === assert_throws returns the thrown error ===
-  let err = assert_throws(
+  const err = assert_throws(
     { ->
       throw "kaboom"
     },
   )
   assert_eq(err, "kaboom")
   // assert_throws itself fails when the body does NOT throw.
-  let no_throw_caught = try {
+  const no_throw_caught = try {
     assert_throws({ -> 42 })
     "unreachable"
   } catch (e) {
@@ -60,7 +60,7 @@ pipeline test_testing_toolkit(task) {
   }
   assert(contains(no_throw_caught, "expected the body to throw"))
   // === assert_error_contains matches a substring of the rendered error ===
-  let matched = assert_error_contains(
+  const matched = assert_error_contains(
     { ->
       throw "url is required"
     },
@@ -68,7 +68,7 @@ pipeline test_testing_toolkit(task) {
   )
   assert_eq(matched, "url is required")
   // Mismatched substring fails.
-  let mismatch_caught = try {
+  const mismatch_caught = try {
     assert_error_contains(
       { ->
         throw "other"
@@ -82,7 +82,7 @@ pipeline test_testing_toolkit(task) {
   assert(contains(mismatch_caught, "expected thrown error to contain"))
   // === assert_no_throw returns the body's value, fails on throw ===
   assert_eq(assert_no_throw({ -> 7 }), 7)
-  let unexpected_throw = try {
+  const unexpected_throw = try {
     assert_no_throw(
       { ->
         throw "surprise"
@@ -97,7 +97,7 @@ pipeline test_testing_toolkit(task) {
   // temp dir from the body and assert on the returned value rather than a
   // captured variable.
   // === with_temp_dir: workspace exists in body, removed after ===
-  let temp_result = with_temp_dir(
+  const temp_result = with_temp_dir(
     { dir ->
       assert(harness.fs.exists(dir))
       harness.fs.write_text(dir + "/x.txt", "1")
@@ -109,7 +109,7 @@ pipeline test_testing_toolkit(task) {
   // The directory is gone once the scope exits.
   assert_eq(harness.fs.exists(temp_result.dir), false)
   // === with_fs: seeds files (incl. nested + JSON), reads back, cleans up ===
-  let fs_result = with_fs(
+  const fs_result = with_fs(
     {"in.txt": "hello", "nested/deep/cfg.json": {a: 1}},
     { dir ->
       assert_eq(harness.fs.read_text(dir + "/in.txt"), "hello")
@@ -120,7 +120,7 @@ pipeline test_testing_toolkit(task) {
   assert_eq(harness.fs.exists(fs_result), false)
   // === with_temp_dir cleans up even when the body throws ===
   // Throw the dir itself so we can assert it was removed after the throw.
-  let leaked_dir = try {
+  const leaked_dir = try {
     with_temp_dir(
       { dir ->
         throw dir
@@ -134,7 +134,7 @@ pipeline test_testing_toolkit(task) {
   assert_eq(harness.fs.exists(leaked_dir), false)
   // === with_scenario: fs + scripted llm in one declarative block ===
   llm_mock_clear()
-  let scenario_out = with_scenario(
+  const scenario_out = with_scenario(
     {llm: [llm_text("answer")], fs: {"seed.txt": "ok"}},
     { s ->
       let seed = harness.fs.read_text(s.dir + "/seed.txt")
@@ -148,7 +148,7 @@ pipeline test_testing_toolkit(task) {
   assert_eq(llm_call_count(), 0)
   // with_scenario without fs/temp_dir passes a nil dir but still mocks.
   llm_mock_clear()
-  let no_fs = with_scenario(
+  const no_fs = with_scenario(
     {llm: [llm_text("plain")]},
     { s ->
       let reply = llm_call("x", nil, {provider: "mock"})

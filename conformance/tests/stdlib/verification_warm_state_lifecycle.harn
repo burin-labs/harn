@@ -8,12 +8,12 @@ fn long_running_command() {
 }
 
 pipeline test(task) {
-  let command = long_running_command()
+  const command = long_running_command()
   if command == nil {
     __io_println("verification warm-state lifecycle skipped on windows")
     return nil
   }
-  let row = {
+  const row = {
     id: "svc/lifecycle",
     name: "synthetic-warm-daemon",
     warmMode: {
@@ -25,25 +25,25 @@ pipeline test(task) {
     cacheIdentity: {SERVER_HOME: ".synthetic-server"},
     timings: {warmMs: {p95: 100}, coldMs: {p95: 5000}},
   }
-  let started = verification_start_warm_state(row, {command_options: {capture: {max_inline_bytes: 4096}}})
+  const started = verification_start_warm_state(row, {command_options: {capture: {max_inline_bytes: 4096}}})
   assert_eq(started.id, "svc/lifecycle")
   assert_eq(started.reused, false)
   assert_eq(started.status, "starting")
   assert(started.handle_id != nil, "warm-state start should return a background command handle")
   assert_eq(started.fact.warm, false)
   assert_eq(started.fact.timing_kind, "cold")
-  let reused = verification_start_warm_state(
+  const reused = verification_start_warm_state(
     row,
     {existing: started, command_options: {capture: {max_inline_bytes: 4096}}},
   )
   assert_eq(reused.reused, true)
   assert_eq(reused.handle_id, started.handle_id)
   assert_eq(reused.status, "starting")
-  let stopped = verification_teardown_warm_state(started, {wait_result_ms: 2000})
+  const stopped = verification_teardown_warm_state(started, {wait_result_ms: 2000})
   assert_eq(stopped.handle_id, started.handle_id)
   assert_eq(stopped.cancelled, true)
   assert_eq(stopped.status, "torn_down")
-  let repeated = verification_teardown_warm_state(started, {wait_result_ms: 100})
+  const repeated = verification_teardown_warm_state(started, {wait_result_ms: 100})
   assert_eq(repeated.cancelled, false)
   __io_println("verification warm-state lifecycle ok")
 }

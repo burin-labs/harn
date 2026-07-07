@@ -6,7 +6,7 @@
 arrive. Iterate over it with a `for` loop:
 
 ```harn
-let stream = llm_stream("Tell me a story", "You are a storyteller")
+const stream = llm_stream("Tell me a story", "You are a storyteller")
 for chunk in stream {
   log(chunk)
 }
@@ -21,7 +21,7 @@ It returns a first-class `Stream` of chunk dicts instead of a channel of
 raw strings:
 
 ```harn
-let chunks = llm_stream_call("Tell me a story", nil, {provider: "openai"})
+const chunks = llm_stream_call("Tell me a story", nil, {provider: "openai"})
 for chunk in chunks {
   log(chunk.visible_delta)
   if chunk.partial.contains("REFUSAL") {
@@ -44,7 +44,7 @@ text, use `std/agent/stream` instead of filtering chunks inline:
 ```harn,ignore
 import {agent_stream_call} from "std/agent/stream"
 
-let result = agent_stream_call(prompt, system, {
+const result = agent_stream_call(prompt, system, {
   provider: "openai",
   model: "gpt-5-mini",
   private: {open_tag: "<secret>", close_tag: "</secret>"},
@@ -94,14 +94,14 @@ Harn includes transcript primitives for carrying context across calls,
 forks, repairs, and resumptions:
 
 ```harn
-let first = llm_call("Plan the work", nil, {provider: "mock"})
+const first = llm_call("Plan the work", nil, {provider: "mock"})
 
-let second = llm_call("Continue", nil, {
+const second = llm_call("Continue", nil, {
   provider: "mock",
   transcript: first.transcript
 })
 
-let compacted = transcript_compact(second.transcript, {
+const compacted = transcript_compact(second.transcript, {
   keep_last: 4,
   summary: "Planning complete."
 })
@@ -116,9 +116,9 @@ can route `/compact <instructions>` through one audited path.
 Transcript helpers also expose the canonical event model:
 
 ```harn
-let visible = transcript_render_visible(result.transcript)
-let full = transcript_render_full(result.transcript)
-let events = transcript_events(result.transcript)
+const visible = transcript_render_visible(result.transcript)
+const full = transcript_render_full(result.transcript)
+const events = transcript_events(result.transcript)
 ```
 
 Use these when a host app needs to render human-visible chat separately from
@@ -130,13 +130,13 @@ session contract on top of raw transcripts and run records:
 ```harn
 import "std/agents"
 
-let result = task_run("Write a note", some_flow, {provider: "mock"})
-let session = workflow_session(result)
-let forked = workflow_session_fork(session)
-let archived = workflow_session_archive(forked)
-let resumed = workflow_session_resume(archived)
-let persisted = workflow_session_persist(result, ".harn-runs/chat.json")
-let restored = workflow_session_restore(persisted.run.persisted_path)
+const result = task_run("Write a note", some_flow, {provider: "mock"})
+const session = workflow_session(result)
+const forked = workflow_session_fork(session)
+const archived = workflow_session_archive(forked)
+const resumed = workflow_session_resume(archived)
+const persisted = workflow_session_persist(result, ".harn-runs/chat.json")
+const restored = workflow_session_restore(persisted.run.persisted_path)
 ```
 
 Each workflow session also carries a normalized `usage` summary copied from the
@@ -175,7 +175,7 @@ loop wiring. Define a helper that assembles the tools your agents will use:
 
 ```harn
 fn review_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "read", "Read a file", {
     parameters: {path: {type: "string"}},
     returns: {type: "string"},
@@ -194,7 +194,7 @@ fn review_tools() {
   return tools
 }
 
-let graph = workflow_graph({
+const graph = workflow_graph({
   name: "review_and_repair",
   entry: "act",
   nodes: {
@@ -204,7 +204,7 @@ let graph = workflow_graph({
   edges: [{from: "act", to: "verify"}]
 })
 
-let run = workflow_execute(
+const run = workflow_execute(
   "Fix the failing test and verify the change.",
   graph,
   [],

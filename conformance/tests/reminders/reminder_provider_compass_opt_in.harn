@@ -10,7 +10,7 @@ pipeline main() {
   with_llm_script(
     [llm_text("done")],
     { ->
-      let opted_in = agent_loop(
+      const opted_in = agent_loop(
         "compass opt-in",
         nil,
         {
@@ -20,14 +20,14 @@ pipeline main() {
           reminders: {providers: ["compass_ast_edits"]},
         },
       )
-      let on = transcript_events_by_kind(opted_in.transcript, "system_reminder")
+      const on = transcript_events_by_kind(opted_in.transcript, "system_reminder")
         .filter({ e -> e.reminder.tags[0] == "compass_ast_edits" })
-      let default_off = agent_loop(
+      const default_off = agent_loop(
         "compass default off",
         nil,
         {provider: "mock", model: "mock", session_id: "reminder-compass-default-off"},
       )
-      let off = transcript_events_by_kind(default_off.transcript, "system_reminder")
+      const off = transcript_events_by_kind(default_off.transcript, "system_reminder")
         .filter({ e -> e.reminder.tags[0] == "compass_ast_edits" })
       __io_println(len(on))
       __io_println(on[0].reminder.tags[0])

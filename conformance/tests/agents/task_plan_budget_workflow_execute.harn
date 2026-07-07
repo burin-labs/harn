@@ -13,7 +13,7 @@ pipeline main() {
       },
     ],
     { ->
-      let plan = {
+      const plan = {
         schema_version: "1",
         objective: "Budgeted workflow",
         entry: "work",
@@ -28,9 +28,9 @@ pipeline main() {
         },
         budgets: {total_cost_usd: 0.000001},
       }
-      let compiled = task_plan_compile(plan)
-      let result = workflow_execute("Budgeted workflow", compiled.workflow, [], {max_steps: 1})
-      let stage = result.run.stages[0]
+      const compiled = task_plan_compile(plan)
+      const result = workflow_execute("Budgeted workflow", compiled.workflow, [], {max_steps: 1})
+      const stage = result.run.stages[0]
       __io_println(result.status)
       __io_println(stage.status)
       __io_println(stage.outcome)

@@ -1,1 +1,1 @@
-let binding `y`: expected string, found int
+const binding `y`: expected string, found int

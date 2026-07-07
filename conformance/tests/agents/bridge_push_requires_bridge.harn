@@ -6,7 +6,7 @@
 import { agent_session_push_bridge_injection } from "std/agent/state"
 
 pipeline main() {
-  let result = try {
+  const result = try {
     agent_session_push_bridge_injection(
       "bridge-push-no-bridge",
       {body: "should fail", mode: "interrupt_immediate"},
@@ -14,7 +14,7 @@ pipeline main() {
   }
   __io_println(is_err(result))
   if is_err(result) {
-    let err = unwrap_err(result)
+    const err = unwrap_err(result)
     __io_println(contains(to_string(err), "no host bridge"))
   }
 }

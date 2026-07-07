@@ -1,6 +1,6 @@
 pipeline test(task) {
   // Register a prompt with arguments
-  let r = mcp_prompt(
+  const r = mcp_prompt(
     {
       name: "code_review",
       description: "Review code quality",

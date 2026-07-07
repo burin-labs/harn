@@ -47,7 +47,7 @@ pub fn runtime_approved_plan() -> string {
  * @errors: []
  */
 pub fn process_run(argv: list<string>, options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return host_call("process.exec", filter_nil(opts + {mode: "argv", argv: argv})) ?? {}
 }
 
@@ -58,7 +58,7 @@ pub fn process_run(argv: list<string>, options = nil) {
  * @errors: []
  */
 pub fn process_shell(command: string, options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return host_call("process.exec", filter_nil(opts + {mode: "shell", command: command})) ?? {}
 }
 
@@ -69,7 +69,7 @@ pub fn process_shell(command: string, options = nil) {
  * @errors: []
  */
 pub fn process_result_text(result: dict) -> string {
-  let {stdout = "", stderr = ""} = result ?? {}
+  const {stdout = "", stderr = ""} = result ?? {}
   if stdout && stderr {
     return "${stdout}\n${stderr}"
   }
@@ -92,7 +92,7 @@ pub fn process_result_success(result: dict) -> bool {
   if result?.success != nil {
     return result?.success ? true : false
   }
-  let {status = "completed", exit_code = -1} = result ?? {}
+  const {status = "completed", exit_code = -1} = result ?? {}
   return status == "completed" && exit_code == 0
 }
 

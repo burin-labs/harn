@@ -7,7 +7,7 @@ import {
 } from "std/llm/tool_middleware"
 
 fn smoke_tools() {
-  let registry = tool_registry()
+  const registry = tool_registry()
   return tool_define(
     registry,
     "receipt_echo",
@@ -20,8 +20,8 @@ fn smoke_tools() {
 }
 
 pipeline default() {
-  let session = "smoke-tool-receipts-" + uuid()
-  let receipt_path = path_join(".harn", "receipts", session + ".jsonl")
+  const session = "smoke-tool-receipts-" + uuid()
+  const receipt_path = path_join(".harn", "receipts", session + ".jsonl")
   if harness.fs.exists(receipt_path) {
     harness.fs.delete(receipt_path)
   }
@@ -38,24 +38,21 @@ pipeline default() {
     },
   )
   llm_mock({text: "Done. ##DONE##"})
-  let reason = with_required_reason({schema_required: false})
-  let tools = tools_use_middleware(smoke_tools(), reason.schema_transform)
-  let caller = compose_tool_callers([with_audit_log({sink: "local", redact: ["token"]}), reason.caller])
-  let result = agent_loop(
-    "smoke tool receipts",
-    nil,
-    {
-      provider: "mock",
-      model: "mock",
-      session_id: session,
-      tools: tools,
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 3,
-      tool_caller: caller,
-    },
-  )
-  let records = read_jsonl(receipt_path, {strict: true})
+  const reason = with_required_reason({schema_required: false})
+  const tools = tools_use_middleware(smoke_tools(), reason.schema_transform)
+  const caller = compose_tool_callers([with_audit_log({sink: "local", redact: ["token"]}), reason.caller])
+  const agent_options = {
+    provider: "mock",
+    model: "mock",
+    session_id: session,
+    tools: tools,
+    tool_format: "native",
+    loop_until_done: true,
+    max_iterations: 3,
+    tool_caller: caller,
+  }
+  const result = agent_loop("smoke tool receipts", nil, agent_options)
+  const records = read_jsonl(receipt_path, {strict: true})
   __io_println("status=" + result.status)
   __io_println("receipt_path=" + receipt_path)
   __io_println("records=" + to_string(len(records)))

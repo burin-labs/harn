@@ -7,26 +7,26 @@
  * the stack one cross-platform `similarity` / `top_k` contract to call.
  */
 pipeline default(_task) {
-  let info = hostlib_embed_info({})
-  let query = "authentication token validation"
-  let corpus = [
+  const info = hostlib_embed_info({})
+  const query = "authentication token validation"
+  const corpus = [
     "markdown table of contents renderer",
     "validate the auth token on each request",
     "JSON parser for config files",
     "auth token refresh and validation flow",
     "SwiftUI sidebar selection state",
   ]
-  let ranked = hostlib_embed_top_k({query: query, corpus: corpus, k: 3, min_score: 0.0})
-  let related = hostlib_embed_similarity({a: query, b: corpus[1]})
-  let unrelated = hostlib_embed_similarity({a: query, b: corpus[0]})
-  let vector = hostlib_embed_vector({text: "SymbolRelevance token validator"})
-  var top_indices = []
-  var top_texts = []
+  const ranked = hostlib_embed_top_k({query: query, corpus: corpus, k: 3, min_score: 0.0})
+  const related = hostlib_embed_similarity({a: query, b: corpus[1]})
+  const unrelated = hostlib_embed_similarity({a: query, b: corpus[0]})
+  const vector = hostlib_embed_vector({text: "SymbolRelevance token validator"})
+  let top_indices = []
+  let top_texts = []
   for result in ranked.results {
     top_indices = top_indices + [result.index]
     top_texts = top_texts + [result.text]
   }
-  let receipt = {
+  const receipt = {
     receipt_kind: "embed_similarity_receipt",
     backend: info.backend,
     dim: info.dim,

@@ -124,12 +124,12 @@ non-empty.
 ```harn,ignore
 import {default_llm_caller, with_retry, with_logging, compose} from "std/llm/handlers"
 
-let caller = compose([
+const caller = compose([
   with_logging({level: "info"}),
   with_retry({max_attempts: 4, backoff: "exponential"}),
 ])(default_llm_caller())
 
-let result = agent_loop(task, system, {
+const result = agent_loop(task, system, {
   loop_until_done: true,
   llm_caller: caller,
 })
@@ -146,12 +146,12 @@ tool middleware from `std/llm/tool_middleware`):
 import {agent_model_options} from "std/agent/options"
 import {compose, default_llm_caller, with_logging, with_retry} from "std/llm/handlers"
 
-let route = agent_model_options({
+const route = agent_model_options({
   role: "planner",
   defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
 })
-let caller = compose([with_retry({max_attempts: 3}), with_logging({})])(default_llm_caller())
-let result = agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
+const caller = compose([with_retry({max_attempts: 3}), with_logging({})])(default_llm_caller())
+const result = agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
 ```
 
 `agent_model_options(config?)` resolves explicit options first, then role
@@ -176,14 +176,14 @@ import {
 } from "std/llm/handlers"
 
 // Cheap default: a fast / inexpensive model on a tight retry budget.
-let cheap = with_circuit_breaker(
+const cheap = with_circuit_breaker(
   with_retry(default_llm_caller(), {max_attempts: 2}),
   {threshold: 5, reset_ms: 30000},
 )
 
 // Frontier escalation: a stronger model with longer retries + a fallback
 // to a second strong model if the first provider trips a circuit.
-let frontier = with_circuit_breaker(
+const frontier = with_circuit_breaker(
   with_fallback([
     with_retry(default_llm_caller(), {max_attempts: 3}),
     with_retry(default_llm_caller(), {max_attempts: 2}),
@@ -191,14 +191,14 @@ let frontier = with_circuit_breaker(
   {threshold: 5, reset_ms: 30000},
 )
 
-let receipts_sink = { record ->
+const receipts_sink = { record ->
   // Forward to cloud receipts / IDE-host transcript / etc.
   agent_emit_event("ops.receipts", "llm_call_log", record)
 }
 
 // with_routing is a base caller (it owns the call, not a wrapper around
 // `next`); the budget + logging middleware compose over it.
-let router = with_routing({
+const router = with_routing({
   default: cheap,
   routes: [
     {name: "frontier",
@@ -207,7 +207,7 @@ let router = with_routing({
   ],
 })
 
-let persona_caller = compose([
+const persona_caller = compose([
   with_logging({level: "info", sink: receipts_sink}),
   with_budget({max_total_tokens: 250000, max_calls: 200}),
 ])(router)
@@ -231,7 +231,7 @@ arbitrary closure-based custom logic. For the much more common
 once and pass it to `llm_call(... routing: policy ...)` directly:
 
 ```harn,ignore
-let policy = routing_policy({
+const policy = routing_policy({
   chain: [
     {provider: "anthropic", model: "claude-opus-4-20250514"},
     {provider: "openai",    model: "gpt-4o"},
@@ -252,7 +252,7 @@ let policy = routing_policy({
   ],
 })
 
-let result = llm_call("Summarize this PR.", nil, {routing: policy})
+const result = llm_call("Summarize this PR.", nil, {routing: policy})
 ```
 
 `escalate_on` makes frontier escalation **conditional on a
@@ -298,8 +298,8 @@ direct `llm_call`-style usage, callers can invoke their wrapped caller
 explicitly:
 
 ```harn,ignore
-let caller = with_retry(default_llm_caller(), {max_attempts: 3})
-let envelope = caller({
+const caller = with_retry(default_llm_caller(), {max_attempts: 3})
+const envelope = caller({
   prompt: "hello",
   system: nil,
   opts: {provider: "auto", model: "claude-sonnet-5"},
@@ -333,7 +333,7 @@ Citations (in source):
 ```harn,ignore
 import {best_of_n} from "std/llm/ensemble"
 
-let result = best_of_n(
+const result = best_of_n(
   "Write a haiku about debugging.",
   "You are a poet.",
   {n: 5, sampler_opts: {temperature: 1.0}},
@@ -348,8 +348,8 @@ log(result.reasoning)
 sampling inside `agent_loop`, wrap it in a caller:
 
 ```harn,ignore
-let ensemble_caller = { call ->
-  let r = best_of_n(call.prompt, call.system, {n: 3} + call.opts)
+const ensemble_caller = { call ->
+  const r = best_of_n(call.prompt, call.system, {n: 3} + call.opts)
   if !r.ok { return {ok: false, status: r.status} }
   return {ok: true, value: {text: r.best.text}}
 }
@@ -384,7 +384,7 @@ Prompt Optimizer guide, OpenAI Cookbook meta-prompting recipe.
 ```harn,ignore
 import {refine_prompt} from "std/llm/refine"
 
-let r = refine_prompt({
+const r = refine_prompt({
   user_prompt: "summarize this report",
   style: "imperative",
   target_size: "small",
@@ -415,7 +415,7 @@ refinements.
 ```harn,ignore
 import {recommend_max_output_tokens, fits_in_context} from "std/llm/budget"
 
-let max_out = recommend_max_output_tokens({
+const max_out = recommend_max_output_tokens({
   prompt: long_text,
   system: sys,
   model: "claude-sonnet-5",
@@ -474,7 +474,7 @@ GPT-5/5.5/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
 ```harn,ignore
 import {pack_agent} from "std/llm/defaults"
 
-let opts = pack_agent("claude-sonnet-5", {
+const opts = pack_agent("claude-sonnet-5", {
   thinking: "medium",
   effort: "quality",
 })
@@ -501,11 +501,11 @@ agent_loop(task, system, opts + {loop_until_done: true})
 ```harn,ignore
 import {safe_call, safe_field, with_case_insensitive_keys} from "std/llm/safe"
 
-let r = safe_call(prompt, system, {provider: "auto", model: "gpt-4o"})
+const r = safe_call(prompt, system, {provider: "auto", model: "gpt-4o"})
 if !r.ok { return r }
 
-let envelope = with_case_insensitive_keys(parse_json(r.value.text))
-let verdict = safe_field(envelope, ["verdict", "decision", "result"], "unknown")
+const envelope = with_case_insensitive_keys(parse_json(r.value.text))
+const verdict = safe_field(envelope, ["verdict", "decision", "result"], "unknown")
 ```
 
 ---
@@ -523,7 +523,7 @@ let verdict = safe_field(envelope, ["verdict", "decision", "result"], "unknown")
 ```harn,ignore
 import {system_prelude} from "std/llm/prompts"
 
-let sys = system_prelude({
+const sys = system_prelude({
   persona: "You are a release auditor.",
   tone: "terse",
   constraints: ["Cite evidence by file path", "No speculation"],
@@ -557,9 +557,9 @@ if has_capability(model, "thinking") {
   // safe to set `thinking: "medium"` in opts
 }
 
-let fam = family_of(model)       // e.g. "anthropic-claude"
-let lineage = lineage_of(model)  // e.g. "claude-opus-adaptive"
-let reviewer = complementary_reviewer({author_model: model, intent: "plan_review"})
+const fam = family_of(model)       // e.g. "anthropic-claude"
+const lineage = lineage_of(model)  // e.g. "claude-opus-adaptive"
+const reviewer = complementary_reviewer({author_model: model, intent: "plan_review"})
 ```
 
 ---

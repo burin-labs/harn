@@ -114,7 +114,7 @@ pipeline default() {
         let diags = lint(
             r#"
 pipeline default() {
-    let effect = {reminder: {body: "heads up", ttl_turns: nil, preserve_on_compact: false}}
+    const effect = {reminder: {body: "heads up", ttl_turns: nil, preserve_on_compact: false}}
 }
 "#,
         );
@@ -126,7 +126,7 @@ pipeline default() {
         let diags = lint(
             r#"
 pipeline default() {
-    let effect = {reminder: {body: "heads up", ttl_turns: 2, preserve_on_compact: false}}
+    const effect = {reminder: {body: "heads up", ttl_turns: 2, preserve_on_compact: false}}
 }
 "#,
         );
@@ -138,7 +138,7 @@ pipeline default() {
         let diags = lint(
             r#"
 pipeline default() {
-    let effect = {reminder: {body: "heads up", preserve_on_compact: true}}
+    const effect = {reminder: {body: "heads up", preserve_on_compact: true}}
 }
 "#,
         );

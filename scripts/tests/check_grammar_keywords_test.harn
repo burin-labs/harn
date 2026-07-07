@@ -3,8 +3,8 @@ import "../check_grammar_keywords.harn"
 
 @test
 pipeline test_grammar_section_extracts_body(task) {
-  let spec = "intro\n\n## Grammar\nrule ::= 'fn'\n\n## Next\nother\n"
-  let section = grammar_section(spec)
+  const spec = "intro\n\n## Grammar\nrule ::= 'fn'\n\n## Next\nother\n"
+  const section = grammar_section(spec)
   assert(section != nil)
   assert(section.contains("rule ::= 'fn'"))
   assert(!section.contains("other"))
@@ -17,7 +17,7 @@ pipeline test_grammar_section_missing_returns_nil(task) {
 
 @test
 pipeline test_single_quoted_words_extracts_alpha_literals(task) {
-  let words = single_quoted_words("a ::= 'fn' | 'where' ':' '->' 'fn'")
+  const words = single_quoted_words("a ::= 'fn' | 'where' ':' '->' 'fn'")
   assert(words.contains("fn"))
   assert(words.contains("where"))
   // punctuation literals and duplicates are excluded

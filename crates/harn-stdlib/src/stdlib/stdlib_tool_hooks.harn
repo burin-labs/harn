@@ -38,7 +38,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * @example: preset_run_command({stacks: ["rust"], inner: shell_runner})
  */
 fn __preset_command_text(args) -> string {
-  let kind = type_of(args)
+  const kind = type_of(args)
   if kind == "string" {
     return args
   }
@@ -71,12 +71,12 @@ fn __preset_invoke_rewrite(rewrite_fn, original_command, rule) -> string {
   if rewrite_fn == nil {
     return original_command
   }
-  let context = {
+  const context = {
     rule_id: rule?.rule_id ?? "",
     catalogue_id: rule?.catalogue_id ?? "",
     severity: rule?.severity ?? "warning",
   }
-  let rewritten = rewrite_fn(original_command, context)
+  const rewritten = rewrite_fn(original_command, context)
   if type_of(rewritten) == "dict" {
     return to_string(rewritten?.command ?? original_command)
   }
@@ -98,8 +98,8 @@ fn __preset_audit_payload(rule, original_command, command) {
 }
 
 fn __preset_reminder_body(rule, original_command, command, action) {
-  let rid = rule?.rule_id ?? ""
-  let explanation = rule?.explanation ?? ""
+  const rid = rule?.rule_id ?? ""
+  const explanation = rule?.explanation ?? ""
   if action == "rewrite" {
     return "Your command was rewritten per rule " + rid + ": " + explanation
       + " Original: "
@@ -143,9 +143,9 @@ fn __preset_reminder_body(rule, original_command, command, action) {
  * @example: preset_run_command({mode: tool_hooks_mode_rewrite_with_audit})
  */
 pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
-  let original_command = __preset_command_text(args)
-  let rewritten_command = __preset_invoke_rewrite(rule?.rewrite, original_command, rule)
-  let envelope = __preset_envelope(rule, original_command, rewritten_command)
+  const original_command = __preset_command_text(args)
+  const rewritten_command = __preset_invoke_rewrite(rule?.rewrite, original_command, rule)
+  const envelope = __preset_envelope(rule, original_command, rewritten_command)
   tool_hooks_emit_audit(
     "tool_rewrite",
     __preset_audit_payload(rule, original_command, rewritten_command),
@@ -160,8 +160,8 @@ pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
   if inner == nil {
     return envelope + {action: "rewrite"}
   }
-  let rewritten_args = __preset_rewritten_args(args, rewritten_command)
-  let result = inner(rewritten_args)
+  const rewritten_args = __preset_rewritten_args(args, rewritten_command)
+  const result = inner(rewritten_args)
   return envelope + {action: "rewrite", result: result}
 }
 
@@ -181,8 +181,8 @@ pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
  * @example: preset_run_command({mode: tool_hooks_mode_deny_with_explanation})
  */
 pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
-  let original_command = __preset_command_text(args)
-  let envelope = __preset_envelope(rule, original_command, original_command)
+  const original_command = __preset_command_text(args)
+  const envelope = __preset_envelope(rule, original_command, original_command)
   tool_hooks_emit_audit(
     "tool_denied",
     __preset_audit_payload(rule, original_command, original_command),
@@ -208,8 +208,8 @@ pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
  * @example: preset_run_command({mode: tool_hooks_mode_passthrough_only_audit})
  */
 pub fn tool_hooks_mode_passthrough_only_audit(rule, args, inner) {
-  let original_command = __preset_command_text(args)
-  let envelope = __preset_envelope(rule, original_command, original_command)
+  const original_command = __preset_command_text(args)
+  const envelope = __preset_envelope(rule, original_command, original_command)
   tool_hooks_emit_audit(
     "tool_rule_warning",
     __preset_audit_payload(rule, original_command, original_command),
@@ -217,12 +217,12 @@ pub fn tool_hooks_mode_passthrough_only_audit(rule, args, inner) {
   if inner == nil {
     return envelope + {action: "passthrough"}
   }
-  let result = inner(args)
+  const result = inner(args)
   return envelope + {action: "passthrough", result: result}
 }
 
 fn __preset_no_match(args, inner) {
-  let original_command = __preset_command_text(args)
+  const original_command = __preset_command_text(args)
   if inner == nil {
     return {action: "passthrough", command: original_command, original_command: original_command}
   }
@@ -260,29 +260,29 @@ fn __classifier_validate_config(cfg) {
   if type_of(cfg) != "dict" {
     throw "preset_run_command: llm_classifier must be a dict"
   }
-  let model = cfg?.model ?? ""
+  const model = cfg?.model ?? ""
   if type_of(model) != "string" || len(model) == 0 {
     throw "preset_run_command: llm_classifier.model must be a non-empty string"
   }
-  let threshold = cfg?.threshold ?? 0.8
-  let threshold_kind = type_of(threshold)
+  const threshold = cfg?.threshold ?? 0.8
+  const threshold_kind = type_of(threshold)
   if threshold_kind != "float" && threshold_kind != "int" {
     throw "preset_run_command: llm_classifier.threshold must be a number"
   }
-  let threshold_f = to_float(threshold)
+  const threshold_f = to_float(threshold)
   if threshold_f < 0.0 || threshold_f > 1.0 {
     throw "preset_run_command: llm_classifier.threshold must be between 0 and 1"
   }
-  let meta_prompt = cfg?.meta_prompt ?? __classifier_default_meta_prompt()
+  const meta_prompt = cfg?.meta_prompt ?? __classifier_default_meta_prompt()
   if type_of(meta_prompt) != "string" {
     throw "preset_run_command: llm_classifier.meta_prompt must be a string"
   }
-  let provider = cfg?.provider ?? nil
+  const provider = cfg?.provider ?? nil
   if provider != nil && type_of(provider) != "string" {
     throw "preset_run_command: llm_classifier.provider must be a string"
   }
-  let cache = cfg?.cache ?? nil
-  let cache_ttl_ms = if cache == nil {
+  const cache = cfg?.cache ?? nil
+  const cache_ttl_ms = if cache == nil {
     0
   } else {
     if type_of(cache) != "dict" {
@@ -304,7 +304,7 @@ fn __classifier_validate_config(cfg) {
   /* Stable per-config scope so independent wrappers don't share verdict
    * cache. Caller-supplied `id` wins; otherwise we synthesize a key
    * from (model, threshold) which keeps tests deterministic. */
-  let scope = if cfg?.id != nil {
+  const scope = if cfg?.id != nil {
     to_string(cfg.id)
   } else {
     "tool_hooks_classifier:" + to_string(model) + ":" + to_string(threshold_f)
@@ -343,7 +343,7 @@ fn __classifier_build_options(classifier_cfg) {
   /* Merge order: caller `llm_options` first so they can override our
    * defaults; then pin `model` (and `provider` when supplied) so the
    * classifier never silently falls back to the default agent model. */
-  let merged = classifier_cfg.llm_options + {model: classifier_cfg.model}
+  const merged = classifier_cfg.llm_options + {model: classifier_cfg.model}
   if classifier_cfg.provider != nil {
     return merged + {provider: classifier_cfg.provider}
   }
@@ -363,27 +363,27 @@ fn __classifier_extract_text(envelope) -> string {
 }
 
 fn __classifier_parse_verdict(text) {
-  let trimmed = trim(to_string(text))
+  const trimmed = trim(to_string(text))
   if len(trimmed) == 0 {
     return {kind: "error", error: "empty classifier response"}
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(trimmed)
   }
   if is_err(parsed) {
     return {kind: "error", error: "non-JSON classifier response: " + to_string(unwrap_err(parsed))}
   }
-  let value = unwrap(parsed)
+  const value = unwrap(parsed)
   if type_of(value) != "dict" {
     return {kind: "error", error: "classifier response is not a dict"}
   }
-  let kind = to_string(value?.kind ?? "")
+  const kind = to_string(value?.kind ?? "")
   if kind != "rewrite" && kind != "deny" && kind != "allow" {
     return {kind: "error", error: "classifier kind must be rewrite|deny|allow"}
   }
-  let confidence_raw = value?.confidence ?? 0.0
-  let confidence_kind = type_of(confidence_raw)
-  let confidence = if confidence_kind == "float" || confidence_kind == "int" {
+  const confidence_raw = value?.confidence ?? 0.0
+  const confidence_kind = type_of(confidence_raw)
+  const confidence = if confidence_kind == "float" || confidence_kind == "int" {
     to_float(confidence_raw)
   } else {
     0.0
@@ -403,12 +403,12 @@ fn __classifier_synth_rule(verdict, classifier_cfg, original_command) {
    * rule's `rewrite` is a constant closure returning the model's
    * proposal — the default rewrite-with-audit mode forwards that text
    * to `inner`. */
-  let rewritten = if verdict.kind == "rewrite" && len(verdict.rewritten) > 0 {
+  const rewritten = if verdict.kind == "rewrite" && len(verdict.rewritten) > 0 {
     verdict.rewritten
   } else {
     original_command
   }
-  let severity = if verdict.kind == "deny" {
+  const severity = if verdict.kind == "deny" {
     "error"
   } else {
     "warning"
@@ -441,15 +441,15 @@ fn __classifier_audit_payload(classifier_cfg, command, verdict, cache_hit, actio
 }
 
 fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
-  let original_command = __preset_command_text(args)
-  let cache_key = __classifier_cache_key(classifier_cfg.scope, original_command)
-  let now = harness.clock.now_ms()
-  let cached = if classifier_cfg.cache_ttl_ms > 0 {
+  const original_command = __preset_command_text(args)
+  const cache_key = __classifier_cache_key(classifier_cfg.scope, original_command)
+  const now = harness.clock.now_ms()
+  const cached = if classifier_cfg.cache_ttl_ms > 0 {
     __tool_hooks_classifier_cache_get(cache_key, now)
   } else {
     nil
   }
-  let verdict = if cached != nil {
+  const verdict = if cached != nil {
     cached
   } else {
     let envelope = llm_call_safe(
@@ -464,7 +464,7 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
     }
     parsed
   }
-  let cache_hit = cached != nil
+  const cache_hit = cached != nil
   /* Error verdicts always audit + passthrough — privacy escape hatch:
    * the audit payload echoes the command but the classifier never
    * blocks the caller's dispatch on its own faults. */
@@ -489,7 +489,7 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
    * `tool_hooks_mode_deny_with_explanation` for `deny` regardless of
    * the wrapper's primary `mode` — the classifier verdict expresses
    * the desired action explicitly. */
-  let synth_rule = __classifier_synth_rule(verdict, classifier_cfg, original_command)
+  const synth_rule = __classifier_synth_rule(verdict, classifier_cfg, original_command)
   tool_hooks_emit_audit(
     "tool_hook_classifier_verdict",
     __classifier_audit_payload(classifier_cfg, original_command, verdict, cache_hit, verdict.kind),
@@ -567,11 +567,11 @@ fn __preset_custom_registry(custom_rules) {
  * @example: agent_loop(message, tools: {tools: [{name: "run_command", handler: preset_run_command({stacks: ["rust"]})}]})
  */
 pub fn preset_run_command(config = nil) {
-  let cfg = config ?? {}
+  const cfg = config ?? {}
   if type_of(cfg) != "dict" {
     throw "preset_run_command: config must be a dict"
   }
-  let stacks = cfg?.stacks ?? []
+  const stacks = cfg?.stacks ?? []
   if type_of(stacks) != "list" {
     throw "preset_run_command: `stacks` must be a list of strings"
   }
@@ -581,34 +581,34 @@ pub fn preset_run_command(config = nil) {
    * catalogue per opted-in stack. Callers that supply `registry:` keep
    * full control — tests, vendor overrides, and migration paths are
    * unaffected. (TH-04 #1897) */
-  let {registry = tool_hooks_seed_registry(stacks), custom_rules = []} = cfg ?? {}
+  const {registry = tool_hooks_seed_registry(stacks), custom_rules = []} = cfg ?? {}
   if type_of(custom_rules) != "list" {
     throw "preset_run_command: `custom_rules` must be a list of tool_rule values"
   }
-  let mode = cfg?.mode ?? tool_hooks_mode_rewrite_with_audit
-  let inner = cfg?.inner
-  let classifier_cfg = if cfg?.llm_classifier == nil {
+  const mode = cfg?.mode ?? tool_hooks_mode_rewrite_with_audit
+  const inner = cfg?.inner
+  const classifier_cfg = if cfg?.llm_classifier == nil {
     nil
   } else {
     __classifier_validate_config(cfg.llm_classifier)
   }
-  let filtered_registry = tool_hooks_filter(registry, stacks)
-  let has_custom = len(custom_rules) > 0
-  let custom_registry = if has_custom {
+  const filtered_registry = tool_hooks_filter(registry, stacks)
+  const has_custom = len(custom_rules) > 0
+  const custom_registry = if has_custom {
     __preset_custom_registry(custom_rules)
   } else {
     nil
   }
-  let context = {stacks: stacks}
+  const context = {stacks: stacks}
   return { args ->
-    let command = __preset_command_text(args)
+    const command = __preset_command_text(args)
     if custom_registry != nil {
-      let custom_matches = tool_hooks_match(custom_registry, command, context)
+      const custom_matches = tool_hooks_match(custom_registry, command, context)
       if len(custom_matches) > 0 {
         return mode(custom_matches[0], args, inner)
       }
     }
-    let matches = tool_hooks_match(filtered_registry, command, context)
+    const matches = tool_hooks_match(filtered_registry, command, context)
     if len(matches) > 0 {
       return mode(matches[0], args, inner)
     }

@@ -5,6 +5,6 @@
  * precisely at the backslash instead of silently rendering the raw text.
  */
 pipeline test(task) {
-  let x = nil
+  const x = nil
   log("value=${x ?? \"y\"}")
 }

@@ -54,7 +54,7 @@ pub fn fail(kind: string) -> string {
 }
 
 pub fn spin(label: string) -> string {
-  var ticks = 0
+  let ticks = 0
   while !is_cancelled() {
     ticks = ticks + 1
     mcp_report_progress(ticks, {message: "spinning " + label})
@@ -72,7 +72,7 @@ fn write_script_surface_fixture(temp: &TempDir) {
         temp.path().join("script_surface.harn"),
         r##"
 pipeline main(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(tools, "echo", "Echo input", {
     parameters: {text: "string"},
     returns: {type: "string"},
@@ -84,8 +84,8 @@ pipeline main(task) {
     parameters: {steps: "int"},
     returns: {type: "string"},
     handler: { args ->
-      var sent = 0
-      var i = 0
+      let sent = 0
+      let i = 0
       while i < args.steps {
         i = i + 1
         if mcp_report_progress(i, {total: args.steps, message: "step " + to_string(i)}) {

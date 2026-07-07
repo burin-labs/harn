@@ -1,18 +1,18 @@
 type GraderOut = {verdict: "pass" | "fail" | "unclear", score: 0 | 1 | 2, summary: string}
 
 pipeline test(task) {
-  let s = schema_of(GraderOut)
+  const s = schema_of(GraderOut)
   __io_println(s.type)
   __io_println(s.required)
   __io_println(s.properties.verdict.enum)
   __io_println(s.properties.score.enum)
   // Positive round-trip: a conforming value validates.
-  let ok = {verdict: "pass", score: 2, summary: "ok"}
+  const ok = {verdict: "pass", score: 2, summary: "ok"}
   __io_println(schema_is(ok, s))
   // Negative: enum violation on verdict.
-  let bad_verdict = {verdict: "nope", score: 0, summary: "x"}
+  const bad_verdict = {verdict: "nope", score: 0, summary: "x"}
   __io_println(schema_is(bad_verdict, s))
   // Negative: enum violation on int literal.
-  let bad_score = {verdict: "fail", score: 5, summary: "x"}
+  const bad_score = {verdict: "fail", score: 5, summary: "x"}
   __io_println(schema_is(bad_score, s))
 }

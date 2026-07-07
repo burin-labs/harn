@@ -23,26 +23,26 @@ pub fn fixture_adapter(snapshot) {
 /** List open PRs in a repository. */
 pub fn list_open_prs(adapter, repo) {
   if adapter.mode == "fixture" {
-    let bucket = adapter.snapshot[repo]
+    const bucket = adapter.snapshot[repo]
     if bucket == nil {
       return []
     }
     return (bucket.pulls ?? []).filter({ pr -> pr.state == "open" })
   }
-  let parts = repo.split("/")
-  let path = "/repos/${parts[0]}/${parts[1]}/pulls?state=open&per_page=100"
-  let result = _gh("api_call", {path: path, method: "GET"})
+  const parts = repo.split("/")
+  const path = "/repos/${parts[0]}/${parts[1]}/pulls?state=open&per_page=100"
+  const result = _gh("api_call", {path: path, method: "GET"})
   return result ?? []
 }
 
 /** Fetch detailed PR + checks data. */
 pub fn get_pr_details(adapter, repo, number) {
   if adapter.mode == "fixture" {
-    let bucket = adapter.snapshot[repo]
+    const bucket = adapter.snapshot[repo]
     if bucket == nil {
       return nil
     }
-    var found = nil
+    let found = nil
     for pr in bucket.pulls ?? [] {
       if pr.number == number {
         found = pr
@@ -51,22 +51,22 @@ pub fn get_pr_details(adapter, repo, number) {
     if found == nil {
       return nil
     }
-    let checks_for = (bucket.checks ?? {})[to_string(number)] ?? []
+    const checks_for = (bucket.checks ?? {})[to_string(number)] ?? []
     return {pr: found, checks: checks_for}
   }
-  let parts = repo.split("/")
-  let pr = _gh("api_call", {path: "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}", method: "GET"})
-  let checks_envelope = _gh(
+  const parts = repo.split("/")
+  const pr = _gh("api_call", {path: "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}", method: "GET"})
+  const checks_envelope = _gh(
     "api_call",
     {path: "/repos/${parts[0]}/${parts[1]}/commits/${pr.head.sha}/check-runs", method: "GET"},
   )
-  let runs = checks_envelope?.check_runs ?? []
+  const runs = checks_envelope?.check_runs ?? []
   return {pr: normalize_pr(pr), checks: runs}
 }
 
 /** Normalize a raw GitHub PR API payload into our minimal shape. */
 pub fn normalize_pr(api_pr) {
-  let labels = (api_pr.labels ?? []).map({ l -> l.name })
+  const labels = (api_pr.labels ?? []).map({ l -> l.name })
   return {
     repo: api_pr.base?.repo?.full_name ?? "",
     number: api_pr.number,
@@ -93,9 +93,9 @@ pub fn update_branch(adapter, repo, number, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
-  let parts = repo.split("/")
-  let path = "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}/update-branch"
-  let response = _gh("api_call", {path: path, method: "PUT", body: {}})
+  const parts = repo.split("/")
+  const path = "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}/update-branch"
+  const response = _gh("api_call", {path: path, method: "PUT", body: {}})
   return {ok: true, response: response}
 }
 
@@ -104,8 +104,8 @@ pub fn enqueue_merge_queue(adapter, repo, number, merge_method, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
-  let pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
-  let response = _gh("merge_pr", {pr_url: pr_url, merge_method: merge_method, queue: true})
+  const pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
+  const response = _gh("merge_pr", {pr_url: pr_url, merge_method: merge_method, queue: true})
   return {ok: true, response: response}
 }
 
@@ -114,8 +114,8 @@ pub fn add_label(adapter, repo, number, label, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
-  let issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
-  let response = _gh("add_labels", {issue_url: issue_url, labels: [label]})
+  const issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
+  const response = _gh("add_labels", {issue_url: issue_url, labels: [label]})
   return {ok: true, response: response}
 }
 
@@ -124,8 +124,8 @@ pub fn comment(adapter, repo, number, body, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
-  let issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
-  let response = _gh("comment", {issue_url: issue_url, body: body})
+  const issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
+  const response = _gh("comment", {issue_url: issue_url, body: body})
   return {ok: true, response: response}
 }
 
@@ -134,7 +134,7 @@ pub fn request_review(adapter, repo, number, reviewers, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
-  let pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
-  let response = _gh("request_review", {pr_url: pr_url, reviewers: reviewers})
+  const pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
+  const response = _gh("request_review", {pr_url: pr_url, reviewers: reviewers})
   return {ok: true, response: response}
 }

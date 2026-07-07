@@ -28,7 +28,7 @@ fn normalize(task) {
 }
 
 pipeline review(task) {
-  let _ = normalize(task)
+  const _ = normalize(task)
   return task?.title ?? "untitled"
 }
 

@@ -16,10 +16,10 @@ pipeline test(task) {
     throw "kaboom"
   }
   // --- Success path: try* returns the operand's value. ---
-  let v = try* ok()
+  const v = try* ok()
   log("ok: ${v}")
   // --- Error path: try* rethrows; outer try/catch catches it. ---
-  let caught = try {
+  const caught = try {
     let _ = try* boom()
     "unreachable"
   } catch (e) {
@@ -29,7 +29,7 @@ pipeline test(task) {
   // --- Nested try* inside a try/catch expression: the inner throw
   //     short-circuits the let and lands in the outer catch with the
   //     original thrown value. ---
-  let nested: string = try {
+  const nested: string = try {
     let v = try* boom()
     "got:${v}"
   } catch (e) {
@@ -38,13 +38,13 @@ pipeline test(task) {
   log("nested: ${nested}")
   // --- try* on an expression embedded mid-expression: error path
   //     short-circuits before the surrounding expression evaluates. ---
-  let composed = try {
+  const composed = try {
     "value=${try* ok()}"
   } catch (e) {
     "composed-ok"
   }
   log("composed: ${composed}")
-  let composed_err = try {
+  const composed_err = try {
     "value=${try* boom()}"
   } catch (e) {
     "composed-err:${e}"
@@ -52,7 +52,7 @@ pipeline test(task) {
   log("composed_err: ${composed_err}")
   // --- Rethrow targets the *innermost* enclosing catch; outer is not
   //     touched when inner handles the rethrow. ---
-  let outer_untouched = try {
+  const outer_untouched = try {
     let inner = try {
       let _ = try* boom()
       "u1"

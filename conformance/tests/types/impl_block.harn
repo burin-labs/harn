@@ -14,10 +14,10 @@ pipeline test(task) {
       return "(${self.x}, ${self.y})"
     }
   }
-  let p = Point({x: 3, y: 4})
+  const p = Point({x: 3, y: 4})
   log(p.distance())
   log(p.to_string())
-  let p2 = p.translate(10, 20)
+  const p2 = p.translate(10, 20)
   log(p2.x)
   log(p2.y)
 }

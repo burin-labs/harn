@@ -846,7 +846,7 @@ harn check --preflight warning src/
   require_budget: "llm.model",
 )
 fn release_worker(client) {
-  let _approval = request_approval("edit", {capabilities_requested: ["fs.write"]})
+  const _approval = request_approval("edit", {capabilities_requested: ["fs.write"]})
   write_file("src/release.md", "ready")
   with_command_policy({deny: ["rm"]}, { -> exec("git status") })
   egress_policy({default: "deny", allow: ["api.github.com"]})

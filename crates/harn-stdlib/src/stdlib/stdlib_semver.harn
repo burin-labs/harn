@@ -26,7 +26,7 @@ type Version = {major: int, minor: int, patch: int}
  * @example: strip_v("v1.2.3")
  */
 pub fn strip_v(version) -> string {
-  let text = to_string(version ?? "")
+  const text = to_string(version ?? "")
   if starts_with(text, "v") {
     return substring(text, 1, len(text))
   }
@@ -42,7 +42,7 @@ pub fn strip_v(version) -> string {
  * @example: add_v("1.2.3")
  */
 pub fn add_v(version) -> string {
-  let text = to_string(version ?? "")
+  const text = to_string(version ?? "")
   if text == "" || starts_with(text, "v") {
     return text
   }
@@ -74,14 +74,14 @@ pub fn is_v_semver(value) -> bool {
  * @example: parse("v1.2.3")
  */
 pub fn parse(version) -> Version? {
-  let text = strip_v(version)
-  let parts = split(text, ".")
+  const text = strip_v(version)
+  const parts = split(text, ".")
   if len(parts) != 3 {
     return nil
   }
-  let major = to_int(parts[0])
-  let minor = to_int(parts[1])
-  let patch = to_int(parts[2])
+  const major = to_int(parts[0])
+  const minor = to_int(parts[1])
+  const patch = to_int(parts[2])
   if major == nil || minor == nil || patch == nil {
     return nil
   }
@@ -102,7 +102,7 @@ pub fn parse(version) -> Version? {
  * @example: next("1.2.3", "minor")
  */
 pub fn next(current, bump) -> string {
-  let parsed = parse(current)
+  const parsed = parse(current)
   if parsed == nil {
     throw "std/semver: current version is not semver: " + to_string(current ?? "")
   }
@@ -131,8 +131,8 @@ pub fn next(current, bump) -> string {
  * @example: bump_type("1.2.3", "1.2.4")
  */
 pub fn bump_type(current, target) {
-  let cur = parse(current)
-  let tgt = parse(target)
+  const cur = parse(current)
+  const tgt = parse(target)
   if cur == nil {
     throw "std/semver: current version is not semver: " + to_string(current ?? "")
   }
@@ -163,11 +163,11 @@ pub fn bump_type(current, target) {
  * @example: version_from_release_branch("release/v1.2.3")
  */
 pub fn version_from_release_branch(branch) -> string {
-  let text = to_string(branch ?? "")
+  const text = to_string(branch ?? "")
   if !starts_with(text, "release/v") {
     return ""
   }
-  let candidate = substring(text, 9, len(text))
+  const candidate = substring(text, 9, len(text))
   if parse(candidate) == nil {
     return ""
   }

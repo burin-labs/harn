@@ -8,10 +8,10 @@
 import { create } from "std/net_policy"
 
 fn main(harness: Harness) {
-  let policy = create({allow: [], default: "deny", on_violation: "quarantine"})
-  let restricted = harness.with_net_policy(policy)
+  const policy = create({allow: [], default: "deny", on_violation: "quarantine"})
+  const restricted = harness.with_net_policy(policy)
   harness.stdio.println("before=" + to_string(restricted.is_quarantined()))
-  var err = nil
+  let err = nil
   try {
     restricted.net.get("https://probe.test/x")
   } catch (e) {

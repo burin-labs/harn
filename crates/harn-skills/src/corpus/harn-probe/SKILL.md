@@ -159,7 +159,7 @@ and record the fresh outcome.
 import { probe_eval, probe_typecheck } from "std/agent/probe"
 
 // 1. Verify a shell helper before relying on its exit code.
-let helper = probe_eval(
+const helper = probe_eval(
   "git diff --quiet HEAD -- crates/harn-stdlib",
   {expected: 0, timeout_ms: 5000},
 )
@@ -168,8 +168,8 @@ if helper.outcome != "pass" {
 }
 
 // 2. Confirm a fragment type-checks before pasting it into the user's file.
-let tc = probe_typecheck(
-  "pipeline summary() { let x: int = len([1, 2, 3]) __io_println(x) }\n",
+const tc = probe_typecheck(
+  "pipeline summary() { const x: int = len([1, 2, 3]) __io_println(x) }\n",
   {expected: 0},
 )
 require tc.outcome == "pass", "fragment fails typecheck: " + tc.observed

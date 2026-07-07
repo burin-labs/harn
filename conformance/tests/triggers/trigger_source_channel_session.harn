@@ -5,14 +5,14 @@ import "std/triggers"
  * session scope but ignores emits on the default tenant scope.
  */
 fn handle_session(event) {
-  let payload = event.provider_payload
+  const payload = event.provider_payload
   emit_channel("ch.session.fired", {scope: payload.scope, name: payload.name})
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-session-" + unique,
       kind: "channel.emit",
@@ -31,10 +31,10 @@ pipeline test(task) {
     },
   )
   // Tenant-scoped emit must NOT fire the session-scoped trigger.
-  let _ = emit_channel("sess.input", {n: 1})
+  const _ = emit_channel("sess.input", {n: 1})
   // Session-scoped emit fires the trigger.
-  let _ = emit_channel("session:sess.input", {n: 2})
-  let fired = channel_events("ch.session.fired")
+  const _ = emit_channel("session:sess.input", {n: 2})
+  const fired = channel_events("ch.session.fired")
   __io_println(len(fired))
   __io_println(fired[0].payload.scope)
   __io_println(fired[0].payload.name)

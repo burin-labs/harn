@@ -15,8 +15,8 @@ import { workflow_run_repair } from "std/workflow/repair"
  * blind repair would loop to exhaustion and fail the assertions below.
  */
 pipeline default() {
-  let token = "GOTOKEN"
-  let executor = { ctx ->
+  const token = "GOTOKEN"
+  const executor = { ctx ->
     let saw = contains(json_stringify(ctx.prior_findings), token)
     let fb = contains(ctx.task, "Previous attempt 1 failed")
     let body = if saw {
@@ -31,8 +31,8 @@ pipeline default() {
     }
     return {text: body + mark}
   }
-  let verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} }
-  let out = workflow_run_repair({task: "Z", executor: executor, verify: verifier, max_attempts: 2})
+  const verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} }
+  const out = workflow_run_repair({task: "Z", executor: executor, verify: verifier, max_attempts: 2})
   // Settled successfully after exactly two attempts (fail -> pass).
   __io_println(out.ok)
   __io_println(len(out.attempts))
@@ -49,7 +49,7 @@ pipeline default() {
   __io_println(contains(out.text, "|FB"))
   // --- Attempt count is honored: a never-satisfiable verifier with
   //     max_attempts: 1 stops after exactly one inline attempt. ---
-  let capped = workflow_run_repair(
+  const capped = workflow_run_repair(
     {
       task: "u",
       executor: { _ctx -> return {text: "x"} },
@@ -62,7 +62,7 @@ pipeline default() {
   __io_println(contains(json_stringify(capped.findings), "never satisfied"))
   // --- Containment: a THROWING executor is a failed attempt, not an aborted
   //     run. Two attempts still recorded and settled. ---
-  let boom = workflow_run_repair(
+  const boom = workflow_run_repair(
     {
       task: "b",
       executor: { ctx ->

@@ -5,11 +5,11 @@
  * own distinct topics.
  */
 pipeline default() {
-  let _ = emit_channel("agent.done", {turn: 1}, {scope: "session", session_id: "sess-A", id: "A-1"})
-  let _ = emit_channel("agent.done", {turn: 99}, {scope: "session", session_id: "sess-B", id: "B-1"})
-  let sess_a = channel_events("agent.done", {scope: "session", session_id: "sess-A"})
-  let sess_b = channel_events("agent.done", {scope: "session", session_id: "sess-B"})
-  let sess_c = channel_events("agent.done", {scope: "session", session_id: "sess-C"})
+  const _ = emit_channel("agent.done", {turn: 1}, {scope: "session", session_id: "sess-A", id: "A-1"})
+  const _ = emit_channel("agent.done", {turn: 99}, {scope: "session", session_id: "sess-B", id: "B-1"})
+  const sess_a = channel_events("agent.done", {scope: "session", session_id: "sess-A"})
+  const sess_b = channel_events("agent.done", {scope: "session", session_id: "sess-B"})
+  const sess_c = channel_events("agent.done", {scope: "session", session_id: "sess-C"})
   __io_println(len(sess_a))
   __io_println(sess_a[0].payload.turn)
   __io_println(sess_a[0].scope_id)

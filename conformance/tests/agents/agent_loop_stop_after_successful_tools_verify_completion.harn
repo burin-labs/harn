@@ -1,7 +1,7 @@
 import { with_llm_script } from "std/testing"
 
 fn edit_tools() {
-  let tools = tool_registry()
+  const tools = tool_registry()
   return tool_define(
     tools,
     "apply_fix",
@@ -29,7 +29,7 @@ pipeline default() {
       {text: "verified now ##DONE##"},
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Apply the fix and finish only after verification.",
         nil,
         {

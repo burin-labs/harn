@@ -1,10 +1,10 @@
 import { scripted_user, simulated_user_respond, simulated_user_status } from "std/agent/user"
 
 pipeline main() {
-  let answerer = scripted_user(["First answer."], {max_replies: 1})
-  let first = simulated_user_respond(answerer, {question: "One?"})
-  let second = simulated_user_respond(answerer, {question: "Two?"})
-  let status = simulated_user_status(answerer)
+  const answerer = scripted_user(["First answer."], {max_replies: 1})
+  const first = simulated_user_respond(answerer, {question: "One?"})
+  const second = simulated_user_respond(answerer, {question: "Two?"})
+  const status = simulated_user_status(answerer)
   __io_println(first.action)
   __io_println(first.message)
   __io_println(second.action)

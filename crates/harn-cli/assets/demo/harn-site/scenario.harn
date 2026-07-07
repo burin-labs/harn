@@ -32,8 +32,8 @@ pub fn echo(req: dict) -> dict {
 // If-None-Match validator matches, 200 with the ETag otherwise.
 @route("GET", "/conditional")
 pub fn conditional(req: dict) -> dict {
-  let body = "{\"id\":\"r1\"}"
-  let etag = http_etag(body)
+  const body = "{\"id\":\"r1\"}"
+  const etag = http_etag(body)
   if req.headers["if-none-match"] == etag {
     return http_not_modified(etag, {})
   }
@@ -52,13 +52,13 @@ fn main(_harness: Harness) {
   // Drive the handlers the way the site host would, then capture every
   // observable result in a receipt so the tape stays deterministic. Each
   // http_* envelope carries its HTTP status under the `status` key.
-  let hello_reply = hello({method: "GET", path: "/hello", headers: {}})
-  let echo_reply = echo({method: "POST", body: "{\"name\":\"ada\"}", headers: {}})
+  const hello_reply = hello({method: "GET", path: "/hello", headers: {}})
+  const echo_reply = echo({method: "POST", body: "{\"name\":\"ada\"}", headers: {}})
   // First GET has no validator -> 200; a matching validator -> 304.
-  let etag = http_etag("{\"id\":\"r1\"}")
-  let fresh = conditional({method: "GET", headers: {}})
-  let cached = conditional({method: "GET", headers: {"if-none-match": etag}})
-  let receipt = {
+  const etag = http_etag("{\"id\":\"r1\"}")
+  const fresh = conditional({method: "GET", headers: {}})
+  const cached = conditional({method: "GET", headers: {"if-none-match": etag}})
+  const receipt = {
     receipt_kind: "harn_site_receipt",
     hello_status: hello_reply.status,
     hello_method: hello_reply.body.method,

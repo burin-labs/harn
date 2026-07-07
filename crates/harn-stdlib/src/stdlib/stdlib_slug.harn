@@ -153,12 +153,12 @@ pub fn slug_dictionary() {
  * @errors: []
  */
 pub fn random_slug(options = nil) {
-  let opts = __slug_options(options)
-  var words = []
-  var index = 0
+  const opts = __slug_options(options)
+  let words = []
+  let index = 0
   while index < opts.segments {
-    let kind = __slug_segment_kind(opts.pattern, index, opts.segments)
-    let bucket = __slug_bucket(kind, opts.dictionary)
+    const kind = __slug_segment_kind(opts.pattern, index, opts.segments)
+    const bucket = __slug_bucket(kind, opts.dictionary)
     words = words + [__slug_random_word(bucket, opts.rng)]
     index = index + 1
   }
@@ -174,13 +174,13 @@ pub fn random_slug(options = nil) {
  * @errors: []
  */
 pub fn slug_from(value, options = nil) {
-  let opts = __slug_options(options)
-  let seed = to_string(opts.salt ?? "") + ":" + to_string(value)
-  var words = []
-  var index = 0
+  const opts = __slug_options(options)
+  const seed = to_string(opts.salt ?? "") + ":" + to_string(value)
+  let words = []
+  let index = 0
   while index < opts.segments {
-    let kind = __slug_segment_kind(opts.pattern, index, opts.segments)
-    let bucket = __slug_bucket(kind, opts.dictionary)
+    const kind = __slug_segment_kind(opts.pattern, index, opts.segments)
+    const bucket = __slug_bucket(kind, opts.dictionary)
     words = words + [bucket[__slug_seed_index(seed, index, len(bucket))]]
     index = index + 1
   }
@@ -217,24 +217,24 @@ pub fn slug(value = nil, options = nil) {
  * @errors: []
  */
 pub fn slugify(value, options = nil) {
-  let separator = __slug_separator(options?.separator ?? "-")
+  const separator = __slug_separator(options?.separator ?? "-")
   return __slugify_text(value, separator)
 }
 
 fn __slug_options(options) {
-  let raw = options ?? {}
-  var segments = to_int(raw?.segments ?? 2)
+  const raw = options ?? {}
+  let segments = to_int(raw?.segments ?? 2)
   if segments < 1 {
     segments = 1
   }
   if segments > 8 {
     segments = 8
   }
-  let separator = __slug_separator(raw?.separator ?? "-")
-  let custom_dictionary = raw?.dictionary ?? {}
-  let prefix = __slug_affix(raw?.prefix, separator)
-  let suffix = __slug_affix(raw?.suffix, separator)
-  var pattern = raw?.pattern ?? []
+  const separator = __slug_separator(raw?.separator ?? "-")
+  const custom_dictionary = raw?.dictionary ?? {}
+  const prefix = __slug_affix(raw?.prefix, separator)
+  const suffix = __slug_affix(raw?.suffix, separator)
+  let pattern = raw?.pattern ?? []
   if type_of(pattern) != "list" {
     pattern = []
   }
@@ -255,7 +255,7 @@ fn __slug_options(options) {
 }
 
 fn __slug_separator(value) {
-  let separator = to_string(value ?? "-")
+  const separator = to_string(value ?? "-")
   if separator == "" {
     return "-"
   }
@@ -283,7 +283,7 @@ fn __slug_segment_kind(pattern, index, segments) {
 }
 
 fn __slug_bucket(kind, dictionary) {
-  let normalized = lowercase(to_string(kind ?? "noun"))
+  const normalized = lowercase(to_string(kind ?? "noun"))
   if normalized == "adjective" || normalized == "adjectives" || normalized == "adj" {
     return dictionary.adjectives
   }
@@ -294,7 +294,7 @@ fn __slug_bucket(kind, dictionary) {
 }
 
 fn __slug_random_word(bucket, rng) {
-  var word = nil
+  let word = nil
   if rng != nil {
     word = random_choice(rng, bucket)
   } else {
@@ -310,9 +310,9 @@ fn __slug_seed_index(seed, index, size) {
   if size <= 0 {
     return 0
   }
-  let digest = sha256(seed + ":" + to_string(index))
-  var value = 0
-  var offset = 0
+  const digest = sha256(seed + ":" + to_string(index))
+  let value = 0
+  let offset = 0
   while offset < 8 {
     value = value * 16 + __slug_hex_digit(substring(digest, offset, offset + 1))
     offset = offset + 1
@@ -321,7 +321,7 @@ fn __slug_seed_index(seed, index, size) {
 }
 
 fn __slug_hex_digit(ch) {
-  let idx = "0123456789abcdef".index_of(lowercase(ch ?? ""))
+  const idx = "0123456789abcdef".index_of(lowercase(ch ?? ""))
   if idx < 0 {
     return 0
   }
@@ -329,7 +329,7 @@ fn __slug_hex_digit(ch) {
 }
 
 fn __slug_join_with_affixes(words, opts) {
-  var parts = []
+  let parts = []
   if opts.prefix != nil && opts.prefix != "" {
     parts = parts + [opts.prefix]
   }
@@ -348,8 +348,8 @@ fn __slug_affix(value, separator) {
 }
 
 fn __slugify_text(value, separator) {
-  let text = lowercase(trim(to_string(value ?? "")))
-  var out = regex_replace("[^a-z0-9]+", "-", text)
+  const text = lowercase(trim(to_string(value ?? "")))
+  let out = regex_replace("[^a-z0-9]+", "-", text)
   out = regex_replace("^-+|-+$", "", out)
   if separator != "-" {
     out = replace(out, "-", separator)

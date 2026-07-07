@@ -16,7 +16,7 @@ fn cap(median, stddev, sigma, fallback) {
 }
 
 fn decide(config, tokens, making_progress) {
-  let decision = token_runaway_decision(config, {making_progress: making_progress, tokens: tokens})
+  const decision = token_runaway_decision(config, {making_progress: making_progress, tokens: tokens})
   return decision.action + ":" + decision.reason + ":" + to_string(to_int(decision.cap))
 }
 
@@ -31,7 +31,7 @@ pipeline default() {
   // thin history (stddev 0) -> median * 1.6.
   __io_println(cap(100.0, 0.0, 2.0, 50.0))
   // ---- decision (cap = 120, hard = 360) ----
-  let config = {fallback: 0.0, median: 100.0, sigma: 2.0, stddev: 10.0}
+  const config = {fallback: 0.0, median: 100.0, sigma: 2.0, stddev: 10.0}
   __io_println(decide(config, 50.0, false))
   __io_println(decide(config, 120.0, false))
   __io_println(decide(config, 200.0, true))
@@ -57,14 +57,14 @@ pipeline default() {
     ),
   )
   // ---- DetectorSpec lowering onto native stall_diagnostics ----
-  let spec = {
+  const spec = {
     hard_stop_after_trips: 5,
     loop: {ping_pong_cycles: 4, repeat: 5},
     no_progress: {messages: 2},
     stuck: {same_diagnostic: 2, same_error: 3},
     token_runaway: {fallback: 0.0, median: 100.0, stddev: 10.0},
   }
-  let stall = detector_spec_to_stall(spec)
+  const stall = detector_spec_to_stall(spec)
   __io_println(stall.repeat_same_observation)
   __io_println(stall.ping_pong_cycles)
   __io_println(stall.no_progress_messages)

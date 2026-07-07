@@ -5,8 +5,8 @@ import "std/memory"
  * flag), newest first, and honors a custom flag name.
  */
 pipeline default() {
-  let root = path_join(".harn", "tmp", "harn-memrem-" + uuid())
-  let ns = "agent/notes"
+  const root = path_join(".harn", "tmp", "harn-memrem-" + uuid())
+  const ns = "agent/notes"
   memory_store(
     ns,
     "n1",
@@ -22,7 +22,7 @@ pipeline default() {
     nil,
     {root: root, id: "c1", now: "2026-04-29T00:00:02Z", flags: {auto_surface: true}},
   )
-  let rem = memory_reminders(ns, {root: root})
+  const rem = memory_reminders(ns, {root: root})
   __io_println(len(rem))
   __io_println(rem[0].id)
   __io_println(rem[1].id)

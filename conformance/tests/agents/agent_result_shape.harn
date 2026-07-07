@@ -10,7 +10,7 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("still working")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Just keep replying",
         "You are helpful",
         {

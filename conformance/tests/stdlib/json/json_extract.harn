@@ -1,26 +1,26 @@
 pipeline test(task) {
   // Extract from plain JSON
-  let data = json_extract("{\"name\": \"alice\", \"age\": 30}")
+  const data = json_extract("{\"name\": \"alice\", \"age\": 30}")
   __io_println(data.name)
   __io_println(data.age)
   // Extract from markdown code fence
-  let fenced = "Here is the result:\n```json\n{\"color\": \"blue\"}\n```\nDone."
-  let result = json_extract(fenced)
+  const fenced = "Here is the result:\n```json\n{\"color\": \"blue\"}\n```\nDone."
+  const result = json_extract(fenced)
   __io_println(result.color)
   // Extract from code fence without language tag
-  let plain_fence = "```\n{\"x\": 42}\n```"
-  let result2 = json_extract(plain_fence)
+  const plain_fence = "```\n{\"x\": 42}\n```"
+  const result2 = json_extract(plain_fence)
   __io_println(result2.x)
   // Extract with key parameter
-  let name = json_extract("{\"name\": \"bob\", \"age\": 25}", "name")
+  const name = json_extract("{\"name\": \"bob\", \"age\": 25}", "name")
   __io_println(name)
-  let age = json_extract("{\"name\": \"bob\", \"age\": 25}", "age")
+  const age = json_extract("{\"name\": \"bob\", \"age\": 25}", "age")
   __io_println(age)
   // Extract JSON array
-  let arr = json_extract("[1, 2, 3]")
+  const arr = json_extract("[1, 2, 3]")
   __io_println(arr)
   // Extract from text with surrounding prose
-  let prose = "The answer is {\"result\": true} as expected"
-  let extracted = json_extract(prose)
+  const prose = "The answer is {\"result\": true} as expected"
+  const extracted = json_extract(prose)
   __io_println(extracted.result)
 }

@@ -2,8 +2,8 @@ import { coord_ack, coord_cursor, coord_inbox, coord_reply, coord_send } from "s
 
 pipeline default() {
   mock_time(4000)
-  let opts = {workspace_id: "workspace-A", tenant_id: "tenant-A"}
-  let request = coord_send(
+  const opts = {workspace_id: "workspace-A", tenant_id: "tenant-A"}
+  const request = coord_send(
     "workspace",
     "ops",
     "agent-A",
@@ -16,29 +16,29 @@ pipeline default() {
     },
     opts + {id: "coord-inbox-1"},
   )
-  let _other = coord_send(
+  const _other = coord_send(
     "workspace",
     "ops",
     "agent-B",
     {kind: "status", subject: "unrelated", body: "For another agent.", from: {agent: "agent-C"}},
     opts + {id: "coord-inbox-2"},
   )
-  let inbox_a = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-A"})
+  const inbox_a = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-A"})
   __io_println(len(inbox_a.messages))
   __io_println(inbox_a.messages[0].subject)
   __io_println(inbox_a.messages[0].kind)
   __io_println(inbox_a.messages[0].data.paths[0])
   __io_println(inbox_a.from_cursor == nil)
-  let repeat_a = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-A"})
+  const repeat_a = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-A"})
   __io_println(len(repeat_a.messages))
-  let dict_address_a = coord_inbox("workspace", "ops", opts + {to: {agent: "agent-A"}})
+  const dict_address_a = coord_inbox("workspace", "ops", opts + {to: {agent: "agent-A"}})
   __io_println(dict_address_a.consumer_id)
   __io_println(len(dict_address_a.messages))
-  let _ack = coord_ack("workspace", "ops", "agent-A", inbox_a.next_cursor, opts)
+  const _ack = coord_ack("workspace", "ops", "agent-A", inbox_a.next_cursor, opts)
   __io_println(coord_cursor("workspace", "ops", "agent-A", opts) == inbox_a.next_cursor)
-  let after_ack = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-A"})
+  const after_ack = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-A"})
   __io_println(len(after_ack.messages))
-  let reply = coord_reply(
+  const reply = coord_reply(
     "workspace",
     "ops",
     request,
@@ -52,7 +52,7 @@ pipeline default() {
     opts + {id: "coord-reply-1"},
   )
   __io_println(reply.message.reply_to == request.id)
-  let inbox_b = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-B", reply_to: request.id})
+  const inbox_b = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-B", reply_to: request.id})
   __io_println(len(inbox_b.messages))
   __io_println(inbox_b.messages[0].subject)
   __io_println(inbox_b.messages[0].reply_to)

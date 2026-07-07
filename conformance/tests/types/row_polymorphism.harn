@@ -5,7 +5,7 @@ fn needs_id(x: {id: string, ...rest}) -> string {
 }
 
 pipeline main() {
-  let combined = merge({a: 1, b: 2}, {b: "override", c: true})
+  const combined = merge({a: 1, b: 2}, {b: "override", c: true})
   __io_println(combined.a)
   __io_println(combined.b)
   __io_println(combined.c)

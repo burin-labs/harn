@@ -7,7 +7,7 @@ import { process_shell } from "std/runtime"
 
 /** Run all local verification commands for a repo. */
 pub fn run_local_verify(commands, dry_run) {
-  let timeout_ms = 600000
+  const timeout_ms = 600000
   return commands
     .map(
     { cmd ->
@@ -21,11 +21,11 @@ pub fn run_local_verify(commands, dry_run) {
           stderr: "",
         }
       } else {
-        let started = now_ms()
-        let result = try {
+        const started = now_ms()
+        const result = try {
           process_shell(to_string(cmd.command), {timeout_ms: cmd.timeout_ms ?? timeout_ms})
         }
-        let finished = now_ms()
+        const finished = now_ms()
         if !is_ok(result) {
           {
             name: cmd.name ?? cmd.command,
@@ -37,8 +37,8 @@ pub fn run_local_verify(commands, dry_run) {
             duration_ms: finished - started,
           }
         } else {
-          let v = unwrap(result)
-          let exit_code = v.exit_code ?? 0
+          const v = unwrap(result)
+          const exit_code = v.exit_code ?? 0
           {
             name: cmd.name ?? cmd.command,
             command: cmd.command,

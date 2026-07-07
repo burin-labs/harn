@@ -37,13 +37,13 @@ fn __resolve_pricing_selector(provider, model) {
     if type_of(provider) == "dict" {
       return llm_pricing(provider)
     }
-    let provider_str = __coerce_to_str(provider)
+    const provider_str = __coerce_to_str(provider)
     if provider_str == "" {
       throw "pricing_for: model is required"
     }
     return llm_pricing(provider_str)
   }
-  let model_str = __coerce_to_str(model)
+  const model_str = __coerce_to_str(model)
   if model_str == "" {
     throw "pricing_for: model is required"
   }
@@ -75,7 +75,7 @@ fn __cache_write_rate_or_nil(pricing) {
 }
 
 fn __billable_input(input_tokens, cache_read_tokens, cache_write_tokens) {
-  let raw = input_tokens - cache_read_tokens - cache_write_tokens
+  const raw = input_tokens - cache_read_tokens - cache_write_tokens
   if raw < 0 {
     return 0
   }
@@ -110,21 +110,21 @@ pub fn pricing_for(provider, model = nil) {
  */
 pub fn estimate_call_cost(opts) {
   __ensure_dict(opts, "estimate_call_cost")
-  let model = __coerce_to_str(opts?.model)
+  const model = __coerce_to_str(opts?.model)
   if model == "" {
     throw "estimate_call_cost: opts.model is required"
   }
-  let provider = if opts?.provider != nil {
+  const provider = if opts?.provider != nil {
     __coerce_to_str(opts.provider)
   } else {
     nil
   }
-  let pricing = __resolve_pricing_selector(provider, model)
-  let input_tokens = __int_or(opts?.input_tokens, 0)
-  let output_tokens = __int_or(opts?.output_tokens, 0)
-  let cache_read_tokens = __int_or(opts?.cache_read_tokens, 0)
-  let cache_write_tokens = __int_or(opts?.cache_write_tokens, 0)
-  var calls = __int_or(opts?.calls, 1)
+  const pricing = __resolve_pricing_selector(provider, model)
+  const input_tokens = __int_or(opts?.input_tokens, 0)
+  const output_tokens = __int_or(opts?.output_tokens, 0)
+  const cache_read_tokens = __int_or(opts?.cache_read_tokens, 0)
+  const cache_write_tokens = __int_or(opts?.cache_write_tokens, 0)
+  let calls = __int_or(opts?.calls, 1)
   if calls < 1 {
     calls = 1
   }
@@ -140,17 +140,17 @@ pub fn estimate_call_cost(opts) {
       model: model,
     }
   }
-  let input_rate = pricing.input_per_mtok / 1000000.0
-  let output_rate = pricing.output_per_mtok / 1000000.0
-  let cache_read_rate = __cache_read_rate(pricing, input_rate)
-  let cache_write_rate = __cache_write_rate_or_nil(pricing) ?? input_rate
-  let billable = __billable_input(input_tokens, cache_read_tokens, cache_write_tokens)
-  let per_call = billable * input_rate
+  const input_rate = pricing.input_per_mtok / 1000000.0
+  const output_rate = pricing.output_per_mtok / 1000000.0
+  const cache_read_rate = __cache_read_rate(pricing, input_rate)
+  const cache_write_rate = __cache_write_rate_or_nil(pricing) ?? input_rate
+  const billable = __billable_input(input_tokens, cache_read_tokens, cache_write_tokens)
+  const per_call = billable * input_rate
     + output_tokens * output_rate
     + cache_read_tokens * cache_read_rate
     + cache_write_tokens * cache_write_rate
-  let total = per_call * calls
-  let breakdown = {
+  const total = per_call * calls
+  const breakdown = {
     input_usd: billable * input_rate * calls,
     output_usd: output_tokens * output_rate * calls,
     cache_read_usd: cache_read_tokens * cache_read_rate * calls,
@@ -169,12 +169,12 @@ pub fn estimate_call_cost(opts) {
 }
 
 fn __aggregate_key(provider, model) {
-  let p = if provider == nil {
+  const p = if provider == nil {
     ""
   } else {
     to_string(provider)
   }
-  let m = if model == nil {
+  const m = if model == nil {
     ""
   } else {
     to_string(model)
@@ -196,18 +196,18 @@ pub fn estimate_session_cost(usage) {
   if type_of(usage) != "list" {
     throw "estimate_session_cost: usage must be a list of call dicts"
   }
-  var total = 0.0
-  var known_total = 0.0
-  var total_calls = 0
-  var total_tokens = 0
-  var unknown_calls = 0
-  var aggregated = {}
+  let total = 0.0
+  let known_total = 0.0
+  let total_calls = 0
+  let total_tokens = 0
+  let unknown_calls = 0
+  let aggregated = {}
   for entry in usage {
-    let row = estimate_call_cost(entry)
-    let calls = row.calls
+    const row = estimate_call_cost(entry)
+    const calls = row.calls
     total_calls = total_calls + calls
-    let entry_input = __int_or(entry?.input_tokens, 0)
-    let entry_output = __int_or(entry?.output_tokens, 0)
+    const entry_input = __int_or(entry?.input_tokens, 0)
+    const entry_output = __int_or(entry?.output_tokens, 0)
     total_tokens = total_tokens + (entry_input + entry_output) * calls
     if row.pricing_known {
       total = total + row.cost_usd
@@ -215,8 +215,8 @@ pub fn estimate_session_cost(usage) {
     } else {
       unknown_calls = unknown_calls + calls
     }
-    let key = __aggregate_key(row.provider, row.model)
-    let prior = aggregated[key]
+    const key = __aggregate_key(row.provider, row.model)
+    const prior = aggregated[key]
       ?? {
       provider: row.provider,
       model: row.model,
@@ -224,8 +224,8 @@ pub fn estimate_session_cost(usage) {
       cost_usd: 0.0,
       pricing_known: row.pricing_known,
     }
-    let row_cost = row.cost_usd ?? 0.0
-    let updated = {
+    const row_cost = row.cost_usd ?? 0.0
+    const updated = {
       provider: prior.provider,
       model: prior.model,
       calls: prior.calls + calls,
@@ -234,11 +234,11 @@ pub fn estimate_session_cost(usage) {
     }
     aggregated = aggregated + {[key]: updated}
   }
-  var rows = []
+  let rows = []
   for k in aggregated.keys() {
     rows = rows.push(aggregated[k])
   }
-  let per_model = rows.sort_by({ row -> -row.cost_usd })
+  const per_model = rows.sort_by({ row -> -row.cost_usd })
   return {
     total_cost_usd: total,
     known_cost_usd: known_total,
@@ -281,20 +281,20 @@ pub fn compare_model_costs(candidates, opts) {
  */
 pub fn cache_break_even(opts) {
   __ensure_dict(opts, "cache_break_even")
-  let model = __coerce_to_str(opts?.model)
+  const model = __coerce_to_str(opts?.model)
   if model == "" {
     throw "cache_break_even: opts.model is required"
   }
-  let provider = if opts?.provider != nil {
+  const provider = if opts?.provider != nil {
     __coerce_to_str(opts.provider)
   } else {
     nil
   }
-  let prompt_tokens = __int_or(opts?.prompt_tokens, 0)
+  const prompt_tokens = __int_or(opts?.prompt_tokens, 0)
   if prompt_tokens <= 0 {
     throw "cache_break_even: opts.prompt_tokens must be > 0"
   }
-  let pricing = __resolve_pricing_selector(provider, model)
+  const pricing = __resolve_pricing_selector(provider, model)
   if pricing == nil {
     return {
       pricing_known: false,
@@ -305,10 +305,10 @@ pub fn cache_break_even(opts) {
       reason: "unknown_pricing",
     }
   }
-  let input_rate = pricing.input_per_mtok / 1000000.0
-  let cache_read_rate = __cache_read_rate(pricing, input_rate)
-  let cache_write_rate = __cache_write_rate_or_nil(pricing)
-  let savings_per_hit = (input_rate - cache_read_rate) * prompt_tokens
+  const input_rate = pricing.input_per_mtok / 1000000.0
+  const cache_read_rate = __cache_read_rate(pricing, input_rate)
+  const cache_write_rate = __cache_write_rate_or_nil(pricing)
+  const savings_per_hit = (input_rate - cache_read_rate) * prompt_tokens
   if savings_per_hit <= 0.0 {
     return {
       pricing_known: true,
@@ -329,8 +329,8 @@ pub fn cache_break_even(opts) {
       reason: "free_cache_write",
     }
   }
-  let write_cost = cache_write_rate * prompt_tokens
-  let break_even_calls = to_int(ceil(write_cost / savings_per_hit))
+  const write_cost = cache_write_rate * prompt_tokens
+  const break_even_calls = to_int(ceil(write_cost / savings_per_hit))
   return {
     pricing_known: true,
     break_even_calls: break_even_calls,
@@ -354,17 +354,17 @@ pub fn cache_break_even(opts) {
  */
 pub fn volume_cost(opts) {
   __ensure_dict(opts, "volume_cost")
-  let calls_per_period = __int_or(opts?.calls_per_period, 0)
+  const calls_per_period = __int_or(opts?.calls_per_period, 0)
   if calls_per_period <= 0 {
     throw "volume_cost: opts.calls_per_period must be > 0"
   }
-  var periods = __int_or(opts?.periods, 1)
+  let periods = __int_or(opts?.periods, 1)
   if periods < 1 {
     periods = 1
   }
-  let total_calls = calls_per_period * periods
-  let inner = opts + {calls: total_calls}
-  let row = estimate_call_cost(inner)
+  const total_calls = calls_per_period * periods
+  const inner = opts + {calls: total_calls}
+  const row = estimate_call_cost(inner)
   if !row.pricing_known {
     return {
       pricing_known: false,

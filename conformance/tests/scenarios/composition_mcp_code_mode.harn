@@ -5,7 +5,7 @@ import {
 } from "std/composition"
 
 pipeline main() {
-  let tools = {
+  const tools = {
     _type: "tool_registry",
     tools: [
       {
@@ -32,16 +32,16 @@ pipeline main() {
       },
     ],
   }
-  let api = composition_mcp_api(tools)
+  const api = composition_mcp_api(tools)
   __io_println(api.tool_count)
   __io_println(api.servers[0])
   __io_println(api.manifest.bindings[0].source)
   __io_println(api.manifest.bindings[0].deferred)
   __io_println(contains(api.harn_api, "type DocsSearchArgs = {limit?: int, query: string}"))
   __io_println(contains(api.harn_api, "fn docs_search(args: DocsSearchArgs)"))
-  let searched = composition_mcp_search(tools, "runtime documentation", {limit: 1})
+  const searched = composition_mcp_search(tools, "runtime documentation", {limit: 1})
   __io_println(searched.manifest.bindings[0].name)
-  let report = composition_mcp_execute(
+  const report = composition_mcp_execute(
     "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
     tools,
     {run_id: "mcp-code-mode"},
@@ -51,14 +51,14 @@ pipeline main() {
   __io_println(report.child_results == nil)
   __io_println(report.result.title)
   __io_println(report.result.total)
-  let full_report = composition_mcp_execute(
+  const full_report = composition_mcp_execute(
     "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
     tools,
     {run_id: "mcp-code-mode-report", include_report: true},
   )
   __io_println(full_report.child_calls[0].tool_name)
   __io_println(contains(full_report.child_results[0].raw_output, "Harn docs"))
-  let settled = composition_mcp_execute(
+  const settled = composition_mcp_execute(
     "let result = map_bounded([\"runtime\", \"stdlib\"], { q -> docs_search({query: q}) }, {concurrency: 2})\nreturn {succeeded: result.succeeded, failed: result.failed}",
     tools,
     {

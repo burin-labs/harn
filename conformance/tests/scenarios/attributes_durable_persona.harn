@@ -16,7 +16,7 @@ pub fn legacy_merge_captain(ctx) -> string {
 
 @test
 pipeline test_durable_persona_attributes(task) {
-  let legacy = {
+  const legacy = {
     triggers: ["github.pr_opened", "github.check_failed"],
     tools: ["github", "ci", "linear"],
     autonomy: "act_with_approval",

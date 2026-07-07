@@ -1,8 +1,8 @@
 pipeline test(task) {
-  let classified = false
-  let fixture = {expect_missing_dep: nil}
+  const classified = false
+  const fixture = {expect_missing_dep: nil}
   __io_println(classified == (fixture.expect_missing_dep ?? false))
   __io_println((classified == fixture.expect_missing_dep) ?? false)
-  let snap = nil
+  const snap = nil
   __io_println((snap?.total_iterations ?? 0) < 2)
 }

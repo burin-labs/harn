@@ -1,8 +1,8 @@
 import "std/calendar"
 
 pipeline default() {
-  let calendar = "US-FEDERAL"
-  let timezone = "America/New_York"
+  const calendar = "US-FEDERAL"
+  const timezone = "America/New_York"
   __io_println(is_holiday("2026-07-03", calendar, timezone))
   __io_println(is_business_day("2026-07-03", calendar, timezone))
   __io_println(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
@@ -12,15 +12,15 @@ pipeline default() {
   __io_println(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
   __io_println(holidays(2026, calendar)[5].date)
   __io_println(len(holidays(2020, calendar)))
-  let options: CalendarBusinessWindowOptions = {timezone: timezone, start: "09:00", end: "17:00"}
+  const options: CalendarBusinessWindowOptions = {timezone: timezone, start: "09:00", end: "17:00"}
   __io_println(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, options))
-  let window: CalendarBusinessWindow = business_window(date_parse("2026-07-06T22:00:00Z"), calendar, options)
+  const window: CalendarBusinessWindow = business_window(date_parse("2026-07-06T22:00:00Z"), calendar, options)
   __io_println(window.reason)
-  let custom: CalendarBusinessCalendar = {timezone: "UTC", holidays: ["2026-01-02"]}
+  const custom: CalendarBusinessCalendar = {timezone: "UTC", holidays: ["2026-01-02"]}
   __io_println(is_business_day("2026-01-02", custom))
-  let custom_weekend: CalendarBusinessCalendar = {timezone: "UTC", weekends: [5]}
+  const custom_weekend: CalendarBusinessCalendar = {timezone: "UTC", weekends: [5]}
   __io_println(is_business_day("2026-01-02", custom_weekend))
-  let unsupported = try {
+  const unsupported = try {
     is_business_day("2026-01-02", "ZZ")
   }
   __io_println(is_err(unsupported))

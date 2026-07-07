@@ -12,25 +12,25 @@
  */
 pipeline test(task) {
   mock_time(1700000000000)
-  let start_wall = harness.clock.now_ms()
-  let start_mono = harness.clock.monotonic_ms()
-  let start_ts = harness.clock.timestamp()
-  let start_elapsed = harness.clock.elapsed()
+  const start_wall = harness.clock.now_ms()
+  const start_mono = harness.clock.monotonic_ms()
+  const start_ts = harness.clock.timestamp()
+  const start_elapsed = harness.clock.elapsed()
   // sleep with an integer (ms) argument advances the mock.
   sleep(50)
   // sleep with a duration literal also advances the mock.
   sleep(125ms)
   // yield_now does not advance time but is async.
   yield_now()
-  let end_wall = harness.clock.now_ms()
-  let end_mono = harness.clock.monotonic_ms()
-  let end_ts = harness.clock.timestamp()
-  let end_elapsed = harness.clock.elapsed()
+  const end_wall = harness.clock.now_ms()
+  const end_mono = harness.clock.monotonic_ms()
+  const end_ts = harness.clock.timestamp()
+  const end_elapsed = harness.clock.elapsed()
   log(end_wall - start_wall)
   log(end_mono - start_mono)
   // timestamp() returns float seconds; assert it advanced by the same
   // 175 ms (within fp rounding) rather than logging a flaky derived ms.
-  let ts_delta_ms = end_ts * 1000.0 - start_ts * 1000.0
+  const ts_delta_ms = end_ts * 1000.0 - start_ts * 1000.0
   log(ts_delta_ms > 174.0 && ts_delta_ms < 176.0)
   log(end_elapsed - start_elapsed)
   unmock_time()

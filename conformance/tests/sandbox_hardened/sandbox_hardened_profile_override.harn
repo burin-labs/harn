@@ -5,17 +5,17 @@
  * running the command unsandboxed.
  */
 pipeline default() {
-  let argv = if platform() == "windows" {
+  const argv = if platform() == "windows" {
     ["cmd", "/C", "echo|set /p=ok"]
   } else {
     ["printf", "ok"]
   }
-  let result = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "worktree"})
+  const result = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "worktree"})
   __io_println(result?.success)
   __io_println(result?.stdout)
-  let unrestricted = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "unrestricted"})
+  const unrestricted = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "unrestricted"})
   __io_println(unrestricted?.success)
-  let bad = try {
+  const bad = try {
     host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "wide_open"})
     nil
   } catch (e) {

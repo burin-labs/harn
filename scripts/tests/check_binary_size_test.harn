@@ -10,7 +10,7 @@ fn defaults() {
 // --- parse_args -------------------------------------------------------------
 @test
 pipeline test_parse_args_defaults(task) {
-  let res = parse_args([], defaults())
+  const res = parse_args([], defaults())
   assert_eq(res.ok, true)
   assert_eq(res.opts.build_release, true)
   assert_eq(res.opts.emit_bloat, true)
@@ -20,7 +20,7 @@ pipeline test_parse_args_defaults(task) {
 
 @test
 pipeline test_parse_args_flags(task) {
-  let res = parse_args(
+  const res = parse_args(
     ["--no-build", "--target", "x86_64-unknown-linux-gnu", "--skip-bloat", "--budget-mb", "50"],
     defaults(),
   )
@@ -33,14 +33,14 @@ pipeline test_parse_args_flags(task) {
 
 @test
 pipeline test_parse_args_bin_and_report_dir(task) {
-  let res = parse_args(["--bin", "/x/harn", "--report-dir", "out"], defaults())
+  const res = parse_args(["--bin", "/x/harn", "--report-dir", "out"], defaults())
   assert_eq(res.opts.harn_bin, "/x/harn")
   assert_eq(res.opts.report_dir, "out")
 }
 
 @test
 pipeline test_parse_args_missing_value(task) {
-  let res = parse_args(["--target"], defaults())
+  const res = parse_args(["--target"], defaults())
   assert_eq(res.ok, false)
   assert_eq(res.message, "error: --target requires a value")
   assert_eq(res.show_usage, false)
@@ -54,7 +54,7 @@ pipeline test_parse_args_missing_path_noun(task) {
 
 @test
 pipeline test_parse_args_unknown_flag_shows_usage(task) {
-  let res = parse_args(["--wat"], defaults())
+  const res = parse_args(["--wat"], defaults())
   assert_eq(res.ok, false)
   assert_eq(res.message, "error: unknown argument: --wat")
   assert_eq(res.show_usage, true)
@@ -89,7 +89,7 @@ pipeline test_budget_bytes_rounding(task) {
 
 @test
 pipeline test_workflow_budget_matches_helper_default(task) {
-  let workflow = harness.fs.read_text("../../.github/workflows/build-release-binaries.yml")
+  const workflow = harness.fs.read_text("../../.github/workflows/build-release-binaries.yml")
   assert_eq(workflow.contains("BINARY_SIZE_BUDGET_MB: \"${default_binary_size_budget_mb()}\""), true)
 }
 
@@ -127,7 +127,7 @@ pipeline test_default_bin_path_windows_exe(task) {
 // --- report_lines -----------------------------------------------------------
 @test
 pipeline test_report_lines_shape(task) {
-  let lines = report_lines("/r/target/release/harn", "", 1536000, 1258291)
+  const lines = report_lines("/r/target/release/harn", "", 1536000, 1258291)
   assert_eq(
     lines,
     [
@@ -145,6 +145,6 @@ pipeline test_report_lines_shape(task) {
 
 @test
 pipeline test_report_lines_named_target(task) {
-  let lines = report_lines("/b", "aarch64-apple-darwin", 10, 20)
+  const lines = report_lines("/b", "aarch64-apple-darwin", 10, 20)
   assert_eq(lines[3], "target: aarch64-apple-darwin")
 }

@@ -13,7 +13,7 @@ pipeline default() {
   with_llm_script(
     [],
     { ->
-      let direct = llm_call(
+      const direct = llm_call(
         "direct prompt",
         "Direct base.",
         {provider: "mock", system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"})},
@@ -28,22 +28,22 @@ pipeline default() {
   with_llm_script(
     [],
     { ->
-      let sid = "system-prompt-continuation-session"
-      let opts = with_system_prompt_parts(
+      const sid = "system-prompt-continuation-session"
+      const opts = with_system_prompt_parts(
         {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
         [
           system_preamble("Persistent contract.", {label: "Session contract"}),
           {content: "disabled", enabled: false},
         ],
       )
-      let first = agent_loop("hello", "Base system.", opts)
-      let resumed = agent_loop("follow up", "Base system.", opts)
-      let resumed_without_prompt = agent_loop(
+      const first = agent_loop("hello", "Base system.", opts)
+      const resumed = agent_loop("follow up", "Base system.", opts)
+      const resumed_without_prompt = agent_loop(
         "resume without prompt options",
         nil,
         {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(first.status)
       __io_println(resumed.status)
       __io_println(resumed_without_prompt.status)

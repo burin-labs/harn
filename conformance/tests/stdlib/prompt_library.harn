@@ -1,10 +1,10 @@
 import "std/prompt_library"
 
 pipeline test(task) {
-  let root = path_join(harness.fs.temp_dir(), "harn-prompt-library-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-prompt-library-" + uuid())
   harness.fs.mkdir(root)
-  let catalog_path = path_join(root, "prompt_library_catalog.toml")
-  let front_path = path_join(root, "prompt_library_front.harn.prompt")
+  const catalog_path = path_join(root, "prompt_library_catalog.toml")
+  const front_path = path_join(root, "prompt_library_front.harn.prompt")
   harness.fs
     .write_text(
     catalog_path,
@@ -26,7 +26,7 @@ pipeline test(task) {
       + "---\n"
       + "Operate in {{env}} with low-noise status updates.",
   )
-  let library = prompt_library_load([catalog_path, front_path])
+  const library = prompt_library_load([catalog_path, front_path])
   assert_eq(
     prompt_library_inject(library, "rust-repo-conventions-v1", {crate: "harn-vm"}),
     "Use nextest for harn-vm and keep sccache warm.",
@@ -36,7 +36,7 @@ pipeline test(task) {
     prompt_library_payload(library, "ops-prefix", {env: "prod"}).cache_control.type,
     "ephemeral",
   )
-  let api = prompt_library_api(library)
+  const api = prompt_library_api(library)
   assert_eq(
     api.inject("ops-prefix", {env: "staging"}),
     "Operate in staging with low-noise status updates.",
@@ -52,7 +52,7 @@ pipeline test(task) {
       "parser",
     ),
   )
-  let conversations = [
+  const conversations = [
     {
       id: "a1",
       tenant_id: "tenant-a",
@@ -72,7 +72,7 @@ pipeline test(task) {
       embedding: [10.0, 10.0],
     },
   ]
-  let proposals = prompt_library_hotspots(
+  const proposals = prompt_library_hotspots(
     conversations,
     {
       tenant_id: "tenant-a",
@@ -86,8 +86,8 @@ pipeline test(task) {
   assert_eq(proposals[0].provenance, "kmeans")
   assert_eq(proposals[0].tenant_id, "tenant-a")
   assert(contains(proposals[0].body, "system repo rust testing conventions"))
-  let review_library = prompt_library_define(prompt_library(), proposals[0])
-  let queue = prompt_library_review_queue(review_library)
+  const review_library = prompt_library_define(prompt_library(), proposals[0])
+  const queue = prompt_library_review_queue(review_library)
   assert_eq(len(queue), 1)
   assert_eq(queue[0].members, ["a1", "a2"])
   log("prompt_library ok")

@@ -1,12 +1,12 @@
 import { composition_crystallization_input, composition_mcp_tools } from "std/composition"
 
 pipeline main() {
-  let tools = composition_mcp_tools()
+  const tools = composition_mcp_tools()
   __io_println(tool_count(tools))
-  let search = tool_find(tools, "harn.code.search_examples")
-  let examples = search.handler({query: "read", limit: 1})
+  const search = tool_find(tools, "harn.code.search_examples")
+  const examples = search.handler({query: "read", limit: 1})
   __io_println(examples[0].language)
-  let source_tools = [
+  const source_tools = [
     {
       name: "read_file",
       parameters: {type: "object", required: ["path"]},
@@ -14,15 +14,15 @@ pipeline main() {
       metadata: {mock_output: {text: "profile ok"}},
     },
   ]
-  let manifest = composition_binding_manifest(source_tools)
-  let execute = tool_find(tools, "harn.code.execute_composition")
-  let report = execute
+  const manifest = composition_binding_manifest(source_tools)
+  const execute = tool_find(tools, "harn.code.execute_composition")
+  const report = execute
     .handler(
     {snippet: "return read_file({path: \"README.md\"}).text", manifest: manifest, run_id: "profile-run"},
   )
   __io_println(report.ok)
   __io_println(report.child_calls[0].tool_name)
-  let trace = composition_crystallization_input(report, {id: "profile-trace"})
+  const trace = composition_crystallization_input(report, {id: "profile-trace"})
   __io_println(trace.source)
   __io_println(trace.actions.count())
   __io_println(trace.actions[0].name)

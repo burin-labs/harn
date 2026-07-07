@@ -19,11 +19,11 @@
  */
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
-let observed = atomic(0)
+const observed = atomic(0)
 
-let observed_action_resume = atomic(0)
+const observed_action_resume = atomic(0)
 
-let observed_action_cancel = atomic(0)
+const observed_action_cancel = atomic(0)
 
 pipeline default() {
   clear_session_hooks()
@@ -41,11 +41,11 @@ pipeline default() {
     },
   )
   // 1. Hook plumbing: synthetic dispatch through the canonical parser.
-  let resume_event = __host_fire_session_hook(
+  const resume_event = __host_fire_session_hook(
     "on_drain_decision",
     {action: "resume", item: {category: "suspended_subagent", id: "worker://triage/42"}},
   )
-  let cancel_event = __host_fire_session_hook(
+  const cancel_event = __host_fire_session_hook(
     "on_drain_decision",
     {action: "cancel", item: {category: "suspended_subagent", id: "worker://triage/43"}},
   )
@@ -61,7 +61,7 @@ pipeline default() {
   clear_session_hooks()
   pipeline_on_finish(
     { harness, return_value ->
-      let receipt = harness
+      const receipt = harness
         .emit_audit(
         "drain_decision",
         {
@@ -71,7 +71,7 @@ pipeline default() {
           reason: "ordering decision",
         },
       )
-      let audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("receipt_status=" + receipt.status)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)

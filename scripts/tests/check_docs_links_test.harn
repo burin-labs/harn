@@ -4,8 +4,8 @@ import "../check_docs_links.harn"
 
 @test
 pipeline test_strip_fenced_blocks_blanks_fences_keeps_lines(task) {
-  let text = "a [x](y.md)\n```\n[hidden](z.md)\n```\nb [w](v.md)"
-  let stripped = strip_fenced_blocks(text)
+  const text = "a [x](y.md)\n```\n[hidden](z.md)\n```\nb [w](v.md)"
+  const stripped = strip_fenced_blocks(text)
   // Line count is preserved (4 newlines -> 5 lines).
   assert_eq(stripped.split("\n").count, 5)
   // Fence lines and the line inside are blanked.
@@ -14,7 +14,7 @@ pipeline test_strip_fenced_blocks_blanks_fences_keeps_lines(task) {
 
 @test
 pipeline test_strip_fenced_blocks_tilde_marker(task) {
-  let text = "~~~\ninside\n~~~\nout"
+  const text = "~~~\ninside\n~~~\nout"
   assert_eq(strip_fenced_blocks(text), "\n\n\nout")
 }
 
@@ -89,38 +89,38 @@ pipeline test_with_md_suffix(task) {
 
 @test
 pipeline test_candidate_rel_paths_extensionless(task) {
-  let c = candidate_rel_paths("docs/src/sub", "page", "docs/src")
+  const c = candidate_rel_paths("docs/src/sub", "page", "docs/src")
   assert_eq(c, ["docs/src/sub/page", "docs/src/sub/page.md", "docs/src/sub/page/index.md"])
 }
 
 @test
 pipeline test_candidate_rel_paths_html(task) {
-  let c = candidate_rel_paths("docs/src", "bar.html", "docs/src")
+  const c = candidate_rel_paths("docs/src", "bar.html", "docs/src")
   assert_eq(c, ["docs/src/bar.html", "docs/src/bar.md"])
 }
 
 @test
 pipeline test_candidate_rel_paths_md_only(task) {
-  let c = candidate_rel_paths("docs/src", "bar.md", "docs/src")
+  const c = candidate_rel_paths("docs/src", "bar.md", "docs/src")
   assert_eq(c, ["docs/src/bar.md"])
 }
 
 @test
 pipeline test_candidate_rel_paths_trailing_slash(task) {
   // Trailing-slash with empty suffix takes the extensionless branch.
-  let c = candidate_rel_paths("docs/src", "dir/", "docs/src")
+  const c = candidate_rel_paths("docs/src", "dir/", "docs/src")
   assert_eq(c, ["docs/src/dir", "docs/src/dir.md", "docs/src/dir/index.md"])
 }
 
 @test
 pipeline test_candidate_rel_paths_absolute_uses_docs_dir(task) {
-  let c = candidate_rel_paths("docs/src/sub", "/top.md", "docs/src")
+  const c = candidate_rel_paths("docs/src/sub", "/top.md", "docs/src")
   assert_eq(c, ["docs/src/top.md"])
 }
 
 @test
 pipeline test_candidate_rel_paths_relative_parent(task) {
-  let c = candidate_rel_paths("docs/src/sub", "../up.md", "docs/src")
+  const c = candidate_rel_paths("docs/src/sub", "../up.md", "docs/src")
   assert_eq(c, ["docs/src/sub/../up.md"])
 }
 
@@ -159,8 +159,8 @@ pipeline test_dir_of(task) {
 
 @test
 pipeline test_collect_links_inline_reference_html(task) {
-  let text = "[a](one.md) and ![img](two.png)\n[ref]: three.md\n<a href=\"four.md\">x</a> <img src='five.png'>"
-  let links = collect_links(text)
+  const text = "[a](one.md) and ![img](two.png)\n[ref]: three.md\n<a href=\"four.md\">x</a> <img src='five.png'>"
+  const links = collect_links(text)
   assert_eq(links.count, 5)
   // Source order is preserved by start offset.
   assert_eq(links[0].target, "one.md")
@@ -177,9 +177,9 @@ pipeline test_collect_links_inline_reference_html(task) {
 @test
 pipeline test_collect_links_reference_requires_low_indent(task) {
   // Up to 3 leading spaces is a reference def; 4+ is not.
-  let ok = collect_links("   [r]: ok.md")
+  const ok = collect_links("   [r]: ok.md")
   assert_eq(ok.count, 1)
   assert_eq(ok[0].target, "ok.md")
-  let no = collect_links("    [r]: indented.md")
+  const no = collect_links("    [r]: indented.md")
   assert_eq(no.count, 0)
 }

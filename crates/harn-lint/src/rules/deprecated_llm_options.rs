@@ -61,10 +61,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
         Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
             visit_nodes(body, diagnostics);
         }
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
-            visit_node(value, diagnostics);
-        }
-        Node::ConstBinding { value, .. } => {
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
             visit_node(value, diagnostics);
         }
         Node::ImplBlock { methods, .. } => visit_nodes(methods, diagnostics),
@@ -477,7 +474,7 @@ pipeline default(task) {
         let diags = lint(
             r#"
 pipeline default(task) {
-    let opts = {llm_retries: 3}
+    const opts = {llm_retries: 3}
     llm_call("hi", nil, opts)
 }
 "#,

@@ -1,6 +1,6 @@
 pipeline test(task) {
-  let body = "{\"hello\":\"world\"}"
-  let signed = aws_sigv4_headers(
+  const body = "{\"hello\":\"world\"}"
+  const signed = aws_sigv4_headers(
     {
       method: "POST",
       url: "https://service.us-east-1.amazonaws.com/",
@@ -31,18 +31,18 @@ pipeline test(task) {
     "https://service.us-east-1.amazonaws.com/",
     {status: 200, body: "ok", headers: {}},
   )
-  let response = harness.net
+  const response = harness.net
     .request(
     "POST",
     "https://service.us-east-1.amazonaws.com/",
     {body: body, headers: signed.headers},
   )
   assert_eq(response.status, 200)
-  let redacted = http_mock_calls()
+  const redacted = http_mock_calls()
   assert_eq(redacted[0].headers.authorization, "[redacted]")
-  let raw = http_mock_calls({include_sensitive: true})
+  const raw = http_mock_calls({include_sensitive: true})
   assert_eq(raw[0].headers.authorization, signed.authorization)
-  let session_signed = aws_sigv4_headers(
+  const session_signed = aws_sigv4_headers(
     {
       method: "GET",
       url: "https://service.us-east-1.amazonaws.com/",
@@ -56,7 +56,7 @@ pipeline test(task) {
   )
   assert_eq(session_signed.headers["X-Amz-Security-Token"], "session-token")
   assert(contains(session_signed.signed_headers, "x-amz-security-token"))
-  let edge = aws_sigv4_headers(
+  const edge = aws_sigv4_headers(
     {
       method: "GET",
       url: "https://example.amazonaws.com/a%2Fb/space%20here/tilde%7e?Param=value%2Fwith%20space&plus=a+b&empty&Param=second",
@@ -73,7 +73,7 @@ pipeline test(task) {
     contains(edge.canonical_request, "\nParam=second&Param=value%2Fwith%20space&empty=&plus=a%2Bb\n"),
   )
   assert(contains(edge.canonical_request, "x-amz-target:Example.Action\n"))
-  let failed = try {
+  const failed = try {
     aws_sigv4_headers(
       {
         method: "POST",

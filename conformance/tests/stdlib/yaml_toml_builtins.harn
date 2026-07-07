@@ -1,6 +1,6 @@
 pipeline test(task) {
-  let yaml = yaml_parse("name: Ada\nage: 37\n")
-  let toml_data = toml_parse("name = \"Ada\"\nage = 37\n")
+  const yaml = yaml_parse("name: Ada\nage: 37\n")
+  const toml_data = toml_parse("name = \"Ada\"\nage = 37\n")
   log(yaml.name)
   log(toml_data.age)
   log(json_stringify(yaml_parse(yaml_stringify({name: "Ada", age: 37}))))

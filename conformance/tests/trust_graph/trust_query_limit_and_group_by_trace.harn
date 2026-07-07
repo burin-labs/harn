@@ -1,10 +1,10 @@
 import "std/triggers"
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let agent_id = "trust-grouped-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const agent_id = "trust-grouped-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: agent_id,
       kind: "issue.opened",
@@ -25,16 +25,16 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let first: DispatchHandle = trigger_fire(
+  const first: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-a-" + unique}},
   )
-  let second: DispatchHandle = trigger_fire(
+  const second: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-b-" + unique}},
   )
-  let flat: list<TrustRecord> = trust_query({agent: agent_id, limit: 2})
-  let grouped: list<TrustTraceGroup> = trust_query({agent: agent_id, limit: 2, grouped_by_trace: true})
+  const flat: list<TrustRecord> = trust_query({agent: agent_id, limit: 2})
+  const grouped: list<TrustTraceGroup> = trust_query({agent: agent_id, limit: 2, grouped_by_trace: true})
   __io_println(first.status == "dispatched")
   __io_println(second.status == "dispatched")
   __io_println(len(flat) == 2)

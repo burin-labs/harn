@@ -2,6 +2,6 @@
 // so the implicit covariance that would let a `float` be pushed
 // into the underlying `list<int>` would be unsound.
 pipeline test(task) {
-  let xs: list<int> = [1, 2, 3]
-  let ys: list<float> = xs
+  const xs: list<int> = [1, 2, 3]
+  const ys: list<float> = xs
 }

@@ -44,7 +44,7 @@ pub fn metadata_namespace(dir, namespace) {
  * @errors: []
  */
 pub fn metadata_local_namespace(dir, namespace) {
-  let normalized = if dir == "" {
+  const normalized = if dir == "" {
     "."
   } else {
     dir
@@ -74,21 +74,21 @@ pub fn project_inventory(namespace) {
  * @errors: []
  */
 pub fn project_root_package() -> string {
-  var root_package = ""
-  let root_enrichment = metadata_get("", "enrichment")
+  let root_package = ""
+  const root_enrichment = metadata_get("", "enrichment")
   if root_enrichment?.rootPackageName {
     root_package = root_enrichment?.rootPackageName
   }
   if !root_package {
-    let src_enrichment = metadata_get("src", "enrichment")
+    const src_enrichment = metadata_get("src", "enrichment")
     if src_enrichment?.rootPackageName {
       root_package = src_enrichment?.rootPackageName
     }
   }
   if !root_package {
-    let project_root = project_root() ?? ""
+    const project_root = project_root() ?? ""
     if project_root {
-      let scan = project_scan(project_root, {tiers: ["ambient", "config"]})
+      const scan = project_scan(project_root, {tiers: ["ambient", "config"]})
       if scan?.package_name {
         root_package = scan.package_name
       }
@@ -165,31 +165,31 @@ pub fn project_scan_paths(path = ".", options = nil) {
  * @errors: []
  */
 pub fn project_deep_scan(path = ".", options = nil) {
-  let opts = options ?? {}
-  let namespace = opts?.namespace ?? "project-enrichment"
-  let tiers = __project_deep_scan_tiers(opts)
-  let walk_options = __project_deep_scan_walk_options(opts)
-  let walk = project_walk_tree_native(path, walk_options)
-  let scope_dir = if len(walk) == 0 {
+  const opts = options ?? {}
+  const namespace = opts?.namespace ?? "project-enrichment"
+  const tiers = __project_deep_scan_tiers(opts)
+  const walk_options = __project_deep_scan_walk_options(opts)
+  const walk = project_walk_tree_native(path, walk_options)
+  const scope_dir = if len(walk) == 0 {
     "."
   } else {
     walk[0].dir
   }
-  var cache = __project_deep_scan_cache(namespace)
-  let signature = __project_deep_scan_signature(opts, tiers, walk_options)
-  let incremental = if opts?.incremental == nil {
+  let cache = __project_deep_scan_cache(namespace)
+  const signature = __project_deep_scan_signature(opts, tiers, walk_options)
+  const incremental = if opts?.incremental == nil {
     true
   } else {
     opts.incremental
   }
-  let now = date_now().timestamp
-  let max_staleness_seconds = opts?.max_staleness_seconds
-  var tree = {}
-  var cache_hits = 0
-  var enriched_dirs = 0
-  var last_refresh = nil
+  const now = date_now().timestamp
+  const max_staleness_seconds = opts?.max_staleness_seconds
+  let tree = {}
+  let cache_hits = 0
+  let enriched_dirs = 0
+  let last_refresh = nil
   for entry in walk {
-    let cached = cache[entry.dir]?._deep_scan
+    const cached = cache[entry.dir]?._deep_scan
     if !__project_deep_scan_needs_refresh(
       cached,
       entry,
@@ -199,7 +199,7 @@ pub fn project_deep_scan(path = ".", options = nil) {
       incremental,
       now,
     ) {
-      let cached_evidence = __project_deep_scan_select_tiers(cached?.evidence ?? {}, tiers)
+      const cached_evidence = __project_deep_scan_select_tiers(cached?.evidence ?? {}, tiers)
       tree[entry.path] = cached_evidence
       cache_hits = cache_hits + 1
       if cached_evidence?.enriched != nil {
@@ -208,7 +208,7 @@ pub fn project_deep_scan(path = ".", options = nil) {
       last_refresh = __project_deep_scan_last_refresh(last_refresh, cached?.refreshed_at)
       continue
     }
-    let record = __project_deep_scan_refresh_entry(namespace, entry, tiers, opts?.enrichment ?? {}, signature, now)
+    const record = __project_deep_scan_refresh_entry(namespace, entry, tiers, opts?.enrichment ?? {}, signature, now)
     metadata_set(entry.dir, namespace, {_deep_scan: record})
     cache[entry.dir] = {_deep_scan: record}
     tree[entry.path] = __project_deep_scan_select_tiers(record.evidence ?? {}, tiers)
@@ -217,7 +217,7 @@ pub fn project_deep_scan(path = ".", options = nil) {
     }
     last_refresh = __project_deep_scan_last_refresh(last_refresh, record.refreshed_at)
   }
-  let status = {
+  const status = {
     version: 1,
     scope: scope_dir,
     total_dirs: len(walk),
@@ -244,16 +244,16 @@ pub fn project_deep_scan(path = ".", options = nil) {
  * @errors: []
  */
 pub fn project_deep_scan_status(namespace, path = ".") {
-  let scope_dir = __project_deep_scan_scope_dir(path)
-  let local = metadata_local_namespace(scope_dir, namespace)
-  let status = local?._deep_scan_status
+  const scope_dir = __project_deep_scan_scope_dir(path)
+  const local = metadata_local_namespace(scope_dir, namespace)
+  const status = local?._deep_scan_status
   if status != nil {
     return status
   }
-  var total_dirs = 0
-  var enriched_dirs = 0
+  let total_dirs = 0
+  let enriched_dirs = 0
   for entry in metadata_entries(namespace) {
-    let record = entry.local?._deep_scan
+    const record = entry.local?._deep_scan
     if record == nil {
       continue
     }
@@ -301,7 +301,7 @@ fn __project_deep_scan_walk_options(options) {
 }
 
 fn __project_deep_scan_scope_dir(path) {
-  let scope = project_walk_tree_native(path, {depth: 0})
+  const scope = project_walk_tree_native(path, {depth: 0})
   if len(scope) == 0 {
     return "."
   }
@@ -309,7 +309,7 @@ fn __project_deep_scan_scope_dir(path) {
 }
 
 fn __project_deep_scan_cache(namespace) {
-  var cache = {}
+  let cache = {}
   for entry in metadata_entries(namespace) {
     if entry.local != nil {
       cache[entry.dir] = entry.local
@@ -319,7 +319,7 @@ fn __project_deep_scan_cache(namespace) {
 }
 
 fn __project_deep_scan_signature(options, tiers, walk_options) {
-  let enrichment = options?.enrichment ?? {}
+  const enrichment = options?.enrichment ?? {}
   return sha256(
     json_stringify(
       {
@@ -348,7 +348,7 @@ fn __project_has_tier(tiers, name) {
 }
 
 fn __project_deep_scan_deterministic_tiers(tiers) {
-  var result = []
+  let result = []
   if __project_has_tier(tiers, "ambient") {
     result = result + ["ambient"]
   }
@@ -406,13 +406,13 @@ fn __project_deep_scan_needs_refresh(
 }
 
 fn __project_deep_scan_refresh_entry(namespace, entry, tiers, enrichment, signature, now) {
-  let scan_tiers = __project_deep_scan_deterministic_tiers(tiers)
-  let scan = if len(scan_tiers) == 0 {
+  const scan_tiers = __project_deep_scan_deterministic_tiers(tiers)
+  const scan = if len(scan_tiers) == 0 {
     {}
   } else {
     project_scan(entry.dir, {tiers: scan_tiers})
   }
-  var evidence = __project_deep_scan_evidence(scan, tiers)
+  let evidence = __project_deep_scan_evidence(scan, tiers)
   if __project_has_tier(tiers, "enriched") {
     evidence["enriched"] = project_enrich_native(
       entry.dir,
@@ -432,7 +432,7 @@ fn __project_deep_scan_refresh_entry(namespace, entry, tiers, enrichment, signat
 }
 
 fn __project_deep_scan_evidence(scan, tiers) {
-  var evidence = {}
+  let evidence = {}
   if __project_has_tier(tiers, "ambient") {
     evidence["ambient"] = __project_scan_ambient(scan)
   }
@@ -481,13 +481,13 @@ fn __project_deep_scan_enrichment_options(namespace, entry, evidence, options) {
 }
 
 fn __project_deep_scan_enrichment_prompt(dir, display_path, evidence, options) {
-  let instruction = options?.system ?? options?.prompt
+  const instruction = options?.system ?? options?.prompt
     ?? "Return a compact JSON summary of this directory. No markdown."
   return "${instruction}\n\nDirectory key: ${dir}\nDisplay path: ${display_path}\nDeterministic evidence:\n${json_stringify(evidence)}\nRelevant files:\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}"
 }
 
 fn __project_deep_scan_select_tiers(evidence, tiers) {
-  var selected = {}
+  let selected = {}
   if __project_has_tier(tiers, "ambient") && evidence?.ambient != nil {
     selected["ambient"] = evidence.ambient
   }
@@ -530,8 +530,8 @@ pub fn project_stale(namespace) {
  * @errors: []
  */
 pub fn project_stale_dirs(namespace) {
-  let stale = project_stale(namespace)
-  var dirs = []
+  const stale = project_stale(namespace)
+  let dirs = []
   for dir in stale.tier1 {
     dirs = dirs + [dir]
   }
@@ -548,7 +548,7 @@ pub fn project_stale_dirs(namespace) {
  * @errors: []
  */
 pub fn project_requires_refresh(namespace) {
-  let status = metadata_status(namespace)
+  const status = metadata_status(namespace)
   if status.stale.any_stale {
     return true
   }

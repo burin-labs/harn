@@ -4,11 +4,11 @@ The single most repeated shape in Harn-using code is optional-field extraction
 with a fallback:
 
 ```harn,ignore
-let input = pipeline_input() ?? {}
-let path = input?.path ?? ""
-let namespace = input?.namespace ?? nil
-let retries = input?.retries ?? 0
-let opts = input?.opts ?? {}
+const input = pipeline_input() ?? {}
+const path = input?.path ?? ""
+const namespace = input?.namespace ?? nil
+const retries = input?.retries ?? 0
+const opts = input?.opts ?? {}
 ```
 
 Every line repeats the source and the `?.` / `??` dance. Harn supports
@@ -16,7 +16,7 @@ Every line repeats the source and the `?.` / `??` dance. Harn supports
 block collapses to one bind:
 
 ```harn,ignore
-let { namespace = nil, opts = {}, path = "", retries = 0 } = pipeline_input() ?? {}
+const { namespace = nil, opts = {}, path = "", retries = 0 } = pipeline_input() ?? {}
 ```
 
 The two forms are equivalent — including the types each binding receives.
@@ -28,13 +28,13 @@ A run of `let <name> = <src>?.<key> ?? <default>` statements that share the same
 
 ```harn,ignore
 // before
-let cfg = load_config() ?? {}
-let host = cfg?.host ?? "0.0.0.0"
-let port = cfg?.port ?? 8080
-let tls  = cfg?.tls  ?? false
+const cfg = load_config() ?? {}
+const host = cfg?.host ?? "0.0.0.0"
+const port = cfg?.port ?? 8080
+const tls  = cfg?.tls  ?? false
 
 // after
-let { host = "0.0.0.0", port = 8080, tls = false } = load_config() ?? {}
+const { host = "0.0.0.0", port = 8080, tls = false } = load_config() ?? {}
 ```
 
 Rules that keep the rewrite behavior-preserving:
@@ -59,9 +59,9 @@ The binding types are inferred *exactly* as the `?.` / `??` expression would
 produce them, so migrating never loses precision under the type checker:
 
 ```harn,ignore
-let { port = 8080 } = load_config() ?? {}
-let p: int = port        // ok — `port` infers `int` from the default
-let q: string = port     // error: expected string, found int
+const { port = 8080 } = load_config() ?? {}
+const p: int = port        // ok — `port` infers `int` from the default
+const q: string = port     // error: expected string, found int
 ```
 
 When the source is a typed shape, present fields keep their declared type

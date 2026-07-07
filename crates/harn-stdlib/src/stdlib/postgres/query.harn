@@ -25,11 +25,11 @@ type PgNamedQuery = {
 
 type PgQuery = {name?: string, mode?: PgQueryMode, sql: string, params?: list<any>, options?: dict}
 
-let __QUERY_MODES = ["one", "many", "exec"]
+const __QUERY_MODES = ["one", "many", "exec"]
 
-let __IDENTIFIER_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$"
+const __IDENTIFIER_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$"
 
-let __SQL_FRAGMENT_TYPE = "std/postgres/query.sql_fragment.v1"
+const __SQL_FRAGMENT_TYPE = "std/postgres/query.sql_fragment.v1"
 
 fn __sql_fragment(sql: string) -> PgSqlFragment {
   if type_of(sql) != "string" {
@@ -45,7 +45,7 @@ fn __is_sql_fragment(value) -> bool {
 }
 
 fn __sql_fragment_text(value) -> string {
-  let fragment_sql = value?.sql
+  const fragment_sql = value?.sql
   if type_of(fragment_sql) != "string" {
     throw "std/postgres/query: SQL fragment sql must be a string"
   }
@@ -56,7 +56,7 @@ fn __query_name(query) -> string {
   if type_of(query) != "dict" {
     return ""
   }
-  let name = query?.name
+  const name = query?.name
   if name == nil {
     return ""
   }
@@ -67,7 +67,7 @@ fn __query_name(query) -> string {
 }
 
 fn __query_error_prefix(query) -> string {
-  let name = __query_name(query)
+  const name = __query_name(query)
   if name == "" {
     return "std/postgres/query: "
   }
@@ -78,22 +78,22 @@ fn __normalize_query(query, expected_mode = nil) {
   if type_of(query) != "dict" {
     throw "std/postgres/query: query must be a dict"
   }
-  let sql = query?.sql
+  const sql = query?.sql
   if type_of(sql) != "string" || trim(sql) == "" {
     throw __query_error_prefix(query) + "sql must be a non-empty string"
   }
-  let params = query?.params ?? []
+  const params = query?.params ?? []
   if type_of(params) != "list" {
     throw __query_error_prefix(query) + "params must be a list"
   }
-  let mode = query?.mode ?? expected_mode
+  const mode = query?.mode ?? expected_mode
   if mode != nil && !contains(__QUERY_MODES, mode) {
     throw __query_error_prefix(query) + "mode must be one of one, many, exec"
   }
   if expected_mode != nil && query?.mode != nil && query.mode != expected_mode {
     throw __query_error_prefix(query) + "mode " + query.mode + " cannot run through " + expected_mode
   }
-  let options = query?.options
+  const options = query?.options
   if options != nil && type_of(options) != "dict" {
     throw __query_error_prefix(query) + "options must be a dict"
   }
@@ -112,7 +112,7 @@ fn __with_query_name(query, body) {
 }
 
 fn __find_placeholder_end(chars: list<string>, start: int) -> int {
-  var idx = start
+  let idx = start
   while idx < len(chars) {
     if chars[idx] == "}" {
       return idx
@@ -126,11 +126,11 @@ fn __render_placeholder(key: string, value, params: list<any>, positions: dict) 
   if __is_sql_fragment(value) {
     return {sql: __sql_fragment_text(value), params: params, positions: positions}
   }
-  let existing = positions[key]
+  const existing = positions[key]
   if existing != nil {
     return {sql: "$" + to_string(existing), params: params, positions: positions}
   }
-  let next = len(params) + 1
+  const next = len(params) + 1
   return {sql: "$" + to_string(next), params: params.push(value), positions: positions + {[key]: next}}
 }
 
@@ -141,24 +141,24 @@ fn __render_sql_template(template: string, values: dict) {
   if type_of(values) != "dict" {
     throw "std/postgres/query: SQL template values must be a dict"
   }
-  let template_chars = chars(template)
-  var idx = 0
-  var out = ""
-  var params = []
-  var positions = {}
+  const template_chars = chars(template)
+  let idx = 0
+  let out = ""
+  let params = []
+  let positions = {}
   while idx < len(template_chars) {
-    let char = template_chars[idx]
+    const char = template_chars[idx]
     if char == "{" {
       if idx + 1 < len(template_chars) && template_chars[idx + 1] == "{" {
         out = out + "{"
         idx = idx + 2
         continue
       }
-      let end = __find_placeholder_end(template_chars, idx + 1)
+      const end = __find_placeholder_end(template_chars, idx + 1)
       if end < 0 {
         throw "std/postgres/query: unclosed `{` in SQL template"
       }
-      let key = trim(join(template_chars[idx + 1:end], ""))
+      const key = trim(join(template_chars[idx + 1:end], ""))
       if key == "" {
         throw "std/postgres/query: empty SQL template placeholder"
       }
@@ -168,7 +168,7 @@ fn __render_sql_template(template: string, values: dict) {
       if !contains(values.keys(), key) {
         throw "std/postgres/query: missing SQL template value `" + key + "`"
       }
-      let rendered = __render_placeholder(key, values[key], params, positions)
+      const rendered = __render_placeholder(key, values[key], params, positions)
       out = out + rendered.sql
       params = rendered.params
       positions = rendered.positions
@@ -215,7 +215,7 @@ pub fn named(name: string, mode: PgQueryMode, sql: string, params: list<any> = [
  * @example: sql("SELECT * FROM receipts WHERE tenant_id = {tenant_id}", {tenant_id: tenant_id})
  */
 pub fn sql(template: string, values: dict = {}, options = nil) -> PgQuery {
-  let rendered = __render_sql_template(template, values)
+  const rendered = __render_sql_template(template, values)
   return __normalize_query({sql: rendered.sql, params: rendered.params, options: options})
 }
 
@@ -234,7 +234,7 @@ pub fn named_sql(
   values: dict = {},
   options = nil,
 ) -> PgNamedQuery {
-  let rendered = __render_sql_template(template, values)
+  const rendered = __render_sql_template(template, values)
   return __normalize_query(
     {name: name, mode: mode, sql: rendered.sql, params: rendered.params, options: options},
   )
@@ -298,7 +298,7 @@ pub fn named_raw_sql(
  * @example: one(db, {name: "get_receipt", sql: sql, params: [id]})
  */
 pub fn one(handle, query: PgQuery) {
-  let q = __normalize_query(query, "one")
+  const q = __normalize_query(query, "one")
   return __with_query_name(q, { -> pg_query_one(handle, q.sql, q.params, q.options) })
 }
 
@@ -311,7 +311,7 @@ pub fn one(handle, query: PgQuery) {
  * @example: many(db, {name: "list_receipts", sql: sql, params: [tenant_id]})
  */
 pub fn many(handle, query: PgQuery) -> list {
-  let q = __normalize_query(query, "many")
+  const q = __normalize_query(query, "many")
   return __with_query_name(q, { -> pg_query(handle, q.sql, q.params, q.options) })
 }
 
@@ -324,7 +324,7 @@ pub fn many(handle, query: PgQuery) -> list {
  * @example: exec(db, {name: "mark_read", sql: sql, params: [id, status]})
  */
 pub fn exec(handle, query: PgQuery) -> PgExecuteResult {
-  let q = __normalize_query(query, "exec")
+  const q = __normalize_query(query, "exec")
   if q.options != nil {
     throw __query_error_prefix(q) + "options are only supported by one and many"
   }
@@ -340,7 +340,7 @@ pub fn exec(handle, query: PgQuery) -> PgExecuteResult {
  * @example: run(db, named("list_receipts", "many", sql, [tenant_id]))
  */
 pub fn run(handle, query: PgNamedQuery) {
-  let q = __normalize_query(query)
+  const q = __normalize_query(query)
   if q.mode == nil {
     throw __query_error_prefix(q) + "mode is required"
   }
@@ -413,7 +413,7 @@ pub fn ident_path(parts: list<string>) -> PgSqlFragment {
   if type_of(parts) != "list" || len(parts) == 0 {
     throw "std/postgres/query: SQL identifier path must be a non-empty list"
   }
-  var quoted = []
+  let quoted = []
   for part in parts {
     quoted = quoted.push(quote_identifier(part))
   }
@@ -451,7 +451,7 @@ pub fn unsafe_sql(fragment: string) -> PgSqlFragment {
  * @example: sql_fragment("{column} IS NOT NULL", {column: ident("created_at")})
  */
 pub fn sql_fragment(template: string, values: dict = {}) -> PgSqlFragment {
-  let rendered = __render_sql_template(template, values)
+  const rendered = __render_sql_template(template, values)
   if len(rendered.params) != 0 {
     throw "std/postgres/query: SQL fragment placeholders must be trusted SQL fragments; bind values through sql/named_sql"
   }
@@ -486,7 +486,7 @@ fn __trusted_fragment_text(value, label: string) -> string {
 }
 
 fn __predicate_part_text(part) -> string {
-  let sql = __trusted_fragment_text(part, "predicate part")
+  const sql = __trusted_fragment_text(part, "predicate part")
   if trim(sql) == "" {
     throw "std/postgres/query: predicate part must be non-empty"
   }
@@ -509,7 +509,7 @@ pub fn sql_and(parts: list) -> PgSqlFragment {
   if len(parts) == 0 {
     throw "std/postgres/query: sql_and requires at least one predicate fragment"
   }
-  var rendered = []
+  let rendered = []
   for part in parts {
     rendered = rendered.push("(" + __predicate_part_text(part) + ")")
   }
@@ -532,7 +532,7 @@ pub fn sql_or(parts: list) -> PgSqlFragment {
   if len(parts) == 0 {
     throw "std/postgres/query: sql_or requires at least one predicate fragment"
   }
-  var rendered = []
+  let rendered = []
   for part in parts {
     rendered = rendered.push("(" + __predicate_part_text(part) + ")")
   }
@@ -573,7 +573,7 @@ pub fn jsonb_object(fields: list) -> PgSqlFragment {
   if len(fields) == 0 {
     throw "std/postgres/query: jsonb_object requires at least one field"
   }
-  var rendered = []
+  let rendered = []
   for field in fields {
     if type_of(field) != "dict" {
       throw "std/postgres/query: jsonb_object field must be a dict"
@@ -618,7 +618,7 @@ pub fn columns(parts: list) -> PgSqlFragment {
   if len(parts) == 0 {
     throw "std/postgres/query: columns requires at least one projection part"
   }
-  var rendered = []
+  let rendered = []
   for part in parts {
     rendered = rendered.push(__projection_part_text(part))
   }
@@ -646,8 +646,8 @@ pub fn select_clause(parts: list) -> PgSqlFragment {
  * qualified columns from joined queries (`vaults.created_at`) without escaping.
  */
 fn __qualified_column(name: string) -> string {
-  let parts = split(name, ".")
-  var validated = []
+  const parts = split(name, ".")
+  let validated = []
   for part in parts {
     validated = validated.push(identifier(part))
   }
@@ -660,7 +660,7 @@ fn __qualified_column(name: string) -> string {
  * valid SQL).
  */
 fn __column_alias(name: string) -> string {
-  let parts = split(name, ".")
+  const parts = split(name, ".")
   return identifier(parts[len(parts) - 1])
 }
 
@@ -676,8 +676,8 @@ fn __column_alias(name: string) -> string {
  * @example: uuid_text("id")
  */
 pub fn uuid_text(name: string) -> PgSqlFragment {
-  let column = __qualified_column(name)
-  let alias = __column_alias(name)
+  const column = __qualified_column(name)
+  const alias = __column_alias(name)
   return __sql_fragment(column + "::text AS " + alias)
 }
 
@@ -696,8 +696,8 @@ pub fn uuid_text(name: string) -> PgSqlFragment {
  * @example: nullable_uuid_text("forked_from_session_id")
  */
 pub fn nullable_uuid_text(name: string) -> PgSqlFragment {
-  let column = __qualified_column(name)
-  let alias = __column_alias(name)
+  const column = __qualified_column(name)
+  const alias = __column_alias(name)
   return __sql_fragment(
     "CASE WHEN " + column + " IS NULL THEN NULL ELSE " + column + "::text END AS " + alias,
   )
@@ -716,8 +716,8 @@ pub fn nullable_uuid_text(name: string) -> PgSqlFragment {
  * @example: timestamptz_json("created_at")
  */
 pub fn timestamptz_json(name: string) -> PgSqlFragment {
-  let column = __qualified_column(name)
-  let alias = __column_alias(name)
+  const column = __qualified_column(name)
+  const alias = __column_alias(name)
   return __sql_fragment("to_json(" + column + ")#>>'{}' AS " + alias)
 }
 
@@ -734,8 +734,8 @@ pub fn timestamptz_json(name: string) -> PgSqlFragment {
  * @example: nullable_timestamptz_json("finished_at")
  */
 pub fn nullable_timestamptz_json(name: string) -> PgSqlFragment {
-  let column = __qualified_column(name)
-  let alias = __column_alias(name)
+  const column = __qualified_column(name)
+  const alias = __column_alias(name)
   return __sql_fragment(
     "CASE WHEN " + column + " IS NULL THEN NULL ELSE to_json(" + column + ")#>>'{}' END AS " + alias,
   )

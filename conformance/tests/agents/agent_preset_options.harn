@@ -2,7 +2,7 @@ import { agent_loop_options } from "std/agent/options"
 import { agent_preset } from "std/agent/presets"
 
 pipeline default() {
-  let audit = agent_preset("audit")
+  const audit = agent_preset("audit")
   __io_println(audit.profile)
   __io_println(audit.loop_until_done)
   __io_println(audit.iteration_budget.mode)
@@ -17,15 +17,15 @@ pipeline default() {
   __io_println(audit.reasoning_task)
   __io_println(audit.repair_diagnostics.reserved_terminal_verify)
   __io_println(audit.repair_diagnostics.reserved_terminal_verify_iterations)
-  let json_audit = agent_loop_options(
+  const json_audit = agent_loop_options(
     agent_preset("audit", {provider: "mock", tools: tool_registry(), tool_format: "json"}),
   )
   __io_println(json_audit.done_sentinel)
-  let native_audit = agent_loop_options(
+  const native_audit = agent_loop_options(
     agent_preset("audit", {provider: "mock", tools: tool_registry(), tool_format: "native"}),
   )
   __io_println(native_audit.done_sentinel == nil)
-  let summary = agent_preset("summary")
+  const summary = agent_preset("summary")
   __io_println(summary.profile)
   __io_println(summary?.tool_choice == nil)
   __io_println(summary.iteration_budget.mode)
@@ -33,24 +33,24 @@ pipeline default() {
   __io_println(summary.iteration_budget.max)
   __io_println(summary.loop_until_done)
   __io_println(summary.max_nudges)
-  let repair = agent_preset("repair", {iteration_budget: {mode: "adaptive", initial: 6, max: 20, extend_by: 3}})
+  const repair = agent_preset("repair", {iteration_budget: {mode: "adaptive", initial: 6, max: 20, extend_by: 3}})
   __io_println(repair.iteration_budget.mode)
   __io_println(repair.iteration_budget.initial)
   __io_println(repair.iteration_budget.max)
   __io_println(repair.iteration_budget.extend_by)
-  let verify = agent_preset("verify")
+  const verify = agent_preset("verify")
   __io_println(verify.profile)
   __io_println(verify.iteration_budget.mode)
   __io_println(verify.iteration_budget.max)
   __io_println(verify.done_judge)
   // String sugar: iteration_budget: "adaptive" keeps preset numeric defaults
   // but explicitly switches mode.
-  let audit_adaptive_sugar = agent_preset("audit", {iteration_budget: "adaptive"})
+  const audit_adaptive_sugar = agent_preset("audit", {iteration_budget: "adaptive"})
   __io_println(audit_adaptive_sugar.iteration_budget.mode)
   __io_println(audit_adaptive_sugar.iteration_budget.initial)
   __io_println(audit_adaptive_sugar.iteration_budget.max)
   // Caller overrides preset defaults.
-  let overridden = agent_preset("audit", {max_nudges: 4, loop_until_done: false})
+  const overridden = agent_preset("audit", {max_nudges: 4, loop_until_done: false})
   __io_println(overridden.max_nudges)
   __io_println(overridden.loop_until_done)
 }

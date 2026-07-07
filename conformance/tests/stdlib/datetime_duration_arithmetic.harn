@@ -1,6 +1,6 @@
 pipeline default() {
-  let base = date_parse("2026-04-25T00:00:00Z")
-  let later = date_add(base, duration_hours(2))
+  const base = date_parse("2026-04-25T00:00:00Z")
+  const later = date_add(base, duration_hours(2))
   __io_println(date_to_zone(later, "UTC"))
   __io_println(duration_to_seconds(date_diff(later, base)))
   __io_println(duration_to_human(duration_minutes(194)))

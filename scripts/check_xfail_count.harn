@@ -17,11 +17,11 @@ pub fn count_substring(haystack: string, needle: string) -> int {
  * the literal `@xfail:` string when describing the convention.
  */
 pub fn count_xfail_markers(root: string) -> int {
-  let entries = harness.fs.walk(root)
-  var total = 0
+  const entries = harness.fs.walk(root)
+  let total = 0
   for entry in entries {
     if entry.is_file && entry.path.ends_with(".harn") {
-      let text = try {
+      const text = try {
         harness.fs.read_text(entry.path)
       } catch (_) {
         ""
@@ -33,18 +33,18 @@ pub fn count_xfail_markers(root: string) -> int {
 }
 
 pipeline main(task) {
-  let threshold_file = "scripts/xfail_threshold.txt"
+  const threshold_file = "scripts/xfail_threshold.txt"
   if !harness.fs.exists(threshold_file) {
     __io_eprintln("missing ${threshold_file}")
     return 1
   }
-  let raw = harness.fs.read_text(threshold_file).trim()
-  let threshold = to_int(raw)
+  const raw = harness.fs.read_text(threshold_file).trim()
+  const threshold = to_int(raw)
   if threshold == nil || threshold < 0 {
     __io_eprintln("${threshold_file} must contain a non-negative integer")
     return 1
   }
-  let count = count_xfail_markers("conformance")
+  const count = count_xfail_markers("conformance")
   if count > threshold {
     __io_eprintln("::error::xfail count went up: ${count} > ${threshold}")
     return 1

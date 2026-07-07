@@ -1,7 +1,7 @@
 pipeline main() {
-  let dir = path_join(harness.fs.temp_dir(), "harn_eval_manifest_artifacts")
+  const dir = path_join(harness.fs.temp_dir(), "harn_eval_manifest_artifacts")
   harness.fs.mkdir(dir)
-  let baseline = run_record(
+  const baseline = run_record(
     {
       _type: "run_record",
       id: "baseline",
@@ -22,7 +22,7 @@ pipeline main() {
       ],
     },
   )
-  let candidate = run_record(
+  const candidate = run_record(
     {
       _type: "run_record",
       id: "candidate",
@@ -38,7 +38,7 @@ pipeline main() {
   )
   run_record_save(baseline, path_join(dir, "baseline.json"))
   run_record_save(candidate, path_join(dir, "candidate.json"))
-  let suite = eval_suite_run(
+  const suite = eval_suite_run(
     eval_suite_manifest(
       {
         base_dir: dir,
@@ -46,11 +46,11 @@ pipeline main() {
       },
     ),
   )
-  let diff = artifact_diff("src/main.rs", "old\nsame", "new\nsame")
-  let review = artifact_diff_review(diff, "Needs approval")
-  let decision = artifact_review_decision(review, "accepted")
-  let workspace = artifact_workspace_file("src/main.rs", "fn " + "main() {}")
-  let command = artifact_command_result("cargo test", {status: 0, success: true})
+  const diff = artifact_diff("src/main.rs", "old\nsame", "new\nsame")
+  const review = artifact_diff_review(diff, "Needs approval")
+  const decision = artifact_review_decision(review, "accepted")
+  const workspace = artifact_workspace_file("src/main.rs", "fn " + "main() {}")
+  const command = artifact_command_result("cargo test", {status: 0, success: true})
   __io_println(suite?.failed == 1)
   __io_println(!suite?.cases[0]?.comparison?.identical)
   __io_println(diff?.kind == "diff")

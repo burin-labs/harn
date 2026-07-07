@@ -7,7 +7,7 @@
  * Run with: cargo run --bin harn -- run examples/parallel-pipeline.harn
  */
 pipeline main(task) {
-  let prompts = [
+  const prompts = [
     "What is 2 + 2?",
     "Name one planet in our solar system.",
     "What color is the sky on a clear day?",
@@ -16,14 +16,14 @@ pipeline main(task) {
   ]
   log("Processing ${len(prompts)} prompts in parallel...")
   // parallel each runs the closure concurrently for each item
-  let results = parallel each prompts { prompt ->
+  const results = parallel each prompts { prompt ->
     "Answer to: ${prompt}"
   }
   // In production, replace with: llm_call(prompt, "Answer in one word.")
   // Using string transform here so the example runs without an API key.
   log("")
   log("=== Results ===")
-  let idx = 0
+  const idx = 0
   for result in results {
     log("[${idx + 1}] ${prompts[idx]}")
     log("    -> ${result}")
@@ -32,6 +32,6 @@ pipeline main(task) {
   log("")
   log("Processed ${len(results)} items total.")
   // Demonstrate chaining: filter results by length
-  let short_answers = results.filter({ r -> len(r) < 40 })
+  const short_answers = results.filter({ r -> len(r) < 40 })
   log("Short answers (< 40 chars): ${len(short_answers)}")
 }

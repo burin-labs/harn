@@ -7,13 +7,13 @@ import { fs_drop_snapshot, fs_list_snapshots, fs_restore, fs_snapshot } from "st
  * session-scoped; an explicit `session_id` keeps the fixture hermetic.
  */
 fn main(harness: Harness) {
-  let session = "conformance-snapshot-session"
-  let path = harness.fs.path_join(harness.fs.temp_dir(), "harn_fs_snapshot.txt")
+  const session = "conformance-snapshot-session"
+  const path = harness.fs.path_join(harness.fs.temp_dir(), "harn_fs_snapshot.txt")
   if harness.fs.exists(path) {
     harness.fs.delete(path)
   }
   harness.fs.write_text(path, "original")
-  let snap = fs_snapshot([path], {session_id: session, snapshot_id: "attempt-1"})
+  const snap = fs_snapshot([path], {session_id: session, snapshot_id: "attempt-1"})
   harness.stdio.println(snap.snapshot_id)
   harness.stdio.println(len(snap.captured_paths))
   // List sees exactly the one snapshot we took.
@@ -21,7 +21,7 @@ fn main(harness: Harness) {
   // Mutate the workspace, then restore the captured pre-image.
   harness.fs.write_text(path, "clobbered")
   harness.stdio.println(harness.fs.read_text(path))
-  let restored = fs_restore(snap.snapshot_id, [], {session_id: session})
+  const restored = fs_restore(snap.snapshot_id, [], {session_id: session})
   harness.stdio.println(len(restored.restored_paths))
   harness.stdio.println(harness.fs.read_text(path))
   // Drop releases the checkpoint and is idempotent.

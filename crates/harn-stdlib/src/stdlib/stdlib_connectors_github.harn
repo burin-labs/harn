@@ -70,7 +70,7 @@ type GitHubClosePrResult = {
   error: any,
 }
 
-var github_connector_config: GitHubConnectorConfig = {}
+let github_connector_config: GitHubConnectorConfig = {}
 
 /**
  * configure overrides the module-level connector config used by every call.
@@ -108,7 +108,7 @@ pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
 }
 
 fn __github_strip_git_suffix(value) {
-  let text = trim(to_string(value ?? ""))
+  const text = trim(to_string(value ?? ""))
   if ends_with(text, ".git") {
     return substring(text, 0, len(text) - len(".git"))
   }
@@ -116,16 +116,16 @@ fn __github_strip_git_suffix(value) {
 }
 
 fn __github_slug_match(pattern, text) {
-  let captures = regex_captures(pattern, text)
+  const captures = regex_captures(pattern, text)
   if len(captures) == 0 {
     return nil
   }
-  let groups = captures[0].groups
+  const groups = captures[0].groups
   if len(groups) < 2 {
     return nil
   }
-  let owner = trim(to_string(groups[0]))
-  let repo = __github_strip_git_suffix(groups[1])
+  const owner = trim(to_string(groups[0]))
+  const repo = __github_strip_git_suffix(groups[1])
   if owner == "" || repo == "" || contains(owner, "/") || contains(repo, "/") {
     return nil
   }
@@ -139,11 +139,11 @@ fn __github_slug_match(pattern, text) {
  * @errors: []
  */
 pub fn github_slug_from_remote(url: string) -> string? {
-  let text = trim(to_string(url ?? ""))
+  const text = trim(to_string(url ?? ""))
   if text == "" {
     return nil
   }
-  let url_slug = __github_slug_match(
+  const url_slug = __github_slug_match(
     "^(?:git\\+)?(?:https?|ssh|git)://(?:[^@/]+@)?github\\.com(?::[0-9]+)?/([^/]+)/([^/#?]+)(?:[?#].*)?$",
     text,
   )
@@ -161,27 +161,27 @@ pub fn github_slug_from_remote(url: string) -> string? {
  */
 pub fn github_repo(repo: any, name: string? = nil) -> GitHubRepoRef? {
   if name != nil {
-    let owner = trim(to_string(repo ?? ""))
-    let repo_name = __github_strip_git_suffix(name)
+    const owner = trim(to_string(repo ?? ""))
+    const repo_name = __github_strip_git_suffix(name)
     if owner == "" || repo_name == "" {
       return nil
     }
     return {owner: owner, name: repo_name, full_name: owner + "/" + repo_name}
   }
   if type_of(repo) == "dict" {
-    let full_name = repo?.full_name
+    const full_name = repo?.full_name
     if full_name != nil {
       return github_repo(full_name)
     }
-    let owner = repo?.owner ?? repo?.owner_login
-    let repo_name = repo?.name ?? repo?.repo
+    const owner = repo?.owner ?? repo?.owner_login
+    const repo_name = repo?.name ?? repo?.repo
     if owner != nil && repo_name != nil {
       return github_repo(owner, repo_name)
     }
     return nil
   }
-  let raw = trim(to_string(repo ?? ""))
-  let slug = if contains(raw, "github.com") || contains(raw, "://") {
+  const raw = trim(to_string(repo ?? ""))
+  const slug = if contains(raw, "github.com") || contains(raw, "://") {
     github_slug_from_remote(raw)
   } else {
     raw
@@ -189,7 +189,7 @@ pub fn github_repo(repo: any, name: string? = nil) -> GitHubRepoRef? {
   if slug == nil || !contains(slug, "/") {
     return nil
   }
-  let parts = split(slug, "/")
+  const parts = split(slug, "/")
   if len(parts) != 2 {
     return nil
   }
@@ -197,7 +197,7 @@ pub fn github_repo(repo: any, name: string? = nil) -> GitHubRepoRef? {
 }
 
 fn __github_repo_or_throw(repo, name = nil) {
-  let parsed = github_repo(repo, name)
+  const parsed = github_repo(repo, name)
   if parsed == nil {
     throw "std/connectors/github: expected repo as owner/repo, GitHub remote URL, or owner + repo"
   }
@@ -306,7 +306,7 @@ pub fn workflow_dispatch(
   inputs: dict? = nil,
   options: GitHubCallOptions = {},
 ) {
-  let r = __github_repo_or_throw(repo)
+  const r = __github_repo_or_throw(repo)
   return call(
     "github.actions.workflow_dispatch",
     {repo: r.full_name, workflow_id: workflow_id, ref: ref, inputs: inputs ?? {}},
@@ -321,7 +321,7 @@ pub fn workflow_dispatch(
  * @errors: []
  */
 pub fn workflow_runs(repo: any, options: GitHubCallOptions = {}) {
-  let r = __github_repo_or_throw(repo)
+  const r = __github_repo_or_throw(repo)
   return call("github.actions.runs", {repo: r.full_name}, options)
 }
 
@@ -332,7 +332,7 @@ pub fn workflow_runs(repo: any, options: GitHubCallOptions = {}) {
  * @errors: []
  */
 pub fn workflow_run(repo: any, run_id: any, options: GitHubCallOptions = {}) {
-  let r = __github_repo_or_throw(repo)
+  const r = __github_repo_or_throw(repo)
   return call("github.actions.run", {repo: r.full_name, run_id: run_id}, options)
 }
 
@@ -390,7 +390,7 @@ pub fn read_file_at_ref(
   ref: string? = nil,
   options: GitHubCallOptions = {},
 ) {
-  let r = __github_repo_or_throw(repo)
+  const r = __github_repo_or_throw(repo)
   return call("repos.get_text", filter_nil({owner: r.owner, repo: r.name, path: path, ref: ref}), options)
 }
 
@@ -417,7 +417,7 @@ pub fn repos_get_text(
  * @errors: []
  */
 pub fn latest_release(repo: any, options: GitHubCallOptions = {}) {
-  let r = __github_repo_or_throw(repo)
+  const r = __github_repo_or_throw(repo)
   return call("github.release.latest", {repo: r.full_name}, options)
 }
 
@@ -428,7 +428,7 @@ pub fn latest_release(repo: any, options: GitHubCallOptions = {}) {
  * @errors: []
  */
 pub fn release_assets(repo: any, release_id: any = nil, options: GitHubCallOptions = {}) {
-  let r = __github_repo_or_throw(repo)
+  const r = __github_repo_or_throw(repo)
   return call("github.release.assets", filter_nil({repo: r.full_name, release_id: release_id}), options)
 }
 
@@ -489,9 +489,9 @@ pub fn github_release_assets(
  * @errors: []
  */
 pub fn enable_auto_merge(repo: any, pull_number: any, options: GitHubCallOptions = {}) -> GitHubAutoMergeResult {
-  let r = __github_repo_or_throw(repo)
-  let requested_method = uppercase(to_string(options.method ?? options.merge_method ?? "merge"))
-  let result = try {
+  const r = __github_repo_or_throw(repo)
+  const requested_method = uppercase(to_string(options.method ?? options.merge_method ?? "merge"))
+  const result = try {
     call(
       "github.pr.enable_auto_merge",
       {repo: r.full_name, pull_number: pull_number, method: requested_method},
@@ -546,10 +546,10 @@ pub fn close_pr(
   comment: string? = nil,
   options: GitHubCallOptions = {},
 ) -> GitHubClosePrResult {
-  let r = __github_repo_or_throw(repo)
-  var comment_posted = false
+  const r = __github_repo_or_throw(repo)
+  let comment_posted = false
   if comment != nil && trim(to_string(comment)) != "" {
-    let posted = try {
+    const posted = try {
       call(
         "issues.create_comment",
         {owner: r.owner, repo: r.name, issue_number: pull_number, body: to_string(comment)},
@@ -561,7 +561,7 @@ pub fn close_pr(
     }
     comment_posted = true
   }
-  let updated = try {
+  const updated = try {
     call(
       "issues.update",
       {owner: r.owner, repo: r.name, issue_number: pull_number, state: "closed"},
@@ -638,8 +638,8 @@ fn __github_auto_merge_failed(requested_method, pull_number, error) -> GitHubAut
 }
 
 fn __github_auto_merge_success(result, requested_method, pull_number) -> GitHubAutoMergeResult {
-  let state = result?.state ?? "enabled"
-  let merge_method = result?.requested_method ?? result?.auto_merge?.merge_method
+  const state = result?.state ?? "enabled"
+  const merge_method = result?.requested_method ?? result?.auto_merge?.merge_method
     ?? result?.pull_request?.autoMergeRequest?.mergeMethod
     ?? requested_method
   return {
@@ -679,7 +679,7 @@ fn __github_payload(log_event) {
 }
 
 fn __github_repo_matches(payload, repo) {
-  let full_name = payload?.raw?.repository?.full_name
+  const full_name = payload?.raw?.repository?.full_name
   return full_name == nil || full_name == repo
 }
 
@@ -694,9 +694,9 @@ pub fn deployment_status_source(repo: string, deployment_id: any, options: GitHu
     label: "github.deployment_status:" + repo + "#" + to_string(deployment_id),
     prefers_push: true,
     poll: { _ ->
-      let path = "/repos/" + repo + "/deployments/" + to_string(deployment_id) + "/statuses"
-      let statuses = api_call(path, "GET", nil, options)
-      var latest = nil
+      const path = "/repos/" + repo + "/deployments/" + to_string(deployment_id) + "/statuses"
+      const statuses = api_call(path, "GET", nil, options)
+      let latest = nil
       if len(statuses) > 0 {
         latest = statuses[0]
       }
@@ -708,8 +708,8 @@ pub fn deployment_status_source(repo: string, deployment_id: any, options: GitHu
       }
     },
     push_filter: { log_event ->
-      let event = __github_event(log_event)
-      let payload = __github_payload(log_event)
+      const event = __github_event(log_event)
+      const payload = __github_payload(log_event)
       return event?.provider == "github"
         && event?.kind == "deployment_status"
         && payload?.deployment?.id == deployment_id
@@ -729,7 +729,7 @@ pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOpti
     label: "github.check_run:" + repo + "#" + to_string(check_run_id),
     prefers_push: true,
     poll: { _ ->
-      let check_run = api_call("/repos/" + repo + "/check-runs/" + to_string(check_run_id), "GET", nil, options)
+      const check_run = api_call("/repos/" + repo + "/check-runs/" + to_string(check_run_id), "GET", nil, options)
       return {
         repo: repo,
         check_run_id: check_run_id,
@@ -739,8 +739,8 @@ pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOpti
       }
     },
     push_filter: { log_event ->
-      let event = __github_event(log_event)
-      let payload = __github_payload(log_event)
+      const event = __github_event(log_event)
+      const payload = __github_payload(log_event)
       return event?.provider == "github"
         && event?.kind == "check_run"
         && payload?.check_run?.id == check_run_id
@@ -760,7 +760,7 @@ pub fn pull_request_merged_source(repo: string, number: any, options: GitHubCall
     label: "github.pull_request_merged:" + repo + "#" + to_string(number),
     prefers_push: true,
     poll: { _ ->
-      let pull_request = api_call("/repos/" + repo + "/pulls/" + to_string(number), "GET", nil, options)
+      const pull_request = api_call("/repos/" + repo + "/pulls/" + to_string(number), "GET", nil, options)
       return {
         repo: repo,
         number: number,
@@ -770,8 +770,8 @@ pub fn pull_request_merged_source(repo: string, number: any, options: GitHubCall
       }
     },
     push_filter: { log_event ->
-      let event = __github_event(log_event)
-      let payload = __github_payload(log_event)
+      const event = __github_event(log_event)
+      const payload = __github_payload(log_event)
       return event?.provider == "github"
         && event?.kind == "pull_request"
         && payload?.pull_request?.number == number
@@ -791,9 +791,9 @@ const GITHUB_DEFAULT_WAIT_MS = 300000
  * cadence is actually honored by the monitor.
  */
 fn __github_wait_options(options: GitHubWaitOptions, source, condition) {
-  let timeout_ms = options.max_wait_ms ?? options.timeout_ms ?? GITHUB_DEFAULT_WAIT_MS
-  let base = {source: source, condition: condition, timeout: duration_ms(timeout_ms)}
-  let poll_interval_ms = options.poll_interval_ms
+  const timeout_ms = options.max_wait_ms ?? options.timeout_ms ?? GITHUB_DEFAULT_WAIT_MS
+  const base = {source: source, condition: condition, timeout: duration_ms(timeout_ms)}
+  const poll_interval_ms = options.poll_interval_ms
   if poll_interval_ms != nil {
     return merge(base, {poll_interval: duration_ms(poll_interval_ms)})
   }

@@ -12,35 +12,35 @@ pipeline default() {
   with_llm_script(
     [llm_text("all done")],
     { ->
-      let normal = agent_loop("hi", nil, {provider: "mock"})
+      const normal = agent_loop("hi", nil, {provider: "mock"})
       __io_println(normal.acp_stop_reason)
     },
   )
   with_llm_script(
     [{text: "truncated", stop_reason: "max_tokens"}],
     { ->
-      let truncated = agent_loop("hi", nil, {provider: "mock"})
+      const truncated = agent_loop("hi", nil, {provider: "mock"})
       __io_println(truncated.acp_stop_reason)
     },
   )
   with_llm_script(
     [{text: "truncated", stop_reason: "length"}],
     { ->
-      let length = agent_loop("hi", nil, {provider: "mock"})
+      const length = agent_loop("hi", nil, {provider: "mock"})
       __io_println(length.acp_stop_reason)
     },
   )
   with_llm_script(
     [{text: "I cannot assist with that.", stop_reason: "refusal"}],
     { ->
-      let refused = agent_loop("hi", nil, {provider: "mock"})
+      const refused = agent_loop("hi", nil, {provider: "mock"})
       __io_println(refused.acp_stop_reason)
     },
   )
   with_llm_script(
     [llm_text("still working"), llm_text("still working")],
     { ->
-      let capped = agent_loop("hi", nil, {provider: "mock", loop_until_done: true, max_iterations: 1})
+      const capped = agent_loop("hi", nil, {provider: "mock", loop_until_done: true, max_iterations: 1})
       __io_println(capped.acp_stop_reason)
     },
   )

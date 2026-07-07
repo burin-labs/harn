@@ -27,7 +27,7 @@ fn parse_arg(args, prefix) {
 }
 
 fn collect_plan_files(harness, dir) {
-  var paths = []
+  let paths = []
   for name in harness.fs.list_dir(dir) {
     if ends_with(name, ".json") {
       paths = paths + [path_join(dir, name)]
@@ -37,10 +37,10 @@ fn collect_plan_files(harness, dir) {
 }
 
 fn record_for(harness, plan_path) {
-  let plan = json_parse(harness.fs.read_text(plan_path))
-  let report = task_plan_validate(plan)
-  let compiled = task_plan_compile(plan)
-  let wf_report = if compiled.ok {
+  const plan = json_parse(harness.fs.read_text(plan_path))
+  const report = task_plan_validate(plan)
+  const compiled = task_plan_compile(plan)
+  const wf_report = if compiled.ok {
     workflow_validate(compiled.workflow)
   } else {
     {valid: false, errors: [], warnings: []}
@@ -65,18 +65,18 @@ fn record_for(harness, plan_path) {
 }
 
 fn main(harness: Harness) -> int {
-  let plans_dir = parse_arg(argv, "--plans=") ?? "examples/task_plan/plans"
-  let out_path = parse_arg(argv, "--out=")
-  let plan_files = collect_plan_files(harness, plans_dir)
-  var records = []
+  const plans_dir = parse_arg(argv, "--plans=") ?? "examples/task_plan/plans"
+  const out_path = parse_arg(argv, "--out=")
+  const plan_files = collect_plan_files(harness, plans_dir)
+  let records = []
   for plan_path in plan_files {
     records = records + [record_for(harness, plan_path)]
   }
-  var lines = []
+  let lines = []
   for record in records {
     lines = lines + [json_stringify(record)]
   }
-  let body = lines.join("\n") + "\n"
+  const body = lines.join("\n") + "\n"
   if out_path == nil || out_path == "" {
     harness.stdio.print(body)
   } else {

@@ -11,12 +11,12 @@ stdlib path `import { obs } from "std/observability"`.
 import { obs } from "std/observability"
 
 pipeline default() {
-  let o = obs()
+  const o = obs()
   o.configure({backend: o.Backend.auto})
 
   return o.span("plan_review", {pr_number: 1915}, { ->
     o.log("starting review", "info", {phase: "start"})
-    let result = {duration_ms: 42, status: "ok"}
+    const result = {duration_ms: 42, status: "ok"}
     o.metric("review_duration_ms", result.duration_ms, {unit: "ms"})
     return result
   })
@@ -37,7 +37,7 @@ Explicit backends:
 ```harn
 import { obs } from "std/observability"
 
-let B = obs().Backend
+const B = obs().Backend
 
 obs().configure({backend: B.otel(env("OTEL_EXPORTER_OTLP_ENDPOINT"))})
 obs().configure({backend: B.splunk_hec(env("SPLUNK_HEC_ENDPOINT"), env("SPLUNK_HEC_TOKEN"))})
@@ -53,8 +53,8 @@ Routes dispatch by `kind`, `level`, or `default` to a named backend:
 ```harn
 import { obs } from "std/observability"
 
-let o = obs()
-let B = o.Backend
+const o = obs()
+const B = o.Backend
 
 o.configure({
   backends: {
@@ -81,7 +81,7 @@ Use the stock redaction processor when logs or spans can carry credentials:
 ```harn
 import { obs } from "std/observability"
 
-let o = obs()
+const o = obs()
 o.configure({
   backend: o.Backend.otel("http://collector:4318"),
   processors: [o.Processor.redaction],

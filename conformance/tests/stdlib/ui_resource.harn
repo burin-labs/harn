@@ -1,15 +1,15 @@
 import "std/ui_resource"
 
 pipeline default() {
-  let dashboard_html = "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
-  let resource_options: UiResourceOptions = {
+  const dashboard_html = "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
+  const resource_options: UiResourceOptions = {
     description: "Weekly KPI tiles",
     permissions: ["tools/call", "context/update"],
     capabilities: ["tools/call", "context/update", "context/read"],
     version: "2026-05-11",
     meta: {owner: "growth-team"},
   }
-  let resource: UiResource = ui_resource("ui://harn-dashboard/kpis@v1", "KPIs dashboard", dashboard_html, resource_options)
+  const resource: UiResource = ui_resource("ui://harn-dashboard/kpis@v1", "KPIs dashboard", dashboard_html, resource_options)
   __io_println(resource.schema)
   __io_println(resource.mime_type)
   __io_println(resource.profile)
@@ -18,40 +18,40 @@ pipeline default() {
   __io_println(resource.validation.ok)
   __io_println(resource.content_sha256.starts_with("sha256:"))
   __io_println(len(resource.permissions))
-  let meta_options: UiToolMetaOptions = {visibility: "app_only", initial_view: {tab: "signups"}}
-  let meta: UiToolMeta = ui_tool_meta(resource, meta_options)
-  let mcp_meta = ui_tool_meta_to_mcp(meta)
+  const meta_options: UiToolMetaOptions = {visibility: "app_only", initial_view: {tab: "signups"}}
+  const meta: UiToolMeta = ui_tool_meta(resource, meta_options)
+  const mcp_meta = ui_tool_meta_to_mcp(meta)
   __io_println(meta.schema)
   __io_println(mcp_meta.ui.resourceUri)
   __io_println(mcp_meta.ui.visibility)
   __io_println(mcp_meta.ui.initialView.tab)
-  let csp_header = ui_resource_csp_header(resource.csp)
+  const csp_header = ui_resource_csp_header(resource.csp)
   __io_println(csp_header.contains("default-src 'self'"))
   __io_println(csp_header.contains("connect-src 'none'"))
-  let sandbox_attr = ui_resource_sandbox_attr(resource.csp)
+  const sandbox_attr = ui_resource_sandbox_attr(resource.csp)
   __io_println(sandbox_attr)
-  let result_options: UiToolResultOptions = {structured_fallback: ui_structured_fallback({signups: 42, churn: 3}, {text: "signups=42 churn=3"})}
-  let result: UiToolResult = ui_tool_result(resource, result_options)
+  const result_options: UiToolResultOptions = {structured_fallback: ui_structured_fallback({signups: 42, churn: 3}, {text: "signups=42 churn=3"})}
+  const result: UiToolResult = ui_tool_result(resource, result_options)
   __io_println(result.schema)
   __io_println(result.text_fallback.content.contains("KPIs"))
   __io_println(result.text_fallback.content.contains("signups=42 churn=3"))
   __io_println(result.structured_fallback?.data.signups)
   __io_println(result.structured_fallback?.text)
-  let validated = ui_tool_result_validate(result)
+  const validated = ui_tool_result_validate(result)
   __io_println(validated.selected)
-  let supporting = ui_select_for_host(result, {apps: true, profiles: ["mcp-app"]})
+  const supporting = ui_select_for_host(result, {apps: true, profiles: ["mcp-app"]})
   __io_println(supporting.selected)
   __io_println(supporting.ui_resource?.uri)
-  let plain = ui_select_for_host(result, {apps: false})
+  const plain = ui_select_for_host(result, {apps: false})
   __io_println(plain.selected)
   __io_println(plain.ui_resource == nil)
   __io_println(plain.text_fallback.content.contains("KPIs"))
-  let openai_caps = ui_host_supports_apps({ui: {apps: true, profiles: ["mcp-app"]}})
-  let no_apps = ui_host_supports_apps({apps: false})
-  let mcp_caps = ui_host_supports_apps({apps: {enabled: true, profiles: ["mcp-app", "openai-app"]}})
-  let custom_only = ui_host_supports_apps({apps: true, profiles: ["custom-app"]})
-  let null_caps = ui_host_supports_apps(nil)
-  let normalized: UiHostCapabilities = ui_host_capabilities({apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}})
+  const openai_caps = ui_host_supports_apps({ui: {apps: true, profiles: ["mcp-app"]}})
+  const no_apps = ui_host_supports_apps({apps: false})
+  const mcp_caps = ui_host_supports_apps({apps: {enabled: true, profiles: ["mcp-app", "openai-app"]}})
+  const custom_only = ui_host_supports_apps({apps: true, profiles: ["custom-app"]})
+  const null_caps = ui_host_supports_apps(nil)
+  const normalized: UiHostCapabilities = ui_host_capabilities({apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}})
   __io_println(openai_caps)
   __io_println(no_apps)
   __io_println(mcp_caps)
@@ -59,27 +59,27 @@ pipeline default() {
   __io_println(null_caps)
   __io_println(normalized.profiles)
   __io_println(normalized.bridges)
-  let call: UiToolCallEnvelope = ui_tool_call_envelope("dashboard.refresh", {window: "7d"}, {id: "call-1"})
+  const call: UiToolCallEnvelope = ui_tool_call_envelope("dashboard.refresh", {window: "7d"}, {id: "call-1"})
   __io_println(call.jsonrpc)
   __io_println(call.method)
   __io_println(call.params.name)
   __io_println(call.params.arguments.window)
-  let ctx_update: UiContextUpdateEnvelope = ui_context_update_envelope("selection", {tile: "signups"}, {id: "ctx-1"})
+  const ctx_update: UiContextUpdateEnvelope = ui_context_update_envelope("selection", {tile: "signups"}, {id: "ctx-1"})
   __io_println(ctx_update.method)
   __io_println(ctx_update.params.key)
   __io_println(ctx_update.params.model_visible)
-  let bad_uri = try {
+  const bad_uri = try {
     ui_resource("http://example/widget", "Bad", "<html></html>")
   }
   __io_println(is_err(bad_uri))
-  let invalid_html = ui_resource(
+  const invalid_html = ui_resource(
     "ui://harn-dashboard/unsafe@v1",
     "Unsafe widget",
     "<html><body><script>fetch('https://evil.example')</script></body></html>",
   )
   __io_println(invalid_html.validation.ok)
   __io_println(invalid_html.validation.error_codes.contains("network_call"))
-  let unsafe_result = ui_tool_result(
+  const unsafe_result = ui_tool_result(
     invalid_html,
     {
       text_fallback: "Widget blocked: contains an unapproved network call",
@@ -88,9 +88,9 @@ pipeline default() {
   )
   __io_println(unsafe_result.ui_resource == nil)
   __io_println(unsafe_result.validation.error_codes.contains("network_call"))
-  let unsafe_selected = ui_select_for_host(unsafe_result, {apps: true, profiles: ["mcp-app"]})
+  const unsafe_selected = ui_select_for_host(unsafe_result, {apps: true, profiles: ["mcp-app"]})
   __io_println(unsafe_selected.selected)
-  let allow_invalid = ui_tool_result(
+  const allow_invalid = ui_tool_result(
     invalid_html,
     {
       text_fallback: "Preview only — widget failed validation",
@@ -99,11 +99,11 @@ pipeline default() {
     },
   )
   __io_println(allow_invalid.ui_resource != nil)
-  let validation_should_throw = try {
+  const validation_should_throw = try {
     ui_tool_result_validate(allow_invalid)
   }
   __io_println(is_err(validation_should_throw))
-  let empty_fallback = try {
+  const empty_fallback = try {
     ui_tool_result(resource, {text_fallback: ""})
   }
   __io_println(is_err(empty_fallback))

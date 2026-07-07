@@ -8,10 +8,10 @@
 import { with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-let observed = atomic(0)
+const observed = atomic(0)
 
 fn tools() {
-  let r = tool_registry()
+  const r = tool_registry()
   return tool_define(
     r,
     "echo",
@@ -33,12 +33,12 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      let mw = with_required_reason()
-      let counting_caller = { call, next ->
+      const mw = with_required_reason()
+      const counting_caller = { call, next ->
         let _ = atomic_add(observed, 1)
         return mw.caller(call, next)
       }
-      let result = agent_loop(
+      const result = agent_loop(
         "do it",
         nil,
         {

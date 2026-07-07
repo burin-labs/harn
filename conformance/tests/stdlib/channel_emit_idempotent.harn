@@ -13,9 +13,9 @@ fn handle_event(event) {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-idempotent-" + unique,
       kind: "channel.emit",
@@ -33,14 +33,14 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let event_id = "fixed-emit-" + unique
-  let first = emit_channel("ch.idem.input", {seq: 1}, {id: event_id})
-  let second = emit_channel("ch.idem.input", {seq: 2}, {id: event_id})
+  const event_id = "fixed-emit-" + unique
+  const first = emit_channel("ch.idem.input", {seq: 1}, {id: event_id})
+  const second = emit_channel("ch.idem.input", {seq: 2}, {id: event_id})
   __io_println(first.duplicate)
   __io_println(second.duplicate)
   __io_println(first.event_id == second.event_id)
   // Only one fired handler invocation despite two emits.
-  let fired = channel_events("ch.idem.fired")
+  const fired = channel_events("ch.idem.fired")
   __io_println(len(fired))
   __io_println(fired[0].payload.seq)
 }

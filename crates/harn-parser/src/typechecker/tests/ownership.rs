@@ -20,7 +20,7 @@ fn returning_owned_binding_without_owned_return_type_warns() {
         r#"
             pipeline main() {
                 fn leak() -> channel {
-                    let ch: owned<channel> = channel("leak", 4)
+                    const ch: owned<channel> = channel("leak", 4)
                     return ch
                 }
                 leak()
@@ -39,7 +39,7 @@ fn returning_owned_binding_with_owned_return_type_is_silent() {
         r#"
             pipeline main() {
                 fn transfer() -> owned<channel> {
-                    let ch: owned<channel> = channel("transfer", 4)
+                    const ch: owned<channel> = channel("transfer", 4)
                     return ch
                 }
                 transfer()
@@ -58,7 +58,7 @@ fn returning_non_owned_binding_is_silent() {
         r#"
             pipeline main() {
                 fn passthrough() -> channel {
-                    let ch = channel("ok", 4)
+                    const ch = channel("ok", 4)
                     return ch
                 }
                 passthrough()

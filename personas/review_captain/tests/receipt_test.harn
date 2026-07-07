@@ -6,7 +6,7 @@ fn _request() {
 }
 
 pipeline test_clean_receipt_returns_approve(task) {
-  let receipt = build_review_receipt(
+  const receipt = build_review_receipt(
     {
       request: _request(),
       secret_findings: [],
@@ -27,7 +27,7 @@ pipeline test_clean_receipt_returns_approve(task) {
 }
 
 pipeline test_secret_findings_set_blocking(task) {
-  let receipt = build_review_receipt(
+  const receipt = build_review_receipt(
     {
       request: _request(),
       secret_findings: [{detector: "aws-access-key-id", title: "AWS access key id", line: 4, fingerprint: "abc123"}],
@@ -47,7 +47,7 @@ pipeline test_secret_findings_set_blocking(task) {
 }
 
 pipeline test_warning_findings_set_needs_follow_up(task) {
-  let receipt = build_review_receipt(
+  const receipt = build_review_receipt(
     {
       request: _request(),
       secret_findings: [],
@@ -73,7 +73,7 @@ pipeline test_warning_findings_set_needs_follow_up(task) {
 }
 
 pipeline test_dedupe_drops_duplicate_ids(task) {
-  let receipt = build_review_receipt(
+  const receipt = build_review_receipt(
     {
       request: _request(),
       secret_findings: [],
@@ -98,7 +98,7 @@ pipeline test_dedupe_drops_duplicate_ids(task) {
 }
 
 pipeline test_dry_run_envelope_skips_llm(task) {
-  let receipt = envelope_for_dry_run(_request(), [], ["sources/foo.swift"], ["scripts/release.sh"])
+  const receipt = envelope_for_dry_run(_request(), [], ["sources/foo.swift"], ["scripts/release.sh"])
   assert_eq(receipt.self_review_skipped_reason, "dry_run")
   assert_eq(receipt.rounds, 0)
   assert_eq(receipt.verdict, "needs_follow_up")

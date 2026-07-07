@@ -10,10 +10,10 @@ import "std/triggers"
  * the registry was empty, which is success rather than failure.
  */
 pipeline test(task) {
-  let _ = lifecycle_audit_log_take()
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const _ = lifecycle_audit_log_take()
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-interrupt-all-empty-" + unique,
       kind: "issue.opened",
@@ -30,7 +30,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let dispatch = trigger_fire(
+  const dispatch = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
@@ -41,11 +41,11 @@ pipeline test(task) {
   __io_println(dispatch.result?.suspended_count)
   __io_println(dispatch.result?.skipped_count)
   __io_println(dispatch.result?.reason == "build_storm")
-  let audits = lifecycle_audit_log_take()
-  var audit_count = 0
-  var outcome = ""
-  var scope_kind = ""
-  var reason = ""
+  const audits = lifecycle_audit_log_take()
+  let audit_count = 0
+  let outcome = ""
+  let scope_kind = ""
+  let reason = ""
   for audit in audits {
     if audit.kind == "triggers.interrupt_and_suspend.audit" {
       audit_count = audit_count + 1

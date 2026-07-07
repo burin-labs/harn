@@ -1,4 +1,4 @@
 pipeline main() {
-  let config = {handler: fn(name) { return "hello " + name }}
+  const config = {handler: fn(name) { return "hello " + name }}
   log(config.handler("world"))
 }

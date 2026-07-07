@@ -1,6 +1,6 @@
 // Calling a method on a value statically known to be `nil` fails at
 // runtime; the checker flags the receiver and points at `?.m(…)`.
 pipeline default(_) {
-  let x: nil = nil
+  const x: nil = nil
   __io_println(x.foo())
 }

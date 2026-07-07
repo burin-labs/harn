@@ -1,8 +1,8 @@
 import { parse_args } from "std/cli"
 
-let ARTIFACTS_REL = "spec/protocol-artifacts"
+const ARTIFACTS_REL = "spec/protocol-artifacts"
 
-let TARGETS = [
+const TARGETS = [
   {source: "HarnProtocol.swift", destination: "Sources/BurinCore/ACP/HarnProtocol.generated.swift"},
   {source: "harn-protocol.ts", destination: "server/src/generated/harn-protocol.ts"},
 ]
@@ -31,7 +31,7 @@ fn expand_user(path: string) -> string {
     return harness.env.get("HOME") ?? path
   }
   if path.starts_with("~/") {
-    let home = harness.env.get("HOME") ?? ""
+    const home = harness.env.get("HOME") ?? ""
     if home != "" {
       return path_join(home, path.substring(2, path.len()))
     }
@@ -57,13 +57,13 @@ pub fn discover_burin_root(explicit_root: string = "") -> string {
   if explicit_root != "" {
     return path_normalize(expand_user(explicit_root))
   }
-  let env_root = harness.env.get("BURIN_CODE_ROOT") ?? ""
+  const env_root = harness.env.get("BURIN_CODE_ROOT") ?? ""
   if env_root != "" {
     return path_normalize(expand_user(env_root))
   }
-  let home = harness.env.get("HOME") ?? ""
+  const home = harness.env.get("HOME") ?? ""
   if home != "" {
-    let candidate = path_join(home, "projects", "burin-code")
+    const candidate = path_join(home, "projects", "burin-code")
     if is_dir(candidate) {
       return candidate
     }
@@ -72,18 +72,18 @@ pub fn discover_burin_root(explicit_root: string = "") -> string {
 }
 
 pub fn stale_burin_protocol_bindings(burin_root: string, harn_root: string = "") -> list<string> {
-  var stale: list<string> = []
-  let source_root = artifact_root(harn_root)
+  let stale: list<string> = []
+  const source_root = artifact_root(harn_root)
   for target in TARGETS {
-    let source = path_join(source_root, to_string(target.source))
-    let destination_rel = to_string(target.destination)
-    let destination = path_join(burin_root, destination_rel)
+    const source = path_join(source_root, to_string(target.source))
+    const destination_rel = to_string(target.destination)
+    const destination = path_join(burin_root, destination_rel)
     if !is_file(destination) {
       stale = stale + [destination_rel + " (missing)"]
       continue
     }
-    let source_text = normalize_protocol_text(harness.fs.read_text(source))
-    let destination_text = normalize_protocol_text(harness.fs.read_text(destination))
+    const source_text = normalize_protocol_text(harness.fs.read_text(source))
+    const destination_text = normalize_protocol_text(harness.fs.read_text(destination))
     if source_text != destination_text {
       stale = stale + [destination_rel]
     }
@@ -96,8 +96,8 @@ pub fn check_burin_protocol_bindings(
   required: bool = false,
   harn_root: string = "",
 ) -> dict {
-  let burin_root = discover_burin_root(burin_root_arg)
-  let artifacts = artifact_root(harn_root)
+  const burin_root = discover_burin_root(burin_root_arg)
+  const artifacts = artifact_root(harn_root)
   if !is_dir(burin_root) {
     return {
       ok: !required,
@@ -109,7 +109,7 @@ pub fn check_burin_protocol_bindings(
       stale_count: 0,
     }
   }
-  let stale = stale_burin_protocol_bindings(burin_root, harn_root)
+  const stale = stale_burin_protocol_bindings(burin_root, harn_root)
   return {
     ok: len(stale) == 0,
     skipped: false,
@@ -133,7 +133,7 @@ fn arg_spec() -> list {
 }
 
 fn main(harness: Harness) {
-  let parsed = parse_args(argv, arg_spec())
+  const parsed = parse_args(argv, arg_spec())
   if parsed?._help ?? false {
     harness.stdio
       .println(
@@ -142,11 +142,11 @@ fn main(harness: Harness) {
     return nil
   }
   if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    let errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
     harness.stdio.eprintln(join(errors, "\n"))
     exit(2)
   }
-  let report = check_burin_protocol_bindings(to_string(parsed?.burin_root ?? ""), parsed?.required ?? false)
+  const report = check_burin_protocol_bindings(to_string(parsed?.burin_root ?? ""), parsed?.required ?? false)
   if report.status == "missing_root" {
     if parsed?.required ?? false {
       harness.stdio.eprintln("error: Burin Code checkout not found")

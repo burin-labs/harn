@@ -11,7 +11,7 @@ import { with_temp_dir } from "std/testing"
 pipeline default() {
   with_temp_dir(
     { root ->
-      let options = {project_root: root, now: "2026-06-27T12:00:00Z", support_threshold: 2, window_days: 30}
+      const options = {project_root: root, now: "2026-06-27T12:00:00Z", support_threshold: 2, window_days: 30}
       pattern_learning_observe(
         "s1",
         "Refactor the auth refresh tests in Swift",
@@ -24,27 +24,27 @@ pipeline default() {
         ["read", "edit"],
         options,
       )
-      let pending = pattern_learning_pending(options)
+      const pending = pattern_learning_pending(options)
       __io_println(len(pending))
       __io_println(pending[0].kind)
-      let accepted = pattern_learning_accept(pending[0].id, options)
+      const accepted = pattern_learning_accept(pending[0].id, options)
       __io_println(accepted.accepted)
       __io_println(harness.fs.exists(accepted.skill_path))
-      let context = pattern_learning_context("s3", "Please refactor auth refresh tests", 3, options)
+      const context = pattern_learning_context("s3", "Please refactor auth refresh tests", 3, options)
       __io_println(contains(context.body, "Loaded learned skills"))
       pattern_learning_set_enabled(false, options)
-      let status = pattern_learning_status(options)
+      const status = pattern_learning_status(options)
       __io_println(status.enabled)
-      let read_only_options = options + {namespace: "readonly"}
-      let read_only_policy = {capabilities: {workspace: ["exists", "read_text", "list"]}, side_effect_level: "read_only"}
-      let read_only_context = with_execution_policy(
+      const read_only_options = options + {namespace: "readonly"}
+      const read_only_policy = {capabilities: {workspace: ["exists", "read_text", "list"]}, side_effect_level: "read_only"}
+      const read_only_context = with_execution_policy(
         read_only_policy,
         fn() { return pattern_learning_context("ro1", "Read-only context lookup", 3, read_only_options) },
       )
       __io_println(read_only_context.body == "")
       __io_println(!(read_only_context.unavailable ?? false))
       __io_println(to_string(read_only_context.error ?? "") == "")
-      let read_only_observe = with_execution_policy(
+      const read_only_observe = with_execution_policy(
         read_only_policy,
         fn() { return pattern_learning_observe("ro2", "Read-only observation", ["read"], read_only_options) },
       )

@@ -12,7 +12,7 @@
 //
 // Usage:
 //   harn run scripts/check_docs_snippets.harn
-let DOCS_GLOB = "docs/src/**/*.md"
+const DOCS_GLOB = "docs/src/**/*.md"
 
 /**
  * Walk `text` with the fence state machine and return the block events in
@@ -25,13 +25,13 @@ let DOCS_GLOB = "docs/src/**/*.md"
  * `idx` counts harn fences per file, 1-based. Pure so tests can drive it.
  */
 pub fn extract_blocks(text: string) -> list {
-  var events: list = []
-  var in_block = false
-  var skip = false
-  var idx = 0
-  var open_line = 0
-  var body: list<string> = []
-  var line_no = 0
+  let events: list = []
+  let in_block = false
+  let skip = false
+  let idx = 0
+  let open_line = 0
+  let body: list<string> = []
+  let line_no = 0
   for line in text.lines() {
     line_no = line_no + 1
     if line == "```harn" || line == "```harn,ignore" {
@@ -69,7 +69,7 @@ pub fn extract_blocks(text: string) -> list {
 
 /** Repo-relative form of a glob result (strip the `/./` marker). */
 pub fn rel_path(path: string) -> string {
-  let idx = path.index_of("/./")
+  const idx = path.index_of("/./")
   if idx >= 0 {
     return path.substring(idx + 3, path.len())
   }
@@ -78,16 +78,16 @@ pub fn rel_path(path: string) -> string {
 
 /** The trailing path component of `p` without a final `.md` suffix. */
 pub fn md_base_name(p: string) -> string {
-  var slash = -1
-  var i = 0
-  let n = p.len()
+  let slash = -1
+  let i = 0
+  const n = p.len()
   while i < n {
     if p.char_at(i) == "/" {
       slash = i
     }
     i = i + 1
   }
-  var name = p.substring(slash + 1, n)
+  let name = p.substring(slash + 1, n)
   if name.ends_with(".md") {
     name = name.substring(0, name.len() - 3)
   }
@@ -96,7 +96,7 @@ pub fn md_base_name(p: string) -> string {
 
 /** Prefix every line of `output` with `      | ` (the failure indent). */
 pub fn indent_output(output: string) -> list<string> {
-  var out: list<string> = []
+  let out: list<string> = []
   for line in output.lines() {
     out = out + ["      | " + line]
   }
@@ -109,15 +109,15 @@ pub fn indent_output(output: string) -> list<string> {
  * missing) — the same ladder as the bash original.
  */
 fn resolve_harn_bin() -> string {
-  let env_bin = harness.env.get("HARN_BIN")
+  const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
   }
-  var target_dir = ""
-  let meta = harness.process
+  let target_dir = ""
+  const meta = harness.process
     .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
   if meta.success {
-    let parsed = try {
+    const parsed = try {
       json_parse(meta.stdout)
     } catch (err) {
       nil
@@ -130,10 +130,10 @@ fn resolve_harn_bin() -> string {
   if target_dir == "" {
     target_dir = "target"
   }
-  let bin = "${target_dir}/debug/harn"
+  const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    let build = harness.process
+    const build = harness.process
       .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       __io_eprint(build.stderr)
@@ -144,8 +144,8 @@ fn resolve_harn_bin() -> string {
 }
 
 pipeline main(task) {
-  let harn_bin = resolve_harn_bin()
-  var md_files: list<string> = []
+  const harn_bin = resolve_harn_bin()
+  let md_files: list<string> = []
   for g in harness.fs.glob(DOCS_GLOB) {
     md_files = md_files + [rel_path(g)]
   }
@@ -153,25 +153,25 @@ pipeline main(task) {
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the snippet scratch directory lives there (removed afterward) rather
    * than under the system temp dir the bash version used. */
-  let mk = harness.process
+  const mk = harness.process
     .spawn_captured({cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     return 1
   }
-  let tmp_dir = mk.stdout.trim()
+  const tmp_dir = mk.stdout.trim()
   defer {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_dir]})
   }
-  var checked = 0
-  var skipped = 0
-  var failures = 0
-  var file_no = 0
+  let checked = 0
+  let skipped = 0
+  let failures = 0
+  let file_no = 0
   for md_file in md_files {
     file_no = file_no + 1
     // Unlike the bash version, the temp prefix carries a per-file counter
     // so same-named docs (index.md, README.md) cannot collide.
-    let prefix = "${tmp_dir}/${file_no}_${md_base_name(md_file)}"
+    const prefix = "${tmp_dir}/${file_no}_${md_base_name(md_file)}"
     for event in extract_blocks(harness.fs.read_text(md_file)) {
       if event.kind == "unclosed" {
         failures = failures + 1
@@ -185,9 +185,9 @@ pipeline main(task) {
         continue
       }
       checked = checked + 1
-      let block_path = "${prefix}_${event.idx}.harn"
+      const block_path = "${prefix}_${event.idx}.harn"
       harness.fs.write_text(block_path, event.content)
-      let res = harness.process.spawn_captured({cmd: harn_bin, args: ["check", block_path]})
+      const res = harness.process.spawn_captured({cmd: harn_bin, args: ["check", block_path]})
       if !res.success {
         failures = failures + 1
         __io_println("")

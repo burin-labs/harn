@@ -11,7 +11,7 @@ fn step_hook_persona(input) -> string {
 }
 
 fn step_hook_tools() {
-  let registry = tool_registry()
+  const registry = tool_registry()
   return tool_define(
     registry,
     "step_hook_tool",
@@ -34,7 +34,7 @@ pipeline main() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "call the step hook tool",
         nil,
         {
@@ -46,7 +46,7 @@ pipeline main() {
           session_id: "hook-reminder-step",
         },
       )
-      let events = transcript_events_by_kind(result.transcript, "system_reminder")
+      const events = transcript_events_by_kind(result.transcript, "system_reminder")
       __io_println(result.status)
       __io_println(len(events))
       __io_println(events[0].reminder.body)

@@ -13,7 +13,7 @@ pipeline default() {
    *   - "low" catalogue: warning-severity rewrite rule, priority 1.
    *   - "mid" catalogue: warning-severity rewrite rule, priority 5.
    *   - "deny" catalogue: error-severity deny rule, priority 100. */
-  let low_rule = tool_rule(
+  const low_rule = tool_rule(
     {
       id: "low.git_push_force_rewrite",
       pattern: "git push.* --force",
@@ -22,7 +22,7 @@ pipeline default() {
       priority: 1,
     },
   )
-  let mid_rule = tool_rule(
+  const mid_rule = tool_rule(
     {
       id: "mid.git_push_force_rewrite",
       pattern: "git push.* --force",
@@ -31,7 +31,7 @@ pipeline default() {
       priority: 5,
     },
   )
-  let deny_rule = tool_rule(
+  const deny_rule = tool_rule(
     {
       id: "deny.git_push_force_deny",
       pattern: "git push.* --force",
@@ -40,16 +40,16 @@ pipeline default() {
       priority: 100,
     },
   )
-  let low_cat = catalogue({id: "team/low", stack: "git", rules: [low_rule]})
-  let mid_cat = catalogue({id: "team/mid", stack: "git", rules: [mid_rule]})
-  let deny_cat = catalogue({id: "team/deny", stack: "git", rules: [deny_rule]})
+  const low_cat = catalogue({id: "team/low", stack: "git", rules: [low_rule]})
+  const mid_cat = catalogue({id: "team/mid", stack: "git", rules: [mid_rule]})
+  const deny_cat = catalogue({id: "team/deny", stack: "git", rules: [deny_rule]})
   /* Register intentionally out-of-order so the priority-sort is the
    * subject under test (not the registration order). */
-  let reg = tool_hooks_register(
+  const reg = tool_hooks_register(
     tool_hooks_register(tool_hooks_register(tool_hooks_registry(), low_cat), deny_cat),
     mid_cat,
   )
-  let matches = tool_hooks_match(reg, "git push origin main --force", {stacks: ["git"]})
+  const matches = tool_hooks_match(reg, "git push origin main --force", {stacks: ["git"]})
   /* All three rules matched. */
   __io_println(len(matches))
   /* Highest priority wins the first slot regardless of insertion order. */
@@ -60,8 +60,8 @@ pipeline default() {
   __io_println(matches[2].rule_id)
   /* Removing the deny catalogue collapses to the rewrite rules and the
    * mid (priority 5) rule wins over the low (priority 1) one. */
-  let pruned = tool_hooks_unregister(reg, "team/deny")
-  let pruned_matches = tool_hooks_match(pruned, "git push origin main --force", {stacks: ["git"]})
+  const pruned = tool_hooks_unregister(reg, "team/deny")
+  const pruned_matches = tool_hooks_match(pruned, "git push origin main --force", {stacks: ["git"]})
   __io_println(len(pruned_matches))
   __io_println(pruned_matches[0].rule_id)
   __io_println(pruned_matches[1].rule_id)

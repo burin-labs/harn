@@ -4,12 +4,12 @@ pipeline default() {
   // `{ expr }`, turning a callable closure into an immediately-evaluated
   // block expression. Both shapes below must survive `harn fmt --check`
   // (via `make fmt-harn`) and still execute as closures at runtime.
-  let zero = { -> 1 }
+  const zero = { -> 1 }
   fn heavy() {
     return 7
   }
-  let with_call = { -> heavy() }
-  let one = { x -> x + 1 }
+  const with_call = { -> heavy() }
+  const one = { x -> x + 1 }
   __io_println(zero())
   __io_println(with_call())
   __io_println(one(2))

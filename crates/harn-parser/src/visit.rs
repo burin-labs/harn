@@ -85,11 +85,8 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
             collect_nodes(body, children);
         }
-        Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
+        Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. } => {
             collect_binding_pattern(pattern, children);
-            children.push(value);
-        }
-        Node::ConstBinding { value, .. } => {
             children.push(value);
         }
         Node::EnumDecl { variants, .. } => {

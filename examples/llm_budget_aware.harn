@@ -8,24 +8,24 @@
 import { recommend_max_output_tokens } from "std/llm/budget"
 
 pipeline default() {
-  let model = "claude-sonnet-4-5"
-  let short_prompt = "Summarize: cats are great."
+  const model = "claude-sonnet-4-5"
+  const short_prompt = "Summarize: cats are great."
   // ~2000 char prompt (the lorem ipsum string repeated several times).
-  let lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+  const lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
     + "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
     + "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris "
     + "nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in "
     + "reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla "
     + "pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
     + "culpa qui officia deserunt mollit anim id est laborum."
-  var long_prompt = ""
-  var i = 0
+  let long_prompt = ""
+  let i = 0
   while i < 8 {
     long_prompt = long_prompt + lorem
     i = i + 1
   }
-  let short_max = recommend_max_output_tokens({prompt: short_prompt, model: model, task_kind: "chat"})
-  let long_max = recommend_max_output_tokens({prompt: long_prompt, model: model, task_kind: "summarize"})
+  const short_max = recommend_max_output_tokens({prompt: short_prompt, model: model, task_kind: "chat"})
+  const long_max = recommend_max_output_tokens({prompt: long_prompt, model: model, task_kind: "summarize"})
   __io_println("short prompt -> recommended max_output_tokens = " + to_string(short_max))
   __io_println("long prompt  -> recommended max_output_tokens = " + to_string(long_max))
 }

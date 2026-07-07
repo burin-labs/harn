@@ -3,7 +3,7 @@
 import { has_capability } from "std/llm/catalog"
 
 pipeline default() {
-  let m = "claude-sonnet-4-20250514"
+  const m = "claude-sonnet-4-20250514"
   __io_println(has_capability(m, "native_tools"))
   __io_println(has_capability(m, "prompt_caching"))
   __io_println(has_capability(m, "vision"))

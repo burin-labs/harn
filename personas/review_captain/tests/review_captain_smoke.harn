@@ -7,13 +7,13 @@ import { default_policy } from "../lib/policy"
 import { review_pr } from "../lib/review"
 
 fn _fixture_request() {
-  let raw = read_file("../fixtures/pull_request.json")
+  const raw = read_file("../fixtures/pull_request.json")
   return json_parse(raw)
 }
 
 pipeline test_smoke_dry_run_emits_receipt(task) {
-  let request = _fixture_request()
-  let receipt = review_pr(request, default_policy(), nil)
+  const request = _fixture_request()
+  const receipt = review_pr(request, default_policy(), nil)
   assert_eq(receipt.persona, "review_captain")
   assert_eq(receipt.kind, "review_receipt")
   assert_eq(receipt.schema_version, 1)

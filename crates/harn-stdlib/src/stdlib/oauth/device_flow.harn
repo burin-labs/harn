@@ -53,26 +53,26 @@
  * standard `sleep(ms)` builtin and so honors `mock_time(...)` /
  * `advance_time(...)` in tests.
  */
-let __DEFAULT_INTERVAL_SECONDS = 5
+const __DEFAULT_INTERVAL_SECONDS = 5
 
-let __SLOW_DOWN_BUMP_SECONDS = 5
+const __SLOW_DOWN_BUMP_SECONDS = 5
 
-let __DEFAULT_TOKEN_KEY = "access-token"
+const __DEFAULT_TOKEN_KEY = "access-token"
 
-let __AUDIT_TOPIC = "oauth.device_flow.audit"
+const __AUDIT_TOPIC = "oauth.device_flow.audit"
 
-let __AUDIT_KIND_OBTAINED = "token_obtained"
+const __AUDIT_KIND_OBTAINED = "token_obtained"
 
-let __ERROR_AUTHORIZATION_PENDING = "authorization_pending"
+const __ERROR_AUTHORIZATION_PENDING = "authorization_pending"
 
-let __ERROR_SLOW_DOWN = "slow_down"
+const __ERROR_SLOW_DOWN = "slow_down"
 
-let __ERROR_EXPIRED_TOKEN = "expired_token"
+const __ERROR_EXPIRED_TOKEN = "expired_token"
 
-let __ERROR_ACCESS_DENIED = "access_denied"
+const __ERROR_ACCESS_DENIED = "access_denied"
 
 fn __require_string(value, field) {
-  let text = to_string(value ?? "")
+  const text = to_string(value ?? "")
   if text == "" {
     throw "std/oauth/device_flow: " + field + " is required"
   }
@@ -83,12 +83,12 @@ fn __require_provider(provider) {
   if type_of(provider) != "dict" {
     throw "std/oauth/device_flow: provider must be a dict (use std/oauth/providers)"
   }
-  let device_url = provider?.device_code_url
+  const device_url = provider?.device_code_url
   if device_url == nil || to_string(device_url) == "" {
-    let id = to_string(provider?.id ?? "custom")
+    const id = to_string(provider?.id ?? "custom")
     throw "std/oauth/device_flow: provider `" + id + "` does not declare a device_code_url"
   }
-  let token_url = provider?.token_url
+  const token_url = provider?.token_url
   if token_url == nil || to_string(token_url) == "" {
     throw "std/oauth/device_flow: provider.token_url is required"
   }
@@ -99,9 +99,9 @@ fn __require_storage(storage) {
   if type_of(storage) != "dict" {
     throw "std/oauth/device_flow: opts.storage is required (use std/oauth/storage)"
   }
-  let g = storage?.get
-  let s = storage?.set
-  let d = storage?.delete
+  const g = storage?.get
+  const s = storage?.set
+  const d = storage?.delete
   if type_of(g) != "closure" && type_of(g) != "builtin" {
     throw "std/oauth/device_flow: opts.storage.get must be a function"
   }
@@ -115,7 +115,7 @@ fn __require_storage(storage) {
 }
 
 fn __scope_separator(provider) {
-  let id = lowercase(to_string(provider?.id ?? ""))
+  const id = lowercase(to_string(provider?.id ?? ""))
   if id == "linear" {
     return ","
   }
@@ -123,10 +123,10 @@ fn __scope_separator(provider) {
 }
 
 fn __join_scopes(scopes, separator) {
-  var parts = []
+  let parts = []
   if scopes != nil {
     for raw in scopes {
-      let text = trim(to_string(raw ?? ""))
+      const text = trim(to_string(raw ?? ""))
       if text != "" {
         parts = parts + [text]
       }
@@ -143,7 +143,7 @@ fn __url_encode_value(value) {
 }
 
 fn __form_body(params) {
-  var parts = []
+  let parts = []
   for entry in params {
     parts = parts + [url_encode(entry.key) + "=" + __url_encode_value(entry.value)]
   }
@@ -151,7 +151,7 @@ fn __form_body(params) {
 }
 
 fn __safe_json_parse(text) {
-  let s = to_string(text ?? "")
+  const s = to_string(text ?? "")
   if s == "" {
     return nil
   }
@@ -167,7 +167,7 @@ fn __now_seconds(harness: Harness) {
 }
 
 fn __default_on_user_code(user_code, verification_uri) {
-  let _ = __io_write_stderr(
+  const _ = __io_write_stderr(
     "To authorize this device, open " + to_string(verification_uri) + " and enter code: "
       + to_string(user_code)
       + "\n",
@@ -200,23 +200,23 @@ fn __redact_token(token) {
 }
 
 fn __build_token_set(parsed, scopes, issued_at) {
-  var token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
-  let token_type = parsed?.token_type
+  let token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
+  const token_type = parsed?.token_type
   if token_type != nil {
     token_set = token_set + {token_type: to_string(token_type)}
   }
-  let expires_in = parsed?.expires_in
+  const expires_in = parsed?.expires_in
   if expires_in != nil {
-    let ttl_s = to_int(expires_in)
+    const ttl_s = to_int(expires_in)
     token_set = token_set + {expires_in: ttl_s, expires_at_unix: issued_at + ttl_s}
   } else if parsed?.expires_at_unix != nil {
     token_set = token_set + {expires_at_unix: to_int(parsed.expires_at_unix)}
   }
-  let refresh = parsed?.refresh_token
+  const refresh = parsed?.refresh_token
   if refresh != nil && to_string(refresh) != "" {
     token_set = token_set + {refresh_token: to_string(refresh)}
   }
-  let returned_scope = parsed?.scope
+  const returned_scope = parsed?.scope
   if returned_scope != nil && to_string(returned_scope) != "" {
     token_set = token_set + {scopes: split(to_string(returned_scope), " ")}
   } else if scopes != nil && len(scopes) > 0 {
@@ -226,46 +226,46 @@ fn __build_token_set(parsed, scopes, issued_at) {
 }
 
 fn __audit_obtained(provider_id, storage_key, token_set) {
-  let payload = {
+  const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
     next: __redact_token(token_set),
   }
-  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_OBTAINED, payload, {provider: to_string(provider_id)})
+  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_OBTAINED, payload, {provider: to_string(provider_id)})
 }
 
 fn __request_device_code(harness: Harness, cfg) {
-  var form = [{key: "client_id", value: cfg.client_id}]
-  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  let form = [{key: "client_id", value: cfg.client_id}]
+  const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   if scopes_str != nil {
     form = form + [{key: "scope", value: scopes_str}]
   }
   if cfg.audience != nil && to_string(cfg.audience) != "" {
     form = form + [{key: "audience", value: cfg.audience}]
   }
-  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  let response = harness.net.post(cfg.device_code_url, __form_body(form), {headers: headers})
+  const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  const response = harness.net.post(cfg.device_code_url, __form_body(form), {headers: headers})
   if !(response?.ok ?? false) {
-    let parsed = __safe_json_parse(response?.body ?? "")
-    let detail = (parsed?.error_description ?? parsed?.error ?? "device authorization endpoint returned status ")
+    const parsed = __safe_json_parse(response?.body ?? "")
+    const detail = (parsed?.error_description ?? parsed?.error ?? "device authorization endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/device_flow: device authorization request failed: " + to_string(detail)
   }
-  let parsed = __safe_json_parse(response?.body ?? "")
+  const parsed = __safe_json_parse(response?.body ?? "")
   if parsed == nil {
     throw "std/oauth/device_flow: device authorization endpoint did not return JSON"
   }
-  let device_code = to_string(parsed?.device_code ?? "")
-  let user_code = to_string(parsed?.user_code ?? "")
-  let verification_uri = to_string(parsed?.verification_uri ?? parsed?.verification_url ?? "")
+  const device_code = to_string(parsed?.device_code ?? "")
+  const user_code = to_string(parsed?.user_code ?? "")
+  const verification_uri = to_string(parsed?.verification_uri ?? parsed?.verification_url ?? "")
   if device_code == "" || user_code == "" || verification_uri == "" {
     throw "std/oauth/device_flow: device authorization response missing required fields"
   }
-  let verification_uri_complete = parsed?.verification_uri_complete
-  let interval_raw = parsed?.interval ?? __DEFAULT_INTERVAL_SECONDS
-  let interval_seconds = to_int(interval_raw)
-  let expires_in_raw = parsed?.expires_in ?? 0
-  let expires_in_seconds = to_int(expires_in_raw)
+  const verification_uri_complete = parsed?.verification_uri_complete
+  const interval_raw = parsed?.interval ?? __DEFAULT_INTERVAL_SECONDS
+  const interval_seconds = to_int(interval_raw)
+  const expires_in_raw = parsed?.expires_in ?? 0
+  const expires_in_seconds = to_int(expires_in_raw)
   return {
     device_code: device_code,
     user_code: user_code,
@@ -277,7 +277,7 @@ fn __request_device_code(harness: Harness, cfg) {
 }
 
 fn __poll_once(harness: Harness, cfg, device_code) {
-  var form = [
+  let form = [
     {key: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code"},
     {key: "device_code", value: device_code},
     {key: "client_id", value: cfg.client_id},
@@ -285,14 +285,14 @@ fn __poll_once(harness: Harness, cfg, device_code) {
   if cfg.client_secret != nil && to_string(cfg.client_secret) != "" {
     form = form + [{key: "client_secret", value: cfg.client_secret}]
   }
-  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  let response = harness.net.post(cfg.token_url, __form_body(form), {headers: headers})
-  let status = to_int(response?.status ?? 0)
-  let parsed = __safe_json_parse(response?.body ?? "") ?? {}
+  const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  const response = harness.net.post(cfg.token_url, __form_body(form), {headers: headers})
+  const status = to_int(response?.status ?? 0)
+  const parsed = __safe_json_parse(response?.body ?? "") ?? {}
   if (response?.ok ?? false) && parsed?.access_token != nil {
     return {kind: "ok", parsed: parsed}
   }
-  let error_code = to_string(parsed?.error ?? "")
+  const error_code = to_string(parsed?.error ?? "")
   if error_code == __ERROR_AUTHORIZATION_PENDING {
     return {kind: "pending"}
   }
@@ -305,8 +305,8 @@ fn __poll_once(harness: Harness, cfg, device_code) {
   if error_code == __ERROR_ACCESS_DENIED {
     throw "std/oauth/device_flow: user denied the device authorization request"
   }
-  let detail = (parsed?.error_description ?? error_code ?? "token endpoint returned status ") + to_string(status)
-  let prefix = error_code == "" ? "token endpoint error: " : "token endpoint error `" + error_code + "`: "
+  const detail = (parsed?.error_description ?? error_code ?? "token endpoint returned status ") + to_string(status)
+  const prefix = error_code == "" ? "token endpoint error: " : "token endpoint error `" + error_code + "`: "
   throw "std/oauth/device_flow: " + prefix + to_string(detail)
 }
 
@@ -317,10 +317,10 @@ fn __poll_until_done(
   initial_interval_seconds,
   expires_in_seconds,
 ) {
-  var interval_seconds = initial_interval_seconds
-  var elapsed_seconds = 0
+  let interval_seconds = initial_interval_seconds
+  let elapsed_seconds = 0
   while true {
-    let outcome = __poll_once(harness, cfg, device_code)
+    const outcome = __poll_once(harness, cfg, device_code)
     if outcome.kind == "ok" {
       return outcome.parsed
     }
@@ -364,14 +364,14 @@ pub fn device_flow(provider, opts) {
   if type_of(opts) != "dict" {
     throw "std/oauth/device_flow: opts must be a dict"
   }
-  let provider_record = __require_provider(provider)
-  let storage = __require_storage(opts?.storage)
-  let client_id = __require_string(opts?.client_id, "opts.client_id")
-  let client_secret = opts?.client_secret
-  let scopes = opts?.scopes ?? provider_record?.default_scopes ?? []
-  let scope_separator = __scope_separator(provider_record)
-  let storage_key = to_string(opts?.storage_key ?? provider_record?.id ?? __DEFAULT_TOKEN_KEY)
-  let cfg = {
+  const provider_record = __require_provider(provider)
+  const storage = __require_storage(opts?.storage)
+  const client_id = __require_string(opts?.client_id, "opts.client_id")
+  const client_secret = opts?.client_secret
+  const scopes = opts?.scopes ?? provider_record?.default_scopes ?? []
+  const scope_separator = __scope_separator(provider_record)
+  const storage_key = to_string(opts?.storage_key ?? provider_record?.id ?? __DEFAULT_TOKEN_KEY)
+  const cfg = {
     provider_id: to_string(provider_record?.id ?? "custom"),
     device_code_url: to_string(provider_record.device_code_url),
     token_url: to_string(provider_record.token_url),
@@ -381,17 +381,17 @@ pub fn device_flow(provider, opts) {
     scope_separator: scope_separator,
     audience: opts?.audience,
   }
-  let device = __request_device_code(harness, cfg)
-  let _ = __invoke_user_code_handler(opts?.on_user_code, device.user_code, device.verification_uri)
-  let parsed = __poll_until_done(
+  const device = __request_device_code(harness, cfg)
+  const _ = __invoke_user_code_handler(opts?.on_user_code, device.user_code, device.verification_uri)
+  const parsed = __poll_until_done(
     harness,
     cfg,
     device.device_code,
     device.interval_seconds,
     device.expires_in_seconds,
   )
-  let issued_at = __now_seconds(harness)
-  let token_set = __build_token_set(parsed, scopes, issued_at)
+  const issued_at = __now_seconds(harness)
+  const token_set = __build_token_set(parsed, scopes, issued_at)
   storage.set(storage_key, token_set)
   __audit_obtained(cfg.provider_id, storage_key, token_set)
   return token_set

@@ -27,7 +27,7 @@ projection without persisting the event (for example, to preview a
 clean view in a UI).
 
 ```harn
-let view = transcript_project(transcript, {policy: "clean_tool_repair"})
+const view = transcript_project(transcript, {policy: "clean_tool_repair"})
 log(view.policy)          // "clean_tool_repair"
 log(view.kept_count)      // messages surviving
 log(view.dropped_count)   // messages hidden from the next request
@@ -84,7 +84,7 @@ with `_harn_projection.synthetic = true` so observability sinks can render it
 distinctly from the original transcript events.
 
 ```harn
-let view = transcript_project(transcript, {
+const view = transcript_project(transcript, {
   policy: "summary_prefix",
   keep_last: 3,
   summary: "Earlier turns: investigated repo layout and ran tests.",
@@ -110,7 +110,7 @@ scratchpad-version write barrier for that turn. This lets
 been externalized.
 
 ```harn
-let view = transcript_project(transcript, {
+const view = transcript_project(transcript, {
   policy: "reachability_gc",
   root_window: 6,
   scratchpad: current_scratchpad,
@@ -136,12 +136,12 @@ the returned messages against the raw prefix; you can override that mapping
 explicitly by returning `{messages, kept_indices, dropped_indices}`.
 
 ```harn
-let view = transcript_project(transcript, {
+const view = transcript_project(transcript, {
   policy: "custom",
   projector: fn(messages) {
     // Drop tool error results carrying full stack traces.
-    var kept = []
-    var dropped = []
+    let kept = []
+    let dropped = []
     for (idx, msg) in iter(messages).enumerate() {
       if msg.role == "tool" && msg.content.starts_with("Traceback") {
         dropped = dropped.push(idx)
@@ -162,7 +162,7 @@ appends the resulting `transcript.projection` event to the raw transcript, and
 emits a typed `TranscriptProjected` agent event for hosts.
 
 ```harn,ignore
-let result = agent_loop(
+const result = agent_loop(
   "Fix the failing tests.",
   "You are a test repair agent.",
   {
@@ -170,7 +170,7 @@ let result = agent_loop(
     transcript_projection: {policy: "clean_tool_repair"},
   },
 )
-let events = transcript_events_by_kind(result.transcript, "transcript.projection")
+const events = transcript_events_by_kind(result.transcript, "transcript.projection")
 log(len(events))                                  // one per turn
 log(events[0].metadata.policy)                    // "clean_tool_repair"
 log(events[0].metadata.prefix_hash)               // "sha256:..."

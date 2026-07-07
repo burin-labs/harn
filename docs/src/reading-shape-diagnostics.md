@@ -20,7 +20,7 @@ need to dig into the source to interpret one.
 ```harn,ignore
 type User = {name: string, email: string, age: int}
 
-let u: User = {name: "Ada", email: "ada@x", age: 36}
+const u: User = {name: "Ada", email: "ada@x", age: 36}
 log(u.emial)
 ```
 
@@ -70,7 +70,7 @@ The canonical guard pattern, which lets the typechecker narrow the inner
 shape inside the `if` body, is:
 
 ```harn
-let data = r.data       // r.data: T | nil
+const data = r.data       // r.data: T | nil
 if data != nil {
   log(data.name)    // data: T here
 }
@@ -101,11 +101,11 @@ or thread it through a typed function parameter:
 
 ```harn
 // Lenient — d.missing returns nil
-let d = {a: 1, b: 2}
+const d = {a: 1, b: 2}
 
 // Strict — d.missing is a typecheck error
 type Counts = {a: int, b: int}
-let d: Counts = {a: 1, b: 2}
+const d: Counts = {a: 1, b: 2}
 ```
 
 The same opt-in applies to `var x = nil` widening loops; annotating with

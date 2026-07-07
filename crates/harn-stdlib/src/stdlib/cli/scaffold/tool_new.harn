@@ -25,7 +25,7 @@ fn __escape_basic_string(value: string) -> string {
   // description is a single user-supplied line. Control characters are
   // accepted as-is; the Rust dispatch shim rejects multi-line input
   // before reaching this point.
-  var out = replace(value, "\\", "\\\\")
+  let out = replace(value, "\\", "\\\\")
   out = replace(out, "\"", "\\\"")
   out = replace(out, "\n", "\\n")
   out = replace(out, "\r", "\\r")
@@ -45,7 +45,7 @@ fn __toml_string_literal(value: string) -> string {
 
 fn __strip_trailing_periods(value: string) -> string {
   // substring(s, start, end) — second arg is an exclusive end index.
-  var out = value
+  let out = value
   while len(out) > 0 && ends_with(out, ".") {
     out = substring(out, 0, len(out) - 1)
   }
@@ -53,10 +53,10 @@ fn __strip_trailing_periods(value: string) -> string {
 }
 
 fn __render_harn_toml(package_name: string, description: string, harn_range: string) -> string {
-  let pkg = __toml_string_literal(package_name)
-  let desc = __toml_string_literal(description)
-  let repo = __toml_string_literal("https://github.com/OWNER/" + package_name)
-  let prov = __toml_string_literal("https://github.com/OWNER/" + package_name + "/releases/tag/v0.1.0")
+  const pkg = __toml_string_literal(package_name)
+  const desc = __toml_string_literal(description)
+  const repo = __toml_string_literal("https://github.com/OWNER/" + package_name)
+  const prov = __toml_string_literal("https://github.com/OWNER/" + package_name + "/releases/tag/v0.1.0")
   return "[package]\n"
     + "name = "
     + pkg
@@ -114,17 +114,17 @@ fn __render_harn_toml(package_name: string, description: string, harn_range: str
 }
 
 fn __render_tools_harn(package_name: string, handler: string, description: string) -> string {
-  let tool_name = __harn_string_literal(package_name)
-  let desc_lit = __harn_string_literal(description)
+  const tool_name = __harn_string_literal(package_name)
+  const desc_lit = __harn_string_literal(description)
   // Mirrors the Rust handler's `description.trim_end_matches('.')` so
   // the docstring summary reads naturally with the trailing period we
   // add back in the rendered text.
-  let handler_doc = __strip_trailing_periods(description)
+  const handler_doc = __strip_trailing_periods(description)
   return "/** " + handler_doc + ". */\n"
     + "pub fn "
     + handler
     + "(args) {\n"
-    + "  let input = schema_expect(args, {\n"
+    + "  const input = schema_expect(args, {\n"
     + "    type: \"object\",\n"
     + "    properties: {\n"
     + "      text: {type: \"string\"}\n"
@@ -138,7 +138,7 @@ fn __render_tools_harn(package_name: string, handler: string, description: strin
     + package_name
     + "`. */\n"
     + "pub fn tools(registry = nil) {\n"
-    + "  var reg = registry ?? tool_registry()\n"
+    + "  let reg = registry ?? tool_registry()\n"
     + "  reg = tool_define(reg, "
     + tool_name
     + ", "
@@ -165,17 +165,17 @@ fn __render_tools_harn(package_name: string, handler: string, description: strin
 }
 
 fn __render_main_harn(package_name: string) -> string {
-  let tool_name = __harn_string_literal(package_name)
+  const tool_name = __harn_string_literal(package_name)
   return "import { agent_dispatch_tool_call } from \"std/agent/primitives\"\n"
     + "import { tools } from \"lib/tools\"\n"
     + "\n"
     + "pipeline default() {\n"
-    + "  let registry = tools()\n"
-    + "  var text = \"hello\"\n"
+    + "  const registry = tools()\n"
+    + "  let text = \"hello\"\n"
     + "  if len(argv) > 0 {\n"
     + "    text = argv[0]\n"
     + "  }\n"
-    + "  let result = agent_dispatch_tool_call({\n"
+    + "  const result = agent_dispatch_tool_call({\n"
     + "    name: "
     + tool_name
     + ",\n"
@@ -189,15 +189,15 @@ fn __render_main_harn(package_name: string) -> string {
 }
 
 fn __render_test_harn(package_name: string, ident: string) -> string {
-  let tool_name = __harn_string_literal(package_name)
+  const tool_name = __harn_string_literal(package_name)
   return "import { agent_dispatch_tool_call } from \"std/agent/primitives\"\n"
     + "import { tools } from \"../lib/tools\"\n"
     + "\n"
     + "pipeline test_"
     + ident
     + "_tool(task) {\n"
-    + "  let registry = tools()\n"
-    + "  let ok = agent_dispatch_tool_call({\n"
+    + "  const registry = tools()\n"
+    + "  const ok = agent_dispatch_tool_call({\n"
     + "    name: "
     + tool_name
     + ",\n"
@@ -206,7 +206,7 @@ fn __render_test_harn(package_name: string, ident: string) -> string {
     + "  assert(ok.ok, ok.error?.message ?? \"tool call should pass\")\n"
     + "  assert_eq(ok.rendered_result, \"hello\")\n"
     + "\n"
-    + "  let bad = agent_dispatch_tool_call({\n"
+    + "  const bad = agent_dispatch_tool_call({\n"
     + "    name: "
     + tool_name
     + ",\n"
@@ -272,8 +272,8 @@ fn __render_workflow_yaml() -> string {
 }
 
 fn __write(harness: Harness, dest: string, rel: string, content: string) {
-  let path = path_join(dest, rel)
-  let parent = dirname(path)
+  const path = path_join(dest, rel)
+  const parent = dirname(path)
   if parent != "" && !harness.fs.exists(parent) {
     try {
       harness.fs.mkdir(parent)
@@ -291,12 +291,12 @@ fn __write(harness: Harness, dest: string, rel: string, content: string) {
 }
 
 fn main(harness: Harness) {
-  let name = harness.env.get_or("HARN_TOOL_NAME", "")
-  let dest = harness.env.get_or("HARN_TOOL_DEST", "")
-  let ident = harness.env.get_or("HARN_TOOL_IDENT", "")
-  let handler = harness.env.get_or("HARN_TOOL_HANDLER", "")
-  let description = harness.env.get_or("HARN_TOOL_DESCRIPTION", "")
-  let harn_range = harness.env.get_or("HARN_TOOL_HARN_RANGE", "")
+  const name = harness.env.get_or("HARN_TOOL_NAME", "")
+  const dest = harness.env.get_or("HARN_TOOL_DEST", "")
+  const ident = harness.env.get_or("HARN_TOOL_IDENT", "")
+  const handler = harness.env.get_or("HARN_TOOL_HANDLER", "")
+  const description = harness.env.get_or("HARN_TOOL_DESCRIPTION", "")
+  const harn_range = harness.env.get_or("HARN_TOOL_HARN_RANGE", "")
   if name == "" || dest == "" || ident == "" || handler == "" || harn_range == "" {
     harness.stdio
       .eprintln("tool new: HARN_TOOL_{NAME,DEST,IDENT,HANDLER,HARN_RANGE} must be set")

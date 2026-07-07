@@ -9,16 +9,16 @@ import "std/triggers"
  */
 pipeline test(task) {
   mock_time(1700000000000)
-  let bp = Backpressure()
-  let gate = channel(nil, 8)
-  let inflight = atomic(0)
-  let peak = atomic(0)
-  let completed = atomic(0)
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const bp = Backpressure()
+  const gate = channel(nil, 8)
+  const inflight = atomic(0)
+  const peak = atomic(0)
+  const completed = atomic(0)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let pool_name = "spawn-to-pool-cap-demo-" + unique
-  let _ = pool_create({name: pool_name, max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")})
-  let task_factory = { _event -> return { ->
+  const pool_name = "spawn-to-pool-cap-demo-" + unique
+  const _ = pool_create({name: pool_name, max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")})
+  const task_factory = { _event -> return { ->
     let now = atomic_add(inflight, 1) + 1
     if now > atomic_get(peak) {
       atomic_set(peak, now)
@@ -28,8 +28,8 @@ pipeline test(task) {
     atomic_add(completed, 1)
     return now
   } }
-  let trigger_id = "trigger-spawn-to-pool-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const trigger_id = "trigger-spawn-to-pool-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -48,9 +48,9 @@ pipeline test(task) {
   )
   // Fire 8 events. With max_concurrent=3 the pool must keep at most three
   // closures running concurrently regardless of inbound event rate.
-  var handles = []
+  let handles = []
   for i in 0 to 8 exclusive {
-    let dispatch: DispatchHandle = trigger_fire(
+    const dispatch: DispatchHandle = trigger_fire(
       handle,
       {
         provider: "github",
@@ -66,7 +66,7 @@ pipeline test(task) {
   for _i in 0 to len(handles) exclusive {
     send(gate, "go")
   }
-  let results = pool_wait(handles)
+  const results = pool_wait(handles)
   __io_println(len(results) == 8)
   __io_println(atomic_get(peak) <= 3)
   __io_println(atomic_get(inflight) == 0)

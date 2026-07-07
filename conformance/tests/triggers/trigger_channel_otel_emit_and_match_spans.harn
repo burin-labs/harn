@@ -14,10 +14,10 @@ fn handle_event(event) {
 
 pipeline default() {
   enable_tracing(true)
-  let stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-otel-" + unique,
       kind: "channel.emit",
@@ -35,27 +35,27 @@ pipeline default() {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("ch.otel.input", {repo: "harn"})
+  const _ = emit_channel("ch.otel.input", {repo: "harn"})
   // Drain the lifecycle topic: emit -> match -> nested emit on
   // `ch.otel.fired`. The match handler runs synchronously inline so
   // both events land before the test reads them.
-  let first = stream.next().value
+  const first = stream.next().value
   __io_println(first.kind)
   __io_println(first.payload.name_resolved)
   __io_println(first.payload.scope)
   __io_println(first.payload.inserted)
-  let second = stream.next().value
+  const second = stream.next().value
   __io_println(second.kind)
   __io_println(second.payload.name_resolved)
   __io_println(second.payload.handler_kind)
   // Spans: at least one ChannelEmit and one ChannelMatch must be
   // present, and the match span must carry a link back to the emit.
-  let spans = trace_spans()
-  let emits = spans.filter({ s -> s.kind == "channel_emit" })
-  let matches = spans.filter({ s -> s.kind == "channel_match" })
+  const spans = trace_spans()
+  const emits = spans.filter({ s -> s.kind == "channel_emit" })
+  const matches = spans.filter({ s -> s.kind == "channel_match" })
   __io_println(len(emits) >= 1)
   __io_println(len(matches) >= 1)
-  let match_span = matches[0]
+  const match_span = matches[0]
   __io_println(match_span.links != nil)
   __io_println(len(match_span.links) >= 1)
   enable_tracing(false)

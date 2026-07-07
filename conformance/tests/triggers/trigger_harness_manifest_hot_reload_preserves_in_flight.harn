@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("manifest_hot_reload_preserves_in_flight")
+  const result = trigger_test_harness("manifest_hot_reload_preserves_in_flight")
   __io_println(result.ok)
   __io_println(len(result.bindings) == 2)
   __io_println(result.bindings[0].id == "reload.fixture")

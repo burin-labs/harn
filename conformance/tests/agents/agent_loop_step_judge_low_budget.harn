@@ -12,8 +12,8 @@ pipeline default() {
       llm_text("{\"verdict\":\"revise\",\"reasoning\":\"force a regression\",\"critique\":\"try again\"}"),
     ],
     { ->
-      let session = "step-judge-low-budget-" + uuid()
-      let captured = agent_capture_events(
+      const session = "step-judge-low-budget-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Answer once.",
@@ -27,7 +27,7 @@ pipeline default() {
           },
         ) },
       )
-      let decisions = events_of(captured.events, "step_judge_decision")
+      const decisions = events_of(captured.events, "step_judge_decision")
       require len(decisions) == 1, "low-budget step_judge skip should emit one decision event"
       __io_println(captured.result.status)
       __io_println(captured.result.visible_text)

@@ -13,16 +13,16 @@ pipeline test(task) {
       {text: "use match instead", model: "mock", provider: "mock"},
     ],
     { ->
-      let policy = routing_policy(
+      const policy = routing_policy(
         {
           chain: [{provider: "mock", model: "mock", label: "cheap"}],
           escalate_on: [{kind: "lint", forbidden_patterns: ["unwrap"], on_fail: "refine"}],
           label: "verifier-refine",
         },
       )
-      let result = llm_call("question", nil, {routing: policy})
+      const result = llm_call("question", nil, {routing: policy})
       __io_println(result.text)
-      let attempts = result.routing.attempts
+      const attempts = result.routing.attempts
       __io_println(len(attempts))
       __io_println(attempts[0].verifier_outcome)
       __io_println(attempts[1].verifier_outcome)

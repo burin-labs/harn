@@ -62,7 +62,7 @@ fn __scratchpad_dict(label, value, fallback) {
  * @example: agent_scratchpad_options({scratchpad: true})
  */
 pub fn agent_scratchpad_options(opts = nil) {
-  let raw = (opts ?? {})?.scratchpad
+  const raw = (opts ?? {})?.scratchpad
   if raw == nil {
     return __scratchpad_default_options(false, false, 0)
   }
@@ -75,7 +75,7 @@ pub fn agent_scratchpad_options(opts = nil) {
   if type_of(raw) != "dict" {
     throw "agent_loop: `scratchpad` must be a bool, dict, or nil; got " + type_of(raw)
   }
-  let enabled = __scratchpad_bool("scratchpad.enabled", raw?.enabled, true)
+  const enabled = __scratchpad_bool("scratchpad.enabled", raw?.enabled, true)
   return {
     enabled: enabled,
     recite: __scratchpad_bool("scratchpad.recite", raw?.recite ?? raw?.recitation, true),
@@ -103,7 +103,7 @@ fn __scratchpad_list(value) {
 }
 
 fn __scratchpad_task_ref(task) {
-  let text = trim(to_string(task ?? ""))
+  const text = trim(to_string(task ?? ""))
   if text == "" {
     return nil
   }
@@ -116,7 +116,7 @@ fn __scratchpad_task_ref(task) {
 }
 
 fn __scratchpad_initial_goal(task) {
-  let text = trim(to_string(task ?? ""))
+  const text = trim(to_string(task ?? ""))
   if text == "" {
     return []
   }
@@ -127,14 +127,14 @@ fn __scratchpad_normalize(pad, task) {
   if type_of(pad) != "dict" {
     throw "agent_loop: `scratchpad.initial` must be a dict when provided"
   }
-  let task_ref = __scratchpad_task_ref(task)
-  let refs = __scratchpad_list(pad?.refs)
-  let normalized_refs = if task_ref == nil || __scratchpad_ref_ids(refs)["user:initial"] {
+  const task_ref = __scratchpad_task_ref(task)
+  const refs = __scratchpad_list(pad?.refs)
+  const normalized_refs = if task_ref == nil || __scratchpad_ref_ids(refs)["user:initial"] {
     refs
   } else {
     [task_ref] + refs
   }
-  let goals = __scratchpad_list(pad?.goals)
+  const goals = __scratchpad_list(pad?.goals)
   return pad
     + {
     schema: pad?.schema ?? "harn.agent_scratchpad.v1",
@@ -171,20 +171,20 @@ fn __scratchpad_empty(task) {
  * @api_stability: experimental
  */
 pub fn agent_scratchpad_init(session, opts) {
-  let cfg = agent_scratchpad_options(opts)
+  const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled {
     return {ok: true, status: "disabled"}
   }
-  let current = agent_session_scratchpad(session.session_id)
+  const current = agent_session_scratchpad(session.session_id)
   if current != nil {
     return {ok: true, status: "existing", scratchpad: current}
   }
-  let pad = if cfg.initial != nil {
+  const pad = if cfg.initial != nil {
     __scratchpad_normalize(cfg.initial, session?.task ?? "")
   } else {
     __scratchpad_empty(session?.task ?? "")
   }
-  let result = agent_session_set_scratchpad(
+  const result = agent_session_set_scratchpad(
     session.session_id,
     pad,
     {source: "agent_loop", reason: "init", metadata: {task_ref: "user:initial"}},
@@ -193,7 +193,7 @@ pub fn agent_scratchpad_init(session, opts) {
 }
 
 fn __scratchpad_excerpt(value, limit) {
-  let text = replace(replace(trim(to_string(value ?? "")), "\n", " "), "\t", " ")
+  const text = replace(replace(trim(to_string(value ?? "")), "\n", " "), "\t", " ")
   if len(text) <= limit {
     return text
   }
@@ -218,18 +218,18 @@ fn __scratchpad_item_source(item) {
 }
 
 fn __scratchpad_format_items(items, empty_label) {
-  let values = __scratchpad_list(items)
+  const values = __scratchpad_list(items)
   if len(values) == 0 {
     return "- (" + empty_label + ")"
   }
-  var lines = []
+  let lines = []
   for item in values {
-    let text = __scratchpad_item_text(item)
+    const text = __scratchpad_item_text(item)
     if text == "" {
       continue
     }
-    let source = __scratchpad_item_source(item)
-    let suffix = if source == "" {
+    const source = __scratchpad_item_source(item)
+    const suffix = if source == "" {
       ""
     } else {
       " [source_ref: " + source + "]"
@@ -243,19 +243,19 @@ fn __scratchpad_format_items(items, empty_label) {
 }
 
 fn __scratchpad_format_refs(refs) {
-  let values = __scratchpad_list(refs)
+  const values = __scratchpad_list(refs)
   if len(values) == 0 {
     return "- (none)"
   }
-  var lines = []
+  let lines = []
   for ref in values {
-    let id = trim(to_string(ref?.id ?? ""))
+    const id = trim(to_string(ref?.id ?? ""))
     if id == "" {
       continue
     }
-    let kind = trim(to_string(ref?.kind ?? "source"))
-    let label = __scratchpad_excerpt(ref?.label ?? ref?.excerpt ?? "", 120)
-    let suffix = if label == "" {
+    const kind = trim(to_string(ref?.kind ?? "source"))
+    const label = __scratchpad_excerpt(ref?.label ?? ref?.excerpt ?? "", 120)
+    const suffix = if label == "" {
       ""
     } else {
       ": " + label
@@ -289,11 +289,11 @@ fn __scratchpad_render(pad) {
  * @api_stability: experimental
  */
 pub fn agent_scratchpad_recitation_fragment(session, opts) {
-  let cfg = agent_scratchpad_options(opts)
+  const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled || !cfg.recite {
     return nil
   }
-  let pad = agent_session_scratchpad(session.session_id)
+  const pad = agent_session_scratchpad(session.session_id)
   if pad == nil {
     return nil
   }
@@ -301,8 +301,8 @@ pub fn agent_scratchpad_recitation_fragment(session, opts) {
 }
 
 fn __scratchpad_message_refs(messages, limit) {
-  let values = __scratchpad_list(messages)
-  let cap = if limit > 0 {
+  const values = __scratchpad_list(messages)
+  const cap = if limit > 0 {
     limit
   } else {
     0
@@ -310,15 +310,15 @@ fn __scratchpad_message_refs(messages, limit) {
   if cap == 0 || len(values) == 0 {
     return []
   }
-  var start = len(values) - cap
+  let start = len(values) - cap
   if start < 0 {
     start = 0
   }
-  var refs = []
-  var index = start
+  let refs = []
+  let index = start
   while index < len(values) {
-    let msg = values[index]
-    let excerpt = __scratchpad_excerpt(msg?.content ?? msg?.text ?? "", 200)
+    const msg = values[index]
+    const excerpt = __scratchpad_excerpt(msg?.content ?? msg?.text ?? "", 200)
     if excerpt != "" {
       refs = refs
         .push(
@@ -331,9 +331,9 @@ fn __scratchpad_message_refs(messages, limit) {
 }
 
 fn __scratchpad_ref_ids(refs) {
-  var out = {}
+  let out = {}
   for ref in __scratchpad_list(refs) {
-    let id = trim(to_string(ref?.id ?? ""))
+    const id = trim(to_string(ref?.id ?? ""))
     if id != "" {
       out = out + {[id]: true}
     }
@@ -342,17 +342,17 @@ fn __scratchpad_ref_ids(refs) {
 }
 
 fn __scratchpad_merge_refs(existing, additions) {
-  var refs = []
-  var seen = {}
+  let refs = []
+  let seen = {}
   for ref in __scratchpad_list(existing) {
-    let id = trim(to_string(ref?.id ?? ""))
+    const id = trim(to_string(ref?.id ?? ""))
     if id != "" && !seen[id] {
       seen = seen + {[id]: true}
       refs = refs.push(ref)
     }
   }
   for ref in __scratchpad_list(additions) {
-    let id = trim(to_string(ref?.id ?? ""))
+    const id = trim(to_string(ref?.id ?? ""))
     if id != "" && !seen[id] {
       seen = seen + {[id]: true}
       refs = refs.push(ref)
@@ -410,9 +410,9 @@ fn __scratchpad_schema() {
 }
 
 fn __scratchpad_allowed_ref_lines(refs) {
-  var lines = []
+  let lines = []
   for ref in __scratchpad_list(refs) {
-    let id = trim(to_string(ref?.id ?? ""))
+    const id = trim(to_string(ref?.id ?? ""))
     if id == "" {
       continue
     }
@@ -439,7 +439,7 @@ fn __scratchpad_reorganize_prompt(current, allowed_refs, context) {
 }
 
 fn __scratchpad_reorganizer_options(opts, cfg) {
-  var out = cfg.reorganizer ?? {}
+  let out = cfg.reorganizer ?? {}
   if out?.provider == nil && opts?.provider != nil {
     out = out + {provider: opts.provider}
   }
@@ -459,11 +459,11 @@ fn __scratchpad_reorganizer_options(opts, cfg) {
 }
 
 fn __scratchpad_validate_refs(pad, allowed_refs) {
-  let allowed = __scratchpad_ref_ids(allowed_refs)
-  let returned = __scratchpad_ref_ids(pad?.refs)
-  var errors = []
+  const allowed = __scratchpad_ref_ids(allowed_refs)
+  const returned = __scratchpad_ref_ids(pad?.refs)
+  let errors = []
   for ref in __scratchpad_list(pad?.refs) {
-    let id = trim(to_string(ref?.id ?? ""))
+    const id = trim(to_string(ref?.id ?? ""))
     if id == "" {
       errors = errors.push("refs entries must have non-empty id")
     } else if !allowed[id] {
@@ -471,7 +471,7 @@ fn __scratchpad_validate_refs(pad, allowed_refs) {
     }
   }
   for fact in __scratchpad_list(pad?.facts) {
-    let source = __scratchpad_item_source(fact)
+    const source = __scratchpad_item_source(fact)
     if source == "" {
       errors = errors.push("facts must include source_ref")
     } else if !returned[source] {
@@ -479,7 +479,7 @@ fn __scratchpad_validate_refs(pad, allowed_refs) {
     }
   }
   for item in __scratchpad_list(pad?.goals) + __scratchpad_list(pad?.open_items) {
-    let source = __scratchpad_item_source(item)
+    const source = __scratchpad_item_source(item)
     if source != "" && !returned[source] {
       errors = errors.push("item cites unknown source_ref `" + source + "`")
     }
@@ -497,7 +497,7 @@ fn __scratchpad_counts(pad) {
 }
 
 fn __scratchpad_emit_reorganization(session_id, iteration, status, payload = nil) {
-  let details = payload ?? {}
+  const details = payload ?? {}
   agent_emit_event(
     session_id,
     "agent_scratchpad_reorganization",
@@ -514,22 +514,22 @@ fn __scratchpad_emit_reorganization(session_id, iteration, status, payload = nil
  * @example: agent_scratchpad_reorganize(session, opts, 1, {reason: "iteration_end"})
  */
 pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
-  let cfg = agent_scratchpad_options(opts)
+  const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled {
     return {ok: true, status: "disabled"}
   }
-  var current = agent_session_scratchpad(session.session_id)
+  let current = agent_session_scratchpad(session.session_id)
   if current == nil {
-    let initialized = agent_scratchpad_init(session, opts)
+    const initialized = agent_scratchpad_init(session, opts)
     current = initialized?.scratchpad
   }
   if current == nil {
     __scratchpad_emit_reorganization(session.session_id, iteration, "missing_scratchpad")
     return {ok: false, status: "missing_scratchpad"}
   }
-  let message_refs = __scratchpad_message_refs(agent_session_messages(session.session_id), cfg.max_recent_messages)
-  let allowed_refs = __scratchpad_merge_refs(current?.refs, message_refs)
-  let envelope = llm_call_structured_result(
+  const message_refs = __scratchpad_message_refs(agent_session_messages(session.session_id), cfg.max_recent_messages)
+  const allowed_refs = __scratchpad_merge_refs(current?.refs, message_refs)
+  const envelope = llm_call_structured_result(
     __scratchpad_reorganize_prompt(current, allowed_refs, context),
     __scratchpad_schema(),
     __scratchpad_reorganizer_options(opts, cfg),
@@ -543,8 +543,8 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
     )
     return {ok: false, status: "llm_error", error: envelope?.error ?? envelope}
   }
-  let next = __scratchpad_normalize(envelope.data, session?.task ?? "")
-  let validation = __scratchpad_validate_refs(next, allowed_refs)
+  const next = __scratchpad_normalize(envelope.data, session?.task ?? "")
+  const validation = __scratchpad_validate_refs(next, allowed_refs)
   if !validation.ok {
     __scratchpad_emit_reorganization(
       session.session_id,
@@ -564,7 +564,7 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
       after_counts: __scratchpad_counts(next),
     }
   }
-  let set_result = try {
+  const set_result = try {
     agent_session_set_scratchpad(
       session.session_id,
       next,
@@ -580,11 +580,11 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
     )
   }
   if is_err(set_result) {
-    let store_error = to_string(unwrap_err(set_result))
+    const store_error = to_string(unwrap_err(set_result))
     __scratchpad_emit_reorganization(session.session_id, iteration, "store_error", {error: store_error})
     return {ok: false, status: "store_error", error: store_error}
   }
-  let stored = unwrap(set_result)
+  const stored = unwrap(set_result)
   __scratchpad_emit_reorganization(
     session.session_id,
     iteration,
@@ -614,15 +614,15 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
  * @example: agent_scratchpad_reorganize_if_due(session, opts, 0)
  */
 pub fn agent_scratchpad_reorganize_if_due(session, opts, iteration_index, context = nil) {
-  let cfg = agent_scratchpad_options(opts)
+  const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled {
     return {ok: true, status: "disabled"}
   }
-  let cadence = cfg.reorganize_every
+  const cadence = cfg.reorganize_every
   if cadence <= 0 {
     return {ok: true, status: "skipped", reason: "cadence_disabled"}
   }
-  let turn = iteration_index + 1
+  const turn = iteration_index + 1
   if turn % cadence != 0 {
     return {ok: true, status: "skipped", reason: "cadence", next_due: turn + (cadence - turn % cadence)}
   }

@@ -2,7 +2,7 @@ pipeline test(task) {
   fn call_one(f: fn(int) -> int) -> int {
     return f(1)
   }
-  let needs_two = fn(x: int, y: int) -> int { return x + y }
-  let callback: fn(int) -> int = needs_two
+  const needs_two = fn(x: int, y: int) -> int { return x + y }
+  const callback: fn(int) -> int = needs_two
   __io_println(call_one(callback))
 }

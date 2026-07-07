@@ -1,9 +1,9 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-let hook_order = atomic(0)
+const hook_order = atomic(0)
 
 fn audit_tools() {
-  let registry = tool_registry()
+  const registry = tool_registry()
   return tool_define(
     registry,
     "audit_tool",
@@ -14,7 +14,7 @@ fn audit_tools() {
 
 @persona(name: "merge_captain")
 fn merge_captain(ctx) -> string {
-  let merged = admin_merge(ctx)
+  const merged = admin_merge(ctx)
   return "persona:" + merged
 }
 
@@ -26,7 +26,7 @@ fn admin_merge(ctx) -> string {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Run the audit tool",
         nil,
         {
@@ -38,7 +38,7 @@ fn admin_merge(ctx) -> string {
           session_id: "persona-hooks-composition",
         },
       )
-      let saw_tool_hook = json_stringify(transcript_messages(result?.transcript)).contains("permission_denied")
+      const saw_tool_hook = json_stringify(transcript_messages(result?.transcript)).contains("permission_denied")
       return "merge:" + ctx + ":" + to_string(saw_tool_hook)
     },
   )
@@ -80,7 +80,7 @@ pipeline default() {
       return {output: ctx.output + ":post"}
     },
   )
-  let result = merge_captain("PR-7")
+  const result = merge_captain("PR-7")
   __io_println(result)
   __io_println(atomic_get(hook_order))
   clear_persona_hooks()

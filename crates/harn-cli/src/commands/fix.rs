@@ -1186,11 +1186,8 @@ fn callable_bound_names(params: &[TypedParam], body: &[SNode]) -> BTreeSet<Strin
 fn collect_binding_names(nodes: &[SNode], names: &mut BTreeSet<String>) {
     for node in nodes {
         visit::walk_node(node, &mut |child| match &child.node {
-            Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
+            Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
                 collect_pattern_names(pattern, names);
-            }
-            Node::ConstBinding { name, .. } => {
-                names.insert(name.clone());
             }
             Node::ForIn { pattern, .. } => {
                 collect_pattern_names(pattern, names);
@@ -1680,7 +1677,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("repair_demo.harn");
         let source =
-            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n";
+            "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n";
         fs::write(&script, source).unwrap();
         let before = fs::read(&script).unwrap();
 
@@ -1715,7 +1712,7 @@ mod tests {
         let invalid = temp.path().join("invalid.harn");
         fs::write(
             &valid,
-            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n",
+            "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
         )
         .unwrap();
         fs::write(&invalid, "fn bad() {\n").unwrap();
@@ -1748,7 +1745,7 @@ mod tests {
         let script = temp.path().join("repair_demo.harn");
         fs::write(
             &script,
-            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n",
+            "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
         )
         .unwrap();
 
@@ -1769,7 +1766,7 @@ mod tests {
         let invalid = temp.path().join("invalid.harn");
         fs::write(
             &valid,
-            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n",
+            "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
         )
         .unwrap();
         fs::write(&invalid, "fn bad() {\n").unwrap();
@@ -1793,7 +1790,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("repair_demo.harn");
         let source =
-            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n";
+            "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n";
         fs::write(&script, source).unwrap();
 
         let result = apply_repairs(&script, RepairSafety::BehaviorPreserving, true).unwrap();
@@ -1832,7 +1829,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("repair_demo.harn");
         let source =
-            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n";
+            "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n";
         fs::write(&script, source).unwrap();
 
         let result = apply_repairs(&script, RepairSafety::FormatOnly, false).unwrap();
@@ -2044,31 +2041,31 @@ mod tests {
             (
                 "clock_apply.harn",
                 Code::LintAmbientClockBuiltin,
-                "let value = now_ms()",
+                "const value = now_ms()",
                 "harness.clock.now_ms()",
             ),
             (
                 "fs_apply.harn",
                 Code::LintAmbientFsBuiltin,
-                "let value = read_file(\"notes.txt\")",
+                "const value = read_file(\"notes.txt\")",
                 "harness.fs.read_text(\"notes.txt\")",
             ),
             (
                 "env_apply.harn",
                 Code::LintAmbientEnvBuiltin,
-                "let value = env_or(\"MODE\", \"dev\")",
+                "const value = env_or(\"MODE\", \"dev\")",
                 "harness.env.get_or(\"MODE\", \"dev\")",
             ),
             (
                 "random_apply.harn",
                 Code::LintAmbientRandomBuiltin,
-                "let value = random_int(0, 10)",
+                "const value = random_int(0, 10)",
                 "harness.random.gen_range(0, 10)",
             ),
             (
                 "net_apply.harn",
                 Code::LintAmbientNetBuiltin,
-                "let value = http_get(\"https://example.test\")",
+                "const value = http_get(\"https://example.test\")",
                 "harness.net.get(\"https://example.test\")",
             ),
         ];
@@ -2123,7 +2120,7 @@ mod tests {
         let script = temp.path().join("pipeline_direct.harn");
         fs::write(
             &script,
-            "pipeline default() {\n  println(\"hi\")\n  let home = env_or(\"HOME\", \"\")\n}\n",
+            "pipeline default() {\n  println(\"hi\")\n  const home = env_or(\"HOME\", \"\")\n}\n",
         )
         .unwrap();
 

@@ -2,13 +2,13 @@ import "std/collections"
 
 pipeline default() {
   // filter_nil: removes nil, empty string, and "null" string
-  let d = {name: "alice", age: 30, empty: "", nothing: nil, fake_null: "null", valid: "ok"}
-  let cleaned = filter_nil(d)
+  const d = {name: "alice", age: 30, empty: "", nothing: nil, fake_null: "null", valid: "ok"}
+  const cleaned = filter_nil(d)
   __io_println(cleaned.name)
   __io_println(cleaned.age)
   __io_println(cleaned.valid)
   __io_println(len(cleaned.keys()))
-  let picked = pick_keys({a: 1, b: nil, c: 3}, ["c", "missing", "b"], {drop_nil: true})
+  const picked = pick_keys({a: 1, b: nil, c: 3}, ["c", "missing", "b"], {drop_nil: true})
   __io_println(picked.c)
   __io_println(contains(picked.keys(), "missing"))
   __io_println(contains(picked.keys(), "b"))

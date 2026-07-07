@@ -292,7 +292,7 @@ fn __git_non_empty_string(value, label) -> string {
 }
 
 fn __git_ref_arg(value, label) -> string {
-  let text = __git_non_empty_string(value, label)
+  const text = __git_non_empty_string(value, label)
   if starts_with(text, "-") {
     throw "std/git: " + label + " must not start with '-'"
   }
@@ -347,8 +347,8 @@ pub fn git_repo_path(repo = ".") -> string {
 }
 
 fn __git_run_options(repo, options) -> dict {
-  let opts = options ?? {}
-  var out = {
+  const opts = options ?? {}
+  let out = {
     cwd: git_repo_path(opts?.repo ?? opts?.cwd ?? repo ?? "."),
     timeout_ms: opts?.timeout_ms ?? 120000,
     env_remove: opts?.env_remove ?? git_env_remove(),
@@ -369,7 +369,7 @@ fn __git_run_options(repo, options) -> dict {
     }
   }
   if opts?.max_inline_bytes != nil {
-    let base_capture = out?.capture ?? {}
+    const base_capture = out?.capture ?? {}
     out = out + {capture: base_capture + {max_inline_bytes: opts.max_inline_bytes}}
   }
   return out
@@ -381,12 +381,12 @@ fn __git_run_options(repo, options) -> dict {
  * and `env_mode: "merge"` keeps inherited PATH/HOME/credentials.
  */
 fn __git_with_repo(repo, options) -> dict {
-  let opts = options ?? {}
+  const opts = options ?? {}
   return opts + {repo: repo}
 }
 
 fn __git_argv(args) -> list<string> {
-  let parts = __git_string_list(args, "args")
+  const parts = __git_string_list(args, "args")
   if len(parts) == 0 {
     throw "std/git: args must be a non-empty list"
   }
@@ -397,9 +397,9 @@ fn __git_argv(args) -> list<string> {
 }
 
 fn __git_result(result, argv, cwd) -> GitCommandResult {
-  let raw = result ?? {}
-  let success = process_result_success(raw)
-  let status = if raw?.status != nil {
+  const raw = result ?? {}
+  const success = process_result_success(raw)
+  const status = if raw?.status != nil {
     raw.status
   } else if success {
     "completed"
@@ -434,8 +434,8 @@ fn __git_result(result, argv, cwd) -> GitCommandResult {
  * @errors: []
  */
 pub fn git_run(args: list<string>, options: GitRunOptions = {}) -> GitCommandResult {
-  let argv = __git_argv(args)
-  let run_options = __git_run_options(options.repo ?? ".", options)
+  const argv = __git_argv(args)
+  const run_options = __git_run_options(options.repo ?? ".", options)
   return __git_result(process_run(argv, run_options), argv, run_options.cwd)
 }
 
@@ -542,8 +542,8 @@ pub fn git_worktree_remove(path: string, options: dict = {}) -> GitReceipt {
  * @errors: []
  */
 pub fn git_current_branch(repo = ".", options: GitRunOptions = {}) -> GitBranchResult {
-  let result = git_run(["branch", "--show-current"], __git_with_repo(repo, options))
-  let branch = trim(result.stdout)
+  const result = git_run(["branch", "--show-current"], __git_with_repo(repo, options))
+  const branch = trim(result.stdout)
   return result + {branch: branch, detached: result.success && branch == ""}
 }
 
@@ -554,19 +554,19 @@ pub fn git_current_branch(repo = ".", options: GitRunOptions = {}) -> GitBranchR
  * @errors: []
  */
 pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
-  let opts = options
+  const opts = options
   if opts.rev != nil && opts.rev_range != nil {
     throw "std/git: git_log accepts rev or rev_range, not both"
   }
-  var args = ["log"]
-  let format = opts.format
-  let oneline = opts.oneline ?? (format == nil)
+  let args = ["log"]
+  const format = opts.format
+  const oneline = opts.oneline ?? (format == nil)
   if oneline {
     args = args + ["--oneline"]
   } else if format != nil {
     args = args + ["--format=" + __git_non_empty_string(format, "format")]
   }
-  let max_count = opts.max_count ?? opts.limit
+  const max_count = opts.max_count ?? opts.limit
   if max_count != nil {
     args = args + ["--max-count", to_string(max_count)]
   }
@@ -583,7 +583,7 @@ pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
   if opts.rev_range != nil {
     args = args + [__git_ref_arg(opts.rev_range, "rev_range")]
   }
-  let paths = __git_string_list(opts.paths, "paths")
+  const paths = __git_string_list(opts.paths, "paths")
   if len(paths) > 0 {
     args = args + ["--"] + paths
   }
@@ -597,8 +597,8 @@ pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
  * @errors: []
  */
 pub fn git_show(rev: string, repo = ".", options: GitShowOptions = {}) -> GitCommandResult {
-  let opts = options
-  var args = ["show"]
+  const opts = options
+  let args = ["show"]
   if opts.stat ?? true {
     args = args + ["--stat"]
   }
@@ -636,11 +636,11 @@ pub fn git_remote_list(repo = ".", options: GitRunOptions = {}) -> GitCommandRes
  * @errors: []
  */
 pub fn git_switch(branch: string, repo = ".", options: GitSwitchOptions = {}) -> GitCommandResult {
-  let opts = options
+  const opts = options
   if (opts.create ?? false) && (opts.force_create ?? false) {
     throw "std/git: git_switch accepts create or force_create, not both"
   }
-  var args = ["switch"]
+  let args = ["switch"]
   if opts.create ?? false {
     args = args + ["-c"]
   }
@@ -669,8 +669,8 @@ pub fn git_pull_ff_only(
   branch: string? = nil,
   options: GitPullOptions = {},
 ) -> GitCommandResult {
-  let opts = options
-  var args = ["pull", "--ff-only"]
+  const opts = options
+  let args = ["pull", "--ff-only"]
   if opts.quiet ?? false {
     args = args + ["--quiet"]
   }
@@ -869,11 +869,11 @@ fn __git_catalog_all() {
  * @errors: []
  */
 pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCatalogEntry> {
-  let opts = options
-  let include_mutations = opts.include_mutations ?? false
-  let enabled = opts.enabled_operations ?? opts.operations
-  let disabled = opts.disabled_operations ?? []
-  var out = []
+  const opts = options
+  const include_mutations = opts.include_mutations ?? false
+  const enabled = opts.enabled_operations ?? opts.operations
+  const disabled = opts.disabled_operations ?? []
+  let out = []
   for entry in __git_catalog_all() {
     if entry.group == "mutation" && !include_mutations {
       continue
@@ -892,16 +892,16 @@ pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCata
 }
 
 fn __git_search_tokens(text) {
-  let normalized = regex_replace("[^A-Za-z0-9_./:-]+", " ", lowercase(to_string(text ?? "")))
+  const normalized = regex_replace("[^A-Za-z0-9_./:-]+", " ", lowercase(to_string(text ?? "")))
   return split(trim(normalized), " ").filter({ token -> token != "" })
 }
 
 fn __git_catalog_score(query, tokens, entry) {
-  let q = lowercase(trim(to_string(query ?? "")))
-  let name = lowercase(entry.operation)
-  let description = lowercase(entry.description)
-  let keywords = lowercase(join(entry.keywords ?? [], " "))
-  var score = 0
+  const q = lowercase(trim(to_string(query ?? "")))
+  const name = lowercase(entry.operation)
+  const description = lowercase(entry.description)
+  const keywords = lowercase(join(entry.keywords ?? [], " "))
+  let score = 0
   if q != "" {
     if q == name {
       score = score + 100
@@ -933,8 +933,8 @@ fn __git_catalog_score(query, tokens, entry) {
 }
 
 fn __git_insert_ranked(ranked, entry) {
-  var out = []
-  var inserted = false
+  let out = []
+  let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
       out = out.push(entry)
@@ -955,27 +955,27 @@ fn __git_insert_ranked(ranked, entry) {
  * @errors: []
  */
 pub fn git_find_tool(query: string, options: GitToolCatalogOptions = {}) -> GitToolSearchResult {
-  let opts = options
-  let tokens = __git_search_tokens(query)
-  var ranked: list<GitToolSearchMatch> = []
+  const opts = options
+  const tokens = __git_search_tokens(query)
+  let ranked: list<GitToolSearchMatch> = []
   for entry in git_tool_catalog(opts) {
-    let score = __git_catalog_score(query, tokens, entry)
+    const score = __git_catalog_score(query, tokens, entry)
     if score > 0 || len(tokens) == 0 {
       ranked = __git_insert_ranked(ranked, entry + {score: score})
     }
   }
-  let limit = opts.limit ?? opts.max_results ?? 5
-  var matches: list<GitToolSearchMatch> = []
-  var idx = 0
+  const limit = opts.limit ?? opts.max_results ?? 5
+  let matches: list<GitToolSearchMatch> = []
+  let idx = 0
   while idx < len(ranked) && idx < limit {
     matches = matches + [ranked[idx]]
     idx = idx + 1
   }
-  var operation_names: list<string> = []
+  let operation_names: list<string> = []
   for entry in matches {
     operation_names = operation_names + [to_string(entry.operation)]
   }
-  let result: GitToolSearchResult = {
+  const result: GitToolSearchResult = {
     query: query,
     strategy: "stdlib.git.lexical",
     operations: operation_names,
@@ -996,14 +996,14 @@ pub fn git_run_tool(
   args: GitToolRunArgs = {},
   options: GitToolCatalogOptions = {},
 ) {
-  let opts = options
-  let request = args
-  let op = __git_non_empty_string(operation, "operation")
-  let entry = git_tool_catalog(opts).find({ item -> item.operation == op })
+  const opts = options
+  const request = args
+  const op = __git_non_empty_string(operation, "operation")
+  const entry = git_tool_catalog(opts).find({ item -> item.operation == op })
   if entry == nil {
     throw "std/git: git operation not available: " + op
   }
-  let repo = __git_tool_repo(request, opts)
+  const repo = __git_tool_repo(request, opts)
   if op == "status" {
     return git_status(repo)
   }
@@ -1014,7 +1014,7 @@ pub fn git_run_tool(
     return git_log(repo, request)
   }
   if op == "diff" {
-    var selector = {}
+    let selector = {}
     if request.range != nil {
       selector = selector + {range: request.range}
     }
@@ -1064,10 +1064,10 @@ pub fn git_run_tool(
 }
 
 fn __git_tool_enabled(options, key, group) -> bool {
-  let opts = options ?? {}
-  let enabled = opts?.enabled_tools
+  const opts = options ?? {}
+  const enabled = opts?.enabled_tools
     ?? ["git_status", "git_current_branch", "git_log", "git_diff", "git_branch_list", "git_remote_list"]
-  let disabled = opts?.disabled_tools ?? []
+  const disabled = opts?.disabled_tools ?? []
   if __git_list_contains(disabled, key) || __git_list_contains(disabled, group) {
     return false
   }
@@ -1084,23 +1084,23 @@ fn __git_tool_description(options, key, fallback) -> string {
 }
 
 fn __git_tool_annotations(options, key, defaults) -> dict {
-  let opts = options ?? {}
-  let shared = opts?.annotations?.["*"] ?? {}
-  let local = opts?.annotations?.[key] ?? {}
+  const opts = options ?? {}
+  const shared = opts?.annotations?.["*"] ?? {}
+  const local = opts?.annotations?.[key] ?? {}
   return defaults + shared + local
 }
 
 fn __git_tool_config(options, key, config) {
-  let opts = options ?? {}
-  var out = config
+  const opts = options ?? {}
+  let out = config
   if opts?.defer_loading != nil {
     out = out + {defer_loading: opts.defer_loading}
   }
   if opts?.namespace != nil {
     out = out + {namespace: opts.namespace}
   }
-  let shared = opts?.tool_config?.["*"] ?? {}
-  let local = opts?.tool_config?.[key] ?? {}
+  const shared = opts?.tool_config?.["*"] ?? {}
+  const local = opts?.tool_config?.[key] ?? {}
   return out + shared + local
 }
 
@@ -1131,11 +1131,11 @@ fn __git_catalog_tool_run_options(entry, opts) {
 }
 
 fn __git_define_catalog_tool(tools, entry, opts) {
-  let key = __git_catalog_tool_key(entry)
+  const key = __git_catalog_tool_key(entry)
   if !__git_tool_enabled(opts, key, entry.group) {
     return tools
   }
-  let run_opts = __git_catalog_tool_run_options(entry, opts)
+  const run_opts = __git_catalog_tool_run_options(entry, opts)
   return tool_define(
     tools,
     __git_tool_name(opts, key),
@@ -1160,8 +1160,8 @@ fn __git_define_catalog_tool(tools, entry, opts) {
  * @errors: []
  */
 pub fn git_tools(registry = nil, options: GitToolRegistryOptions = {}) {
-  let opts = options
-  var tools = registry ?? tool_registry()
+  const opts = options
+  let tools = registry ?? tool_registry()
   for entry in __git_catalog_all() {
     tools = __git_define_catalog_tool(tools, entry, opts)
   }
@@ -1169,9 +1169,9 @@ pub fn git_tools(registry = nil, options: GitToolRegistryOptions = {}) {
 }
 
 fn __git_toolbox_enabled(options, key) -> bool {
-  let opts = options ?? {}
-  let enabled = opts?.enabled_tools ?? ["find_git_tool", "run_git_tool"]
-  let disabled = opts?.disabled_tools ?? []
+  const opts = options ?? {}
+  const enabled = opts?.enabled_tools ?? ["find_git_tool", "run_git_tool"]
+  const disabled = opts?.disabled_tools ?? []
   if __git_list_contains(disabled, key) || __git_list_contains(disabled, "toolbox") {
     return false
   }
@@ -1180,7 +1180,7 @@ fn __git_toolbox_enabled(options, key) -> bool {
 }
 
 fn __git_toolbox_find_options(opts, args) {
-  var out = opts
+  let out = opts
   if args?.max_results != nil {
     out = out + {max_results: args.max_results}
   }
@@ -1205,10 +1205,10 @@ fn __git_toolbox_run_annotations(opts, key) {
  * @errors: []
  */
 pub fn git_toolbox_tools(registry = nil, options: GitToolRegistryOptions = {}) {
-  let opts = options
-  var tools = registry ?? tool_registry()
+  const opts = options
+  let tools = registry ?? tool_registry()
   if __git_toolbox_enabled(opts, "find_git_tool") {
-    let key = "find_git_tool"
+    const key = "find_git_tool"
     tools = tool_define(
       tools,
       __git_tool_name(opts, key),
@@ -1230,7 +1230,7 @@ pub fn git_toolbox_tools(registry = nil, options: GitToolRegistryOptions = {}) {
     )
   }
   if __git_toolbox_enabled(opts, "run_git_tool") {
-    let key = "run_git_tool"
+    const key = "run_git_tool"
     tools = tool_define(
       tools,
       __git_tool_name(opts, key),

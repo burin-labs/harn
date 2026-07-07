@@ -8,6 +8,6 @@ fn merge_label(env: {region: string} & {tier: string}) -> string {
 }
 
 pipeline test(task) {
-  let env = {region: "us-east", tier: "prod"}
+  const env = {region: "us-east", tier: "prod"}
   __io_println(merge_label(env))
 }

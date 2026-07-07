@@ -1,5 +1,5 @@
 fn agent_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read",
@@ -28,7 +28,7 @@ fn agent_tools() {
 
 pipeline test(task) {
   // Test agent() and agent_config() builtins.
-  let classifier = agent(
+  const classifier = agent(
     "classifier",
     {
       system: "You classify code directories",
@@ -48,10 +48,10 @@ pipeline test(task) {
   assert(classifier.provider == "mock", "should have provider")
   assert(classifier.max_iterations == 5, "should have max_iterations")
   // Test agent_name
-  let name = agent_name(classifier)
+  const name = agent_name(classifier)
   assert(name == "classifier", "agent_name should return name")
   // Test agent_config
-  let cfg = agent_config(classifier, "Classify src/models")
+  const cfg = agent_config(classifier, "Classify src/models")
   assert(cfg.prompt == "Classify src/models", "should have prompt")
   assert(cfg.system == "You classify code directories", "should have system")
   assert(cfg.options.provider == "mock", "should have provider in options")

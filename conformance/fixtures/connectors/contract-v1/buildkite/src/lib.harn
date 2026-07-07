@@ -1,21 +1,21 @@
-let BUILDKITE_PROVIDER_ID = "buildkite"
+const BUILDKITE_PROVIDER_ID = "buildkite"
 
-let BUILDKITE_STATE_KEY = "harn-buildkite-connector.state"
+const BUILDKITE_STATE_KEY = "harn-buildkite-connector.state"
 
-let BUILDKITE_API_BASE_URL = "https://api.buildkite.com/v2"
+const BUILDKITE_API_BASE_URL = "https://api.buildkite.com/v2"
 
-let BUILDKITE_GRAPHQL_URL = "https://graphql.buildkite.com/v1"
+const BUILDKITE_GRAPHQL_URL = "https://graphql.buildkite.com/v1"
 
-let BUILDKITE_WEBHOOK_TOKEN_SECRET = "buildkite/webhook-token"
+const BUILDKITE_WEBHOOK_TOKEN_SECRET = "buildkite/webhook-token"
 
-let MAX_BODY_BYTES = 1048576
+const MAX_BODY_BYTES = 1048576
 
 // Reject signed deliveries whose embedded timestamp is older than this many
 // seconds. The timestamp is part of the signed message, so without this window
 // a captured-and-replayed delivery would still verify forever.
-let SIGNATURE_MAX_AGE_SECONDS = 300
+const SIGNATURE_MAX_AGE_SECONDS = 300
 
-let BUILDKITE_SUPPORTED_EVENTS = [
+const BUILDKITE_SUPPORTED_EVENTS = [
   "ping",
   "build.scheduled",
   "build.running",
@@ -28,9 +28,9 @@ let BUILDKITE_SUPPORTED_EVENTS = [
   "job.activated",
 ]
 
-let BUILDKITE_FAILURE_STATES = ["failed", "canceled", "waiting_failed"]
+const BUILDKITE_FAILURE_STATES = ["failed", "canceled", "waiting_failed"]
 
-let BUILDKITE_OUTBOUND_METHODS = [
+const BUILDKITE_OUTBOUND_METHODS = [
   "build.get",
   "build.cancel",
   "build.rebuild",
@@ -42,7 +42,7 @@ let BUILDKITE_OUTBOUND_METHODS = [
   "github_commit_pulls",
 ]
 
-let BUILDKITE_MUTATING_METHODS = ["build.cancel", "build.rebuild", "job.retry", "job.unblock"]
+const BUILDKITE_MUTATING_METHODS = ["build.cancel", "build.rebuild", "job.retry", "job.unblock"]
 
 /** Return this connector's Harn provider id. */
 pub fn provider_id() {
@@ -62,7 +62,7 @@ pub fn kinds() {
  * standard approval boundary; read-only methods pass through.
  */
 pub fn methods() {
-  var out = []
+  let out = []
   for method in BUILDKITE_OUTBOUND_METHODS {
     out = out + [{name: method, requires_approval: contains(BUILDKITE_MUTATING_METHODS, method)}]
   }
@@ -100,18 +100,18 @@ pub fn payload_schema() {
 
 /** Initialize connector state with orchestrator context. */
 pub fn init(ctx = nil) {
-  let next = __state() + {initialized: true, ctx: ctx ?? {}}
+  const next = __state() + {initialized: true, ctx: ctx ?? {}}
   __set_state(next)
   return next
 }
 
 /** Activate webhook bindings and reject duplicate configured paths. */
 pub fn activate(bindings = []) {
-  var by_id = {}
-  var seen_paths = {}
+  let by_id = {}
+  let seen_paths = {}
   for binding in bindings ?? [] {
-    let binding_id = binding?.binding_id ?? binding?.id ?? ("binding-" + to_string(len(by_id.keys())))
-    let path = binding?.path ?? binding?.match?.path
+    const binding_id = binding?.binding_id ?? binding?.id ?? ("binding-" + to_string(len(by_id.keys())))
+    const path = binding?.path ?? binding?.match?.path
     if path != nil && path != "" {
       if seen_paths.get(path) {
         return __err("activation", "buildkite connector path `" + path + "` is configured by multiple bindings")
@@ -120,7 +120,7 @@ pub fn activate(bindings = []) {
     }
     by_id[binding_id] = binding + {binding_id: binding_id}
   }
-  let next = __state() + {active: true, bindings: by_id}
+  const next = __state() + {active: true, bindings: by_id}
   __set_state(next)
   return {bindings: len(by_id.keys()), kind: "webhook", provider: BUILDKITE_PROVIDER_ID}
 }
@@ -145,24 +145,24 @@ pub fn shutdown() {
  * Fails closed when no webhook token is configured.
  */
 pub fn normalize_inbound(raw) {
-  let body_text = raw?.body_text ?? raw?.body ?? ""
+  const body_text = raw?.body_text ?? raw?.body ?? ""
   if len(body_text) > MAX_BODY_BYTES {
     return __reject(413, "payload_too_large", "buildkite webhook body exceeds 1 MiB cap")
   }
-  let headers = raw?.headers ?? {}
-  let verified = __verify_webhook(raw, headers, body_text)
+  const headers = raw?.headers ?? {}
+  const verified = __verify_webhook(raw, headers, body_text)
   if is_err(verified) {
     return __reject_err(unwrap_err(verified))
   }
-  let signature_status = unwrap(verified)
-  let parsed = try {
+  const signature_status = unwrap(verified)
+  const parsed = try {
     json_parse(body_text)
   }
   if is_err(parsed) {
     return __reject(400, "invalid_json", "buildkite payload body is not valid JSON")
   }
-  let payload = unwrap(parsed)
-  let event = payload?.event ?? __header(headers, "x-buildkite-event")
+  const payload = unwrap(parsed)
+  const event = payload?.event ?? __header(headers, "x-buildkite-event")
   if event == nil || event == "" {
     return __reject(400, "missing_event", "missing Buildkite event field and X-Buildkite-Event header")
   }
@@ -172,7 +172,7 @@ pub fn normalize_inbound(raw) {
   if !contains(BUILDKITE_SUPPORTED_EVENTS, event) {
     return __reject(400, "unsupported_event", "unsupported Buildkite event type `" + to_string(event) + "`")
   }
-  let normalized = __build_event(event, payload, raw, headers, signature_status)
+  const normalized = __build_event(event, payload, raw, headers, signature_status)
   return {type: "event", event: normalized}
 }
 
@@ -188,17 +188,17 @@ pub fn call(method, args = {}) {
   if method == "graphql" {
     return __graphql(args ?? {})
   }
-  let config = __outbound_config(args ?? {})
+  const config = __outbound_config(args ?? {})
   if is_err(config) {
     return config
   }
-  let cfg = unwrap(config)
+  const cfg = unwrap(config)
   if method == "api.request" {
-    let http_method = __upcase_method(args?.method ?? "GET")
-    let path = to_string(args?.path ?? "")
+    const http_method = __upcase_method(args?.method ?? "GET")
+    const path = to_string(args?.path ?? "")
     return __buildkite_json(http_method, __api_url(cfg.api_base_url, path), args?.body, cfg)
   }
-  let org = __require(args, "org")
+  const org = __require(args, "org")
   if is_err(org) {
     return org
   }
@@ -286,9 +286,9 @@ fn __reject(status, code, message) {
 }
 
 fn __reject_err(err) {
-  let code = err?.code ?? "rejected"
-  let message = err?.message ?? "request rejected"
-  let status = if code == "invalid_signature" || code == "invalid_token" || code == "missing_signature"
+  const code = err?.code ?? "rejected"
+  const message = err?.message ?? "request rejected"
+  const status = if code == "invalid_signature" || code == "invalid_token" || code == "missing_signature"
     || code == "missing_token"
     || code == "missing_secret"
     || code == "stale_signature" {
@@ -300,7 +300,7 @@ fn __reject_err(err) {
 }
 
 fn __header(headers, name) {
-  let wanted = lowercase(name)
+  const wanted = lowercase(name)
   for entry in (headers ?? {}).entries() {
     if lowercase(trim(to_string(entry.key))) == wanted {
       return trim(to_string(entry.value))
@@ -311,38 +311,38 @@ fn __header(headers, name) {
 
 @complexity(allow)
 fn __webhook_token(raw) {
-  let state = __state()
-  let ctx_token = state.ctx?.webhook_token ?? state.ctx?.secrets?.webhook_token
+  const state = __state()
+  const ctx_token = state.ctx?.webhook_token ?? state.ctx?.secrets?.webhook_token
   if ctx_token != nil && trim(to_string(ctx_token)) != "" {
     return to_string(ctx_token)
   }
-  let bindings = state.bindings ?? {}
-  let binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
+  const bindings = state.bindings ?? {}
+  const binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
   if binding_id != nil {
-    let binding = bindings.get(binding_id)
-    let binding_token = binding?.webhook_token ?? binding?.secrets?.webhook_token
+    const binding = bindings.get(binding_id)
+    const binding_token = binding?.webhook_token ?? binding?.secrets?.webhook_token
       ?? binding?.config?.webhook_token
     if binding_token != nil && trim(to_string(binding_token)) != "" {
       return to_string(binding_token)
     }
   }
-  let secret_id = __webhook_token_id(raw)
+  const secret_id = __webhook_token_id(raw)
   if secret_id != nil {
-    let resolved = try {
+    const resolved = try {
       secret_get(secret_id)
     }
     if !is_err(resolved) {
-      let value = to_string(unwrap(resolved))
+      const value = to_string(unwrap(resolved))
       if value != "" {
         return value
       }
     }
   }
-  let fallback = try {
+  const fallback = try {
     secret_get(BUILDKITE_WEBHOOK_TOKEN_SECRET)
   }
   if !is_err(fallback) {
-    let value = to_string(unwrap(fallback))
+    const value = to_string(unwrap(fallback))
     if value != "" {
       return value
     }
@@ -351,16 +351,16 @@ fn __webhook_token(raw) {
 }
 
 fn __webhook_token_id(raw) {
-  let metadata = raw?.metadata ?? {}
-  let id = metadata?.secret_ids?.webhook_token ?? metadata?.config?.secret_ids?.webhook_token
+  const metadata = raw?.metadata ?? {}
+  const id = metadata?.secret_ids?.webhook_token ?? metadata?.config?.secret_ids?.webhook_token
   if id != nil && trim(to_string(id)) != "" {
     return to_string(id)
   }
-  let bindings = __state().bindings ?? {}
-  let binding_id = metadata?.binding_id ?? raw?.binding_id
+  const bindings = __state().bindings ?? {}
+  const binding_id = metadata?.binding_id ?? raw?.binding_id
   if binding_id != nil {
-    let binding = bindings.get(binding_id)
-    let bid = binding?.webhook_token_id ?? binding?.secrets?.webhook_token_id
+    const binding = bindings.get(binding_id)
+    const bid = binding?.webhook_token_id ?? binding?.secrets?.webhook_token_id
       ?? binding?.config?.secret_ids?.webhook_token
     if bid != nil && trim(to_string(bid)) != "" {
       return to_string(bid)
@@ -371,18 +371,18 @@ fn __webhook_token_id(raw) {
 
 @complexity(allow)
 fn __verify_webhook(raw, headers, body_text) {
-  let token = __webhook_token(raw)
+  const token = __webhook_token(raw)
   if token == nil || trim(to_string(token)) == "" {
     return __err(
       "missing_secret",
       "buildkite webhook token is required; configure buildkite/webhook-token to verify inbound webhooks",
     )
   }
-  let signature_header = __header(headers, "x-buildkite-signature")
+  const signature_header = __header(headers, "x-buildkite-signature")
   if signature_header != nil && signature_header != "" {
     return __verify_signature(raw, signature_header, body_text, to_string(token))
   }
-  let provided_token = __header(headers, "x-buildkite-token")
+  const provided_token = __header(headers, "x-buildkite-token")
   if provided_token == nil || provided_token == "" {
     return __err("missing_signature", "neither X-Buildkite-Signature nor X-Buildkite-Token header is present")
   }
@@ -394,26 +394,26 @@ fn __verify_webhook(raw, headers, body_text) {
 
 @complexity(allow)
 fn __verify_signature(raw, signature_header, body_text, token) {
-  let fields = __parse_signature_header(signature_header)
-  let timestamp = fields.get("timestamp")
-  let signature = fields.get("signature")
+  const fields = __parse_signature_header(signature_header)
+  const timestamp = fields.get("timestamp")
+  const signature = fields.get("signature")
   if timestamp == nil || trim(to_string(timestamp)) == "" || signature == nil
     || trim(to_string(signature)) == "" {
     return __err("invalid_signature", "x-buildkite-signature must contain `timestamp=<unix>,signature=<hex>`")
   }
-  let signed_message = to_string(timestamp) + "." + body_text
-  let expected = hmac_sha256(token, signed_message)
+  const signed_message = to_string(timestamp) + "." + body_text
+  const expected = hmac_sha256(token, signed_message)
   if !constant_time_eq(lowercase(expected), lowercase(to_string(signature))) {
     return __err("invalid_signature", "x-buildkite-signature did not match the computed HMAC")
   }
-  let parsed_ts = try {
+  const parsed_ts = try {
     to_int(to_string(timestamp))
   }
   if is_err(parsed_ts) {
     return __err("invalid_signature", "x-buildkite-signature timestamp is not an integer")
   }
-  let now = __verification_timestamp(raw)
-  let age = now - unwrap(parsed_ts)
+  const now = __verification_timestamp(raw)
+  const age = now - unwrap(parsed_ts)
   if age > SIGNATURE_MAX_AGE_SECONDS || age < -SIGNATURE_MAX_AGE_SECONDS {
     return __err(
       "stale_signature",
@@ -425,9 +425,9 @@ fn __verify_signature(raw, signature_header, body_text, token) {
 }
 
 fn __verification_timestamp(raw) {
-  let received_at = raw?.received_at
+  const received_at = raw?.received_at
   if received_at != nil && trim(to_string(received_at)) != "" {
-    let parsed = try {
+    const parsed = try {
       date_parse(to_string(received_at))
     }
     if !is_err(parsed) {
@@ -438,13 +438,13 @@ fn __verification_timestamp(raw) {
 }
 
 fn __parse_signature_header(header) {
-  var fields = {}
+  let fields = {}
   for part in split(to_string(header), ",") {
-    let trimmed = trim(part)
-    let eq = __index_of(trimmed, "=")
+    const trimmed = trim(part)
+    const eq = __index_of(trimmed, "=")
     if eq > 0 {
-      let key = lowercase(trim(trimmed[0:eq]))
-      let value = trim(trimmed[eq + 1:len(trimmed)])
+      const key = lowercase(trim(trimmed[0:eq]))
+      const value = trim(trimmed[eq + 1:len(trimmed)])
       fields[key] = value
     }
   }
@@ -453,14 +453,14 @@ fn __parse_signature_header(header) {
 
 @complexity(allow)
 fn __build_event(event, payload, raw, headers, signature_status) {
-  let build = payload?.build ?? {}
-  let pipeline_obj = payload?.pipeline ?? {}
-  let job = payload?.job
-  let state = build?.state
-  let is_failure = state != nil && contains(BUILDKITE_FAILURE_STATES, to_string(state))
-  let pipeline_slug = pipeline_obj?.slug ?? pipeline_obj?.name
-  let org = __org_from_pipeline(pipeline_obj)
-  let normalized_payload = {
+  const build = payload?.build ?? {}
+  const pipeline_obj = payload?.pipeline ?? {}
+  const job = payload?.job
+  const state = build?.state
+  const is_failure = state != nil && contains(BUILDKITE_FAILURE_STATES, to_string(state))
+  const pipeline_slug = pipeline_obj?.slug ?? pipeline_obj?.name
+  const org = __org_from_pipeline(pipeline_obj)
+  const normalized_payload = {
     branch: build?.branch,
     build_id: build?.id,
     build_number: build?.number,
@@ -499,7 +499,7 @@ fn __signature_status(status) {
 
 fn __event_kind(event, build, job) {
   if event == "build.finished" {
-    let state = build?.state
+    const state = build?.state
     if state != nil && contains(BUILDKITE_FAILURE_STATES, to_string(state)) {
       return "build.failed"
     }
@@ -511,7 +511,7 @@ fn __event_kind(event, build, job) {
 }
 
 fn __pr_number(build) {
-  let pr = build?.pull_request
+  const pr = build?.pull_request
   if pr == nil {
     return nil
   }
@@ -534,7 +534,7 @@ fn __job(job) {
 }
 
 fn __org_from_pipeline(pipeline_obj) {
-  let provider = pipeline_obj?.provider ?? {}
+  const provider = pipeline_obj?.provider ?? {}
   return provider?.settings?.account ?? pipeline_obj?.organization?.slug ?? pipeline_obj?.account_slug
 }
 
@@ -560,7 +560,7 @@ fn __occurred_at(build, job, raw) {
 }
 
 fn __require(args, key) {
-  let value = args.get(key)
+  const value = args.get(key)
   if value == nil || trim(to_string(value)) == "" {
     return __err("missing_argument", "buildkite call requires `" + key + "`")
   }
@@ -582,12 +582,12 @@ fn __upcase_method(method) {
 
 @complexity(allow)
 fn __outbound_config(args) {
-  let api_base_url = args?.api_base_url ?? harness.env.get_or("BUILDKITE_API_BASE_URL", BUILDKITE_API_BASE_URL)
-  let base_check = __validate_url_host(api_base_url, "api_base_url")
+  const api_base_url = args?.api_base_url ?? harness.env.get_or("BUILDKITE_API_BASE_URL", BUILDKITE_API_BASE_URL)
+  const base_check = __validate_url_host(api_base_url, "api_base_url")
   if is_err(base_check) {
     return base_check
   }
-  let api_token = args?.api_token ?? args?.access_token ?? args?.token ?? args?.secrets?.api_token
+  const api_token = args?.api_token ?? args?.access_token ?? args?.token ?? args?.secrets?.api_token
     ?? harness.env.get("BUILDKITE_API_TOKEN")
     ?? harness.env.get("BUILDKITE_TOKEN")
   if api_token == nil || trim(to_string(api_token)) == "" {
@@ -597,8 +597,8 @@ fn __outbound_config(args) {
 }
 
 fn __api_url(api_base_url, path) {
-  let base = trim(to_string(api_base_url))
-  let prefix = if ends_with(base, "/") {
+  const base = trim(to_string(api_base_url))
+  const prefix = if ends_with(base, "/") {
     base[0:len(base) - 1]
   } else {
     base
@@ -617,22 +617,22 @@ fn __validate_url_host(url_value, label) {
   if url_value == nil || trim(to_string(url_value)) == "" {
     return __err("invalid_url", label + " is required")
   }
-  let url = trim(to_string(url_value))
+  const url = trim(to_string(url_value))
   if !starts_with(lowercase(url), "https://") {
     return __err("invalid_url", label + " must use https:// scheme")
   }
-  let after_scheme = url[8:len(url)]
-  let slash_idx = __index_of(after_scheme, "/")
-  let host_port = if slash_idx >= 0 {
+  const after_scheme = url[8:len(url)]
+  const slash_idx = __index_of(after_scheme, "/")
+  const host_port = if slash_idx >= 0 {
     after_scheme[0:slash_idx]
   } else {
     after_scheme
   }
-  let host = __strip_port(host_port)
+  const host = __strip_port(host_port)
   if host == "" {
     return __err("invalid_url", label + " is missing a host")
   }
-  let host_lc = lowercase(host)
+  const host_lc = lowercase(host)
   if __is_disallowed_host(host_lc) {
     return __err(
       "invalid_url",
@@ -645,13 +645,13 @@ fn __validate_url_host(url_value, label) {
 
 fn __strip_port(host_port) {
   if starts_with(host_port, "[") {
-    let close = __index_of(host_port, "]")
+    const close = __index_of(host_port, "]")
     if close >= 0 {
       return host_port[1:close]
     }
     return host_port
   }
-  let colon = __index_of(host_port, ":")
+  const colon = __index_of(host_port, ":")
   if colon >= 0 {
     return host_port[0:colon]
   }
@@ -659,12 +659,12 @@ fn __strip_port(host_port) {
 }
 
 fn __index_of(text, needle) {
-  let n = len(text)
-  let m = len(needle)
+  const n = len(text)
+  const m = len(needle)
   if m == 0 {
     return 0
   }
-  var i = 0
+  let i = 0
   while i + m <= n {
     if text[i:i + m] == needle {
       return i
@@ -692,15 +692,15 @@ fn __is_disallowed_host(host_lc) {
     return true
   }
   if starts_with(host_lc, "172.") {
-    let rest = host_lc[4:len(host_lc)]
-    let dot = __index_of(rest, ".")
+    const rest = host_lc[4:len(host_lc)]
+    const dot = __index_of(rest, ".")
     if dot > 0 {
-      let octet_str = rest[0:dot]
-      let parsed = try {
+      const octet_str = rest[0:dot]
+      const parsed = try {
         to_int(octet_str)
       }
       if !is_err(parsed) {
-        let octet = unwrap(parsed)
+        const octet = unwrap(parsed)
         if octet >= 16 && octet <= 31 {
           return true
         }
@@ -712,7 +712,7 @@ fn __is_disallowed_host(host_lc) {
 
 @complexity(allow)
 fn __buildkite_json(method, url, body, cfg) {
-  var options = {
+  let options = {
     headers: {Accept: "application/json", Authorization: "Bearer " + cfg.api_token},
     retry: {backoff_ms: 0, max: 0},
   }
@@ -720,16 +720,16 @@ fn __buildkite_json(method, url, body, cfg) {
     options["body"] = json_stringify(body)
     options.headers["Content-Type"] = "application/json"
   }
-  var retried_rate_limit = false
+  let retried_rate_limit = false
   while true {
-    let response_result = try {
+    const response_result = try {
       harness.net.request(method, url, options)
     }
     if is_err(response_result) {
       return __err("transport", to_string(unwrap_err(response_result)))
     }
-    let response = unwrap(response_result)
-    let limited = __maybe_wait_for_rate_limit(response)
+    const response = unwrap(response_result)
+    const limited = __maybe_wait_for_rate_limit(response)
     if is_err(limited) {
       return limited
     }
@@ -738,7 +738,7 @@ fn __buildkite_json(method, url, body, cfg) {
       continue
     }
     if response.status < 200 || response.status >= 300 {
-      let code = if response.status == 429 || response.status == 503 {
+      const code = if response.status == 429 || response.status == 503 {
         "rate_limited"
       } else if response.status == 401 || response.status == 403 {
         "unauthorized"
@@ -759,14 +759,14 @@ fn __decode_response(response) {
   if trim(response.body ?? "") == "" {
     return {body: "", headers: response.headers, status: response.status}
   }
-  let content_type = lowercase(to_string(__header(response.headers ?? {}, "content-type") ?? ""))
+  const content_type = lowercase(to_string(__header(response.headers ?? {}, "content-type") ?? ""))
   // job.log and other text endpoints return text/plain; surface the body verbatim.
   if contains(content_type, "text/") {
     return {body: response.body, headers: response.headers, status: response.status}
   }
   // Default to JSON: Buildkite REST returns JSON without always echoing a
   // content-type header through every layer.
-  let parsed = try {
+  const parsed = try {
     json_parse(response.body)
   }
   if is_err(parsed) {
@@ -777,21 +777,21 @@ fn __decode_response(response) {
 
 @complexity(allow)
 fn __maybe_wait_for_rate_limit(response) {
-  let remaining = __header(response.headers ?? {}, "ratelimit-remaining")
+  const remaining = __header(response.headers ?? {}, "ratelimit-remaining")
   if remaining == nil || trim(to_string(remaining)) != "0" {
     return Ok(false)
   }
-  let reset = __header(response.headers ?? {}, "ratelimit-reset")
+  const reset = __header(response.headers ?? {}, "ratelimit-reset")
   if reset == nil || trim(to_string(reset)) == "" {
     return Ok(true)
   }
-  let parsed_reset = try {
+  const parsed_reset = try {
     to_int(reset)
   }
   if is_err(parsed_reset) {
     return Ok(true)
   }
-  let wait_seconds = unwrap(parsed_reset) - to_int(harness.clock.timestamp())
+  const wait_seconds = unwrap(parsed_reset) - to_int(harness.clock.timestamp())
   if wait_seconds > 60 {
     return __err("rate_limited", "buildkite API rate limit reset is more than 60 seconds away")
   }
@@ -803,7 +803,7 @@ fn __maybe_wait_for_rate_limit(response) {
 
 @complexity(allow)
 fn __graphql(args) {
-  let api_token = args?.api_token ?? args?.access_token ?? args?.token
+  const api_token = args?.api_token ?? args?.access_token ?? args?.token
     ?? harness.env.get("BUILDKITE_API_TOKEN")
     ?? harness.env.get("BUILDKITE_TOKEN")
   if api_token == nil || trim(to_string(api_token)) == "" {
@@ -812,8 +812,8 @@ fn __graphql(args) {
   if args?.query == nil || trim(to_string(args.query)) == "" {
     return __err("missing_query", "buildkite graphql requires a query")
   }
-  let url = args?.graphql_url ?? BUILDKITE_GRAPHQL_URL
-  let base_check = __validate_url_host(url, "graphql_url")
+  const url = args?.graphql_url ?? BUILDKITE_GRAPHQL_URL
+  const base_check = __validate_url_host(url, "graphql_url")
   if is_err(base_check) {
     return base_check
   }
@@ -827,28 +827,28 @@ fn __graphql(args) {
 
 @complexity(allow)
 fn __github_commit_pulls(args) {
-  let owner = __require(args, "owner")
+  const owner = __require(args, "owner")
   if is_err(owner) {
     return owner
   }
-  let repo = __require(args, "repo")
+  const repo = __require(args, "repo")
   if is_err(repo) {
     return repo
   }
-  let sha = __require(args, "sha")
+  const sha = __require(args, "sha")
   if is_err(sha) {
     return sha
   }
-  let github_token = args?.github_token ?? args?.token ?? harness.env.get("GITHUB_TOKEN")
+  const github_token = args?.github_token ?? args?.token ?? harness.env.get("GITHUB_TOKEN")
   if github_token == nil || trim(to_string(github_token)) == "" {
     return __err("missing_token", "github_commit_pulls requires github_token")
   }
-  let base = args?.github_api_base_url ?? "https://api.github.com"
-  let base_check = __validate_url_host(base, "github_api_base_url")
+  const base = args?.github_api_base_url ?? "https://api.github.com"
+  const base_check = __validate_url_host(base, "github_api_base_url")
   if is_err(base_check) {
     return base_check
   }
-  let url = __api_url(
+  const url = __api_url(
     to_string(base),
     "/repos/" + url_encode(unwrap(owner)) + "/" + url_encode(unwrap(repo)) + "/commits/"
       + url_encode(unwrap(sha))

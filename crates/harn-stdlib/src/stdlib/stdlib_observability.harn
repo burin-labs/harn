@@ -13,12 +13,12 @@ type ObsBackend = dict
 type ObsSpan = dict
 
 fn __backend(kind: string, fields: dict = {}) -> ObsBackend {
-  let id = fields?.id ?? kind
+  const id = fields?.id ?? kind
   return fields + {kind: kind, id: id}
 }
 
 fn __span_fields(span: ObsSpan, fields: dict) -> dict {
-  let attrs = span?.attrs ?? {}
+  const attrs = span?.attrs ?? {}
   return attrs + fields
 }
 
@@ -119,12 +119,12 @@ pub fn end_span(span: ObsSpan) {
  * @example: span("review", {pr: 1915}, { -> work() })
  */
 pub fn span(name: string, attrs: dict = {}, callback = nil) {
-  let handle = start_span(name, attrs)
+  const handle = start_span(name, attrs)
   if callback == nil {
     return handle
   }
   try {
-    let result = callback()
+    const result = callback()
     end_span(handle)
     return result
   } catch (e) {

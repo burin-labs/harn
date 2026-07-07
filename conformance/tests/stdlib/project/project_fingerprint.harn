@@ -19,12 +19,12 @@ fn fingerprint_signature(fp: ProjectFingerprint) -> string {
 }
 
 pipeline test(task) {
-  let root = path_join(harness.fs.temp_dir(), "project-fingerprint-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "project-fingerprint-" + uuid())
   harness.fs.mkdir(root)
   defer {
     harness.fs.delete(root)
   }
-  let rust_workspace = path_join(root, "rust-workspace")
+  const rust_workspace = path_join(root, "rust-workspace")
   harness.fs.mkdir(rust_workspace)
   harness.fs.mkdir(path_join(rust_workspace, ".git"))
   harness.fs.mkdir(path_join(rust_workspace, ".config"))
@@ -48,7 +48,7 @@ pipeline test(task) {
     "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n",
   )
   __io_println("rust-workspace " + fingerprint_signature(project_fingerprint(rust_workspace)))
-  let swift_library = path_join(root, "swift-library")
+  const swift_library = path_join(root, "swift-library")
   harness.fs.mkdir(swift_library)
   harness.fs.mkdir(path_join(swift_library, "Sources/Lib"))
   harness.fs.mkdir(path_join(swift_library, "Tests/LibTests"))
@@ -60,7 +60,7 @@ pipeline test(task) {
   harness.fs.write_text(path_join(swift_library, "Sources/Lib/Lib.swift"), "public struct Lib {}\n")
   harness.fs.write_text(path_join(swift_library, "Tests/LibTests/LibTests.swift"), "import XCTest\n")
   __io_println("swift-library " + fingerprint_signature(project_fingerprint(swift_library)))
-  let swift_executable = path_join(root, "swift-executable")
+  const swift_executable = path_join(root, "swift-executable")
   harness.fs.mkdir(swift_executable)
   harness.fs.mkdir(path_join(swift_executable, "Sources/App"))
   harness.fs.mkdir(path_join(swift_executable, "Tests/AppTests"))
@@ -73,7 +73,7 @@ pipeline test(task) {
   harness.fs
     .write_text(path_join(swift_executable, "Tests/AppTests/AppTests.swift"), "import XCTest\n")
   __io_println("swift-executable " + fingerprint_signature(project_fingerprint(swift_executable)))
-  let npm_monorepo = path_join(root, "npm-monorepo")
+  const npm_monorepo = path_join(root, "npm-monorepo")
   harness.fs.mkdir(npm_monorepo)
   harness.fs.mkdir(path_join(npm_monorepo, "packages/web/src"))
   harness.fs.mkdir(path_join(npm_monorepo, "packages/web/tests"))
@@ -85,7 +85,7 @@ pipeline test(task) {
   harness.fs.write_text(path_join(npm_monorepo, "package-lock.json"), "{}\n")
   harness.fs.write_text(path_join(npm_monorepo, "packages/web/src/app.ts"), "export const app = 1\n")
   __io_println("npm-monorepo " + fingerprint_signature(project_fingerprint(npm_monorepo)))
-  let pnpm_monorepo = path_join(root, "pnpm-monorepo")
+  const pnpm_monorepo = path_join(root, "pnpm-monorepo")
   harness.fs.mkdir(pnpm_monorepo)
   harness.fs.mkdir(path_join(pnpm_monorepo, "apps/web"))
   harness.fs
@@ -96,7 +96,7 @@ pipeline test(task) {
   harness.fs.write_text(path_join(pnpm_monorepo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   harness.fs.write_text(path_join(pnpm_monorepo, "apps/web/next.config.ts"), "export default {}\n")
   __io_println("pnpm-monorepo " + fingerprint_signature(project_fingerprint(pnpm_monorepo)))
-  let python_poetry = path_join(root, "python-poetry")
+  const python_poetry = path_join(root, "python-poetry")
   harness.fs.mkdir(python_poetry)
   harness.fs.mkdir(path_join(python_poetry, "tests"))
   harness.fs
@@ -106,7 +106,7 @@ pipeline test(task) {
   )
   harness.fs.write_text(path_join(python_poetry, "poetry.lock"), "# lock\n")
   __io_println("python-poetry " + fingerprint_signature(project_fingerprint(python_poetry)))
-  let python_uv = path_join(root, "python-uv")
+  const python_uv = path_join(root, "python-uv")
   harness.fs.mkdir(python_uv)
   harness.fs.mkdir(path_join(python_uv, "tests"))
   harness.fs
@@ -116,14 +116,14 @@ pipeline test(task) {
   )
   harness.fs.write_text(path_join(python_uv, "uv.lock"), "# lock\n")
   __io_println("python-uv " + fingerprint_signature(project_fingerprint(python_uv)))
-  let go_module = path_join(root, "go-module")
+  const go_module = path_join(root, "go-module")
   harness.fs.mkdir(go_module)
   harness.fs.mkdir(path_join(go_module, "pkg"))
   harness.fs.write_text(path_join(go_module, "go.mod"), "module github.com/acme/service\n\ngo 1.23\n")
   harness.fs.write_text(path_join(go_module, "go.sum"), "example v0.0.0 h1:abc\n")
   harness.fs.write_text(path_join(go_module, "pkg/service.go"), "package pkg\n")
   __io_println("go-module " + fingerprint_signature(project_fingerprint(go_module)))
-  let mixed_repo = path_join(root, "mixed-repo")
+  const mixed_repo = path_join(root, "mixed-repo")
   harness.fs.mkdir(mixed_repo)
   harness.fs.mkdir(path_join(mixed_repo, ".git"))
   harness.fs.mkdir(path_join(mixed_repo, ".github/workflows"))
@@ -144,7 +144,7 @@ pipeline test(task) {
   harness.fs.write_text(path_join(mixed_repo, "portal/pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   harness.fs.write_text(path_join(mixed_repo, ".github/workflows/ci.yml"), "name: ci\non: push\n")
   __io_println("mixed-repo " + fingerprint_signature(project_fingerprint(mixed_repo)))
-  let empty_dir = path_join(root, "empty-dir")
+  const empty_dir = path_join(root, "empty-dir")
   harness.fs.mkdir(empty_dir)
   __io_println("empty-dir " + fingerprint_signature(project_fingerprint(empty_dir)))
 }

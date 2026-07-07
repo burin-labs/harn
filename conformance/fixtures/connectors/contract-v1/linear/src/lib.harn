@@ -13,7 +13,7 @@ import {
 } from "std/graphql"
 import { merge } from "std/json"
 
-var connector_state = {ctx: nil, bindings: []}
+let connector_state = {ctx: nil, bindings: []}
 
 fn __default_signing_secret_id() {
   return "linear/webhook-secret"
@@ -34,12 +34,12 @@ fn __allowed_api_hosts() {
 }
 
 fn __extract_host(url) {
-  let trimmed = trim(to_string(url ?? ""))
+  const trimmed = trim(to_string(url ?? ""))
   if trimmed == "" {
     return nil
   }
-  let lower = lowercase(trimmed)
-  var rest = nil
+  const lower = lowercase(trimmed)
+  let rest = nil
   if lower.starts_with("https://") {
     rest = trimmed[8:len(trimmed)]
   } else if lower.starts_with("http://") {
@@ -47,19 +47,19 @@ fn __extract_host(url) {
   } else {
     return nil
   }
-  let at_idx = rest.index_of("@")
+  const at_idx = rest.index_of("@")
   if at_idx != nil && at_idx >= 0 {
     rest = rest[at_idx + 1:len(rest)]
   }
-  var end = len(rest)
+  let end = len(rest)
   for ch in ["/", "?", "#"] {
-    let idx = rest.index_of(ch)
+    const idx = rest.index_of(ch)
     if idx != nil && idx >= 0 && idx < end {
       end = idx
     }
   }
-  var host = rest[0:end]
-  let colon_idx = host.index_of(":")
+  let host = rest[0:end]
+  const colon_idx = host.index_of(":")
   if colon_idx != nil && colon_idx >= 0 {
     host = host[0:colon_idx]
   }
@@ -67,15 +67,15 @@ fn __extract_host(url) {
 }
 
 fn __validate_api_base_url(url) {
-  let default_url = __default_api_base_url()
+  const default_url = __default_api_base_url()
   if url == nil {
     return default_url
   }
-  let text = trim(to_string(url))
+  const text = trim(to_string(url))
   if text == "" || text == default_url {
     return default_url
   }
-  let host = __extract_host(text)
+  const host = __extract_host(text)
   if host == nil {
     throw {code: "invalid_api_base_url", message: "linear api_base_url must be an absolute http(s) URL"}
   }
@@ -117,7 +117,7 @@ fn __header(headers, name) {
 }
 
 fn __binding_for_raw(raw) {
-  let binding_id = raw?.binding_id ?? raw?.metadata?.binding_id
+  const binding_id = raw?.binding_id ?? raw?.metadata?.binding_id
   if binding_id != nil {
     for binding in connector_state.bindings {
       if binding.id == binding_id || binding.binding_id == binding_id {
@@ -141,7 +141,7 @@ fn __binding_config(raw) {
  * leak if the secret backend doesn't enforce isolation.
  */
 fn __is_allowed_secret_id(value) {
-  let raw = trim(to_string(value ?? ""))
+  const raw = trim(to_string(value ?? ""))
   if raw == "" {
     return false
   }
@@ -149,7 +149,7 @@ fn __is_allowed_secret_id(value) {
 }
 
 fn __secret_ref(value, fallback_id) {
-  let raw = trim(to_string(value ?? ""))
+  const raw = trim(to_string(value ?? ""))
   if raw == "" {
     return secret_get(fallback_id)
   }
@@ -160,7 +160,7 @@ fn __secret_ref(value, fallback_id) {
 }
 
 fn __auth_token(literal, secret_ref, fallback_id) {
-  let raw = trim(to_string(literal ?? ""))
+  const raw = trim(to_string(literal ?? ""))
   if raw != "" {
     return raw
   }
@@ -168,7 +168,7 @@ fn __auth_token(literal, secret_ref, fallback_id) {
 }
 
 fn __secret_id_candidate(value, fallback_name) {
-  let raw = trim(to_string(value ?? ""))
+  const raw = trim(to_string(value ?? ""))
   if raw == "" {
     return nil
   }
@@ -186,7 +186,7 @@ fn __secret_get_optional(secret_id) {
   if secret_id == nil {
     return nil
   }
-  let value = try {
+  const value = try {
     secret_get(secret_id)
   }
   if is_ok(value) {
@@ -196,7 +196,7 @@ fn __secret_get_optional(secret_id) {
 }
 
 fn __secret_ref_with_alias(value, fallback_name, fallback_id) {
-  let candidate = __secret_id_candidate(value, fallback_name)
+  const candidate = __secret_id_candidate(value, fallback_name)
   if candidate != nil {
     return __secret_get_optional(candidate)
   }
@@ -204,18 +204,18 @@ fn __secret_ref_with_alias(value, fallback_name, fallback_id) {
 }
 
 fn __metadata_secret_alias(raw, name) {
-  let alias = raw?.metadata?.secret_ids?.[name] ?? raw?.metadata?.config?.secret_ids?.[name]
+  const alias = raw?.metadata?.secret_ids?.[name] ?? raw?.metadata?.config?.secret_ids?.[name]
     ?? raw?.config?.secret_ids?.[name]
   return __secret_get_optional(__secret_id_candidate(alias, name))
 }
 
 fn __signing_secret(raw) {
-  let metadata_alias = __metadata_secret_alias(raw, "signing_secret")
+  const metadata_alias = __metadata_secret_alias(raw, "signing_secret")
   if metadata_alias != nil {
     return metadata_alias
   }
-  let config = __binding_config(raw)
-  let literal = raw?.signing_secret ?? raw?.metadata?.signing_secret ?? config?.signing_secret
+  const config = __binding_config(raw)
+  const literal = raw?.signing_secret ?? raw?.metadata?.signing_secret ?? config?.signing_secret
   if literal != nil && trim(to_string(literal)) != "" {
     return to_string(literal)
   }
@@ -243,14 +243,14 @@ fn __reject(status, code, message) {
 }
 
 fn __metrics_inc(name, amount = 1) {
-  let _ = try {
+  const _ = try {
     metrics_inc(name, amount)
   }
   return nil
 }
 
 fn __normalize_resource(raw_type) {
-  let value = lowercase(to_string(raw_type ?? ""))
+  const value = lowercase(to_string(raw_type ?? ""))
   if value == "issue" {
     return "issue"
   }
@@ -289,7 +289,7 @@ fn __dedupe_key(raw, body) {
   if body?.webhookId != nil {
     return "linear:" + body.webhookId
   }
-  let delivery = __header(raw.headers, "linear-delivery")
+  const delivery = __header(raw.headers, "linear-delivery")
   if delivery != nil && delivery != "" {
     return "linear:" + delivery
   }
@@ -313,7 +313,7 @@ fn __verify(raw, body) {
   if body?.webhookTimestamp == nil {
     return __reject(400, "missing_webhook_timestamp", "Linear webhookTimestamp is required")
   }
-  let timestamp_ms = __unix_ms(body.webhookTimestamp)
+  const timestamp_ms = __unix_ms(body.webhookTimestamp)
   if timestamp_ms == nil {
     return __reject(
       400,
@@ -324,7 +324,7 @@ fn __verify(raw, body) {
   // F1: refuse to HMAC-verify against a re-serialized body — Linear signs the
   // raw bytes and JSON re-encoding (key ordering, whitespace, escaping) won't
   // round-trip. If the host stripped raw.body_text, we cannot prove integrity.
-  let body_text = raw?.body_text
+  const body_text = raw?.body_text
   if body_text == nil || to_string(body_text) == "" {
     return __reject(
       400,
@@ -335,25 +335,25 @@ fn __verify(raw, body) {
   // F10: trust the clock, not the envelope. raw.received_at is host-supplied
   // and can be plumbed from an attacker-controllable field; deriving `now`
   // from date_now() keeps the replay window meaningful for hostile callers.
-  let received_ms = to_int(date_now().timestamp * 1000)
-  let age_ms = if received_ms >= timestamp_ms {
+  const received_ms = to_int(date_now().timestamp * 1000)
+  const age_ms = if received_ms >= timestamp_ms {
     received_ms - timestamp_ms
   } else {
     timestamp_ms - received_ms
   }
-  let config = __binding_config(raw)
+  const config = __binding_config(raw)
   // F4: cap caller-supplied replay window at __replay_window_max_secs() — a
   // 24h window defeats the freshness check. Default unchanged at 60s.
-  let raw_window = config?.replay_window_secs ?? config?.security?.replay_window_secs
+  const raw_window = config?.replay_window_secs ?? config?.security?.replay_window_secs
     ?? __replay_window_default_secs()
-  let raw_grace = config?.replay_grace_secs ?? config?.security?.replay_grace_secs ?? 0
-  let max = __replay_window_max_secs()
-  let replay_window_secs = if raw_window > max {
+  const raw_grace = config?.replay_grace_secs ?? config?.security?.replay_grace_secs ?? 0
+  const max = __replay_window_max_secs()
+  const replay_window_secs = if raw_window > max {
     max
   } else {
     raw_window
   }
-  let replay_grace_secs = if raw_grace > max {
+  const replay_grace_secs = if raw_grace > max {
     max
   } else {
     raw_grace
@@ -362,13 +362,13 @@ fn __verify(raw, body) {
     __metrics_inc("linear_webhook_replay_rejections", 1)
     return __reject(401, "timestamp_out_of_window", "Linear webhookTimestamp is outside the replay window")
   }
-  let signature = __header(raw.headers, "linear-signature")
+  const signature = __header(raw.headers, "linear-signature")
   if signature == nil || trim(signature) == "" {
     return __reject(401, "missing_signature", "linear-signature header is required")
   }
   // F2: explicit missing_secret guard before hmac so we never compute
   // hmac_sha256(nil, body). Mirrors Slack's `slack/signing_secret` check.
-  let secret = __signing_secret(raw)
+  const secret = __signing_secret(raw)
   if secret == nil || trim(to_string(secret)) == "" {
     return __reject(
       401,
@@ -383,12 +383,12 @@ fn __verify(raw, body) {
 }
 
 fn __event(raw, body) {
-  let resource = __normalize_resource(body?.type ?? __header(raw.headers, "linear-event"))
-  let action = body?.action ?? "update"
+  const resource = __normalize_resource(body?.type ?? __header(raw.headers, "linear-event"))
+  const action = body?.action ?? "update"
   if !__valid_action(action) {
     return __reject(400, "unsupported_action", "Linear action '" + to_string(action) + "' is not supported")
   }
-  let kind = "linear." + resource + "." + action
+  const kind = "linear." + resource + "." + action
   return {
     type: "event",
     event: {
@@ -404,7 +404,7 @@ fn __event(raw, body) {
 }
 
 fn __auth_config(args) {
-  let config = args ?? {}
+  const config = args ?? {}
   if config?.api_token != nil || config?.api_token_secret != nil {
     return {token: __auth_token(config?.api_token, config?.api_token_secret, "linear/api-token"), oauth: false}
   }
@@ -418,8 +418,8 @@ fn __auth_config(args) {
     return {token: __auth_token(config?.api_key, config?.api_key_secret, "linear/api-key"), oauth: false}
   }
   for binding in connector_state.bindings {
-    let binding_config = binding?.config ?? {}
-    let secrets = binding_config?.secrets ?? {}
+    const binding_config = binding?.config ?? {}
+    const secrets = binding_config?.secrets ?? {}
     if secrets?.api_token != nil || binding_config?.api_token != nil {
       return {
         token: __auth_token(binding_config?.api_token, secrets?.api_token, "linear/api-token"),
@@ -468,11 +468,11 @@ fn __rate_limited(status, errors) {
 }
 
 fn __int_header(headers, name) {
-  let value = connector_http_header(headers ?? {}, name)
+  const value = connector_http_header(headers ?? {}, name)
   if value == nil || trim(to_string(value)) == "" {
     return nil
   }
-  let parsed = try {
+  const parsed = try {
     to_int(value)
   }
   if is_ok(parsed) {
@@ -485,7 +485,7 @@ fn __complexity_estimate(query, variables) {
   if query == nil || trim(query) == "" {
     return nil
   }
-  let requested = variables?.first
+  const requested = variables?.first
   if requested != nil && contains(query, "nodes") {
     return to_int(requested) + 1
   }
@@ -499,9 +499,9 @@ fn __complexity_estimate(query, variables) {
 }
 
 fn __graphql_meta(headers, query, variables = nil) {
-  let estimate = __complexity_estimate(query, variables ?? {})
-  let observed = __int_header(headers, "x-complexity")
-  let complexity = observed ?? estimate ?? 0
+  const estimate = __complexity_estimate(query, variables ?? {})
+  const observed = __int_header(headers, "x-complexity")
+  const complexity = observed ?? estimate ?? 0
   return {
     complexity_estimate: estimate,
     observed_complexity: observed ?? 0,
@@ -533,7 +533,7 @@ fn __missing_http_response(response) {
 }
 
 fn __required_string(args, field) {
-  let value = args?.[field]
+  const value = args?.[field]
   if value == nil || trim(to_string(value)) == "" {
     throw {message: "linear " + field + " is required", code: "invalid_args", field: field}
   }
@@ -541,23 +541,23 @@ fn __required_string(args, field) {
 }
 
 fn __graphql(args) {
-  let query = args?.query
+  const query = args?.query
   if query == nil || trim(query) == "" {
     throw {message: "graphql requires query", code: "invalid_args"}
   }
-  let auth = __auth_config(args)
-  let authorization = if auth.oauth {
+  const auth = __auth_config(args)
+  const authorization = if auth.oauth {
     "Bearer " + auth.token
   } else {
     auth.token
   }
-  let request = graphql_request_body(
+  const request = graphql_request_body(
     query,
     args?.variables ?? {},
     {operation_name: args?.operation_name ?? args?.operationName},
   )
-  let api_base_url = __validate_api_base_url(args?.api_base_url)
-  let response = connector_http_json(
+  const api_base_url = __validate_api_base_url(args?.api_base_url)
+  const response = connector_http_json(
     "POST",
     api_base_url,
     {
@@ -567,7 +567,7 @@ fn __graphql(args) {
       body: json_stringify(request),
     },
   )
-  let header_meta = __graphql_meta(response?.headers ?? {}, query, request.variables)
+  const header_meta = __graphql_meta(response?.headers ?? {}, query, request.variables)
   if __missing_http_response(response) {
     throw {
       message: to_string(response?.error?.message ?? "linear GraphQL request failed before receiving a response"),
@@ -580,11 +580,11 @@ fn __graphql(args) {
       meta: __meta_with_complexity({}, header_meta),
     }
   }
-  let envelope = graphql_normalize_response(response, {operation_name: request.operationName})
-  let merged_meta = __meta_with_complexity(envelope.meta, header_meta)
+  const envelope = graphql_normalize_response(response, {operation_name: request.operationName})
+  const merged_meta = __meta_with_complexity(envelope.meta, header_meta)
   if !envelope.ok {
-    let errors = envelope.errors
-    let code = if __rate_limited(envelope.meta.status, errors) {
+    const errors = envelope.errors
+    const code = if __rate_limited(envelope.meta.status, errors) {
       "rate_limited"
     } else if len(errors) > 0 {
       "graphql_error"
@@ -608,7 +608,7 @@ fn __operation(name, document, options = nil) {
 }
 
 fn __execute(operation, variables, args) {
-  let envelope = __graphql(
+  const envelope = __graphql(
     (args ?? {})
       + {
       query: operation.document,
@@ -616,12 +616,12 @@ fn __execute(operation, variables, args) {
       operation_name: operation.operation_name ?? operation.name,
     },
   )
-  let result = if operation.root_field != nil {
+  const result = if operation.root_field != nil {
     graphql_extract(envelope, operation.root_field, operation.result_schema)
   } else {
     envelope.data
   }
-  let shaped_result = if type_of(result) == "dict" {
+  const shaped_result = if type_of(result) == "dict" {
     merge(result, {meta: envelope.meta})
   } else {
     result
@@ -650,7 +650,7 @@ fn __create_comment_operation() {
 }
 
 fn __search_operation(use_term = false) {
-  let document = if use_term {
+  const document = if use_term {
     __search_issues_term_query()
   } else {
     __search_issues_query()
@@ -659,7 +659,7 @@ fn __search_operation(use_term = false) {
 }
 
 fn __list_issues(args) {
-  let connection = __execute(
+  const connection = __execute(
     __list_issues_operation(),
     {
       filter: args?.filter,
@@ -689,15 +689,15 @@ fn __create_comment(args) {
 }
 
 fn __search(args) {
-  let first = args?.first ?? 10
-  let query = __required_string(args, "query")
-  let primary = try {
+  const first = args?.first ?? 10
+  const query = __required_string(args, "query")
+  const primary = try {
     __execute(__search_operation(false), {query: query, first: first}, args).result
   }
   if is_ok(primary) {
     return unwrap(primary)
   }
-  let err = unwrap_err(primary)
+  const err = unwrap_err(primary)
   if !contains(to_string(err?.message ?? ""), "Unknown argument")
     && !__has_graphql_error_code(err?.errors, "GRAPHQL_VALIDATION_FAILED") {
     throw err
@@ -745,15 +745,15 @@ pub fn init(ctx) {
 
 /** Activate Linear trigger bindings for inbound and outbound configuration. */
 pub fn activate(bindings) {
-  let resolved = bindings ?? []
+  const resolved = bindings ?? []
   // F4: reject bindings that try to widen the replay window beyond
   // __replay_window_max_secs(). A configured 24h window is a sharp edge
   // (canonical OTP-lifetime mistake) that defeats the freshness check.
-  let max = __replay_window_max_secs()
+  const max = __replay_window_max_secs()
   for binding in resolved {
-    let cfg = binding?.config ?? {}
-    let window = cfg?.replay_window_secs ?? cfg?.security?.replay_window_secs
-    let grace = cfg?.replay_grace_secs ?? cfg?.security?.replay_grace_secs
+    const cfg = binding?.config ?? {}
+    const window = cfg?.replay_window_secs ?? cfg?.security?.replay_window_secs
+    const grace = cfg?.replay_grace_secs ?? cfg?.security?.replay_grace_secs
     if window != nil && to_int(window) > max {
       throw {
         code: "replay_window_too_large",
@@ -784,8 +784,8 @@ pub fn shutdown() {
 
 /** Verify and normalize one Linear inbound webhook into NormalizeResult v1. */
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text ?? "{}")
-  let rejection = __verify(raw, body)
+  const body = raw.body_json ?? json_parse(raw.body_text ?? "{}")
+  const rejection = __verify(raw, body)
   if rejection != nil {
     return rejection
   }

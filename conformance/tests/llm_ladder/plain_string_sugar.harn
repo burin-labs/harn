@@ -16,9 +16,9 @@ pipeline test(task) {
       {text: "strong wins", model: "mock-strong", provider: "mock"},
     ],
     { ->
-      let result = llm_call("hi", nil, {models: ["mock-cheap", "mock-strong"]})
+      const result = llm_call("hi", nil, {models: ["mock-cheap", "mock-strong"]})
       __io_println(result.text)
-      let attempts = result.routing.attempts
+      const attempts = result.routing.attempts
       __io_println(len(attempts))
       __io_println(attempts[0].status)
       __io_println(attempts[1].status)

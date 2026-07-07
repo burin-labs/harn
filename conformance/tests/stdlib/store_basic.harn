@@ -9,7 +9,7 @@ pipeline default() {
   // Get missing key
   __io_println(store_get("missing"))
   // List keys
-  let keys = store_list()
+  const keys = store_list()
   __io_println(len(keys))
   // Delete
   store_delete("age")
@@ -17,7 +17,7 @@ pipeline default() {
   __io_println(len(store_list()))
   // Complex values
   store_set("config", {theme: "dark", size: 14})
-  let cfg = store_get("config")
+  const cfg = store_get("config")
   __io_println(cfg.theme)
   __io_println(cfg.size)
   // Clear

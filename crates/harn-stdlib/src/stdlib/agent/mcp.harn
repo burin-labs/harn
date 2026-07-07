@@ -6,7 +6,7 @@
  * @api_stability: experimental
  */
 pub fn agent_mcp_bootstrap_if_needed(session, opts) {
-  let specs = opts?.mcp_servers
+  const specs = opts?.mcp_servers
   if specs == nil || len(specs) == 0 {
     return opts
   }
@@ -35,11 +35,11 @@ pub fn agent_mcp_bootstrap_if_needed(session, opts) {
  * @api_stability: experimental
  */
 pub fn agent_mcp_mount_additional(session, opts, requested_specs) {
-  let delta = __mcp_delta_specs(opts, requested_specs ?? [])
+  const delta = __mcp_delta_specs(opts, requested_specs ?? [])
   if len(delta) == 0 {
     return opts + {_mcp_delta_bootstrap: nil}
   }
-  let mounted = __mcp_bootstrap_and_admit(session, opts, delta)
+  const mounted = __mcp_bootstrap_and_admit(session, opts, delta)
   return mounted + {_mcp_delta_bootstrap: mounted?._mcp_bootstrap}
 }
 
@@ -64,9 +64,9 @@ pub fn agent_mcp_admit_bootstrap(opts, result) {
 
 /** Bootstrap `specs` and admit their tools into `opts` (catalog + ceiling). */
 fn __mcp_bootstrap_and_admit(session, opts, specs) {
-  let result = __host_mcp_bootstrap(session.session_id, specs)
-  let prior_info = opts?._mcp_server_info ?? []
-  let out = opts + {_mcp_bootstrap: result, _mcp_server_info: prior_info + (result?.server_info ?? [])}
+  const result = __host_mcp_bootstrap(session.session_id, specs)
+  const prior_info = opts?._mcp_server_info ?? []
+  const out = opts + {_mcp_bootstrap: result, _mcp_server_info: prior_info + (result?.server_info ?? [])}
   return __mcp_admit_tools(out, result)
 }
 
@@ -76,32 +76,32 @@ fn __mcp_bootstrap_and_admit(session, opts, specs) {
  * are visible AND callable. Idempotent: a tool already present is skipped.
  */
 fn __mcp_admit_tools(opts, result) {
-  let tools_added = result?.tools_added ?? []
+  const tools_added = result?.tools_added ?? []
   if len(tools_added) == 0 {
     return opts
   }
-  let existing = opts?.tools
-  let existing_tools = if existing?._type == "tool_registry" {
+  const existing = opts?.tools
+  const existing_tools = if existing?._type == "tool_registry" {
     existing?.tools ?? []
   } else {
     []
   }
-  let reg = {_type: "tool_registry", tools: __mcp_merge_tool_lists(existing_tools, tools_added)}
+  const reg = {_type: "tool_registry", tools: __mcp_merge_tool_lists(existing_tools, tools_added)}
   return __with_mcp_tool_ceiling(opts + {tools: reg}, tools_added)
 }
 
 /** Append `added` tools to `existing`, skipping any whose name is present. */
 fn __mcp_merge_tool_lists(existing, added) {
-  var out = existing
-  var names = []
+  let out = existing
+  let names = []
   for entry in existing {
-    let name = __mcp_tool_ceiling_name(entry)
+    const name = __mcp_tool_ceiling_name(entry)
     if name != "" {
       names = names + [name]
     }
   }
   for entry in added {
-    let name = __mcp_tool_ceiling_name(entry)
+    const name = __mcp_tool_ceiling_name(entry)
     if name != "" && names.contains(name) {
       continue
     }
@@ -115,11 +115,11 @@ fn __mcp_merge_tool_lists(existing, added) {
 
 /** Spec entries whose server name is neither already mounted nor a dup. */
 fn __mcp_delta_specs(opts, specs) {
-  let mounted = __mcp_mounted_server_ids(opts)
-  var delta = []
-  var seen = []
+  const mounted = __mcp_mounted_server_ids(opts)
+  let delta = []
+  let seen = []
   for spec in specs {
-    let name = to_string(spec?.name ?? "")
+    const name = to_string(spec?.name ?? "")
     if name == "" || mounted.contains(name) || seen.contains(name) {
       continue
     }
@@ -131,9 +131,9 @@ fn __mcp_delta_specs(opts, specs) {
 
 /** Server names already mounted this run, from the running `_mcp_server_info`. */
 fn __mcp_mounted_server_ids(opts) {
-  var ids = []
+  let ids = []
   for info in opts?._mcp_server_info ?? [] {
-    let name = to_string(info?.name ?? "")
+    const name = to_string(info?.name ?? "")
     if name != "" && !ids.contains(name) {
       ids = ids + [name]
     }
@@ -159,17 +159,17 @@ fn __mcp_mounted_server_ids(opts) {
  * Idempotent: never double-adds a name already present.
  */
 fn __with_mcp_tool_ceiling(opts, tools_added) {
-  let policy = opts?.policy
+  const policy = opts?.policy
   if type_of(policy) != "dict" {
     return opts
   }
-  let ceiling = policy?.tools
+  const ceiling = policy?.tools
   if type_of(ceiling) != "list" || len(ceiling) == 0 {
     return opts
   }
-  var names = []
+  let names = []
   for entry in tools_added {
-    let name = __mcp_tool_ceiling_name(entry)
+    const name = __mcp_tool_ceiling_name(entry)
     if name != "" && !ceiling.contains(name) && !names.contains(name) {
       names = names + [name]
     }
@@ -185,7 +185,7 @@ fn __mcp_tool_ceiling_name(entry) {
   if type_of(entry) != "dict" {
     return ""
   }
-  let flat = to_string(entry?.name ?? "")
+  const flat = to_string(entry?.name ?? "")
   if flat != "" {
     return flat
   }

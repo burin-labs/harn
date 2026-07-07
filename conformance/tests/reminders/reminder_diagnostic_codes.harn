@@ -5,11 +5,11 @@ fn has_code(result, code) {
 }
 
 pipeline main() {
-  let invalid_type = try {
+  const invalid_type = try {
     transcript.inject_reminder(transcript(), {body: 1})
   }
   __io_println(has_code(invalid_type, "HARN-RMD-001"))
-  let bad_propagate = try {
+  const bad_propagate = try {
     transcript.inject_reminder(transcript(), {body: "remember", propagate: "workspace"})
   }
   __io_println(has_code(bad_propagate, "HARN-RMD-005"))
@@ -21,9 +21,9 @@ pipeline main() {
       evaluate: { _ctx -> return {reminder: {tags: ["bad"]}} },
     },
   )
-  let session = agent_session_open("reminder-diagnostic-codes")
+  const session = agent_session_open("reminder-diagnostic-codes")
   agent_session_reset(session)
-  let bad_provider = try {
+  const bad_provider = try {
     agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
   }
   __io_println(has_code(bad_provider, "HARN-RMD-006"))

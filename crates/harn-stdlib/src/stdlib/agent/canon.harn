@@ -7,7 +7,7 @@ fn __canon_text(value) -> string {
 }
 
 fn __canon_path(root, rel) -> string {
-  let raw = __canon_text(rel)
+  const raw = __canon_text(rel)
   if raw == "" {
     return ""
   }
@@ -18,7 +18,7 @@ fn __canon_path(root, rel) -> string {
 }
 
 fn __canon_manifest_path(root) -> string {
-  let text = __canon_text(root)
+  const text = __canon_text(root)
   if text == "" {
     return ""
   }
@@ -26,7 +26,7 @@ fn __canon_manifest_path(root) -> string {
 }
 
 fn __canon_root_with_manifest(root) -> string {
-  let text = __canon_text(root)
+  const text = __canon_text(root)
   if text == "" {
     return ""
   }
@@ -37,7 +37,7 @@ fn __canon_root_with_manifest(root) -> string {
 }
 
 fn __canon_push_unique(items, value) {
-  let text = __canon_text(value)
+  const text = __canon_text(value)
   if text == "" || contains(items, text) {
     return items
   }
@@ -54,7 +54,7 @@ fn __canon_manifest_has_routing(manifest) -> bool {
 }
 
 fn __canon_selector_matches(values, wanted) -> bool {
-  let target = lowercase(__canon_text(wanted))
+  const target = lowercase(__canon_text(wanted))
   if target == "" {
     return false
   }
@@ -67,20 +67,20 @@ fn __canon_selector_matches(values, wanted) -> bool {
 }
 
 fn __canon_pack_ids_for_path_from_manifest(path, manifest) -> list<string> {
-  let raw = __canon_text(path)
+  const raw = __canon_text(path)
   if raw == "" {
     return []
   }
-  let extension = lowercase(ext(raw))
-  let name = lowercase(basename(raw))
-  var ids = []
+  const extension = lowercase(ext(raw))
+  const name = lowercase(basename(raw))
+  let ids = []
   for pack in manifest?.packs ?? [] {
-    let id = __canon_text(pack?.id)
+    const id = __canon_text(pack?.id)
     if id == "" {
       continue
     }
-    let matches_extension = __canon_selector_matches(pack?.extensions, extension)
-    let matches_name = __canon_selector_matches(pack?.file_names, name)
+    const matches_extension = __canon_selector_matches(pack?.extensions, extension)
+    const matches_name = __canon_selector_matches(pack?.file_names, name)
     if matches_extension || matches_name {
       ids = __canon_push_unique(ids, id)
     }
@@ -102,21 +102,21 @@ fn __canon_pack_ids_for_path_from_manifest(path, manifest) -> list<string> {
  * @api_stability: experimental
  */
 pub fn canon_resolve_root(options = nil) -> string {
-  let opts = options ?? {}
-  let explicit = __canon_text(opts?.canon_root)
+  const opts = options ?? {}
+  const explicit = __canon_text(opts?.canon_root)
   if explicit != "" {
     return explicit
   }
-  let env_root = __canon_root_with_manifest(harness.env.get_or("HARN_CANON_ROOT", ""))
+  const env_root = __canon_root_with_manifest(harness.env.get_or("HARN_CANON_ROOT", ""))
   if env_root != "" {
     return env_root
   }
-  let root = __canon_text(opts?.project_root ?? project_root() ?? cwd() ?? "")
+  const root = __canon_text(opts?.project_root ?? project_root() ?? cwd() ?? "")
   if root == "" {
     return ""
   }
   for candidate in [path_join(root, ".harn", "canon"), path_join(root, ".harn", "harn-canon")] {
-    let found = __canon_root_with_manifest(candidate)
+    const found = __canon_root_with_manifest(candidate)
     if found != "" {
       return found
     }
@@ -132,7 +132,7 @@ pub fn canon_resolve_root(options = nil) -> string {
  * @api_stability: experimental
  */
 pub fn canon_pack_ids_for_path(path, manifest = nil) -> list<string> {
-  let raw = __canon_text(path)
+  const raw = __canon_text(path)
   if raw == "" {
     return []
   }
@@ -154,9 +154,9 @@ pub fn canon_pack_ids_for_path(path, manifest = nil) -> list<string> {
  * @api_stability: experimental
  */
 pub fn canon_pack_ids_for_files(files, manifest = nil) -> list<string> {
-  var ids = []
+  let ids = []
   for file in files ?? [] {
-    let path = __canon_text(file?.path ?? file?.name)
+    const path = __canon_text(file?.path ?? file?.name)
     for id in canon_pack_ids_for_path(path, manifest) {
       ids = __canon_push_unique(ids, id)
     }
@@ -172,9 +172,9 @@ pub fn canon_pack_ids_for_files(files, manifest = nil) -> list<string> {
  * @api_stability: experimental
  */
 pub fn canon_slice_from_files(files, metadata = nil) -> dict {
-  var normalized = []
+  let normalized = []
   for file in files ?? [] {
-    let path = __canon_text(file?.path ?? file?.name)
+    const path = __canon_text(file?.path ?? file?.name)
     if path != "" {
       normalized = normalized
         .push({path: path, text: to_string(file?.text ?? file?.content ?? "")})
@@ -196,11 +196,11 @@ pub fn canon_slice_from_files(files, metadata = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn canon_slice_from_paths(paths, options = nil) -> dict {
-  let opts = options ?? {}
-  let root = opts?.root ?? opts?.workspace_root
-  var files = []
+  const opts = options ?? {}
+  const root = opts?.root ?? opts?.workspace_root
+  let files = []
   for item in paths ?? [] {
-    let path = __canon_text(item?.path ?? item?.name ?? item)
+    const path = __canon_text(item?.path ?? item?.name ?? item)
     if path == "" {
       continue
     }
@@ -208,7 +208,7 @@ pub fn canon_slice_from_paths(paths, options = nil) -> dict {
       files = files.push({path: path, text: to_string(item?.text ?? item?.content ?? "")})
       continue
     }
-    let read_path = __canon_path(root, path)
+    const read_path = __canon_path(root, path)
     if harness.fs.exists(read_path) {
       files = files.push({path: path, text: harness.fs.read_text(read_path)})
     } else if opts?.include_missing ?? false {
@@ -226,12 +226,12 @@ pub fn canon_slice_from_paths(paths, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn canon_load_manifest(canon_root: string) -> dict {
-  let root = __canon_text(canon_root)
+  const root = __canon_text(canon_root)
   if root == "" {
     throw "canon_load_manifest: canon_root is required"
   }
-  let path = __canon_manifest_path(root)
-  let manifest = read_json(path, nil)
+  const path = __canon_manifest_path(root)
+  const manifest = read_json(path, nil)
   if manifest == nil {
     throw "canon_load_manifest: failed to read " + path
   }
@@ -239,7 +239,7 @@ pub fn canon_load_manifest(canon_root: string) -> dict {
 }
 
 fn __canon_manifest_pack(manifest, id) {
-  let wanted = __canon_text(id)
+  const wanted = __canon_text(id)
   for pack in manifest?.packs ?? [] {
     if __canon_text(pack?.id) == wanted {
       return pack
@@ -265,10 +265,10 @@ fn __canon_append_manifest_packs(packs, base_dir, manifest) {
   if manifest == nil {
     return packs
   }
-  var out = packs
+  let out = packs
   for pack in manifest?.packs ?? [] {
-    let id = __canon_text(pack?.id)
-    let invariants = __canon_text(pack?.invariants ?? pack?.path ?? pack?.module_path)
+    const id = __canon_text(pack?.id)
+    const invariants = __canon_text(pack?.invariants ?? pack?.path ?? pack?.module_path)
     if id == "" || invariants == "" {
       continue
     }
@@ -288,15 +288,15 @@ fn __canon_append_manifest_packs(packs, base_dir, manifest) {
 }
 
 fn __canon_manifest_path_for_contribution(package_dir, contribution) -> string {
-  let explicit = __canon_text(contribution?.manifest ?? contribution?.canon_packs ?? contribution?.canonPacks)
+  const explicit = __canon_text(contribution?.manifest ?? contribution?.canon_packs ?? contribution?.canonPacks)
   if explicit != "" {
     return __canon_path(package_dir, explicit)
   }
-  let raw_path = __canon_text(contribution?.path)
+  const raw_path = __canon_text(contribution?.path)
   if raw_path == "" {
     return ""
   }
-  let manifest_path = path_join(__canon_path(package_dir, raw_path), "canon-packs.json")
+  const manifest_path = path_join(__canon_path(package_dir, raw_path), "canon-packs.json")
   if harness.fs.exists(manifest_path) {
     return manifest_path
   }
@@ -304,26 +304,26 @@ fn __canon_manifest_path_for_contribution(package_dir, contribution) -> string {
 }
 
 fn __canon_manifest_from_installed_packages(project_root_value) -> dict? {
-  let root = __canon_text(project_root_value)
+  const root = __canon_text(project_root_value)
   if root == "" {
     return nil
   }
-  let packages_dir = path_join(root, ".harn", "packages")
+  const packages_dir = path_join(root, ".harn", "packages")
   if !harness.fs.exists(packages_dir) {
     return nil
   }
-  var packs = []
+  let packs = []
   for manifest_path in find_files(root, ".harn/packages/*/harn.toml").sort() {
-    let manifest = read_toml(manifest_path, nil)
+    const manifest = read_toml(manifest_path, nil)
     if manifest == nil {
       continue
     }
-    let package_dir = dirname(manifest_path)
+    const package_dir = dirname(manifest_path)
     for contribution in manifest?.contributes ?? [] {
       if __canon_text(contribution?.kind) != "harn.canon" {
         continue
       }
-      let contribution_manifest_path = __canon_manifest_path_for_contribution(package_dir, contribution)
+      const contribution_manifest_path = __canon_manifest_path_for_contribution(package_dir, contribution)
       if contribution_manifest_path != "" {
         packs = __canon_append_manifest_packs(
           packs,
@@ -332,17 +332,17 @@ fn __canon_manifest_from_installed_packages(project_root_value) -> dict? {
         )
         continue
       }
-      let raw_path = __canon_text(contribution?.path ?? contribution?.invariants ?? contribution?.file)
+      const raw_path = __canon_text(contribution?.path ?? contribution?.invariants ?? contribution?.file)
       if raw_path == "" {
         continue
       }
-      let contribution_path = __canon_path(package_dir, raw_path)
-      let invariants = if contribution_path.ends_with(".harn") {
+      const contribution_path = __canon_path(package_dir, raw_path)
+      const invariants = if contribution_path.ends_with(".harn") {
         contribution_path
       } else {
         path_join(contribution_path, "invariants.harn")
       }
-      let id = __canon_text(contribution?.id ?? basename(contribution_path))
+      const id = __canon_text(contribution?.id ?? basename(contribution_path))
       if id == "" {
         continue
       }
@@ -372,12 +372,12 @@ fn __canon_merge_manifest_packs(primary, secondary) -> dict? {
   if secondary == nil {
     return primary
   }
-  var packs = []
+  let packs = []
   for pack in primary?.packs ?? [] {
     packs = packs.push(pack)
   }
   for pack in secondary?.packs ?? [] {
-    let id = __canon_text(pack?.id)
+    const id = __canon_text(pack?.id)
     if id == "" || __canon_manifest_pack({packs: packs}, id) != nil {
       continue
     }
@@ -388,8 +388,8 @@ fn __canon_merge_manifest_packs(primary, secondary) -> dict? {
 
 fn __canon_pack_from_item(item, manifest, canon_root) {
   if type_of(item) == "string" {
-    let id = __canon_text(item)
-    let found = __canon_manifest_pack(manifest, id)
+    const id = __canon_text(item)
+    const found = __canon_manifest_pack(manifest, id)
     if found == nil {
       return {id: id, title: id, invariants: __canon_path(canon_root, path_join(id, "invariants.harn"))}
     }
@@ -402,9 +402,9 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
   if type_of(item) != "dict" {
     throw "canon_resolve_packs: pack entries must be strings or dicts"
   }
-  let id = __canon_text(item?.id ?? item?.pack_id)
-  let title = __canon_text(item?.title ?? id)
-  let invariants = __canon_text(item?.invariants ?? item?.path ?? item?.module_path)
+  const id = __canon_text(item?.id ?? item?.pack_id)
+  const title = __canon_text(item?.title ?? id)
+  const invariants = __canon_text(item?.invariants ?? item?.path ?? item?.module_path)
   if id == "" || invariants == "" {
     throw "canon_resolve_packs: dict pack entries need `id` and `invariants`"
   }
@@ -438,28 +438,28 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
  * @api_stability: experimental
  */
 pub fn canon_resolve_packs(options = nil) -> list<dict> {
-  let opts = options ?? {}
-  let project = __canon_text(opts?.project_root ?? project_root() ?? cwd() ?? "")
-  let explicit_root = __canon_text(opts?.canon_root)
-  let env_root = if explicit_root == "" {
+  const opts = options ?? {}
+  const project = __canon_text(opts?.project_root ?? project_root() ?? cwd() ?? "")
+  const explicit_root = __canon_text(opts?.canon_root)
+  const env_root = if explicit_root == "" {
     __canon_root_with_manifest(harness.env.get_or("HARN_CANON_ROOT", ""))
   } else {
     ""
   }
-  let configured_root = explicit_root != "" || env_root != ""
-  let canon_root = if explicit_root != "" {
+  const configured_root = explicit_root != "" || env_root != ""
+  const canon_root = if explicit_root != "" {
     explicit_root
   } else if env_root != "" {
     env_root
   } else {
     canon_resolve_root(opts)
   }
-  var requested = opts?.packs ?? opts?.pack_ids ?? []
+  let requested = opts?.packs ?? opts?.pack_ids ?? []
   if type_of(requested) == "string" {
     requested = [requested]
   }
-  let needs_manifest = len(requested) == 0 || __canon_requested_needs_manifest(requested)
-  let manifest = opts?.manifest
+  const needs_manifest = len(requested) == 0 || __canon_requested_needs_manifest(requested)
+  const manifest = opts?.manifest
     ?? if needs_manifest && canon_root != nil && __canon_text(canon_root) != "" {
     let root_manifest = canon_load_manifest(canon_root)
     if configured_root {
@@ -475,7 +475,7 @@ pub fn canon_resolve_packs(options = nil) -> list<dict> {
   if len(requested) == 0 {
     requested = canon_pack_ids_for_files(opts?.files ?? opts?.slice?.files ?? [], manifest)
   }
-  var resolved = []
+  let resolved = []
   for item in requested {
     resolved = resolved.push(__canon_pack_from_item(item, manifest, canon_root))
   }
@@ -493,14 +493,14 @@ pub fn canon_resolve_packs(options = nil) -> list<dict> {
  * @api_stability: experimental
  */
 pub fn canon_evaluate_slice(slice, options = nil) -> dict {
-  let opts = options ?? {}
-  let packs = canon_resolve_packs(opts + {slice: slice})
-  var reports = []
-  var selected = []
-  var ok = true
+  const opts = options ?? {}
+  const packs = canon_resolve_packs(opts + {slice: slice})
+  let reports = []
+  let selected = []
+  let ok = true
   for pack in packs {
     selected = selected.push(pack.id)
-    let report = flow_evaluate_invariants(
+    const report = flow_evaluate_invariants(
       "",
       slice,
       {
@@ -524,7 +524,7 @@ pub fn canon_evaluate_slice(slice, options = nil) -> dict {
       },
     )
   }
-  let status = if len(packs) == 0 {
+  const status = if len(packs) == 0 {
     "no_packs"
   } else if ok {
     "pass"
@@ -542,10 +542,10 @@ pub fn canon_evaluate_slice(slice, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn canon_feedback_text(result, options = nil) -> string {
-  let opts = options ?? {}
-  var sections = []
+  const opts = options ?? {}
+  let sections = []
   for pack in result?.packs ?? [] {
-    let body = trim(to_string(pack?.feedback ?? ""))
+    const body = trim(to_string(pack?.feedback ?? ""))
     if body != "" {
       sections = sections.push("[" + pack.pack_id + "] " + pack.title + "\n" + body)
     }
@@ -569,15 +569,15 @@ pub fn canon_feedback_text(result, options = nil) -> string {
  * @api_stability: experimental
  */
 pub fn canon_inject_feedback(session_id: string, slice, options = nil) -> dict {
-  let opts = options ?? {}
-  let result = canon_evaluate_slice(slice, opts)
-  let feedback = canon_feedback_text(result, opts)
-  let mode = lowercase(__canon_text(opts?.inject ?? "feedback"))
-  var reminder_id = nil
+  const opts = options ?? {}
+  const result = canon_evaluate_slice(slice, opts)
+  const feedback = canon_feedback_text(result, opts)
+  const mode = lowercase(__canon_text(opts?.inject ?? "feedback"))
+  let reminder_id = nil
   if feedback != "" && mode == "feedback" {
     agent_session_inject_feedback(session_id, opts?.feedback_kind ?? "harn_canon", feedback)
   } else if feedback != "" && mode == "reminder" {
-    let reminder = (opts?.reminder ?? {})
+    const reminder = (opts?.reminder ?? {})
       + {
       body: feedback,
       tags: opts?.reminder?.tags ?? ["harn-canon"],
@@ -606,13 +606,13 @@ pub fn canon_inject_feedback(session_id: string, slice, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn canon_inject_paths_feedback(session_id: string, paths, options = nil) -> dict {
-  let opts = options ?? {}
-  let slice = canon_slice_from_paths(paths, opts)
+  const opts = options ?? {}
+  const slice = canon_slice_from_paths(paths, opts)
   return canon_inject_feedback(session_id, slice, opts + {files: slice.files})
 }
 
 fn __canon_event_path(item) -> string {
-  let kind = type_of(item)
+  const kind = type_of(item)
   if kind == "string" {
     return __canon_text(item)
   }
@@ -632,7 +632,7 @@ fn __canon_event_path(item) -> string {
 }
 
 fn __canon_event_push_path(items, value) {
-  let path = __canon_event_path(value)
+  const path = __canon_event_path(value)
   if path == "" || contains(items, path) {
     return items
   }
@@ -646,7 +646,7 @@ fn __canon_event_push_path_bucket(items, bucket) {
   if type_of(bucket) != "list" {
     return __canon_event_push_path(items, bucket)
   }
-  var out = items
+  let out = items
   for item in bucket ?? [] {
     out = __canon_event_push_path(out, item)
   }
@@ -654,7 +654,7 @@ fn __canon_event_push_path_bucket(items, bucket) {
 }
 
 fn __canon_event_strip_path_token(raw) -> string {
-  var token = __canon_text(raw)
+  let token = __canon_text(raw)
   while starts_with(token, "`") || starts_with(token, "'") || starts_with(token, "\"")
     || starts_with(token, "(")
     || starts_with(token, "[") {
@@ -696,7 +696,7 @@ pub fn canon_event_write_path_from_result(result) -> string {
     result?.function?.arguments,
   ] {
     if type_of(carrier) == "dict" {
-      let path = __canon_text(
+      const path = __canon_text(
         carrier?.path
           ?? carrier?.file
           ?? carrier?.file_path
@@ -711,14 +711,14 @@ pub fn canon_event_write_path_from_result(result) -> string {
       }
     }
   }
-  let body = __canon_text(result?.observation ?? result?.result ?? result?.rendered_result ?? result?.raw_output)
-  let first_line = to_string((body.split("\n") ?? [""])[0] ?? "")
+  const body = __canon_text(result?.observation ?? result?.result ?? result?.rendered_result ?? result?.raw_output)
+  const first_line = to_string((body.split("\n") ?? [""])[0] ?? "")
   for raw_token in first_line.split(" ") {
-    let token = __canon_event_strip_path_token(raw_token)
+    const token = __canon_event_strip_path_token(raw_token)
     if token == "" {
       continue
     }
-    let extension = lowercase(ext(token))
+    const extension = lowercase(ext(token))
     if contains(token, "/") || extension != "" {
       return token
     }
@@ -733,7 +733,7 @@ fn __canon_event_result_ok(result) -> bool {
   if result?.success != nil {
     return result.success ? true : false
   }
-  let status = lowercase(__canon_text(result?.status))
+  const status = lowercase(__canon_text(result?.status))
   if status == "error" || status == "failed" || status == "failure" {
     return false
   }
@@ -744,7 +744,7 @@ fn __canon_event_push_tool_result_paths(items, result) {
   if type_of(result) != "dict" {
     return items
   }
-  var out = items
+  let out = items
   for bucket in [
     result?.changed_paths ?? result?.changedPaths,
     result?.files_written ?? result?.filesWritten,
@@ -755,7 +755,7 @@ fn __canon_event_push_tool_result_paths(items, result) {
   ] {
     out = __canon_event_push_path_bucket(out, bucket)
   }
-  let tool_name = lowercase(__canon_text(result?.tool_name ?? result?.name))
+  const tool_name = lowercase(__canon_text(result?.tool_name ?? result?.name))
   if contains(["edit", "scaffold", "run_codemod", "write", "write_file"], tool_name)
     && __canon_event_result_ok(result) {
     out = __canon_event_push_path(out, canon_event_write_path_from_result(result))
@@ -767,7 +767,7 @@ fn __canon_event_push_tool_results_paths(items, bucket) {
   if type_of(bucket) != "list" {
     return __canon_event_push_tool_result_paths(items, bucket)
   }
-  var out = items
+  let out = items
   for result in bucket ?? [] {
     out = __canon_event_push_tool_result_paths(out, result)
   }
@@ -785,10 +785,10 @@ fn __canon_event_observation_explicit(item) -> bool {
   if type_of(item) != "dict" {
     return false
   }
-  let schema = __canon_event_observation_field(item, "schema")
-  let kind = lowercase(__canon_event_observation_field(item, "kind"))
-  let event_type = lowercase(__canon_event_observation_field(item, "type"))
-  let mode = lowercase(__canon_event_observation_field(item, "mode"))
+  const schema = __canon_event_observation_field(item, "schema")
+  const kind = lowercase(__canon_event_observation_field(item, "kind"))
+  const event_type = lowercase(__canon_event_observation_field(item, "type"))
+  const mode = lowercase(__canon_event_observation_field(item, "mode"))
   return schema == "harn.probe.v1"
     || kind == "observe_output"
     || kind == "observed_output"
@@ -800,7 +800,7 @@ fn __canon_event_observation_explicit(item) -> bool {
 }
 
 fn __canon_event_symbol(value) -> string {
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "string" {
     return __canon_text(value)
   }
@@ -817,7 +817,7 @@ fn __canon_event_symbol(value) -> string {
     "function_name",
     "functionName",
   ] {
-    let field = __canon_event_observation_field(value, key)
+    const field = __canon_event_observation_field(value, key)
     if field != "" {
       return field
     }
@@ -829,7 +829,7 @@ fn __canon_event_symbol(value) -> string {
 }
 
 fn __canon_event_push_symbol(items, value) {
-  let symbol = __canon_event_symbol(value)
+  const symbol = __canon_event_symbol(value)
   if symbol == "" || contains(items, symbol) {
     return items
   }
@@ -843,7 +843,7 @@ fn __canon_event_push_symbol_bucket(items, bucket) {
   if type_of(bucket) != "list" {
     return __canon_event_push_symbol(items, bucket)
   }
-  var out = items
+  let out = items
   for item in bucket ?? [] {
     out = __canon_event_push_symbol(out, item)
   }
@@ -854,7 +854,7 @@ fn __canon_event_push_tool_result_symbols(items, bucket) {
   if type_of(bucket) != "list" {
     return items
   }
-  var out = items
+  let out = items
   for result in bucket ?? [] {
     out = __canon_event_push_symbol(out, result)
     out = __canon_event_push_symbol(out, result?.result)
@@ -884,7 +884,7 @@ fn __canon_event_push_tool_result_symbols(items, bucket) {
  * @api_stability: experimental
  */
 pub fn canon_event_paths(event) -> list<string> {
-  var paths = []
+  let paths = []
   for bucket in [
     event?.changed_paths ?? [],
     event?.changedPaths ?? [],
@@ -916,7 +916,7 @@ pub fn canon_event_paths(event) -> list<string> {
  * @api_stability: experimental
  */
 pub fn canon_event_observed_symbols(event) -> list<string> {
-  var symbols = []
+  let symbols = []
   for bucket in [
     event?.observed_symbols ?? event?.observedSymbols,
     event?.observed_symbol ?? event?.observedSymbol,
@@ -933,13 +933,13 @@ pub fn canon_event_observed_symbols(event) -> list<string> {
 }
 
 fn __canon_event_state_key(session_id: string, suffix: string, options = nil) -> string {
-  let opts = options ?? {}
-  let prefix = __canon_text(opts?.state_key_prefix ?? "harn.canon_feedback")
+  const opts = options ?? {}
+  const prefix = __canon_text(opts?.state_key_prefix ?? "harn.canon_feedback")
   return prefix + "." + __canon_text(session_id) + "." + suffix
 }
 
 fn __canon_event_stored_observed_symbols(session_id: string, options = nil) -> list {
-  let raw = store_get(__canon_event_state_key(session_id, "observed_symbols", options))
+  const raw = store_get(__canon_event_state_key(session_id, "observed_symbols", options))
   if type_of(raw) == "list" {
     return raw
   }
@@ -954,12 +954,12 @@ fn __canon_event_stored_observed_symbols(session_id: string, options = nil) -> l
  * @api_stability: experimental
  */
 pub fn canon_event_record_observed_symbols(session_id: string, event, options = nil) -> list<string> {
-  let sid = __canon_text(session_id)
-  let event_symbols = canon_event_observed_symbols(event ?? {})
+  const sid = __canon_text(session_id)
+  const event_symbols = canon_event_observed_symbols(event ?? {})
   if sid == "" {
     return event_symbols
   }
-  var merged = __canon_event_stored_observed_symbols(sid, options)
+  let merged = __canon_event_stored_observed_symbols(sid, options)
   for symbol in event_symbols {
     merged = __canon_event_push_symbol(merged, symbol)
   }
@@ -975,10 +975,10 @@ fn __canon_event_provider_paths(provider) {
 }
 
 fn __canon_event_fallback_paths(options = nil) -> list {
-  let opts = options ?? {}
-  let provider = opts?.changed_paths_provider ?? opts?.changedPathsProvider ?? opts?.changed_paths
+  const opts = options ?? {}
+  const provider = opts?.changed_paths_provider ?? opts?.changedPathsProvider ?? opts?.changed_paths
     ?? opts?.changedPaths
-  var paths = []
+  let paths = []
   for item in __canon_event_provider_paths(provider) ?? [] {
     paths = __canon_event_push_path(paths, item)
   }
@@ -986,9 +986,9 @@ fn __canon_event_fallback_paths(options = nil) -> list {
 }
 
 fn __canon_event_options_with_ctx(options, observed_symbols) {
-  let opts = options ?? {}
-  let existing = opts?.ctx ?? opts?.predicate_ctx ?? {}
-  let ctx = if type_of(existing) == "dict" {
+  const opts = options ?? {}
+  const existing = opts?.ctx ?? opts?.predicate_ctx ?? {}
+  const ctx = if type_of(existing) == "dict" {
     existing
   } else {
     {}
@@ -997,7 +997,7 @@ fn __canon_event_options_with_ctx(options, observed_symbols) {
 }
 
 fn __canon_event_is_iteration_end(event) -> bool {
-  let event_type = lowercase(__canon_text(event?.type ?? event?.kind))
+  const event_type = lowercase(__canon_text(event?.type ?? event?.kind))
   return event_type == "iteration_end"
     || event_type == "iteration-end"
     || event_type == "iterationend"
@@ -1021,16 +1021,16 @@ fn __canon_event_is_iteration_end(event) -> bool {
  * @api_stability: experimental
  */
 pub fn canon_event_router(session_id: string, event, options = nil) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if !(opts?.enabled ?? opts?.active ?? true) {
     return nil
   }
-  let observed_symbols = canon_event_record_observed_symbols(session_id, event ?? {}, opts)
+  const observed_symbols = canon_event_record_observed_symbols(session_id, event ?? {}, opts)
   if !__canon_event_is_iteration_end(event ?? {}) {
     return nil
   }
-  let event_paths = canon_event_paths(event ?? {})
-  let paths = if len(event_paths) > 0 {
+  const event_paths = canon_event_paths(event ?? {})
+  const paths = if len(event_paths) > 0 {
     event_paths
   } else {
     __canon_event_fallback_paths(opts)
@@ -1038,18 +1038,18 @@ pub fn canon_event_router(session_id: string, event, options = nil) {
   if len(paths) == 0 {
     return nil
   }
-  let workspace_root = __canon_text(opts?.root ?? opts?.workspace_root ?? opts?.project_root ?? project_root() ?? cwd())
-  let inject_options = __canon_event_options_with_ctx(opts, observed_symbols)
+  const workspace_root = __canon_text(opts?.root ?? opts?.workspace_root ?? opts?.project_root ?? project_root() ?? cwd())
+  const inject_options = __canon_event_options_with_ctx(opts, observed_symbols)
     + {root: workspace_root, project_root: workspace_root, inject: opts?.inject ?? "reminder"}
-  let injected = try {
+  const injected = try {
     canon_inject_paths_feedback(session_id, paths, inject_options)
   }
   if !is_ok(injected) {
-    let message = to_string(injected)
+    const message = to_string(injected)
     store_set(__canon_event_state_key(session_id, "last_error", opts), message)
     return {ok: false, error: message, paths: paths}
   }
-  let result = unwrap(injected) + {paths: paths}
+  const result = unwrap(injected) + {paths: paths}
   store_set(__canon_event_state_key(session_id, "last_result", opts), result)
   return result
 }
@@ -1062,16 +1062,16 @@ pub fn canon_event_router(session_id: string, event, options = nil) {
  * @api_stability: experimental
  */
 pub fn canon_install_feedback_sink(session_id: string, options = nil) -> nil {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if !(opts?.enabled ?? opts?.active ?? true) {
     return nil
   }
-  let key = __canon_event_state_key(session_id, "installed", opts)
+  const key = __canon_event_state_key(session_id, "installed", opts)
   if store_get(key) {
     return nil
   }
   store_set(key, true)
-  let handler = { event -> canon_event_router(session_id, event, opts) }
+  const handler = { event -> canon_event_router(session_id, event, opts) }
   agent_subscribe(session_id, handler)
   return nil
 }

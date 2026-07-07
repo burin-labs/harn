@@ -18,7 +18,7 @@ pipeline default() {
       llm_text("{\"best_index\": 1, \"scores\": [0.2, 0.9, 0.3], \"reasoning\": \"B wins\"}"),
     ],
     { ->
-      let bon_caller = { call ->
+      const bon_caller = { call ->
         let result = best_of_n(
           call.prompt,
           call.system,
@@ -39,7 +39,7 @@ pipeline default() {
           },
         }
       }
-      let result = agent_loop("hi", nil, {provider: "mock", llm_caller: bon_caller, max_iterations: 1})
+      const result = agent_loop("hi", nil, {provider: "mock", llm_caller: bon_caller, max_iterations: 1})
       __io_println(result.status)
       __io_println(result.visible_text)
     },

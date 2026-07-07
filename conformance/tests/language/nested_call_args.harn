@@ -28,9 +28,9 @@ pipeline test(task) {
   // Mixed: literal, nested call, nested call
   log(concat3("lit", identity("mid"), concat3("x", "y", "z")))
   // Nested call returning a dict used as arg
-  let merged = make_dict(identity("val"))
+  const merged = make_dict(identity("val"))
   log(merged["key"])
   // Nested with ?? inside call args (regression for precedence bug)
-  let name = nil
+  const name = nil
   log(concat3("base", name ?? "fallback", identity(name ?? "tag")))
 }

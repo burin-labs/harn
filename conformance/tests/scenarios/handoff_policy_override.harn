@@ -8,7 +8,7 @@ import "std/handoffs"
 import { with_handoff_artifact } from "std/llm/tool_middleware"
 
 fn note_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_note",
@@ -61,10 +61,10 @@ fn successful_handoff_result(payload) {
 }
 
 fn review_captain_mock(envelope) {
-  let policy = current_policy()
-  let tools = note_tools()
-  let read_result = agent_dispatch_tool_call({name: "read_note", id: "read-1", arguments: {path: "notes.txt"}}, tools)
-  let denied = agent_dispatch_tool_call({name: "write_note", id: "write-1", arguments: {path: "notes.txt"}}, tools)
+  const policy = current_policy()
+  const tools = note_tools()
+  const read_result = agent_dispatch_tool_call({name: "read_note", id: "read-1", arguments: {path: "notes.txt"}}, tools)
+  const denied = agent_dispatch_tool_call({name: "write_note", id: "write-1", arguments: {path: "notes.txt"}}, tools)
   return {
     source_handoff: envelope?.audit?.scope?.source_handoff,
     handoff_policy_tool: envelope?.handoff?.policy_override?.tools[0],
@@ -76,7 +76,7 @@ fn review_captain_mock(envelope) {
 }
 
 pipeline main() {
-  let routes = [
+  const routes = [
     {
       id: "handoff-policy-review",
       kind: "merge_receipt",
@@ -84,7 +84,7 @@ pipeline main() {
       route: [{target: "review_captain", when: "always"}],
     },
   ]
-  let payload = {
+  const payload = {
     kind: "merge_receipt",
     source_persona: "merge_captain",
     target_persona_or_human: {kind: "persona", id: "review_captain", label: "review_captain"},
@@ -93,12 +93,12 @@ pipeline main() {
     requested_capabilities: ["review"],
     policy_override: {tools: ["read_note"], side_effect_level: "read_only"},
   }
-  let record = handoff(payload)
-  let mw = with_handoff_artifact()
-  let audited = mw(handoff_tool_call(), successful_handoff_result(payload))
-  let routed = handoff_routed(payload, routes, {})
-  let dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
-  let invocation = dispatch?.dispatch_receipt?.invocation_result
+  const record = handoff(payload)
+  const mw = with_handoff_artifact()
+  const audited = mw(handoff_tool_call(), successful_handoff_result(payload))
+  const routed = handoff_routed(payload, routes, {})
+  const dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
+  const invocation = dispatch?.dispatch_receipt?.invocation_result
   __io_println(record?.policy_override?.tools[0] == "read_note")
   __io_println(audited?.audit?.handoff?.policy_override?.tools[0] == "read_note")
   __io_println(dispatch?.audit?.scope?.source_handoff == routed?.id)

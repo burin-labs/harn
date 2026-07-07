@@ -14,11 +14,11 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(task) {
-  let topic = "oauth.client.audit"
-  let cursor = event_log.latest(topic) ?? 0
-  let _ = mock_time(1700000000000)
-  let store = memory()
-  let provider = custom(
+  const topic = "oauth.client.audit"
+  const cursor = event_log.latest(topic) ?? 0
+  const _ = mock_time(1700000000000)
+  const store = memory()
+  const provider = custom(
     {
       id: "mockExpiredRefresh",
       auth_url: "https://idp.example/authorize",
@@ -26,8 +26,8 @@ pipeline test(task) {
       default_scopes: ["read"],
     },
   )
-  let now = to_int(harness.clock.timestamp())
-  let stored = {
+  const now = to_int(harness.clock.timestamp())
+  const stored = {
     access_token: "ACCESS-STALE",
     refresh_token: "REFRESH-DEAD",
     issued_at_unix: now - 3600,
@@ -35,7 +35,7 @@ pipeline test(task) {
     token_type: "Bearer",
   }
   store.set("mockExpiredRefresh", stored)
-  let cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  const cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
   http_mock_clear()
   http_mock(
     "POST",
@@ -46,10 +46,10 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  var threw = false
-  var caught_message = ""
+  let threw = false
+  let caught_message = ""
   try {
-    let _ = token(cli)
+    const _ = token(cli)
   } catch (err) {
     caught_message = to_string(err)
     threw = true
@@ -66,7 +66,7 @@ pipeline test(task) {
   // Storage MUST NOT be wiped on a failed refresh — the caller still
   // owns the (now-useless) previous credential and can re-run
   // authorization without losing scope/expiry metadata for audit.
-  let after = store.get("mockExpiredRefresh")
+  const after = store.get("mockExpiredRefresh")
   assert_eq(after.access_token, "ACCESS-STALE", "storage access token unchanged after failed refresh")
   assert_eq(
     after.refresh_token,
@@ -74,15 +74,15 @@ pipeline test(task) {
     "storage refresh token unchanged after failed refresh",
   )
   // Confirm we did try to refresh exactly once — no silent retry.
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "exactly one POST to the token endpoint")
   assert(contains(calls[0].body, "grant_type=refresh_token"), "refresh grant used")
   assert(contains(calls[0].body, "refresh_token=REFRESH-DEAD"), "old refresh token sent")
   // No token_refreshed audit should fire because the refresh failed:
   // event_log.latest() on the topic must not have advanced past the
   // cursor captured before the call.
-  let latest_after = event_log.latest(topic) ?? 0
+  const latest_after = event_log.latest(topic) ?? 0
   assert_eq(latest_after, cursor, "no audit events emitted on failed refresh")
-  let _ = unmock_time()
+  const _ = unmock_time()
   log("oauth refresh token expired ok")
 }

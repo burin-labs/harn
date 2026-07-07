@@ -5,7 +5,7 @@
  * so this is the conformance signal for the missing-context guard.
  */
 pipeline default() {
-  let pipeline_emit = try {
+  const pipeline_emit = try {
     emit_channel("pipeline:stage.done", {n: 1}, {id: "outside-pipeline"})
   }
   __io_println(is_err(pipeline_emit))

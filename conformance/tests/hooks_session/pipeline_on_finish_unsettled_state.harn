@@ -7,10 +7,10 @@ import { counts, is_empty, summary, unsettled_state } from "std/lifecycle"
 pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
-      let state = harness.unsettled_state()
-      let helper_state = unsettled_state(harness)
-      let direct_counts = harness.counts(state)
-      let helper_counts = counts(helper_state)
+      const state = harness.unsettled_state()
+      const helper_state = unsettled_state(harness)
+      const direct_counts = harness.counts(state)
+      const helper_counts = counts(helper_state)
       harness.stdio
         .println("empty=" + to_string(harness.is_empty(state)) + "/" + to_string(is_empty(state)))
       harness.stdio
@@ -21,22 +21,22 @@ pipeline default() {
           + ","
           + to_string(direct_counts.in_flight),
       )
-      let suspended_decision = if direct_counts.suspended == 0 {
+      const suspended_decision = if direct_counts.suspended == 0 {
         "none"
       } else {
         "resume"
       }
-      let trigger_decision = if helper_counts.queued == 0 {
+      const trigger_decision = if helper_counts.queued == 0 {
         "none"
       } else {
         "ack"
       }
-      let handoff_decision = if helper_counts.partial == 0 {
+      const handoff_decision = if helper_counts.partial == 0 {
         "none"
       } else {
         "ack"
       }
-      let llm_decision = if direct_counts.in_flight == 0 {
+      const llm_decision = if direct_counts.in_flight == 0 {
         "none"
       } else {
         "wait"
@@ -46,8 +46,8 @@ pipeline default() {
       harness.stdio.println("handoff_decision=" + handoff_decision)
       harness.stdio.println("llm_decision=" + llm_decision)
       harness.stdio.println("summary=" + summary(state))
-      let ack = harness.acknowledge_trigger("missing-trigger")
-      let wait = harness.wait_for_any_settlement(0)
+      const ack = harness.acknowledge_trigger("missing-trigger")
+      const wait = harness.wait_for_any_settlement(0)
       harness.stdio.println("ack=" + ack.status)
       harness.stdio.println("wait=" + wait.status)
       return return_value

@@ -198,7 +198,7 @@ fn __text(value) -> string {
 }
 
 fn __text_or_nil(value) {
-  let text = __text(value)
+  const text = __text(value)
   if text == "" {
     return nil
   }
@@ -216,7 +216,7 @@ fn __bool(value, fallback) -> bool {
   if type_of(value) == "bool" {
     return value
   }
-  let text = __lower(value)
+  const text = __lower(value)
   if text == "true" || text == "yes" || text == "1" || text == "on" {
     return true
   }
@@ -241,9 +241,9 @@ fn __float_or_nil(value) {
 }
 
 fn __string_list(value) -> list<string> {
-  var out = []
+  let out = []
   for item in __list(value) {
-    let text = __lower(item)
+    const text = __lower(item)
     if text != "" {
       out = out + [text]
     }
@@ -252,7 +252,7 @@ fn __string_list(value) -> list<string> {
 }
 
 fn __contains_ci(values, value) -> bool {
-  let needle = __lower(value)
+  const needle = __lower(value)
   if needle == "" {
     return false
   }
@@ -260,7 +260,7 @@ fn __contains_ci(values, value) -> bool {
 }
 
 fn __allow_list_allows(values, value) -> bool {
-  let normalized = __string_list(values)
+  const normalized = __string_list(values)
   if len(normalized) == 0 {
     return true
   }
@@ -268,7 +268,7 @@ fn __allow_list_allows(values, value) -> bool {
 }
 
 fn __recording_mode(value) -> string {
-  let mode = __lower(value)
+  const mode = __lower(value)
   if mode == "full" {
     return "full"
   }
@@ -279,7 +279,7 @@ fn __recording_mode(value) -> string {
 }
 
 fn __completion_kind(value) -> string {
-  let kind = __lower(value)
+  const kind = __lower(value)
   if kind == "inline_replace" || kind == "replace" {
     return "inline_replace"
   }
@@ -293,7 +293,7 @@ fn __completion_kind(value) -> string {
 }
 
 fn __trigger_kind(value) -> string {
-  let trigger = __lower(value)
+  const trigger = __lower(value)
   if trigger == "invoked" || trigger == "manual" {
     return "invoked"
   }
@@ -307,7 +307,7 @@ fn __decision(value) -> string {
   if type_of(value) == "bool" {
     return value ? "accepted" : "rejected"
   }
-  let decision = __lower(value)
+  const decision = __lower(value)
   if decision == "accept" || decision == "accepted" || decision == "applied" {
     return "accepted"
   }
@@ -324,12 +324,12 @@ fn __decision(value) -> string {
 }
 
 fn __local_provider(provider) -> bool {
-  let p = __lower(provider)
+  const p = __lower(provider)
   return p == "ollama" || p == "local" || p == "llamacpp" || p == "mlx" || p == "vllm" || p == "tgi"
 }
 
 fn __prompt_chars(context) -> int {
-  let ctx = __dict(context)
+  const ctx = __dict(context)
   return len(__text(ctx?.prefix)) + len(__text(ctx?.suffix)) + len(json_stringify(ctx?.metadata ?? {}))
 }
 
@@ -355,8 +355,8 @@ fn __completion_id(prefix, body) -> string {
  * @api_stability: experimental
  */
 pub fn completion_context(input = {}) -> CompletionContext {
-  let raw = __dict(input)
-  let cursor = __dict(raw?.cursor)
+  const raw = __dict(input)
+  const cursor = __dict(raw?.cursor)
   return filter_nil(
     {
       schema: "harn.completion.context.v1",
@@ -399,10 +399,10 @@ pub fn completion_context(input = {}) -> CompletionContext {
  * @api_stability: experimental
  */
 pub fn completion_policy(input = {}) -> CompletionPolicy {
-  let raw = __dict(input)
-  let languages = __dict(raw?.languages)
-  let providers = __dict(raw?.providers)
-  let models = __dict(raw?.models)
+  const raw = __dict(input)
+  const languages = __dict(raw?.languages)
+  const providers = __dict(raw?.providers)
+  const models = __dict(raw?.models)
   return {
     schema: "harn.completion.policy.v1",
     enabled: __bool(raw?.enabled, true),
@@ -456,11 +456,11 @@ pub fn completion_policy(input = {}) -> CompletionPolicy {
  * @api_stability: experimental
  */
 pub fn completion_policy_decision(context = {}, route = {}, policy = {}) -> CompletionPolicyDecision {
-  let ctx = completion_context(context)
-  let r = __dict(route)
-  let p = completion_policy(policy)
-  let provider = __text(r?.provider)
-  let model = __text(r?.model_id ?? r?.modelID ?? r?.model ?? r?.id)
+  const ctx = completion_context(context)
+  const r = __dict(route)
+  const p = completion_policy(policy)
+  const provider = __text(r?.provider)
+  const model = __text(r?.model_id ?? r?.modelID ?? r?.model ?? r?.id)
   if !p.enabled {
     return {allowed: false, reason_code: "disabled", reason: "Suggestions are turned off.", policy: p}
   }
@@ -530,9 +530,9 @@ pub fn completion_policy_decision(context = {}, route = {}, policy = {}) -> Comp
  * @api_stability: experimental
  */
 pub fn completion_model_route(opts = {}) -> CompletionRoute {
-  let raw = __dict(opts)
-  let constraints = __dict(raw?.constraints)
-  var query = {
+  const raw = __dict(opts)
+  const constraints = __dict(raw?.constraints)
+  let query = {
     strengths: constraints?.strengths ?? ["coding"],
     exclude_deprecated: constraints?.exclude_deprecated ?? true,
     available_only: constraints?.available_only ?? raw?.available_only ?? false,
@@ -545,7 +545,7 @@ pub fn completion_model_route(opts = {}) -> CompletionRoute {
   if raw?.tier != nil {
     query = query + {tier: raw.tier}
   }
-  let selected = pick_model(query)
+  const selected = pick_model(query)
   if selected == nil {
     return {
       schema: "harn.completion.route.v1",
@@ -575,10 +575,10 @@ pub fn completion_model_route(opts = {}) -> CompletionRoute {
  * @api_stability: experimental
  */
 pub fn completion_proposal(input = {}) -> CompletionProposal {
-  let raw = __dict(input)
-  let kind = __completion_kind(raw?.kind ?? raw?.completion_kind)
-  let insert_text = __text(raw?.insert_text ?? raw?.suggestion ?? raw?.text)
-  let body = filter_nil(
+  const raw = __dict(input)
+  const kind = __completion_kind(raw?.kind ?? raw?.completion_kind)
+  const insert_text = __text(raw?.insert_text ?? raw?.suggestion ?? raw?.text)
+  const body = filter_nil(
     {
       kind: kind,
       file_path: __text_or_nil(raw?.file_path ?? raw?.filePath),
@@ -617,8 +617,8 @@ pub fn completion_proposal(input = {}) -> CompletionProposal {
  * @api_stability: experimental
  */
 pub fn completion_context_hash(context = {}, route = {}) -> string {
-  let ctx = completion_context(context)
-  let r = __dict(route)
+  const ctx = completion_context(context)
+  const r = __dict(route)
   return "sha256:"
     + sha256(
     json_stringify(
@@ -644,11 +644,11 @@ pub fn completion_context_hash(context = {}, route = {}) -> string {
  * @api_stability: experimental
  */
 pub fn completion_usage(input = {}) -> CompletionUsage {
-  let raw = __dict(input)
-  let input_tokens = __int_or(raw?.input_tokens ?? raw?.prompt_tokens, 0)
-  let output_tokens = __int_or(raw?.output_tokens ?? raw?.completion_tokens, 0)
-  let cache_read_tokens = __int_or(raw?.cache_read_tokens ?? raw?.cached_input_tokens, 0)
-  let cache_write_tokens = __int_or(raw?.cache_write_tokens, 0)
+  const raw = __dict(input)
+  const input_tokens = __int_or(raw?.input_tokens ?? raw?.prompt_tokens, 0)
+  const output_tokens = __int_or(raw?.output_tokens ?? raw?.completion_tokens, 0)
+  const cache_read_tokens = __int_or(raw?.cache_read_tokens ?? raw?.cached_input_tokens, 0)
+  const cache_write_tokens = __int_or(raw?.cache_write_tokens, 0)
   return filter_nil(
     {
       schema: "harn.completion.usage.v1",
@@ -670,7 +670,7 @@ fn __event_id(prefix, record_id, timestamp) -> string {
 }
 
 fn __event_timestamp(opts) -> string {
-  let explicit = __text_or_nil(opts?.timestamp)
+  const explicit = __text_or_nil(opts?.timestamp)
   if explicit != nil {
     return explicit
   }
@@ -678,7 +678,7 @@ fn __event_timestamp(opts) -> string {
 }
 
 fn __usage_from(proposal, usage) {
-  let u = completion_usage(usage)
+  const u = completion_usage(usage)
   return u
     + filter_nil({provider: u.provider ?? proposal.provider, model_id: u.model_id ?? proposal.model_id})
 }
@@ -694,16 +694,16 @@ fn __usage_from(proposal, usage) {
  * @api_stability: experimental
  */
 pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}) -> CompletionEvent {
-  let prop = completion_proposal(proposal)
-  let ctx = completion_context(context)
-  let options = __dict(opts)
-  let policy = completion_policy(options?.policy)
-  let timestamp = __event_timestamp(options)
-  let record_id = __text_or_nil(options?.record_id ?? prop.id)
+  const prop = completion_proposal(proposal)
+  const ctx = completion_context(context)
+  const options = __dict(opts)
+  const policy = completion_policy(options?.policy)
+  const timestamp = __event_timestamp(options)
+  const record_id = __text_or_nil(options?.record_id ?? prop.id)
     ?? __completion_id("record", {proposal: prop, context: ctx})
-  let route = {provider: prop.provider, model_id: prop.model_id}
-  let u = __usage_from(prop, usage)
-  var event = filter_nil(
+  const route = {provider: prop.provider, model_id: prop.model_id}
+  const u = __usage_from(prop, usage)
+  let event = filter_nil(
     {
       schema: "harn.completion.event.v1",
       event: "shown",
@@ -736,7 +736,7 @@ pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}
       metadata: __dict(options?.metadata),
     },
   )
-  let prompt = __text_or_nil(options?.prompt)
+  const prompt = __text_or_nil(options?.prompt)
   if prompt != nil && policy.prompt_recording == "full" {
     event = event + {prompt: prompt}
   } else if prompt != nil && policy.prompt_recording == "metadata" {
@@ -753,11 +753,11 @@ pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}
  * @api_stability: experimental
  */
 pub fn completion_decision_event(shown_event = {}, decision = "rejected", opts = {}) -> CompletionEvent {
-  let shown = __dict(shown_event)
-  let options = __dict(opts)
-  let timestamp = __event_timestamp(options)
-  let normalized = __decision(decision)
-  let record_id = __text_or_nil(options?.record_id ?? options?.recordID ?? shown?.record_id)
+  const shown = __dict(shown_event)
+  const options = __dict(opts)
+  const timestamp = __event_timestamp(options)
+  const normalized = __decision(decision)
+  const record_id = __text_or_nil(options?.record_id ?? options?.recordID ?? shown?.record_id)
     ?? __completion_id("record", shown)
   return filter_nil(
     {
@@ -791,16 +791,16 @@ pub fn completion_decision_event(shown_event = {}, decision = "rejected", opts =
  * @api_stability: experimental
  */
 pub fn completion_trust_record(event = {}, opts = {}) -> CompletionTrustRecord {
-  let row = __dict(event)
-  let options = __dict(opts)
-  let decision = __decision(row?.decision ?? options?.decision)
-  let kind = __completion_kind(row?.completion_kind)
-  let provider = __text(row?.provider ?? options?.provider ?? "unknown")
-  let model = __text(
+  const row = __dict(event)
+  const options = __dict(opts)
+  const decision = __decision(row?.decision ?? options?.decision)
+  const kind = __completion_kind(row?.completion_kind)
+  const provider = __text(row?.provider ?? options?.provider ?? "unknown")
+  const model = __text(
     row?.model_id ?? row?.modelID ?? row?.model ?? options?.model_id ?? options?.modelID
       ?? "unknown",
   )
-  let outcome = if decision == "accepted" {
+  const outcome = if decision == "accepted" {
     "success"
   } else if decision == "timed_out" {
     "timeout"
@@ -843,9 +843,9 @@ pub fn completion_trust_record(event = {}, opts = {}) -> CompletionTrustRecord {
  * @api_stability: experimental
  */
 pub fn completion_usage_record(event = {}, opts = {}) -> CompletionUsageRecord {
-  let row = __dict(event)
-  let options = __dict(opts)
-  let usage = completion_usage(row?.usage)
+  const row = __dict(event)
+  const options = __dict(opts)
+  const usage = completion_usage(row?.usage)
   return filter_nil(
     {
       schema_version: 1,

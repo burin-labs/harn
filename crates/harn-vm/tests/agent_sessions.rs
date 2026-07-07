@@ -42,8 +42,8 @@ fn harn_string(value: &str) -> String {
 fn open_mints_and_is_idempotent() {
     let lines = out(r"
 pipeline main(task) {
-  let a = agent_session_open()
-  let b = agent_session_open(a)
+  const a = agent_session_open()
+  const b = agent_session_open(a)
   log(a == b)
   log(agent_session_exists(a))
 }
@@ -55,11 +55,11 @@ pipeline main(task) {
 fn inject_then_length_and_snapshot() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_inject(s, {role: "user", content: "hello"})
   agent_session_inject(s, {role: "assistant", content: "hi"})
   log(agent_session_length(s))
-  let snap = agent_session_snapshot(s)
+  const snap = agent_session_snapshot(s)
   log(len(snap["messages"]))
   log(snap["parent_id"] == nil)
   log(len(snap["child_ids"]))
@@ -73,7 +73,7 @@ pipeline main(task) {
 fn reset_clears_history_preserves_id() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_inject(s, {role: "user", content: "a"})
   agent_session_inject(s, {role: "user", content: "b"})
   agent_session_reset(s)
@@ -88,11 +88,11 @@ pipeline main(task) {
 fn tool_format_contract_is_first_class_and_resettable() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open("tool-contract")
+  const s = agent_session_open("tool-contract")
   log(agent_session_tool_format(s) == nil)
   agent_session_claim_tool_format(s, "native")
   log(agent_session_tool_format(s))
-  let conflict = try {
+  const conflict = try {
     agent_session_claim_tool_format(s, "text")
   }
   log(is_err(conflict))
@@ -111,15 +111,15 @@ fn agent_loop_rejects_tool_format_switch_on_same_session() {
 pipeline main(task) {
   llm_mock_clear()
   llm_mock({text: "first ##DONE##"})
-  let s = agent_session_open("agent-loop-tool-contract")
-  let first = agent_loop(
+  const s = agent_session_open("agent-loop-tool-contract")
+  const first = agent_loop(
     "first turn",
     nil,
     {provider: "mock", model: "mock", session_id: s, max_iterations: 1, tool_format: "text"},
   )
   log(first?.tools?.mode)
   log(agent_session_tool_format(s))
-  let switched = try {
+  const switched = try {
     agent_loop(
       "second turn",
       nil,
@@ -137,12 +137,12 @@ pipeline main(task) {
 fn fork_is_independent_in_both_directions() {
     let lines = out(r#"
 pipeline main(task) {
-  let src = agent_session_open()
+  const src = agent_session_open()
   agent_session_inject(src, {role: "user", content: "shared"})
-  let dst = agent_session_fork(src)
-  let src_snap = agent_session_snapshot(src)
-  let dst_snap = agent_session_snapshot(dst)
-  let dst_ancestry = agent_session_ancestry(dst)
+  const dst = agent_session_fork(src)
+  const src_snap = agent_session_snapshot(src)
+  const dst_snap = agent_session_snapshot(dst)
+  const dst_ancestry = agent_session_ancestry(dst)
   log(agent_session_length(dst))
   log(dst_snap["parent_id"] == src)
   log(len(src_snap["child_ids"]))
@@ -164,11 +164,11 @@ pipeline main(task) {
 fn fork_carries_tool_format_contract() {
     let lines = out(r#"
 pipeline main(task) {
-  let src = agent_session_open("tool-fork-src")
+  const src = agent_session_open("tool-fork-src")
   agent_session_claim_tool_format(src, "native")
-  let dst = agent_session_fork(src, "tool-fork-dst")
+  const dst = agent_session_fork(src, "tool-fork-dst")
   log(agent_session_tool_format(dst))
-  let conflict = try {
+  const conflict = try {
     agent_session_claim_tool_format(dst, "text")
   }
   log(is_err(conflict))
@@ -181,13 +181,13 @@ pipeline main(task) {
 fn fork_at_records_branch_index_and_root_lineage() {
     let lines = out(r#"
 pipeline main(task) {
-  let root = agent_session_open("root")
+  const root = agent_session_open("root")
   agent_session_inject(root, {role: "user", content: "a"})
   agent_session_inject(root, {role: "assistant", content: "b"})
   agent_session_inject(root, {role: "user", content: "c"})
-  let branch = agent_session_fork_at(root, 2, "branch")
-  let snap = agent_session_snapshot(branch)
-  let ancestry = agent_session_ancestry(branch)
+  const branch = agent_session_fork_at(root, 2, "branch")
+  const snap = agent_session_snapshot(branch)
+  const ancestry = agent_session_ancestry(branch)
   log(agent_session_length(branch))
   log(snap["branched_at_event_index"])
   log(ancestry["parent_id"] == root)
@@ -201,15 +201,15 @@ pipeline main(task) {
 fn trim_retains_last_n() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_inject(s, {role: "user", content: "a"})
   agent_session_inject(s, {role: "user", content: "b"})
   agent_session_inject(s, {role: "user", content: "c"})
   agent_session_inject(s, {role: "user", content: "d"})
-  let kept = agent_session_trim(s, 2)
+  const kept = agent_session_trim(s, 2)
   log(kept)
   log(agent_session_length(s))
-  let snap = agent_session_snapshot(s)
+  const snap = agent_session_snapshot(s)
   log(snap["messages"][0]["content"])
   log(snap["messages"][1]["content"])
 }
@@ -221,7 +221,7 @@ pipeline main(task) {
 fn trim_clamps_to_available() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_inject(s, {role: "user", content: "only"})
   log(agent_session_trim(s, 100))
 }
@@ -233,7 +233,7 @@ pipeline main(task) {
 fn close_removes_session() {
     let lines = out(r"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_close(s)
   log(agent_session_exists(s))
 }
@@ -245,7 +245,7 @@ pipeline main(task) {
 fn inject_without_role_errors() {
     let err = run(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_inject(s, {content: "oops"})
 }
 "#)
@@ -277,9 +277,9 @@ fn exists_and_snapshot_on_unknown_are_safe() {
     let lines = out(r#"
 pipeline main(task) {
   log(agent_session_exists("nope"))
-  let snap = agent_session_snapshot("nope")
+  const snap = agent_session_snapshot("nope")
   log(snap == nil)
-  let ancestry = agent_session_ancestry("nope")
+  const ancestry = agent_session_ancestry("nope")
   log(ancestry == nil)
 }
 "#);
@@ -291,7 +291,7 @@ fn fork_at_on_unknown_or_negative_keep_first_errors() {
     for op in [
         r#"agent_session_fork_at("does-not-exist", 1)"#,
         r"
-let s = agent_session_open()
+const s = agent_session_open()
 agent_session_fork_at(s, -1)
 ",
     ] {
@@ -327,7 +327,7 @@ fn lru_eviction_kicks_in_at_cap() {
 fn compact_unknown_key_errors() {
     let err = run(r"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_compact(s, {bogus: 1})
 }
 ")
@@ -339,7 +339,7 @@ pipeline main(task) {
 fn open_pins_workspace_anchor_and_surfaces_in_snapshot() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open(
+  const s = agent_session_open(
     "anchor-open",
     {
       workspace_anchor: {
@@ -349,7 +349,7 @@ pipeline main(task) {
     },
   )
   log(agent_session_workspace_anchor(s)["primary"])
-  let snap = agent_session_snapshot(s)
+  const snap = agent_session_snapshot(s)
   log(snap["workspace_anchor"]["primary"])
   log(snap["workspace_anchor"]["anchored_at"])
   log(len(snap["workspace_anchor"]["additional_roots"]))
@@ -370,20 +370,20 @@ pipeline main(task) {
 fn set_workspace_anchor_replaces_and_clears() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open("anchor-set")
+  const s = agent_session_open("anchor-set")
   log(agent_session_workspace_anchor(s) == nil)
-  let changed = agent_session_set_workspace_anchor(s, {
+  const changed = agent_session_set_workspace_anchor(s, {
     primary: "/workspace/initial",
     anchored_at: "2026-05-23T00:00:00Z",
   })
   log(changed)
   log(agent_session_workspace_anchor(s)["primary"])
-  let same = agent_session_set_workspace_anchor(s, {
+  const same = agent_session_set_workspace_anchor(s, {
     primary: "/workspace/initial",
     anchored_at: "2026-05-23T00:00:00Z",
   })
   log(same)
-  let cleared = agent_session_set_workspace_anchor(s, nil)
+  const cleared = agent_session_set_workspace_anchor(s, nil)
   log(cleared)
   log(agent_session_workspace_anchor(s) == nil)
 }
@@ -405,7 +405,7 @@ pipeline main(task) {
 fn workspace_anchor_round_trips_through_fork() {
     let lines = out(r#"
 pipeline main(task) {
-  let src = agent_session_open("anchor-fork-src", {
+  const src = agent_session_open("anchor-fork-src", {
     workspace_anchor: {
       primary: "/workspace/main",
       additional_roots: [
@@ -414,8 +414,8 @@ pipeline main(task) {
       anchored_at: "2026-05-23T00:00:00Z",
     },
   })
-  let dst = agent_session_fork(src, "anchor-fork-dst")
-  let anchor = agent_session_workspace_anchor(dst)
+  const dst = agent_session_fork(src, "anchor-fork-dst")
+  const anchor = agent_session_workspace_anchor(dst)
   log(anchor["primary"])
   log(len(anchor["additional_roots"]))
   log(anchor["additional_roots"][0]["mount_mode"])
@@ -476,35 +476,35 @@ fn add_root_uses_default_mount_mode_emits_event_and_removes_cleanly() {
     let lines = out(&format!(
         r#"
 pipeline main(task) {{
-  let s = agent_session_open("anchor-roots", {{
+  const s = agent_session_open("anchor-roots", {{
     workspace_policy: {{default_mount_mode: "extend"}},
     workspace_anchor: {{
       primary: {primary_literal},
       anchored_at: "2026-05-24T00:00:00Z",
     }},
   }})
-  let added = agent_session_add_root(s, {mounted_literal}, {{reason: "shared"}})
+  const added = agent_session_add_root(s, {mounted_literal}, {{reason: "shared"}})
   log(added.ok)
   log(added.mounted_at != nil)
-  let roots = agent_session_list_roots(s)
+  const roots = agent_session_list_roots(s)
   log(roots["primary"])
   log(len(roots["additional"]))
   log(roots["additional"][0]["mount_mode"])
-  let mounted_events = transcript_events_by_kind(agent_session_snapshot(s), "RootMounted")
+  const mounted_events = transcript_events_by_kind(agent_session_snapshot(s), "RootMounted")
   log(len(mounted_events))
   log(mounted_events[0]["metadata"]["path"])
   log(mounted_events[0]["metadata"]["mount_mode"])
   log(mounted_events[0]["metadata"]["reason"])
 
-  let updated = agent_session_add_root(s, {mounted_literal}, {{mount_mode: "sandboxed"}})
+  const updated = agent_session_add_root(s, {mounted_literal}, {{mount_mode: "sandboxed"}})
   log(updated.ok)
   log(agent_session_list_roots(s)["additional"][0]["mount_mode"])
   log(len(agent_session_list_roots(s)["additional"]))
 
-  let removed = agent_session_remove_root(s, {mounted_literal})
+  const removed = agent_session_remove_root(s, {mounted_literal})
   log(removed.ok)
   log(len(agent_session_list_roots(s)["additional"]))
-  let missing = agent_session_remove_root(s, {mounted_literal})
+  const missing = agent_session_remove_root(s, {mounted_literal})
   log(missing.ok)
 }}
 "#
@@ -542,13 +542,13 @@ fn add_root_reports_missing_directory_in_result_envelope() {
     let lines = out(&format!(
         r#"
 pipeline main(task) {{
-  let s = agent_session_open("anchor-roots-missing", {{
+  const s = agent_session_open("anchor-roots-missing", {{
     workspace_anchor: {{
       primary: {primary_literal},
       anchored_at: "2026-05-24T00:00:00Z",
     }},
   }})
-  let added = agent_session_add_root(s, {missing_literal})
+  const added = agent_session_add_root(s, {missing_literal})
   log(added.ok)
   log(contains(added.error ?? "", "must exist"))
 }}

@@ -17,15 +17,15 @@ pipeline default() {
       harness.handoff_to("nightly-drain", {note: "one"})
       harness.handoff_to("nightly-drain", {note: "two"})
       harness.handoff_to("nightly-drain", {note: "three"})
-      let snapshot = harness.unsettled_state()
-      let result = harness
+      const snapshot = harness.unsettled_state()
+      const result = harness
         .spawn_settlement_agent(snapshot, return_value, {drain_budget_iterations: 1})
-      let audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take()
       harness.stdio.println("status=" + result.status)
       harness.stdio.println("iterations=" + to_string(result.iterations))
       harness.stdio.println("budget=" + to_string(result.budget))
       harness.stdio.println("items_processed=" + to_string(result.items_processed))
-      let remaining = audits
+      const remaining = audits
         .filter({ entry -> entry.kind == "drain_unsettled_remaining" })
       harness.stdio.println("remaining_audits=" + to_string(len(remaining)))
       harness.stdio

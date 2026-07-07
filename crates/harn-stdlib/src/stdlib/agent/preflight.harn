@@ -7,7 +7,7 @@ import {
 import { agent_session_messages, agent_session_project_turn } from "std/agent/state"
 
 fn __agent_done_sentinel(opts) {
-  let sentinel = opts?.done_sentinel
+  const sentinel = opts?.done_sentinel
   if sentinel == nil {
     return nil
   }
@@ -36,7 +36,7 @@ fn __agent_tool_format(opts) {
  * @api_stability: experimental
  */
 pub fn agent_tool_call_paradigm(options = nil) {
-  let format = __agent_tool_format(options)
+  const format = __agent_tool_format(options)
   if format == "native" {
     return {
       kind: "native",
@@ -80,22 +80,22 @@ pub fn agent_tool_call_paradigm(options = nil) {
  * @example: agent_render_tool_call_exemplar("edit", [{key: "action", value: "create"}], opts)
  */
 pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
-  let p = agent_tool_call_paradigm(options)
+  const p = agent_tool_call_paradigm(options)
   if p.kind == "json" {
     // Fenced-JSON: one ```tool block wrapping a single {name, args} object.
     // Both `body` and scalar args are ordinary JSON string/values — the JSON
     // encoder handles escaping, so the `body` flag is a no-op here.
-    var pairs = []
+    let pairs = []
     for a in args ?? [] {
       pairs = pairs.push([to_string(a?.key), a?.value])
     }
-    let call_obj = {name: to_string(name), args: dict_from_pairs(pairs)}
+    const call_obj = {name: to_string(name), args: dict_from_pairs(pairs)}
     return p.call_open + json_stringify(call_obj) + p.call_close
   }
-  var rendered = ""
-  var first = true
+  let rendered = ""
+  let first = true
   for a in args ?? [] {
-    let piece = if a?.body ?? false {
+    const piece = if a?.body ?? false {
       to_string(a?.key) + ": " + p.body_open + to_string(a?.value) + p.body_close
     } else {
       to_string(a?.key) + ": " + json_stringify(a?.value)
@@ -111,7 +111,7 @@ pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
 }
 
 fn __agent_has_tools(opts) {
-  let registry = opts?.tools
+  const registry = opts?.tools
   if registry == nil {
     return false
   }
@@ -119,7 +119,7 @@ fn __agent_has_tools(opts) {
     return len(registry) > 0
   }
   if type_of(registry) == "dict" {
-    let tools = registry?.tools
+    const tools = registry?.tools
     if type_of(tools) == "list" {
       return len(tools) > 0
     }
@@ -128,12 +128,12 @@ fn __agent_has_tools(opts) {
 }
 
 fn __agent_loop_contract_prompt(opts) {
-  let sentinel = __agent_done_sentinel(opts)
-  let loop_until_done = opts?.loop_until_done ?? false
+  const sentinel = __agent_done_sentinel(opts)
+  const loop_until_done = opts?.loop_until_done ?? false
   if !loop_until_done && sentinel == nil {
     return ""
   }
-  let mode = __agent_tool_format(opts)
+  const mode = __agent_tool_format(opts)
   return loop_until_done_system_prompt(
     {
       loop_until_done: loop_until_done,
@@ -185,26 +185,26 @@ fn __agent_schema_text(value) {
 }
 
 fn __agent_tool_listing_prompt(registry) {
-  let tools = registry?.tools ?? []
+  const tools = registry?.tools ?? []
   if len(tools) == 0 {
     return "No tools are available."
   }
-  var out = ""
+  let out = ""
   for entry in tools {
-    let name = entry?.name ?? ""
+    const name = entry?.name ?? ""
     if name == "" {
       continue
     }
     out = out + "### " + name + "\n"
-    let description = trim(entry?.description ?? "")
+    const description = trim(entry?.description ?? "")
     if description != "" {
       out = out + description + "\n"
     }
-    let parameters = __agent_schema_text(entry?.parameters ?? entry?.inputSchema)
+    const parameters = __agent_schema_text(entry?.parameters ?? entry?.inputSchema)
     if parameters != "" {
       out = out + "Parameters: " + parameters + "\n"
     }
-    let returns = __agent_schema_text(entry?.outputSchema ?? entry?.returns)
+    const returns = __agent_schema_text(entry?.outputSchema ?? entry?.returns)
     if returns != "" {
       out = out + "Returns: " + returns + "\n"
     }
@@ -220,8 +220,8 @@ fn __agent_text_tool_contract_prompt(opts) {
   if opts?.tools == nil || __agent_tool_format(opts) == "native" {
     return ""
   }
-  let turn_policy = opts?.turn_policy ?? {}
-  let done_sentinel = __agent_done_sentinel(opts)
+  const turn_policy = opts?.turn_policy ?? {}
+  const done_sentinel = __agent_done_sentinel(opts)
   return render_agent_prompt_id(
     "agent.tool_contract_text",
     {
@@ -252,26 +252,26 @@ fn __agent_active_skill_prompt(active) {
   if len(active ?? []) == 0 {
     return ""
   }
-  var out = "## Active skills\n"
+  let out = "## Active skills\n"
   for active_skill in active {
-    let name = active_skill?.id ?? active_skill?.name
+    const name = active_skill?.id ?? active_skill?.name
     if name == nil || name == "" {
       continue
     }
     out = out + "\n### " + name + "\n"
-    let description = trim(active_skill?.description ?? "")
+    const description = trim(active_skill?.description ?? "")
     if description != "" {
       out = out + description + "\n"
     }
-    let when_to_use = trim(active_skill?.when_to_use ?? "")
+    const when_to_use = trim(active_skill?.when_to_use ?? "")
     if when_to_use != "" {
       out = out + "When to use: " + when_to_use + "\n"
     }
-    let allowed = active_skill?.allowed_tools ?? []
+    const allowed = active_skill?.allowed_tools ?? []
     if len(allowed) > 0 {
       out = out + "Scoped tools: " + join(allowed, ", ") + "\n"
     }
-    let prompt = trim(active_skill?.prompt ?? "")
+    const prompt = trim(active_skill?.prompt ?? "")
     if prompt != "" {
       out = out + "\n" + prompt + "\n"
     }
@@ -286,19 +286,19 @@ fn __agent_mcp_initialize_advisory_prompt(opts) {
   if !opts?.mcp_initialize_advisory || !opts?.mcp_context?.initialize_advisory {
     return ""
   }
-  let servers = opts?._mcp_server_info ?? []
+  const servers = opts?._mcp_server_info ?? []
   if len(servers) == 0 {
     return ""
   }
-  var out = "## MCP Server Advisory Context\n"
-  var count = 0
+  let out = "## MCP Server Advisory Context\n"
+  let count = 0
   for server in servers {
-    let instructions = trim(server?.instructions ?? "")
+    const instructions = trim(server?.instructions ?? "")
     if instructions == "" {
       continue
     }
     count = count + 1
-    let server_name = server?.name ?? "mcp-server"
+    const server_name = server?.name ?? "mcp-server"
     out = out
       + "\n### "
       + server_name
@@ -314,7 +314,7 @@ fn __agent_mcp_initialize_advisory_prompt(opts) {
 }
 
 fn __agent_timestamped_content(content, timestamp) {
-  let marker = "[harn timestamp: " + timestamp + "]"
+  const marker = "[harn timestamp: " + timestamp + "]"
   if type_of(content) == "string" {
     return marker + "\n" + content
   }
@@ -328,12 +328,12 @@ fn __agent_timestamp_message(message, timestamp) {
   if type_of(message) != "dict" {
     return message
   }
-  let content = if message?.content == nil {
+  const content = if message?.content == nil {
     nil
   } else {
     __agent_timestamped_content(message.content, timestamp)
   }
-  var out = message + {timestamp: timestamp}
+  let out = message + {timestamp: timestamp}
   if content != nil {
     out = out + {content: content}
   }
@@ -341,15 +341,15 @@ fn __agent_timestamp_message(message, timestamp) {
 }
 
 fn __agent_decorate_turn_message(message, opts, session, iteration, index, timestamp) {
-  var out = message
+  let out = message
   if opts?.timestamp_messages ?? opts?.message_timestamps ?? false {
     out = __agent_timestamp_message(out, timestamp)
   }
-  let decorator = opts?.message_decorator ?? opts?.decorate_message
+  const decorator = opts?.message_decorator ?? opts?.decorate_message
   if decorator == nil {
     return out
   }
-  let decorated = decorator(
+  const decorated = decorator(
     out,
     {
       session_id: session.session_id,
@@ -386,7 +386,7 @@ fn __agent_has_system_prompt_options(opts) {
 }
 
 fn __agent_push_system_fragment(fragments, id, body) {
-  let trimmed = trim(body ?? "")
+  const trimmed = trim(body ?? "")
   if trimmed == "" {
     return fragments
   }
@@ -407,7 +407,7 @@ fn __agent_push_system_fragment(fragments, id, body) {
  * @api_stability: internal
  */
 pub fn __with_prompt_fragment(agent_options, fragment) {
-  let opts = if type_of(agent_options) == "dict" {
+  const opts = if type_of(agent_options) == "dict" {
     agent_options
   } else {
     {}
@@ -415,12 +415,12 @@ pub fn __with_prompt_fragment(agent_options, fragment) {
   if fragment == nil {
     return opts
   }
-  let profile = if type_of(opts?.context_profile) == "dict" {
+  const profile = if type_of(opts?.context_profile) == "dict" {
     opts.context_profile
   } else {
     {}
   }
-  let existing = if type_of(profile?.prompt_fragments) == "list" {
+  const existing = if type_of(profile?.prompt_fragments) == "list" {
     profile.prompt_fragments
   } else {
     []
@@ -429,10 +429,10 @@ pub fn __with_prompt_fragment(agent_options, fragment) {
 }
 
 fn __agent_context_profile_fragments(opts) {
-  var fragments = []
-  let profile = opts?.context_profile ?? opts?.project_context_profile ?? {}
+  let fragments = []
+  const profile = opts?.context_profile ?? opts?.project_context_profile ?? {}
   for fragment in profile?.prompt_fragments ?? [] {
-    let body = trim(fragment?.body ?? fragment?.content ?? "")
+    const body = trim(fragment?.body ?? fragment?.content ?? "")
     if body == "" {
       continue
     }
@@ -455,7 +455,7 @@ fn __agent_primary_system_text(session, opts) {
     return opts.system
   }
   if !__agent_has_system_prompt_options(opts) {
-    let stored_system = agent_session_system_prompt(session.session_id)
+    const stored_system = agent_session_system_prompt(session.session_id)
     if stored_system != nil && stored_system != "" {
       return stored_system
     }
@@ -495,7 +495,7 @@ fn __agent_primary_system_text(session, opts) {
  * @api_stability: experimental
  */
 pub fn agent_build_turn_system_fragments(session, opts, iteration) {
-  var fragments = []
+  let fragments = []
   fragments = __agent_push_system_fragment(fragments, "system", __agent_primary_system_text(session, opts))
   fragments = __agent_push_system_fragment(
     fragments,
@@ -533,7 +533,7 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
       __agent_text_tool_contract_prompt(opts),
     )
   }
-  let scratchpad_fragment = agent_scratchpad_recitation_fragment(session, opts)
+  const scratchpad_fragment = agent_scratchpad_recitation_fragment(session, opts)
   if scratchpad_fragment != nil {
     fragments = fragments.push(scratchpad_fragment)
   }
@@ -548,7 +548,7 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
  * @api_stability: experimental
  */
 pub fn agent_build_turn_system(session, opts, iteration) {
-  var parts = []
+  let parts = []
   for fragment in agent_build_turn_system_fragments(session, opts, iteration) {
     parts = parts.push(fragment.body)
   }
@@ -556,7 +556,7 @@ pub fn agent_build_turn_system(session, opts, iteration) {
 }
 
 fn __agent_projection_options(opts) {
-  let raw = opts?.transcript_projection
+  const raw = opts?.transcript_projection
   if raw == nil {
     return nil
   }
@@ -574,20 +574,20 @@ fn __agent_reachability_projection(policy) {
 }
 
 fn __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts) {
-  let policy_label = projection_opts?.policy ?? "raw"
+  const policy_label = projection_opts?.policy ?? "raw"
   if !__agent_reachability_projection(policy_label) {
     return projection_opts
   }
-  let scratchpad_cfg = agent_scratchpad_options(opts)
+  const scratchpad_cfg = agent_scratchpad_options(opts)
   if !scratchpad_cfg.enabled {
     return projection_opts
   }
-  let snapshot = agent_session_snapshot(session_id) ?? {}
-  let scratchpad = snapshot?.scratchpad
+  const snapshot = agent_session_snapshot(session_id) ?? {}
+  const scratchpad = snapshot?.scratchpad
   if scratchpad == nil {
     return projection_opts
   }
-  let version = snapshot?.scratchpad_version ?? 0
+  const version = snapshot?.scratchpad_version ?? 0
   return projection_opts
     + {
     scratchpad: [projection_opts?.scratchpad, scratchpad],
@@ -600,16 +600,16 @@ fn __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts)
 }
 
 fn __agent_apply_projection(session_id, messages, opts) {
-  var projection_opts = __agent_projection_options(opts)
+  let projection_opts = __agent_projection_options(opts)
   if projection_opts == nil {
     return messages
   }
-  let policy_label = projection_opts?.policy ?? "raw"
+  const policy_label = projection_opts?.policy ?? "raw"
   if policy_label == "raw" {
     return messages
   }
   projection_opts = __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts)
-  let projection = agent_session_project_turn(session_id, projection_opts)
+  const projection = agent_session_project_turn(session_id, projection_opts)
   return projection?.messages ?? messages
 }
 
@@ -621,15 +621,15 @@ fn __agent_apply_projection(session_id, messages, opts) {
  * @api_stability: experimental
  */
 pub fn agent_build_turn_messages(session, opts, iteration) {
-  let raw_messages = agent_session_messages(session.session_id)
-  let projected_messages = __agent_apply_projection(session.session_id, raw_messages, opts)
-  let decorator = opts?.message_decorator ?? opts?.decorate_message
+  const raw_messages = agent_session_messages(session.session_id)
+  const projected_messages = __agent_apply_projection(session.session_id, raw_messages, opts)
+  const decorator = opts?.message_decorator ?? opts?.decorate_message
   if !(opts?.timestamp_messages ?? opts?.message_timestamps ?? false) && decorator == nil {
     return projected_messages
   }
-  let timestamp = date_now_iso()
-  var out = []
-  var index = 0
+  const timestamp = date_now_iso()
+  let out = []
+  let index = 0
   for message in projected_messages {
     out = out.push(__agent_decorate_turn_message(message, opts, session, iteration, index, timestamp))
     index = index + 1

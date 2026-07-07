@@ -48,8 +48,8 @@ Parameters must carry a scalar type annotation:
 
 ```harn,ignore
 fn score(hits: int, misses: int) -> int {
-  var total = 0
-  var i = 0
+  let total = 0
+  let i = 0
   while i < hits {
     total = total + 10
     i = i + 1

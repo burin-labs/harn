@@ -2,34 +2,34 @@ import "std/triggers"
 import "../_common"
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let root = path_join(harness.fs.temp_dir(), "harn-a2a-dispatch-" + unique)
+  const root = path_join(harness.fs.temp_dir(), "harn-a2a-dispatch-" + unique)
   harness.fs.mkdir(root)
   harness.fs
     .write_text(
     path_join(root, "receiver.harn"),
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  let start = shell_at(
+  const start = shell_at(
     root,
     "nohup " + harn_bin + " serve --port 0"
       + " receiver.harn >receiver.log 2>&1 </dev/null & echo $!",
   )
-  let pid = start.stdout.trim()
+  const pid = start.stdout.trim()
   assert(start.success, "failed to start A2A receiver")
   assert(pid != "", "missing A2A receiver pid")
-  let receiver_url = wait_for_a2a_server_url(harness, path_join(root, "receiver.log"))
+  const receiver_url = wait_for_a2a_server_url(harness, path_join(root, "receiver.log"))
   assert(receiver_url != nil, "A2A receiver did not start")
-  let port_matches = regex_captures(r":(\d+)$", receiver_url)
+  const port_matches = regex_captures(r":(\d+)$", receiver_url)
   assert(len(port_matches) == 1, "A2A receiver URL did not include a port: " + receiver_url)
-  let port = port_matches[0].groups[0]
-  let trigger_id = "github-a2a-review-" + unique
-  let trace_id = "trace-a2a-" + unique
-  let handle: TriggerHandle = trigger_register(
+  const port = port_matches[0].groups[0]
+  const trigger_id = "github-a2a-review-" + unique
+  const trace_id = "trace-a2a-" + unique
+  const handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -48,7 +48,7 @@ pipeline test(task) {
     },
   )
   __io_println(handle.id == trigger_id && handle.handler_kind == "a2a")
-  let fire: DispatchHandle = trigger_fire(
+  const fire: DispatchHandle = trigger_fire(
     handle,
     {
       id: "evt-" + unique,
@@ -61,7 +61,7 @@ pipeline test(task) {
   __io_println(fire.status == "dispatched" && fire.error == nil)
   __io_println(fire.result?.trace_id == trace_id)
   __io_println(fire.result?.target_agent == "triage")
-  let _ = shell("kill -TERM " + pid)
+  const _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
   harness.fs.delete(root)
 }

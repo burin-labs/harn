@@ -7,29 +7,29 @@ import { edit_extract_variable } from "std/edit"
  * matrix, and parameter/conflict validation.
  */
 fn write_fixture(dir: string, name: string, body: string) -> string {
-  let path = path_join(dir, name)
+  const path = path_join(dir, name)
   harness.fs.write_text(path, body)
   return path
 }
 
 fn range_of(content: string, line_index: int, needle: string) -> dict {
-  let lines = split(content, "\n")
-  let col = lines[line_index].index_of(needle)
+  const lines = split(content, "\n")
+  const col = lines[line_index].index_of(needle)
   return {start_line: line_index, start_col: col, end_line: line_index, end_col: col + len(needle)}
 }
 
 pipeline default() {
   hostlib_enable("tools:deterministic")
-  let root = path_join(
+  const root = path_join(
     harness.fs.temp_dir(),
     "harn_edit_extract_variable_" + to_string(harness.random.gen_range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   // 1) Rust dry-run: preview the extraction without touching disk.
-  let rs_body = "fn calc() -> i64 {\n    let result = compute(2) + compute(3);\n    return result;\n}\n"
-  let rs_path = write_fixture(root, "calc.rs", rs_body)
-  let rs_range = range_of(rs_body, 1, "compute(2)")
-  let preview = edit_extract_variable({path: rs_path, range: rs_range, new_name: "first", dry_run: true})
+  const rs_body = "fn calc() -> i64 {\n    let result = compute(2) + compute(3);\n    return result;\n}\n"
+  const rs_path = write_fixture(root, "calc.rs", rs_body)
+  const rs_range = range_of(rs_body, 1, "compute(2)")
+  const preview = edit_extract_variable({path: rs_path, range: rs_range, new_name: "first", dry_run: true})
   __io_println(preview.result)
   __io_println(preview.ok)
   __io_println(preview.dry_run)
@@ -40,36 +40,36 @@ pipeline default() {
   // Disk is byte-identical after a dry run.
   __io_println(harness.fs.read_text(rs_path) == rs_body)
   // 2) Rust apply: the declaration is inserted and the span replaced.
-  let applied = edit_extract_variable({path: rs_path, range: rs_range, new_name: "first"})
+  const applied = edit_extract_variable({path: rs_path, range: rs_range, new_name: "first"})
   __io_println(applied.result)
   __io_println(applied.applied)
-  let rs_after = harness.fs.read_text(rs_path)
+  const rs_after = harness.fs.read_text(rs_path)
   __io_println(contains(rs_after, "    let first = compute(2);"))
   __io_println(contains(rs_after, "    let result = first + compute(3);"))
   __io_println(contains(rs_after, "    return result;"))
   // 3) Python apply: bare `name = expr` form, no `let`/`;`.
-  let py_body = "def calc():\n    result = compute(2) + compute(3)\n    return result\n"
-  let py_path = write_fixture(root, "calc.py", py_body)
-  let py_range = range_of(py_body, 1, "compute(2)")
-  let py_applied = edit_extract_variable({path: py_path, range: py_range, new_name: "first"})
+  const py_body = "def calc():\n    result = compute(2) + compute(3)\n    return result\n"
+  const py_path = write_fixture(root, "calc.py", py_body)
+  const py_range = range_of(py_body, 1, "compute(2)")
+  const py_applied = edit_extract_variable({path: py_path, range: py_range, new_name: "first"})
   __io_println(py_applied.result)
-  let py_after = harness.fs.read_text(py_path)
+  const py_after = harness.fs.read_text(py_path)
   __io_println(contains(py_after, "    first = compute(2)"))
   __io_println(contains(py_after, "    result = first + compute(3)"))
   __io_println(!contains(py_after, "let first"))
   // 4) Unsupported language: Java has no inferable local-declaration form.
-  let java_path = write_fixture(root, "Calc.java", "int x = compute(2) + compute(3);\n")
-  let unsupported = edit_extract_variable(
+  const java_path = write_fixture(root, "Calc.java", "int x = compute(2) + compute(3);\n")
+  const unsupported = edit_extract_variable(
     {path: java_path, range: {start_line: 0, start_col: 8, end_line: 0, end_col: 18}, new_name: "first"},
   )
   __io_println(unsupported.result)
   __io_println(unsupported.errors[0].code)
   // 5) Multi-line range is rejected as unsupported.
-  let multi = edit_extract_variable(
+  const multi = edit_extract_variable(
     {path: rs_path, range: {start_line: 0, start_col: 0, end_line: 2, end_col: 4}, new_name: "x"},
   )
   __io_println(multi.result)
   // 6) Missing new_name is invalid_params.
-  let invalid = edit_extract_variable({path: rs_path, range: rs_range})
+  const invalid = edit_extract_variable({path: rs_path, range: rs_range})
   __io_println(invalid.result)
 }

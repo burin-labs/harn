@@ -26,9 +26,9 @@ fields specified in parentheses.
 Variants are constructed using dot syntax on the enum name:
 
 ```harn
-let c = Color.Red
-let s = Shape.Circle(5.0)
-let r = Shape.Rectangle(3.0, 4.0)
+const c = Color.Red
+const s = Shape.Circle(5.0)
+const r = Shape.Rectangle(3.0, 4.0)
 ```
 
 ### Pattern matching on enums
@@ -60,13 +60,13 @@ Shorthand constructor functions `Ok(value)` and `Err(value)` are available
 as builtins, equivalent to `Result.Ok(value)` and `Result.Err(value)`.
 
 ```harn
-let ok = Ok(42)
-let err = Err("something failed")
-let typed_ok: Result<int, string> = ok
+const ok = Ok(42)
+const err = Err("something failed")
+const typed_ok: Result<int, string> = ok
 
 // Equivalent long form:
-let ok2 = Result.Ok(42)
-let err2 = Result.Err("oops")
+const ok2 = Result.Ok(42)
+const err2 = Result.Err("oops")
 ```
 
 ### Result helper functions
@@ -94,12 +94,12 @@ fn divide(a, b) {
 }
 
 fn compute(x) {
-  let result = divide(x, 2)?   // unwraps Ok, or returns Err early
+  const result = divide(x, 2)?   // unwraps Ok, or returns Err early
   return Ok(result + 10)
 }
 
-let r1 = compute(20)   // Result.Ok(20)
-let r2 = compute(0)    // would propagate Err from divide
+const r1 = compute(20)   // Result.Ok(20)
+const r2 = compute(0)    // would propagate Err from divide
 ```
 
 The `?` operator requires its operand to be a `Result` value. Applying `?`
@@ -133,10 +133,10 @@ It evaluates the body and wraps the result in a `Result`:
 - If the body throws an error, returns `Result.Err(error)`.
 
 ```harn
-let result = try { json_parse(raw_input) }
+const result = try { json_parse(raw_input) }
 // result is Result.Ok(parsed_data) or Result.Err("invalid JSON: ...")
 
-let checked = try { schema_check(data, schema) }
+const checked = try { schema_check(data, schema) }
 // checked is schema_check's Result directly, not Result.Ok(Result.Ok(...))
 ```
 
@@ -146,12 +146,12 @@ errors. Together they form a complete error-handling pipeline:
 
 ```harn
 fn safe_divide(a, b) {
-  let result = try { a / b }
+  const result = try { a / b }
   return result
 }
 
 fn compute(x) {
-  let val = safe_divide(x, 2)?  // unwrap Ok or propagate Err
+  const val = safe_divide(x, 2)?  // unwrap Ok or propagate Err
   return Ok(val + 10)
 }
 ```
@@ -168,8 +168,8 @@ The `?` operator works naturally in pipelines:
 
 ```harn
 fn fetch_and_parse(url) {
-  let response = http_get(url)?
-  let data = json_parse(response)?
+  const response = http_get(url)?
+  const data = json_parse(response)?
   return Ok(data)
 }
 ```

@@ -31,8 +31,8 @@ progress unless `progress_tools` restricts it.
 import { governor_decision } from "std/agent/governors"
 
 fn budget_action(consumed: float, made_progress: bool) -> string {
-  let policy = {budget: 10.0, checkpoint: 1.0, over_estimate: 2.0, hard: 3.0, signal: "iterations"}
-  let decision = governor_decision(
+  const policy = {budget: 10.0, checkpoint: 1.0, over_estimate: 2.0, hard: 3.0, signal: "iterations"}
+  const decision = governor_decision(
     policy,
     {ceiling: 10.0, consumed: consumed, made_progress: made_progress, signal: "iterations"},
   )
@@ -71,7 +71,7 @@ Nothing about it touches `agent_loop` — you call it and act on the verdict.
 ```harn
 import { governor_pace_decision } from "std/agent/governors"
 
-let decision = governor_pace_decision(
+const decision = governor_pace_decision(
   {extend_max: 6, pace_check_max: 2},
   {
     armed_budget_ms: 60000,
@@ -131,7 +131,7 @@ token-runaway is added as a `post_turn_callback` overlay that emits the same
 ```harn,ignore
 import { with_governance } from "std/agent/governors"
 
-let opts = with_governance(base_opts, {
+const opts = with_governance(base_opts, {
   detectors: {
     loop: {repeat: 4, ping_pong_cycles: 6},
     no_progress: {messages: 3},

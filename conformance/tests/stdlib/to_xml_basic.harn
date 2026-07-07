@@ -1,27 +1,27 @@
 pipeline test(task) {
   // Flat dict
-  let flat = to_xml({name: "Ada", year: 1815})
+  const flat = to_xml({name: "Ada", year: 1815})
   assert_eq(flat, "<root><name>Ada</name><year>1815</year></root>", "to_xml renders flat dict")
   // List under a key becomes repeated <item> children — the canonical
   // pattern for building tagged context blocks in system prompts.
-  let with_list = to_xml({previous_chats: ["x.jsonl", "y.jsonl"]})
+  const with_list = to_xml({previous_chats: ["x.jsonl", "y.jsonl"]})
   assert_eq(
     with_list,
     "<root><previous_chats><item>x.jsonl</item><item>y.jsonl</item></previous_chats></root>",
     "to_xml renders list as repeated <item>",
   )
   // Special characters in text get escaped.
-  let escaped = to_xml({msg: "<a> & </b>"})
+  const escaped = to_xml({msg: "<a> & </b>"})
   assert_eq(
     escaped,
     "<root><msg>&lt;a&gt; &amp; &lt;/b&gt;</msg></root>",
     "to_xml escapes XML metacharacters",
   )
   // Pretty mode indents children.
-  let pretty = to_xml({a: "x", b: "y"}, {pretty: true})
+  const pretty = to_xml({a: "x", b: "y"}, {pretty: true})
   assert_eq(pretty, "<root>\n  <a>x</a>\n  <b>y</b>\n</root>", "to_xml pretty indents children")
   // from_xml round-trips a flat document.
-  let parsed = from_xml("<root><name>Ada</name><year>1815</year></root>")
+  const parsed = from_xml("<root><name>Ada</name><year>1815</year></root>")
   assert_eq(parsed.root.name, "Ada", "from_xml extracts string field")
   assert_eq(parsed.root.year, 1815, "from_xml coerces numeric text")
   log("xml builtins: all tests passed")

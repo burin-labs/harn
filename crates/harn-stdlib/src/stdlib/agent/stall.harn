@@ -362,7 +362,7 @@ fn __agent_stall_default_config() -> AgentStallConfig {
 }
 
 fn __agent_stall_config(value) -> AgentStallConfig {
-  let defaults = __agent_stall_default_config()
+  const defaults = __agent_stall_default_config()
   if value == nil {
     return defaults
   }
@@ -372,18 +372,18 @@ fn __agent_stall_config(value) -> AgentStallConfig {
   if type_of(value) != "dict" {
     throw "agent_loop: `stall_diagnostics` must be a dict, bool, or nil; got " + type_of(value)
   }
-  let repair_diagnostics = value?.repair_diagnostics
+  const repair_diagnostics = value?.repair_diagnostics
   if repair_diagnostics != nil && type_of(repair_diagnostics) != "dict" {
     throw "agent_loop: stall_diagnostics.repair_diagnostics must be a dict or nil; got "
       + type_of(repair_diagnostics)
   }
-  let {threshold = 3, max_feedback = 1} = value ?? {}
-  let exempt_tools = if value?.exempt_tools != nil {
+  const {threshold = 3, max_feedback = 1} = value ?? {}
+  const exempt_tools = if value?.exempt_tools != nil {
     __agent_stall_list(value.exempt_tools, "exempt_tools")
   } else {
     __agent_stall_list(value?.allow_repeated_tools, "allow_repeated_tools")
   }
-  let resolved_threshold = if type_of(threshold) == "int" && threshold >= 2 {
+  const resolved_threshold = if type_of(threshold) == "int" && threshold >= 2 {
     threshold
   } else {
     3
@@ -392,7 +392,7 @@ fn __agent_stall_config(value) -> AgentStallConfig {
   // as the same-observation condition, so when a caller sets it explicitly it
   // also drives `repeat_same_observation` for back-compat. Absent an explicit
   // `threshold`, the same-observation condition uses the reference default (4).
-  let same_observation_default = if value?.threshold != nil {
+  const same_observation_default = if value?.threshold != nil {
     resolved_threshold
   } else {
     STALL_REPEAT_SAME_OBSERVATION
@@ -556,7 +556,7 @@ fn __agent_tool_call_name(call) -> string {
 }
 
 fn __agent_tool_call_args(call) -> dict {
-  let raw = call?.arguments ?? call?.tool_args
+  const raw = call?.arguments ?? call?.tool_args
   if type_of(raw) == "dict" {
     return raw
   }
@@ -564,7 +564,7 @@ fn __agent_tool_call_args(call) -> dict {
 }
 
 fn __agent_tool_call_signature(call) -> string {
-  let args_text = json_stringify(__agent_tool_call_args(call))
+  const args_text = json_stringify(__agent_tool_call_args(call))
   return __agent_tool_call_name(call) + "\n" + args_text
 }
 
@@ -576,7 +576,7 @@ fn __agent_stall_result_ok(result) -> bool {
   if result?.success != nil {
     return result.success ? true : false
   }
-  let status = to_string(result?.status ?? "")
+  const status = to_string(result?.status ?? "")
   return status == "ok" || status == "success"
 }
 
@@ -589,7 +589,7 @@ fn __agent_stall_result_name(result) -> string {
  * repeating it is never productive and never recovers on its own.
  */
 fn __agent_stall_is_context_window_error(text: string) -> bool {
-  let lowered = lowercase(text)
+  const lowered = lowercase(text)
   return contains(lowered, "context window")
     || contains(lowered, "context length")
     || contains(lowered, "context_length")
@@ -601,8 +601,8 @@ fn __agent_stall_is_context_window_error(text: string) -> bool {
 }
 
 fn __agent_stall_delta_signature(current: dict) -> string {
-  let signatures = current?.signatures ?? []
-  let count = to_int(current?.count) ?? len(signatures)
+  const signatures = current?.signatures ?? []
+  const count = to_int(current?.count) ?? len(signatures)
   return "err:" + sha256(json_stringify({signatures: signatures, count: count}))
 }
 
@@ -610,7 +610,7 @@ fn __agent_stall_result_error_signature(delta, result) -> string {
   if len(delta.current.signatures) > 0 {
     return __agent_stall_delta_signature(delta.current)
   }
-  let fallback = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  const fallback = to_string(result?.error ?? result?.message ?? result?.result ?? "")
   return "err:" + sha256(fallback)
 }
 
@@ -635,14 +635,14 @@ fn __agent_stall_gate_input(previous, result) {
  */
 fn __agent_stall_result_outcome(result) -> dict {
   if __agent_stall_result_ok(result) {
-    let payload = json_stringify(result?.result ?? result?.output ?? result?.content ?? nil)
+    const payload = json_stringify(result?.result ?? result?.output ?? result?.content ?? nil)
     return {kind: "ok", signature: "ok:" + sha256(payload)}
   }
-  let error_text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  const error_text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
   if __agent_stall_is_context_window_error(error_text) {
     return {kind: "context_window", signature: "ctx"}
   }
-  let gate = __agent_stall_gate_input(nil, result)
+  const gate = __agent_stall_gate_input(nil, result)
   if !gate.feedsGates {
     return {kind: "advisory", signature: "advisory:" + sha256(json_stringify(gate.current))}
   }
@@ -658,8 +658,8 @@ fn __agent_stall_result_snippet(result) -> string {
   if __agent_stall_result_ok(result) {
     return ""
   }
-  let text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
-  let normalized = trim(text)
+  const text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  const normalized = trim(text)
   return __agent_clip_head_tail(normalized, 4000)
 }
 
@@ -673,15 +673,15 @@ fn __agent_stall_result_snippet(result) -> string {
  * only to bound a pathological multi-megabyte blob.
  */
 fn __agent_clip_head_tail(text, cap) {
-  let total = len(text)
+  const total = len(text)
   if total <= cap {
     return text
   }
-  let tail_len = cap / 3
-  let head_len = cap - tail_len
-  let omitted = total - head_len - tail_len
-  let head = text.substring(0, head_len)
-  let tail = text.substring(total - tail_len, total)
+  const tail_len = cap / 3
+  const head_len = cap - tail_len
+  const omitted = total - head_len - tail_len
+  const head = text.substring(0, head_len)
+  const tail = text.substring(total - tail_len, total)
   return head + "\n…[" + to_string(omitted) + " chars elided — middle of output]…\n" + tail
 }
 
@@ -696,12 +696,12 @@ fn __agent_stall_turn_result(prev_dispatch) {
   if prev_dispatch == nil {
     return nil
   }
-  let results = if type_of(prev_dispatch) == "list" {
+  const results = if type_of(prev_dispatch) == "list" {
     prev_dispatch
   } else {
     prev_dispatch?.results ?? []
   }
-  var first = nil
+  let first = nil
   for result in results {
     if !__agent_stall_result_ok(result) {
       return result
@@ -717,8 +717,8 @@ fn __agent_stall_delta_previous(state: AgentStallState) {
   if state.last_diagnostic_class != "fail" {
     return nil
   }
-  let current = state.last_diagnostic_delta_current ?? {}
-  let signatures = current?.signatures ?? []
+  const current = state.last_diagnostic_delta_current ?? {}
+  const signatures = current?.signatures ?? []
   if len(signatures) == 0 {
     return nil
   }
@@ -774,20 +774,20 @@ fn __agent_stall_gate_failure(gate) -> bool {
 fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_made_edit: bool) -> AgentStallState {
   // Edit bookkeeping first: a successful workspace mutation advances the epoch,
   // which arms the post-edit re-verify mandate in the loop.
-  let new_write_epoch = if turn_made_edit {
+  const new_write_epoch = if turn_made_edit {
     state.write_epoch + 1
   } else {
     state.write_epoch
   }
-  let result = __agent_stall_turn_result(prev_dispatch)
-  let result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
-  let gate = if result_is_non_ok {
+  const result = __agent_stall_turn_result(prev_dispatch)
+  const result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
+  const gate = if result_is_non_ok {
     __agent_stall_gate_input(__agent_stall_delta_previous(state), result)
   } else {
     nil
   }
-  let delta = gate?.delta
-  let result_is_gate_failure = __agent_stall_gate_failure(gate)
+  const delta = gate?.delta
+  const result_is_gate_failure = __agent_stall_gate_failure(gate)
   if !result_is_gate_failure {
     // No FAILING verification this turn. A successful edit on top of a live
     // failure is NOT proof the failure is resolved (its "ok" is the edit
@@ -814,12 +814,12 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       return state + {write_epoch: new_write_epoch}
     }
     // A passing verification clears the current-failure model.
-    let pass_signature = if delta != nil {
+    const pass_signature = if delta != nil {
       "ok:" + sha256(json_stringify(delta.current))
     } else {
       __agent_stall_result_outcome(result).signature
     }
-    let verified_epoch = if state.write_epoch > state.verified_write_epoch {
+    const verified_epoch = if state.write_epoch > state.verified_write_epoch {
       state.write_epoch
     } else {
       state.verified_write_epoch
@@ -844,14 +844,14 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
   // delta status is the progress signal, so the streak advances only when the
   // std/verification helper says the normalized signature set is unchanged.
   // Advisory/stale/unbound diagnostics never reach this branch.
-  let signature = __agent_stall_delta_signature(delta.current)
-  let same_signature = delta.status == "unchanged" && state.last_diagnostic_class == "fail"
-  let new_streak = if same_signature {
+  const signature = __agent_stall_delta_signature(delta.current)
+  const same_signature = delta.status == "unchanged" && state.last_diagnostic_class == "fail"
+  const new_streak = if same_signature {
     state.same_diagnostic_streak + 1
   } else {
     1
   }
-  let failing_turns = state.failing_verify_turns + 1
+  const failing_turns = state.failing_verify_turns + 1
   // Total (non-consecutive) recurrence per signature (#burin-cutover seam 1). The
   // consecutive `same_diagnostic_streak` above RESETS whenever an off-signature
   // failure interposes, so it misses interleaved churn: a dead API / wrong error
@@ -860,8 +860,8 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
   // TOTAL counter never resets on a signature change, so the verify-state axis
   // can trip a hard-recurrence cut on total occurrences regardless of ordering.
   // Always maintained (cheap); consulted only when a progress_signal is supplied.
-  let sig_counts = state.verify_signature_counts ?? {}
-  let sig_total = (to_int(sig_counts[signature] ?? 0) ?? 0) + 1
+  const sig_counts = state.verify_signature_counts ?? {}
+  const sig_total = (to_int(sig_counts[signature] ?? 0) ?? 0) + 1
   // This is a verification result, so the post-edit re-verify mandate (if any)
   // has now been satisfied: clear reverify_owed and the edit-since marker. The
   // NEXT edit after this failure re-arms them.
@@ -890,7 +890,7 @@ fn __agent_stall_outcome_for(prev_dispatch, tool_name: string) {
   if prev_dispatch == nil {
     return nil
   }
-  let results = if type_of(prev_dispatch) == "list" {
+  const results = if type_of(prev_dispatch) == "list" {
     prev_dispatch
   } else {
     prev_dispatch?.results ?? []
@@ -904,16 +904,16 @@ fn __agent_stall_outcome_for(prev_dispatch, tool_name: string) {
 }
 
 fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
-  let pattern = warning.pattern
-  let count = to_string(warning.count)
+  const pattern = warning.pattern
+  const count = to_string(warning.count)
   // Evidence-aware repair loop: a strategy-shift nudge grounded in the actual
   // diagnostic, not a blind "you repeated yourself" counter. This fires when
   // the same failure has survived `stuck_same_diagnostic_after` repair turns
   // with no intervening successful edit (or with edits that did not change the
   // failure), so the right move is to change approach, not to retry harder.
   if pattern == "stuck_same_diagnostic" {
-    let snippet = to_string(warning.diagnostic_snippet ?? "")
-    let evidence = if snippet != "" {
+    const snippet = to_string(warning.diagnostic_snippet ?? "")
+    const evidence = if snippet != "" {
       " The failing evidence is unchanged:\n" + snippet
     } else {
       ""
@@ -930,8 +930,8 @@ fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
   // this exact failure and it STILL did not land — a stronger stuck signal than
   // an untouched same-failure repeat, so the nudge is blunter.
   if pattern == "delivered_fix_not_landing" {
-    let snippet = to_string(warning.diagnostic_snippet ?? "")
-    let evidence = if snippet != "" {
+    const snippet = to_string(warning.diagnostic_snippet ?? "")
+    const evidence = if snippet != "" {
       " The failing evidence is unchanged:\n" + snippet
     } else {
       ""
@@ -944,7 +944,7 @@ fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
       + " root cause from scratch, form a materially different hypothesis, or report this"
       + " specific blocker instead of repeating."
   }
-  let core = if pattern == "repeated_same_observation" {
+  const core = if pattern == "repeated_same_observation" {
     "the action `" + warning.tool_name + "` produced the same observation " + count
       + " times in a row"
   } else if pattern == "repeated_error" {
@@ -990,8 +990,8 @@ fn __agent_stall_warning_record(
   config: AgentStallConfig,
   threshold: int,
 ) -> AgentStallWarning {
-  let args_text = json_stringify(args)
-  var record = {
+  const args_text = json_stringify(args)
+  let record = {
     iteration: iteration,
     tool_name: tool_name,
     repeat_count: count,
@@ -1023,8 +1023,8 @@ pub fn agent_stall_inject_feedback(
   config: AgentStallConfig,
   state: AgentStallState,
 ) -> AgentStallState {
-  let wants_feedback = config.inject_feedback ?? true
-  let should_feedback = wants_feedback && state.feedback_count < config.max_feedback
+  const wants_feedback = config.inject_feedback ?? true
+  const should_feedback = wants_feedback && state.feedback_count < config.max_feedback
   if should_feedback {
     agent_session_inject_feedback(session_id, "stall_diagnostics", __agent_stall_feedback_text(warning))
     return state + {feedback_count: state.feedback_count + 1}
@@ -1057,8 +1057,8 @@ fn __agent_stall_maybe_emit(
  * `ping_pong_alternations`.
  */
 fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string) -> AgentStallState {
-  let a = state.ping_pong_a
-  let b = state.ping_pong_b
+  const a = state.ping_pong_a
+  const b = state.ping_pong_b
   if a == "" {
     return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
   }
@@ -1069,7 +1069,7 @@ fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string) -> 
     }
     return state + {ping_pong_b: signature, ping_pong_alternations: 1}
   }
-  let expected_next = if state.ping_pong_alternations % 2 == 1 {
+  const expected_next = if state.ping_pong_alternations % 2 == 1 {
     a
   } else {
     b
@@ -1091,7 +1091,7 @@ fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string) -> 
  * to flag a hard stop. Returns the state with the trip recorded.
  */
 fn __agent_stall_register_trip(state: AgentStallState, config: AgentStallConfig) -> AgentStallState {
-  let trips = state.consecutive_trips + 1
+  const trips = state.consecutive_trips + 1
   return state + {consecutive_trips: trips, hard_stop: trips >= config.hard_stop_after_trips}
 }
 
@@ -1154,7 +1154,7 @@ fn __agent_stall_emit_diagnostic_trip(
   defer_feedback: bool,
   remediation_delivered = false,
 ) -> AgentStallObservation {
-  var warning = __agent_stall_warning_record(
+  let warning = __agent_stall_warning_record(
     iteration,
     "",
     {},
@@ -1174,8 +1174,8 @@ fn __agent_stall_emit_diagnostic_trip(
   if remediation_delivered {
     warning = warning + {remediation_delivered: true}
   }
-  let emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
-  let next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
+  const emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
+  const next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
 
@@ -1192,7 +1192,7 @@ fn __agent_stall_observe_no_progress(
   turn_stop_reason = "",
 ) -> AgentStallObservation {
   // An agent message breaks any action-repeat / ping-pong run.
-  var next_state = __agent_stall_reset_action(state)
+  let next_state = __agent_stall_reset_action(state)
   next_state = next_state + {no_progress_streak: next_state.no_progress_streak + 1}
   if next_state.no_progress_streak < config.no_progress_messages {
     next_state = __agent_stall_register_recovery(next_state)
@@ -1204,12 +1204,12 @@ fn __agent_stall_observe_no_progress(
   // eval-meter failure class. Give it cause-specific feedback instead of the
   // generic "made no progress" nag, so the model knows its turn errored and to
   // re-emit the intended tool call.
-  let pattern = if to_string(turn_stop_reason) == "error" {
+  const pattern = if to_string(turn_stop_reason) == "error" {
     "errored_no_tool_call"
   } else {
     "no_progress_monologue"
   }
-  let warning = __agent_stall_warning_record(
+  const warning = __agent_stall_warning_record(
     iteration,
     "",
     {},
@@ -1221,7 +1221,7 @@ fn __agent_stall_observe_no_progress(
     config,
     config.no_progress_messages,
   )
-  let emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+  const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
   next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
@@ -1242,31 +1242,31 @@ fn __agent_stall_process_call(
   tool_name: string,
   prev_dispatch,
 ) -> dict {
-  let signature = __agent_tool_call_signature(call)
-  let same_action = signature == state.last_signature
-  let outcome = __agent_stall_outcome_for(prev_dispatch, tool_name)
+  const signature = __agent_tool_call_signature(call)
+  const same_action = signature == state.last_signature
+  const outcome = __agent_stall_outcome_for(prev_dispatch, tool_name)
   // Observation signature of the action that just repeated. When dispatch
   // results are unavailable, fall back to the action signature itself so the
   // legacy adjacent-repeat behavior still trips.
-  let obs_signature = if outcome != nil {
+  const obs_signature = if outcome != nil {
     outcome.signature
   } else {
     "sig:" + sha256(signature)
   }
-  let outcome_kind = if outcome != nil {
+  const outcome_kind = if outcome != nil {
     outcome.kind
   } else {
     "ok"
   }
   // Ping-pong is independent of the same-action streak and only considers
   // distinct alternating actions; update it first.
-  var next_state = __agent_stall_update_ping_pong(state, signature)
-  let streak = if same_action {
+  let next_state = __agent_stall_update_ping_pong(state, signature)
+  const streak = if same_action {
     next_state.streak + 1
   } else {
     1
   }
-  let repeated = if streak > 1 {
+  const repeated = if streak > 1 {
     next_state.repeated_tool_calls + 1
   } else {
     next_state.repeated_tool_calls
@@ -1279,9 +1279,9 @@ fn __agent_stall_process_call(
   // streak. When observations are unavailable (no dispatch results threaded in)
   // the streak counts the raw signature repeat, preserving the legacy
   // adjacent-identical-call behavior so existing thresholds still trip.
-  let both_known = outcome != nil && next_state.last_outcome_kind != ""
-  let observation_changed = both_known && obs_signature != next_state.last_observation_signature
-  let new_same_observation_streak = if !same_action || outcome_kind != "ok" {
+  const both_known = outcome != nil && next_state.last_outcome_kind != ""
+  const observation_changed = both_known && obs_signature != next_state.last_observation_signature
+  const new_same_observation_streak = if !same_action || outcome_kind != "ok" {
     if outcome_kind == "ok" {
       1
     } else {
@@ -1294,7 +1294,7 @@ fn __agent_stall_process_call(
   }
   // Same-error streak: same action producing the same (or unknown) error.
   // Distinct errors reset, because the agent is making different mistakes.
-  let new_same_error_streak = if !same_action || outcome_kind != "error" {
+  const new_same_error_streak = if !same_action || outcome_kind != "error" {
     if outcome_kind == "error" {
       1
     } else {
@@ -1305,7 +1305,7 @@ fn __agent_stall_process_call(
   } else {
     next_state.same_error_streak + 1
   }
-  let new_context_streak = if outcome_kind == "context_window" {
+  const new_context_streak = if outcome_kind == "context_window" {
     next_state.context_window_error_streak + 1
   } else {
     0
@@ -1325,8 +1325,8 @@ fn __agent_stall_process_call(
     same_error_streak: new_same_error_streak,
     context_window_error_streak: new_context_streak,
   }
-  let ping_pong_cycles = next_state.ping_pong_alternations / 2
-  let trip = __agent_stall_classify_trip(
+  const ping_pong_cycles = next_state.ping_pong_alternations / 2
+  const trip = __agent_stall_classify_trip(
     config,
     {
       context_streak: new_context_streak,
@@ -1355,7 +1355,7 @@ fn __agent_stall_process_call(
  * not cover.
  */
 fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
-  let repair_owns_repeat = config.repair_aware
+  const repair_owns_repeat = config.repair_aware
   if s.context_streak >= config.repeat_context_window_error {
     return {
       pattern: "repeated_context_window_error",
@@ -1413,7 +1413,7 @@ fn __agent_stall_observe_core(
   had_parse_errors = false,
   turn_stop_reason = "",
 ) -> AgentStallObservation {
-  let config = __agent_stall_config(raw_config)
+  const config = __agent_stall_config(raw_config)
   if !config.enabled {
     return {
       state: state,
@@ -1441,7 +1441,7 @@ fn __agent_stall_observe_core(
   // Soft progress-report tools (e.g. `agent_progress`) report status without
   // advancing task state, so they are excluded from the real-action stream: a
   // turn whose only call is such a report is treated as no-progress.
-  let substantive_calls = tool_calls
+  const substantive_calls = tool_calls
     .filter({ c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) })
   if len(substantive_calls) == 0 {
     // No substantive tool call this turn — either none at all, or only soft
@@ -1465,21 +1465,21 @@ fn __agent_stall_observe_core(
       false,
     )
   }
-  var next_state = state + {no_progress_streak: 0}
-  var emitted_warning = nil
-  var feedback_deferred = false
+  let next_state = state + {no_progress_streak: 0}
+  let emitted_warning = nil
+  let feedback_deferred = false
   for call in substantive_calls {
-    let tool_name = __agent_tool_call_name(call)
+    const tool_name = __agent_tool_call_name(call)
     if tool_name == "" || contains(config.exempt_tools, tool_name) {
       next_state = __agent_stall_register_recovery(__agent_stall_reset_action(next_state))
       continue
     }
-    let processed = __agent_stall_process_call(next_state, config, call, tool_name, prev_dispatch)
+    const processed = __agent_stall_process_call(next_state, config, call, tool_name, prev_dispatch)
     next_state = processed.state
-    let trip = processed.trip
+    const trip = processed.trip
     if trip != nil {
       next_state = __agent_stall_register_trip(next_state, config)
-      let warning = __agent_stall_warning_record(
+      const warning = __agent_stall_warning_record(
         iteration,
         tool_name,
         __agent_tool_call_args(call),
@@ -1491,7 +1491,7 @@ fn __agent_stall_observe_core(
         config,
         trip.threshold,
       )
-      let emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+      const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
       next_state = emitted.state
       if emitted_warning == nil {
         emitted_warning = warning
@@ -1528,17 +1528,17 @@ fn __agent_stall_apply_repair(
   turn_made_edit: bool,
   defer_feedback: bool,
 ) -> AgentStallObservation {
-  let should_fold_current_failure = config.post_edit_reverify || config.repair_aware
+  const should_fold_current_failure = config.post_edit_reverify || config.repair_aware
   if !should_fold_current_failure {
     return observation
   }
-  let folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
-  let hard_cap_due = config.no_net_progress_extend_guard
+  const folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
+  const hard_cap_due = config.no_net_progress_extend_guard
     && folded.last_diagnostic_class == "fail"
     && folded.failing_verify_turns >= config.no_net_progress_hard_cap_after
     && observation.state.failing_verify_turns < config.no_net_progress_hard_cap_after
   if hard_cap_due {
-    let tripped = __agent_stall_register_immediate_hard_stop(folded)
+    const tripped = __agent_stall_register_immediate_hard_stop(folded)
     return __agent_stall_emit_diagnostic_trip(
       session_id,
       config,
@@ -1562,19 +1562,19 @@ fn __agent_stall_apply_repair(
   // callback is invoked ONLY inside the guard below, so an absent callback (or a
   // turn that does not otherwise qualify) leaves behavior byte-identical. Fires
   // regardless of `repair_aware` (it keys on the fact, not the repair nudge).
-  let delivered_streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
-  let delivered_candidate = config.remediation_delivered != nil
+  const delivered_streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
+  const delivered_candidate = config.remediation_delivered != nil
     && folded.last_diagnostic_class == "fail"
     && folded.same_diagnostic_streak >= STALL_DELIVERED_FIX_AFTER
     && delivered_streak_advanced
     && observation.warning == nil
   if delivered_candidate {
-    let delivered = config
+    const delivered = config
       .remediation_delivered(
       {prev_dispatch: prev_dispatch, session_id: session_id, signature: folded.last_diagnostic_signature},
     )
     if delivered {
-      let tripped = __agent_stall_register_trip(folded, config)
+      const tripped = __agent_stall_register_trip(folded, config)
       return __agent_stall_emit_diagnostic_trip(
         session_id,
         config,
@@ -1599,14 +1599,14 @@ fn __agent_stall_apply_repair(
   // streak reset (a different/passing signature) re-arms the trip for the next
   // genuinely-stuck episode. Also require that no other stall pattern already
   // fired this turn (avoid double-nudging).
-  let streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
-  let should_trip = folded.same_diagnostic_streak == config.stuck_same_diagnostic_after
+  const streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
+  const should_trip = folded.same_diagnostic_streak == config.stuck_same_diagnostic_after
     && streak_advanced
     && observation.warning == nil
   if !should_trip {
     return observation + {state: folded}
   }
-  let tripped = __agent_stall_register_trip(folded, config)
+  const tripped = __agent_stall_register_trip(folded, config)
   return __agent_stall_emit_diagnostic_trip(
     session_id,
     config,
@@ -1651,7 +1651,7 @@ pub fn agent_stall_observe_tool_calls(
   turn_stop_reason = "",
   payload = nil,
 ) -> AgentStallObservation {
-  let observation = __agent_stall_observe_core(
+  const observation = __agent_stall_observe_core(
     session_id,
     tool_calls,
     iteration,
@@ -1666,7 +1666,7 @@ pub fn agent_stall_observe_tool_calls(
   if !observation.enabled {
     return observation
   }
-  let repaired = __agent_stall_apply_repair(
+  const repaired = __agent_stall_apply_repair(
     session_id,
     observation.config,
     observation,
@@ -1696,7 +1696,7 @@ pub fn agent_stall_observe_tool_calls(
  * @api_stability: experimental
  */
 pub fn agent_stall_repair_config(raw_config) -> dict {
-  let config = __agent_stall_config(raw_config)
+  const config = __agent_stall_config(raw_config)
   return {
     repair_aware: config.repair_aware,
     post_edit_reverify: config.post_edit_reverify,
@@ -1735,7 +1735,7 @@ fn __agent_stall_fold_verify_state(
   if config.progress_signal == nil {
     return state
   }
-  let raw = config.progress_signal(payload)
+  const raw = config.progress_signal(payload)
   if raw == nil {
     return state
       + {
@@ -1743,8 +1743,8 @@ fn __agent_stall_fold_verify_state(
       verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
     }
   }
-  let scalar = to_float(raw)
-  let advanced = !state.verify_state_seen || scalar > state.verify_state_high
+  const scalar = to_float(raw)
+  const advanced = !state.verify_state_seen || scalar > state.verify_state_high
   if advanced {
     return state
       + {
@@ -1795,10 +1795,10 @@ fn __agent_stall_fold_verify_state(
  * @api_stability: experimental
  */
 pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> bool {
-  let config = __agent_stall_config(raw_config)
+  const config = __agent_stall_config(raw_config)
   if config.progress_signal != nil {
-    let streak = stall_state.same_diagnostic_streak
-    let long_stall = streak >= config.verify_state_streak
+    const streak = stall_state.same_diagnostic_streak
+    const long_stall = streak >= config.verify_state_streak
       && stall_state.verify_turns_since_advance >= config.verify_state_stall_turns
     // Hard-recurrence trips on EITHER a consecutive same-diagnostic streak OR the
     // TOTAL (non-consecutive) occurrences of the CURRENT failure signature across
@@ -1806,11 +1806,11 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     // error re-proposed N times with off-signature failures churning between, so
     // the consecutive streak keeps resetting and never trips). Both predicates
     // share `verify_state_recurrence_hard`.
-    let sig_total = to_int((stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0)
+    const sig_total = to_int((stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0)
       ?? 0
-    let hard_recurrence = streak >= config.verify_state_recurrence_hard
+    const hard_recurrence = streak >= config.verify_state_recurrence_hard
       || sig_total >= config.verify_state_recurrence_hard
-    let write_axis = stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
+    const write_axis = stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
       && stall_state.verify_wrote_since_advance
     return long_stall || hard_recurrence || write_axis
   }
@@ -1832,7 +1832,7 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
  * @api_stability: experimental
  */
 pub fn agent_stall_verified_write_satisfied(raw_config, stall_state: AgentStallState) -> bool {
-  let config = __agent_stall_config(raw_config)
+  const config = __agent_stall_config(raw_config)
   return config.enabled
     && config.post_edit_reverify
     && stall_state.write_epoch > 0
@@ -1917,13 +1917,13 @@ pub fn agent_stall_apply_result(result: dict, stall_enabled: bool, stall_state: 
   if !stall_enabled && len(stall_state.warnings) == 0 {
     return result
   }
-  let base = result
+  const base = result
     + {
     repeated_tool_calls: stall_state.repeated_tool_calls,
     stall_warnings: stall_state.warnings,
     suspected_loop: len(stall_state.warnings) > 0,
   }
-  let current_failure = agent_stall_current_failure(stall_state)
+  const current_failure = agent_stall_current_failure(stall_state)
   if current_failure == nil {
     return base
   }
@@ -1931,11 +1931,11 @@ pub fn agent_stall_apply_result(result: dict, stall_enabled: bool, stall_state: 
 }
 
 fn __agent_done_judge_stall_cadence(opts) {
-  let judge = opts?.done_judge
+  const judge = opts?.done_judge
   if type_of(judge) != "dict" {
     return nil
   }
-  let cadence = judge?.cadence
+  const cadence = judge?.cadence
   if type_of(cadence) != "dict" || cadence?.when != "stalled" {
     return nil
   }
@@ -1951,19 +1951,19 @@ fn __agent_done_judge_stall_cadence(opts) {
  * @example: agent_stall_done_judge_due(opts, 0, 3)
  */
 pub fn agent_stall_done_judge_due(opts, invocations: int, turn_number: int) -> bool {
-  let cadence = __agent_done_judge_stall_cadence(opts)
+  const cadence = __agent_done_judge_stall_cadence(opts)
   if cadence == nil {
     return false
   }
-  let max_invocations = cadence?.max_invocations
+  const max_invocations = cadence?.max_invocations
   if max_invocations != nil && invocations >= max_invocations {
     return false
   }
-  let min_iterations = cadence?.min_iterations_before_first
+  const min_iterations = cadence?.min_iterations_before_first
   if min_iterations != nil && turn_number <= min_iterations {
     return false
   }
-  let every = cadence?.every
+  const every = cadence?.every
   if every != nil && turn_number % every != 0 {
     return false
   }
@@ -2034,7 +2034,7 @@ pub fn token_runaway_resolve_cap(median: float, stddev: float, sigma: float, fal
   if median <= 0.0 {
     return fallback
   }
-  let relative = if stddev > 0.0 {
+  const relative = if stddev > 0.0 {
     median + sigma * stddev
   } else {
     median * (1.0 + TOKEN_RUNAWAY_THIN_HISTORY_MARGIN)
@@ -2062,9 +2062,9 @@ pub fn token_runaway_resolve_cap(median: float, stddev: float, sigma: float, fal
  * @api_stability: experimental
  */
 pub fn token_runaway_decision(config: dict, obs: dict) -> dict {
-  let sigma = to_float(config?.sigma ?? TOKEN_RUNAWAY_DEFAULT_SIGMA)
-  let fallback = to_float(config?.fallback ?? 0.0)
-  let cap = token_runaway_resolve_cap(
+  const sigma = to_float(config?.sigma ?? TOKEN_RUNAWAY_DEFAULT_SIGMA)
+  const fallback = to_float(config?.fallback ?? 0.0)
+  const cap = token_runaway_resolve_cap(
     to_float(config?.median ?? 0.0),
     to_float(config?.stddev ?? 0.0),
     sigma,
@@ -2073,8 +2073,8 @@ pub fn token_runaway_decision(config: dict, obs: dict) -> dict {
   if cap <= 0.0 {
     return {action: "proceed", cap: cap, reason: "no_cap"}
   }
-  let tokens = to_float(obs?.tokens ?? 0)
-  let hard_multiple = to_float(config?.hard_multiple ?? TOKEN_RUNAWAY_HARD_OVERSHOOT_MULTIPLE)
+  const tokens = to_float(obs?.tokens ?? 0)
+  const hard_multiple = to_float(config?.hard_multiple ?? TOKEN_RUNAWAY_HARD_OVERSHOOT_MULTIPLE)
   if tokens >= cap * hard_multiple {
     return {action: "abort", cap: cap, reason: "token_runaway_hard"}
   }
@@ -2119,7 +2119,7 @@ fn __token_runaway_is_verification_result(result) -> bool {
  * @api_stability: experimental
  */
 pub fn token_runaway_made_progress(payload) -> bool {
-  let results = if type_of(payload?.tool_results) == "list" {
+  const results = if type_of(payload?.tool_results) == "list" {
     payload.tool_results
   } else {
     payload?.dispatch?.results ?? []
@@ -2130,7 +2130,7 @@ pub fn token_runaway_made_progress(payload) -> bool {
     }
     // A verification result present this turn that is NOT a gate-bearing
     // failure = verification passed / advanced = real progress.
-    let gate = __agent_stall_gate_input(nil, result)
+    const gate = __agent_stall_gate_input(nil, result)
     if !(gate?.gate_bearing_failure ?? false) {
       return true
     }
@@ -2154,14 +2154,14 @@ pub fn token_runaway_made_progress(payload) -> bool {
  */
 pub fn token_runaway_post_turn(config: dict) {
   return { payload ->
-    let session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
-    let totals = agent_session_totals(session_id)
-    let obs = {making_progress: token_runaway_made_progress(payload), tokens: to_float(totals?.input_tokens ?? 0)}
-    let decision = token_runaway_decision(config, obs)
+    const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
+    const totals = agent_session_totals(session_id)
+    const obs = {making_progress: token_runaway_made_progress(payload), tokens: to_float(totals?.input_tokens ?? 0)}
+    const decision = token_runaway_decision(config, obs)
     if decision.action != "abort" {
       nil
     } else {
-      let warning = {
+      const warning = {
         arguments_digest: "",
         consecutive_trips: 1,
         count: to_int(obs.tokens),
@@ -2201,8 +2201,8 @@ pub fn token_runaway_post_turn(config: dict) {
  * @api_stability: experimental
  */
 pub fn detector_spec_to_stall(spec: DetectorSpec) -> dict {
-  var config = {enabled: spec.enabled ?? true}
-  let loop = spec.loop
+  let config = {enabled: spec.enabled ?? true}
+  const loop = spec.loop
   if loop != nil {
     if loop.repeat != nil {
       config = config + {repeat_same_observation: loop.repeat}
@@ -2211,11 +2211,11 @@ pub fn detector_spec_to_stall(spec: DetectorSpec) -> dict {
       config = config + {ping_pong_cycles: loop.ping_pong_cycles}
     }
   }
-  let no_progress = spec.no_progress
+  const no_progress = spec.no_progress
   if no_progress?.messages != nil {
     config = config + {no_progress_messages: no_progress.messages}
   }
-  let stuck = spec.stuck
+  const stuck = spec.stuck
   if stuck != nil {
     if stuck.same_error != nil {
       config = config + {repeat_same_error: stuck.same_error}
@@ -2253,7 +2253,7 @@ pub fn detector_spec_token_runaway(spec: DetectorSpec) {
  * @api_stability: experimental
  */
 pub fn unified_detectors_post_turn(spec: DetectorSpec) {
-  let token_runaway = detector_spec_token_runaway(spec)
+  const token_runaway = detector_spec_token_runaway(spec)
   if token_runaway == nil {
     return nil
   }

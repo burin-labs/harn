@@ -22,7 +22,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "finish quickly",
         nil,
         {
@@ -36,7 +36,7 @@ pipeline default() {
           ],
         },
       )
-      let advances = agent_trace().filter({ e -> e.type == "models_advance" })
+      const advances = agent_trace().filter({ e -> e.type == "models_advance" })
       __io_println(result.status)
       __io_println(len(advances))
       __io_println(advances[0].to_model)

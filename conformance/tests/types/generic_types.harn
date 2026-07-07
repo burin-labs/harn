@@ -1,12 +1,12 @@
 pipeline default() {
   // list<int> type annotation
-  let numbers: list<int> = [1, 2, 3]
+  const numbers: list<int> = [1, 2, 3]
   __io_println(numbers.count)
   // dict<string, int> type annotation
-  let ages: dict<string, int> = {alice: 30, bob: 25}
+  const ages: dict<string, int> = {alice: 30, bob: 25}
   __io_println(ages["alice"])
   // Nested: list of dicts
-  let people: list<dict> = [{name: "Alice"}, {name: "Bob"}]
+  const people: list<dict> = [{name: "Alice"}, {name: "Bob"}]
   __io_println(people[0]["name"])
   // Type annotation on function params
   fn sum(items: list<int>) -> int {

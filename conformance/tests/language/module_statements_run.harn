@@ -1,11 +1,11 @@
 // Module-level statements (assignments, expression statements) execute in
 // source order before any pipeline runs — the same semantics as script
 // mode. They used to be silently dropped when the file declared a pipeline.
-var counter = 1
+let counter = 1
 
 counter = counter + 1
 
-var nested = {a: {b: 0}}
+let nested = {a: {b: 0}}
 
 nested.a.b = counter
 

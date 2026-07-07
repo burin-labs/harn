@@ -17,7 +17,7 @@
  * max_iterations is small (8) to bound cost.
  */
 fn build_tools() -> dict {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "list_dir",
@@ -77,16 +77,16 @@ fn build_tools() -> dict {
 
 fn run_variant(label: string, mode: string, sentinel: string, registry: dict) -> dict {
   log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
-  let task = "Investigate this small repo and tell me what the compute function does and how it is used in main."
-  let system_prompt = "/no_think You are a coding agent. Use the available tools to investigate the repo step by step, then return a concise final answer to the user."
-  let cb = { info ->
+  const task = "Investigate this small repo and tell me what the compute function does and how it is used in main."
+  const system_prompt = "/no_think You are a coding agent. Use the available tools to investigate the repo step by step, then return a concise final answer to the user."
+  const cb = { info ->
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0
     let iter = info?.iteration ?? 0
     log("  [${label}] iter=${iter} tools=${count} names=${names}")
     nil
   }
-  var opts = {
+  let opts = {
     provider: "llamacpp",
     model: "qwen3.6",
     tool_format: mode,
@@ -98,13 +98,13 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
   if sentinel != "(default)" {
     opts = opts + {done_sentinel: sentinel}
   }
-  let result = agent_loop(task, system_prompt, opts)
+  const result = agent_loop(task, system_prompt, opts)
   log("  [${label}] DONE status=${result.status} iters=${result.llm.iterations}")
-  let visible = result?.visible_text ?? ""
-  let visible_len = len(visible)
+  const visible = result?.visible_text ?? ""
+  const visible_len = len(visible)
   log("  [${label}] visible_len=${visible_len}")
   if visible_len > 0 {
-    let head_len = if visible_len < 200 {
+    const head_len = if visible_len < 200 {
       visible_len
     } else {
       200
@@ -115,8 +115,8 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
 }
 
 pipeline main(task) {
-  let registry = build_tools()
-  let results = [
+  const registry = build_tools()
+  const results = [
     run_variant("A:native+default", "native", "(default)", registry),
     run_variant("B:native+empty", "native", "", registry),
     run_variant("C:text+default", "text", "(default)", registry),

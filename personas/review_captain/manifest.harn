@@ -13,11 +13,11 @@ import { review_pr } from "lib/review"
 @persona(name: "review_captain", description: "Harn-native review captain. Runs deterministic secret/risk checks plus optional self_review LLM rounds and emits a structured review receipt.", tools: [github, mcp], autonomy: suggest, receipts: required, triggers: [github.review_requested, github.pull_request_synchronized, github.pull_request_opened])
 /** Static persona graph used by `harn persona inspect` to expose Review Captain's durable steps. */
 pub fn review_captain_persona(ctx) {
-  let input = resolve_review_input_step(ctx)
-  let secret_scan_findings = scan_secrets_step(input)
-  let risky_paths = classify_risky_paths_step({input: input, secret_scan_findings: secret_scan_findings})
-  let llm_findings = run_self_review_step({input: input, risky_paths: risky_paths})
-  let receipt = build_review_receipt_step(
+  const input = resolve_review_input_step(ctx)
+  const secret_scan_findings = scan_secrets_step(input)
+  const risky_paths = classify_risky_paths_step({input: input, secret_scan_findings: secret_scan_findings})
+  const llm_findings = run_self_review_step({input: input, risky_paths: risky_paths})
+  const receipt = build_review_receipt_step(
     {
       input: input,
       llm_findings: llm_findings,
@@ -74,11 +74,11 @@ fn _default_request() {
 }
 
 fn _resolve_request() {
-  let from_stdin = _try_stdin()
+  const from_stdin = _try_stdin()
   if from_stdin != nil {
     return _merge_with_defaults(from_stdin)
   }
-  let from_runtime = _try_runtime_input()
+  const from_runtime = _try_runtime_input()
   if from_runtime != nil {
     return _merge_with_defaults(from_runtime)
   }
@@ -86,7 +86,7 @@ fn _resolve_request() {
 }
 
 fn _try_stdin() {
-  let raw = trim(read_stdin() ?? "")
+  const raw = trim(read_stdin() ?? "")
   if raw == "" {
     return nil
   }
@@ -94,7 +94,7 @@ fn _try_stdin() {
 }
 
 fn _try_runtime_input() {
-  let attempt = try {
+  const attempt = try {
     runtime_pipeline_input()
   }
   if !is_ok(attempt) {
@@ -104,7 +104,7 @@ fn _try_runtime_input() {
 }
 
 fn _merge_with_defaults(provided) {
-  let defaults = _default_request()
+  const defaults = _default_request()
   return {
     repo: provided.repo ?? defaults.repo,
     pr_number: provided.pr_number ?? defaults.pr_number,
@@ -120,12 +120,12 @@ fn _merge_with_defaults(provided) {
 }
 
 fn _resolve_policy(request) {
-  let path = request.policy_path
+  const path = request.policy_path
   if path == nil || path == "" {
     return default_policy()
   }
-  let raw = read_file(path)
-  let result = load_policy_json(raw)
+  const raw = read_file(path)
+  const result = load_policy_json(raw)
   if result.ok {
     return result.policy
   }
@@ -133,9 +133,9 @@ fn _resolve_policy(request) {
 }
 
 pipeline run(task) {
-  let request = _resolve_request()
-  let policy = _resolve_policy(request)
-  let receipt = review_pr(request, policy, nil)
+  const request = _resolve_request()
+  const policy = _resolve_policy(request)
+  const receipt = review_pr(request, policy, nil)
   __io_println(json_stringify(receipt))
   return receipt
 }

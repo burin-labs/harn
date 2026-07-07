@@ -1,6 +1,6 @@
-let GREETING = "hello"
+const GREETING = "hello"
 
-let NAME = "harn"
+const NAME = "harn"
 
 pub fn greet() -> string {
   return GREETING

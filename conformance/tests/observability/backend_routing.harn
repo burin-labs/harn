@@ -1,7 +1,7 @@
 import { obs } from "std/observability"
 
 pipeline default() {
-  let o = obs()
+  const o = obs()
   o.reset()
   o
     .configure(
@@ -19,7 +19,7 @@ pipeline default() {
   o.log("normal", "info", {component: "router"})
   o.log("bad", "error", {component: "router"})
   o.metric("requests", 7, {route: "/v1"})
-  let emitted = o.events_take()
+  const emitted = o.events_take()
   __io_println(len(emitted))
   __io_println(emitted[0].backend)
   __io_println(emitted[0].payload.resourceLogs[0].scopeLogs[0].logRecords[0].body)

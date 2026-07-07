@@ -3,13 +3,13 @@ pipeline default() {
   // value that can flow into `let`, a function call argument, or a
   // `return`. Friction logs kept reporting this as missing — it
   // works, but a test under a searchable name helps people find it.
-  let x = if true {
+  const x = if true {
     1
   } else {
     2
   }
   __io_println(x)
-  let label = if 3 > 2 {
+  const label = if 3 > 2 {
     "bigger"
   } else {
     "smaller"
@@ -24,7 +24,7 @@ pipeline default() {
     },
   )
   // Multiple branches via chained else-if still work.
-  let grade = if 75 >= 90 {
+  const grade = if 75 >= 90 {
     "A"
   } else if 75 >= 80 {
     "B"

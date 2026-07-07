@@ -10,8 +10,8 @@ memory_store("workspace/acme", "alice-profile", {
   text: "Alice prefers Rust examples and concise plans",
 }, ["profile", "preference"])
 
-let related = memory_recall("workspace/acme", "rust preference", 3)
-let summary = memory_summarize("workspace/acme", {limit: 10})
+const related = memory_recall("workspace/acme", "rust preference", 3)
+const summary = memory_summarize("workspace/acme", {limit: 10})
 ```
 
 ## API
@@ -97,7 +97,7 @@ store_fact({
   provenance: {agent: "codex", run_id: "run-1"},
 })
 
-let facts = recall_facts("Rust examples", "claim", 0.8)
+const facts = recall_facts("Rust examples", "claim", 0.8)
 ```
 
 Facts normalize to `harn.fact.v1` with `kind`, `claim`, `evidence`,
@@ -128,9 +128,9 @@ answer instead of re-guessing.
 ```harn
 import { probe_eval, probe_typecheck } from "std/agent/probe"
 
-let helper = probe_eval("git diff --quiet HEAD -- crates/harn-stdlib", {expected: 0})
-let tc = probe_typecheck(
-  "pipeline summary() { let x: int = len([1, 2, 3]) __io_println(x) }\n",
+const helper = probe_eval("git diff --quiet HEAD -- crates/harn-stdlib", {expected: 0})
+const tc = probe_typecheck(
+  "pipeline summary() { const x: int = len([1, 2, 3]) __io_println(x) }\n",
   {expected: 0},
 )
 ```
@@ -153,7 +153,7 @@ recall:
 import { pattern_learning_observe, pattern_learning_pending } from "std/agent/pattern_knowledge"
 
 pattern_learning_observe("session-1", "Refactor the auth refresh tests", ["read", "edit"])
-let proposals = pattern_learning_pending()
+const proposals = pattern_learning_pending()
 ```
 
 The module keeps observations, pending proposals, and enablement state in the

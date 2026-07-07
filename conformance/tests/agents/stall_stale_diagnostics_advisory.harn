@@ -27,10 +27,10 @@ fn dispatch(hash: string, current_hash: string) {
 }
 
 fn run(dispatches, config) {
-  var state = agent_stall_initial_state()
-  var warnings = []
+  let state = agent_stall_initial_state()
+  let warnings = []
   for item in dispatches {
-    let obs = agent_stall_observe_tool_calls("stall-stale-diag-" + uuid(), call(), 1, config, state, true, item)
+    const obs = agent_stall_observe_tool_calls("stall-stale-diag-" + uuid(), call(), 1, config, state, true, item)
     state = obs.state
     if obs.warning != nil {
       warnings = warnings + [obs.warning]
@@ -40,7 +40,7 @@ fn run(dispatches, config) {
 }
 
 pipeline default() {
-  let stale = run(
+  const stale = run(
     [dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new")],
     {
       enabled: true,
@@ -56,13 +56,13 @@ pipeline default() {
   assert_eq(stale.state.same_diagnostic_streak, 0)
   assert_eq(stale.state.failing_verify_turns, 0)
   assert_eq(agent_stall_no_net_progress({no_net_progress_extend_guard: true}, stale.state), false)
-  let repeated_stale = run(
+  const repeated_stale = run(
     [dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new")],
     {enabled: true, inject_feedback: false, repair_aware: false, repeat_same_error: 2},
   )
   assert_eq(len(repeated_stale.warnings), 0)
   assert_eq(repeated_stale.state.same_error_streak, 0)
-  let fresh = run(
+  const fresh = run(
     [dispatch("new", "new"), dispatch("new", "new")],
     {enabled: true, inject_feedback: false, repair_aware: true, stuck_same_diagnostic_after: 2},
   )

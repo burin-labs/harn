@@ -77,11 +77,11 @@ fn __safe_int(value) -> int? {
  *   _            → "32_plus"
  */
 fn __ram_bucket_from_bytes(available_bytes) -> string {
-  let bytes = __safe_int(available_bytes)
+  const bytes = __safe_int(available_bytes)
   if bytes == nil {
     return "lt8"
   }
-  let gib = bytes / GIB
+  const gib = bytes / GIB
   if gib <= 7 {
     return "lt8"
   }
@@ -96,7 +96,7 @@ fn __ram_bucket_from_bytes(available_bytes) -> string {
 
 /** Round half-up GiB conversion for the human rationale string. */
 fn __ram_gib_rounded(bytes) -> int {
-  let b = __safe_int(bytes) ?? 0
+  const b = __safe_int(bytes) ?? 0
   return (b + GIB / 2) / GIB
 }
 
@@ -121,9 +121,9 @@ fn __find_rule(rules: list, ram_bucket: string, gpu: string, has_provider_key: b
     if type_of(rule) != "dict" {
       continue
     }
-    let r_ram = __safe_string(rule["ram_bucket"], "")
-    let r_gpu = __safe_string(rule["gpu"], "")
-    let r_key = __safe_bool(rule["has_provider_key"], false)
+    const r_ram = __safe_string(rule["ram_bucket"], "")
+    const r_gpu = __safe_string(rule["gpu"], "")
+    const r_key = __safe_bool(rule["has_provider_key"], false)
     if r_ram == ram_bucket && r_gpu == gpu && r_key == has_provider_key {
       return rule
     }
@@ -140,13 +140,13 @@ fn __find_rule(rules: list, ram_bucket: string, gpu: string, has_provider_key: b
  */
 fn __harn_selector_for(provider: string, model_id: string) -> string {
   if provider == "ollama" {
-    let prefix = "ollama/"
+    const prefix = "ollama/"
     if len(model_id) >= len(prefix) && model_id[0:len(prefix)] == prefix {
       return "ollama:" + model_id[len(prefix):len(model_id)]
     }
     return model_id
   }
-  let prefix = provider + "/"
+  const prefix = provider + "/"
   if len(model_id) >= len(prefix) && model_id[0:len(prefix)] == prefix {
     return model_id[len(prefix):len(model_id)]
   }
@@ -154,12 +154,12 @@ fn __harn_selector_for(provider: string, model_id: string) -> string {
 }
 
 fn __rationale(ram_bytes, gpu: string, has_provider_key: bool, model_id: string) -> string {
-  let ram = if __safe_int(ram_bytes) == nil {
+  const ram = if __safe_int(ram_bytes) == nil {
     "unknown free RAM"
   } else {
     to_string(__ram_gib_rounded(ram_bytes)) + " GB free"
   }
-  let creds = if has_provider_key {
+  const creds = if has_provider_key {
     "cloud creds available"
   } else {
     "no cloud creds"
@@ -177,15 +177,15 @@ fn __rationale(ram_bytes, gpu: string, has_provider_key: bool, model_id: string)
  * also true.
  */
 fn __resolve_rule(rule: dict, cloud_model) -> dict? {
-  let model_id = __safe_string(rule["model_id"], "")
+  const model_id = __safe_string(rule["model_id"], "")
   if model_id != CLOUD_DEFAULT_SENTINEL {
     return {provider: __safe_string(rule["provider"], ""), model_id: model_id}
   }
   if type_of(cloud_model) != "dict" {
     return nil
   }
-  let provider = __safe_string(cloud_model["provider"], "")
-  let cloud_model_id = __safe_string(cloud_model["model_id"], "")
+  const provider = __safe_string(cloud_model["provider"], "")
+  const cloud_model_id = __safe_string(cloud_model["model_id"], "")
   if provider == "" || cloud_model_id == "" {
     return nil
   }
@@ -193,27 +193,27 @@ fn __resolve_rule(rule: dict, cloud_model) -> dict? {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_MODELS_RECOMMEND_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_MODELS_RECOMMEND_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_MODELS_RECOMMEND_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
-  let payload = try {
+  const payload = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse recommend payload: " + to_string(e))
     return 70
   }
-  let hardware = __safe_dict(payload["hardware"])
-  let ram = __safe_dict(hardware["ram"])
-  let gpu_snap = __safe_dict(hardware["gpu"])
-  let gpu = __safe_string(gpu_snap["kind"], "none")
-  let has_provider_key = __safe_bool(payload["has_provider_key"], false)
-  let cloud_model = payload["cloud_model"]
-  let rules = __safe_list(payload["recommendations"])
-  let ram_bucket = __ram_bucket_from_bytes(ram["available_bytes"])
-  let rule = __find_rule(rules, ram_bucket, gpu, has_provider_key)
+  const hardware = __safe_dict(payload["hardware"])
+  const ram = __safe_dict(hardware["ram"])
+  const gpu_snap = __safe_dict(hardware["gpu"])
+  const gpu = __safe_string(gpu_snap["kind"], "none")
+  const has_provider_key = __safe_bool(payload["has_provider_key"], false)
+  const cloud_model = payload["cloud_model"]
+  const rules = __safe_list(payload["recommendations"])
+  const ram_bucket = __ram_bucket_from_bytes(ram["available_bytes"])
+  const rule = __find_rule(rules, ram_bucket, gpu, has_provider_key)
   if rule == nil {
     harness.stdio
       .eprintln(
@@ -225,19 +225,19 @@ fn main(harness: Harness) -> int {
     )
     return 1
   }
-  let resolved = __resolve_rule(rule, cloud_model)
+  const resolved = __resolve_rule(rule, cloud_model)
   if resolved == nil {
     harness.stdio
       .eprintln("recommendation table requested a cloud default without cloud credentials")
     return 1
   }
-  let provider = resolved["provider"]
-  let model_id = resolved["model_id"]
-  let harn_selector = __harn_selector_for(provider, model_id)
-  let rationale = __rationale(ram["available_bytes"], gpu, has_provider_key, model_id)
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const provider = resolved["provider"]
+  const model_id = resolved["model_id"]
+  const harn_selector = __harn_selector_for(provider, model_id)
+  const rationale = __rationale(ram["available_bytes"], gpu, has_provider_key, model_id)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
-    let envelope = {
+    const envelope = {
       model_id: model_id,
       harn_selector: harn_selector,
       provider: provider,

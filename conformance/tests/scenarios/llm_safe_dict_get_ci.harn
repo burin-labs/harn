@@ -2,7 +2,7 @@
 import { dict_get_ci } from "std/llm/safe"
 
 pipeline default() {
-  let d = {Foo: 1, BAR: "x", baz: nil}
+  const d = {Foo: 1, BAR: "x", baz: nil}
   __io_println(dict_get_ci(d, "foo"))
   __io_println(dict_get_ci(d, "FOO"))
   __io_println(dict_get_ci(d, "bar"))

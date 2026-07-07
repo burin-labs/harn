@@ -315,12 +315,12 @@ impl SyncInterpreter {
         match &node.node {
             Node::LetBinding { pattern, value, .. } => {
                 let val = self.eval(value)?;
-                self.define_pattern(pattern, val, false);
+                self.define_pattern(pattern, val, true);
                 Ok(Val::Nil)
             }
-            Node::VarBinding { pattern, value, .. } => {
+            Node::ConstBinding { pattern, value, .. } => {
                 let val = self.eval(value)?;
-                self.define_pattern(pattern, val, true);
+                self.define_pattern(pattern, val, false);
                 Ok(Val::Nil)
             }
             Node::Assignment { target, value, .. } => {

@@ -19,7 +19,7 @@ fn events_of(events, kind) {
 }
 
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_test",
@@ -51,8 +51,8 @@ pipeline default() {
       llm_text("Giving up. ##DONE##"),
     ],
     { ->
-      let session = "repair-strategy-shift-" + uuid()
-      let captured = agent_capture_events(
+      const session = "repair-strategy-shift-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the failing test pass.",
@@ -75,13 +75,13 @@ pipeline default() {
           },
         ) },
       )
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
-      let repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
       __io_println(len(repair_stalls))
       __io_println(repair_stalls[0].warning.pattern)
       __io_println(repair_stalls[0].warning.count)
       __io_println(len(stalls.filter({ s -> s.warning.pattern == "repeated_error" })))
-      let messages = json_stringify(agent_session_messages(session))
+      const messages = json_stringify(agent_session_messages(session))
       __io_println(contains(messages, "AssertionError: expected 5 got 4"))
       __io_println(contains(messages, "Repair diagnostic"))
     },

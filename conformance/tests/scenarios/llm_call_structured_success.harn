@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * `schema_retries: 3` unless the caller overrides them.
  */
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["name", "age"],
     properties: {name: {type: "string"}, age: {type: "integer"}},
@@ -15,7 +15,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
     { ->
-      let summary = llm_call_structured("Summarize", schema, {provider: "mock"})
+      const summary = llm_call_structured("Summarize", schema, {provider: "mock"})
       __io_println(summary.name)
       __io_println(summary.age)
       __io_println(len(llm_mock_calls()))
@@ -24,9 +24,9 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"name\": \"Grace\", \"age\": 42}")],
     { ->
-      let grace = llm_call_structured("Summarize", schema, {provider: "mock", system: "You are precise."})
+      const grace = llm_call_structured("Summarize", schema, {provider: "mock", system: "You are precise."})
       __io_println(grace.name)
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       __io_println(calls[0].system)
     },
   )

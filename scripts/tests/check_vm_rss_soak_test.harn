@@ -14,14 +14,14 @@ import {
 /* --- parse_env_int: mirrors Python env_int --- */
 @test
 pipeline test_parse_env_int_empty_uses_default(task) {
-  let r = parse_env_int("X", "", 24)
+  const r = parse_env_int("X", "", 24)
   assert_eq(r.ok, true)
   assert_eq(r.value, 24)
 }
 
 @test
 pipeline test_parse_env_int_valid(task) {
-  let r = parse_env_int("X", "16", 24)
+  const r = parse_env_int("X", "16", 24)
   assert_eq(r.ok, true)
   assert_eq(r.value, 16)
 }
@@ -29,7 +29,7 @@ pipeline test_parse_env_int_valid(task) {
 @test
 pipeline test_parse_env_int_trims_whitespace(task) {
   // Python int(" 12 ") == 12.
-  let r = parse_env_int("X", " 12 ", 24)
+  const r = parse_env_int("X", " 12 ", 24)
   assert_eq(r.ok, true)
   assert_eq(r.value, 12)
 }
@@ -37,7 +37,7 @@ pipeline test_parse_env_int_trims_whitespace(task) {
 @test
 pipeline test_parse_env_int_non_integer_reports_raw(task) {
   // Python: "X must be an integer, got 'abc'" (raw repr, not trimmed).
-  let r = parse_env_int("HARN_VM_RSS_SOAK_ITERATIONS", "abc", 24)
+  const r = parse_env_int("HARN_VM_RSS_SOAK_ITERATIONS", "abc", 24)
   assert_eq(r.ok, false)
   assert_eq(r.error, "HARN_VM_RSS_SOAK_ITERATIONS must be an integer, got 'abc'")
 }
@@ -45,21 +45,21 @@ pipeline test_parse_env_int_non_integer_reports_raw(task) {
 @test
 pipeline test_parse_env_int_float_string_is_non_integer(task) {
   // Python int("1.5") raises -> integer error, raw preserved.
-  let r = parse_env_int("X", "1.5", 24)
+  const r = parse_env_int("X", "1.5", 24)
   assert_eq(r.ok, false)
   assert_eq(r.error, "X must be an integer, got '1.5'")
 }
 
 @test
 pipeline test_parse_env_int_zero_is_not_positive(task) {
-  let r = parse_env_int("HARN_VM_RSS_SOAK_ITERATIONS", "0", 24)
+  const r = parse_env_int("HARN_VM_RSS_SOAK_ITERATIONS", "0", 24)
   assert_eq(r.ok, false)
   assert_eq(r.error, "HARN_VM_RSS_SOAK_ITERATIONS must be positive")
 }
 
 @test
 pipeline test_parse_env_int_negative_is_not_positive(task) {
-  let r = parse_env_int("HARN_VM_RSS_SOAK_MAX_TAIL_GROWTH_BYTES", "-5", 24)
+  const r = parse_env_int("HARN_VM_RSS_SOAK_MAX_TAIL_GROWTH_BYTES", "-5", 24)
   assert_eq(r.ok, false)
   assert_eq(r.error, "HARN_VM_RSS_SOAK_MAX_TAIL_GROWTH_BYTES must be positive")
 }
@@ -74,7 +74,7 @@ pipeline test_list_min(task) {
 /* --- extract_rss_samples: mirrors load_rss_samples filtering --- */
 @test
 pipeline test_extract_rss_samples_basic(task) {
-  let report = {
+  const report = {
     iterations: [{iteration: 1, rss_bytes: 100}, {iteration: 2, rss_bytes: 200}, {iteration: 3, rss_bytes: 300}],
   }
   assert_eq(extract_rss_samples(report).join(","), "100,200,300")
@@ -83,7 +83,7 @@ pipeline test_extract_rss_samples_basic(task) {
 @test
 pipeline test_extract_rss_samples_skips_non_int_and_missing(task) {
   // Python keeps only isinstance(rss_bytes, int) entries.
-  let report = {
+  const report = {
     iterations: [
       {iteration: 1, rss_bytes: 100},
       {iteration: 2},
@@ -102,7 +102,7 @@ pipeline test_extract_rss_samples_no_iterations(task) {
 /* --- soak_outcome: warmup/tail/tail_growth threshold logic --- */
 @test
 pipeline test_soak_too_few_samples(task) {
-  let o = soak_outcome([100, 200], 1000)
+  const o = soak_outcome([100, 200], 1000)
   assert_eq(o.too_few, true)
   assert_eq(o.ok, false)
 }
@@ -111,7 +111,7 @@ pipeline test_soak_too_few_samples(task) {
 pipeline test_soak_flat_passes(task) {
   // 6 samples: warmup = max(1, 6//3) = 2; tail = last 4 = [300,300,300,300];
   // tail_growth = 300 - 300 = 0 <= limit -> OK.
-  let o = soak_outcome([100, 200, 300, 300, 300, 300], 1000)
+  const o = soak_outcome([100, 200, 300, 300, 300, 300], 1000)
   assert_eq(o.too_few, false)
   assert_eq(o.tail_growth, 0)
   assert_eq(o.regressed, false)
@@ -124,7 +124,7 @@ pipeline test_soak_warmup_excludes_early_spike(task) {
   // 3 samples: warmup = max(1, 3//3) = 1; tail = [200, 150];
   // tail_growth = max(0, 150 - 150) = 0 (last - min(tail)) -> OK.
   // The big early value at index 0 is excluded by warmup.
-  let o = soak_outcome([100000, 200, 150], 1000)
+  const o = soak_outcome([100000, 200, 150], 1000)
   assert_eq(o.tail_growth, 0)
   assert_eq(o.ok, true)
 }
@@ -133,7 +133,7 @@ pipeline test_soak_warmup_excludes_early_spike(task) {
 pipeline test_soak_growth_within_limit_passes(task) {
   // 9 samples: warmup = max(1, 9//3) = 3; tail = last 6 = [40,50,60,70,80,90];
   // tail_growth = 90 - 40 = 50 <= 100 -> OK.
-  let o = soak_outcome([10, 20, 30, 40, 50, 60, 70, 80, 90], 100)
+  const o = soak_outcome([10, 20, 30, 40, 50, 60, 70, 80, 90], 100)
   assert_eq(o.tail_growth, 50)
   assert_eq(o.regressed, false)
   assert_eq(o.ok, true)
@@ -142,7 +142,7 @@ pipeline test_soak_growth_within_limit_passes(task) {
 @test
 pipeline test_soak_growth_exceeds_limit_fails(task) {
   // Same tail (growth 50) but limit 49 -> regression, fails.
-  let o = soak_outcome([10, 20, 30, 40, 50, 60, 70, 80, 90], 49)
+  const o = soak_outcome([10, 20, 30, 40, 50, 60, 70, 80, 90], 49)
   assert_eq(o.tail_growth, 50)
   assert_eq(o.regressed, true)
   assert_eq(o.ok, false)
@@ -151,7 +151,7 @@ pipeline test_soak_growth_exceeds_limit_fails(task) {
 @test
 pipeline test_soak_growth_equal_to_limit_passes(task) {
   // tail_growth == limit is NOT a regression (Python uses strict `>`).
-  let o = soak_outcome([10, 20, 30, 40, 50, 60, 70, 80, 90], 50)
+  const o = soak_outcome([10, 20, 30, 40, 50, 60, 70, 80, 90], 50)
   assert_eq(o.tail_growth, 50)
   assert_eq(o.regressed, false)
   assert_eq(o.ok, true)
@@ -161,7 +161,7 @@ pipeline test_soak_growth_equal_to_limit_passes(task) {
 pipeline test_soak_negative_growth_clamped_to_zero(task) {
   // Tail strictly decreasing: last < min would be negative; clamped to 0.
   // 3 samples: warmup 1; tail = [500, 100]; last - min = 100 - 100 = 0.
-  let o = soak_outcome([900, 500, 100], 0)
+  const o = soak_outcome([900, 500, 100], 0)
   assert_eq(o.tail_growth, 0)
   assert_eq(o.regressed, false)
   assert_eq(o.ok, true)

@@ -3,7 +3,7 @@
  * `tenant:<current-or-default-tenant>:foo`.
  */
 pipeline default() {
-  let receipt = emit_channel("pr.merged", {n: 1}, {id: "bare-1"})
+  const receipt = emit_channel("pr.merged", {n: 1}, {id: "bare-1"})
   __io_println(receipt.scope)
   __io_println(receipt.scope_id)
   __io_println(receipt.name_resolved)

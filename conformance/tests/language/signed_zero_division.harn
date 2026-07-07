@@ -2,13 +2,13 @@ pipeline test(task) {
   // -0.0 and 0.0 are distinct float literals: dividing by them yields -inf vs
   // +inf. The constant pool must not collapse them onto one slot (which made
   // the sign depend on which literal was interned first).
-  let neg = -0.0
-  let pos = 0.0
+  const neg = -0.0
+  const pos = 0.0
   log(1.0 / neg)
   log(1.0 / pos)
   // Reversed declaration order — results must be identical, not flipped.
-  let pos2 = 0.0
-  let neg2 = -0.0
+  const pos2 = 0.0
+  const neg2 = -0.0
   log(1.0 / pos2)
   log(1.0 / neg2)
 }

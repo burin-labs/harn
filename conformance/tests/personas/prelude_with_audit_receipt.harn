@@ -1,27 +1,27 @@
 import { with_audit_receipt } from "std/personas/prelude"
 
 pipeline test(task) {
-  let opts = {
+  const opts = {
     persona: "audit_captain",
     step: "write_receipt",
     trace_id: "trace-audit",
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  let wrapped = with_audit_receipt(fn() { return {done: true} }, opts)
-  let ok = wrapped()
+  const wrapped = with_audit_receipt(fn() { return {done: true} }, opts)
+  const ok = wrapped()
   __io_println(ok.status)
   __io_println(ok.result.done)
   __io_println(ok.receipt.schema)
   __io_println(ok.receipt.step)
   __io_println(len(ok.receipt.tool_calls))
-  let failed_wrapper = with_audit_receipt(
+  const failed_wrapper = with_audit_receipt(
     fn() {
       throw "boom"
     },
     opts,
   )
-  let failed = failed_wrapper()
+  const failed = failed_wrapper()
   __io_println(failed.status)
   __io_println(failed.error.message)
   __io_println(failed.receipt.status)

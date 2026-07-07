@@ -6,9 +6,9 @@ pipeline default() {
   // when its static type is unknown — not fall through to the function (which
   // would mis-type the returned value as a function reference).
   fn build(seed) {
-    let registry = seed
+    const registry = seed
     return registry
   }
-  let r = build({items: ["a", "b"]})
+  const r = build({items: ["a", "b"]})
   __io_println(to_string(len(r.items)))
 }

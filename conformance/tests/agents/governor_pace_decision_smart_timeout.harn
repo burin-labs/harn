@@ -7,12 +7,12 @@ import { governor_pace_decision } from "std/agent/governors"
  * and each firing decision (extend / pace_check / cut with every reason).
  */
 fn line(d) {
-  let budget = if contains(keys(d), "new_budget_ms") {
+  const budget = if contains(keys(d), "new_budget_ms") {
     " " + to_string(d.new_budget_ms)
   } else {
     ""
   }
-  let reason = if contains(keys(d), "reason") {
+  const reason = if contains(keys(d), "reason") {
     " " + d.reason
   } else {
     ""

@@ -24,7 +24,7 @@ fn detail_for(details, name) {
 }
 
 fn add_narrowing_tool(tools, name, annotations = nil) {
-  var config = {parameters: {}, handler: { _args -> "ok" }}
+  let config = {parameters: {}, handler: { _args -> "ok" }}
   if annotations != nil {
     config = config + {annotations: annotations}
   }
@@ -32,7 +32,7 @@ fn add_narrowing_tool(tools, name, annotations = nil) {
 }
 
 fn narrowing_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = add_narrowing_tool(tools, "look", {kind: "read", side_effect_level: "read_only"})
   tools = add_narrowing_tool(tools, "search", {kind: "search", side_effect_level: "read_only"})
   tools = add_narrowing_tool(tools, "read_docs", {kind: "read", side_effect_level: "read_only"})
@@ -61,8 +61,8 @@ pipeline default() {
       {tool_calls: [{id: "done-1", name: "done_sentinel", arguments: {}}]},
     ],
     { ->
-      let session = "tool-surface-narrowing-" + uuid()
-      let captured = agent_capture_events(
+      const session = "tool-surface-narrowing-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Narrow unused tools.",
@@ -79,11 +79,11 @@ pipeline default() {
           },
         ) },
       )
-      let narrow = events_of(captured.events, "skill_narrow")
+      const narrow = events_of(captured.events, "skill_narrow")
       require len(narrow) >= 1, "skill_narrow should be emitted after the configured window"
-      let first = narrow[0]
-      let calls = llm_mock_calls()
-      let sixth_tools = calls[5].tools
+      const first = narrow[0]
+      const calls = llm_mock_calls()
+      const sixth_tools = calls[5].tools
       __io_println(captured.result.status)
       __io_println(len(narrow) >= 1)
       __io_println(contains(first.removed_tools, "read_docs"))
@@ -117,8 +117,8 @@ pipeline default() {
       {tool_calls: [{id: "run-1", name: "run", arguments: {}}]},
     ],
     { ->
-      let rewiden_session = "tool-surface-rewiden-" + uuid()
-      let rewidened = agent_loop(
+      const rewiden_session = "tool-surface-rewiden-" + uuid()
+      const rewidened = agent_loop(
         "Narrow unused tools, then load runner.",
         nil,
         {
@@ -134,7 +134,7 @@ pipeline default() {
           tool_surface_narrowing: {enabled: true, window_turns: 5, mode: "aggressive"},
         },
       )
-      let rewiden_calls = llm_mock_calls()
+      const rewiden_calls = llm_mock_calls()
       require rewidened.status == "done", "explicit load_skill rewiden scenario should complete"
       require !has_tool(rewiden_calls[5].tools, "run"), "run should be narrow before explicit skill load"
       require has_tool(rewiden_calls[5].tools, "load_skill"), "load_skill should be hard-kept after narrowing"

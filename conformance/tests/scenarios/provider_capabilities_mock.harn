@@ -4,17 +4,17 @@
  * both paths round-trip through `capabilities::lookup`.
  */
 pipeline test(task) {
-  let as_claude = provider_capabilities("mock", "claude-opus-4-7")
+  const as_claude = provider_capabilities("mock", "claude-opus-4-7")
   assert(as_claude.defer_loading, "mock+claude routes to anthropic row")
   assert(as_claude.tool_search[0] == "bm25", "mock+claude gets anthropic variants")
   assert(as_claude.prompt_caching, "mock+claude inherits claude-family caching")
-  let as_gpt = provider_capabilities("mock", "gpt-5.4-preview")
+  const as_gpt = provider_capabilities("mock", "gpt-5.4-preview")
   assert(as_gpt.defer_loading, "mock+gpt routes to openai row")
   assert(as_gpt.tool_search[0] == "hosted", "mock+gpt gets openai variants")
-  let as_legacy = provider_capabilities("mock", "gpt-4o")
+  const as_legacy = provider_capabilities("mock", "gpt-4o")
   assert(!as_legacy.defer_loading, "mock+gpt-4o has no tool search")
   assert(as_legacy.native_tools, "mock+gpt-4o still has native tools")
-  let as_unknown = provider_capabilities("mock", "mystery-model-7b")
+  const as_unknown = provider_capabilities("mock", "mystery-model-7b")
   assert(!as_unknown.defer_loading, "mock+unknown has no capabilities")
   log("provider_capabilities_mock tests passed")
 }

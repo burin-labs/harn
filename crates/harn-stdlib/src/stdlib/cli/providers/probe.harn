@@ -83,16 +83,16 @@ fn __render_loaded_lines(models: list) -> string {
   if len(models) == 0 {
     return ""
   }
-  var out = "loaded:\n"
+  let out = "loaded:\n"
   for model in models {
     if type_of(model) != "dict" {
       continue
     }
-    let name = __safe_string(model["name"], "")
-    let size = __fmt_bytes(model["size_bytes"])
-    let vram = __fmt_bytes(model["size_vram_bytes"])
-    let ctx = __fmt_u64(model["context_length"])
-    let expires = __safe_string(model["expires_at"], "-")
+    const name = __safe_string(model["name"], "")
+    const size = __fmt_bytes(model["size_bytes"])
+    const vram = __fmt_bytes(model["size_vram_bytes"])
+    const ctx = __fmt_u64(model["context_length"])
+    const expires = __safe_string(model["expires_at"], "-")
     out = out + "  - " + name
       + " (size="
       + size
@@ -108,7 +108,7 @@ fn __render_loaded_lines(models: list) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_JSON", "")
+  const raw = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_PROVIDER_PROBE_PAYLOAD_JSON not set by dispatch shim")
@@ -119,46 +119,46 @@ fn main(harness: Harness) -> int {
   // variant so we don't lose serde's float fidelity through Harn's
   // `json_parse`/`json_stringify` round-trip). Human mode parses to
   // pull `readiness.message` and `loaded_models[]`.
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
-    let pretty = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_PRETTY", raw)
+    const pretty = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_PRETTY", raw)
     harness.stdio.println(pretty)
     // Decide the exit code after printing so stdout is still available
     // for failing readiness probes. Parse the raw bytes to find
     // `readiness.ok`. Floats are not in the field we touch, so the
     // round-trip is safe here.
-    let parsed_ok = try {
+    const parsed_ok = try {
       json_parse(raw)
     } catch (_) {
       nil
     }
     if type_of(parsed_ok) == "dict" {
-      let readiness = __safe_dict(parsed_ok["readiness"])
+      const readiness = __safe_dict(parsed_ok["readiness"])
       if !__safe_bool(readiness["ok"], false) {
         return 1
       }
     }
     return 0
   }
-  let payload = try {
+  const payload = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio
       .eprintln("internal error: failed to parse provider-probe payload: " + to_string(e))
     return 70
   }
-  let readiness = __safe_dict(payload["readiness"])
-  let ok = __safe_bool(readiness["ok"], false)
-  let message = __safe_string(readiness["message"], "")
+  const readiness = __safe_dict(payload["readiness"])
+  const ok = __safe_bool(readiness["ok"], false)
+  const message = __safe_string(readiness["message"], "")
   if ok {
     harness.stdio.println(message)
-    let loaded = __safe_list(payload["loaded_models"])
-    let lines = __render_loaded_lines(loaded)
+    const loaded = __safe_list(payload["loaded_models"])
+    const lines = __render_loaded_lines(loaded)
     if lines != "" {
       // Strip the trailing newline `__render_loaded_lines` always
       // appends so `println` can add exactly one — matches Rust's
       // `println!` shape line-for-line.
-      let trimmed = if lines[len(lines) - 1] == "\n" {
+      const trimmed = if lines[len(lines) - 1] == "\n" {
         lines[0:len(lines) - 1]
       } else {
         lines

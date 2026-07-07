@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let handle = spawn {
+  const handle = spawn {
     log("should be cancelled")
   }
   cancel(handle)

@@ -34,7 +34,7 @@ fn __workflow_execute_pop_front(queue) {
 }
 
 fn __workflow_execute_enqueue_edges(queue, edges) {
-  var next = queue
+  let next = queue
   for edge in __workflow_execute_list(edges) {
     if type_of(edge?.to) == "string" {
       next = __workflow_execute_enqueue_unique(next, edge.to)
@@ -51,19 +51,19 @@ fn __workflow_execute_enqueue_edges(queue, edges) {
  * @api_stability: experimental
  */
 pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
-  let opts = options ?? {}
-  var state = __host_workflow_prepare_run(task, graph, artifacts ?? [], opts)
-  let state_id = state.state_id
-  let workflow_graph = state.graph
-  var ready = __workflow_execute_list(state?.ready_nodes)
-  var steps = 0
+  const opts = options ?? {}
+  let state = __host_workflow_prepare_run(task, graph, artifacts ?? [], opts)
+  const state_id = state.state_id
+  const workflow_graph = state.graph
+  let ready = __workflow_execute_list(state?.ready_nodes)
+  let steps = 0
   while steps < state.max_steps && len(ready) > 0 {
     steps = steps + 1
-    let current = ready[0]
+    const current = ready[0]
     ready = __workflow_execute_pop_front(ready)
-    let node = workflow_graph.nodes[current]
+    const node = workflow_graph.nodes[current]
     if node?.kind == "join" {
-      let readiness = workflow_join_readiness(
+      const readiness = workflow_join_readiness(
         {graph: workflow_graph, node_id: current, node: node, completed_nodes: state.completed_nodes},
       )
       if !readiness.ready {
@@ -71,8 +71,8 @@ pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
         continue
       }
     }
-    let plan = __host_workflow_stage_prepare(state_id, current, ready, opts)
-    let llm_result = if contains(plan.keys(), "result") {
+    const plan = __host_workflow_stage_prepare(state_id, current, ready, opts)
+    const llm_result = if contains(plan.keys(), "result") {
       plan.result
     } else {
       try {
@@ -87,9 +87,9 @@ pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
         {__workflow_stage_error: true, status: "failed", text: "", visible_text: "", error: to_string(e)}
       }
     }
-    let executed = __host_workflow_stage_complete(state_id, current, llm_result)
+    const executed = __host_workflow_stage_complete(state_id, current, llm_result)
     state = executed.state
-    let edges = workflow_next_edges({graph: workflow_graph, current: current, branch: executed.branch})
+    const edges = workflow_next_edges({graph: workflow_graph, current: current, branch: executed.branch})
     ready = __workflow_execute_enqueue_edges(__workflow_execute_list(state?.ready_nodes), edges)
     state = __host_workflow_record_transitions(state_id, ready, executed.stage, edges)
     ready = __workflow_execute_list(state?.ready_nodes)

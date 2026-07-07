@@ -66,7 +66,7 @@ import { resolve_telemetry_sink, tool_call_span } from "std/llm/tool_telemetry"
 // -------------------------------------------------------------------------------------------------
 
 fn __tool_mw_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
@@ -85,7 +85,7 @@ fn __tool_mw_list(value) -> list {
 }
 
 fn __tool_mw_string_list(value) -> list {
-  var out = []
+  let out = []
   for item in __tool_mw_list(value) {
     if item != nil {
       out = out.push(to_string(item))
@@ -98,7 +98,7 @@ fn __tool_mw_optional_text(value) {
   if value == nil {
     return nil
   }
-  let text = to_string(value)
+  const text = to_string(value)
   if text == "" {
     return nil
   }
@@ -106,7 +106,7 @@ fn __tool_mw_optional_text(value) {
 }
 
 fn __tool_mw_nonnegative_int(value) -> int {
-  let parsed = to_int(value) ?? 0
+  const parsed = to_int(value) ?? 0
   if parsed < 0 {
     return 0
   }
@@ -115,7 +115,7 @@ fn __tool_mw_nonnegative_int(value) -> int {
 
 fn __tool_mw_drop_keys(value, keys) {
   if type_of(value) == "dict" {
-    var out = {}
+    let out = {}
     for key in value.keys() {
       if contains(keys, key) {
         continue
@@ -125,7 +125,7 @@ fn __tool_mw_drop_keys(value, keys) {
     return out
   }
   if type_of(value) == "list" {
-    var out = []
+    let out = []
     for item in value {
       out = out.push(__tool_mw_drop_keys(item, keys))
     }
@@ -136,15 +136,15 @@ fn __tool_mw_drop_keys(value, keys) {
 
 fn __tool_mw_canonical_json(value) -> string {
   if type_of(value) == "dict" {
-    let keys = value.keys().sort()
-    var parts = []
+    const keys = value.keys().sort()
+    let parts = []
     for key in keys {
       parts = parts.push(json_stringify(to_string(key)) + ":" + __tool_mw_canonical_json(value[key]))
     }
     return "{" + join(parts, ",") + "}"
   }
   if type_of(value) == "list" {
-    var parts = []
+    let parts = []
     for item in value {
       parts = parts.push(__tool_mw_canonical_json(item))
     }
@@ -158,7 +158,7 @@ fn __tool_mw_sha256_value(value) -> string {
 }
 
 fn __tool_mw_short_circuit(envelope, status, fields) {
-  let base = {
+  const base = {
     ok: false,
     status: "error",
     tool_name: envelope.tool_name,
@@ -171,7 +171,7 @@ fn __tool_mw_short_circuit(envelope, status, fields) {
     error_category: status,
     executor: nil,
   }
-  let extra = if fields == nil {
+  const extra = if fields == nil {
     {}
   } else {
     fields
@@ -183,13 +183,13 @@ fn __merge_audit(existing, addition) {
   if addition == nil {
     return existing
   }
-  let base = if type_of(existing) == "dict" {
+  const base = if type_of(existing) == "dict" {
     existing
   } else {
     {}
   }
-  let layers = __tool_mw_list(base?.layers) + __tool_mw_list(addition?.layers)
-  let merged = base + addition
+  const layers = __tool_mw_list(base?.layers) + __tool_mw_list(addition?.layers)
+  const merged = base + addition
   if len(layers) > 0 {
     return merged + {layers: layers}
   }
@@ -200,7 +200,7 @@ fn __tool_mw_attach_audit(result, addition) {
   if addition == nil {
     return result
   }
-  let merged = __merge_audit(result?.audit, addition)
+  const merged = __merge_audit(result?.audit, addition)
   return result + {audit: merged}
 }
 
@@ -209,11 +209,11 @@ fn __tool_mw_now_iso() -> string {
 }
 
 fn __safe_call_caller(caller, envelope, next) {
-  let outcome = try {
+  const outcome = try {
     caller(envelope, next)
   }
   if is_err(outcome) {
-    let err = unwrap_err(outcome)
+    const err = unwrap_err(outcome)
     return {
       ok: false,
       status: "error",
@@ -263,20 +263,20 @@ pub fn tools_use_middleware(registry, transform) {
   if type_of(registry) != "dict" {
     throw "tools_use_middleware: registry must be a tool registry dict; got " + type_of(registry)
   }
-  let entries = __tool_mw_list(registry?.tools)
-  var rewritten = []
+  const entries = __tool_mw_list(registry?.tools)
+  let rewritten = []
   for entry in entries {
     if type_of(entry) != "dict" {
       rewritten = rewritten.push(entry)
       continue
     }
-    let mapped = try {
+    const mapped = try {
       transform(entry)
     }
     if is_err(mapped) {
       throw unwrap_err(mapped)
     }
-    let value = unwrap(mapped)
+    const value = unwrap(mapped)
     if value == nil {
       continue
     }
@@ -310,32 +310,32 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
   if type_of(entry) != "dict" {
     return entry
   }
-  let cfg = __tool_mw_dict(opts)
-  let required = cfg?.required ?? true
-  let fragment = if type_of(schema_fragment) == "dict" && schema_fragment?.required == nil {
+  const cfg = __tool_mw_dict(opts)
+  const required = cfg?.required ?? true
+  const fragment = if type_of(schema_fragment) == "dict" && schema_fragment?.required == nil {
     schema_fragment + {required: required}
   } else {
     schema_fragment
   }
-  let params = entry?.parameters
+  const params = entry?.parameters
   if type_of(params) == "dict" && contains(params.keys(), "type")
     && to_string(params.type) == "object" {
-    let props = __tool_mw_dict(params?.properties)
+    const props = __tool_mw_dict(params?.properties)
     if contains(props.keys(), name) {
       return entry
     }
-    let new_props = props + {[name]: fragment}
-    let req_list = __tool_mw_list(params?.required)
-    let new_req = if required && !contains(req_list, name) {
+    const new_props = props + {[name]: fragment}
+    const req_list = __tool_mw_list(params?.required)
+    const new_req = if required && !contains(req_list, name) {
       req_list.push(name)
     } else {
       req_list
     }
-    let new_params = params + {properties: new_props, required: new_req}
+    const new_params = params + {properties: new_props, required: new_req}
     return entry + {parameters: new_params}
   }
   // Bare-shorthand path: parameters is `{name: "type"}` or empty.
-  let bare = __tool_mw_dict(params)
+  const bare = __tool_mw_dict(params)
   if contains(bare.keys(), name) {
     return entry
   }
@@ -377,16 +377,16 @@ pub fn default_tool_caller() {
  * @errors: []
  */
 pub fn compose_tool_callers(wrappers) {
-  let list = __tool_mw_list(wrappers)
+  const list = __tool_mw_list(wrappers)
   if len(list) == 0 {
     return default_tool_caller()
   }
   return { call, next ->
-    var built = next
-    var i = len(list) - 1
+    let built = next
+    let i = len(list) - 1
     while i >= 0 {
-      let layer = list[i]
-      let prev = built
+      const layer = list[i]
+      const prev = built
       built = { c -> __safe_call_caller(layer, c, prev) }
       i = i - 1
     }
@@ -427,17 +427,17 @@ pub fn compose_tool_callers(wrappers) {
  * @errors: []
  */
 pub fn with_required_reason(opts = nil) {
-  let cfg = __tool_mw_dict(opts)
-  let field = to_string(cfg?.field ?? "reason")
-  let description = to_string(cfg?.description ?? "Brief one-line reason for invoking this tool")
-  let strip = cfg?.strip ?? true
-  let audit_key = to_string(cfg?.audit_key ?? "summary")
-  let min_length = cfg?.min_length ?? 1
-  let on_missing = to_string(cfg?.on_missing ?? "reject")
-  let schema_required = cfg?.schema_required ?? true
-  let schema_fragment = {type: "string", description: description, required: schema_required}
-  let schema_transform = { entry -> return tool_inject_param(entry, field, schema_fragment, {required: schema_required}) }
-  let caller = { call, next ->
+  const cfg = __tool_mw_dict(opts)
+  const field = to_string(cfg?.field ?? "reason")
+  const description = to_string(cfg?.description ?? "Brief one-line reason for invoking this tool")
+  const strip = cfg?.strip ?? true
+  const audit_key = to_string(cfg?.audit_key ?? "summary")
+  const min_length = cfg?.min_length ?? 1
+  const on_missing = to_string(cfg?.on_missing ?? "reject")
+  const schema_required = cfg?.schema_required ?? true
+  const schema_fragment = {type: "string", description: description, required: schema_required}
+  const schema_transform = { entry -> return tool_inject_param(entry, field, schema_fragment, {required: schema_required}) }
+  const caller = { call, next ->
     let raw = call.tool_args?.[field]
     let value = if type_of(raw) == "string" {
       trim(raw)
@@ -447,7 +447,7 @@ pub fn with_required_reason(opts = nil) {
     if len(value) < min_length {
       if on_missing == "fill_blank" {
         let stripped_args = if strip {
-          var cleaned = {}
+          let cleaned = {}
           for key in call.tool_args.keys() {
             if key != field {
               cleaned = cleaned + {[key]: call.tool_args[key]}
@@ -476,7 +476,7 @@ pub fn with_required_reason(opts = nil) {
       )
     }
     let next_args = if strip {
-      var cleaned = {}
+      let cleaned = {}
       for key in call.tool_args.keys() {
         if key != field {
           cleaned = cleaned + {[key]: call.tool_args[key]}
@@ -505,13 +505,13 @@ pub fn with_required_reason(opts = nil) {
  * @errors: []
  */
 pub fn local_receipt_sink(session_id) {
-  let fallback = __tool_mw_optional_text(session_id) ?? "session"
+  const fallback = __tool_mw_optional_text(session_id) ?? "session"
   return { receipt ->
-    let raw_session = __tool_mw_optional_text(receipt?.session_id) ?? fallback
-    let filename = __tool_mw_local_receipt_filename(raw_session)
-    let dir = path_join(".harn", "receipts")
+    const raw_session = __tool_mw_optional_text(receipt?.session_id) ?? fallback
+    const filename = __tool_mw_local_receipt_filename(raw_session)
+    const dir = path_join(".harn", "receipts")
     harness.fs.mkdir(dir)
-    let path = path_join(dir, filename + ".jsonl")
+    const path = path_join(dir, filename + ".jsonl")
     harness.fs.append(path, json_stringify(receipt) + "\n")
     return path
   }
@@ -522,14 +522,14 @@ fn __tool_mw_local_receipt_filename(session_id_text) -> string {
 }
 
 fn __tool_mw_local_receipt_uri(session_id_value) -> string {
-  let raw = __tool_mw_optional_text(session_id_value) ?? "session"
-  let filename = __tool_mw_local_receipt_filename(raw)
+  const raw = __tool_mw_optional_text(session_id_value) ?? "session"
+  const filename = __tool_mw_local_receipt_filename(raw)
   return "file://" + path_join(cwd(), ".harn", "receipts", filename + ".jsonl")
 }
 
 fn __tool_mw_receipt_status(result) -> string {
-  let status = to_string(result?.status ?? "")
-  let category = to_string(result?.error_category ?? "")
+  const status = to_string(result?.status ?? "")
+  const category = to_string(result?.error_category ?? "")
   if result?.ok ?? result?.success ?? false {
     return "ok"
   }
@@ -549,7 +549,7 @@ fn __tool_mw_receipt_status(result) -> string {
 }
 
 fn __tool_mw_receipt_executor(value) {
-  let raw = __tool_mw_optional_text(value)
+  const raw = __tool_mw_optional_text(value)
   if raw == nil {
     return nil
   }
@@ -566,7 +566,7 @@ fn __tool_mw_receipt_executor(value) {
 }
 
 fn __tool_mw_receipt_kind(call, audit) {
-  let audit_kind = __tool_mw_optional_text(audit?.kind)
+  const audit_kind = __tool_mw_optional_text(audit?.kind)
   if audit_kind != nil {
     return audit_kind
   }
@@ -581,15 +581,15 @@ fn __tool_mw_receipt_result_hash(result) {
 }
 
 fn __tool_mw_tool_call_receipt(call, result, duration_ms, redact_keys) {
-  let turn = __tool_mw_dict(call?.turn)
-  let audit = __tool_mw_dict(result?.audit)
-  let iteration = __tool_mw_nonnegative_int(turn?.iteration)
-  let turn_index = if iteration > 0 {
+  const turn = __tool_mw_dict(call?.turn)
+  const audit = __tool_mw_dict(result?.audit)
+  const iteration = __tool_mw_nonnegative_int(turn?.iteration)
+  const turn_index = if iteration > 0 {
     iteration - 1
   } else {
     nil
   }
-  let args_for_hash = __tool_mw_drop_keys(call?.tool_args ?? {}, redact_keys)
+  const args_for_hash = __tool_mw_drop_keys(call?.tool_args ?? {}, redact_keys)
   return {
     schema_version: 1,
     session_id: to_string(turn?.session_id ?? ""),
@@ -615,20 +615,20 @@ fn __tool_mw_tool_call_receipt(call, result, duration_ms, redact_keys) {
 }
 
 fn __tool_mw_audit_log_config(sink) {
-  let raw_cfg = if type_of(sink) == "dict" {
+  const raw_cfg = if type_of(sink) == "dict" {
     sink
   } else {
     {sink: sink}
   }
-  let redact_keys = __tool_mw_string_list(raw_cfg?.redact)
-  let raw_sink = raw_cfg?.sink
+  const redact_keys = __tool_mw_string_list(raw_cfg?.redact)
+  const raw_sink = raw_cfg?.sink
   if __tool_mw_is_callable(raw_sink) {
     return {mode: "closure", sink_fn: raw_sink, redact_keys: redact_keys}
   }
   if type_of(raw_sink) != "string" {
     throw "with_audit_log: sink must be callable or one of local/cloud/both; got " + type_of(raw_sink)
   }
-  let mode = to_string(raw_sink)
+  const mode = to_string(raw_sink)
   if mode != "local" && mode != "cloud" && mode != "both" {
     throw "with_audit_log: sink must be callable or one of local/cloud/both; got " + mode
   }
@@ -636,8 +636,8 @@ fn __tool_mw_audit_log_config(sink) {
 }
 
 fn __tool_mw_audit_log_emit_local(receipt) {
-  let sink = local_receipt_sink(receipt?.session_id)
-  let _ = try {
+  const sink = local_receipt_sink(receipt?.session_id)
+  const _ = try {
     sink(receipt)
   }
 }
@@ -651,7 +651,7 @@ fn __tool_mw_audit_log_flush(cfg, receipt) {
     __tool_mw_audit_log_emit_local(receipt)
   }
   if cfg.sink_fn != nil {
-    let _ = try {
+    const _ = try {
       cfg.sink_fn(receipt)
     }
   }
@@ -688,29 +688,29 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
  * @errors: []
  */
 pub fn with_audit_log(sink_or_options) {
-  let cfg = __tool_mw_audit_log_config(sink_or_options)
+  const cfg = __tool_mw_audit_log_config(sink_or_options)
   return { call, next ->
-    let started = harness.clock.now_ms()
-    let result = next(call)
-    let duration = harness.clock.now_ms() - started
-    let base_receipt = __tool_mw_tool_call_receipt(call, result, duration, cfg.redact_keys)
-    let receipt_uri = if cfg.mode == "local" || cfg.mode == "both" {
+    const started = harness.clock.now_ms()
+    const result = next(call)
+    const duration = harness.clock.now_ms() - started
+    const base_receipt = __tool_mw_tool_call_receipt(call, result, duration, cfg.redact_keys)
+    const receipt_uri = if cfg.mode == "local" || cfg.mode == "both" {
       __tool_mw_local_receipt_uri(base_receipt.session_id)
     } else {
       nil
     }
-    let receipt = if receipt_uri == nil {
+    const receipt = if receipt_uri == nil {
       base_receipt
     } else {
       base_receipt + {audit: __merge_audit(base_receipt.audit, {receipt_uri: receipt_uri})}
     }
-    let enriched_result = if receipt_uri == nil {
+    const enriched_result = if receipt_uri == nil {
       result
     } else {
       result + {audit: __merge_audit(result?.audit, {receipt_uri: receipt_uri})}
     }
     if call?.turn?.prefetch_next_turn ?? false {
-      let returned = __tool_mw_audit_log_return(enriched_result, cfg, receipt)
+      const returned = __tool_mw_audit_log_return(enriched_result, cfg, receipt)
       if __tool_mw_audit_log_has_deferred_sink(cfg) {
         return returned
           + {_audit_flush: { -> __tool_mw_audit_log_flush(cfg, receipt) }}
@@ -741,15 +741,15 @@ pub fn with_consent(prompt_fn) {
     throw "with_consent: prompt_fn must be callable; got " + type_of(prompt_fn)
   }
   return { call, next ->
-    let outcome = try {
+    const outcome = try {
       prompt_fn(call)
     }
-    let raw = if is_err(outcome) {
+    const raw = if is_err(outcome) {
       {decision: "denied", reason: to_string(unwrap_err(outcome))}
     } else {
       unwrap(outcome)
     }
-    let decision = if type_of(raw) == "bool" {
+    const decision = if type_of(raw) == "bool" {
       if raw {
         {decision: "approved"}
       } else {
@@ -758,7 +758,7 @@ pub fn with_consent(prompt_fn) {
     } else {
       __tool_mw_dict(raw)
     }
-    let verdict = to_string(decision?.decision ?? "denied")
+    const verdict = to_string(decision?.decision ?? "denied")
     if verdict == "denied" {
       return __tool_mw_short_circuit(
         call,
@@ -777,7 +777,7 @@ pub fn with_consent(prompt_fn) {
         },
       )
     }
-    let result = next(call)
+    const result = next(call)
     return __tool_mw_attach_audit(
       result,
       {
@@ -833,28 +833,28 @@ pub fn with_consent(prompt_fn) {
  * @errors: []
  */
 pub fn with_scoped_executor(opts) {
-  let cfg = __tool_mw_dict(opts)
-  let stage = to_string(cfg?.stage ?? "scoped")
-  let allowed = __tool_mw_string_list(cfg?.allowed_tools)
-  let restrict_tools = cfg?.allowed_tools != nil
-  let side_effect_level = __tool_mw_optional_text(cfg?.side_effect_level)
-  let capabilities_value = if type_of(cfg?.capabilities) == "dict" {
+  const cfg = __tool_mw_dict(opts)
+  const stage = to_string(cfg?.stage ?? "scoped")
+  const allowed = __tool_mw_string_list(cfg?.allowed_tools)
+  const restrict_tools = cfg?.allowed_tools != nil
+  const side_effect_level = __tool_mw_optional_text(cfg?.side_effect_level)
+  const capabilities_value = if type_of(cfg?.capabilities) == "dict" {
     cfg.capabilities
   } else {
     nil
   }
-  let on_violation = to_string(cfg?.on_violation ?? "reject")
+  const on_violation = to_string(cfg?.on_violation ?? "reject")
   if on_violation != "reject" && on_violation != "raise" {
     throw "with_scoped_executor: on_violation must be `reject` or `raise`; got " + on_violation
   }
-  let scope_descriptor = if restrict_tools {
+  const scope_descriptor = if restrict_tools {
     {stage: stage, allowed_tools: allowed}
   } else {
     {stage: stage}
   }
   return { call, next ->
     if restrict_tools && !contains(allowed, call.tool_name) {
-      let reason = "tool '" + call.tool_name + "' not in stage '" + stage + "' allowlist"
+      const reason = "tool '" + call.tool_name + "' not in stage '" + stage + "' allowlist"
       if on_violation == "raise" {
         throw "scope_violation: " + reason
       }
@@ -872,7 +872,7 @@ pub fn with_scoped_executor(opts) {
         },
       )
     }
-    var policy = {}
+    let policy = {}
     if restrict_tools {
       policy = policy + {tools: allowed}
     }
@@ -882,7 +882,7 @@ pub fn with_scoped_executor(opts) {
     if capabilities_value != nil {
       policy = policy + {capabilities: capabilities_value}
     }
-    let result = with_execution_policy(policy, fn() { return next(call) })
+    const result = with_execution_policy(policy, fn() { return next(call) })
     return __tool_mw_attach_audit(
       result,
       {scope: scope_descriptor, layers: [{name: "with_scoped_executor", status: "ok", stage: stage}]},
@@ -907,17 +907,17 @@ pub fn with_scoped_executor(opts) {
  * @errors: []
  */
 pub fn with_dry_run(opts = nil) {
-  let cfg = __tool_mw_dict(opts)
-  let message = to_string(cfg?.message ?? "(dry run)")
-  let only = __tool_mw_list(cfg?.only)
-  let except = __tool_mw_list(cfg?.except)
+  const cfg = __tool_mw_dict(opts)
+  const message = to_string(cfg?.message ?? "(dry run)")
+  const only = __tool_mw_list(cfg?.only)
+  const except = __tool_mw_list(cfg?.except)
   return { call, next ->
-    let in_only = len(only) == 0 || contains(only, call.tool_name)
-    let in_except = contains(except, call.tool_name)
+    const in_only = len(only) == 0 || contains(only, call.tool_name)
+    const in_except = contains(except, call.tool_name)
     if !in_only || in_except {
       return next(call)
     }
-    let summary = message + " — " + call.tool_name + "(" + to_string(call.tool_args) + ")"
+    const summary = message + " — " + call.tool_name + "(" + to_string(call.tool_args) + ")"
     return {
       ok: true,
       status: "dry_run",
@@ -951,31 +951,31 @@ pub fn with_redaction(redactor) {
     throw "with_redaction: redactor must be callable; got " + type_of(redactor)
   }
   return { call, next ->
-    let in_redact = try {
+    const in_redact = try {
       redactor({phase: "in", tool_name: call.tool_name, args: call.tool_args, result: nil})
     }
-    let inbound = if is_err(in_redact) {
+    const inbound = if is_err(in_redact) {
       {args: call.tool_args, redacted_fields: []}
     } else {
       __tool_mw_dict(unwrap(in_redact))
     }
-    let safe_args = if inbound?.args != nil {
+    const safe_args = if inbound?.args != nil {
       inbound.args
     } else {
       call.tool_args
     }
-    let result = next(call + {tool_args: safe_args})
-    let out_redact = try {
+    const result = next(call + {tool_args: safe_args})
+    const out_redact = try {
       redactor({phase: "out", tool_name: call.tool_name, args: safe_args, result: result?.result})
     }
-    let outbound = if is_err(out_redact) {
+    const outbound = if is_err(out_redact) {
       {result: result?.result, redacted_fields: []}
     } else {
       __tool_mw_dict(unwrap(out_redact))
     }
-    let in_fields = __tool_mw_list(inbound?.redacted_fields)
-    let out_fields = __tool_mw_list(outbound?.redacted_fields)
-    let final_result = if outbound?.result != nil {
+    const in_fields = __tool_mw_list(inbound?.redacted_fields)
+    const out_fields = __tool_mw_list(outbound?.redacted_fields)
+    const final_result = if outbound?.result != nil {
       result + {result: outbound.result}
     } else {
       result
@@ -1012,18 +1012,18 @@ pub fn with_idempotency(key_fn, opts = nil) {
   if !__tool_mw_is_callable(key_fn) {
     throw "with_idempotency: key_fn must be callable; got " + type_of(key_fn)
   }
-  let cfg = __tool_mw_dict(opts)
-  let cache_options = {
+  const cfg = __tool_mw_dict(opts)
+  const cache_options = {
     store: cfg?.store ?? "tool.idempotency",
     namespace: cfg?.namespace ?? "tool_middleware",
     ttl: cfg?.ttl ?? "10m",
     max_entries: cfg?.max_entries ?? 256,
   }
   return { call, next ->
-    let key_outcome = try {
+    const key_outcome = try {
       key_fn(call)
     }
-    let key = if is_err(key_outcome) {
+    const key = if is_err(key_outcome) {
       ""
     } else {
       to_string(unwrap(key_outcome) ?? "")
@@ -1031,16 +1031,16 @@ pub fn with_idempotency(key_fn, opts = nil) {
     if key == "" {
       return next(call)
     }
-    let cached = cache_get(key, cache_options)
+    const cached = cache_get(key, cache_options)
     if cached?.hit ?? false {
       return __tool_mw_attach_audit(
         cached.value,
         {layers: [{name: "with_idempotency", status: "hit", key: key}]},
       )
     }
-    let result = next(call)
+    const result = next(call)
     if result?.ok ?? false {
-      let _ = cache_put(key, result, cache_options)
+      const _ = cache_put(key, result, cache_options)
     }
     return __tool_mw_attach_audit(result, {layers: [{name: "with_idempotency", status: "miss", key: key}]})
   }
@@ -1064,17 +1064,17 @@ pub fn with_idempotency(key_fn, opts = nil) {
  * @errors: []
  */
 pub fn with_rate_limit(opts) {
-  let cfg = __tool_mw_dict(opts)
-  let cap = cfg?.max_calls
+  const cfg = __tool_mw_dict(opts)
+  const cap = cfg?.max_calls
   if type_of(cap) != "int" || cap < 0 {
     throw "with_rate_limit: max_calls must be a non-negative int"
   }
-  let counter = atomic(0)
-  let message = to_string(cfg?.message ?? "rate limit exceeded")
+  const counter = atomic(0)
+  const message = to_string(cfg?.message ?? "rate limit exceeded")
   return { call, next ->
-    let count = atomic_add(counter, 1)
+    const count = atomic_add(counter, 1)
     if count >= cap {
-      let _ = atomic_add(counter, -1)
+      const _ = atomic_add(counter, -1)
       return __tool_mw_short_circuit(
         call,
         "rate_limited",
@@ -1085,7 +1085,7 @@ pub fn with_rate_limit(opts) {
         },
       )
     }
-    let result = next(call)
+    const result = next(call)
     return __tool_mw_attach_audit(
       result,
       {layers: [{name: "with_rate_limit", status: "ok", count: count + 1, cap: cap}]},
@@ -1129,22 +1129,22 @@ pub fn with_rate_limit(opts) {
  * @errors: []
  */
 pub fn with_telemetry(sink_or_opts) {
-  let sink = resolve_telemetry_sink(sink_or_opts)
-  let extras = __telemetry_extras(sink_or_opts)
+  const sink = resolve_telemetry_sink(sink_or_opts)
+  const extras = __telemetry_extras(sink_or_opts)
   return { call, next ->
-    let started_ms = harness.clock.now_ms()
-    let started_iso = __tool_mw_now_iso()
-    let result = next(call)
-    let ended_ms = harness.clock.now_ms()
-    let ended_iso = __tool_mw_now_iso()
-    let span = tool_call_span(
+    const started_ms = harness.clock.now_ms()
+    const started_iso = __tool_mw_now_iso()
+    const result = next(call)
+    const ended_ms = harness.clock.now_ms()
+    const ended_iso = __tool_mw_now_iso()
+    const span = tool_call_span(
       call,
       result,
       started_ms,
       ended_ms,
       extras + {start_time_iso: started_iso, end_time_iso: ended_iso},
     )
-    let _ = try {
+    const _ = try {
       sink(span)
     }
     return __tool_mw_attach_audit(
@@ -1158,8 +1158,8 @@ fn __telemetry_extras(value) {
   if type_of(value) != "dict" {
     return {}
   }
-  let cfg = value
-  var extras = {}
+  const cfg = value
+  let extras = {}
   if cfg?.persona != nil {
     extras = extras + {persona: cfg.persona}
   }
@@ -1198,11 +1198,11 @@ pub fn with_summary(format_fn) {
     throw "with_summary: format_fn must be callable; got " + type_of(format_fn)
   }
   return { call, next ->
-    let result = next(call)
-    let outcome = try {
+    const result = next(call)
+    const outcome = try {
       format_fn(call, result)
     }
-    let summary = if is_err(outcome) {
+    const summary = if is_err(outcome) {
       ""
     } else {
       to_string(unwrap(outcome) ?? "")
@@ -1248,27 +1248,27 @@ pub fn with_summary(format_fn) {
  * @errors: []
  */
 pub fn with_handoff_artifact(opts = nil) {
-  let cfg = __tool_mw_dict(opts)
-  let sink = cfg?.sink
-  let detect = cfg?.detect
-  let extra_keys = __tool_mw_list(cfg?.keys)
-  let source_override = cfg?.source
-  let strict = cfg?.strict ?? false
+  const cfg = __tool_mw_dict(opts)
+  const sink = cfg?.sink
+  const detect = cfg?.detect
+  const extra_keys = __tool_mw_list(cfg?.keys)
+  const source_override = cfg?.source
+  const strict = cfg?.strict ?? false
   if sink != nil && !__tool_mw_is_callable(sink) {
     throw "with_handoff_artifact: sink must be callable; got " + type_of(sink)
   }
   if detect != nil && !__tool_mw_is_callable(detect) {
     throw "with_handoff_artifact: detect must be callable; got " + type_of(detect)
   }
-  let candidate_keys = ["__handoff", "handoff"] + extra_keys
+  const candidate_keys = ["__handoff", "handoff"] + extra_keys
   return { call, next ->
-    let result = next(call)
+    const result = next(call)
     if !(result?.ok ?? false) {
       return result
     }
-    var payload = nil
+    let payload = nil
     if detect != nil {
-      let detected = try {
+      const detected = try {
         detect(call, result)
       }
       if !is_err(detected) {
@@ -1276,7 +1276,7 @@ pub fn with_handoff_artifact(opts = nil) {
       }
     }
     if payload == nil {
-      let candidate = __tool_mw_handoff_dict_candidate(result?.result)
+      const candidate = __tool_mw_handoff_dict_candidate(result?.result)
       if type_of(candidate) == "dict" {
         for key in candidate_keys {
           if payload == nil && candidate?.[key] != nil {
@@ -1294,12 +1294,12 @@ pub fn with_handoff_artifact(opts = nil) {
       }
       return result
     }
-    let enriched = if source_override != nil && payload?.source_persona == nil {
+    const enriched = if source_override != nil && payload?.source_persona == nil {
       payload + {source_persona: to_string(source_override)}
     } else {
       payload
     }
-    let normalized_outcome = try {
+    const normalized_outcome = try {
       handoff(enriched)
     }
     if is_err(normalized_outcome) {
@@ -1315,9 +1315,9 @@ pub fn with_handoff_artifact(opts = nil) {
         },
       )
     }
-    let record = unwrap(normalized_outcome)
+    const record = unwrap(normalized_outcome)
     if sink != nil {
-      let _ = try {
+      const _ = try {
         sink(record, call)
       }
     }
@@ -1337,13 +1337,13 @@ fn __tool_mw_handoff_dict_candidate(raw_result) {
     return raw_result
   }
   if type_of(raw_result) == "string" {
-    let parsed = try {
+    const parsed = try {
       json_parse(raw_result)
     }
     if is_err(parsed) {
       return nil
     }
-    let value = unwrap(parsed)
+    const value = unwrap(parsed)
     if type_of(value) == "dict" {
       return value
     }
@@ -1370,29 +1370,29 @@ fn __tool_mw_handoff_dict_candidate(raw_result) {
  * @errors: []
  */
 pub fn with_timeout(opts) {
-  let cfg = __tool_mw_dict(opts)
-  let default_ms = cfg?.max_ms
+  const cfg = __tool_mw_dict(opts)
+  const default_ms = cfg?.max_ms
   if type_of(default_ms) != "int" || default_ms < 0 {
     throw "with_timeout: max_ms must be a non-negative int"
   }
-  let per_tool = __tool_mw_dict(cfg?.per_tool)
-  let message = to_string(cfg?.message ?? "tool call exceeded time budget")
+  const per_tool = __tool_mw_dict(cfg?.per_tool)
+  const message = to_string(cfg?.message ?? "tool call exceeded time budget")
   return { call, next ->
-    let limit = if per_tool[call.tool_name] != nil {
+    const limit = if per_tool[call.tool_name] != nil {
       per_tool[call.tool_name]
     } else {
       default_ms
     }
-    let started = harness.clock.now_ms()
-    let result = next(call)
-    let elapsed = harness.clock.now_ms() - started
+    const started = harness.clock.now_ms()
+    const result = next(call)
+    const elapsed = harness.clock.now_ms() - started
     if elapsed < limit {
       return __tool_mw_attach_audit(
         result,
         {layers: [{name: "with_timeout", status: "ok", elapsed_ms: elapsed, limit_ms: limit}]},
       )
     }
-    let breached = result
+    const breached = result
       + {
       ok: false,
       status: "error",

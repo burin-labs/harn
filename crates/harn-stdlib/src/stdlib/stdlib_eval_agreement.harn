@@ -79,7 +79,7 @@ pub fn evaluator_kind_weak() -> string {
 }
 
 fn normalize_verdict(value) -> string {
-  let text = trim(to_string(value ?? "")).lower()
+  const text = trim(to_string(value ?? "")).lower()
   if text == "pass" || text == "true" || text == "complete" {
     return verdict_pass()
   }
@@ -161,12 +161,12 @@ pub fn agreement_decision(
   required_execution_id: string = "reexec_verify",
   reexecution_ids: list<string> = ["reexec_verify"],
 ) -> dict {
-  let concurring = passing(verdicts)
-  let exec_passes = execution_passes(verdicts)
-  let decided = verdicts.filter({ v -> verdict_is_decided(v) }).to_list()
-  let aligned = len(concurring)
-  let enough_concur = aligned >= min_agreement
-  let has_execution = len(exec_passes) >= 1
+  const concurring = passing(verdicts)
+  const exec_passes = execution_passes(verdicts)
+  const decided = verdicts.filter({ v -> verdict_is_decided(v) }).to_list()
+  const aligned = len(concurring)
+  const enough_concur = aligned >= min_agreement
+  const has_execution = len(exec_passes) >= 1
   // Clause 3, "an independent RE-EXECUTION judge must be among the agreeing
   // votes": at least one agreeing behavior judge whose id is in `reexecution_ids`
   // (the re-grade, reexec_verify, by default) OR equals `required_execution_id`.
@@ -175,22 +175,22 @@ pub fn agreement_decision(
   // not re-run anything — letting it substitute for the re-execution judge would
   // contradict "the grader can only reinforce, never replace a judge that ran the
   // code".
-  let exec_ids = ids_of(exec_passes)
-  let reexec_concurring = exec_passes
+  const exec_ids = ids_of(exec_passes)
+  const reexec_concurring = exec_passes
     .filter(
     { v ->
       let id = to_string(v?.id ?? "")
       contains(reexecution_ids, id) || id == required_execution_id
     },
   ).to_list()
-  let has_required_execution = len(reexec_concurring) >= 1
-  let passed = enough_concur && has_execution && has_required_execution
+  const has_required_execution = len(reexec_concurring) >= 1
+  const passed = enough_concur && has_execution && has_required_execution
   // A bar fires when enough judges agreed but no INDEPENDENT RE-EXECUTION judge
   // is among them — either the only behavior signal is weak (the "a file exists,
   // so call it solved" trap) or the only behavior signals are the in-loop gate
   // and/or a non-re-executing model grader.
-  let barred = enough_concur && !passed
-  let bar_reason = if !barred {
+  const barred = enough_concur && !passed
+  const bar_reason = if !barred {
     ""
   } else if !has_execution {
     "pass carried only by non-execution (artifact/substring) signals — BARRED"
@@ -244,17 +244,17 @@ pub fn cohen_kappa(
   id_a: string = "burin_mechanical_gate",
   id_b: string = "reexec_verify",
 ) -> dict {
-  var n = 0
-  var agree = 0
-  var a_pass = 0
-  var b_pass = 0
-  var both_pass = 0
-  var both_fail = 0
+  let n = 0
+  let agree = 0
+  let a_pass = 0
+  let b_pass = 0
+  let both_pass = 0
+  let both_fail = 0
   for verdicts in cases {
-    let va = verdict_for(verdicts, id_a)
-    let vb = verdict_for(verdicts, id_b)
-    let a_decided = va == verdict_pass() || va == verdict_fail()
-    let b_decided = vb == verdict_pass() || vb == verdict_fail()
+    const va = verdict_for(verdicts, id_a)
+    const vb = verdict_for(verdicts, id_b)
+    const a_decided = va == verdict_pass() || va == verdict_fail()
+    const b_decided = vb == verdict_pass() || vb == verdict_fail()
     if !a_decided || !b_decided {
       continue
     }
@@ -278,13 +278,13 @@ pub fn cohen_kappa(
   if n < 2 {
     return {kappa: nil, n: n, po: nil, pe: nil, agree: agree, e1_pass: a_pass, e2_pass: b_pass}
   }
-  let total = to_float(n) ?? 1.0
-  let po = (to_float(agree) ?? 0.0) / total
+  const total = to_float(n) ?? 1.0
+  const po = (to_float(agree) ?? 0.0) / total
   // Chance agreement = P(both pass by chance) + P(both fail by chance).
-  let pa_pass = (to_float(a_pass) ?? 0.0) / total
-  let pb_pass = (to_float(b_pass) ?? 0.0) / total
-  let pe = pa_pass * pb_pass + (1.0 - pa_pass) * (1.0 - pb_pass)
-  let kappa = if pe >= 1.0 {
+  const pa_pass = (to_float(a_pass) ?? 0.0) / total
+  const pb_pass = (to_float(b_pass) ?? 0.0) / total
+  const pe = pa_pass * pb_pass + (1.0 - pa_pass) * (1.0 - pb_pass)
+  const kappa = if pe >= 1.0 {
     if po >= 1.0 {
       1.0
     } else {

@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let pairs = iter(["a", "b", "c"]).enumerate().to_list()
+  const pairs = iter(["a", "b", "c"]).enumerate().to_list()
   for p in pairs {
     log("${p.first}:${p.second}")
   }

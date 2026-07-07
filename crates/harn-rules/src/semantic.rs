@@ -438,18 +438,16 @@ fn exact_named_node<'tree>(node: Node<'tree>, start: usize, end: usize) -> Optio
     if start < node.start_byte() || end > node.end_byte() {
         return None;
     }
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if child.start_byte() <= start && end <= child.end_byte() {
-            if let Some(found) = exact_named_node(child, start, end) {
-                return Some(found);
-            }
-        }
-    }
-    if node.start_byte() == start && node.end_byte() == end {
-        return Some(node);
-    }
-    None
+    // Descend to the smallest named node covering the span in O(tree depth) via
+    // tree-sitter's cursor (binary-searches each level), rather than iterating
+    // every child at every level. The manual walk was O(siblings) per level, so
+    // enriching N bindings in a flat module (e.g. a codemod touching every
+    // binding) re-scanned the whole child list N times — O(N²) overall. The
+    // smallest named node whose span still covers `[start, end)` is, for an
+    // exact-span capture, that node itself (any named child is strictly
+    // smaller), so requiring an exact match preserves the old semantics.
+    let found = node.named_descendant_for_byte_range(start, end)?;
+    (found.start_byte() == start && found.end_byte() == end).then_some(found)
 }
 
 fn for_identifier_descendants<'tree>(node: Node<'tree>, f: &mut impl FnMut(Node<'tree>)) {

@@ -24,7 +24,7 @@ fn __schedule_contains(values, value) {
 }
 
 fn __schedule_incoming_edges(graph, node_id) {
-  var incoming = []
+  let incoming = []
   for edge in __schedule_list(graph?.edges) {
     if edge?.to == node_id {
       incoming = incoming.push(edge)
@@ -34,11 +34,11 @@ fn __schedule_incoming_edges(graph, node_id) {
 }
 
 fn __schedule_required_inputs(node, incoming_count) {
-  let explicit = __schedule_int(node?.join_policy?.min_completed)
+  const explicit = __schedule_int(node?.join_policy?.min_completed)
   if explicit != nil {
     return explicit
   }
-  let strategy = __schedule_string(node?.join_policy?.strategy, "all")
+  const strategy = __schedule_string(node?.join_policy?.strategy, "all")
   if node?.join_policy?.require_all_inputs || strategy == "all" {
     return incoming_count
   }
@@ -53,12 +53,12 @@ fn __schedule_required_inputs(node, incoming_count) {
  * @api_stability: experimental
  */
 pub fn workflow_join_readiness(config = nil) {
-  let node_id = __schedule_string(config?.node_id, "")
-  let {node = {}, graph = {}} = config ?? {}
-  let completed_nodes = __schedule_list(config?.completed_nodes)
-  let incoming = __schedule_incoming_edges(graph, node_id)
-  let required = __schedule_required_inputs(node, len(incoming))
-  var completed_inputs = 0
+  const node_id = __schedule_string(config?.node_id, "")
+  const {node = {}, graph = {}} = config ?? {}
+  const completed_nodes = __schedule_list(config?.completed_nodes)
+  const incoming = __schedule_incoming_edges(graph, node_id)
+  const required = __schedule_required_inputs(node, len(incoming))
+  let completed_inputs = 0
   for edge in incoming {
     if __schedule_contains(completed_nodes, edge?.from) {
       completed_inputs = completed_inputs + 1
@@ -82,11 +82,11 @@ fn __schedule_branch_matches(left, right) {
  * @api_stability: experimental
  */
 pub fn workflow_next_edges(config = nil) {
-  let graph = config?.graph ?? {}
-  let current = __schedule_string(config?.current, "")
-  let branch = config?.branch
-  var exact = []
-  var default_edges = []
+  const graph = config?.graph ?? {}
+  const current = __schedule_string(config?.current, "")
+  const branch = config?.branch
+  let exact = []
+  let default_edges = []
   for edge in __schedule_list(graph?.edges) {
     if edge?.from != current {
       continue

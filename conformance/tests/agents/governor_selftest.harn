@@ -5,7 +5,7 @@
 import { governors_selftest } from "std/agent/governors"
 
 pipeline default() {
-  let report = governors_selftest()
+  const report = governors_selftest()
   __io_println(report.ok)
   __io_println(report.decision.action)
   __io_println(report.decision.reason)

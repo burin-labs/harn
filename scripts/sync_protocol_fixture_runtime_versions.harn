@@ -10,7 +10,7 @@
 //
 // Pure logic lives in `pub fn`s driven by the paired test with no filesystem.
 // `main` does the globbing/reads/writes.
-let FIXTURE_ROOT = "conformance/protocols/fixtures"
+const FIXTURE_ROOT = "conformance/protocols/fixtures"
 
 /** True iff `v` is exactly X.Y.Z — mirrors Python `SEMVER_RE.fullmatch`. */
 pub fn is_semver(v: string) -> bool {
@@ -31,7 +31,7 @@ pub fn py_repr(value: string) -> string {
  * and non-string scalars never match.
  */
 pub fn count_old_values(value: any, old: string) -> int {
-  let t = type_of(value)
+  const t = type_of(value)
   if t == "string" {
     if value == old {
       return 1
@@ -39,14 +39,14 @@ pub fn count_old_values(value: any, old: string) -> int {
     return 0
   }
   if t == "list" {
-    var n = 0
+    let n = 0
     for item in value {
       n = n + count_old_values(item, old)
     }
     return n
   }
   if t == "dict" {
-    var n = 0
+    let n = 0
     for key in value.keys() {
       n = n + count_old_values(value[key], old)
     }
@@ -72,13 +72,13 @@ pub fn replace_literals(text: string, old: string, new: string) -> string {
 }
 
 pipeline main(task) {
-  let parsed = parse_args()
+  const parsed = parse_args()
   if parsed.error != nil {
     __io_eprintln(parsed.error)
     return parsed.code
   }
-  let old = parsed.old
-  let new = parsed.new
+  const old = parsed.old
+  const new = parsed.new
   if !is_semver(old) {
     __io_eprintln("error: --from must be X.Y.Z, got ${py_repr(old)}")
     return 1
@@ -95,20 +95,20 @@ pipeline main(task) {
     __io_println("protocol fixture root not found: ${FIXTURE_ROOT}")
     return 0
   }
-  var changed_files = 0
-  var changed_values = 0
+  let changed_files = 0
+  let changed_values = 0
   for path in sorted_json_files(FIXTURE_ROOT) {
-    let text = harness.fs.read_text(path)
-    let data = json_parse(text)
-    let count = count_old_values(data, old)
+    const text = harness.fs.read_text(path)
+    const data = json_parse(text)
+    const count = count_old_values(data, old)
     if count == 0 {
       continue
     }
     // The parsed rewrite above tells us this file has exact string-valued
     // runtime versions; the text replacement updates only those JSON string
     // literals without reflowing arrays.
-    let updated_text = replace_literals(text, old, new)
-    let reparsed = json_parse(updated_text)
+    const updated_text = replace_literals(text, old, new)
+    const reparsed = json_parse(updated_text)
     if count_old_values(reparsed, old) != 0 {
       __io_eprintln("error: failed to replace all ${py_repr(old)} values in ${path}")
       return 1
@@ -129,11 +129,11 @@ pipeline main(task) {
  * code 2; otherwise `{old, new, error: nil, code: 0}`.
  */
 fn parse_args() -> any {
-  var old: string? = nil
-  var new: string? = nil
-  var i = 0
+  let old: string? = nil
+  let new: string? = nil
+  let i = 0
   while i < argv.count {
-    let arg = argv[i]
+    const arg = argv[i]
     if arg == "--from" {
       i = i + 1
       if i < argv.count {
@@ -152,15 +152,15 @@ fn parse_args() -> any {
     i = i + 1
   }
   if old == nil || new == nil {
-    var missing: list<string> = []
+    let missing: list<string> = []
     if old == nil {
       missing = missing + ["--from"]
     }
     if new == nil {
       missing = missing + ["--to"]
     }
-    let usage = "usage: sync_protocol_fixture_runtime_versions.py [-h] --from OLD --to NEW"
-    let err = "sync_protocol_fixture_runtime_versions.py: error: the following arguments are required: ${missing.join(", ")}"
+    const usage = "usage: sync_protocol_fixture_runtime_versions.py [-h] --from OLD --to NEW"
+    const err = "sync_protocol_fixture_runtime_versions.py: error: the following arguments are required: ${missing.join(", ")}"
     return {old: "", new: "", error: usage + "\n" + err, code: 2}
   }
   return {old: old, new: new, error: nil, code: 0}
@@ -171,7 +171,7 @@ fn parse_args() -> any {
  * `sorted(FIXTURE_ROOT.rglob("*.json"))`.
  */
 fn sorted_json_files(root: string) -> list<string> {
-  var paths: list<string> = []
+  let paths: list<string> = []
   for path in harness.fs.glob("${root}/**/*.json") {
     paths = paths + [path]
   }

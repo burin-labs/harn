@@ -1,14 +1,14 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools() {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "emit_handoff",
     "Emit a handoff artifact",
     {
       handler: { _args ->
-        let record = handoff(
+        const record = handoff(
           {
             source_persona: "parent",
             target_persona_or_human: {kind: "persona", id: "child", label: "child"},
@@ -19,7 +19,7 @@ fn tools() {
         __io_println(len(record.reminder_propagation))
         __io_println(record.reminder_propagation[0].body)
         __io_println(record.reminder_propagation[0].source)
-        var saw_none = false
+        let saw_none = false
         for entry in record.reminder_propagation {
           if entry.body == "dropped at handoff" {
             saw_none = true
@@ -38,7 +38,7 @@ fn tools() {
 pipeline main() {
   // The handoff envelope must omit propagate=none reminders, keeping
   // only the propagate=all entry.
-  let parent = agent_session_open("reminder-propagate-none-dropped-at-handoff")
+  const parent = agent_session_open("reminder-propagate-none-dropped-at-handoff")
   agent_session_reset(parent)
   agent_session_inject(
     parent,

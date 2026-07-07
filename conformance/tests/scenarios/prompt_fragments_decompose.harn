@@ -19,8 +19,8 @@ fn contains_id(items, needle) {
 }
 
 pipeline test(task) {
-  let session = {session_id: "prompt-fragments-decompose"}
-  let opts = {
+  const session = {session_id: "prompt-fragments-decompose"}
+  const opts = {
     system: "You are a careful operator.",
     active_skills: [{id: "disk_cleanup", description: "Free up disk space", when_to_use: "when low"}],
     skill_catalog_prompt: "## Skills\nUse skills wisely.",
@@ -30,9 +30,9 @@ pipeline test(task) {
     tool_format: "text",
   }
   // Joining the fragment bodies reproduces the legacy string exactly.
-  let fragments = agent_build_turn_system_fragments(session, opts, 0)
-  let joined = join(fragments.map(fn(f) { return f.body }), "\n\n")
-  let legacy = agent_build_turn_system(session, opts, 0)
+  const fragments = agent_build_turn_system_fragments(session, opts, 0)
+  const joined = join(fragments.map(fn(f) { return f.body }), "\n\n")
+  const legacy = agent_build_turn_system(session, opts, 0)
   assert(joined == legacy, "joined fragment bodies equal agent_build_turn_system")
   assert(len(fragments) >= 4, "primary block decomposed into multiple parts")
   // Every fragment is namespaced under the primary region.
@@ -42,9 +42,9 @@ pipeline test(task) {
   }
   // prompt_explain expands the channel as the primary region and traces each
   // part individually — no opaque single `primary` fragment remains.
-  let explained = prompt_explain({_system_fragments: fragments, tools: opts.tools})
+  const explained = prompt_explain({_system_fragments: fragments, tools: opts.tools})
   assert(explained.system == legacy, "prompt_explain system equals legacy string")
-  let ids = explained.fragments.map(fn(t) { return t.id })
+  const ids = explained.fragments.map(fn(t) { return t.id })
   assert(contains_id(ids, "primary:system"), "traces primary:system")
   assert(contains_id(ids, "primary:active_skills"), "traces primary:active_skills")
   assert(contains_id(ids, "primary:skill_catalog"), "traces primary:skill_catalog")
@@ -61,13 +61,13 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("Cleanup done.")],
     { ->
-      let res = agent_loop(
+      const res = agent_loop(
         "run disk cleanup please",
         "You are a careful operator.",
         {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
       )
       assert(res?.status == "done", "live loop completes")
-      let recorded = llm_mock_calls()[0].system
+      const recorded = llm_mock_calls()[0].system
       assert(contains(recorded, "## Active skills"), "live system surfaces active skills")
       assert(contains(recorded, "You are a careful operator."), "live system surfaces primary text")
       assert(!contains(recorded, "\n\n\n"), "no triple-newline runs in composed system")

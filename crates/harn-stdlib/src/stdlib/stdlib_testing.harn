@@ -1,7 +1,7 @@
 /** std/testing — helpers for writing Harn tests. */
 import { unified_diff } from "std/diff"
 
-var __testing_step_events = []
+let __testing_step_events = []
 
 fn params_subset_match(expected, actual) {
   if expected == nil {
@@ -48,7 +48,7 @@ pub fn mock_host_result(cap: string, op: string, result, params) {
  * @errors: []
  */
 pub fn mock_host_error(cap: string, op: string, message: string, params) {
-  let config = {error: message}
+  const config = {error: message}
   if params == nil {
     return host_mock(cap, op, config)
   }
@@ -131,7 +131,7 @@ pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) 
   if host_was_called(cap, op, params) {
     return nil
   }
-  let default_message = if params == nil {
+  const default_message = if params == nil {
     "Expected host call " + cap + "." + op + " to be recorded"
   } else {
     "Expected host call " + cap + "." + op + " with params " + to_string(params) + " to be recorded"
@@ -147,8 +147,8 @@ pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) 
  * @errors: []
  */
 pub fn assert_host_call_count(expected_count: int, cap: string, op: string, message = nil) {
-  let actual_count = host_call_count_for(cap, op)
-  let default_message = "Expected " + to_string(expected_count) + " host calls, got " + to_string(actual_count)
+  const actual_count = host_call_count_for(cap, op)
+  const default_message = "Expected " + to_string(expected_count) + " host calls, got " + to_string(actual_count)
   require actual_count == expected_count, message ?? default_message
   return actual_count
 }
@@ -160,7 +160,7 @@ pub fn assert_host_call_count(expected_count: int, cap: string, op: string, mess
  * @errors: []
  */
 pub fn assert_no_host_calls(message = nil) {
-  let actual_count = host_call_count()
+  const actual_count = host_call_count()
   require actual_count == 0, (message ?? "Expected no host calls, got ") + to_string(actual_count)
   return actual_count
 }
@@ -182,8 +182,8 @@ fn apply_host_mock_entry(entry) {
   if type_of(entry) != "dict" {
     throw "with_host_mocks: each entry must be a dict, got " + type_of(entry)
   }
-  let cap = entry?.capability
-  let op = entry?.operation
+  const cap = entry?.capability
+  const op = entry?.operation
   if cap == nil || op == nil {
     throw "with_host_mocks: each entry must include 'capability' and 'operation'"
   }
@@ -215,7 +215,7 @@ pub fn with_host_mocks(mocks, body) {
     for entry in mocks ?? [] {
       apply_host_mock_entry(entry)
     }
-    let result = __testing_call_body(body)
+    const result = __testing_call_body(body)
     host_mock_pop_scope()
     return result
   } catch (e) {
@@ -225,12 +225,12 @@ pub fn with_host_mocks(mocks, body) {
 }
 
 fn __testing_is_callable(value) -> bool {
-  let kind = type_of(value)
+  const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
 fn __testing_step_event_record(ctx) {
-  var record = {
+  let record = {
     event: ctx?.event,
     target: ctx?.target,
     persona: ctx?.persona,
@@ -245,7 +245,7 @@ fn __testing_step_event_record(ctx) {
 }
 
 fn __testing_step_events_for(kind) {
-  var out = []
+  let out = []
   for event in __testing_step_events {
     if event.event == kind {
       out = out.push(event)
@@ -271,7 +271,7 @@ fn __testing_handoff_target_matches(handoff, target) -> bool {
   if target == nil {
     return true
   }
-  let resolved = handoff?.target_persona_or_human ?? {}
+  const resolved = handoff?.target_persona_or_human ?? {}
   return resolved?.id == target
     || resolved?.label == target
     || resolved?.kind == target
@@ -281,7 +281,7 @@ fn __testing_handoff_target_matches(handoff, target) -> bool {
 
 fn __testing_golden_match(expected, actual) -> bool {
   if expected == "<ms>" {
-    let kind = type_of(actual)
+    const kind = type_of(actual)
     return kind == "int" || kind == "float"
       || (kind == "string" && len(regex_captures("^[0-9]+$", actual)) == 1)
   }
@@ -313,7 +313,7 @@ fn __testing_golden_match(expected, actual) -> bool {
     if len(expected) != len(actual) {
       return false
     }
-    var idx = 0
+    let idx = 0
     while idx < len(expected) {
       if !__testing_golden_match(expected[idx], actual[idx]) {
         return false
@@ -367,7 +367,7 @@ pub fn with_llm_mocks(mocks, body) {
       }
       llm_mock(entry)
     }
-    let result = __testing_call_body(body)
+    const result = __testing_call_body(body)
     llm_mock_pop_scope()
     return result
   } catch (e) {
@@ -387,8 +387,8 @@ pub fn with_llm_mocks(mocks, body) {
  * @errors: []
  */
 pub fn with_mocks(config, body) {
-  let host_entries = config?.host_mocks ?? []
-  let llm_entries = config?.llm_mocks ?? []
+  const host_entries = config?.host_mocks ?? []
+  const llm_entries = config?.llm_mocks ?? []
   host_mock_push_scope()
   llm_mock_push_scope()
   // Wrap registration *and* body together so a malformed entry
@@ -405,7 +405,7 @@ pub fn with_mocks(config, body) {
       }
       llm_mock(entry)
     }
-    let result = __testing_call_body(body)
+    const result = __testing_call_body(body)
     llm_mock_pop_scope()
     host_mock_pop_scope()
     return result
@@ -487,7 +487,7 @@ pub fn step_assertions_end() {
  * @errors: []
  */
 pub fn assert_steps_ran(expected_names, message = nil) {
-  var actual = []
+  let actual = []
   for event in __testing_step_events_for("PreStep") {
     actual = actual.push(event.step_name)
   }
@@ -537,13 +537,13 @@ pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
  * @errors: []
  */
 pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
-  let handoffs = source?.handoffs ?? source
+  const handoffs = source?.handoffs ?? source
   for item in handoffs ?? [] {
     if item?.kind == handoff_kind && __testing_handoff_target_matches(item, target) {
       return item
     }
   }
-  let suffix = if target == nil {
+  const suffix = if target == nil {
     ""
   } else {
     " to " + to_string(target)
@@ -559,7 +559,7 @@ pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
  * @errors: []
  */
 pub fn assert_receipt_field(receipt, path, value) {
-  let actual = json_pointer(receipt, path)
+  const actual = json_pointer(receipt, path)
   require actual == value, "receipt field " + path + " mismatch"
   return actual
 }
@@ -670,10 +670,10 @@ pub fn llm_tool_call(name: string, args = {}, id = nil) -> dict {
  * @example: llm_tool_calls([{name: "a", args: {}}, {name: "b"}])
  */
 pub fn llm_tool_calls(calls) -> dict {
-  var out = []
-  var index = 0
+  let out = []
+  let index = 0
   for call in calls ?? [] {
-    let resolved_id = call?.id ?? (to_string(call?.name) + "_" + to_string(index))
+    const resolved_id = call?.id ?? (to_string(call?.name) + "_" + to_string(index))
     out = out.push({id: resolved_id, name: call?.name, arguments: call?.args ?? {}})
     index = index + 1
   }
@@ -710,8 +710,8 @@ pub fn with_llm_script(turns, body) {
  * @example: assert_throws({ -> parse("") })
  */
 pub fn assert_throws(body, message = nil) -> any {
-  var threw = false
-  var captured = nil
+  let threw = false
+  let captured = nil
   try {
     body()
   } catch (e) {
@@ -732,8 +732,8 @@ pub fn assert_throws(body, message = nil) -> any {
  * @example: assert_error_contains({ -> connect("") }, "url is required")
  */
 pub fn assert_error_contains(body, substring: string, message = nil) -> any {
-  let captured = assert_throws(body, message)
-  let rendered = to_string(captured)
+  const captured = assert_throws(body, message)
+  const rendered = to_string(captured)
   require contains(rendered, substring), message
     ?? ("assert_error_contains: expected thrown error to contain "
     + to_string(substring)
@@ -755,7 +755,7 @@ pub fn assert_no_throw(body, message = nil) -> any {
   // A throw inside `return <expr>` within a try is not observed by the
   // local catch, so the assign-then-return shape is required for the
   // catch to fire.
-  var value = nil
+  let value = nil
   try {
     value = body()
   } catch (e) {
@@ -792,10 +792,10 @@ fn __testing_fs_content(value) -> string {
  * @example: with_temp_dir({ dir -> harness.fs.write_text(dir + "/x", "1") })
  */
 pub fn with_temp_dir(body) -> any {
-  let dir = harness.fs.temp_dir() + "/harn-test-" + uuid_v7()
+  const dir = harness.fs.temp_dir() + "/harn-test-" + uuid_v7()
   harness.fs.mkdir(dir)
   try {
-    let result = body(dir)
+    const result = body(dir)
     harness.fs.delete(dir)
     return result
   } catch (e) {
@@ -819,7 +819,7 @@ pub fn with_fs(files, body) -> any {
   return with_temp_dir(
     { dir ->
       for entry in entries(files ?? {}) {
-        let full = dir + "/" + entry.key
+        const full = dir + "/" + entry.key
         harness.fs.mkdir(dirname(full))
         harness.fs.write_text(full, __testing_fs_content(entry.value))
       }
@@ -845,7 +845,7 @@ pub fn with_fs(files, body) -> any {
  * @example: with_scenario({llm: [llm_done()], fs: {"a.txt": "1"}}, { s -> run(s.dir) })
  */
 pub fn with_scenario(config, body) {
-  let mock_config = {host_mocks: config?.host ?? [], llm_mocks: config?.llm ?? []}
+  const mock_config = {host_mocks: config?.host ?? [], llm_mocks: config?.llm ?? []}
   if config?.fs != nil {
     return with_fs(config.fs, { dir -> with_mocks(mock_config, { _ -> body({dir: dir}) }) })
   }
@@ -878,7 +878,7 @@ pub fn with_scenario(config, body) {
 
 /** Truthy for an env var set to anything other than "", "0", or "false". */
 fn __testing_env_flag(name: string) -> bool {
-  let raw = harness.env.get(name)
+  const raw = harness.env.get(name)
   return raw != nil && raw != "" && raw != "0" && raw != "false"
 }
 
@@ -927,7 +927,7 @@ fn __testing_snapshot_may_write(options) -> bool {
  * tool's goldens.
  */
 fn __testing_snapshot_path(name: string, options) -> string {
-  let dir = options?.dir ?? (source_dir() + "/__snapshots__")
+  const dir = options?.dir ?? (source_dir() + "/__snapshots__")
   return dir + "/" + name + ".harn.snap"
 }
 
@@ -939,7 +939,7 @@ fn __testing_snapshot_path(name: string, options) -> string {
  * write and the compare path, so the stored golden is always the scrubbed form.
  */
 fn __testing_snapshot_normalize(actual: string, options) -> string {
-  var out = actual
+  let out = actual
   for rule in options?.redact ?? [] {
     out = regex_replace(rule.pattern, rule.replacement ?? "", out)
   }
@@ -989,8 +989,8 @@ fn __testing_snapshot_guidance(action: string) -> string {
  * @example: assert_snapshot("render_home", render_home())
  */
 pub fn assert_snapshot(name: string, actual: string, options = nil) -> string {
-  let path = __testing_snapshot_path(name, options)
-  let normalized = __testing_snapshot_normalize(actual, options)
+  const path = __testing_snapshot_path(name, options)
+  const normalized = __testing_snapshot_normalize(actual, options)
   if __testing_snapshot_may_write(options) {
     harness.fs.mkdir(dirname(path))
     harness.fs.write_text(path, normalized)
@@ -1000,11 +1000,11 @@ pub fn assert_snapshot(name: string, actual: string, options = nil) -> string {
     require false, "snapshot '" + name + "' does not exist at " + path + __testing_snapshot_guidance("create it")
     return actual
   }
-  let golden = harness.fs.read_text(path)
+  const golden = harness.fs.read_text(path)
   if golden == normalized {
     return actual
   }
-  let diff = unified_diff(golden, normalized, {from_label: "snapshot (" + name + ")", to_label: "actual"})
+  const diff = unified_diff(golden, normalized, {from_label: "snapshot (" + name + ")", to_label: "actual"})
   require false, "snapshot '"
     + name
     + "' mismatch at "

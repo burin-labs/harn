@@ -9,9 +9,9 @@ fn handle_match(event) {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-filter-" + unique,
       kind: "channel.emit",
@@ -29,10 +29,10 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("filter.input", {repo: "other-repo"})
-  let _ = emit_channel("filter.input", {repo: "harn"})
-  let _ = emit_channel("filter.input", {repo: "burin"})
-  let fired = channel_events("ch.filter.fired")
+  const _ = emit_channel("filter.input", {repo: "other-repo"})
+  const _ = emit_channel("filter.input", {repo: "harn"})
+  const _ = emit_channel("filter.input", {repo: "burin"})
+  const fired = channel_events("ch.filter.fired")
   __io_println(len(fired))
   __io_println(fired[0].payload.repo)
 }

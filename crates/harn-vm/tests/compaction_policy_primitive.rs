@@ -40,9 +40,9 @@ fn out(source: &str) -> Vec<String> {
 fn check_defers_when_session_under_threshold() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   compaction.policy({session_id: s, max_tokens: 10000, max_turns: 50})
-  let decision = compaction.check(s)
+  const decision = compaction.check(s)
   log(decision["action"])
   log(decision["message_count"])
   log(decision["trigger"])
@@ -56,11 +56,11 @@ pipeline main(task) {
 fn check_marks_compact_now_when_tokens_cross() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   compaction.policy({session_id: s, max_tokens: 1, max_turns: 100})
   agent_session_inject(s, {role: "user", content: "Investigate the parser regression in stdlib once more."})
   agent_session_inject(s, {role: "assistant", content: "The root cause is in diagnostic recovery; we missed an EOF guard."})
-  let decision = compaction.check(s)
+  const decision = compaction.check(s)
   log(decision["action"])
   log(decision["trigger"])
   log(decision["strategy"])
@@ -79,11 +79,11 @@ fn check_uses_default_policy_when_session_unscoped() {
 pipeline main(task) {
   // No session_id → registers the default policy.
   compaction.policy({max_turns: 2})
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_inject(s, {role: "user", content: "one"})
   agent_session_inject(s, {role: "assistant", content: "two"})
   agent_session_inject(s, {role: "user", content: "three"})
-  let decision = compaction.check(s)
+  const decision = compaction.check(s)
   log(decision["action"])
   log(decision["trigger"])
   log(decision["policy_inherited"])
@@ -96,13 +96,13 @@ pipeline main(task) {
 fn run_compacts_session_via_lifecycle_with_custom_strategy() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   compaction.policy({session_id: s, max_tokens: 1, keep_last: 1})
   agent_session_inject(s, {role: "user", content: "Investigate the parser regression."})
   agent_session_inject(s, {role: "assistant", content: "The root cause is in diagnostic recovery."})
   agent_session_inject(s, {role: "user", content: "Capture the next command."})
 
-  let outcome = compaction.run(s, {
+  const outcome = compaction.run(s, {
     strategy: "custom",
     summarize_fn: { archived, _reminders -> {summary: "policy compacted " + to_string(len(archived))} },
   })
@@ -124,8 +124,8 @@ pipeline main(task) {
 fn policy_supports_safety_ratio_and_context_window() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
-  let snapshot = compaction.policy({
+  const s = agent_session_open()
+  const snapshot = compaction.policy({
     session_id: s,
     context_window: 100000,
     safety_ratio: 0.5,

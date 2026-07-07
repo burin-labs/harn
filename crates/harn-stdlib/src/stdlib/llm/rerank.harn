@@ -6,7 +6,7 @@ fn __rerank_text(value) {
 }
 
 fn __rerank_records(candidates) {
-  var records = []
+  let records = []
   for (index, candidate) in iter(candidates).enumerate() {
     records = records.push({index: index, candidate: candidate})
   }
@@ -14,7 +14,7 @@ fn __rerank_records(candidates) {
 }
 
 fn __rerank_initial_scores(candidates) {
-  var scores = []
+  let scores = []
   for (index, candidate) in iter(candidates).enumerate() {
     scores = scores
       .push(
@@ -35,7 +35,7 @@ fn __rerank_initial_scores(candidates) {
 }
 
 fn __rerank_clamp01(value, fallback = 1.0) {
-  let parsed = to_float(value)
+  const parsed = to_float(value)
   if parsed == nil {
     return fallback
   }
@@ -49,11 +49,11 @@ fn __rerank_clamp01(value, fallback = 1.0) {
 }
 
 fn __rerank_note_score(scores, index, outcome, confidence) {
-  let current = scores[index]
-  var next_scores = scores
-  var wins = current.wins
-  var losses = current.losses
-  var ties = current.ties
+  const current = scores[index]
+  let next_scores = scores
+  let wins = current.wins
+  let losses = current.losses
+  let ties = current.ties
   if outcome == "win" {
     wins = wins + 1
   } else if outcome == "loss" {
@@ -61,9 +61,9 @@ fn __rerank_note_score(scores, index, outcome, confidence) {
   } else {
     ties = ties + 1
   }
-  let comparisons = wins + losses + ties
-  let prior_confidence_sum = current?.confidence_sum ?? 0.0
-  let confidence_sum = prior_confidence_sum + confidence
+  const comparisons = wins + losses + ties
+  const prior_confidence_sum = current?.confidence_sum ?? 0.0
+  const confidence_sum = prior_confidence_sum + confidence
   next_scores[index] = current
     + {
     wins: wins,
@@ -78,9 +78,9 @@ fn __rerank_note_score(scores, index, outcome, confidence) {
 }
 
 fn __rerank_note_decision(state, left, right, decision) {
-  let confidence = __rerank_clamp01(decision?.confidence, 1.0)
-  var scores = state.scores
-  let winner = decision.winner
+  const confidence = __rerank_clamp01(decision?.confidence, 1.0)
+  let scores = state.scores
+  const winner = decision.winner
   if winner == "left" {
     scores = __rerank_note_score(scores, left.index, "win", confidence)
     scores = __rerank_note_score(scores, right.index, "loss", confidence)
@@ -91,7 +91,7 @@ fn __rerank_note_decision(state, left, right, decision) {
     scores = __rerank_note_score(scores, left.index, "tie", confidence)
     scores = __rerank_note_score(scores, right.index, "tie", confidence)
   }
-  let comparison = {
+  const comparison = {
     left_index: left.index,
     right_index: right.index,
     winner: winner,
@@ -102,7 +102,7 @@ fn __rerank_note_decision(state, left, right, decision) {
 }
 
 fn __rerank_winner_from_string(value) {
-  let normalized = lowercase(trim(value))
+  const normalized = lowercase(trim(value))
   if contains(["a", "left", "first", "candidate_a", "candidate a", "1"], normalized) {
     return "left"
   }
@@ -117,7 +117,7 @@ fn __rerank_winner_from_string(value) {
 
 fn __rerank_normalize_decision(value) {
   if type_of(value) == "dict" {
-    let raw_winner = value?.winner ?? value?.preferred ?? value?.choice ?? value?.verdict
+    const raw_winner = value?.winner ?? value?.preferred ?? value?.choice ?? value?.verdict
     return {
       winner: __rerank_normalize_decision(raw_winner).winner,
       confidence: __rerank_clamp01(value?.confidence, 1.0),
@@ -175,7 +175,7 @@ fn __rerank_schema() {
 }
 
 fn __rerank_llm_options(opts) {
-  let base = opts?.llm_options ?? opts ?? {}
+  const base = opts?.llm_options ?? opts ?? {}
   return base
     + {
     max_tokens: base?.max_tokens ?? 128,
@@ -197,7 +197,7 @@ fn __rerank_compare(left, right, opts) {
       ),
     )
   }
-  let result = llm_call_structured(
+  const result = llm_call_structured(
     __rerank_prompt(left, right, opts),
     __rerank_schema(),
     __rerank_llm_options(opts),
@@ -206,12 +206,12 @@ fn __rerank_compare(left, right, opts) {
 }
 
 fn __rerank_merge(left, right, opts, state) {
-  var out = []
-  var left_idx = 0
-  var right_idx = 0
-  var next_state = state
+  let out = []
+  let left_idx = 0
+  let right_idx = 0
+  let next_state = state
   while left_idx < len(left) && right_idx < len(right) {
-    let decision = __rerank_compare(left[left_idx], right[right_idx], opts)
+    const decision = __rerank_compare(left[left_idx], right[right_idx], opts)
     next_state = __rerank_note_decision(next_state, left[left_idx], right[right_idx], decision)
     if decision.winner == "right" {
       out = out.push(right[right_idx])
@@ -236,14 +236,14 @@ fn __rerank_sort(records, opts, state) {
   if len(records) <= 1 {
     return {ranked: records, state: state}
   }
-  let mid = floor(len(records) / 2)
-  let left = __rerank_sort(records.slice(0, mid), opts, state)
-  let right = __rerank_sort(records.slice(mid, len(records)), opts, left.state)
+  const mid = floor(len(records) / 2)
+  const left = __rerank_sort(records.slice(0, mid), opts, state)
+  const right = __rerank_sort(records.slice(mid, len(records)), opts, left.state)
   return __rerank_merge(left.ranked, right.ranked, opts, right.state)
 }
 
 fn __rerank_strip_internal_score_fields(scores) {
-  var out = []
+  let out = []
   for score in scores {
     out = out
       .push(
@@ -273,9 +273,9 @@ pub fn pairwise_rerank(candidates, opts = nil) -> dict {
   if len(candidates) == 0 {
     return {ranked: [], scores: [], comparisons: []}
   }
-  let initial_state = {scores: __rerank_initial_scores(candidates), comparisons: []}
-  let sorted = __rerank_sort(__rerank_records(candidates), opts ?? {}, initial_state)
-  var ranked = []
+  const initial_state = {scores: __rerank_initial_scores(candidates), comparisons: []}
+  const sorted = __rerank_sort(__rerank_records(candidates), opts ?? {}, initial_state)
+  let ranked = []
   for record in sorted.ranked {
     ranked = ranked.push(record.candidate)
   }

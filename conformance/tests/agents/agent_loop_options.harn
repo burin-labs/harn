@@ -3,23 +3,23 @@ import { agent_loop_options } from "std/agent/options"
 pipeline default() {
   // No explicit tool_format: resolves the GLOBAL text-channel default, now
   // fenced-json (`json`), not heredoc (`text`).
-  let no_tools = agent_loop_options({provider: "mock"})
+  const no_tools = agent_loop_options({provider: "mock"})
   __io_println(no_tools.tool_format)
   __io_println(contains(no_tools.keys(), "done_judge"))
   __io_println(contains(no_tools.keys(), "verify_completion_judge"))
-  let judged = agent_loop_options({provider: "mock", tools: tool_registry(), done_judge: true})
+  const judged = agent_loop_options({provider: "mock", tools: tool_registry(), done_judge: true})
   __io_println(judged.done_sentinel)
   __io_println(type_of(judged.done_judge))
-  let client_search = agent_loop_options({provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}})
+  const client_search = agent_loop_options({provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}})
   __io_println(client_search.tool_format)
-  let explicit_native = agent_loop_options({provider: "mock", tools: tool_registry(), tool_format: "native"})
+  const explicit_native = agent_loop_options({provider: "mock", tools: tool_registry(), tool_format: "native"})
   __io_println(explicit_native.tool_format)
   __io_println(contains(explicit_native.keys(), "done_sentinel"))
-  let persistent_native = agent_loop_options(
+  const persistent_native = agent_loop_options(
     {provider: "mock", tools: tool_registry(), tool_format: "native", loop_until_done: true},
   )
   __io_println(persistent_native.done_sentinel == nil)
-  let judged_native = agent_loop_options(
+  const judged_native = agent_loop_options(
     {
       provider: "mock",
       tools: tool_registry(),
@@ -30,7 +30,7 @@ pipeline default() {
   )
   __io_println(judged_native.done_sentinel == nil)
   __io_println(contains(no_tools.keys(), "task_ledger"))
-  let shorthand = agent_loop_options(
+  const shorthand = agent_loop_options(
     {provider: "mock", root_task: " Build feature ", deliverables: ["Write code", "", "Run tests"]},
   )
   __io_println(shorthand.task_ledger.root_task)
@@ -38,7 +38,7 @@ pipeline default() {
   __io_println(shorthand.task_ledger.deliverables[0].id)
   __io_println(shorthand.task_ledger.deliverables[0].status)
   __io_println(shorthand.task_ledger.deliverables[1].id)
-  let explicit_ledger = agent_loop_options(
+  const explicit_ledger = agent_loop_options(
     {
       provider: "mock",
       root_task: "ignored",
@@ -53,7 +53,7 @@ pipeline default() {
   )
   __io_println(explicit_ledger.task_ledger.root_task)
   __io_println(explicit_ledger.task_ledger.deliverables[0].id)
-  let invalid_expose_decisions = try {
+  const invalid_expose_decisions = try {
     agent_loop_options(
       {provider: "mock", iteration_budget: {mode: "adaptive", expose_decisions: "yes"}},
     )

@@ -69,17 +69,17 @@
  * module deliberately does not introduce a global on/off switch
  * because the source of truth lives at the transport layer.
  */
-let __AUDIT_TOPIC = "oauth.dynreg.audit"
+const __AUDIT_TOPIC = "oauth.dynreg.audit"
 
-let __AUDIT_KIND_REGISTERED = "client_registered"
+const __AUDIT_KIND_REGISTERED = "client_registered"
 
-let __DEFAULT_CLIENT_METADATA_PATH = "/.well-known/oauth-client.json"
+const __DEFAULT_CLIENT_METADATA_PATH = "/.well-known/oauth-client.json"
 
-let __DEFAULT_AUTH_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server.json"
+const __DEFAULT_AUTH_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server.json"
 
-let __DEFAULT_REGISTRATION_PATH = "/register"
+const __DEFAULT_REGISTRATION_PATH = "/register"
 
-let __CONTENT_TYPE_JSON = "application/json"
+const __CONTENT_TYPE_JSON = "application/json"
 
 fn __require_dict(value, field) {
   if type_of(value) != "dict" {
@@ -89,7 +89,7 @@ fn __require_dict(value, field) {
 }
 
 fn __safe_get(dict, key) {
-  let keys = dict.keys()
+  const keys = dict.keys()
   if keys.contains(key) {
     return dict[key]
   }
@@ -139,7 +139,7 @@ pub fn client_metadata(opts) -> dict {
  * @example: authorization_server_metadata(providers().github, {registration_endpoint: "/register"})
  */
 pub fn authorization_server_metadata(provider, overrides = nil) -> dict {
-  let provider_dict = __require_dict(provider, "provider")
+  const provider_dict = __require_dict(provider, "provider")
   if overrides == nil {
     return __oauth_dynreg_build_authorization_server_metadata(provider_dict, nil)
   }
@@ -160,7 +160,7 @@ pub fn authorization_server_metadata(provider, overrides = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn dynamic_registration_store() -> dict {
-  let inner = __oauth_dynreg_store_handle()
+  const inner = __oauth_dynreg_store_handle()
   return inner
     + {
     _namespace: "oauth_dynreg",
@@ -171,9 +171,9 @@ pub fn dynamic_registration_store() -> dict {
 }
 
 fn __redact_shape(metadata, response) {
-  let redirect_uris = __safe_get(metadata, "redirect_uris") ?? []
-  let grant_types = __safe_get(response, "grant_types") ?? []
-  let has_secret = __safe_get(response, "client_secret") != nil
+  const redirect_uris = __safe_get(metadata, "redirect_uris") ?? []
+  const grant_types = __safe_get(response, "grant_types") ?? []
+  const has_secret = __safe_get(response, "client_secret") != nil
   return {
     redirect_uri_count: len(redirect_uris),
     grant_types: grant_types,
@@ -197,15 +197,15 @@ fn __redact_shape(metadata, response) {
  * @example: register_client(store, {redirect_uris: ["https://app.example/cb"]})
  */
 pub fn register_client(store, metadata) -> dict {
-  let store_dict = __require_dict(store, "store")
-  let metadata_dict = __require_dict(metadata, "metadata")
-  let response = __oauth_dynreg_register(store_dict, metadata_dict)
-  let payload = {
+  const store_dict = __require_dict(store, "store")
+  const metadata_dict = __require_dict(metadata, "metadata")
+  const response = __oauth_dynreg_register(store_dict, metadata_dict)
+  const payload = {
     client_id: __safe_get(response, "client_id"),
     issued_at: __safe_get(response, "client_id_issued_at"),
     redacted: __redact_shape(metadata_dict, response),
   }
-  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REGISTERED, payload, {dynreg: "true"})
+  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REGISTERED, payload, {dynreg: "true"})
   return response
 }
 
@@ -245,7 +245,7 @@ pub fn list_clients(store) -> list<string> {
  * @api_stability: experimental
  */
 pub fn well_known_paths(overrides = nil) -> dict {
-  let defaults = {
+  const defaults = {
     client_metadata: __DEFAULT_CLIENT_METADATA_PATH,
     authorization_server_metadata: __DEFAULT_AUTH_SERVER_METADATA_PATH,
     registration: __DEFAULT_REGISTRATION_PATH,
@@ -268,7 +268,7 @@ pub fn well_known_paths(overrides = nil) -> dict {
  * @example: well_known_response(client_metadata({redirect_uris: ["https://a/cb"]}))
  */
 pub fn well_known_response(metadata) -> dict {
-  let dict = __require_dict(metadata, "metadata")
+  const dict = __require_dict(metadata, "metadata")
   return {
     status: 200,
     content_type: __CONTENT_TYPE_JSON,

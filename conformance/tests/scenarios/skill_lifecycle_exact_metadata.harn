@@ -18,7 +18,7 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("No skill needed.")],
     { ->
-      let generic = agent_loop(
+      const generic = agent_loop(
         "hey wassup? can you help with this?",
         nil,
         {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
@@ -33,7 +33,7 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("No ship skill needed.")],
     { ->
-      let substring = agent_loop(
+      const substring = agent_loop(
         "review membership analytics",
         nil,
         {provider: "mock", max_iterations: 1, skills: ship, skill_match: {strategy: "metadata"}},
@@ -45,7 +45,7 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("Cleanup skill active.")],
     { ->
-      let explicit_id = agent_loop(
+      const explicit_id = agent_loop(
         "run disk cleanup",
         nil,
         {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},

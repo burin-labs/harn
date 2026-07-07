@@ -5,7 +5,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * fire on real-world invocations and respect their negative cases.
  */
 fn probe(reg, cmd) {
-  let m = tool_hooks_match(reg, cmd, {stacks: ["typescript"]})
+  const m = tool_hooks_match(reg, cmd, {stacks: ["typescript"]})
   if len(m) > 0 {
     __io_println(m[0].rule_id + " " + m[0].severity)
   } else {
@@ -14,7 +14,7 @@ fn probe(reg, cmd) {
 }
 
 pipeline default() {
-  let reg = tool_hooks_seed_registry(["typescript"])
+  const reg = tool_hooks_seed_registry(["typescript"])
   /* find_versus_rg: covers .ts/.tsx/.js/.jsx/.mjs/.cjs. */
   probe(reg, "find . -name '*.ts'")
   probe(reg, "find . -name '*.tsx'")

@@ -9,23 +9,23 @@
 import { pool_create } from "std/lifecycle/pool"
 
 pipeline default() {
-  let gate = channel(nil, 1)
-  let pool = pool_create({name: "unsettled-integration", max_concurrent: 1})
+  const gate = channel(nil, 1)
+  const pool = pool_create({name: "unsettled-integration", max_concurrent: 1})
   // One task occupies the slot (parked on `gate`), two more sit in the
   // queue. None reach a terminal state before on_finish runs.
-  let _running = pool
+  const _running = pool
     .submit(
     { ->
       receive(gate)
       return "done"
     },
   )
-  let _queued_a = pool.submit({ -> "a" }, {priority: 5})
-  let _queued_b = pool.submit({ -> "b" }, {priority: 10})
+  const _queued_a = pool.submit({ -> "a" }, {priority: 5})
+  const _queued_b = pool.submit({ -> "b" }, {priority: 10})
   pipeline_on_finish(
     { harness, return_value ->
-      let state = harness.unsettled_state()
-      let pending = state?.pool_pending_tasks ?? []
+      const state = harness.unsettled_state()
+      const pending = state?.pool_pending_tasks ?? []
       harness.stdio.println("pool_pending=" + to_string(len(pending)))
       send(gate, "go")
       return return_value

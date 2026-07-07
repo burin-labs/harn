@@ -29,13 +29,13 @@ fn shrinking_error_set_case() {
   // Strictly shrinking, NON-identical failing error sets, then completion.
   // Each turn is a real model result (ok:true) — genuine progress, not an
   // outage — so the no-progress terminator must credit it and keep going.
-  let errs = [
+  const errs = [
     "errors remaining: e1 e2 e3 e4 e5 e6 e7 e8 e9",
     "errors remaining: e1 e2 e3 e4",
     "errors remaining: e1",
     "all clear DONE",
   ]
-  let caller = { call ->
+  const caller = { call ->
     let i = call?.turn?.iteration ?? 0
     let text = if i < len(errs) {
       errs[i]
@@ -47,8 +47,8 @@ fn shrinking_error_set_case() {
       value: {text: text, tool_calls: [], provider: "mock", model: "cheap", input_tokens: 1, output_tokens: 1},
     }
   }
-  let session = "contract-shrink-" + uuid()
-  let captured = agent_capture_events(
+  const session = "contract-shrink-" + uuid()
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "fix the build",
@@ -65,8 +65,8 @@ fn shrinking_error_set_case() {
       },
     ) },
   )
-  let breaker_count = count_contract_events(captured.events, "budget_circuit_breaker")
-  let stuck_count = count_contract_events(captured.events, "loop_stuck")
+  const breaker_count = count_contract_events(captured.events, "budget_circuit_breaker")
+  const stuck_count = count_contract_events(captured.events, "loop_stuck")
   // NEGATIVE: no premature circuit-break / no-progress stop while shrinking.
   contract_negative("no_premature_stop_while_shrinking", breaker_count > 0 || stuck_count > 0)
   // EFFECT: the run reached DONE rather than being cut at budget.

@@ -2558,7 +2558,7 @@ fn run_registered_closure_probe(source: &str) -> (Result<String, String>, usize)
 #[test]
 fn registered_provider_and_session_hook_evaluate_under_execution_policy() {
     let script = r#"pipeline main() {
-  let session = agent_session_open("trusted-bridge-probe")
+  const session = agent_session_open("trusted-bridge-probe")
   agent_session_reset(session)
   register_reminder_provider({
     id: "probe-provider",
@@ -2732,7 +2732,7 @@ fn registered_provider_closure_resolves_sibling_fn_after_registering_vm_dropped(
                 });
                 let chunk = crate::compile_source(
                     r#"pipeline main() {
-  let session = agent_session_open("provider-fn-probe")
+  const session = agent_session_open("provider-fn-probe")
   agent_session_reset(session)
   __test_fire_reminders()
 }"#,
@@ -2869,7 +2869,7 @@ fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
                 });
                 let chunk = crate::compile_source(
                     r#"pipeline main() {
-  let session = agent_session_open("unknown-call-probe")
+  const session = agent_session_open("unknown-call-probe")
   agent_session_reset(session)
   __test_fire_reminders()
 }"#,

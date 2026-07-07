@@ -4,12 +4,12 @@ pipeline default(task) {
     __io_println(data.name)
   }
   // Pass boundary data with typo: "emial" instead of "email"
-  let bad = json_parse("{\"name\":\"test\",\"emial\":\"foo@bar.com\"}")
-  let result = try {
+  const bad = json_parse("{\"name\":\"test\",\"emial\":\"foo@bar.com\"}")
+  const result = try {
     process(bad)
   }
   __io_println(is_err(result))
   // The error should mention "email" as a suggestion
-  let msg = unwrap_err(result)
+  const msg = unwrap_err(result)
   __io_println(contains(msg, "email"))
 }

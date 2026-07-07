@@ -8,13 +8,13 @@ fn describe(t: SmartTarget) -> string {
 }
 
 pipeline default() {
-  let chosen: SmartTarget = pick("alpha")
+  const chosen: SmartTarget = pick("alpha")
   __io_println(describe(chosen))
   // Imported alias works as an `output_schema` type (schema-as-type lowering).
   with_llm_script(
     [llm_text("{\"name\": \"beta\", \"score\": 3}")],
     { ->
-      let r = llm_call(
+      const r = llm_call(
         "Pick a target",
         nil,
         {provider: "mock", output_schema: SmartTarget, output_validation: "error", response_format: "json"},

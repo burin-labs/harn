@@ -7,14 +7,14 @@ canonical dict so product code does not need to parse provider-native
 message shapes.
 
 ```harn
-let result = llm_call("What is 2 + 2?")
+const result = llm_call("What is 2 + 2?")
 log(result.text)
 ```
 
 With a system message:
 
 ```harn
-let result = llm_call(
+const result = llm_call(
   "Explain quicksort",
   "You are a computer science teacher. Be concise."
 )
@@ -28,12 +28,12 @@ With options — build them through the typed `LlmCallOptions` alias from
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let opts: LlmCallOptions = {
+const opts: LlmCallOptions = {
   provider: "openai",
   model: "gpt-4o",
   max_tokens: 1024,
 }
-let result = llm_call(
+const result = llm_call(
   "Translate to French: Hello, world",
   "You are a translator.",
   opts,
@@ -47,7 +47,7 @@ With image or video content:
 import { image_content, video_content } from "std/llm/media"
 import { LlmCallOptions } from "std/llm/options"
 
-let opts: LlmCallOptions = {
+const opts: LlmCallOptions = {
   provider: "minimax",
   model: "MiniMax-M3",
   messages: [{
@@ -59,7 +59,7 @@ let opts: LlmCallOptions = {
     ],
   }],
 }
-let result = llm_call("", nil, opts)
+const result = llm_call("", nil, opts)
 log(result.text)
 ```
 
@@ -202,14 +202,14 @@ route_policy = "manual"
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let merge_opts: LlmCallOptions = {model_role: "merge", output_schema: schema}
-let merged = llm_call(prompt, sys, merge_opts)
+const merge_opts: LlmCallOptions = {model_role: "merge", output_schema: schema}
+const merged = llm_call(prompt, sys, merge_opts)
 ```
 
 ```harn
 import { with_cache } from "std/llm/handlers"
 
-let result = with_cache("Summarize this file", nil, {
+const result = with_cache("Summarize this file", nil, {
   provider: "anthropic",
   model: "claude-haiku-4-5",
   store: {backend: "sqlite", namespace: "summaries"},
@@ -232,11 +232,11 @@ keys ride alongside the typed alias):
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let opts: LlmCallOptions = {
+const opts: LlmCallOptions = {
   provider: "ollama",
   ollama: {num_ctx: 32768},
 }
-let result = llm_call("hello", nil, opts)
+const result = llm_call("hello", nil, opts)
 ```
 
 ### OpenAI Responses mode
@@ -248,7 +248,7 @@ use OpenAI's native Responses API instead of the generic
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let opts: LlmCallOptions = {
+const opts: LlmCallOptions = {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
@@ -260,7 +260,7 @@ let opts: LlmCallOptions = {
   truncation: "auto",
   max_tool_calls: 4,
 }
-let result = llm_call("Search and summarize current docs.", nil, opts)
+const result = llm_call("Search and summarize current docs.", nil, opts)
 ```
 
 Use normal Harn `tools` when Harn should execute, approve, and audit a tool or
@@ -277,11 +277,11 @@ Structural experiments can be enabled directly on a call:
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let experiment_opts: LlmCallOptions = {
+const experiment_opts: LlmCallOptions = {
   provider: "mock",
   structural_experiment: "prompt_order_permutation(seed: 42)",
 }
-let result = llm_call("Instruction\n\nContext block", nil, experiment_opts)
+const result = llm_call("Instruction\n\nContext block", nil, experiment_opts)
 ```
 
 For custom transforms, pass a closure (or a `std/experiments.custom(...)`
@@ -299,7 +299,7 @@ callsites stop repeating the same four options.
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let schema = {
+const schema = {
   type: "object",
   required: ["name", "age"],
   properties: {
@@ -307,8 +307,8 @@ let schema = {
     age: {type: "integer"},
   },
 }
-let structured_opts: LlmCallOptions = {provider: "anthropic", system: "You are precise."}
-let person = llm_call_structured(
+const structured_opts: LlmCallOptions = {provider: "anthropic", system: "You are precise."}
+const person = llm_call_structured(
   "Extract the speaker's name and age from the transcript.",
   schema,
   structured_opts,
@@ -342,12 +342,12 @@ overrides them in `options`.
 the validated `.data` pre-unwrapped) instead of throwing:
 
 ```harn
-let r = llm_call_structured_safe(prompt, schema, {provider: "openai"})
+const r = llm_call_structured_safe(prompt, schema, {provider: "openai"})
 if !r.ok {
   log("structured call failed:", r.error.category, r.error.message)
   return nil
 }
-let person = r.data
+const person = r.data
 ```
 
 `r.error.category` is one of the canonical `ErrorCategory` strings
@@ -367,7 +367,7 @@ throws on transport or schema failures — `ok: false` plus
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let result_opts: LlmCallOptions = {
+const result_opts: LlmCallOptions = {
   provider: "auto",
   schema_retries: 2,
   // Optional repair pass — runs only on malformed JSON or
@@ -378,9 +378,9 @@ let result_opts: LlmCallOptions = {
     max_tokens: 600,
   },
 }
-let r = llm_call_structured_result(prompt, schema, result_opts)
+const r = llm_call_structured_result(prompt, schema, result_opts)
 if r.ok {
-  let person = r.data
+  const person = r.data
   // ...
 } else {
   log("structured call failed:", r.error_category, "raw:", r.raw_text)
@@ -445,9 +445,9 @@ loop:
 ```harn,ignore
 import {default_llm_caller, with_retry} from "std/llm/handlers"
 
-let caller = with_retry(default_llm_caller(), {max_attempts: 4})
+const caller = with_retry(default_llm_caller(), {max_attempts: 4})
 
-let result = agent_loop(task, system, {
+const result = agent_loop(task, system, {
   loop_until_done: true,
   llm_caller: caller,
 })
@@ -478,11 +478,11 @@ It lives at the same abstraction level as `llm_call`.
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 
-let completion_opts: LlmCallOptions = {
+const completion_opts: LlmCallOptions = {
   provider: "ollama",
   model_tier: "small",
 }
-let result = llm_completion("let total = ", ";", nil, completion_opts)
+const result = llm_completion("const total = ", ";", nil, completion_opts)
 log(result.text)
 ```
 
@@ -492,11 +492,11 @@ Harn provides builtins for estimating and controlling LLM costs:
 
 ```harn
 // Estimate cost for a specific call
-let cost = llm_cost("claude-sonnet-5", 1000, 500)
+const cost = llm_cost("claude-sonnet-5", 1000, 500)
 log("Estimated cost: $${cost}")
 
 // Check cumulative session costs
-let session = llm_session_cost()
+const session = llm_session_cost()
 log("Total: $${session.total_cost}")
 log("Calls: ${session.call_count}")
 log("Input tokens: ${session.input_tokens}")
@@ -513,18 +513,18 @@ shape is `LlmBudget` from `std/llm/options`):
 ```harn
 import { LlmBudget, LlmCallOptions } from "std/llm/options"
 
-let budget: LlmBudget = {
+const budget: LlmBudget = {
   max_cost_usd: 0.001,
   max_input_tokens: 8000,
   max_output_tokens: 1024,
 }
-let budgeted_opts: LlmCallOptions = {
+const budgeted_opts: LlmCallOptions = {
   provider: "openai",
   model: "gpt-4o",
   max_tokens: 1024,
   budget: budget,
 }
-let result = try {
+const result = try {
   llm_call("Summarize this", nil, budgeted_opts)
 }
 ```
@@ -562,7 +562,7 @@ Use `llm_mock()` to queue specific responses — text, tool calls, or both:
 ```harn
 // Queue a text response (consumed in FIFO order)
 llm_mock({text: "The capital of France is Paris."})
-let r = llm_call("What is the capital of France?", nil, {provider: "mock"})
+const r = llm_call("What is the capital of France?", nil, {provider: "mock"})
 assert_eq(r.text, "The capital of France is Paris.")
 
 // Queue a response with tool calls
@@ -584,7 +584,7 @@ llm_mock({text: "step 2", match: "*planner*", consume_match: true})
 llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
 
 // Inspect what was sent to the mock provider
-let calls = llm_mock_calls()
+const calls = llm_mock_calls()
 // Each entry: {messages: [...], system: "..." or nil, tools: [...] or nil}
 
 // Clear all mocks and call log between tests

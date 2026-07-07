@@ -2,14 +2,14 @@ import { agent_lifecycle_tools, agent_stop, sub_agent_run, wait_agent } from "st
 import { with_llm_script } from "std/testing"
 
 fn nested_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "spawn_nested",
     "Start a nested child agent.",
     {
       handler: { _args ->
-        let child = sub_agent_run(
+        const child = sub_agent_run(
           "Leaf checks the migration guard.",
           {
             provider: "mock",
@@ -46,7 +46,7 @@ pipeline main() {
       },
     ],
     { ->
-      let middle = sub_agent_run(
+      const middle = sub_agent_run(
         "Middle should spawn a leaf then park.",
         {
           provider: "mock",
@@ -60,8 +60,8 @@ pipeline main() {
           anchor: {primary: "/workspace/agent-stop-middle"},
         },
       )
-      let suspended = wait_agent(middle)
-      let stopped = agent_stop(middle, {graceful: true, reason: "parent takeover"})
+      const suspended = wait_agent(middle)
+      const stopped = agent_stop(middle, {graceful: true, reason: "parent takeover"})
       __io_println("suspended=" + suspended.status)
       __io_println("stopped=" + stopped.status)
       __io_println("worker_status=" + stopped.worker.status)
@@ -81,14 +81,14 @@ pipeline main() {
         "outcome="
           + to_string(contains(stopped.handoff.metadata.outcome, "waiting for parent stop")),
       )
-      var leaf_status = ""
+      let leaf_status = ""
       for agent in list_agents() {
         if agent.result?.session_id == "agent-stop-leaf" {
           leaf_status = agent.status
         }
       }
       __io_println("leaf_status=" + leaf_status)
-      let hard = sub_agent_run(
+      const hard = sub_agent_run(
         "Hard cancel stays lossy.",
         {
           provider: "mock",
@@ -98,7 +98,7 @@ pipeline main() {
           session_id: "agent-stop-hard",
         },
       )
-      let cancelled = agent_stop(hard, {graceful: false})
+      const cancelled = agent_stop(hard, {graceful: false})
       __io_println("hard=" + cancelled.status)
     },
   )

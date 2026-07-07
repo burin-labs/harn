@@ -27,7 +27,7 @@ const NS: list = [1, 2, X]
 const COUNT: int = len([1, 2, 3])
 
 // reads to silence the unused-variable lint in the example
-let _ = [X, Y, NS, COUNT]
+const _ = [X, Y, NS, COUNT]
 ```
 
 ## How to fix

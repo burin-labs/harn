@@ -70,8 +70,8 @@ fn llm_call_start_events(events) {
 }
 
 pipeline main(task) {
-  let session = "agent-loop-llm-call-start-" + uuid()
-  let caller = { call -> return {
+  const session = "agent-loop-llm-call-start-" + uuid()
+  const caller = { call -> return {
     ok: true,
     value: {
       text: "<user_response>done</user_response>\n<done>##DONE##</done>",
@@ -81,7 +81,7 @@ pipeline main(task) {
       output_tokens: 0,
     },
   } }
-  let captured = agent_capture_events(
+  const captured = agent_capture_events(
     session,
     fn() { return agent_loop(
       "finish",
@@ -98,8 +98,8 @@ pipeline main(task) {
       },
     ) },
   )
-  let starts = llm_call_start_events(captured.events)
-  let checkpoint = starts[0].checkpoint
+  const starts = llm_call_start_events(captured.events)
+  const checkpoint = starts[0].checkpoint
   log(captured.result.status)
   log(len(starts))
   log(checkpoint.kind)
@@ -210,12 +210,12 @@ fn clean_done_pipeline(session_id: &str) -> String {
         r#"
 pipeline main(task) {{
   clear_tool_hooks()
-  let wrapup_counter = shared_cell(
+  const wrapup_counter = shared_cell(
     {{scope: "task_group", key: "clean-done-wrapup-{session_id}", initial: 0}},
   )
-  let mock_llm = {{ _call ->
+  const mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
-      let wsnap = shared_snapshot(wrapup_counter)
+      const wsnap = shared_snapshot(wrapup_counter)
       shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
     }}
     return {{
@@ -228,7 +228,7 @@ pipeline main(task) {{
       }},
     }}
   }}
-  let result = agent_loop(
+  const result = agent_loop(
     "do the work",
     nil,
     {{

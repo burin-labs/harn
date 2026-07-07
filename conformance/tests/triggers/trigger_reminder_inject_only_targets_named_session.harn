@@ -7,13 +7,13 @@ import "std/triggers"
  * cross-session leakage of reminders fired from a single dispatch.
  */
 pipeline test(task) {
-  let target = agent_session_open("trigger-reminder-inject-router-target")
-  let bystander = agent_session_open("trigger-reminder-inject-router-bystander")
+  const target = agent_session_open("trigger-reminder-inject-router-target")
+  const bystander = agent_session_open("trigger-reminder-inject-router-bystander")
   agent_session_reset(target)
   agent_session_reset(bystander)
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-reminder-inject-router-" + unique,
       kind: "issue.opened",
@@ -30,14 +30,14 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let dispatch = trigger_fire(
+  const dispatch = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
   __io_println(dispatch.status == "dispatched")
   __io_println(dispatch.result?.target_session_id == target)
-  let target_reminders = transcript_events_by_kind(agent_session_snapshot(target), "system_reminder")
-  let bystander_reminders = transcript_events_by_kind(agent_session_snapshot(bystander), "system_reminder")
+  const target_reminders = transcript_events_by_kind(agent_session_snapshot(target), "system_reminder")
+  const bystander_reminders = transcript_events_by_kind(agent_session_snapshot(bystander), "system_reminder")
   __io_println(len(target_reminders))
   __io_println(len(bystander_reminders))
   __io_println(target_reminders[0].reminder.body)

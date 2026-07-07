@@ -3,7 +3,7 @@ pipeline test(task) {
   // exact `decimal` (money), so it is compared against decimal literals —
   // decimals form a clean island and never compare equal/ordered against
   // binary floats.
-  let cost = llm_cost("gpt-4o-mini", 1000, 500)
+  const cost = llm_cost("gpt-4o-mini", 1000, 500)
   // gpt-4o-mini: $0.15/M input, $0.60/M output
   // 1000 * 0.15 / 1000000 = 0.00015
   // 500 * 0.60 / 1000000 = 0.0003
@@ -15,16 +15,16 @@ pipeline test(task) {
   assert_eq(llm_format_usd(cost), "$0.000450")
   log("cost ok")
   // Unknown model returns an exact zero decimal
-  let unknown_cost = llm_cost("unknown-model", 1000, 500)
+  const unknown_cost = llm_cost("unknown-model", 1000, 500)
   assert_eq(unknown_cost, decimal("0"))
   log("unknown ok")
   // Budget builtins
   llm_budget(10.0)
-  let remaining = llm_budget_remaining()
+  const remaining = llm_budget_remaining()
   assert_eq(remaining, 10.0)
   log("budget ok")
   // Session cost starts at 0
-  let session = llm_session_cost()
+  const session = llm_session_cost()
   assert_eq(session.total_cost, 0.0)
   log("session ok")
 }

@@ -8,8 +8,8 @@
  * returns the seq-ordered entries that the replay oracle compares.
  */
 pipeline default() {
-  let _ = mock_time(1700000000000)
-  let suspension = lifecycle_receipt_record_suspension(
+  const _ = mock_time(1700000000000)
+  const suspension = lifecycle_receipt_record_suspension(
     {
       handle: "worker://triage/42",
       session_id: "session-a",
@@ -20,7 +20,7 @@ pipeline default() {
       span_id: "span-suspend-1",
     },
   )
-  let resumption = lifecycle_receipt_record_resumption(
+  const resumption = lifecycle_receipt_record_resumption(
     {
       handle: "worker://triage/42",
       session_id: "session-a",
@@ -31,7 +31,7 @@ pipeline default() {
       linked_suspension_span_id: "span-suspend-1",
     },
   )
-  let drain = lifecycle_receipt_record_drain_decision(
+  const drain = lifecycle_receipt_record_drain_decision(
     {
       pipeline_id: "pipeline-1",
       item: {category: "suspended_subagent", id: "worker://triage/42", summary: "paused"},
@@ -41,7 +41,7 @@ pipeline default() {
       prompt: "settle this drain item",
     },
   )
-  let snapshot = lifecycle_receipts_snapshot()
+  const snapshot = lifecycle_receipts_snapshot()
   __io_println("snapshot_len=" + to_string(len(snapshot)))
   __io_println("seq_1=" + to_string(snapshot[0].seq))
   __io_println("seq_2=" + to_string(snapshot[1].seq))
@@ -60,6 +60,6 @@ pipeline default() {
   __io_println("suspension_entry_seq=" + to_string(suspension.seq))
   __io_println("resumption_entry_seq=" + to_string(resumption.seq))
   __io_println("drain_entry_seq=" + to_string(drain.seq))
-  let _ = unmock_time()
+  const _ = unmock_time()
   return "ok"
 }

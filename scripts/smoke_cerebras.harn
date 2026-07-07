@@ -13,32 +13,32 @@
  *   cargo run --quiet --bin harn -- run scripts/smoke_cerebras.harn
  */
 pipeline default(args) {
-  let model = "cerebras/gpt-oss-120b"
-  let iterations = 20
+  const model = "cerebras/gpt-oss-120b"
+  const iterations = 20
   // First call eats DNS/TLS/connection setup; drop it from the
   // percentile so reported numbers reflect steady-state.
-  let warmup = 1
-  let prompt = "Reply with only the word ok."
-  var samples = []
+  const warmup = 1
+  const prompt = "Reply with only the word ok."
+  let samples = []
   for i in range(iterations) {
-    let start = harness.clock.monotonic_ms()
-    let r = llm_call(
+    const start = harness.clock.monotonic_ms()
+    const r = llm_call(
       prompt,
       nil,
       {provider: "cerebras", model: model, max_tokens: 8, temperature: 0.0, stream: false},
     )
-    let elapsed = harness.clock.monotonic_ms() - start
+    const elapsed = harness.clock.monotonic_ms() - start
     samples = samples + [elapsed]
     log("[${i + 1}/${iterations}] ${elapsed}ms — ${r.text}")
   }
-  let measured = samples[warmup:iterations]
-  let measured_count = iterations - warmup
-  let sorted = measured.sort_by({ ms -> ms })
-  let p50_index = measured_count / 2
-  let p99_index = measured_count - 1
-  let p50 = sorted[p50_index]
-  let p99 = sorted[p99_index]
-  let mean = sorted.reduce(0, { acc, ms -> acc + ms }) / measured_count
+  const measured = samples[warmup:iterations]
+  const measured_count = iterations - warmup
+  const sorted = measured.sort_by({ ms -> ms })
+  const p50_index = measured_count / 2
+  const p99_index = measured_count - 1
+  const p50 = sorted[p50_index]
+  const p99 = sorted[p99_index]
+  const mean = sorted.reduce(0, { acc, ms -> acc + ms }) / measured_count
   log("")
   log("Cerebras latency baseline — model=${model} iterations=${iterations} warmup=${warmup}")
   log("  p50  : ${p50}ms")

@@ -1,7 +1,7 @@
 import { workflow_stage_agent_options } from "std/workflow/options"
 
 fn print_budget_error(options: dict, expected: string) {
-  let result = try {
+  const result = try {
     agent_loop("budget validation probe", nil, options)
     "no_error"
   } catch (e) {
@@ -11,7 +11,7 @@ fn print_budget_error(options: dict, expected: string) {
 }
 
 pipeline default() {
-  let opts = workflow_stage_agent_options(
+  const opts = workflow_stage_agent_options(
     {
       mode: "agent",
       has_tools: true,
@@ -24,7 +24,7 @@ pipeline default() {
       host: {default_tool_format: "native"},
     },
   )
-  let budget = opts.agent_loop_options?.iteration_budget
+  const budget = opts.agent_loop_options?.iteration_budget
   __io_println(type_of(budget))
   __io_println(budget?.mode)
   __io_println(budget?.initial)
@@ -33,7 +33,7 @@ pipeline default() {
   // Keep the scalar cap visible for tooling that summarizes loop limits
   // without interpreting the structured budget.
   __io_println(opts.agent_loop_options?.max_iterations)
-  let sugar = workflow_stage_agent_options(
+  const sugar = workflow_stage_agent_options(
     {
       mode: "agent",
       has_tools: true,
@@ -43,7 +43,7 @@ pipeline default() {
   )
   __io_println(type_of(sugar.agent_loop_options?.iteration_budget))
   __io_println(sugar.agent_loop_options?.iteration_budget)
-  let invalid_mode = workflow_stage_agent_options(
+  const invalid_mode = workflow_stage_agent_options(
     {
       mode: "agent",
       has_tools: true,
@@ -55,7 +55,7 @@ pipeline default() {
     invalid_mode.agent_loop_options,
     "agent_loop: iteration_budget.mode must be \"fixed\" or \"adaptive\"",
   )
-  let invalid_max = workflow_stage_agent_options(
+  const invalid_max = workflow_stage_agent_options(
     {
       mode: "agent",
       has_tools: true,

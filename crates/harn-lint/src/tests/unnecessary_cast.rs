@@ -10,7 +10,7 @@ fn warn_to_string_on_string_literal() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-  let s = to_string("hello")
+  const s = to_string("hello")
   log(s)
 }
 "#,
@@ -26,7 +26,7 @@ fn warn_to_int_on_int_literal() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let n = to_int(42)
+  const n = to_int(42)
   log(n)
 }
 ",
@@ -42,7 +42,7 @@ fn warn_to_float_on_float_literal() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let n = to_float(1.5)
+  const n = to_float(1.5)
   log(n)
 }
 ",
@@ -58,7 +58,7 @@ fn warn_to_list_on_list_literal() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let xs = to_list([1, 2, 3])
+  const xs = to_list([1, 2, 3])
   log(xs)
 }
 ",
@@ -74,7 +74,7 @@ fn warn_to_dict_on_dict_literal() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let d = to_dict({a: 1, b: 2})
+  const d = to_dict({a: 1, b: 2})
   log(d)
 }
 ",
@@ -90,8 +90,8 @@ fn warn_to_string_on_interpolated_string() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-  let name = "world"
-  let s = to_string("hello ${name}")
+  const name = "world"
+  const s = to_string("hello ${name}")
   log(s)
 }
 "#,
@@ -109,8 +109,8 @@ fn warn_chained_to_string_calls() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let n = 5
-  let s = to_string(to_string(n))
+  const n = 5
+  const s = to_string(to_string(n))
   log(s)
 }
 ",
@@ -126,8 +126,8 @@ fn no_warn_on_genuine_int_to_string() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let n = 5
-  let s = to_string(n)
+  const n = 5
+  const s = to_string(n)
   log(s)
 }
 ",
@@ -144,7 +144,7 @@ fn no_warn_on_string_to_int() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-  let n = to_int("42")
+  const n = to_int("42")
   log(n)
 }
 "#,
@@ -161,7 +161,7 @@ fn no_warn_on_int_to_float() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let n = to_float(5)
+  const n = to_float(5)
   log(n)
 }
 ",
@@ -178,7 +178,7 @@ fn no_warn_on_float_to_int() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let n = to_int(1.5)
+  const n = to_int(1.5)
   log(n)
 }
 ",
@@ -195,7 +195,7 @@ fn no_warn_on_to_list_of_set_call() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let xs = to_list(set([1, 2, 3]))
+  const xs = to_list(set([1, 2, 3]))
   log(xs)
 }
 ",
@@ -208,7 +208,7 @@ pipeline default(task) {
 
 #[test]
 fn fix_to_string_on_string_literal() {
-    let source = "pipeline default(task) {\n  let s = to_string(\"hello\")\n  log(s)\n}";
+    let source = "pipeline default(task) {\n  const s = to_string(\"hello\")\n  log(s)\n}";
     let diags = lint_source(source);
     assert!(
         get_fix(&diags, "unnecessary-cast").is_some(),
@@ -216,8 +216,8 @@ fn fix_to_string_on_string_literal() {
     );
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let s = \"hello\""),
-        "expected `let s = \"hello\"`, got: {result}"
+        result.contains("const s = \"hello\""),
+        "expected `const s = \"hello\"`, got: {result}"
     );
     assert!(
         !result.contains("to_string"),
@@ -231,22 +231,22 @@ fn fix_to_string_on_string_literal() {
 
 #[test]
 fn fix_to_int_on_int_literal() {
-    let source = "pipeline default(task) {\n  let n = to_int(42)\n  log(n)\n}";
+    let source = "pipeline default(task) {\n  const n = to_int(42)\n  log(n)\n}";
     let diags = lint_source(source);
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let n = 42"),
-        "expected `let n = 42`, got: {result}"
+        result.contains("const n = 42"),
+        "expected `const n = 42`, got: {result}"
     );
 }
 
 #[test]
 fn fix_to_list_on_list_literal_preserves_inner_formatting() {
-    let source = "pipeline default(task) {\n  let xs = to_list([1, 2, 3])\n  log(xs)\n}";
+    let source = "pipeline default(task) {\n  const xs = to_list([1, 2, 3])\n  log(xs)\n}";
     let diags = lint_source(source);
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let xs = [1, 2, 3]"),
+        result.contains("const xs = [1, 2, 3]"),
         "expected list literal with original spacing preserved, got: {result}"
     );
 }
@@ -258,11 +258,11 @@ fn fix_chained_to_string_collapses_one_layer() {
     // because its argument is a bare identifier). The right-to-left,
     // overlap-dropping fix application keeps only the outer one.
     let source =
-        "pipeline default(task) {\n  let n = 5\n  let s = to_string(to_string(n))\n  log(s)\n}";
+        "pipeline default(task) {\n  const n = 5\n  const s = to_string(to_string(n))\n  log(s)\n}";
     let diags = lint_source(source);
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let s = to_string(n)"),
+        result.contains("const s = to_string(n)"),
         "expected outer to_string removed, got: {result}"
     );
 }
@@ -273,8 +273,8 @@ fn no_warn_on_zero_or_multi_arg_calls() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-  let s = to_string()
-  let t = to_string(1, 2)
+  const s = to_string()
+  const t = to_string(1, 2)
   log(s)
   log(t)
 }

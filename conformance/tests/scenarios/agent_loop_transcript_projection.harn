@@ -9,9 +9,9 @@ import { llm_text, with_llm_script } from "std/testing"
  * both turns intact.
  */
 fn flaky_tool() {
-  var tools = tool_registry()
-  var calls = 0
-  let handler = fn(_args) {
+  let tools = tool_registry()
+  let calls = 0
+  const handler = fn(_args) {
     calls = calls + 1
     if calls == 1 {
       throw "tool error: first try"
@@ -28,14 +28,14 @@ fn flaky_tool() {
 }
 
 fn gc_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_stale",
     "Return a stale observation.",
     {
       handler: fn(_args) {
-        var stale = "src/stale.rs\n"
+        let stale = "src/stale.rs\n"
         for i in range(0, 60) {
           stale = stale + "stale output line " + to_string(i) + "\n"
         }
@@ -50,7 +50,7 @@ fn gc_tools() {
     "Return a live observation.",
     {
       handler: fn(_args) {
-        var live = "src/live.rs\nLIVE_SENTINEL\n"
+        let live = "src/live.rs\nLIVE_SENTINEL\n"
         for i in range(0, 60) {
           live = live + "live output line " + to_string(i) + "\n"
         }
@@ -70,7 +70,7 @@ pipeline default() {
       llm_text("Finished. ##DONE##"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "kick it off",
         "You are a test agent.",
         {
@@ -84,9 +84,9 @@ pipeline default() {
         },
       )
       __io_println("status:" + result.status)
-      let raw_messages = transcript_messages(result.transcript)
+      const raw_messages = transcript_messages(result.transcript)
       __io_println("raw_message_count:" + to_string(len(raw_messages)))
-      let events = transcript_events_by_kind(result.transcript, "transcript.projection")
+      const events = transcript_events_by_kind(result.transcript, "transcript.projection")
       __io_println("projection_events:" + to_string(len(events) > 0))
       __io_println("projection_policy:" + events[0].metadata.policy)
       __io_println("projection_safety_blocked:" + to_string(events[0].metadata.provider_safety_blocked))
@@ -117,7 +117,7 @@ pipeline default() {
       llm_text("Done with projection GC. ##DONE##"),
     ],
     { ->
-      let gc_result = agent_loop(
+      const gc_result = agent_loop(
         "complete projection GC task",
         "You are a projection test agent.",
         {
@@ -131,11 +131,11 @@ pipeline default() {
           scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
         },
       )
-      let gc_calls = llm_mock_calls()
-      let projected_stale_body = json_stringify(gc_calls[2].messages[2].content)
-      let projected_live_body = json_stringify(gc_calls[2].messages[3].content)
-      let gc_events = transcript_events_by_kind(gc_result.transcript, "transcript.projection")
-      let gc_projection = gc_events[len(gc_events) - 1]
+      const gc_calls = llm_mock_calls()
+      const projected_stale_body = json_stringify(gc_calls[2].messages[2].content)
+      const projected_live_body = json_stringify(gc_calls[2].messages[3].content)
+      const gc_events = transcript_events_by_kind(gc_result.transcript, "transcript.projection")
+      const gc_projection = gc_events[len(gc_events) - 1]
       __io_println("gc_status:" + gc_result.status)
       __io_println("gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0))
       __io_println(

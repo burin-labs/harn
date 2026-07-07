@@ -18,7 +18,7 @@
  *
  * Run from the repo root: harn run scripts/backfill_stdlib_metadata.harn
  */
-let META_KEYS = ["effects", "errors"]
+const META_KEYS = ["effects", "errors"]
 
 /** Each rule is [pattern, label]. Order is significant for effect ordering. */
 fn _effect_rules() -> list {
@@ -90,8 +90,8 @@ fn _is_ws(c) -> bool {
 
 /** Strip leading whitespace (Python str.lstrip). */
 pub fn lstrip_ws(s) -> string {
-  let n = s.len()
-  var i = 0
+  const n = s.len()
+  let i = 0
   while i < n {
     if _is_ws(s.char_at(i)) {
       i = i + 1
@@ -104,7 +104,7 @@ pub fn lstrip_ws(s) -> string {
 
 /** Strip trailing whitespace (Python str.rstrip). */
 pub fn rstrip_ws(s) -> string {
-  var n = s.len()
+  let n = s.len()
   while n > 0 {
     if _is_ws(s.char_at(n - 1)) {
       n = n - 1
@@ -122,8 +122,8 @@ pub fn strip_ws(s) -> string {
 
 /** Strip leading occurrences of a single char `ch` (Python lstrip("*")). */
 pub fn lstrip_char(s, ch) -> string {
-  let n = s.len()
-  var i = 0
+  const n = s.len()
+  let i = 0
   while i < n {
     if s.char_at(i) == ch {
       i = i + 1
@@ -144,31 +144,31 @@ pub fn leading_indent(s) -> string {
  * Returns the function name, or "" when the line is not a pub fn header.
  */
 pub fn match_pub_fn(line) -> string {
-  let prefix = "pub fn "
+  const prefix = "pub fn "
   if !line.starts_with(prefix) {
     return ""
   }
-  let rest = line.substring(prefix.len(), line.len())
-  let n = rest.len()
+  const rest = line.substring(prefix.len(), line.len())
+  const n = rest.len()
   if n == 0 {
     return ""
   }
-  let c0 = rest.char_at(0)
+  const c0 = rest.char_at(0)
   if !_is_ident_start(c0) {
     return ""
   }
-  var i = 1
+  let i = 1
   while i < n {
-    let c = rest.char_at(i)
+    const c = rest.char_at(i)
     if _is_ident_part(c) {
       i = i + 1
     } else {
       break
     }
   }
-  let name = rest.substring(0, i)
+  const name = rest.substring(0, i)
   /* Skip optional whitespace, then require `<` or `(`. */
-  var j = i
+  let j = i
   while j < n {
     if _is_ws(rest.char_at(j)) {
       j = j + 1
@@ -179,7 +179,7 @@ pub fn match_pub_fn(line) -> string {
   if j >= n {
     return ""
   }
-  let nxt = rest.char_at(j)
+  const nxt = rest.char_at(j)
   if nxt == "<" || nxt == "(" {
     return name
   }
@@ -207,18 +207,18 @@ fn _is_digit(c) -> bool {
  * immediately above the next line. Returns -1 when none is adjacent.
  */
 pub fn find_doc_block_start(out) -> int {
-  let total = len(out)
+  const total = len(out)
   if total == 0 {
     return -1
   }
-  var j = total - 1
+  let j = total - 1
   if strip_ws(out[j]) == "" {
     j = j - 1
     if j < 0 {
       return -1
     }
   }
-  let last_line = rstrip_ws(out[j])
+  const last_line = rstrip_ws(out[j])
   if !last_line.ends_with("*/") {
     return -1
   }
@@ -226,7 +226,7 @@ pub fn find_doc_block_start(out) -> int {
     return j
   }
   while j >= 0 {
-    let s = lstrip_ws(out[j])
+    const s = lstrip_ws(out[j])
     if s.starts_with("/**") {
       return j
     }
@@ -243,9 +243,9 @@ pub fn find_doc_block_start(out) -> int {
  * dict of recognized keys -> value (stripped).
  */
 pub fn parse_existing_metadata(block_lines) -> dict {
-  var out = {}
+  let out = {}
   for raw in block_lines {
-    var s = strip_ws(raw)
+    let s = strip_ws(raw)
     if s.starts_with("/**") {
       s = lstrip_ws(s.substring(3, s.len()))
     }
@@ -256,13 +256,13 @@ pub fn parse_existing_metadata(block_lines) -> dict {
     if !s.starts_with("@") {
       continue
     }
-    let rest = s.substring(1, s.len())
-    let ci = rest.index_of(":")
+    const rest = s.substring(1, s.len())
+    const ci = rest.index_of(":")
     if ci == -1 {
       continue
     }
-    let key = strip_ws(rest.substring(0, ci))
-    let value = strip_ws(rest.substring(ci + 1, rest.len()))
+    const key = strip_ws(rest.substring(0, ci))
+    const value = strip_ws(rest.substring(ci + 1, rest.len()))
     if META_KEYS.contains(key) {
       out[key] = value
     }
@@ -278,19 +278,19 @@ pub fn inject_metadata(block_lines, new_fields) -> list {
   if len(block_lines) == 0 {
     return block_lines
   }
-  var lines = block_lines
-  var last_idx = len(lines) - 1
-  let last_line = lines[last_idx]
-  let indent = leading_indent(lines[0])
+  let lines = block_lines
+  let last_idx = len(lines) - 1
+  const last_line = lines[last_idx]
+  const indent = leading_indent(lines[0])
   if lstrip_ws(last_line).starts_with("/**") && rstrip_ws(last_line).ends_with("*/") {
     /* Expand single-line block into multi-line. inner has no newlines here
        (a line never contains \n), so the inner split is just one token. */
-    let trimmed = strip_ws(last_line)
-    let inner = strip_ws(trimmed.substring(3, trimmed.len() - 2))
-    var rebuilt = ["${indent}/**"]
+    const trimmed = strip_ws(last_line)
+    const inner = strip_ws(trimmed.substring(3, trimmed.len() - 2))
+    let rebuilt = ["${indent}/**"]
     if inner != "" {
       /* Python splits inner on "\n"; a single line has no newline. */
-      let token = strip_ws(inner)
+      const token = strip_ws(inner)
       if token != "" {
         rebuilt = rebuilt + ["${indent} * ${token}"]
       }
@@ -299,17 +299,17 @@ pub fn inject_metadata(block_lines, new_fields) -> list {
     lines = rebuilt
     last_idx = len(lines) - 1
   }
-  let insertion_pos = last_idx
-  let inner_indent = "${indent} *"
-  let prev_stripped = strip_ws(lines[insertion_pos - 1])
-  let needs_separator = insertion_pos > 1 && prev_stripped != "*" && prev_stripped != ""
-  var inserted = []
+  const insertion_pos = last_idx
+  const inner_indent = "${indent} *"
+  const prev_stripped = strip_ws(lines[insertion_pos - 1])
+  const needs_separator = insertion_pos > 1 && prev_stripped != "*" && prev_stripped != ""
+  let inserted = []
   if needs_separator {
     inserted = inserted + [inner_indent]
   }
   for key in META_KEYS {
     if new_fields.keys().contains(key) {
-      let value = new_fields[key]
+      const value = new_fields[key]
       inserted = inserted + ["${inner_indent} @${key}: ${value}"]
     }
   }
@@ -321,17 +321,17 @@ pub fn inject_metadata(block_lines, new_fields) -> list {
  * Returns the joined body text.
  */
 pub fn collect_body(lines, start) -> string {
-  var depth = 0
-  var seen_open = false
-  var body_lines = []
-  var i = start
-  let n = len(lines)
+  let depth = 0
+  let seen_open = false
+  let body_lines = []
+  let i = start
+  const n = len(lines)
   while i < n {
-    let line = lines[i]
-    let m = line.len()
-    var k = 0
+    const line = lines[i]
+    const m = line.len()
+    let k = 0
     while k < m {
-      let ch = line.char_at(k)
+      const ch = line.char_at(k)
       if ch == "{" {
         depth = depth + 1
         seen_open = true
@@ -353,10 +353,10 @@ pub fn collect_body(lines, start) -> string {
 
 /** Infer effects list label set, in rule order, from the body text. */
 pub fn infer_effects(body) -> string {
-  var effects = []
+  let effects = []
   for rule in _effect_rules() {
-    let pattern = rule[0]
-    let label = rule[1]
+    const pattern = rule[0]
+    const label = rule[1]
     if len(regex_captures(pattern, body)) > 0 && !effects.contains(label) {
       effects = effects + [label]
     }
@@ -366,7 +366,7 @@ pub fn infer_effects(body) -> string {
 
 /** Build the inferred metadata dict for the missing keys. */
 pub fn build_inferred(keys, body) -> dict {
-  var out = {}
+  let out = {}
   if keys.contains("effects") {
     out = out + {effects: infer_effects(body)}
   }
@@ -378,34 +378,34 @@ pub fn build_inferred(keys, body) -> dict {
 
 /** Pure transform: text + path -> {text, stats}. */
 pub fn process_file(text, path) -> dict {
-  var total = 0
-  var backfilled = 0
-  var skipped_no_block = 0
-  var already_complete = 0
-  let lines = text.split("\n")
-  var out = []
-  var i = 0
-  let n = len(lines)
+  let total = 0
+  let backfilled = 0
+  let skipped_no_block = 0
+  let already_complete = 0
+  const lines = text.split("\n")
+  let out = []
+  let i = 0
+  const n = len(lines)
   while i < n {
-    let line = lines[i]
-    let name = match_pub_fn(line)
+    const line = lines[i]
+    const name = match_pub_fn(line)
     if name == "" {
       out = out + [line]
       i = i + 1
       continue
     }
     total = total + 1
-    let block_end = len(out)
-    let block_start = find_doc_block_start(out)
+    const block_end = len(out)
+    const block_start = find_doc_block_start(out)
     if block_start == -1 {
       skipped_no_block = skipped_no_block + 1
       out = out + [line]
       i = i + 1
       continue
     }
-    let block = out.slice(block_start, block_end)
-    let existing = parse_existing_metadata(block)
-    var have_all = true
+    const block = out.slice(block_start, block_end)
+    const existing = parse_existing_metadata(block)
+    let have_all = true
     for k in META_KEYS {
       if !existing.keys().contains(k) {
         have_all = false
@@ -417,15 +417,15 @@ pub fn process_file(text, path) -> dict {
       i = i + 1
       continue
     }
-    let body = collect_body(lines, i)
-    var missing = []
+    const body = collect_body(lines, i)
+    let missing = []
     for k in META_KEYS {
       if !existing.keys().contains(k) {
         missing = missing + [k]
       }
     }
-    let inferred = build_inferred(missing, body)
-    let new_block = inject_metadata(block, inferred)
+    const inferred = build_inferred(missing, body)
+    const new_block = inject_metadata(block, inferred)
     out = out.slice(0, block_start) + new_block + out.slice(block_end, len(out))
     out = out + [line]
     i = i + 1
@@ -444,42 +444,42 @@ pub fn process_file(text, path) -> dict {
 
 /** Format a ratio as a one-decimal percent, matching Python f"{n/max(d,1):.1%}". */
 pub fn pct(num, den) -> string {
-  let d = if den < 1 {
+  const d = if den < 1 {
     1
   } else {
     den
   }
   /* value * 1000, rounded to nearest, gives tenths of a percent. */
-  let scaled = num * 1000.0 / d
-  let rounded = floor(scaled + 0.5)
-  let whole = to_int(floor(rounded / 10.0))
-  let tenth = to_int(rounded - whole * 10)
+  const scaled = num * 1000.0 / d
+  const rounded = floor(scaled + 0.5)
+  const whole = to_int(floor(rounded / 10.0))
+  const tenth = to_int(rounded - whole * 10)
   return "${whole}.${tenth}%"
 }
 
 pipeline main(task) {
-  let stdlib = "crates/harn-stdlib/src/stdlib"
-  var total = 0
-  var backfilled = 0
-  var skipped_no_block = 0
-  var already_complete = 0
+  const stdlib = "crates/harn-stdlib/src/stdlib"
+  let total = 0
+  let backfilled = 0
+  let skipped_no_block = 0
+  let already_complete = 0
   /* rglob("*.harn") sorted: glob returns abs workspace paths; sort for
      determinism. */
-  let files = harness.fs.glob("${stdlib}/**/*.harn").sort()
+  const files = harness.fs.glob("${stdlib}/**/*.harn").sort()
   for path in files {
-    let text = harness.fs.read_text(path)
-    let result = process_file(text, path)
-    let st = result["stats"]
+    const text = harness.fs.read_text(path)
+    const result = process_file(text, path)
+    const st = result["stats"]
     total = total + st["total"]
     backfilled = backfilled + st["backfilled"]
     skipped_no_block = skipped_no_block + st["skipped_no_block"]
     already_complete = already_complete + st["already_complete"]
-    let new_text = result["text"]
+    const new_text = result["text"]
     if new_text != text {
       harness.fs.write_text(path, new_text)
     }
   }
-  let coverage = pct(already_complete + backfilled, total)
+  const coverage = pct(already_complete + backfilled, total)
   __io_println(
     "public fns: ${total}; already complete: ${already_complete}; backfilled: ${backfilled}; skipped (no /** */ block): ${skipped_no_block}; final coverage: ${coverage}",
   )

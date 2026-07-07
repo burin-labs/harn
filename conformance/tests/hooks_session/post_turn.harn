@@ -5,7 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * before post-turn control logic decides whether the loop should continue.
  * They are advisory and are meant for enqueueing background work.
  */
-let post_seen = atomic(0)
+const post_seen = atomic(0)
 
 pipeline default() {
   clear_session_hooks()
@@ -23,7 +23,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("ok")],
     { ->
-      let result = agent_loop("hi", nil, {provider: "mock"})
+      const result = agent_loop("hi", nil, {provider: "mock"})
       __io_println(result.status)
       __io_println(atomic_get(post_seen))
       clear_session_hooks()

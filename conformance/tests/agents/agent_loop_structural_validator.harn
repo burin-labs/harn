@@ -11,7 +11,7 @@ fn error_contains(result, fragment) {
 }
 
 fn write_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -27,15 +27,15 @@ fn write_tools() {
 }
 
 pipeline default() {
-  let tool_text = "<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"
-  let malformed_tool_text = "<tool_call>\nwrite_note({ path: })\n</tool_call>"
+  const tool_text = "<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"
+  const malformed_tool_text = "<tool_call>\nwrite_note({ path: })\n</tool_call>"
   // Leading narration emitted as bare prose (NOT wrapped in
   // <assistant_prose>) ahead of a well-formed wrapped call. The parser
   // recovers the call AND flags the stray prose as a protocol violation.
   // The turn did real work, so `tool_calls_well_formed` must NOT veto it —
   // vetoing here drops the recovered call and strands the model in a
   // re-emit loop until the stall detector fires (the create-heavy failure).
-  let stray_prose_with_call_text = "I'll create notes.txt now.\n" + tool_text
+  const stray_prose_with_call_text = "I'll create notes.txt now.\n" + tool_text
   with_llm_script(
     [
       llm_text("I fixed it already."),
@@ -43,8 +43,8 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let session = "structural-validator-" + uuid()
-      let captured = agent_capture_events(
+      const session = "structural-validator-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Update notes.txt and then finish.",
@@ -60,7 +60,7 @@ pipeline default() {
           },
         ) },
       )
-      let decisions = events_of(captured.events, "structural_validator_decision")
+      const decisions = events_of(captured.events, "structural_validator_decision")
       require len(decisions) == 1, "validator should emit exactly one decision"
       __io_println(captured.result.status)
       __io_println(captured.result.tools.successful[0] == "write_note")
@@ -68,7 +68,7 @@ pipeline default() {
       __io_println(decisions[0].rule)
       __io_println(decisions[0].vetoed)
       __io_println(decisions[0].recommended_action.contains("tool call"))
-      let regen_messages = json_stringify(llm_mock_calls()[1].messages)
+      const regen_messages = json_stringify(llm_mock_calls()[1].messages)
       __io_println(!regen_messages.contains("I fixed it already."))
       __io_println(regen_messages.contains("structural_validator"))
       __io_println(regen_messages.contains("non_empty_when_writes_expected"))
@@ -100,8 +100,8 @@ pipeline default() {
   with_llm_script(
     [llm_text("I fixed it already.")],
     { ->
-      let phantom_session = "structural-validator-phantom-" + uuid()
-      let phantom = agent_capture_events(
+      const phantom_session = "structural-validator-phantom-" + uuid()
+      const phantom = agent_capture_events(
         phantom_session,
         fn() { return try {
           agent_loop(
@@ -122,7 +122,7 @@ pipeline default() {
           "caught"
         } },
       )
-      let phantom_decisions = events_of(phantom.events, "structural_validator_decision")
+      const phantom_decisions = events_of(phantom.events, "structural_validator_decision")
       __io_println(phantom.result == "caught")
       __io_println(len(phantom_decisions) == 1)
       __io_println(phantom_decisions[0].rule == "no_phantom_completion")
@@ -134,8 +134,8 @@ pipeline default() {
       llm_text("I fixed it already.<done>##DONE##</done>"),
     ],
     { ->
-      let post_write_session = "structural-validator-post-write-" + uuid()
-      let post_write = agent_capture_events(
+      const post_write_session = "structural-validator-post-write-" + uuid()
+      const post_write = agent_capture_events(
         post_write_session,
         fn() { return agent_loop(
           "Update notes.txt and then finish.",
@@ -151,7 +151,7 @@ pipeline default() {
           },
         ) },
       )
-      let post_write_decisions = events_of(post_write.events, "structural_validator_decision")
+      const post_write_decisions = events_of(post_write.events, "structural_validator_decision")
       __io_println(post_write.result.status == "done")
       __io_println(len(post_write_decisions) == 0)
     },
@@ -162,8 +162,8 @@ pipeline default() {
       llm_text("I fixed it already."),
     ],
     { ->
-      let post_write_non_empty_session = "structural-validator-post-write-non-empty-" + uuid()
-      let post_write_non_empty = agent_capture_events(
+      const post_write_non_empty_session = "structural-validator-post-write-non-empty-" + uuid()
+      const post_write_non_empty = agent_capture_events(
         post_write_non_empty_session,
         fn() { return agent_loop(
           "Update notes.txt and then summarize.",
@@ -178,7 +178,7 @@ pipeline default() {
           },
         ) },
       )
-      let post_write_non_empty_decisions = events_of(post_write_non_empty.events, "structural_validator_decision")
+      const post_write_non_empty_decisions = events_of(post_write_non_empty.events, "structural_validator_decision")
       __io_println(post_write_non_empty.result.status == "done")
       __io_println(len(post_write_non_empty_decisions) == 0)
     },
@@ -186,8 +186,8 @@ pipeline default() {
   with_llm_script(
     [llm_text("The PATCH_HINT is:\n\n```python\ndef add(a, b): return a + b\n```")],
     { ->
-      let lifecycle_only_session = "structural-validator-lifecycle-only-" + uuid()
-      let lifecycle_only = agent_capture_events(
+      const lifecycle_only_session = "structural-validator-lifecycle-only-" + uuid()
+      const lifecycle_only = agent_capture_events(
         lifecycle_only_session,
         fn() { return agent_loop(
           "No tools are available. State the smallest code change.",
@@ -201,7 +201,7 @@ pipeline default() {
           },
         ) },
       )
-      let lifecycle_only_decisions = events_of(lifecycle_only.events, "structural_validator_decision")
+      const lifecycle_only_decisions = events_of(lifecycle_only.events, "structural_validator_decision")
       __io_println(lifecycle_only.result.status == "done")
       __io_println(len(lifecycle_only_decisions) == 0)
     },
@@ -209,8 +209,8 @@ pipeline default() {
   with_llm_script(
     [llm_text(malformed_tool_text)],
     { ->
-      let malformed_session = "structural-validator-malformed-" + uuid()
-      let malformed = agent_capture_events(
+      const malformed_session = "structural-validator-malformed-" + uuid()
+      const malformed = agent_capture_events(
         malformed_session,
         fn() { return try {
           agent_loop(
@@ -231,7 +231,7 @@ pipeline default() {
           "caught"
         } },
       )
-      let malformed_decisions = events_of(malformed.events, "structural_validator_decision")
+      const malformed_decisions = events_of(malformed.events, "structural_validator_decision")
       __io_println(malformed.result == "caught")
       __io_println(len(malformed_decisions) == 1)
       __io_println(malformed_decisions[0].rule == "tool_calls_well_formed")
@@ -240,8 +240,8 @@ pipeline default() {
   with_llm_script(
     [llm_text(tool_text), llm_text("<done>##DONE##</done>")],
     { ->
-      let well_formed_session = "structural-validator-well-formed-" + uuid()
-      let well_formed = agent_capture_events(
+      const well_formed_session = "structural-validator-well-formed-" + uuid()
+      const well_formed = agent_capture_events(
         well_formed_session,
         fn() { return agent_loop(
           "Update notes.txt and then finish.",
@@ -257,7 +257,7 @@ pipeline default() {
           },
         ) },
       )
-      let well_formed_decisions = events_of(well_formed.events, "structural_validator_decision")
+      const well_formed_decisions = events_of(well_formed.events, "structural_validator_decision")
       __io_println(well_formed.result.status == "done")
       __io_println(len(well_formed_decisions) == 0)
     },
@@ -265,8 +265,8 @@ pipeline default() {
   with_llm_script(
     [llm_text(stray_prose_with_call_text), llm_text("<done>##DONE##</done>")],
     { ->
-      let stray_call_session = "structural-validator-stray-prose-call-" + uuid()
-      let stray_call = agent_capture_events(
+      const stray_call_session = "structural-validator-stray-prose-call-" + uuid()
+      const stray_call = agent_capture_events(
         stray_call_session,
         fn() { return agent_loop(
           "Update notes.txt and then finish.",
@@ -282,7 +282,7 @@ pipeline default() {
           },
         ) },
       )
-      let stray_call_decisions = events_of(stray_call.events, "structural_validator_decision")
+      const stray_call_decisions = events_of(stray_call.events, "structural_validator_decision")
       __io_println(stray_call.result.status == "done")
       __io_println(stray_call.result.tools.successful[0] == "write_note")
       __io_println(len(stray_call_decisions) == 0)
@@ -295,8 +295,8 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let missing_arg_session = "structural-validator-native-missing-arg-" + uuid()
-      let missing_arg = agent_capture_events(
+      const missing_arg_session = "structural-validator-native-missing-arg-" + uuid()
+      const missing_arg = agent_capture_events(
         missing_arg_session,
         fn() { return agent_loop(
           "Update notes.txt and then finish.",
@@ -312,8 +312,8 @@ pipeline default() {
           },
         ) },
       )
-      let missing_arg_decisions = events_of(missing_arg.events, "structural_validator_decision")
-      let missing_arg_regen_messages = json_stringify(llm_mock_calls()[1].messages)
+      const missing_arg_decisions = events_of(missing_arg.events, "structural_validator_decision")
+      const missing_arg_regen_messages = json_stringify(llm_mock_calls()[1].messages)
       __io_println(missing_arg.result.status == "done")
       __io_println(missing_arg.result.tools.successful[0] == "write_note")
       __io_println(len(missing_arg_decisions) == 1)
@@ -324,8 +324,8 @@ pipeline default() {
   with_llm_script(
     [{text: "Working on it.", output_tokens: 95}],
     { ->
-      let capped_session = "structural-validator-output-cap-" + uuid()
-      let capped = agent_capture_events(
+      const capped_session = "structural-validator-output-cap-" + uuid()
+      const capped = agent_capture_events(
         capped_session,
         fn() { return try {
           agent_loop(
@@ -347,7 +347,7 @@ pipeline default() {
           "caught"
         } },
       )
-      let capped_decisions = events_of(capped.events, "structural_validator_decision")
+      const capped_decisions = events_of(capped.events, "structural_validator_decision")
       __io_println(capped.result == "caught")
       __io_println(len(capped_decisions) == 1)
       __io_println(capped_decisions[0].rule == "output_token_cap_with_zero_calls")
@@ -356,8 +356,8 @@ pipeline default() {
   with_llm_script(
     [{text: "Brief update.", output_tokens: 94}, {text: "<done>##DONE##</done>", output_tokens: 10}],
     { ->
-      let under_cap_session = "structural-validator-output-under-cap-" + uuid()
-      let under_cap = agent_capture_events(
+      const under_cap_session = "structural-validator-output-under-cap-" + uuid()
+      const under_cap = agent_capture_events(
         under_cap_session,
         fn() { return agent_loop(
           "Update notes.txt and then finish.",
@@ -374,7 +374,7 @@ pipeline default() {
           },
         ) },
       )
-      let under_cap_decisions = events_of(under_cap.events, "structural_validator_decision")
+      const under_cap_decisions = events_of(under_cap.events, "structural_validator_decision")
       __io_println(under_cap.result.status == "done")
       __io_println(len(under_cap_decisions) == 0)
     },
@@ -382,8 +382,8 @@ pipeline default() {
   with_llm_script(
     [llm_text(malformed_tool_text), llm_text(tool_text), llm_text("<done>##DONE##</done>")],
     { ->
-      let warn_only_session = "structural-validator-warn-only-" + uuid()
-      let warn_only = agent_capture_events(
+      const warn_only_session = "structural-validator-warn-only-" + uuid()
+      const warn_only = agent_capture_events(
         warn_only_session,
         fn() { return agent_loop(
           "Update notes.txt and then finish.",
@@ -399,8 +399,8 @@ pipeline default() {
           },
         ) },
       )
-      let warn_only_decisions = events_of(warn_only.events, "structural_validator_decision")
-      let warn_only_messages = json_stringify(llm_mock_calls()[1].messages)
+      const warn_only_decisions = events_of(warn_only.events, "structural_validator_decision")
+      const warn_only_messages = json_stringify(llm_mock_calls()[1].messages)
       __io_println(warn_only.result.status == "done")
       __io_println(len(warn_only_decisions) == 1)
       __io_println(warn_only_decisions[0].rule == "tool_calls_well_formed")

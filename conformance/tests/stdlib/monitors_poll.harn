@@ -1,7 +1,7 @@
 import { wait_for } from "std/monitors"
 
 pipeline test(task) {
-  let result = wait_for(
+  const result = wait_for(
     {
       wait_id: "conformance-monitor-poll",
       timeout: 1ms,

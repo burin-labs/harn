@@ -8,7 +8,7 @@
 import { pack_agent } from "std/llm/defaults"
 
 pipeline default() {
-  let opts = pack_agent("claude-sonnet-4-5", {prompt: "Build a TODO list", system: "You are precise."})
+  const opts = pack_agent("claude-sonnet-4-5", {prompt: "Build a TODO list", system: "You are precise."})
   __io_println("model = " + to_string(opts?.model))
   __io_println("provider = " + to_string(opts?.provider))
   __io_println("temperature = " + to_string(opts?.temperature))

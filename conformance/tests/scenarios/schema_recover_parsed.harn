@@ -3,16 +3,16 @@
  * with attempts=1 and stage="parsed".
  */
 pipeline default() {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["name", "age"],
     properties: {name: {type: "string"}, age: {type: "integer"}},
   }
-  let r = schema_recover("{\"name\": \"Ada\", \"age\": 36}", schema)
+  const r = schema_recover("{\"name\": \"Ada\", \"age\": 36}", schema)
   __io_println(r.ok)
   // `r.data` is `T | nil`; bind it to a local and narrow with a
   // nil guard before reading fields.
-  let data = r.data
+  const data = r.data
   if data != nil {
     __io_println(data.name)
     __io_println(data.age)

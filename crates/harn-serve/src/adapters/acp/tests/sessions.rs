@@ -831,10 +831,10 @@ async fn acp_session_truncate_mutates_current_session_and_notifies_client() {
                 &session_id,
                 2,
                 r#"
-let sid = agent_session_current_id()
+const sid = agent_session_current_id()
 guard sid != nil else { throw "missing session id" }
 agent_session_inject(sid, {role: "user", content: "alpha"})
-let snap = agent_session_snapshot(sid)
+const snap = agent_session_snapshot(sid)
 __io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
 "#,
             )
@@ -846,10 +846,10 @@ __io_println(json_stringify({len: len(snap["messages"]), messages: snap["message
                 &session_id,
                 3,
                 r#"
-let sid = agent_session_current_id()
+const sid = agent_session_current_id()
 guard sid != nil else { throw "missing session id" }
 agent_session_inject(sid, {role: "user", content: "beta"})
-let snap = agent_session_snapshot(sid)
+const snap = agent_session_snapshot(sid)
 __io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
 "#,
             )
@@ -902,9 +902,9 @@ __io_println(json_stringify({len: len(snap["messages"]), messages: snap["message
                 &session_id,
                 5,
                 r#"
-let sid = agent_session_current_id()
+const sid = agent_session_current_id()
 guard sid != nil else { throw "missing session id" }
-let snap = agent_session_snapshot(sid)
+const snap = agent_session_snapshot(sid)
 __io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
 "#,
             )
@@ -1376,15 +1376,15 @@ async fn acp_file_backed_vm_baseline_keeps_prompt_turns_isolated() {
                 &pipeline_path,
                 r#"
 pipeline default(task) {
-  let cell = shared_cell({scope: "task_group", key: "turn", initial: prompt})
+  const cell = shared_cell({scope: "task_group", key: "turn", initial: prompt})
   __io_println(prompt)
   __io_println(shared_get(cell))
   shared_set(cell, "dirty")
-  let held = sync_gate_acquire("runner", 1)
-  let blocked = sync_gate_acquire("runner", 1, 0)
+  const held = sync_gate_acquire("runner", 1)
+  const blocked = sync_gate_acquire("runner", 1, 0)
   __io_println(blocked == nil)
   sync_release(held)
-  let metrics = sync_metrics("gate", "runner")
+  const metrics = sync_metrics("gate", "runner")
   __io_println(metrics.acquisition_count)
   __io_println(host_has("project", "read_file"))
 }"#,
@@ -1461,7 +1461,7 @@ async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
   llm_mock_clear()
   llm_mock({text: "ok"})
   llm_call("", nil, {provider: "mock", messages: prompt_messages})
-  let blocks = llm_mock_calls()[0].messages[0].content
+  const blocks = llm_mock_calls()[0].messages[0].content
   __io_println(blocks[0].text == "Please inspect this context.")
   __io_println(blocks[1].type == "image")
   __io_println(blocks[1].base64 == "iVBORw0KGgo=")

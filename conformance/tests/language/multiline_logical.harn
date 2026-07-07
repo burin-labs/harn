@@ -1,26 +1,26 @@
 pipeline default() {
   // Multiline || should work
-  let a = true
+  const a = true
   __io_println(a)
   // Multiline && should work
-  let b = false
+  const b = false
   __io_println(b)
   // Mixed multiline
-  let c = false || (true
+  const c = false || (true
     && true)
   __io_println(c)
   // Multiline + should work
-  let d = "hello"
+  const d = "hello"
     + " "
     + "world"
   __io_println(d)
   // Multiline method chaining
-  let e = [1, 2, 3, 4, 5]
+  const e = [1, 2, 3, 4, 5]
     .filter({ x -> x > 2 })
     .map({ x -> x * 10 })
   __io_println(e)
   // Multiline |> pipe
-  let f = "hello world"
+  const f = "hello world"
     |> { s -> split(s, " ") }
     |> { parts -> len(parts) }
   __io_println(f)

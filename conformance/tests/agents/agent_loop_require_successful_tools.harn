@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools() {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "lookup",
@@ -20,7 +20,7 @@ pipeline main() {
   with_llm_script(
     [{tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]}, llm_text("Finished.")],
     { ->
-      let failed = agent_loop(
+      const failed = agent_loop(
         "Use one tool.",
         nil,
         {
@@ -40,7 +40,7 @@ pipeline main() {
   with_llm_script(
     [{tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "x"}}]}, llm_text("Finished.")],
     { ->
-      let satisfied = agent_loop(
+      const satisfied = agent_loop(
         "Use one tool.",
         nil,
         {
@@ -63,7 +63,7 @@ pipeline main() {
       llm_text("Finished after using the required tool."),
     ],
     { ->
-      let gated = agent_loop(
+      const gated = agent_loop(
         "Use one tool.",
         nil,
         {

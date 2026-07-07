@@ -16,13 +16,13 @@ import {
   render_notes,
 } from "./render_release_notes.harn"
 
-let CARGO_PATH = "Cargo.toml"
+const CARGO_PATH = "Cargo.toml"
 
-let CHANGELOG_PATH = "CHANGELOG.md"
+const CHANGELOG_PATH = "CHANGELOG.md"
 
-let MANIFEST_PATH = "spec/protocol-artifacts/manifest.json"
+const MANIFEST_PATH = "spec/protocol-artifacts/manifest.json"
 
-let ACP_AGENT_MANIFEST_PATH = "spec/acp-registry/harn/agent.json"
+const ACP_AGENT_MANIFEST_PATH = "spec/acp-registry/harn/agent.json"
 
 type AcpArchiveVersion = {archive: string, version: string}
 
@@ -31,7 +31,7 @@ type AcpArchiveVersion = {archive: string, version: string}
  * Throws the canonical error when the line is missing.
  */
 pub fn current_version(cargo_text: string) -> string {
-  let caps = regex_captures(r#"(?m)^version = "([^"]+)""#, cargo_text)
+  const caps = regex_captures(r#"(?m)^version = "([^"]+)""#, cargo_text)
   if caps.count == 0 {
     throw "error: missing workspace version in Cargo.toml"
   }
@@ -45,7 +45,7 @@ pub fn current_version(cargo_text: string) -> string {
  * error when the field is missing.
  */
 pub fn protocol_artifact_version(manifest_text: string) -> string {
-  let caps = regex_captures(r#""artifactVersion"\s*:\s*"([^"]+)""#, manifest_text)
+  const caps = regex_captures(r#""artifactVersion"\s*:\s*"([^"]+)""#, manifest_text)
   if caps.count == 0 {
     throw "error: missing artifactVersion in " + MANIFEST_PATH
   }
@@ -58,8 +58,8 @@ pub fn protocol_artifact_version(manifest_text: string) -> string {
  * must track the Cargo package version that produced the release assets.
  */
 pub fn acp_agent_manifest_version(manifest_text: string) -> string {
-  let manifest = json_parse(manifest_text)
-  let version = json_pointer(manifest, "/version")
+  const manifest = json_parse(manifest_text)
+  const version = json_pointer(manifest, "/version")
   if type_of(version) != "string" {
     throw "error: missing version in " + ACP_AGENT_MANIFEST_PATH
   }
@@ -71,17 +71,17 @@ pub fn acp_agent_manifest_version(manifest_text: string) -> string {
  * URLs, paired with the source URL for precise failure messages.
  */
 pub fn acp_agent_manifest_archive_versions(manifest_text: string) -> list<AcpArchiveVersion> {
-  let manifest = json_parse(manifest_text)
-  let archives = jq(manifest, ".distribution.binary[] | .archive")
+  const manifest = json_parse(manifest_text)
+  const archives = jq(manifest, ".distribution.binary[] | .archive")
   if archives.count == 0 {
     throw "error: missing binary archive URLs in " + ACP_AGENT_MANIFEST_PATH
   }
-  var versions = []
+  let versions = []
   for archive in archives {
     if type_of(archive) != "string" {
       throw "error: non-string binary archive URL in " + ACP_AGENT_MANIFEST_PATH
     }
-    let caps = regex_captures(r"/releases/download/v([^/]+)/", archive)
+    const caps = regex_captures(r"/releases/download/v([^/]+)/", archive)
     if caps.count == 0 {
       throw "error: binary archive URL in " + ACP_AGENT_MANIFEST_PATH
         + " does not include a GitHub release version: "
@@ -94,7 +94,7 @@ pub fn acp_agent_manifest_archive_versions(manifest_text: string) -> list<AcpArc
 
 /** Ensure the ACP Agent Registry manifest points at the current release. */
 pub fn check_acp_agent_manifest(manifest_text: string, version: string) {
-  let manifest_version = acp_agent_manifest_version(manifest_text)
+  const manifest_version = acp_agent_manifest_version(manifest_text)
   if manifest_version != version {
     throw "error: " + ACP_AGENT_MANIFEST_PATH + " version " + manifest_version
       + " does not match Cargo.toml version "
@@ -113,8 +113,8 @@ pub fn check_acp_agent_manifest(manifest_text: string, version: string) {
 
 /** Return every `## vX.Y.Z` heading version, in file order. */
 pub fn changelog_versions(text: string) -> list<string> {
-  let caps = regex_captures(r"(?m)^## v([0-9]+\.[0-9]+\.[0-9]+)$", text)
-  var out = []
+  const caps = regex_captures(r"(?m)^## v([0-9]+\.[0-9]+\.[0-9]+)$", text)
+  let out = []
   for c in caps {
     out = out + [c.groups[0]]
   }
@@ -127,10 +127,10 @@ pub fn changelog_versions(text: string) -> list<string> {
  * Returns the empty string when the section is absent.
  */
 pub fn changelog_section_body(text: string, version: string) -> string {
-  let heading = "## v" + version
-  let lines = text.lines()
-  var collecting = false
-  var body = []
+  const heading = "## v" + version
+  const lines = text.lines()
+  let collecting = false
+  let body = []
   for line in lines {
     if collecting {
       if line.starts_with("## ") {
@@ -154,14 +154,14 @@ pub fn changelog_section_body(text: string, version: string) -> string {
  * historical headings like `## v0.5 series (...)` are ignored.
  */
 pub fn detect_misformatted_headings(text: string) -> list<string> {
-  var suspicious = []
+  let suspicious = []
   for line in text.lines() {
-    let m = regex_captures(r"^## v\d+\.\d+\.\d+", line)
+    const m = regex_captures(r"^## v\d+\.\d+\.\d+", line)
     if m.count == 0 {
       continue
     }
-    let matched = m[0].match
-    let rest = line.substring(matched.len(), line.len())
+    const matched = m[0].match
+    const rest = line.substring(matched.len(), line.len())
     if rest != "" {
       suspicious = suspicious + [line]
     }
@@ -175,20 +175,20 @@ pub fn detect_misformatted_headings(text: string) -> list<string> {
  * committed, version bump not yet applied" state the workflow produces.
  */
 pub fn is_bump_ahead(cargo_version: string, changelog_version: string) -> bool {
-  let cur = parse(cargo_version)
-  let nxt = parse(changelog_version)
+  const cur = parse(cargo_version)
+  const nxt = parse(changelog_version)
   if cur == nil || nxt == nil {
     return false
   }
-  let le = nxt.major < cur.major
+  const le = nxt.major < cur.major
     || (nxt.major == cur.major && nxt.minor < cur.minor)
     || (nxt.major == cur.major && nxt.minor == cur.minor && nxt.patch <= cur.patch)
   if le {
     return false
   }
-  let patch_bump = nxt.major == cur.major && nxt.minor == cur.minor && nxt.patch == cur.patch + 1
-  let minor_bump = nxt.major == cur.major && nxt.minor == cur.minor + 1 && nxt.patch == 0
-  let major_bump = nxt.major == cur.major + 1 && nxt.minor == 0 && nxt.patch == 0
+  const patch_bump = nxt.major == cur.major && nxt.minor == cur.minor && nxt.patch == cur.patch + 1
+  const minor_bump = nxt.major == cur.major && nxt.minor == cur.minor + 1 && nxt.patch == 0
+  const major_bump = nxt.major == cur.major + 1 && nxt.minor == 0 && nxt.patch == 0
   return patch_bump || minor_bump || major_bump
 }
 
@@ -208,10 +208,10 @@ fn cmp_version(a, b) -> int {
 
 /** True when `versions` is already in strictly/weakly descending semver order. */
 pub fn is_descending(versions: list<string>) -> bool {
-  var i = 1
+  let i = 1
   while i < versions.count {
-    let prev = parse(versions[i - 1])
-    let curr = parse(versions[i])
+    const prev = parse(versions[i - 1])
+    const curr = parse(versions[i])
     if cmp_version(prev, curr) < 0 {
       return false
     }
@@ -222,7 +222,7 @@ pub fn is_descending(versions: list<string>) -> bool {
 
 /** True when any version appears more than once in the list. */
 pub fn has_duplicates(versions: list<string>) -> bool {
-  var seen = []
+  let seen = []
   for v in versions {
     if seen.contains(v) {
       return true
@@ -239,26 +239,26 @@ pub fn has_duplicates(versions: list<string>) -> bool {
  * any failed check.
  */
 pub fn check_metadata(cargo_text: string, changelog_text: string) -> string {
-  let version = current_version(cargo_text)
-  let misformatted = detect_misformatted_headings(changelog_text)
+  const version = current_version(cargo_text)
+  const misformatted = detect_misformatted_headings(changelog_text)
   if misformatted.count > 0 {
-    let joined = misformatted.join("\n  ")
+    const joined = misformatted.join("\n  ")
     throw "error: CHANGELOG.md has heading(s) that look like version markers but "
       + "don't match the canonical `## vX.Y.Z` regex (no trailing whitespace, "
       + "no suffix):\n  "
       + joined
   }
-  let versions = changelog_versions(changelog_text)
+  const versions = changelog_versions(changelog_text)
   if versions.count == 0 {
     throw "error: CHANGELOG.md does not contain any version headings"
   }
-  let top = versions[0]
-  let body = changelog_section_body(changelog_text, top)
+  const top = versions[0]
+  const body = changelog_section_body(changelog_text, top)
   if body == "" {
     throw "error: CHANGELOG.md '## v" + top + "' section has no body content; release "
       + "notes would be empty. Add bullet points describing the release."
   }
-  var effective_version = version
+  let effective_version = version
   if top != version {
     if is_bump_ahead(version, top) {
       effective_version = top
@@ -296,9 +296,9 @@ pub fn success_message(version: string, effective_version: string) -> string {
  * `extract_section` throws on — mirroring the non-zero subprocess exit.
  */
 fn verify_release_notes(version: string) {
-  let changelog = harness.fs.read_text(CHANGELOG_PATH)
-  let normalized = normalize_version(version)
-  let section = try {
+  const changelog = harness.fs.read_text(CHANGELOG_PATH)
+  const normalized = normalize_version(version)
+  const section = try {
     extract_section(changelog, normalized)
   } catch (err) {
     __io_eprintln("error: failed to render release notes for current version")
@@ -307,8 +307,8 @@ fn verify_release_notes(version: string) {
   }
   // render_notes is total given a valid section; exercising it confirms the
   // full render path the Python subprocess covered.
-  let prev = previous_version(changelog_versions(changelog), normalized)
-  let _ = render_notes(section, nil, prev, normalized)
+  const prev = previous_version(changelog_versions(changelog), normalized)
+  const _ = render_notes(section, nil, prev, normalized)
 }
 
 /**
@@ -317,27 +317,27 @@ fn verify_release_notes(version: string) {
  * commit, or HEAD carries an equivalent `Release vX.Y.Z` commit.
  */
 fn verify_tag_state(version: string) {
-  let tag = "v" + version
-  let tag_lookup = harness.process
+  const tag = "v" + version
+  const tag_lookup = harness.process
     .spawn_captured({cmd: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]})
   if !tag_lookup.success {
     return
   }
-  let head = harness.process
+  const head = harness.process
     .spawn_captured({cmd: "git", args: ["rev-parse", "HEAD"]}).stdout
     .trim()
-  let tag_commit = harness.process
+  const tag_commit = harness.process
     .spawn_captured({cmd: "git", args: ["rev-list", "-n", "1", tag]}).stdout
     .trim()
   if head == tag_commit {
     return
   }
-  let is_descendant = harness.process
+  const is_descendant = harness.process
     .spawn_captured({cmd: "git", args: ["merge-base", "--is-ancestor", tag_commit, head]})
   if is_descendant.success {
     return
   }
-  let rebrand = harness.process
+  const rebrand = harness.process
     .spawn_captured(
     {
       cmd: "git",
@@ -367,15 +367,15 @@ fn verify_tag_state(version: string) {
 
 pipeline main(task) {
   try {
-    let cargo_text = harness.fs.read_text(CARGO_PATH)
-    let changelog_text = harness.fs.read_text(CHANGELOG_PATH)
-    let version = current_version(cargo_text)
-    let effective_version = check_metadata(cargo_text, changelog_text)
+    const cargo_text = harness.fs.read_text(CARGO_PATH)
+    const changelog_text = harness.fs.read_text(CHANGELOG_PATH)
+    const version = current_version(cargo_text)
+    const effective_version = check_metadata(cargo_text, changelog_text)
     // Fast staleness guard: `make gen-protocol-artifacts` stamps the crate
     // version into the manifest, so a version bump that skipped the regen is
     // caught here instead of by the slow `check-protocol-artifacts` audit.
-    let manifest_text = harness.fs.read_text(MANIFEST_PATH)
-    let artifact_version = protocol_artifact_version(manifest_text)
+    const manifest_text = harness.fs.read_text(MANIFEST_PATH)
+    const artifact_version = protocol_artifact_version(manifest_text)
     if artifact_version != version {
       throw "error: " + MANIFEST_PATH + " artifactVersion " + artifact_version
         + " does not match Cargo.toml version "
@@ -383,7 +383,7 @@ pipeline main(task) {
         + "; run `make gen-protocol-artifacts` (and "
         + "scripts/sync_protocol_fixture_runtime_versions.harn) after bumping the version"
     }
-    let acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
+    const acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
     check_acp_agent_manifest(acp_manifest_text, version)
     verify_release_notes(effective_version)
     verify_tag_state(effective_version)

@@ -25,7 +25,7 @@ This release unifies them. A single `type` alias now feeds:
 Before — duplicated surface, no cross-check:
 
 ```harn
-let grader_schema = {
+const grader_schema = {
   type: "object",
   required: ["verdict", "summary"],
   properties: {
@@ -34,7 +34,7 @@ let grader_schema = {
   },
 }
 
-let r = llm_call(prompt, nil, {
+const r = llm_call(prompt, nil, {
   model: routing.model,
   output_schema: grader_schema,
   schema_retries: 2,
@@ -53,7 +53,7 @@ type GraderOut = {
   summary: string,
 }
 
-let r = llm_call(prompt, nil, {
+const r = llm_call(prompt, nil, {
   model: routing.model,
   output_schema: GraderOut,   // compiled to the JSON-Schema dict
   schema_retries: 2,
@@ -90,7 +90,7 @@ numeric `min`/`max`, `const`, nested `$ref`, etc.). You can mix:
 ```harn
 type Name = {first: string, last: string}
 
-let r = llm_call(prompt, nil, {
+const r = llm_call(prompt, nil, {
   output_schema: {
     type: "dict",
     properties: {

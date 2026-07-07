@@ -43,12 +43,12 @@ fn __resolve_timeout_ms(ms) {
 }
 
 fn __summarize_result(value) -> string {
-  let kind = type_of(value)
+  const kind = type_of(value)
   if value == nil {
     return "nil"
   }
   if kind == "string" {
-    let s = value
+    const s = value
     if len(s) > 80 {
       return kind + ":" + substring(s, 0, 80) + "..."
     }
@@ -99,7 +99,7 @@ pub fn compose(callbacks) {
     if type_of(callbacks) != "list" || len(callbacks) == 0 {
       return return_value
     }
-    var current = return_value
+    let current = return_value
     for cb in callbacks {
       current = cb(harness, current)
     }
@@ -127,7 +127,7 @@ pub fn first_available(callbacks) {
       return nil
     }
     for cb in callbacks {
-      let result = cb(harness, return_value)
+      const result = cb(harness, return_value)
       if result != nil {
         return result
       }
@@ -152,16 +152,16 @@ pub fn first_available(callbacks) {
  * @example: pipeline_on_finish(with_telemetry(on_finish_drain, "drain"))
  */
 pub fn with_telemetry(callback, span_name = "lifecycle_callback") {
-  let label = if type_of(span_name) == "string" {
+  const label = if type_of(span_name) == "string" {
     span_name
   } else {
     "lifecycle_callback"
   }
   return { harness, return_value ->
-    let span = __lifecycle_span_start(label)
+    const span = __lifecycle_span_start(label)
     harness.emit_audit(label + "_started", {})
     try {
-      let result = callback(harness, return_value)
+      const result = callback(harness, return_value)
       harness
         .emit_audit(label + "_completed", {result_summary: __summarize_result(result)})
       __lifecycle_span_end(span)
@@ -198,11 +198,11 @@ pub fn with_telemetry(callback, span_name = "lifecycle_callback") {
  * @example: pipeline_on_finish(with_timeout(on_finish_drain, 30000))
  */
 pub fn with_timeout(callback, ms) {
-  let timeout_ms = __resolve_timeout_ms(ms)
+  const timeout_ms = __resolve_timeout_ms(ms)
   return { harness, return_value ->
-    let start = harness.clock.now_ms()
-    let result = callback(harness, return_value)
-    let elapsed = harness.clock.now_ms() - start
+    const start = harness.clock.now_ms()
+    const result = callback(harness, return_value)
+    const elapsed = harness.clock.now_ms() - start
     if timeout_ms <= 0 || elapsed <= timeout_ms {
       return result
     }
@@ -227,7 +227,7 @@ pub fn with_timeout(callback, ms) {
  */
 pub fn if_unsettled(callback) {
   return { harness, return_value ->
-    let state = unsettled_state(harness)
+    const state = unsettled_state(harness)
     if is_empty(state) {
       return return_value
     }

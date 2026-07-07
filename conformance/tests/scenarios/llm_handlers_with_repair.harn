@@ -5,9 +5,9 @@ import { with_repair } from "std/llm/handlers"
 
 pipeline default() {
   // Track call counts and whether the second-attempt prompt was nudged.
-  let counter = atomic(0)
-  let nudged = atomic(0)
-  let synthetic = { call ->
+  const counter = atomic(0)
+  const nudged = atomic(0)
+  const synthetic = { call ->
     let n = atomic_add(counter, 1)
     if n < 1 {
       return {ok: false, status: "schema_validation", error: {message: "missing required key 'verdict'"}}
@@ -20,8 +20,8 @@ pipeline default() {
       value: {text: "fixed", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  let caller = with_repair(synthetic, {})
-  let env = caller(
+  const caller = with_repair(synthetic, {})
+  const env = caller(
     {
       prompt: "judge this",
       system: "",
@@ -34,13 +34,13 @@ pipeline default() {
   __io_println(env.repair_attempted)
   __io_println(atomic_get(nudged))
   // Non-schema failures pass through unchanged (no repair attempt).
-  let other_calls = atomic(0)
-  let other_synth = { _call ->
+  const other_calls = atomic(0)
+  const other_synth = { _call ->
     let _ = atomic_add(other_calls, 1)
     return {ok: false, status: "rate_limited", error: "429"}
   }
-  let other_caller = with_repair(other_synth, {})
-  let other_env = other_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const other_caller = with_repair(other_synth, {})
+  const other_env = other_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(other_env.ok)
   __io_println(other_env.status)
   __io_println(other_env?.repair_attempted ?? false)

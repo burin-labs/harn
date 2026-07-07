@@ -22,7 +22,7 @@ import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn one_tool() {
-  let r = tool_registry()
+  const r = tool_registry()
   return tool_define(
     r,
     "echo",
@@ -38,7 +38,7 @@ fn run_loop_with_empty_name() {
   return with_llm_script(
     [{tool_calls: [{id: "bad-1", name: "", arguments: {}}]}, llm_text("##DONE##")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "do something",
         nil,
         {
@@ -63,17 +63,17 @@ pipeline default() {
   // Part A: the whole run survives a nameless tool call and reaches `done`.
   __io_println("loop.status=" + run_loop_with_empty_name())
   // Part B: the dispatch primitive returns a recoverable envelope, not a throw.
-  let empty = agent_dispatch_tool_call({name: "", arguments: {}}, one_tool(), {})
+  const empty = agent_dispatch_tool_call({name: "", arguments: {}}, one_tool(), {})
   __io_println("empty.ok=" + to_string(empty?.ok))
   __io_println("empty.status=" + to_string(empty?.status))
   __io_println("empty.error_category=" + to_string(empty?.error_category))
-  let missing = agent_dispatch_tool_call({arguments: {}}, one_tool(), {})
+  const missing = agent_dispatch_tool_call({arguments: {}}, one_tool(), {})
   __io_println("missing.ok=" + to_string(missing?.ok))
   __io_println("missing.status=" + to_string(missing?.status))
   __io_println("missing.error_category=" + to_string(missing?.error_category))
   // A well-formed call against the same registry still executes normally:
   // the recovery path must not have broken the happy path.
-  let good = agent_dispatch_tool_call({name: "echo", arguments: {msg: "hi"}}, one_tool(), {})
+  const good = agent_dispatch_tool_call({name: "echo", arguments: {msg: "hi"}}, one_tool(), {})
   __io_println("good.ok=" + to_string(good?.ok))
   __io_println("good.status=" + to_string(good?.status))
 }

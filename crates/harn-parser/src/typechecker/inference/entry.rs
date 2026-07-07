@@ -313,7 +313,7 @@ impl TypeChecker {
                         walk_all(scope, summary_body);
                     }
                 }
-                Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
+                Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
                     // Only bare-identifier patterns at module scope
                     // need forward-ref placeholders; destructuring
                     // patterns are checked as statements and define
@@ -324,13 +324,6 @@ impl TypeChecker {
                             scope.clear_nil_widenable(name);
                         }
                     }
-                }
-                Node::ConstBinding { name, .. } => {
-                    // Module-scope `const` bindings need the same
-                    // forward-ref placeholder treatment so a later use
-                    // resolves under the strict cross-module check.
-                    scope.define_var(name, None);
-                    scope.clear_nil_widenable(name);
                 }
                 _ => {}
             }

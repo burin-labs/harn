@@ -7,7 +7,7 @@ raw OS thread IDs are not part of the stable language surface.
 `task_current()` is an alias for `runtime_context()`.
 
 ```harn
-let ctx = runtime_context()
+const ctx = runtime_context()
 log(ctx.task_id)
 log(ctx.parent_task_id)
 log(ctx.root_task_id)
@@ -43,7 +43,7 @@ writes do not affect already-created children.
 ```harn
 runtime_context_set("tenant", "acme")
 
-let result = parallel each ["a", "b"] { item ->
+const result = parallel each ["a", "b"] { item ->
   runtime_context_get("tenant")
 }
 

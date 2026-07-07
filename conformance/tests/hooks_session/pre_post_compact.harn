@@ -5,9 +5,9 @@ import { llm_text, with_llm_script } from "std/testing"
  * `{block: true}`. `post_compact` hooks observe the archived-message
  * count once compaction completes successfully.
  */
-let pre_seen = atomic(0)
+const pre_seen = atomic(0)
 
-let post_seen = atomic(0)
+const post_seen = atomic(0)
 
 pipeline default() {
   clear_session_hooks()
@@ -38,7 +38,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("round one"), llm_text("round two")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "compact me",
         nil,
         {

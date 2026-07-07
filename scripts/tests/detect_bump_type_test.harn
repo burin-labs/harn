@@ -41,7 +41,7 @@ pipeline test_detect_major(task) {
 
 @test
 pipeline test_detect_rejects_skipped_versions(task) {
-  let r = try {
+  const r = try {
     detect("0.8.4", "0.8.6")
   } catch (_) {
     "caught"
@@ -51,7 +51,7 @@ pipeline test_detect_rejects_skipped_versions(task) {
 
 @test
 pipeline test_detect_rejects_non_zero_minor_on_major(task) {
-  let r = try {
+  const r = try {
     detect("1.0.0", "2.1.0")
   } catch (_) {
     "caught"
@@ -61,7 +61,7 @@ pipeline test_detect_rejects_non_zero_minor_on_major(task) {
 
 @test
 pipeline test_detect_rejects_non_zero_patch_on_minor(task) {
-  let r = try {
+  const r = try {
     detect("1.0.0", "1.1.5")
   } catch (_) {
     "caught"
@@ -71,7 +71,7 @@ pipeline test_detect_rejects_non_zero_patch_on_minor(task) {
 
 @test
 pipeline test_detect_rejects_downgrade(task) {
-  let r = try {
+  const r = try {
     detect("1.2.3", "1.2.2")
   } catch (_) {
     "caught"

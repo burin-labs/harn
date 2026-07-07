@@ -14,7 +14,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * result.current_failure is present (the hand-back says WHAT failed).
  */
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_test",
@@ -59,8 +59,8 @@ fn scenario_success() {
       llm_text("All set. ##DONE##"),
     ],
     { ->
-      let session = "repair-success-clear-" + uuid()
-      let result = agent_loop(
+      const session = "repair-success-clear-" + uuid()
+      const result = agent_loop(
         "Make the failing test pass, then finish.",
         nil,
         {
@@ -92,8 +92,8 @@ fn scenario_stuck() {
       run_test_call("r8"),
     ],
     { ->
-      let session = "repair-stuck-keeps-" + uuid()
-      let result = agent_loop(
+      const session = "repair-stuck-keeps-" + uuid()
+      const result = agent_loop(
         "Make the failing test pass.",
         nil,
         {
@@ -107,7 +107,7 @@ fn scenario_stuck() {
           stall_diagnostics: {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 2, hard_stop_after_trips: 1},
         },
       )
-      let cf = result?.current_failure
+      const cf = result?.current_failure
       return cf != nil && cf.class == "fail"
     },
   )

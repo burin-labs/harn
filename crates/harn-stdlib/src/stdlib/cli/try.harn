@@ -14,7 +14,7 @@ import { agent_first_tool_format_override_warning_text } from "std/agent/options
  *   HARN_TRY_OVERRIDE_REASON — optional rationale for a forced tool_format
  */
 fn __trimmed_env(harness: Harness, key: string) {
-  let value = trim(harness.env.get_or(key, ""))
+  const value = trim(harness.env.get_or(key, ""))
   if value == "" {
     return nil
   }
@@ -26,28 +26,28 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("try: prompt is required")
     exit(2)
   }
-  let prompt = argv[0]
-  let max_iters = to_int(harness.env.get_or("HARN_TRY_MAX_ITERS", "5")) ?? 5
+  const prompt = argv[0]
+  const max_iters = to_int(harness.env.get_or("HARN_TRY_MAX_ITERS", "5")) ?? 5
   // No `tools` option: the registered-tool contract requires schemas,
   // not bare identifiers, and `harn try` is meant to be a zero-config
   // smoke test. Users wanting tool-augmented loops should use `harn
   // run` with a script that builds the options explicitly.
-  var options = {max_iterations: max_iters}
-  let provider = __trimmed_env(harness, "HARN_TRY_PROVIDER")
-  let model = __trimmed_env(harness, "HARN_TRY_MODEL")
+  let options = {max_iterations: max_iters}
+  const provider = __trimmed_env(harness, "HARN_TRY_PROVIDER")
+  const model = __trimmed_env(harness, "HARN_TRY_MODEL")
   if provider != nil && model != nil {
     options = options + {provider: provider, model: model}
   }
-  let tool_format = __trimmed_env(harness, "HARN_TRY_TOOL_FORMAT")
+  const tool_format = __trimmed_env(harness, "HARN_TRY_TOOL_FORMAT")
   if tool_format != nil {
     options = options + {tool_format: tool_format}
   }
-  let override_reason = __trimmed_env(harness, "HARN_TRY_OVERRIDE_REASON")
+  const override_reason = __trimmed_env(harness, "HARN_TRY_OVERRIDE_REASON")
   if override_reason != nil {
     options = options + {tool_format_override_reason: override_reason}
   }
-  let result = agent_loop(prompt, nil, options)
-  let warning = agent_first_tool_format_override_warning_text(transcript_events(result?.transcript))
+  const result = agent_loop(prompt, nil, options)
+  const warning = agent_first_tool_format_override_warning_text(transcript_events(result?.transcript))
   if warning != nil {
     __io_eprintln(warning)
   }

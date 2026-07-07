@@ -1,14 +1,14 @@
 import "std/agent_state"
 
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn-agent-state-two-writer-" + uuid())
-  let first = agent_state_init(root, {session_id: "conflict-session", writer_id: "stage-a"})
+  const root = path_join(harness.fs.temp_dir(), "harn-agent-state-two-writer-" + uuid())
+  const first = agent_state_init(root, {session_id: "conflict-session", writer_id: "stage-a"})
   agent_state_write(first, "ledger.md", "from-a")
-  let second = agent_state_resume(root, "conflict-session", {writer_id: "stage-b", conflict_policy: "ignore"})
+  const second = agent_state_resume(root, "conflict-session", {writer_id: "stage-b", conflict_policy: "ignore"})
   agent_state_write(second, "ledger.md", "from-b")
   __io_println(agent_state_read(second, "ledger.md"))
-  let strict = agent_state_resume(root, "conflict-session", {writer_id: "stage-c", conflict_policy: "error"})
-  let message = try {
+  const strict = agent_state_resume(root, "conflict-session", {writer_id: "stage-c", conflict_policy: "error"})
+  const message = try {
     agent_state_write(strict, "ledger.md", "from-c")
     "no error"
   } catch (e) {

@@ -8,9 +8,9 @@
  */
 import { token_exchange_capability_rows } from "std/oauth/token_exchange_catalog"
 
-let __GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
+const __GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
 
-let __TOKEN_TYPE_PREFIX = "urn:ietf:params:oauth:token-type:"
+const __TOKEN_TYPE_PREFIX = "urn:ietf:params:oauth:token-type:"
 
 type OAuthTokenExchangeCapability = {
   id: string,
@@ -29,14 +29,14 @@ type OAuthTokenExchangeCapability = {
 }
 
 fn __normalize_token_type(name) {
-  let raw = trim(to_string(name ?? ""))
+  const raw = trim(to_string(name ?? ""))
   if raw == "" {
     throw "std/oauth/token_exchange: token type is required"
   }
   if starts_with(raw, "urn:") {
     return raw
   }
-  let key = lowercase(raw)
+  const key = lowercase(raw)
   if key == "access" {
     return __TOKEN_TYPE_PREFIX + "access_token"
   }
@@ -61,7 +61,7 @@ fn __normalize_token_type(name) {
 }
 
 fn __normalize_token_types(values) {
-  var out = []
+  let out = []
   for value in values ?? [] {
     out = out + [__normalize_token_type(value)]
   }
@@ -76,7 +76,7 @@ fn __normalize_row(raw) {
   if type_of(raw) != "dict" {
     throw "std/oauth/token_exchange: capability row must be a dict"
   }
-  let id = trim(to_string(raw?.id ?? raw?.provider ?? raw?.authorization_server ?? ""))
+  const id = trim(to_string(raw?.id ?? raw?.provider ?? raw?.authorization_server ?? ""))
   if id == "" {
     throw "std/oauth/token_exchange: capability row id is required"
   }
@@ -98,9 +98,9 @@ fn __normalize_row(raw) {
 }
 
 fn __catalog_from_rows(rows) {
-  var out = {}
+  let out = {}
   for raw in rows ?? [] {
-    let row = __normalize_row(raw)
+    const row = __normalize_row(raw)
     out = out + {[row.id]: row}
   }
   return out
@@ -114,9 +114,9 @@ fn __overlay_rows(overlays) {
     return overlays
   }
   if type_of(overlays) == "dict" {
-    var rows = []
+    let rows = []
     for id in overlays.keys() {
-      let value = overlays[id]
+      const value = overlays[id]
       if type_of(value) != "dict" {
         throw "std/oauth/token_exchange: overlay `" + to_string(id) + "` must be a dict"
       }
@@ -182,7 +182,7 @@ pub fn token_exchange_capability(provider_or_id, overlays = nil) -> OAuthTokenEx
   if type_of(provider_or_id) == "dict" && provider_or_id?.token_exchange != nil {
     return __normalize_row(provider_or_id.token_exchange + {id: provider_or_id?.id})
   }
-  let id = __provider_id(provider_or_id)
+  const id = __provider_id(provider_or_id)
   if id == "" {
     return nil
   }
@@ -191,7 +191,7 @@ pub fn token_exchange_capability(provider_or_id, overlays = nil) -> OAuthTokenEx
 
 fn __actor_dict(actor) {
   if type_of(actor) == "dict" {
-    let sub = trim(to_string(actor?.sub ?? ""))
+    const sub = trim(to_string(actor?.sub ?? ""))
     if sub == "" {
       throw "std/oauth/token_exchange: actor.sub is required"
     }
@@ -214,10 +214,10 @@ pub fn actor_claim(actors: list) -> dict {
   if len(actors) == 0 {
     throw "std/oauth/token_exchange: at least one actor is required"
   }
-  var out = nil
-  var index = len(actors) - 1
+  let out = nil
+  let index = len(actors) - 1
   while index >= 0 {
-    var actor = __actor_dict(actors[index])
+    let actor = __actor_dict(actors[index])
     if trim(to_string(actor.sub ?? "")) == "" {
       throw "std/oauth/token_exchange: actor.sub is required"
     }

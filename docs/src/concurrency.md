@@ -22,19 +22,19 @@ fan out, wait, collect, and clean up.
 Launch background tasks and collect results:
 
 ```harn
-let handle = spawn {
+const handle = spawn {
   sleep(1s)
   "done"
 }
 
-let result = await(handle)  // blocks until complete
+const result = await(handle)  // blocks until complete
 log(result)                 // "done"
 ```
 
 Cancel a task before it finishes:
 
 ```harn
-let handle = spawn { sleep(10s) }
+const handle = spawn { sleep(10s) }
 cancel(handle)
 ```
 
@@ -87,7 +87,7 @@ scope {
 Run N tasks concurrently and collect results in order:
 
 ```harn
-let results = parallel(5) { i ->
+const results = parallel(5) { i ->
   i * 10
 }
 // [0, 10, 20, 30, 40]
@@ -108,9 +108,9 @@ regardless of failures, use `parallel settle`.
 Map over a collection concurrently:
 
 ```harn
-let files = ["a.txt", "b.txt", "c.txt"]
+const files = ["a.txt", "b.txt", "c.txt"]
 
-let contents = parallel each files { file ->
+const contents = parallel each files { file ->
   read_file(file)
 }
 ```
@@ -121,7 +121,7 @@ Use `as stream` when callers need completion-order progress instead of
 an eager list:
 
 ```harn
-let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
+const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
   sleep(ms)
   ms
 } as stream
@@ -142,8 +142,8 @@ runs to completion regardless of sibling failures. Instead, it collects
 both successes and failures into a result object:
 
 ```harn
-let items = [1, 2, 3]
-let outcome = parallel settle items { item ->
+const items = [1, 2, 3]
+const outcome = parallel settle items { item ->
   if item == 2 {
     throw "boom"
   }
@@ -192,9 +192,9 @@ If all attempts fail, returns `nil`. Note that `return` statements inside
 Message-passing between concurrent tasks:
 
 ```harn
-let ch = channel("events")
+const ch = channel("events")
 send(ch, {event: "start", timestamp: timestamp()})
-let msg = receive(ch)
+const msg = receive(ch)
 ```
 
 ## Channel iteration
@@ -204,7 +204,7 @@ messages one at a time and exits when the channel is closed and fully
 drained:
 
 ```harn
-let ch = channel("stream")
+const ch = channel("stream")
 
 spawn {
   send(ch, "chunk 1")
@@ -222,7 +222,7 @@ This is especially useful with `llm_stream`, which returns a channel
 of response chunks:
 
 ```harn
-let stream = llm_stream("Tell me a story", "You are a storyteller")
+const stream = llm_stream("Tell me a story", "You are a storyteller")
 for chunk in stream {
   log(chunk)
 }
@@ -258,12 +258,12 @@ inherited by `spawn` and `parallel` children. If you do not pass one of those
 handles, the child sees its own copy of the value it captured at start.
 
 ```harn
-let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
 
 parallel 10 { i ->
-  var updated = false
+  let updated = false
   while !updated {
-    let snap = shared_snapshot(budget)
+    const snap = shared_snapshot(budget)
     updated = shared_cas(budget, snap, snap.value + 1)
   }
 }
@@ -301,8 +301,8 @@ Use the named synchronization primitives when an update needs a larger
 critical section:
 
 ```harn,ignore
-let memo = shared_map({scope: "workflow_run", key: "memo"})
-let permit = sync_mutex_acquire("memo:customer-42", 250ms)
+const memo = shared_map({scope: "workflow_run", key: "memo"})
+const permit = sync_mutex_acquire("memo:customer-42", 250ms)
 guard permit != nil else { throw "memo lock timeout" }
 try {
   shared_map_set(memo, "customer-42", compute_customer_summary())
@@ -317,13 +317,13 @@ Mailboxes are named inboxes for actor-style communication between tasks and
 long-lived workers. They use explicit messages instead of transcript mutation.
 
 ```harn
-let inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
 
 spawn {
   mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
 }
 
-let msg = mailbox_receive(inbox)
+const msg = mailbox_receive(inbox)
 log(msg.kind)
 ```
 
@@ -337,27 +337,27 @@ Examples:
 
 ```harn,ignore
 // Connector token refresh: only one task refreshes the token.
-let tokens = shared_map({scope: "tenant", tenant_id: "acme", key: "connector_tokens"})
-let lock = sync_mutex_acquire("token:acme:slack", 2s)
+const tokens = shared_map({scope: "tenant", tenant_id: "acme", key: "connector_tokens"})
+const lock = sync_mutex_acquire("token:acme:slack", 2s)
 guard lock != nil else { throw "token refresh busy" }
 try { shared_map_set(tokens, "slack", refresh_slack_token()) } finally { sync_release(lock) }
 
 // Workflow memoization: cache pure stage output for this run.
-let memo = shared_map({scope: "workflow_run", key: "stage_memo"})
-let cached = shared_map_get(memo, "normalize", nil)
+const memo = shared_map({scope: "workflow_run", key: "stage_memo"})
+const cached = shared_map_get(memo, "normalize", nil)
 if cached == nil {
   shared_map_set(memo, "normalize", normalize(input))
 }
 
 // Multi-agent scratchpad: parent and workers exchange notes explicitly.
-let scratch = shared_map({scope: "agent_session", key: "scratchpad"})
+const scratch = shared_map({scope: "agent_session", key: "scratchpad"})
 shared_map_set(scratch, "hypothesis", "retry with smaller batch")
 
 // Shared budget counter: CAS avoids lost updates.
-let spent = shared_cell({scope: "task_group", key: "budget_usd_micros", initial: 0})
-var ok = false
+const spent = shared_cell({scope: "task_group", key: "budget_usd_micros", initial: 0})
+let ok = false
 while !ok {
-  let snap = shared_snapshot(spent)
+  const snap = shared_snapshot(spent)
   ok = shared_cas(spent, snap, snap.value + 1250)
 }
 ```
@@ -367,14 +367,14 @@ while !ok {
 Thread-safe counters:
 
 ```harn
-let counter = atomic(0)
+const counter = atomic(0)
 log(atomic_get(counter))         // 0
 
-let before_add = atomic_add(counter, 5)
+const before_add = atomic_add(counter, 5)
 log(before_add)                  // 0
 log(atomic_get(counter))         // 5
 
-let before_set = atomic_set(counter, 100)
+const before_set = atomic_set(counter, 100)
 log(before_set)                  // 5
 log(atomic_get(counter))         // 100
 ```
@@ -398,9 +398,9 @@ fn apply_charge(id) {
   log(id)
 }
 
-let account_id = "acct-42"
+const account_id = "acct-42"
 
-var count = 0
+let count = 0
 
 mutex {
   // only one task executes this particular block at a time
@@ -422,7 +422,7 @@ or observable permits:
 ```harn
 fn update_index() { nil }
 
-let permit = sync_mutex_acquire("repo:index", 500ms)
+const permit = sync_mutex_acquire("repo:index", 500ms)
 guard permit != nil else { throw "timed out waiting for repo index" }
 try {
   update_index()
@@ -457,7 +457,7 @@ returns `false`; the first release returns `true`.
 primitives:
 
 ```harn
-let m = sync_metrics("gate", "workflow-runner")
+const m = sync_metrics("gate", "workflow-runner")
 log(m?.acquisition_count)
 log(m?.timeout_count)
 log(m?.current_queue_depth)
@@ -475,17 +475,17 @@ fn poll_connector() { nil }
 fn write_shared_state() { nil }
 
 // Connector polling: cap concurrent calls against one provider.
-let permit = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
+const permit = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
 guard permit != nil else { throw "connector poll saturated" }
 try { poll_connector() } finally { sync_release(permit) }
 
 // Fair workflow runner admission.
-let slot = sync_gate_acquire("workflow-runner", 8, 5s)
+const slot = sync_gate_acquire("workflow-runner", 8, 5s)
 guard slot != nil else { throw "runner queue timed out" }
 try { workflow_execute("task", {}, [], {}) } finally { sync_release(slot) }
 
 // Critical-section update.
-let lock = sync_mutex_acquire("state:account-42", 250ms)
+const lock = sync_mutex_acquire("state:account-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
 try { write_shared_state() } finally { sync_release(lock) }
 ```
@@ -504,7 +504,7 @@ state root. Pass `state_path` when several repositories or runner fleets should
 share a quota DB:
 
 ```harn
-let gate = durable_rate_limit_acquire({
+const gate = durable_rate_limit_acquire({
   state_path: ".harn/eval-rate-limits.sqlite",
   buckets: [
     {key: "provider:cerebras:rpm", limit: 5, units: 1, window_ms: 60s},
@@ -535,8 +535,8 @@ timeout without real sleeps:
 ```harn
 mock_time(1000)
 
-let first = durable_rate_limit_acquire({key: "test", limit: 1, window_ms: 1s})
-let second = durable_rate_limit_acquire({
+const first = durable_rate_limit_acquire({key: "test", limit: 1, window_ms: 1s})
+const second = durable_rate_limit_acquire({
   key: "test",
   limit: 1,
   window_ms: 1s,
@@ -568,7 +568,7 @@ loop, or on an uncaught throw:
 fn open(path) { return path }
 fn close(f) { log("closed ${f}") }
 
-let f = open("data.txt")
+const f = open("data.txt")
 defer { close(f) }
 // ... use f ...
 // close(f) runs automatically on scope exit
@@ -587,8 +587,8 @@ binding with `owned<T>` so the compiler registers an implicit
 `defer { drop(<binding>) }` for you:
 
 ```harn
-let ch: owned<channel> = channel("log", 64)
-// equivalent to: let ch = channel("log", 64); defer { drop(ch) }
+const ch: owned<channel> = channel("log", 64)
+// equivalent to: const ch = channel("log", 64); defer { drop(ch) }
 ```
 
 `drop()` is a builtin that dispatches on the runtime value tag — it
@@ -597,7 +597,7 @@ values that don't carry a close hook. The auto-drop fires alongside
 user-written `defer` blocks in LIFO order, so:
 
 ```harn
-let ch: owned<channel> = channel("log", 64)
+const ch: owned<channel> = channel("log", 64)
 defer { log("user defer first (LIFO)") }
 // At scope exit: "user defer first (LIFO)" runs, then drop(ch).
 ```
@@ -611,7 +611,7 @@ whose return type is not also `owned<T>`. Widen the return type to
 
 ```harn
 fn open_log() -> owned<channel> {
-  let ch: owned<channel> = channel("log", 64)
+  const ch: owned<channel> = channel("log", 64)
   return ch        // ownership flows to the caller; auto-drop suppressed
 }
 ```
@@ -625,10 +625,10 @@ frees up — fan-out stays bounded while the total work is unchanged.
 
 ```harn
 // Without a cap: all 200 requests hit the server at once.
-let results = parallel settle paths { p -> llm_call(p, nil, opts) }
+const results = parallel settle paths { p -> llm_call(p, nil, opts) }
 
 // With max_concurrent=8: at most 8 in-flight calls at any moment.
-let results = parallel settle paths with { max_concurrent: 8 } { p ->
+const results = parallel settle paths with { max_concurrent: 8 } { p ->
   llm_call(p, nil, opts)
 }
 ```
@@ -695,13 +695,13 @@ fn fetch_page(cursor) {
 }
 
 fn collect_pages(cursors) {
-  let outcome = deadline 30s {
+  const outcome = deadline 30s {
     parallel settle cursors with { max_concurrent: 4 } { cursor ->
       fetch_page(cursor)
     }
   }
 
-  var pages = []
+  let pages = []
   for result in outcome.results {
     if is_ok(result) {
       pages = pages.push(unwrap(result).items)
@@ -717,11 +717,11 @@ Stream shutdown with cooperative cancellation:
 
 ```harn
 fn consume_stream(url) {
-  let stream = sse_connect(url)
+  const stream = sse_connect(url)
   defer { sse_close(stream) }
 
   while !is_cancelled() {
-    let event = sse_receive(stream, 5000)
+    const event = sse_receive(stream, 5000)
     if event == nil {
       continue
     }
@@ -729,8 +729,8 @@ fn consume_stream(url) {
   }
 }
 
-let reader = spawn { consume_stream(binding.stream_url) }
-let shutdown = waitpoint_wait("connector.shutdown", {timeout: 1h})
+const reader = spawn { consume_stream(binding.stream_url) }
+const shutdown = waitpoint_wait("connector.shutdown", {timeout: 1h})
 if shutdown.status == "completed" {
   cancel_graceful(reader, 2s)
 }
@@ -746,7 +746,7 @@ child_kind, attempt, restart_count}`.
 Connector stream:
 
 ```harn
-let _streams = supervisor_start({
+const _streams = supervisor_start({
   name: "connector-streams",
   strategy: "one_for_one",
   children: [{
@@ -754,9 +754,9 @@ let _streams = supervisor_start({
     kind: "connector_stream",
     restart: {mode: "on_failure", max_restarts: 8, window_ms: 60000, backoff_ms: 250, factor: 2, jitter_ms: 100, circuit_open_ms: 300000},
     task: { _ctx ->
-      let stream = sse_connect("https://example.invalid/events")
+      const stream = sse_connect("https://example.invalid/events")
       while !is_cancelled() {
-        let event = sse_receive(stream, 5000)
+        const event = sse_receive(stream, 5000)
         if event != nil {
           event_log_emit("connector.github", event.kind, event.payload)
         }
@@ -769,7 +769,7 @@ let _streams = supervisor_start({
 Continuous persona:
 
 ```harn
-let _persona = supervisor_start({
+const _persona = supervisor_start({
   name: "review-captain",
   strategy: "one_for_one",
   children: [{
@@ -789,9 +789,9 @@ fn handle_patch_message(msg) {
   msg
 }
 
-let inbox = mailbox_open({scope: "task_group", name: "patcher", capacity: 32})
+const inbox = mailbox_open({scope: "task_group", name: "patcher", capacity: 32})
 
-let _actor = supervisor_start({
+const _actor = supervisor_start({
   name: "patch-actors",
   strategy: "rest_for_one",
   children: [{
@@ -800,7 +800,7 @@ let _actor = supervisor_start({
     restart: {mode: "on_failure", max_restarts: 3, window_ms: 60000, backoff_ms: 100},
     task: { _ctx ->
       while !is_cancelled() {
-        let msg = mailbox_receive(inbox)
+        const msg = mailbox_receive(inbox)
         if msg != nil {
           handle_patch_message(msg)
         }

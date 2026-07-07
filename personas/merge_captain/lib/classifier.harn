@@ -20,7 +20,7 @@ fn _result(state, action, reason, evidence) {
 
 /** Classify an observation under a repo policy. */
 pub fn classify(observation, policy, prior_state) {
-  let obs = observation
+  const obs = observation
   // Terminal observations override anything we previously thought.
   if is_merged(obs) {
     return _result("merged", "mark_merged", "PR is merged on remote", {merged: true})
@@ -41,7 +41,7 @@ pub fn classify(observation, policy, prior_state) {
   }
   // Hard blockers come next: explicit labels and dirty branches.
   if is_blocked_by_label(obs, policy.blocking_labels) {
-    let hits = obs.labels.filter({ l -> policy.blocking_labels.contains(l) })
+    const hits = obs.labels.filter({ l -> policy.blocking_labels.contains(l) })
     return _result("blocked", "escalate_human", "blocked by label", {labels: hits})
   }
   if is_dirty(obs) {
@@ -54,12 +54,12 @@ pub fn classify(observation, policy, prior_state) {
   }
   // Required CI: if anything failed we either escalate or repair locally.
   if len(obs.failed_required_checks) > 0 {
-    let action = if len(policy.local_verification) > 0 {
+    const action = if len(policy.local_verification) > 0 {
       "run_local_verification"
     } else {
       "escalate_human"
     }
-    let next = if len(policy.local_verification) > 0 {
+    const next = if len(policy.local_verification) > 0 {
       "local_repair"
     } else {
       "failing_ci"
@@ -86,7 +86,7 @@ pub fn classify(observation, policy, prior_state) {
   }
   // Approvals: ensure the human review gate is satisfied.
   if !has_required_approvals(obs, policy.required_review_count) {
-    let needed = policy.required_review_count - obs.approvals
+    const needed = policy.required_review_count - obs.approvals
     return _result(
       "blocked",
       "request_review",

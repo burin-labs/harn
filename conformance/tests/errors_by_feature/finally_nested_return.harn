@@ -12,7 +12,7 @@ pipeline test(task) {
     }
     log("unreachable")
   }
-  let r = outer()
+  const r = outer()
   log("result: ${r}")
   // Finally with empty body should not crash
   fn with_empty_finally() {

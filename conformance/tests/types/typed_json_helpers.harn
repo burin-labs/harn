@@ -5,19 +5,19 @@
 import { merge, omit, pick } from "std/json"
 
 pipeline default(task) {
-  let scores: dict<string, int> = {alice: 1, bob: 2}
-  let bonus: dict<string, int> = {bob: 5, carol: 3}
-  let combined: dict<string, int> = merge(scores, bonus)
+  const scores: dict<string, int> = {alice: 1, bob: 2}
+  const bonus: dict<string, int> = {bob: 5, carol: 3}
+  const combined: dict<string, int> = merge(scores, bonus)
   __io_println(combined.alice)
   __io_println(combined.bob)
   __io_println(combined.carol)
-  let kept: dict<string, int> = pick(scores, ["alice"])
+  const kept: dict<string, int> = pick(scores, ["alice"])
   __io_println(kept.alice)
   __io_println(contains(kept.keys(), "bob"))
-  let dropped: dict<string, int> = omit(scores, ["bob"])
+  const dropped: dict<string, int> = omit(scores, ["bob"])
   __io_println(dropped.alice)
   __io_println(contains(dropped.keys(), "bob"))
-  let extras = merge({region: "us"}, {tier: "gold"})
+  const extras = merge({region: "us"}, {tier: "gold"})
   __io_println(extras.region)
   __io_println(extras.tier)
 }

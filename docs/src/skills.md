@@ -157,12 +157,12 @@ through unchanged** so authors see what wasn't supplied rather than a
 silent empty substitution.
 
 ```harn
-let deploy = skill_find(skills, "deploy")
+const deploy = skill_find(skills, "deploy")
 guard deploy != nil else {
   exit(1)
 }
 
-let rendered = skill_render(deploy, ["prod", "us-east-1"])
+const rendered = skill_render(deploy, ["prod", "us-east-1"])
 // rendered now has $1 and $2 replaced with "prod" and "us-east-1".
 ```
 
@@ -182,7 +182,7 @@ against the active registry and applying the same substitution rules:
 Builtin example:
 
 ```harn
-let runbook = load_skill("deploy")
+const runbook = load_skill("deploy")
 assert(contains(runbook, "Deploy runbook"), "full body is fetched lazily")
 ```
 
@@ -202,8 +202,8 @@ The recommended harness convention is:
 Harn ships two pure helpers for that pattern:
 
 ```harn
-let entries = skills_catalog_entries(skills)
-let catalog = render_always_on_catalog(entries, 2000)
+const entries = skills_catalog_entries(skills)
+const catalog = render_always_on_catalog(entries, 2000)
 ```
 
 `skills_catalog_entries` projects the resolved registry into compact
@@ -216,9 +216,9 @@ block and trims the list to the requested character budget.
 Copy-pasteable example:
 
 ```harn
-let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
 
-let result = agent_loop(
+const result = agent_loop(
   "Help me ship this release",
   catalog,
   {

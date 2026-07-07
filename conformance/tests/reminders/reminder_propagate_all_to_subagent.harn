@@ -5,7 +5,7 @@ fn child_tools() {
 }
 
 fn parent_tools(child_session) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate_child",
@@ -30,8 +30,8 @@ fn parent_tools(child_session) {
 }
 
 pipeline main() {
-  let parent = agent_session_open("reminder-propagate-all-to-subagent-parent")
-  let child = "reminder-propagate-all-to-subagent-child"
+  const parent = agent_session_open("reminder-propagate-all-to-subagent-parent")
+  const child = "reminder-propagate-all-to-subagent-child"
   agent_session_open(child)
   agent_session_reset(parent)
   agent_session_reset(child)
@@ -60,7 +60,7 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+      const child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
       __io_println(len(child_reminders))
       __io_println(child_reminders[0].reminder.body)
       __io_println(child_reminders[0].reminder.propagate)

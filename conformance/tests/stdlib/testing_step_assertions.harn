@@ -16,7 +16,7 @@ fn test_captain(ctx) {
 
 @step(name: "checked_step")
 fn checked_step(ctx) {
-  let wrapped = with_audit_receipt(
+  const wrapped = with_audit_receipt(
     fn() { return {value: ctx.value + ":done"} },
     {persona: "test_captain", step: "checked_step", started_at: "2026-01-01T00:00:00Z"},
   )
@@ -25,7 +25,7 @@ fn checked_step(ctx) {
 
 pipeline test() {
   step_assertions_begin("test_captain")
-  let result = test_captain({value: "input"})
+  const result = test_captain({value: "input"})
   assert_steps_ran(["checked_step"])
   assert_step_received("checked_step", { event -> event.args[0].value == "input" })
   assert_step_emitted("checked_step", { event -> event.output.result.value == "input:done" })

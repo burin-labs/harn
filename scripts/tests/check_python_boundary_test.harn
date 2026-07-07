@@ -2,8 +2,8 @@ import { with_temp_dir } from "std/testing"
 import "../check_python_boundary.harn"
 
 fn mkdirs(path: string) -> nil {
-  let parts = split(path_normalize(path), "/")
-  var current = if path.starts_with("/") {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
     "/"
   } else {
     ""
@@ -25,7 +25,7 @@ fn mkdirs(path: string) -> nil {
 }
 
 fn write_file(root: string, rel: string) -> nil {
-  let path = path_join(root, rel)
+  const path = path_join(root, rel)
   mkdirs(dirname(path) ?? root)
   harness.fs.write_text(path, "print('fixture')\n")
   return nil
@@ -33,9 +33,9 @@ fn write_file(root: string, rel: string) -> nil {
 
 @test
 pipeline test_current_repo_python_boundary_is_explicit(task) {
-  let report = check_python_boundary()
+  const report = check_python_boundary()
   assert_eq(report.violation_count, 0)
-  let paths = report.allowed.map({ row -> row.path }).to_list()
+  const paths = report.allowed.map({ row -> row.path }).to_list()
   assert_eq(paths.contains("scripts/affected-crates.py"), false)
   assert_eq(paths.contains("scripts/check_protocol_bindings.py"), false)
   assert_eq(paths.contains("scripts/check_burin_protocol_bindings.py"), false)
@@ -60,12 +60,12 @@ pipeline test_temp_tree_reports_only_unclassified_python(task) {
       write_file(root, "scripts/new_orchestration.py")
       write_file(root, ".harn/tmp/ignored.py")
       write_file(root, "target/generated.py")
-      let files = python_files(root)
+      const files = python_files(root)
       assert_eq(files.contains("scripts/affected-crates.py"), true)
       assert_eq(files.contains("scripts/new_orchestration.py"), true)
       assert_eq(files.contains(".harn/tmp/ignored.py"), false)
       assert_eq(files.contains("target/generated.py"), false)
-      let report = check_python_boundary(root)
+      const report = check_python_boundary(root)
       assert_eq(report.violation_count, 2)
       assert_eq(
         report.violations.map({ row -> row.path }).to_list().sort(),

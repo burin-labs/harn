@@ -5,7 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * promotion with oldest-eviction, and a custom synthetic tool name.
  */
 pipeline test(task) {
-  var registry = tool_registry()
+  let registry = tool_registry()
   registry = tool_define(
     registry,
     "stay",
@@ -27,7 +27,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "deploy",
         nil,
         {
@@ -38,11 +38,11 @@ pipeline test(task) {
           max_iterations: 3,
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(contains(calls[0].system, "find_a_tool"), "custom synthetic tool name advertised")
       assert(!contains(calls[0].system, "__harn_tool_search"), "default name not used when overridden")
-      let events = transcript_events(result?.transcript)
-      var promoted_deploy = false
+      const events = transcript_events(result?.transcript)
+      let promoted_deploy = false
       for ev in events {
         if ev.kind == "tool_search_result" {
           for n in ev.metadata?.promoted {
@@ -55,14 +55,14 @@ pipeline test(task) {
       assert(promoted_deploy, "explicit client mode promotes matches")
     },
   )
-  var big = tool_registry()
+  let big = tool_registry()
   big = tool_define(
     big,
     "anchor",
     "Always present",
     {parameters: {op: {type: "string"}}, handler: { _ -> "ok" }},
   )
-  let fat_desc = "A very detailed tool whose description is deliberately long enough \\\n+  that its JSON schema runs hundreds of characters, ensuring the \\\n+  token-estimator predicts a real budget impact rather than rounding down \\\n+  to a trivial cost on the budget accounting path."
+  const fat_desc = "A very detailed tool whose description is deliberately long enough \\\n+  that its JSON schema runs hundreds of characters, ensuring the \\\n+  token-estimator predicts a real budget impact rather than rounding down \\\n+  to a trivial cost on the budget accounting path."
   big = tool_define(
     big,
     "alpha",
@@ -100,8 +100,8 @@ pipeline test(task) {
           max_iterations: 5,
         },
       )
-      let calls2 = llm_mock_calls()
-      let last_system = calls2[len(calls2) - 1].system
+      const calls2 = llm_mock_calls()
+      const last_system = calls2[len(calls2) - 1].system
       assert(contains(last_system, "gamma"), "most-recently-promoted tool is visible")
       assert(!contains(last_system, "alpha"), "oldest promotion evicted under budget")
       assert(!contains(last_system, "beta"), "second-oldest promotion evicted under budget")

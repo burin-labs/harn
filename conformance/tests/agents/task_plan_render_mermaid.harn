@@ -1,7 +1,7 @@
 import { task_plan_render_mermaid } from "std/agent/task_plan"
 
 pipeline main() {
-  let plan = {
+  const plan = {
     schema_version: "1",
     objective: "Smoke-test the mermaid renderer",
     entry: "discover",
@@ -17,7 +17,7 @@ pipeline main() {
       {from: "cmd", to: "check"},
     ],
   }
-  let mermaid = task_plan_render_mermaid(plan)
+  const mermaid = task_plan_render_mermaid(plan)
   __io_println(starts_with(mermaid, "flowchart TD"))
   __io_println(contains(mermaid, "discover[\"discover: read_fact"))
   __io_println(contains(mermaid, "gate((\"gate: human_gate"))

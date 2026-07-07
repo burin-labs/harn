@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("scheduled_eval_suite")
+  const result = trigger_test_harness("scheduled_eval_suite")
   __io_println(result.ok)
   __io_println(result.details.first_status == "succeeded")
   __io_println(result.details.ledger_rows == 1)

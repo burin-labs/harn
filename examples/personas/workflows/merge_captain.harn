@@ -21,14 +21,14 @@ fn merge_risk(pr) {
 }
 
 pipeline run(task) {
-  let pr = sample_pull_request()
-  let risk = merge_risk(pr)
-  let handoff = if risk == "high" {
+  const pr = sample_pull_request()
+  const risk = merge_risk(pr)
+  const handoff = if risk == "high" {
     "review_captain"
   } else {
     nil
   }
-  let result = {
+  const result = {
     persona: "merge_captain",
     execution_mode: "dry_run",
     approval_required: true,

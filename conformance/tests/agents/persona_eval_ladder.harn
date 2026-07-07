@@ -1,7 +1,7 @@
 pipeline main() {
-  let root = project_root() ?? cwd()
-  let artifacts = path_join(harness.fs.temp_dir(), "harn-persona-eval-ladder-" + uuid())
-  let manifest = persona_eval_ladder_manifest(
+  const root = project_root() ?? cwd()
+  const artifacts = path_join(harness.fs.temp_dir(), "harn-persona-eval-ladder-" + uuid())
+  const manifest = persona_eval_ladder_manifest(
     {
       id: "merge-captain-ladder-conformance",
       persona: "merge_captain",
@@ -20,7 +20,7 @@ pipeline main() {
       timeout_tiers: [{id: "tiny", max_tool_calls: 1}, {id: "balanced", max_tool_calls: 4, max_model_calls: 1}],
     },
   )
-  let report = persona_eval_ladder_run(manifest)
+  const report = persona_eval_ladder_run(manifest)
   __io_println(report.pass)
   __io_println(report.total)
   __io_println(report.first_correct_tier)

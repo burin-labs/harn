@@ -19,10 +19,10 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(task) {
-  let topic = "oauth.client.audit"
-  let cursor = event_log.latest(topic) ?? 0
-  let store = memory()
-  let provider = custom(
+  const topic = "oauth.client.audit"
+  const cursor = event_log.latest(topic) ?? 0
+  const store = memory()
+  const provider = custom(
     {
       id: "mockPkce",
       auth_url: "https://idp.example/authorize",
@@ -30,11 +30,11 @@ pipeline test(task) {
       default_scopes: ["read"],
     },
   )
-  let cli = client(
+  const cli = client(
     provider,
     {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", scopes: ["read"], storage: store},
   )
-  let pkce = start_authorization(cli)
+  const pkce = start_authorization(cli)
   http_mock_clear()
   http_mock(
     "POST",
@@ -45,10 +45,10 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  var threw = false
-  var msg = ""
+  let threw = false
+  let msg = ""
   try {
-    let _ = exchange_code(cli, pkce, "auth-code-123", pkce.state)
+    const _ = exchange_code(cli, pkce, "auth-code-123", pkce.state)
   } catch (err) {
     msg = to_string(err)
     threw = true
@@ -58,16 +58,16 @@ pipeline test(task) {
     contains(msg, "PKCE code_verifier mismatch") || contains(msg, "invalid_grant"),
     "server error_description must be surfaced, got: " + msg,
   )
-  let after = store.get("mockPkce")
+  const after = store.get("mockPkce")
   assert(after == nil, "no TokenSet persisted on failed exchange")
   // Confirm the client did send the verifier on the wire so the
   // server had something to validate against.
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "one POST to token endpoint")
   assert(contains(calls[0].body, "code_verifier=" + pkce.code_verifier), "code_verifier sent in body")
   assert(contains(calls[0].body, "grant_type=authorization_code"), "auth-code grant type")
   // No audit event must fire on a failed exchange.
-  let latest_after = event_log.latest(topic) ?? 0
+  const latest_after = event_log.latest(topic) ?? 0
   assert_eq(latest_after, cursor, "no token_exchanged audit on failed exchange")
   log("oauth pkce validates ok")
 }

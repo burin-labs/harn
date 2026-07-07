@@ -6,7 +6,7 @@ fn handler(event: TriggerEvent) -> dict {
 }
 
 fn classify(event: TriggerEvent) -> bool {
-  let result = llm_call("predicate budget " + event.kind, nil, {provider: "mock", model: "gpt-4o-mini"})
+  const result = llm_call("predicate budget " + event.kind, nil, {provider: "mock", model: "gpt-4o-mini"})
   return contains(result.text, "yes")
 }
 
@@ -14,9 +14,9 @@ pipeline test(task) {
   with_llm_script(
     [{text: "yes", input_tokens: 3000, output_tokens: 4000, model: "gpt-4o-mini"}],
     { ->
-      let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+      const unique = to_string(to_int(harness.clock.timestamp())) + "-"
         + to_string(harness.random.gen_range(100000, 999999))
-      let handle: TriggerHandle = trigger_register(
+      const handle: TriggerHandle = trigger_register(
         {
           id: "llm-predicate-budget-" + unique,
           kind: "issue.opened",
@@ -34,13 +34,13 @@ pipeline test(task) {
           package_name: nil,
         },
       )
-      let fire: DispatchHandle = trigger_fire(
+      const fire: DispatchHandle = trigger_fire(
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
       )
-      let budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded")
+      const budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded")
         .filter({ entry -> entry?.headers?.trigger_id == handle.id })
-      let dispatches = trigger_inspect_lifecycle("DispatchStarted")
+      const dispatches = trigger_inspect_lifecycle("DispatchStarted")
         .filter({ entry -> entry?.headers?.trigger_id == handle.id })
       __io_println(fire.status == "dispatched")
       __io_println(contains(json_stringify(fire.result ?? {}), "\"reason\":\"budget_exceeded\""))

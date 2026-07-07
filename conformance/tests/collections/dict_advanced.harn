@@ -1,17 +1,17 @@
 pipeline test(task) {
-  let d = {a: 1, b: 2, c: 3}
+  const d = {a: 1, b: 2, c: 3}
   log(d.entries().map({ x -> x.key }))
   log(d.entries().map({ x -> x.value }))
   log(d.count)
-  let mapped_values = d.map_values({ v -> v * 2 })
+  const mapped_values = d.map_values({ v -> v * 2 })
   log(mapped_values.a)
   log(mapped_values.b)
   log(mapped_values.c)
-  let filtered_dict = d.filter({ v -> v > 1 })
+  const filtered_dict = d.filter({ v -> v > 1 })
   log(filtered_dict.has("a"))
   log(filtered_dict.has("b"))
   log(filtered_dict.has("c"))
-  let d_remove = {a: 1, b: 2, c: 3}
+  const d_remove = {a: 1, b: 2, c: 3}
   d_remove.remove("b")
   log(d_remove.has("a"))
   log(d_remove.has("b"))
@@ -19,8 +19,8 @@ pipeline test(task) {
   log(d.get("a"))
   log(d.get("z", "default_value"))
   log(d.get("z"))
-  let dynamic_key = "b"
-  let computed = {a: 1, [dynamic_key]: 2}
+  const dynamic_key = "b"
+  const computed = {a: 1, [dynamic_key]: 2}
   log(computed.get("a"))
   log(computed.get("b"))
 }

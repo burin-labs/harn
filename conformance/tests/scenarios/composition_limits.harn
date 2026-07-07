@@ -1,5 +1,5 @@
 pipeline main() {
-  let tools = [
+  const tools = [
     {
       name: "read_file",
       parameters: {type: "object", required: ["path"]},
@@ -7,8 +7,8 @@ pipeline main() {
       metadata: {mock_output: {text: "hello"}},
     },
   ]
-  let manifest = composition_binding_manifest(tools)
-  let capped = composition_execute(
+  const manifest = composition_binding_manifest(tools)
+  const capped = composition_execute(
     "let _a = read_file({path: \"a\"})\nreturn read_file({path: \"b\"})",
     manifest,
     {run_id: "conformance-child-cap", max_operations: 1},
@@ -16,14 +16,14 @@ pipeline main() {
   __io_println(capped.ok)
   __io_println(capped.run.failure_category)
   __io_println(capped.child_calls.count)
-  let too_large = composition_execute(
+  const too_large = composition_execute(
     "return \"0123456789\"",
     manifest,
     {run_id: "conformance-output-cap", max_output_bytes: 4},
   )
   __io_println(too_large.ok)
   __io_println(too_large.run.failure_category)
-  let gated_manifest = composition_binding_manifest(
+  const gated_manifest = composition_binding_manifest(
     [
       {
         name: "write_file",
@@ -34,7 +34,7 @@ pipeline main() {
     {include_denied: true, gated_tools: ["write_file"], side_effect_ceiling: "workspace_write"},
   )
   __io_println(gated_manifest.bindings[0].policy.disposition)
-  let gated = composition_execute(
+  const gated = composition_execute(
     "return write_file({path: \"x\", content: \"bad\"})",
     gated_manifest,
     {run_id: "conformance-gated"},

@@ -1,5 +1,5 @@
 pipeline default() {
-  let template = """
+  const template = """
     pub fn {{ fn_name }}({{ for p in params }}{{ p.name }}{{ if p.optional }} = nil{{ end }}{{ if !loop.last }}, {{ end }}{{ end }}) {
       {{ if show_note }}// optional arg present{{ else }}// no params{{ end }}
       return "{{ greeting | upper }}"

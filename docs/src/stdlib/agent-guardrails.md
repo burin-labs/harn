@@ -20,7 +20,7 @@ zero-token assistant explanation, and terminates the loop with
 ```harn
 import { agent_input_guardrail } from "std/agent/guardrails"
 
-let guardrail_opts = agent_input_guardrail(
+const guardrail_opts = agent_input_guardrail(
   { payload -> return {
     tripwire: payload.user_message.contains("private signing key"),
     reason: "private key exfiltration",

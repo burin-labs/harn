@@ -38,20 +38,20 @@ fn envelope(name, args) {
 }
 
 pipeline default() {
-  let mw = with_required_reason()
-  let next = synthetic_next()
+  const mw = with_required_reason()
+  const next = synthetic_next()
   // (1) missing reason → reject.
-  let r1 = mw.caller(envelope("read", {path: "/tmp/x"}), next)
+  const r1 = mw.caller(envelope("read", {path: "/tmp/x"}), next)
   __io_println(r1.ok)
   __io_println(r1.error_category)
   // (2) reason present → strip + audit.summary populated.
-  let r2 = mw.caller(envelope("read", {reason: "checking the file", path: "/tmp/x"}), next)
+  const r2 = mw.caller(envelope("read", {reason: "checking the file", path: "/tmp/x"}), next)
   __io_println(r2.ok)
   __io_println(r2.audit.summary)
   __io_println(contains(r2.arguments.keys(), "reason"))
   __io_println(r2.arguments.path)
   // (3) schema_transform injects `reason` as a required field.
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read",
@@ -62,26 +62,26 @@ pipeline default() {
       returns: {type: "string"},
     },
   )
-  let entry = mw.schema_transform(tools.tools[0])
+  const entry = mw.schema_transform(tools.tools[0])
   __io_println(contains(entry.parameters.properties.keys(), "reason"))
   __io_println(contains(entry.parameters.required, "reason"))
   __io_println(entry.parameters.properties.reason.required)
   __io_println(entry.parameters.properties.reason.description)
   // (4) custom field name + audit_key.
-  let mw2 = with_required_reason({field: "intent", audit_key: "rationale"})
-  let r3 = mw2.caller(envelope("write", {intent: "ship the fix", body: "x"}), next)
+  const mw2 = with_required_reason({field: "intent", audit_key: "rationale"})
+  const r3 = mw2.caller(envelope("write", {intent: "ship the fix", body: "x"}), next)
   __io_println(r3.ok)
   __io_println(r3.audit.rationale)
   __io_println(contains(r3.arguments.keys(), "intent"))
   // (5) tolerant native-provider surfaces can advertise `reason` without
   // marking it required. Missing reasons still flow through the audit layer,
   // but original args are preserved when `strip: false`.
-  let mw3 = with_required_reason({on_missing: "fill_blank", strip: false, schema_required: false})
-  let entry3 = mw3.schema_transform(tools.tools[0])
+  const mw3 = with_required_reason({on_missing: "fill_blank", strip: false, schema_required: false})
+  const entry3 = mw3.schema_transform(tools.tools[0])
   __io_println(contains(entry3.parameters.properties.keys(), "reason"))
   __io_println(contains(entry3.parameters.required, "reason"))
   __io_println(entry3.parameters.properties.reason.required)
-  let r4 = mw3.caller(envelope("read", {path: "/tmp/y"}), next)
+  const r4 = mw3.caller(envelope("read", {path: "/tmp/y"}), next)
   __io_println(r4.ok)
   __io_println(r4.audit.summary)
   __io_println(r4.arguments.path)

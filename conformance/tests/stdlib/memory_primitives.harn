@@ -1,10 +1,10 @@
 import "std/memory"
 
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn-memory-primitives-" + uuid())
-  let options = {root: root, now: "2026-04-29T00:00:00Z"}
-  let namespace = "agent/customer"
-  let first = memory_store(
+  const root = path_join(harness.fs.temp_dir(), "harn-memory-primitives-" + uuid())
+  const options = {root: root, now: "2026-04-29T00:00:00Z"}
+  const namespace = "agent/customer"
+  const first = memory_store(
     namespace,
     "alice-profile",
     {text: "Alice prefers Rust examples and concise plans"},
@@ -18,16 +18,16 @@ pipeline default() {
     ["profile"],
     {root: root, now: "2026-04-29T00:00:01Z"},
   )
-  let recalled = memory_recall(namespace, "rust preference", 2, {root: root})
+  const recalled = memory_recall(namespace, "rust preference", 2, {root: root})
   __io_println(first._type)
   __io_println(len(recalled))
   __io_println(recalled[0].key)
   __io_println(recalled[0].score > 0.0)
-  let summary = memory_summarize(namespace, {limit: 2}, {root: root})
+  const summary = memory_summarize(namespace, {limit: 2}, {root: root})
   __io_println(summary._type)
   __io_println(summary.count)
   __io_println(contains(summary.text, "Alice prefers Rust examples"))
-  let forgotten = memory_forget(namespace, {tag: "profile"}, {root: root, now: "2026-04-29T00:00:02Z"})
+  const forgotten = memory_forget(namespace, {tag: "profile"}, {root: root, now: "2026-04-29T00:00:02Z"})
   __io_println(forgotten.forgotten)
   __io_println(len(memory_recall(namespace, "rust", 5, {root: root})))
   harness.fs.delete(root)

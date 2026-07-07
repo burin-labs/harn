@@ -1,11 +1,11 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
-  let topic = "transcript.reminder.lifecycle"
-  let child = "reminder-lifecycle-inherited-child"
+  const topic = "transcript.reminder.lifecycle"
+  const child = "reminder-lifecycle-inherited-child"
   agent_session_open(child)
   agent_session_reset(child)
-  let cursor = event_log.latest(topic)
+  const cursor = event_log.latest(topic)
   with_llm_script(
     [llm_text("child done")],
     { ->
@@ -34,18 +34,18 @@ pipeline main() {
           ],
         },
       )
-      let stream = event_log
+      const stream = event_log
         .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
       fn next_reminder_event(source) {
-        var event = source.next().value
+        let event = source.next().value
         while event != nil && event.kind == "transcript.reminder.provider_evaluated" {
           event = source.next().value
         }
         return event
       }
-      let injected = next_reminder_event(stream)
-      let inherited = next_reminder_event(stream)
-      let fired = next_reminder_event(stream)
+      const injected = next_reminder_event(stream)
+      const inherited = next_reminder_event(stream)
+      const fired = next_reminder_event(stream)
       __io_println(injected.kind)
       __io_println(injected.payload.reminder_id)
       __io_println(inherited.kind)

@@ -200,14 +200,14 @@ pub fn agent_transcript_report_schema() {
  * @example: agent_transcript_text(message.content)
  */
 pub fn agent_transcript_text(value) -> string {
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "string" {
     return value
   }
   if kind == "list" {
-    var parts = []
+    let parts = []
     for item in value {
-      let text = if type_of(item) == "dict" {
+      const text = if type_of(item) == "dict" {
         agent_transcript_text(item?.text ?? item?.content ?? "")
       } else {
         agent_transcript_text(item)
@@ -228,7 +228,7 @@ fn __json_or_raw(raw) {
   if type_of(raw) != "string" {
     return raw ?? {}
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(raw)
   }
   if is_ok(parsed) {
@@ -295,7 +295,7 @@ pub fn agent_transcript_tool_call_args(call) {
  * @api_stability: experimental
  */
 pub fn agent_transcript_tool_call(call) {
-  let name = agent_transcript_tool_call_name(call)
+  const name = agent_transcript_tool_call_name(call)
   if name == "" {
     return nil
   }
@@ -315,12 +315,12 @@ pub fn agent_transcript_tool_call(call) {
  * @api_stability: experimental
  */
 pub fn agent_transcript_tool_calls(calls) -> list {
-  var out = []
+  let out = []
   if type_of(calls) != "list" {
     return out
   }
   for call in calls {
-    let normalized = agent_transcript_tool_call(call)
+    const normalized = agent_transcript_tool_call(call)
     if normalized != nil {
       out = out + [normalized]
     }
@@ -377,8 +377,8 @@ fn __tool_call_record_issues(record, index: int) -> list {
   if type_of(calls) != "list" {
     return [__issue("tool_calls_not_list", "assistant tool_calls must be a list", index)]
   }
-  var issues = []
-  var call_index = 0
+  let issues = []
+  let call_index = 0
   for call in calls {
     if type_of(call) != "dict" {
       issues = issues
@@ -528,11 +528,11 @@ fn __tool_message_row(record, index: int, iteration: int) -> dict {
 }
 
 fn __parse_tool_result_attrs(attrs: string) -> dict {
-  let captures = regex_captures("([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*[\"']?([^\"'\\s>]+)", attrs ?? "")
+  const captures = regex_captures("([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*[\"']?([^\"'\\s>]+)", attrs ?? "")
     ?? []
-  var out = {}
+  let out = {}
   for capture in captures {
-    let groups = capture?.groups ?? []
+    const groups = capture?.groups ?? []
     if len(groups) >= 2 {
       out = out + {[groups[0]]: groups[1]}
     }
@@ -551,16 +551,16 @@ fn __parse_tool_result_attrs(attrs: string) -> dict {
  * @api_stability: experimental
  */
 pub fn agent_transcript_tool_result_blocks(text: string) -> list {
-  var out = []
+  let out = []
   for capture in regex_captures("(?i)<tool_result\\b([^>]*)>([\\s\\S]*?)</tool_result>", text ?? "")
     ?? [] {
-    let groups = capture?.groups ?? []
-    let attrs = if len(groups) > 0 {
+    const groups = capture?.groups ?? []
+    const attrs = if len(groups) > 0 {
       __parse_tool_result_attrs(groups[0])
     } else {
       {}
     }
-    let body = if len(groups) > 1 {
+    const body = if len(groups) > 1 {
       trim(groups[1])
     } else {
       ""
@@ -572,18 +572,18 @@ pub fn agent_transcript_tool_result_blocks(text: string) -> list {
 }
 
 fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) -> dict {
-  var all = []
+  let all = []
   for message in record?.messages ?? [] {
     if message?.role == "user" {
       all = all + agent_transcript_tool_result_blocks(agent_transcript_text(message?.content))
     }
   }
-  let fresh = if len(all) > previous_count {
+  const fresh = if len(all) > previous_count {
     all[previous_count:]
   } else {
     all
   }
-  var rows = []
+  let rows = []
   for result in fresh {
     rows = rows
       + [
@@ -614,16 +614,16 @@ fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) ->
  * @api_stability: experimental
  */
 pub fn agent_transcript_normalize(records) -> list {
-  var rows = []
-  var next_iteration = 0
-  var last_assistant_iteration = -1
-  var previous_legacy_result_count = 0
-  var index = 0
+  let rows = []
+  let next_iteration = 0
+  let last_assistant_iteration = -1
+  let previous_legacy_result_count = 0
+  let index = 0
   for record in records ?? [] {
-    let record_type = record?.type
-    let role = __role(record)
+    const record_type = record?.type
+    const role = __role(record)
     if record_type == "response" || role == "assistant" {
-      let iteration = if record?.iteration != nil {
+      const iteration = if record?.iteration != nil {
         to_int(record.iteration) ?? next_iteration
       } else {
         next_iteration
@@ -634,7 +634,7 @@ pub fn agent_transcript_normalize(records) -> list {
     } else if role == "tool" || role == "tool_result" {
       rows = rows + [__tool_message_row(record, index, max(0, last_assistant_iteration))]
     } else if record_type == "request" {
-      let extracted = __legacy_request_tool_result_rows(record, index, previous_legacy_result_count)
+      const extracted = __legacy_request_tool_result_rows(record, index, previous_legacy_result_count)
       rows = rows + extracted.rows
       previous_legacy_result_count = extracted.count
     } else if role == "user" {
@@ -657,7 +657,7 @@ pub fn agent_transcript_normalize(records) -> list {
  * @api_stability: experimental
  */
 pub fn agent_transcript_normalize_report(records) -> dict {
-  var issues = []
+  let issues = []
   let input_records = if type_of(records) == "list" {
     records
   } else {
@@ -669,7 +669,7 @@ pub fn agent_transcript_normalize_report(records) -> dict {
     }
     []
   }
-  var record_index = 0
+  let record_index = 0
   for record in input_records {
     if type_of(record) != "dict" {
       issues = issues
@@ -699,8 +699,8 @@ pub fn agent_transcript_normalize_report(records) -> dict {
     record_index = record_index + 1
   }
   let rows = agent_transcript_normalize(input_records)
-  var errors = []
-  var row_index = 0
+  let errors = []
+  let row_index = 0
   for row in rows {
     let report = get_typed_report(row, agent_transcript_row_schema())
     if !(report?.ok ?? false) {
@@ -757,13 +757,13 @@ pub fn agent_transcript_read_report(path: string, options = {}) -> dict {
  * @api_stability: experimental
  */
 pub fn agent_transcript_tool_events(records) -> list {
-  let rows = agent_transcript_normalize(records)
-  var out = []
+  const rows = agent_transcript_normalize(records)
+  let out = []
   for row in rows {
     if row?.kind != "assistant" {
       continue
     }
-    var call_index = 0
+    let call_index = 0
     for call in row?.tool_calls ?? [] {
       out = out
         + [
@@ -793,8 +793,8 @@ pub fn agent_transcript_tool_events(records) -> list {
  * @api_stability: experimental
  */
 pub fn agent_transcript_tool_results(records) -> list {
-  let rows = agent_transcript_normalize(records)
-  var out = []
+  const rows = agent_transcript_normalize(records)
+  let out = []
   for row in rows {
     if row?.kind == "tool_result" {
       out = out + [row]

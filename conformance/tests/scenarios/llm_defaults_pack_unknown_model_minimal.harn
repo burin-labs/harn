@@ -3,7 +3,7 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  let r = pack_for({model: "totally-fake-model-id"})
+  const r = pack_for({model: "totally-fake-model-id"})
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, "totally-fake-model-id")
   assert_eq(type_of(r.provider), "string")

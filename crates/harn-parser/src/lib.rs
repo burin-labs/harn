@@ -137,7 +137,7 @@ mod pipeline_tests {
 
     #[test]
     fn parse_source_valid() {
-        let program = parse_source("let x = 1").unwrap();
+        let program = parse_source("const x = 1").unwrap();
         assert!(!program.is_empty());
     }
 
@@ -158,13 +158,13 @@ mod pipeline_tests {
 
     #[test]
     fn check_source_returns_diagnostics() {
-        let (program, _diagnostics) = check_source("let x = 1").unwrap();
+        let (program, _diagnostics) = check_source("const x = 1").unwrap();
         assert!(!program.is_empty());
     }
 
     #[test]
     fn check_source_strict_passes_valid_code() {
-        let program = check_source_strict("let x = 1\nlog(x)").unwrap();
+        let program = check_source_strict("const x = 1\nlog(x)").unwrap();
         assert!(!program.is_empty());
     }
 

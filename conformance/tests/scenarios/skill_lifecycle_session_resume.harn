@@ -18,8 +18,8 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("First turn done."), llm_text("Resume done.")],
     { ->
-      let sid = "skill-resume-test"
-      let r1 = agent_loop(
+      const sid = "skill-resume-test"
+      const r1 = agent_loop(
         "please handle this task carefully",
         nil,
         {
@@ -31,7 +31,7 @@ pipeline test(task) {
         },
       )
       assert(r1?.status == "done", "first run completes")
-      let r2 = agent_loop(
+      const r2 = agent_loop(
         "continue",
         nil,
         {
@@ -43,8 +43,8 @@ pipeline test(task) {
         },
       )
       assert(r2?.status == "done", "resume run completes")
-      let calls = llm_mock_calls()
-      let last = calls[len(calls) - 1]
+      const calls = llm_mock_calls()
+      const last = calls[len(calls) - 1]
       assert(contains(last.system, "sticky_skill"), "resume turn keeps skill active")
       log("skill_lifecycle_session_resume tests passed")
     },

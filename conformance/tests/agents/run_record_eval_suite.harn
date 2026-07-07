@@ -1,5 +1,5 @@
 pipeline main() {
-  let good = run_record(
+  const good = run_record(
     {
       _type: "run_record",
       id: "run_good",
@@ -20,7 +20,7 @@ pipeline main() {
       ],
     },
   )
-  let bad = run_record(
+  const bad = run_record(
     {
       _type: "run_record",
       id: "run_bad",
@@ -34,11 +34,11 @@ pipeline main() {
       ],
     },
   )
-  let fixture = run_record_fixture(good)
-  let suite = run_record_eval_suite(
+  const fixture = run_record_fixture(good)
+  const suite = run_record_eval_suite(
     [{run: good, fixture: fixture, path: "good.json"}, {run: bad, fixture: fixture, path: "bad.json"}],
   )
-  let diff = run_record_diff(good, bad)
+  const diff = run_record_diff(good, bad)
   __io_println(!suite?.pass)
   __io_println(suite?.failed == 1)
   __io_println(len(suite?.cases) == 2)

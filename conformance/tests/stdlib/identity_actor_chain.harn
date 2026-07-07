@@ -6,41 +6,41 @@ import {
 } from "std/identity"
 
 pipeline default() {
-  let chain = {
+  const chain = {
     sub: "user:owner",
     scopes: ["repo:read", "repo:write"],
     may_act: {sub: "agent:delegate"},
     act: {sub: "agent:reviewer", scopes: ["repo:read"], act: {sub: "agent:planner", scope: "repo:read"}},
   }
-  let report = actor_chain_report(chain)
+  const report = actor_chain_report(chain)
   __io_println(report.ok)
   __io_println(report.depth)
   __io_println(report.delegated)
-  let current = report.current
+  const current = report.current
   require current != nil, "report should expose current actor"
   __io_println(current.subject)
   __io_println(current.role)
   __io_println(join(current.scopes, ","))
   __io_println(report.prior_actors[0].subject)
   __io_println(join(report.prior_actors[0].scopes, ","))
-  let origin = report.origin
+  const origin = report.origin
   require origin != nil, "report should expose origin"
   __io_println(origin.subject)
   __io_println(report.may_act)
   __io_println(actor_chain_format(chain))
   __io_println(actor_chain_format(chain, {style: "arrow"}))
-  let parts = actor_chain_subject_parts("agent:reviewer")
+  const parts = actor_chain_subject_parts("agent:reviewer")
   __io_println(parts.kind + "/" + parts.id)
-  let plain = actor_chain_subject_parts("root")
+  const plain = actor_chain_subject_parts("root")
   __io_println(plain.kind + "/" + plain.id)
-  let solo = actor_chain_summary({sub: "user:solo"})
+  const solo = actor_chain_summary({sub: "user:solo"})
   __io_println(solo.delegated)
   __io_println(solo.current.subject)
-  let invalid = actor_chain_report({sub: "user:owner", act: {sub: 42, scopes: "repo:read"}})
+  const invalid = actor_chain_report({sub: "user:owner", act: {sub: 42, scopes: "repo:read"}})
   __io_println(invalid.ok)
   __io_println(invalid.issues[0].code)
   __io_println(invalid.issues[0].path)
-  let bad_scope = actor_chain_report({sub: "user:owner", scopes: [1]})
+  const bad_scope = actor_chain_report({sub: "user:owner", scopes: [1]})
   __io_println(bad_scope.ok)
   __io_println(bad_scope.issues[0].code)
   __io_println(bad_scope.issues[0].path)

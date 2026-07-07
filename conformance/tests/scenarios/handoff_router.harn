@@ -11,7 +11,7 @@ fn review_captain_mock(envelope) {
 }
 
 pipeline main() {
-  let routes = [
+  const routes = [
     {
       id: "merge-receipt-review",
       kind: "merge_receipt",
@@ -22,7 +22,7 @@ pipeline main() {
       ],
     },
   ]
-  let seed = {
+  const seed = {
     kind: "merge_receipt",
     source_persona: "merge_captain",
     task: "Review the merge receipt",
@@ -30,14 +30,14 @@ pipeline main() {
     requested_capabilities: ["review"],
     allowed_side_effects: ["comment_on_pr"],
   }
-  let routed = handoff_routed(seed, routes, {})
-  let dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
-  let exhausted = handoff_routed(
+  const routed = handoff_routed(seed, routes, {})
+  const dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
+  const exhausted = handoff_routed(
     seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
     routes,
     {budget_exhausted: true},
   )
-  let run = workflow_result_run(
+  const run = workflow_result_run(
     "Route merge receipt handoff",
     "merge_captain",
     {visible_text: "handoff routed"},

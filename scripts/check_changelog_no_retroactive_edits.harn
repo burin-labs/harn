@@ -18,7 +18,7 @@
  * Runs in the pre-push hook so local pushes reject retroactive CHANGELOG drift
  * before CI.
  */
-let CHANGELOG_REL = "CHANGELOG.md"
+const CHANGELOG_REL = "CHANGELOG.md"
 
 /**
  * True when `line` is exactly a `## vX.Y.Z` version heading (anchored to the
@@ -26,13 +26,13 @@ let CHANGELOG_REL = "CHANGELOG.md"
  * captured version (e.g. "0.8.72"), or nil when the line is not a heading.
  */
 pub fn heading_version(line: string) -> string? {
-  let prefix = "## v"
+  const prefix = "## v"
   if !line.starts_with(prefix) {
     return nil
   }
-  let rest = line.substring(prefix.len(), line.len())
+  const rest = line.substring(prefix.len(), line.len())
   // rest must be exactly N+.N+.N+ (three dot-separated non-empty digit runs).
-  let parts = rest.split(".")
+  const parts = rest.split(".")
   if parts.count != 3 {
     return nil
   }
@@ -49,7 +49,7 @@ pub fn is_all_digits(s: string) -> bool {
   if s.len() == 0 {
     return false
   }
-  let digits = "0123456789"
+  const digits = "0123456789"
   for ch in s.split("") {
     if ch != "" && !digits.contains(ch) {
       return false
@@ -63,9 +63,9 @@ pub fn is_all_digits(s: string) -> bool {
  * Mirrors `VERSION_HEADING.findall(head_text)`.
  */
 pub fn version_headings(text: string) -> list<string> {
-  var versions = []
+  let versions = []
   for line in text.split("\n") {
-    let v = heading_version(line)
+    const v = heading_version(line)
     if v != nil {
       versions = versions + [v]
     }
@@ -95,13 +95,13 @@ pub fn is_section_boundary(line: string) -> bool {
  * when the section heading is absent.
  */
 pub fn section_body(text: string, version: string) -> string? {
-  let target = "## v" + version
-  let lines = text.split("\n")
+  const target = "## v" + version
+  const lines = text.split("\n")
   // Locate the heading line. The Python regex requires the heading to be on
   // its own line followed by `\n`, so the heading cannot be the final line
   // with no trailing newline. split("\n") yields the heading at index i with
   // at least one element after it iff there was a `\n` after the heading.
-  var i = -1
+  let i = -1
   for item in lines.enumerate() {
     if item.value == target {
       i = item.index
@@ -118,10 +118,10 @@ pub fn section_body(text: string, version: string) -> string? {
     return nil
   }
   // Collect body lines until (not including) the next `## ` boundary line.
-  var body_lines = []
-  var j = i + 1
+  let body_lines = []
+  let j = i + 1
   while j < lines.count {
-    let line = lines[j]
+    const line = lines[j]
     if is_section_boundary(line) {
       break
     }
@@ -161,15 +161,15 @@ pub fn section_body(text: string, version: string) -> string? {
  * non-whitespace character.
  */
 pub fn has_bypass_trailer(messages: string) -> bool {
-  let prefix = "Allow-Retroactive-Changelog:"
-  let lines = messages.split("\n")
+  const prefix = "Allow-Retroactive-Changelog:"
+  const lines = messages.split("\n")
   for item in lines.enumerate() {
     if item.value.starts_with(prefix) {
       // Everything from the colon onward across the rest of the message.
       // Python's `\s*\S` lets the non-whitespace char appear after any run
       // of whitespace (including newlines), so join the rest of the message.
-      var rest = item.value.substring(prefix.len(), item.value.len())
-      var k = item.index + 1
+      let rest = item.value.substring(prefix.len(), item.value.len())
+      let k = item.index + 1
       while k < lines.count {
         rest = rest + "\n" + lines[k]
         k = k + 1
@@ -204,21 +204,21 @@ pub fn section_bodies(text: string) -> dict {
  * joining the body of every section in the ~470KB CHANGELOG twice.
  */
 pub fn section_bodies_for(text: string, wanted: list<string>?) -> dict {
-  let lines = text.split("\n")
-  var bodies = {}
-  var idx = 0
+  const lines = text.split("\n")
+  let bodies = {}
+  let idx = 0
   while idx < lines.count {
-    let version = heading_version(lines[idx])
+    const version = heading_version(lines[idx])
     // A heading only starts a section if it is followed by a newline in the
     // source, i.e. it is not the final split element (mirrors `^## v..\n`).
-    let key = version ?? ""
-    let needed = version != nil
+    const key = version ?? ""
+    const needed = version != nil
       && idx < lines.count - 1
       && (wanted == nil || (wanted ?? []).contains(key))
       && bodies[key] == nil
     if needed {
-      var body_lines = []
-      var j = idx + 1
+      let body_lines = []
+      let j = idx + 1
       while j < lines.count {
         if is_section_boundary(lines[j]) {
           break
@@ -229,7 +229,7 @@ pub fn section_bodies_for(text: string, wanted: list<string>?) -> dict {
       // Reconstruct the captured group (see `section_body` for the rationale):
       // body lines stopped at a boundary each carry a trailing newline; a run
       // that reached end-of-text does not append one to the final element.
-      let body = if body_lines.count == 0 {
+      const body = if body_lines.count == 0 {
         ""
       } else if j < lines.count {
         body_lines.join("\n") + "\n"
@@ -253,23 +253,23 @@ pub fn section_bodies_for(text: string, wanted: list<string>?) -> dict {
 pub fn compute_drift(head_text: string, base_text: string, tags: list<string>) -> list<string> {
   // Only published versions present in HEAD can drift; restrict body building
   // to that set so we don't reconstruct every section of the CHANGELOG twice.
-  let head_versions = version_headings(head_text)
-  var wanted = []
+  const head_versions = version_headings(head_text)
+  let wanted = []
   for version in head_versions {
     if tags.contains("v" + version) && !wanted.contains(version) {
       wanted = wanted + [version]
     }
   }
-  let head_bodies = section_bodies_for(head_text, wanted)
-  let base_bodies = section_bodies_for(base_text, wanted)
-  var drift = []
+  const head_bodies = section_bodies_for(head_text, wanted)
+  const base_bodies = section_bodies_for(base_text, wanted)
+  let drift = []
   for version in head_versions {
-    let tag = "v" + version
+    const tag = "v" + version
     if !tags.contains(tag) {
       continue
     }
-    let head_body = head_bodies[version]
-    let base_body = base_bodies[version]
+    const head_body = head_bodies[version]
+    const base_body = base_bodies[version]
     if head_body == nil || base_body == nil {
       continue
     }
@@ -285,7 +285,7 @@ pub fn compute_drift(head_text: string, base_text: string, tags: list<string>) -
  * `base` is the resolved base ref shown in the header.
  */
 pub fn drift_report(base: string, drift: list<string>) -> string {
-  var lines = []
+  let lines = []
   lines = lines
     + [
     "error: CHANGELOG.md sections for already-published versions were modified in this change (compared against "
@@ -311,9 +311,9 @@ pub fn drift_report(base: string, drift: list<string>) -> string {
  * Returns nil when the flag is absent.
  */
 pub fn flag_value(args: list<string>, name: string) -> string? {
-  let prefix = name + "="
+  const prefix = name + "="
   for item in args.enumerate() {
-    let a = item.value
+    const a = item.value
     if a == name && item.index + 1 < args.count {
       return args[item.index + 1]
     }
@@ -336,12 +336,12 @@ fn resolve_base(base: string?) -> string {
   if base != nil && base != "" {
     return base ?? ""
   }
-  let env_base = harness.env.get("CHANGELOG_GUARD_BASE")
+  const env_base = harness.env.get("CHANGELOG_GUARD_BASE")
   if env_base != nil && env_base != "" {
     return env_base ?? ""
   }
   for candidate in ["origin/main", "main"] {
-    let result = git(["merge-base", "HEAD", candidate])
+    const result = git(["merge-base", "HEAD", candidate])
     if result.success {
       return result.stdout.trim()
     }
@@ -356,13 +356,13 @@ fn resolve_base(base: string?) -> string {
  * subprocess spawn per CHANGELOG version (~70 spawns on the real repo).
  */
 fn existing_tags() -> list<string> {
-  let result = git(["tag", "-l"])
+  const result = git(["tag", "-l"])
   if !result.success {
     return []
   }
-  var tags = []
+  let tags = []
   for line in result.stdout.split("\n") {
-    let name = line.trim()
+    const name = line.trim()
     if name != "" {
       tags = tags + [name]
     }
@@ -375,11 +375,11 @@ fn existing_tags() -> list<string> {
  * fallback to the last 50 commits. Mirrors `commit_messages_since`.
  */
 fn commit_messages_since(base: string) -> string {
-  let result = git(["log", "--format=%B%x00", base + "..HEAD"])
+  const result = git(["log", "--format=%B%x00", base + "..HEAD"])
   if result.success && result.stdout.trim() != "" {
     return result.stdout
   }
-  let fallback = git(["log", "-50", "--format=%B%x00", "HEAD"])
+  const fallback = git(["log", "-50", "--format=%B%x00", "HEAD"])
   if fallback.success {
     return fallback.stdout
   }
@@ -391,21 +391,21 @@ pipeline main(task) {
     __io_println("check_changelog_no_retroactive_edits: bypassed via env var")
     return 0
   }
-  let head_text = harness.fs.read_text(CHANGELOG_REL)
-  let base = resolve_base(flag_value(argv, "--base"))
-  let base_show = git(["show", base + ":" + CHANGELOG_REL])
+  const head_text = harness.fs.read_text(CHANGELOG_REL)
+  const base = resolve_base(flag_value(argv, "--base"))
+  const base_show = git(["show", base + ":" + CHANGELOG_REL])
   if !base_show.success {
     // No base to compare against -- nothing to enforce.
     return 0
   }
-  let base_text = base_show.stdout
+  const base_text = base_show.stdout
   if has_bypass_trailer(commit_messages_since(base)) {
     __io_println(
       "check_changelog_no_retroactive_edits: bypassed via Allow-Retroactive-Changelog trailer",
     )
     return 0
   }
-  let drift = compute_drift(head_text, base_text, existing_tags())
+  const drift = compute_drift(head_text, base_text, existing_tags())
   if drift.count == 0 {
     return 0
   }

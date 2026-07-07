@@ -779,7 +779,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let signal = rt.block_on(run_verifier(&verifier, "let x = foo.unwrap();"));
+        let signal = rt.block_on(run_verifier(&verifier, "const x = foo.unwrap();"));
         match signal {
             VerifierSignal::Refine { reason } => assert!(reason.contains("unwrap")),
             other => panic!("expected refine, got {other:?}"),
@@ -801,7 +801,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let signal = rt.block_on(run_verifier(&verifier, "let x = 1\n"));
+        let signal = rt.block_on(run_verifier(&verifier, "const x = 1\n"));
         assert_eq!(signal, VerifierSignal::Accept);
     }
 
@@ -816,7 +816,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let signal = rt.block_on(run_verifier(&verifier, "let x = 1\n"));
+        let signal = rt.block_on(run_verifier(&verifier, "const x = 1\n"));
         assert_eq!(signal, VerifierSignal::Accept);
     }
 

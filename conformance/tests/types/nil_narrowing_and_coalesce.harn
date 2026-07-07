@@ -1,8 +1,8 @@
 type Opts = {label?: string, tags?: list<string>}?
 
 fn describe(options: Opts = nil) -> string {
-  let opts = options ?? {}
-  var out = "base"
+  const opts = options ?? {}
+  let out = "base"
   if opts?.label != nil {
     out = opts.label
   }

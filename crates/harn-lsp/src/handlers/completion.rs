@@ -496,7 +496,7 @@ where
                 visit_node(a, visitor);
             }
         }
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
             visit_node(value, visitor);
         }
         Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {
@@ -537,7 +537,7 @@ mod tests {
     fn dot_completion_prefers_shape_fields() {
         let items = completion_items_at(
             r#"pipeline test() {
-  let data = {name: "Ada", count: 3}
+  const data = {name: "Ada", count: 3}
   data.name
 }"#,
             "data.",
@@ -568,7 +568,7 @@ mod tests {
   impl Person {
     fn greet(self) -> string { return self.name }
   }
-  let person = Person({name: "Ada", age: 3})
+  const person = Person({name: "Ada", age: 3})
   person.name
 }"#,
             "person.",

@@ -17,14 +17,14 @@ fn __edit_normalize_line(line) {
 }
 
 fn __edit_structural_line(line) {
-  let compact = __edit_collapse_ws(line)
+  const compact = __edit_collapse_ws(line)
   return regex_replace("\\s+", "", compact)
 }
 
 fn __edit_signature(text, structural) {
-  var lines = []
+  let lines = []
   for line in split(text ?? "", "\n") {
-    let normalized = if structural {
+    const normalized = if structural {
       __edit_structural_line(line)
     } else {
       __edit_normalize_line(line)
@@ -38,7 +38,7 @@ fn __edit_signature(text, structural) {
 }
 
 fn __edit_nonblank_count(lines) {
-  var count = 0
+  let count = 0
   for line in lines {
     if __edit_structural_line(line) != "" {
       count = count + 1
@@ -55,7 +55,7 @@ fn __edit_start_line(prefix) {
 }
 
 fn __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind) {
-  let end_line = if end_line_exclusive > start_line {
+  const end_line = if end_line_exclusive > start_line {
     end_line_exclusive - 1
   } else {
     start_line
@@ -73,14 +73,14 @@ fn __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind)
 }
 
 fn __edit_context(prefix, needle, suffix) {
-  let before_lines = split(prefix, "\n")
-  let after_lines = split(suffix, "\n")
-  let before = if len(before_lines) > 2 {
+  const before_lines = split(prefix, "\n")
+  const after_lines = split(suffix, "\n")
+  const before = if len(before_lines) > 2 {
     join(before_lines[-2:], "\n")
   } else {
     prefix
   }
-  let after = if len(after_lines) > 2 {
+  const after = if len(after_lines) > 2 {
     join(after_lines[:2], "\n")
   } else {
     suffix
@@ -89,14 +89,14 @@ fn __edit_context(prefix, needle, suffix) {
 }
 
 fn __edit_candidate_contexts(parts, old_text, max_contexts) {
-  var contexts = []
-  var prefix = ""
-  var idx = 0
-  let limit = max_contexts ?? 3
-  let needle_lines = max(len(split(old_text ?? "", "\n")), 1)
+  let contexts = []
+  let prefix = ""
+  let idx = 0
+  const limit = max_contexts ?? 3
+  const needle_lines = max(len(split(old_text ?? "", "\n")), 1)
   while idx < len(parts) - 1 && len(contexts) < limit {
     prefix = prefix + parts[idx]
-    let start_line = __edit_start_line(prefix)
+    const start_line = __edit_start_line(prefix)
     contexts = contexts
       + [
       {
@@ -112,17 +112,17 @@ fn __edit_candidate_contexts(parts, old_text, max_contexts) {
 }
 
 fn __edit_line_candidate_contexts(text, candidates, max_contexts) {
-  let lines = split(text ?? "", "\n")
-  var contexts = []
-  let limit = max_contexts ?? 3
-  var idx = 0
+  const lines = split(text ?? "", "\n")
+  let contexts = []
+  const limit = max_contexts ?? 3
+  let idx = 0
   while idx < len(candidates) && len(contexts) < limit {
-    let candidate = candidates[idx]
-    let start_line = candidate.start_line
-    let end_line_exclusive = candidate.end_line_exclusive
-    let prefix_start = max(start_line - 2, 0)
-    let suffix_end = min(end_line_exclusive + 2, len(lines))
-    let snippet = trim(join(lines[prefix_start:suffix_end], "\n"))
+    const candidate = candidates[idx]
+    const start_line = candidate.start_line
+    const end_line_exclusive = candidate.end_line_exclusive
+    const prefix_start = max(start_line - 2, 0)
+    const suffix_end = min(end_line_exclusive + 2, len(lines))
+    const snippet = trim(join(lines[prefix_start:suffix_end], "\n"))
     contexts = contexts
       + [{start_line: start_line, end_line: end_line_exclusive - 1, snippet: snippet}]
     idx = idx + 1
@@ -131,7 +131,7 @@ fn __edit_line_candidate_contexts(text, candidates, max_contexts) {
 }
 
 fn __edit_error(code, message, text, old_text, new_text, fields = nil) {
-  let base = {
+  const base = {
     ok: false,
     changed: false,
     error_code: code,
@@ -166,22 +166,22 @@ fn __edit_lazy_placeholder_phrases() {
 }
 
 fn __edit_lazy_match_count(text) {
-  let body = text ?? ""
+  const body = text ?? ""
   if body == "" {
     return 0
   }
-  var total = 0
+  let total = 0
   for line in split(body, "\n") {
-    let t = lowercase(trim(line))
+    const t = lowercase(trim(line))
     if t == "..." || t == "…" {
       total = total + 1
     }
   }
   for pattern in __edit_lazy_placeholder_patterns() {
-    let matches = regex_match(pattern, body) ?? []
+    const matches = regex_match(pattern, body) ?? []
     total = total + len(matches)
   }
-  let lowered = lowercase(body)
+  const lowered = lowercase(body)
   for phrase in __edit_lazy_placeholder_phrases() {
     if contains(lowered, phrase) {
       total = total + 1
@@ -195,7 +195,7 @@ fn __edit_has_lazy_placeholder(new_text) {
 }
 
 fn __edit_guardrails(old_text, new_text, options) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if old_text == "" && !(opts?.allow_empty_old_text ?? false) {
     return {code: "empty_old_text", message: "old_text must not be empty"}
   }
@@ -210,14 +210,14 @@ fn __edit_guardrails(old_text, new_text, options) {
   if __edit_has_lazy_placeholder(new_text) && !(opts?.allow_lazy_placeholders ?? false) {
     return {code: "lazy_placeholder", message: "patch contains an omission or unchanged-content placeholder"}
   }
-  let old_len = len(old_text)
-  let new_len = len(new_text)
-  let growth = new_len - old_len
-  let max_growth_bytes = opts?.max_growth_bytes ?? 20000
+  const old_len = len(old_text)
+  const new_len = len(new_text)
+  const growth = new_len - old_len
+  const max_growth_bytes = opts?.max_growth_bytes ?? 20000
   if max_growth_bytes != nil && growth > max_growth_bytes {
     return {code: "excessive_growth", message: "patch grows selected text by more than max_growth_bytes"}
   }
-  let max_growth_ratio = opts?.max_growth_ratio ?? 8
+  const max_growth_ratio = opts?.max_growth_ratio ?? 8
   if max_growth_ratio != nil && growth > 1024 && new_len > old_len * max_growth_ratio {
     return {code: "excessive_growth", message: "patch grows selected text by more than max_growth_ratio"}
   }
@@ -234,9 +234,9 @@ fn __edit_success(
   end_line_exclusive,
   options,
 ) {
-  let before_hash = __edit_sha256(text)
-  let after_hash = __edit_sha256(patched)
-  let expected_region = __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind)
+  const before_hash = __edit_sha256(text)
+  const after_hash = __edit_sha256(patched)
+  const expected_region = __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind)
   return {
     ok: true,
     changed: text != patched,
@@ -265,8 +265,8 @@ fn __edit_success(
 }
 
 fn __edit_splice_raw(text, start_line, end_line_exclusive, new_text) {
-  let lines = split(text ?? "", "\n")
-  var out = []
+  const lines = split(text ?? "", "\n")
+  let out = []
   if start_line > 0 {
     out = out + lines[:start_line]
   }
@@ -280,11 +280,11 @@ fn __edit_splice_raw(text, start_line, end_line_exclusive, new_text) {
 }
 
 fn __edit_has_distinctive_token(line, min_chars) {
-  let chars = min_chars ?? 4
+  const chars = min_chars ?? 4
   if chars <= 0 {
     return true
   }
-  let tokens = regex_match("[A-Za-z0-9_]+", line ?? "") ?? []
+  const tokens = regex_match("[A-Za-z0-9_]+", line ?? "") ?? []
   for token in tokens {
     if len(token) >= chars {
       return true
@@ -294,12 +294,12 @@ fn __edit_has_distinctive_token(line, min_chars) {
 }
 
 fn __edit_structural_anchors_ok(old_text, options) {
-  let opts = options ?? {}
-  let min_lines = opts?.structural_min_nonblank_lines ?? 3
-  let anchor_chars = opts?.structural_anchor_chars ?? 4
-  let anchor_mode = lowercase(opts?.structural_require_anchored_lines ?? "both")
-  let needle_lines = split(old_text ?? "", "\n")
-  var nonblank_lines = []
+  const opts = options ?? {}
+  const min_lines = opts?.structural_min_nonblank_lines ?? 3
+  const anchor_chars = opts?.structural_anchor_chars ?? 4
+  const anchor_mode = lowercase(opts?.structural_require_anchored_lines ?? "both")
+  const needle_lines = split(old_text ?? "", "\n")
+  let nonblank_lines = []
   for line in needle_lines {
     if __edit_structural_line(line) != "" {
       nonblank_lines = nonblank_lines + [line]
@@ -311,10 +311,10 @@ fn __edit_structural_anchors_ok(old_text, options) {
   if anchor_mode == "none" || anchor_chars <= 0 {
     return true
   }
-  let first = nonblank_lines[0] ?? ""
-  let last = nonblank_lines[len(nonblank_lines) - 1] ?? ""
-  let first_ok = __edit_has_distinctive_token(first, anchor_chars)
-  let last_ok = __edit_has_distinctive_token(last, anchor_chars)
+  const first = nonblank_lines[0] ?? ""
+  const last = nonblank_lines[len(nonblank_lines) - 1] ?? ""
+  const first_ok = __edit_has_distinctive_token(first, anchor_chars)
+  const last_ok = __edit_has_distinctive_token(last, anchor_chars)
   if anchor_mode == "either" {
     return first_ok || last_ok
   }
@@ -322,17 +322,17 @@ fn __edit_structural_anchors_ok(old_text, options) {
 }
 
 fn __edit_line_candidates(text, old_text, structural, options) {
-  let lines = split(text ?? "", "\n")
-  var candidates = []
-  let target = __edit_signature(old_text, structural)
+  const lines = split(text ?? "", "\n")
+  let candidates = []
+  const target = __edit_signature(old_text, structural)
   if target == "" {
     return candidates
   }
   if !structural {
-    let width = len(split(old_text ?? "", "\n"))
-    var start = 0
+    const width = len(split(old_text ?? "", "\n"))
+    let start = 0
     while start + width <= len(lines) {
-      let segment = join(lines[start:start + width], "\n")
+      const segment = join(lines[start:start + width], "\n")
       if __edit_signature(segment, false) == target {
         candidates = candidates + [{start_line: start, end_line_exclusive: start + width, text: segment}]
       }
@@ -343,15 +343,15 @@ fn __edit_line_candidates(text, old_text, structural, options) {
   if !__edit_structural_anchors_ok(old_text, options) {
     return candidates
   }
-  let target_count = __edit_nonblank_count(split(old_text ?? "", "\n"))
-  var start = 0
+  const target_count = __edit_nonblank_count(split(old_text ?? "", "\n"))
+  let start = 0
   while start < len(lines) {
     if __edit_structural_line(lines[start]) == "" {
       start = start + 1
       continue
     }
-    var end = start
-    var nonblank = 0
+    let end = start
+    let nonblank = 0
     while end < len(lines) && nonblank < target_count {
       if __edit_structural_line(lines[end]) != "" {
         nonblank = nonblank + 1
@@ -362,7 +362,7 @@ fn __edit_line_candidates(text, old_text, structural, options) {
       while end < len(lines) && __edit_structural_line(lines[end]) == "" {
         end = end + 1
       }
-      let segment = join(lines[start:end], "\n")
+      const segment = join(lines[start:end], "\n")
       if __edit_signature(segment, true) == target {
         candidates = candidates + [{start_line: start, end_line_exclusive: end, text: segment}]
       }
@@ -376,7 +376,7 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
   if len(candidates) == 0 {
     return nil
   }
-  let opts = options ?? {}
+  const opts = options ?? {}
   if len(candidates) > 1 {
     return __edit_error(
       "ambiguous_match",
@@ -391,9 +391,9 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
       },
     )
   }
-  let candidate = candidates[0]
-  let patched = __edit_splice_raw(text, candidate.start_line, candidate.end_line_exclusive, new_text)
-  let result = __edit_success(
+  const candidate = candidates[0]
+  const patched = __edit_splice_raw(text, candidate.start_line, candidate.end_line_exclusive, new_text)
+  const result = __edit_success(
     text,
     patched,
     candidate.text,
@@ -430,25 +430,25 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
  * @errors: []
  */
 pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
-  let source = text ?? ""
-  let raw_old = old_text ?? ""
-  let new = new_text ?? ""
-  let opts = options ?? {}
-  let old = if opts?.strip_line_numbers ?? false {
+  const source = text ?? ""
+  const raw_old = old_text ?? ""
+  const new = new_text ?? ""
+  const opts = options ?? {}
+  const old = if opts?.strip_line_numbers ?? false {
     edit_strip_line_number_prefixes(raw_old)
   } else {
     raw_old
   }
-  let guardrail = __edit_guardrails(old, new, opts)
+  const guardrail = __edit_guardrails(old, new, opts)
   if guardrail != nil {
     return __edit_error(guardrail.code, guardrail.message, source, old, new)
   }
-  let mode = opts?.match ?? "auto"
+  const mode = opts?.match ?? "auto"
   if mode != "line" && mode != "structural" {
-    let parts = split(source, old)
+    const parts = split(source, old)
     if len(parts) == 2 {
-      let start_line = __edit_start_line(parts[0])
-      let end_line_exclusive = start_line + len(split(old, "\n"))
+      const start_line = __edit_start_line(parts[0])
+      const end_line_exclusive = start_line + len(split(old, "\n"))
       return __edit_success(
         source,
         parts[0] + new + parts[1],
@@ -478,7 +478,7 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
     }
   }
   if mode == "line" || mode == "auto" {
-    let line_result = __edit_apply_line_candidate(
+    const line_result = __edit_apply_line_candidate(
       source,
       old,
       new,
@@ -494,7 +494,7 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
     }
   }
   if mode == "structural" || mode == "auto" {
-    let structural_result = __edit_apply_line_candidate(
+    const structural_result = __edit_apply_line_candidate(
       source,
       old,
       new,
@@ -516,10 +516,10 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
  * @errors: []
  */
 pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options = nil) {
-  let source = text ?? ""
-  let lines = split(source, "\n")
-  let start = start_line ?? 0
-  let end = end_line_exclusive ?? start
+  const source = text ?? ""
+  const lines = split(source, "\n")
+  const start = start_line ?? 0
+  const end = end_line_exclusive ?? start
   if start < 0 || end < start || end > len(lines) {
     return __edit_error(
       "invalid_line_range",
@@ -529,24 +529,24 @@ pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options
       new_text ?? "",
     )
   }
-  let old = join(lines[start:end], "\n")
-  let guardrail = __edit_guardrails(old, new_text ?? "", (options ?? {}).merge({allow_empty_old_text: true}))
+  const old = join(lines[start:end], "\n")
+  const guardrail = __edit_guardrails(old, new_text ?? "", (options ?? {}).merge({allow_empty_old_text: true}))
   if guardrail != nil {
     return __edit_error(guardrail.code, guardrail.message, source, old, new_text ?? "")
   }
-  let patched = __edit_splice_raw(source, start, end, new_text ?? "")
+  const patched = __edit_splice_raw(source, start, end, new_text ?? "")
   return __edit_success(source, patched, old, new_text ?? "", "line_splice", start, end, options ?? {})
 }
 
 fn __edit_find_resync(before_lines, after_lines, before_index, after_index) {
-  let window = 80
-  var distance = 1
+  const window = 80
+  let distance = 1
   while distance <= window {
-    var before_delta = 0
+    let before_delta = 0
     while before_delta <= distance {
-      let after_delta = distance - before_delta
-      let next_before = before_index + before_delta
-      let next_after = after_index + after_delta
+      const after_delta = distance - before_delta
+      const next_before = before_index + before_delta
+      const next_after = after_index + after_delta
       if next_before < len(before_lines)
         && next_after < len(after_lines)
         && before_lines[next_before] == after_lines[next_after] {
@@ -580,11 +580,11 @@ fn __edit_hunk(before_start, after_start, before_end, after_end, next_before, ne
  * @errors: []
  */
 pub fn edit_changed_regions(before, after) {
-  let before_lines = split(before ?? "", "\n")
-  let after_lines = split(after ?? "", "\n")
-  var regions = []
-  var before_index = 0
-  var after_index = 0
+  const before_lines = split(before ?? "", "\n")
+  const after_lines = split(after ?? "", "\n")
+  let regions = []
+  let before_index = 0
+  let after_index = 0
   while before_index < len(before_lines) || after_index < len(after_lines) {
     if before_index < len(before_lines)
       && after_index < len(after_lines)
@@ -593,11 +593,11 @@ pub fn edit_changed_regions(before, after) {
       after_index = after_index + 1
       continue
     }
-    let before_start = before_index
-    let after_start = after_index
-    let resync = __edit_find_resync(before_lines, after_lines, before_index, after_index)
-    let next_before = resync.before_index
-    let next_after = resync.after_index
+    const before_start = before_index
+    const after_start = after_index
+    const resync = __edit_find_resync(before_lines, after_lines, before_index, after_index)
+    const next_before = resync.before_index
+    const next_after = resync.after_index
     regions = regions
       + [__edit_hunk(before_start, after_start, next_before - 1, next_after - 1, next_before, next_after)]
     before_index = next_before
@@ -617,8 +617,8 @@ fn __edit_expected_end(region) {
 }
 
 fn __edit_region_within(actual, expected) {
-  let expected_start = expected?.start_line ?? 0
-  let expected_end = __edit_expected_end(expected)
+  const expected_start = expected?.start_line ?? 0
+  const expected_end = __edit_expected_end(expected)
   return actual.start_line >= expected_start && actual.end_line <= expected_end
 }
 
@@ -635,13 +635,13 @@ fn __edit_region_within(actual, expected) {
  * @errors: []
  */
 pub fn edit_strip_line_number_prefixes(text) {
-  let raw = text ?? ""
+  const raw = text ?? ""
   if raw == "" {
     return raw
   }
-  let lines = split(raw, "\n")
-  var non_empty_total = 0
-  var matching = 0
+  const lines = split(raw, "\n")
+  let non_empty_total = 0
+  let matching = 0
   for line in lines {
     if trim(line) == "" {
       continue
@@ -657,7 +657,7 @@ pub fn edit_strip_line_number_prefixes(text) {
   if matching * 100 / non_empty_total <= 60 {
     return raw
   }
-  var stripped = []
+  let stripped = []
   for line in lines {
     stripped = stripped + [regex_replace("^\\s*\\d+\\s*\\| ", "", line)]
   }
@@ -665,7 +665,7 @@ pub fn edit_strip_line_number_prefixes(text) {
 }
 
 fn __edit_count_tab_indent(lines) {
-  var total = 0
+  let total = 0
   for line in lines {
     if (line ?? "").starts_with("\t") {
       total = total + 1
@@ -675,9 +675,9 @@ fn __edit_count_tab_indent(lines) {
 }
 
 fn __edit_count_space_indent(lines) {
-  var total = 0
+  let total = 0
   for line in lines {
-    let raw = line ?? ""
+    const raw = line ?? ""
     if raw == "" || raw.starts_with("\t") {
       continue
     }
@@ -689,13 +689,13 @@ fn __edit_count_space_indent(lines) {
 }
 
 fn __edit_min_indent(lines) {
-  var smallest = -1
+  let smallest = -1
   for line in lines {
-    let raw = line ?? ""
+    const raw = line ?? ""
     if trim(raw) == "" {
       continue
     }
-    let leading = len(raw) - len(regex_replace("^[ \\t]+", "", raw))
+    const leading = len(raw) - len(regex_replace("^[ \\t]+", "", raw))
     if smallest == -1 || leading < smallest {
       smallest = leading
     }
@@ -704,7 +704,7 @@ fn __edit_min_indent(lines) {
 }
 
 fn __edit_count_blank_lines(lines) {
-  var total = 0
+  let total = 0
   for line in lines {
     if trim(line ?? "") == "" {
       total = total + 1
@@ -728,32 +728,32 @@ fn __edit_count_blank_lines(lines) {
  * @errors: []
  */
 pub fn edit_explain_whitespace_difference(needle, matched) {
-  let needle_text = needle ?? ""
-  let matched_text = matched ?? ""
+  const needle_text = needle ?? ""
+  const matched_text = matched ?? ""
   if needle_text == matched_text {
     return ""
   }
-  let needle_lines = split(needle_text, "\n")
-  let matched_lines = split(matched_text, "\n")
-  let needle_tabs = __edit_count_tab_indent(needle_lines)
-  let needle_spaces = __edit_count_space_indent(needle_lines)
-  let matched_tabs = __edit_count_tab_indent(matched_lines)
-  let matched_spaces = __edit_count_space_indent(matched_lines)
+  const needle_lines = split(needle_text, "\n")
+  const matched_lines = split(matched_text, "\n")
+  const needle_tabs = __edit_count_tab_indent(needle_lines)
+  const needle_spaces = __edit_count_space_indent(needle_lines)
+  const matched_tabs = __edit_count_tab_indent(matched_lines)
+  const matched_spaces = __edit_count_space_indent(matched_lines)
   if needle_tabs > 0 && matched_tabs == 0 && matched_spaces > 0 {
     return "your old_string used tabs but the file uses spaces"
   }
   if needle_spaces > 0 && matched_spaces == 0 && matched_tabs > 0 {
     return "your old_string used spaces but the file uses tabs"
   }
-  let needle_min = __edit_min_indent(needle_lines)
-  let matched_min = __edit_min_indent(matched_lines)
+  const needle_min = __edit_min_indent(needle_lines)
+  const matched_min = __edit_min_indent(matched_lines)
   if needle_min != matched_min && needle_min >= 0 && matched_min >= 0 {
     return "your old_string's base indent was ${needle_min} but the file's matched block starts at indent ${matched_min}"
   }
-  let needle_blanks = __edit_count_blank_lines(needle_lines)
-  let matched_blanks = __edit_count_blank_lines(matched_lines)
+  const needle_blanks = __edit_count_blank_lines(needle_lines)
+  const matched_blanks = __edit_count_blank_lines(matched_lines)
   if needle_blanks != matched_blanks {
-    let delta = matched_blanks - needle_blanks
+    const delta = matched_blanks - needle_blanks
     if delta > 0 {
       return "your old_string was missing ${delta} blank line(s) that the file has"
     }
@@ -779,21 +779,21 @@ pub fn edit_explain_whitespace_difference(needle, matched) {
  * @errors: []
  */
 pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
-  let opts = options ?? {}
-  let {min_old_lines = 10, min_keep_pct = 35} = opts ?? {}
-  let old_text = old_content ?? ""
-  let new_text = new_content ?? ""
-  let old_lines = len(split(old_text, "\n"))
-  let new_lines = len(split(new_text, "\n"))
-  let lazy_hits = __edit_lazy_match_count(new_text)
-  let provenance = {
+  const opts = options ?? {}
+  const {min_old_lines = 10, min_keep_pct = 35} = opts ?? {}
+  const old_text = old_content ?? ""
+  const new_text = new_content ?? ""
+  const old_lines = len(split(old_text, "\n"))
+  const new_lines = len(split(new_text, "\n"))
+  const lazy_hits = __edit_lazy_match_count(new_text)
+  const provenance = {
     module: "std/edit",
     helper: "edit_check_lazy_truncation",
     before_sha256: __edit_sha256(old_text),
     after_sha256: __edit_sha256(new_text),
     caller: opts?.provenance,
   }
-  let neutral = {
+  const neutral = {
     ok: true,
     lazy: false,
     error_code: nil,
@@ -806,7 +806,7 @@ pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
   if old_lines < min_old_lines {
     return neutral
   }
-  let threshold = old_lines * min_keep_pct / 100
+  const threshold = old_lines * min_keep_pct / 100
   if new_lines > threshold {
     return neutral
   }
@@ -833,11 +833,11 @@ pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
  * @errors: []
  */
 pub fn edit_validate_changed_regions(before, after, expected_regions, options = nil) {
-  let actual = edit_changed_regions(before ?? "", after ?? "")
-  let expected = expected_regions ?? []
-  var errors = []
+  const actual = edit_changed_regions(before ?? "", after ?? "")
+  const expected = expected_regions ?? []
+  let errors = []
   for region in actual {
-    var matched = false
+    let matched = false
     for expected_region in expected {
       if __edit_region_within(region, expected_region) {
         matched = true
@@ -905,9 +905,9 @@ pub fn edit_validate_changed_regions(before, after, expected_regions, options = 
  * @example: edit_apply_node({path: "src/lib.rs", query: query, replacement: "{ 42 }"})
  */
 pub fn edit_apply_node(params) {
-  let raw = hostlib_ast_apply_node(params ?? {})
-  let payload = raw ?? {}
-  let provenance = {
+  const raw = hostlib_ast_apply_node(params ?? {})
+  const payload = raw ?? {}
+  const provenance = {
     module: "std/edit",
     helper: "edit_apply_node",
     path: payload?.path,
@@ -977,9 +977,9 @@ pub fn edit_apply_node(params) {
  * @example: edit_insert_at_anchor({path: "src/lib.rs", query: q, position: "after", content: "fn beta() {}"})
  */
 pub fn edit_insert_at_anchor(params) {
-  let raw = hostlib_ast_insert_at_anchor(params ?? {})
-  let payload = raw ?? {}
-  let provenance = {
+  const raw = hostlib_ast_insert_at_anchor(params ?? {})
+  const payload = raw ?? {}
+  const provenance = {
     module: "std/edit",
     helper: "edit_insert_at_anchor",
     path: payload?.path,
@@ -1054,7 +1054,7 @@ pub fn edit_insert_at_anchor(params) {
  * @example: edit_batch_apply({paths: ["a.rs", "b.rs"], query: q, replacement: "{ 0 }"})
  */
 pub fn edit_batch_apply(params) {
-  let payload = hostlib_ast_batch_apply(params ?? {}) ?? {}
+  const payload = hostlib_ast_batch_apply(params ?? {}) ?? {}
   return payload
     .merge(
     {
@@ -1069,8 +1069,8 @@ fn __edit_hook_callable(value) {
 }
 
 fn __edit_lifecycle_hooks(options) {
-  let opts = options ?? {}
-  let nested = opts?.lifecycle ?? {}
+  const opts = options ?? {}
+  const nested = opts?.lifecycle ?? {}
   return {
     pre_apply: opts?.pre_apply ?? nested?.pre_apply,
     post_apply: opts?.post_apply ?? nested?.post_apply,
@@ -1080,7 +1080,7 @@ fn __edit_lifecycle_hooks(options) {
 }
 
 fn __edit_lifecycle_forward_options(options) {
-  let hooks = __edit_lifecycle_hooks(options)
+  const hooks = __edit_lifecycle_hooks(options)
   return {
     pre_apply: hooks.pre_apply,
     post_apply: hooks.post_apply,
@@ -1094,7 +1094,7 @@ fn __edit_lifecycle_rejection(kind, verdict) {
     return nil
   }
   if type_of(verdict) == "string" {
-    let reason = trim(verdict)
+    const reason = trim(verdict)
     if reason != "" {
       return {code: kind + "_rejected", reason: reason}
     }
@@ -1115,8 +1115,8 @@ fn __edit_lifecycle_rejection(kind, verdict) {
 }
 
 fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
-  let reason = rejection?.reason ?? (kind + " rejected the edit")
-  let code = rejection?.code ?? (kind + "_rejected")
+  const reason = rejection?.reason ?? (kind + " rejected the edit")
+  const code = rejection?.code ?? (kind + "_rejected")
   return (fields ?? {})
     .merge(
     {
@@ -1128,12 +1128,12 @@ fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
 }
 
 fn __edit_lifecycle_pre_apply(options, action) {
-  let hooks = __edit_lifecycle_hooks(options)
-  let request = (options ?? {}).merge({action: action})
+  const hooks = __edit_lifecycle_hooks(options)
+  const request = (options ?? {}).merge({action: action})
   if !__edit_hook_callable(hooks.pre_apply) {
     return {ok: true, request: request}
   }
-  let verdict = try {
+  const verdict = try {
     hooks.pre_apply(request)
   } catch {
     return {
@@ -1142,7 +1142,7 @@ fn __edit_lifecycle_pre_apply(options, action) {
       request: request,
     }
   }
-  let rejection = __edit_lifecycle_rejection("pre_apply", verdict)
+  const rejection = __edit_lifecycle_rejection("pre_apply", verdict)
   if rejection != nil {
     return {ok: false, rejection: rejection, verdict: verdict, request: request}
   }
@@ -1161,16 +1161,16 @@ fn __edit_lifecycle_pre_apply(options, action) {
 }
 
 fn __edit_lifecycle_write_policy(options, path, content, action) {
-  let hooks = __edit_lifecycle_hooks(options)
+  const hooks = __edit_lifecycle_hooks(options)
   if !__edit_hook_callable(hooks.write_policy) {
     return {ok: true}
   }
-  let verdict = try {
+  const verdict = try {
     hooks.write_policy(path, content, action)
   } catch {
     return {ok: false, rejection: {code: "write_policy_failed", reason: "write_policy hook failed"}}
   }
-  let rejection = __edit_lifecycle_rejection("write_policy", verdict)
+  const rejection = __edit_lifecycle_rejection("write_policy", verdict)
   if rejection != nil {
     return {ok: false, rejection: rejection, verdict: verdict}
   }
@@ -1182,16 +1182,16 @@ fn __edit_lifecycle_has_post_apply(options) {
 }
 
 fn __edit_lifecycle_post_apply(options, context) {
-  let hooks = __edit_lifecycle_hooks(options)
+  const hooks = __edit_lifecycle_hooks(options)
   if !__edit_hook_callable(hooks.post_apply) {
     return {ok: true, warnings: []}
   }
-  let verdict = try {
+  const verdict = try {
     hooks.post_apply(context)
   } catch {
     return {ok: false, rejection: {code: "post_apply_failed", reason: "post_apply hook failed"}, warnings: []}
   }
-  let rejection = __edit_lifecycle_rejection("post_apply", verdict)
+  const rejection = __edit_lifecycle_rejection("post_apply", verdict)
   if rejection != nil {
     return {ok: false, rejection: rejection, verdict: verdict, warnings: []}
   }
@@ -1202,15 +1202,15 @@ fn __edit_lifecycle_post_apply(options, context) {
 }
 
 fn __edit_lifecycle_snapshot(path, options) {
-  let session_id = "edit-lifecycle-" + uuid_v7()
-  let snapshot_id = "post-apply-" + uuid_v7()
-  var request = {session_id: session_id, scope_id: snapshot_id, paths: [path]}
+  const session_id = "edit-lifecycle-" + uuid_v7()
+  const snapshot_id = "post-apply-" + uuid_v7()
+  let request = {session_id: session_id, scope_id: snapshot_id, paths: [path]}
   if options?.snapshot_root != nil {
     request = request.merge({root: options.snapshot_root})
   } else if options?.root != nil {
     request = request.merge({root: options.root})
   }
-  let captured = try {
+  const captured = try {
     hostlib_fs_snapshot(request)
   } catch {
     nil
@@ -1230,17 +1230,17 @@ fn __edit_lifecycle_restore(snapshot, options, path) {
   if !(snapshot?.ok ?? false) {
     return {ok: false, error: "rollback snapshot was not available"}
   }
-  let restored = try {
+  const restored = try {
     hostlib_fs_restore(
       {session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id, paths: [path]},
     )
   } catch {
     nil
   }
-  let skipped = restored?.skipped_paths_with_reasons ?? []
-  let restore_ok = restored != nil && len(skipped) == 0
-  let hooks = __edit_lifecycle_hooks(options)
-  var hook_result = nil
+  const skipped = restored?.skipped_paths_with_reasons ?? []
+  const restore_ok = restored != nil && len(skipped) == 0
+  const hooks = __edit_lifecycle_hooks(options)
+  let hook_result = nil
   if __edit_hook_callable(hooks.on_rollback) {
     hook_result = try {
       hooks.on_rollback(path)
@@ -1292,11 +1292,11 @@ fn __edit_safe_patch_telemetry(result, hunks_count, failed_hunk_index) {
 }
 
 fn __edit_safe_patch_result(ctx, fields = nil) {
-  let extra = fields ?? {}
-  let result = extra?.result ?? ctx.result
-  let matched = result == "applied" || result == "no_op"
-  let failed_idx = extra?.failed_hunk_index
-  let bytes_written = extra?.bytes_written ?? 0
+  const extra = fields ?? {}
+  const result = extra?.result ?? ctx.result
+  const matched = result == "applied" || result == "no_op"
+  const failed_idx = extra?.failed_hunk_index
+  const bytes_written = extra?.bytes_written ?? 0
   if result == "applied" || result == "no_op" || result == "stale_base" || result == "hunk_conflict" {
     hostlib_fs_emit_safe_text_patch_result(
       {
@@ -1309,7 +1309,7 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
       },
     )
   }
-  let base = {
+  const base = {
     ok: matched,
     result: result,
     applied: matched,
@@ -1400,9 +1400,9 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
  * @example: edit_safe_text_patch({path: "src/lib.rs", expected_hash: "sha256:...", hunks: [{old_text: "x = 1", new_text: "x = 2"}]})
  */
 pub fn edit_safe_text_patch(params) {
-  var opts = params ?? {}
-  let pre_apply = __edit_lifecycle_pre_apply(opts, "safe_text_patch")
-  let initial_ctx = {
+  let opts = params ?? {}
+  const pre_apply = __edit_lifecycle_pre_apply(opts, "safe_text_patch")
+  const initial_ctx = {
     path: opts?.path ?? "",
     session_id: opts?.session_id,
     before_hash: __edit_sha256(""),
@@ -1420,14 +1420,14 @@ pub fn edit_safe_text_patch(params) {
     )
   }
   opts = pre_apply.request ?? opts
-  let {path = "", hunks = []} = opts ?? {}
-  let session_id = opts?.session_id
-  let {match_options = {}, dry_run = false} = opts ?? {}
-  let expected_hash = opts?.expected_hash
-  let read_response = hostlib_fs_read_text({path: path, session_id: session_id})
-  let current_content = read_response?.content ?? ""
-  let current_hash = read_response?.sha256 ?? __edit_sha256(current_content)
-  let ctx = {
+  const {path = "", hunks = []} = opts ?? {}
+  const session_id = opts?.session_id
+  const {match_options = {}, dry_run = false} = opts ?? {}
+  const expected_hash = opts?.expected_hash
+  const read_response = hostlib_fs_read_text({path: path, session_id: session_id})
+  const current_content = read_response?.content ?? ""
+  const current_hash = read_response?.sha256 ?? __edit_sha256(current_content)
+  const ctx = {
     path: path,
     session_id: session_id,
     before_hash: current_hash,
@@ -1454,16 +1454,16 @@ pub fn edit_safe_text_patch(params) {
       },
     )
   }
-  var working = current_content
-  var hunk_results = []
-  var idx = 0
+  let working = current_content
+  let hunk_results = []
+  let idx = 0
   while idx < len(hunks) {
-    let hunk = hunks[idx]
-    let hunk_opts = match_options.merge(hunk?.options ?? {})
-    let outcome = edit_apply_old_new_patch(working, hunk?.old_text, hunk?.new_text, hunk_opts)
+    const hunk = hunks[idx]
+    const hunk_opts = match_options.merge(hunk?.options ?? {})
+    const outcome = edit_apply_old_new_patch(working, hunk?.old_text, hunk?.new_text, hunk_opts)
     hunk_results = hunk_results + [outcome]
     if !outcome.ok {
-      let hunk_error_code = outcome?.error_code ?? "no_match"
+      const hunk_error_code = outcome?.error_code ?? "no_match"
       return __edit_safe_patch_result(
         ctx,
         {
@@ -1488,8 +1488,8 @@ pub fn edit_safe_text_patch(params) {
     idx = idx + 1
   }
   if dry_run {
-    let after_hash = __edit_sha256(working)
-    let result_kind = if current_content == working {
+    const after_hash = __edit_sha256(working)
+    const result_kind = if current_content == working {
       "no_op"
     } else {
       "applied"
@@ -1499,7 +1499,7 @@ pub fn edit_safe_text_patch(params) {
       {result: result_kind, after_sha256: after_hash, hunk_results: hunk_results, preview: working},
     )
   }
-  let policy = __edit_lifecycle_write_policy(opts, path, working, "safe_text_patch")
+  const policy = __edit_lifecycle_write_policy(opts, path, working, "safe_text_patch")
   if !policy.ok {
     return __edit_safe_patch_result(
       ctx,
@@ -1510,7 +1510,7 @@ pub fn edit_safe_text_patch(params) {
       ),
     )
   }
-  let rollback_snapshot = if __edit_lifecycle_has_post_apply(opts) {
+  const rollback_snapshot = if __edit_lifecycle_has_post_apply(opts) {
     __edit_lifecycle_snapshot(path, opts)
   } else {
     nil
@@ -1528,7 +1528,7 @@ pub fn edit_safe_text_patch(params) {
       ),
     )
   }
-  let commit = hostlib_fs_safe_text_patch(
+  const commit = hostlib_fs_safe_text_patch(
     {
       path: path,
       content: working,
@@ -1538,9 +1538,9 @@ pub fn edit_safe_text_patch(params) {
       overwrite: opts?.overwrite ?? true,
     },
   )
-  let commit_result = commit?.result ?? "applied"
-  let committed_hash = commit?.current_hash ?? current_hash
-  let committed_after = commit?.after_sha256 ?? current_hash
+  const commit_result = commit?.result ?? "applied"
+  const committed_hash = commit?.current_hash ?? current_hash
+  const committed_after = commit?.after_sha256 ?? current_hash
   if commit_result == "stale_base" {
     __edit_lifecycle_drop_snapshot(rollback_snapshot)
     return __edit_safe_patch_result(
@@ -1560,7 +1560,7 @@ pub fn edit_safe_text_patch(params) {
       },
     )
   }
-  let post = __edit_lifecycle_post_apply(
+  const post = __edit_lifecycle_post_apply(
     opts,
     {
       path: path,
@@ -1573,8 +1573,8 @@ pub fn edit_safe_text_patch(params) {
     },
   )
   if !post.ok {
-    let rollback = __edit_lifecycle_restore(rollback_snapshot, opts, path)
-    let rollback_hash = if rollback.ok {
+    const rollback = __edit_lifecycle_restore(rollback_snapshot, opts, path)
+    const rollback_hash = if rollback.ok {
       current_hash
     } else {
       committed_after
@@ -1635,11 +1635,11 @@ pub fn edit_safe_text_patch(params) {
  * @example: edit_rename_symbol({symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"}, new_name: "Gadget", scope: "workspace"})
  */
 pub fn edit_rename_symbol(params) {
-  let req = params ?? {}
-  let raw = hostlib_code_index_rename_symbol(req)
-  let payload = raw ?? {}
-  let result_tag = payload?.result ?? "no_match"
-  let provenance = {
+  const req = params ?? {}
+  const raw = hostlib_code_index_rename_symbol(req)
+  const payload = raw ?? {}
+  const result_tag = payload?.result ?? "no_match"
+  const provenance = {
     module: "std/edit",
     helper: "edit_rename_symbol",
     symbol: payload?.symbol,
@@ -1695,10 +1695,10 @@ pub fn edit_rename_symbol(params) {
  * @example: edit_dry_run({plan: [{op: "apply_node", path: "src/lib.rs", query: query, replacement: "{ 42 }"}]})
  */
 pub fn edit_dry_run(params) {
-  let plan = params?.plan ?? []
-  let raw = hostlib_ast_dry_run({plan: plan})
-  let payload = raw ?? {}
-  let summary = payload?.summary ?? {}
+  const plan = params?.plan ?? []
+  const raw = hostlib_ast_dry_run({plan: plan})
+  const payload = raw ?? {}
+  const summary = payload?.summary ?? {}
   return {
     ok: (payload?.result ?? "no_ops_applied") != "no_ops_applied",
     result: payload?.result ?? "no_ops_applied",
@@ -1753,14 +1753,14 @@ fn __edit_fast_apply_content_candidate(content, source) {
 }
 
 fn __edit_fast_apply_content(response) {
-  let data = response?.data
+  const data = response?.data
   if data?.content != nil {
     return __edit_fast_apply_content_candidate(data.content, "data.content")
   }
   if data?.updated_content != nil {
     return __edit_fast_apply_content_candidate(data.updated_content, "data.updated_content")
   }
-  let parsed = safe_parse(response?.text ?? "")
+  const parsed = safe_parse(response?.text ?? "")
   if parsed?.content != nil {
     return __edit_fast_apply_content_candidate(parsed.content, "text.json.content")
   }
@@ -1771,23 +1771,23 @@ fn __edit_fast_apply_content(response) {
 }
 
 fn __edit_fast_apply_validate(path, proposed, params) {
-  let opts = params ?? {}
-  let should_validate = opts?.validate_syntax ?? true
+  const opts = params ?? {}
+  const should_validate = opts?.validate_syntax ?? true
   if !should_validate {
     return {ok: true, skipped: true, reason: "disabled", errors: []}
   }
-  let raw = try {
+  const raw = try {
     hostlib_ast_parse_errors({path: path, content: proposed, language: opts?.language})
   }
   if is_err(raw) {
     return {ok: true, skipped: true, reason: to_string(unwrap_err(raw)), errors: []}
   }
-  let parsed = unwrap(raw)
-  let supported = parsed?.supported ?? true
+  const parsed = unwrap(raw)
+  const supported = parsed?.supported ?? true
   if !supported {
     return {ok: true, skipped: true, reason: "unsupported_language", errors: []}
   }
-  let had_errors = parsed?.had_errors ?? false
+  const had_errors = parsed?.had_errors ?? false
   return {
     ok: !had_errors,
     skipped: false,
@@ -1802,14 +1802,14 @@ fn __edit_fast_apply_validate(path, proposed, params) {
 }
 
 fn __edit_fast_apply_preview(path, before, after) {
-  let dry = edit_dry_run({plan: [{op: "safe_text_patch", path: path, old_text: before, new_text: after}]})
+  const dry = edit_dry_run({plan: [{op: "safe_text_patch", path: path, old_text: before, new_text: after}]})
   if dry.ok {
     return dry
   }
   if before != "" && before != after {
     return dry
   }
-  let stat = diff_summary(before, after)
+  const stat = diff_summary(before, after)
   return {
     ok: true,
     result: "ok",
@@ -1870,9 +1870,9 @@ fn __edit_fast_apply_telemetry(result, dry_run, validation_rejected) {
 }
 
 fn __edit_fast_apply_result(ctx, fields = nil) {
-  let extra = fields ?? {}
-  let {result = "applied", validation_rejected = 0} = extra ?? {}
-  let base = {
+  const extra = fields ?? {}
+  const {result = "applied", validation_rejected = 0} = extra ?? {}
+  const base = {
     ok: result == "applied" || result == "no_op",
     applied: result == "applied" || result == "no_op",
     result: result,
@@ -1926,10 +1926,10 @@ fn __edit_fast_apply_result(ctx, fields = nil) {
  * @example: edit_fast_apply({path: "src/lib.rs", intent: "Rename alpha to beta"})
  */
 pub fn edit_fast_apply(params) {
-  let opts = params ?? {}
-  let path = opts?.path ?? ""
-  let intent = opts?.intent ?? opts?.edit_intent ?? opts?.instruction ?? ""
-  let invalid_ctx = {path: path, before_hash: __edit_sha256(""), dry_run: opts?.dry_run ?? false, options: opts}
+  const opts = params ?? {}
+  const path = opts?.path ?? ""
+  const intent = opts?.intent ?? opts?.edit_intent ?? opts?.instruction ?? ""
+  const invalid_ctx = {path: path, before_hash: __edit_sha256(""), dry_run: opts?.dry_run ?? false, options: opts}
   if trim(path) == "" {
     return __edit_fast_apply_result(
       invalid_ctx,
@@ -1948,11 +1948,11 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  let read = hostlib_fs_read_text({path: path, session_id: opts?.session_id})
-  let before = read?.content ?? ""
-  let before_hash = read?.sha256 ?? __edit_sha256(before)
-  let ctx = {path: path, before_hash: before_hash, dry_run: opts?.dry_run ?? false, options: opts}
-  var llm_opts = opts?.llm_options ?? {}
+  const read = hostlib_fs_read_text({path: path, session_id: opts?.session_id})
+  const before = read?.content ?? ""
+  const before_hash = read?.sha256 ?? __edit_sha256(before)
+  const ctx = {path: path, before_hash: before_hash, dry_run: opts?.dry_run ?? false, options: opts}
+  let llm_opts = opts?.llm_options ?? {}
   if opts?.max_tokens != nil {
     llm_opts = llm_opts.merge({max_tokens: opts.max_tokens})
   }
@@ -1970,7 +1970,7 @@ pub fn edit_fast_apply(params) {
       session_id: opts?.session_id ?? llm_opts?.session_id,
     },
   )
-  let response_result = try {
+  const response_result = try {
     llm_call(
       __edit_fast_apply_prompt(path, before_hash, intent, before),
       __edit_fast_apply_system(),
@@ -1978,8 +1978,8 @@ pub fn edit_fast_apply(params) {
     )
   }
   if is_err(response_result) {
-    let err = unwrap_err(response_result)
-    let result = if err?.category == "schema_validation" {
+    const err = unwrap_err(response_result)
+    const result = if err?.category == "schema_validation" {
       "llm_invalid_output"
     } else {
       "llm_call_failed"
@@ -1992,8 +1992,8 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  let response = unwrap(response_result)
-  let extracted = __edit_fast_apply_content(response)
+  const response = unwrap(response_result)
+  const extracted = __edit_fast_apply_content(response)
   if !extracted.ok {
     return __edit_fast_apply_result(
       ctx,
@@ -2004,8 +2004,8 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  let proposed = extracted.content
-  let lazy = edit_check_lazy_truncation(before, proposed, opts?.lazy_truncation)
+  const proposed = extracted.content
+  const lazy = edit_check_lazy_truncation(before, proposed, opts?.lazy_truncation)
   if !lazy.ok {
     return __edit_fast_apply_result(
       ctx,
@@ -2016,7 +2016,7 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  let validation = __edit_fast_apply_validate(path, proposed, opts)
+  const validation = __edit_fast_apply_validate(path, proposed, opts)
   if !validation.ok {
     return __edit_fast_apply_result(
       ctx,
@@ -2029,7 +2029,7 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  let preview = __edit_fast_apply_preview(path, before, proposed)
+  const preview = __edit_fast_apply_preview(path, before, proposed)
   if !preview.ok {
     return __edit_fast_apply_result(
       ctx,
@@ -2042,8 +2042,8 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  let diff = preview.per_file_unified_diff
-  let result_kind = if before == proposed {
+  const diff = preview.per_file_unified_diff
+  const result_kind = if before == proposed {
     "no_op"
   } else {
     "applied"
@@ -2062,7 +2062,7 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  let commit = edit_safe_text_patch(
+  const commit = edit_safe_text_patch(
     {
       path: path,
       expected_hash: before_hash,
@@ -2136,8 +2136,8 @@ pub fn fast_apply(path, edit_intent, options = nil) {
  * @example: edit_capabilities({language: "yaml"})
  */
 pub fn edit_capabilities(params = nil) {
-  let raw = hostlib_ast_capabilities(params ?? {})
-  let payload = raw ?? {}
+  const raw = hostlib_ast_capabilities(params ?? {})
+  const payload = raw ?? {}
   return {
     ok: (payload?.result ?? "") == "ok",
     result: payload?.result ?? "ok",
@@ -2179,24 +2179,24 @@ pub fn edit_capabilities(params = nil) {
 // -------------------------------------------------------------------------------------------------
 
 fn __refactor_normalize_lang(name) {
-  let n = lowercase(trim(name ?? ""))
-  let alias = {golang: "go", js: "javascript", py: "python", rb: "ruby", rs: "rust", ts: "typescript"}
+  const n = lowercase(trim(name ?? ""))
+  const alias = {golang: "go", js: "javascript", py: "python", rb: "ruby", rs: "rust", ts: "typescript"}
   return alias.get(n, n)
 }
 
 fn __refactor_detect_language(params) {
-  let hint = params?.language
+  const hint = params?.language
   if hint != nil && hint != "" {
     return __refactor_normalize_lang(hint)
   }
-  let path = params?.path ?? ""
-  let segments = split(path, "/")
-  let filename = if len(segments) > 0 {
+  const path = params?.path ?? ""
+  const segments = split(path, "/")
+  const filename = if len(segments) > 0 {
     segments[-1]
   } else {
     path
   }
-  let dotted = split(filename, ".")
+  const dotted = split(filename, ".")
   if len(dotted) < 2 {
     return ""
   }
@@ -2213,9 +2213,9 @@ fn __refactor_member(list, item) {
 }
 
 fn __refactor_touched_paths(ops) {
-  var seen = []
+  let seen = []
   for op in ops ?? [] {
-    let path = op?.path
+    const path = op?.path
     if path != nil && !__refactor_member(seen, path) {
       seen = seen + [path]
     }
@@ -2227,28 +2227,28 @@ fn __refactor_common_root(paths) {
   if len(paths) == 0 {
     return "."
   }
-  let first = split(paths[0], "/")
-  var common = if len(first) > 0 {
+  const first = split(paths[0], "/")
+  let common = if len(first) > 0 {
     first[:len(first) - 1]
   } else {
     first
   }
   for p in paths {
-    let segs = split(p, "/")
-    let dir = if len(segs) > 0 {
+    const segs = split(p, "/")
+    const dir = if len(segs) > 0 {
       segs[:len(segs) - 1]
     } else {
       segs
     }
-    var prefix = []
-    var idx = 0
+    let prefix = []
+    let idx = 0
     while idx < len(common) && idx < len(dir) && common[idx] == dir[idx] {
       prefix = prefix + [common[idx]]
       idx = idx + 1
     }
     common = prefix
   }
-  let root = join(common, "/")
+  const root = join(common, "/")
   if root == "" {
     return "."
   }
@@ -2260,13 +2260,13 @@ fn __refactor_new_session(operation) {
 }
 
 fn __refactor_leading_ws(line) {
-  let raw = line ?? ""
-  let body = regex_replace("^[ \\t]+", "", raw)
+  const raw = line ?? ""
+  const body = regex_replace("^[ \\t]+", "", raw)
   return raw.substring(0, len(raw) - len(body))
 }
 
 fn __refactor_result(operation, language, fields) {
-  let base = {
+  const base = {
     ok: false,
     applied: false,
     result: "unsupported",
@@ -2319,10 +2319,10 @@ fn __refactor_conflict(operation, language, conflicts) {
 }
 
 fn __refactor_exec_op(op, session_id, before_map) {
-  let kind = op?.kind
+  const kind = op?.kind
   if kind == "content" {
-    let before = before_map.get(op.path, "")
-    let res = hostlib_fs_safe_text_patch(
+    const before = before_map.get(op.path, "")
+    const res = hostlib_fs_safe_text_patch(
       {
         path: op.path,
         content: op.after,
@@ -2332,7 +2332,7 @@ fn __refactor_exec_op(op, session_id, before_map) {
         overwrite: true,
       },
     )
-    let tag = res?.result ?? "applied"
+    const tag = res?.result ?? "applied"
     return {
       ok: tag == "applied",
       result: tag,
@@ -2340,7 +2340,7 @@ fn __refactor_exec_op(op, session_id, before_map) {
     }
   }
   if kind == "node_apply" {
-    let res = edit_apply_node((op?.params ?? {}).merge({session_id: session_id}))
+    const res = edit_apply_node((op?.params ?? {}).merge({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -2348,7 +2348,7 @@ fn __refactor_exec_op(op, session_id, before_map) {
     }
   }
   if kind == "node_insert" {
-    let res = edit_insert_at_anchor((op?.params ?? {}).merge({session_id: session_id}))
+    const res = edit_insert_at_anchor((op?.params ?? {}).merge({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -2369,9 +2369,9 @@ fn __refactor_exec_op(op, session_id, before_map) {
  * Not part of the public API surface.
  */
 fn __refactor_run(operation, language, ops, params, warnings) {
-  let p = params ?? {}
-  let dry_run = p?.dry_run ?? false
-  let warns = warnings ?? []
+  const p = params ?? {}
+  const dry_run = p?.dry_run ?? false
+  const warns = warnings ?? []
   if len(ops) == 0 {
     return __refactor_result(
       operation,
@@ -2379,10 +2379,10 @@ fn __refactor_run(operation, language, ops, params, warnings) {
       {ok: true, applied: true, result: "no_op", dry_run: dry_run, warnings: warns},
     )
   }
-  let touched = __refactor_touched_paths(ops)
-  let caller_session = p?.session_id
-  let manage_session = dry_run || caller_session == nil
-  let session_id = if manage_session {
+  const touched = __refactor_touched_paths(ops)
+  const caller_session = p?.session_id
+  const manage_session = dry_run || caller_session == nil
+  const session_id = if manage_session {
     __refactor_new_session(operation)
   } else {
     caller_session
@@ -2401,32 +2401,32 @@ fn __refactor_run(operation, language, ops, params, warnings) {
       )
     }
   }
-  var before_map = {}
+  let before_map = {}
   for path in touched {
-    let r = hostlib_fs_read_text({path: path, session_id: session_id})
+    const r = hostlib_fs_read_text({path: path, session_id: session_id})
     before_map = before_map.merge({[path]: r?.content ?? ""})
   }
-  var conflicts = []
-  var ok_all = true
+  let conflicts = []
+  let ok_all = true
   for op in ops {
-    let outcome = __refactor_exec_op(op, session_id, before_map)
+    const outcome = __refactor_exec_op(op, session_id, before_map)
     if !outcome.ok {
       conflicts = conflicts + [outcome.conflict]
       ok_all = false
       break
     }
   }
-  var diffs = []
-  var changed = []
-  var added = 0
-  var removed = 0
+  let diffs = []
+  let changed = []
+  let added = 0
+  let removed = 0
   if ok_all {
     for path in touched {
-      let before = before_map.get(path, "")
-      let after_read = hostlib_fs_read_text({path: path, session_id: session_id})
-      let after = after_read?.content ?? before
+      const before = before_map.get(path, "")
+      const after_read = hostlib_fs_read_text({path: path, session_id: session_id})
+      const after = after_read?.content ?? before
       if after != before {
-        let stat = diff_summary(before, after)
+        const stat = diff_summary(before, after)
         changed = changed + [path]
         added = added + stat.insertions
         removed = removed + stat.deletions
@@ -2449,7 +2449,7 @@ fn __refactor_run(operation, language, ops, params, warnings) {
       hostlib_fs_commit_staged({session_id: session_id})
     }
   }
-  let result_tag = if !ok_all {
+  const result_tag = if !ok_all {
     "conflict"
   } else if len(changed) == 0 {
     "no_op"
@@ -2480,7 +2480,7 @@ fn __refactor_run(operation, language, ops, params, warnings) {
 }
 
 fn __refactor_var_decl_syntax(language) {
-  let table = {
+  const table = {
     go: {kw: "", assign: " := ", term: ""},
     javascript: {kw: "const ", assign: " = ", term: ";"},
     jsx: {kw: "const ", assign: " = ", term: ";"},
@@ -2518,9 +2518,9 @@ fn __refactor_var_decl_syntax(language) {
  * @example: edit_extract_variable({path: "src/lib.rs", range: {start_line: 4, start_col: 13, end_line: 4, end_col: 24}, new_name: "total"})
  */
 pub fn edit_extract_variable(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let syntax = __refactor_var_decl_syntax(language)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const syntax = __refactor_var_decl_syntax(language)
   if syntax == nil {
     return __refactor_unsupported(
       "extract_variable",
@@ -2528,13 +2528,13 @@ pub fn edit_extract_variable(params) {
       "extract_variable has no local-declaration form for language `" + language + "`",
     )
   }
-  let {path = "", new_name = "", range = {}} = p ?? {}
+  const {path = "", new_name = "", range = {}} = p ?? {}
   if path == "" || new_name == "" {
     return __refactor_invalid("extract_variable", language, "`path` and `new_name` are required")
   }
-  let start_line = range?.start_line
-  let {end_line = start_line, start_col = 0} = range ?? {}
-  let end_col = range?.end_col
+  const start_line = range?.start_line
+  const {end_line = start_line, start_col = 0} = range ?? {}
+  const end_col = range?.end_col
   if start_line == nil || end_col == nil {
     return __refactor_invalid(
       "extract_variable",
@@ -2549,21 +2549,21 @@ pub fn edit_extract_variable(params) {
       "multi-line ranges are not supported; select an expression on one line",
     )
   }
-  let read = hostlib_fs_read_text({path: path, session_id: p?.session_id})
-  let content = read?.content ?? ""
-  let lines = split(content, "\n")
+  const read = hostlib_fs_read_text({path: path, session_id: p?.session_id})
+  const content = read?.content ?? ""
+  const lines = split(content, "\n")
   if start_line < 0 || start_line >= len(lines) {
     return __refactor_invalid("extract_variable", language, "start_line is outside the file")
   }
-  let line = lines[start_line]
-  let expr = line.substring(start_col, end_col)
+  const line = lines[start_line]
+  const expr = line.substring(start_col, end_col)
   if trim(expr) == "" {
     return __refactor_invalid("extract_variable", language, "selected range is empty or whitespace")
   }
-  let indent = __refactor_leading_ws(line)
-  let decl = indent + syntax.kw + new_name + syntax.assign + trim(expr) + syntax.term
-  let replaced_line = line.substring(0, start_col) + new_name + line.substring(end_col)
-  var new_lines = if start_line > 0 {
+  const indent = __refactor_leading_ws(line)
+  const decl = indent + syntax.kw + new_name + syntax.assign + trim(expr) + syntax.term
+  const replaced_line = line.substring(0, start_col) + new_name + line.substring(end_col)
+  let new_lines = if start_line > 0 {
     lines[:start_line]
   } else {
     []
@@ -2572,7 +2572,7 @@ pub fn edit_extract_variable(params) {
   if start_line + 1 < len(lines) {
     new_lines = new_lines + lines[start_line + 1:]
   }
-  let after = join(new_lines, "\n")
+  const after = join(new_lines, "\n")
   return __refactor_run("extract_variable", language, [{kind: "content", path: path, after: after}], p, [])
 }
 
@@ -2589,7 +2589,7 @@ pub fn edit_extract_variable(params) {
  * leading `: `, so `ret_prefix` re-adds it.
  */
 fn __refactor_lang_spec(language) {
-  let table = {
+  const table = {
     go: {
       fn_node: "function_declaration",
       params_node: "parameter_list",
@@ -2658,7 +2658,7 @@ fn __refactor_lang_spec(language) {
 }
 
 fn __refactor_symbol_name(p) {
-  let s = p?.symbol
+  const s = p?.symbol
   if type_of(s) == "dict" {
     return s?.name ?? ""
   }
@@ -2669,7 +2669,7 @@ fn __refactor_symbol_name(p) {
 }
 
 fn __refactor_paren_inner(s) {
-  let raw = s ?? ""
+  const raw = s ?? ""
   if len(raw) < 2 {
     return ""
   }
@@ -2677,10 +2677,10 @@ fn __refactor_paren_inner(s) {
 }
 
 fn __refactor_split_top_level(text) {
-  var segs = []
-  var depth = 0
-  var quote = ""
-  var cur = ""
+  let segs = []
+  let depth = 0
+  let quote = ""
+  let cur = ""
   for c in (text ?? "").chars() {
     if quote != "" {
       cur = cur + c
@@ -2712,14 +2712,14 @@ fn __refactor_split_top_level(text) {
 }
 
 fn __refactor_insert_at(list, index, item) {
-  let n = len(list)
-  let idx = max(0, min(index, n))
-  let head = if idx > 0 {
+  const n = len(list)
+  const idx = max(0, min(index, n))
+  const head = if idx > 0 {
     list[:idx]
   } else {
     []
   }
-  let tail = if idx < n {
+  const tail = if idx < n {
     list[idx:]
   } else {
     []
@@ -2756,7 +2756,7 @@ fn __refactor_probe(query, path, session_id) {
 }
 
 fn __refactor_read_def_params(spec, path, fn_name, session_id) {
-  let r = edit_apply_node(
+  const r = edit_apply_node(
     {
       path: path,
       query: __refactor_def_query(spec, fn_name),
@@ -2770,17 +2770,17 @@ fn __refactor_read_def_params(spec, path, fn_name, session_id) {
   if r.result != "applied" {
     return {ok: false, result: r.result, inner: "", params: []}
   }
-  let original = if len(r.edits) > 0 {
+  const original = if len(r.edits) > 0 {
     r.edits[0].original
   } else {
     "()"
   }
-  let inner = __refactor_paren_inner(original)
+  const inner = __refactor_paren_inner(original)
   return {ok: true, result: "applied", inner: inner, params: __refactor_split_top_level(inner)}
 }
 
 fn __refactor_call_sites(spec, path, fn_name, session_id) {
-  let r = __refactor_probe(__refactor_call_query(spec, fn_name), path, session_id)
+  const r = __refactor_probe(__refactor_call_query(spec, fn_name), path, session_id)
   if r.result == "applied" {
     return {count: r.match_count, originals: r.edits.map({ e -> e.original })}
   }
@@ -2835,9 +2835,9 @@ fn __refactor_def_op(spec, path, fn_name, new_inner) {
  * @example: edit_change_signature({path: "src/lib.rs", symbol: {name: "add"}, new_params: "a: i64, b: i64, c: i64", callsite_strategy: "strict"})
  */
 pub fn edit_change_signature(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let spec = __refactor_lang_spec(language)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const spec = __refactor_lang_spec(language)
   if spec == nil {
     return __refactor_unsupported(
       "change_signature",
@@ -2845,9 +2845,9 @@ pub fn edit_change_signature(params) {
       "no signature grammar for language `" + language + "`",
     )
   }
-  let path = p?.path ?? ""
-  let fn_name = __refactor_symbol_name(p)
-  let new_params = p?.new_params
+  const path = p?.path ?? ""
+  const fn_name = __refactor_symbol_name(p)
+  const new_params = p?.new_params
   if path == "" || fn_name == "" || new_params == nil {
     return __refactor_invalid(
       "change_signature",
@@ -2855,14 +2855,14 @@ pub fn edit_change_signature(params) {
       "`path`, `symbol`/`name`, and `new_params` are required",
     )
   }
-  let strategy = p?.callsite_strategy ?? "strict"
-  let probe_session = if p?.dry_run ?? false {
+  const strategy = p?.callsite_strategy ?? "strict"
+  const probe_session = if p?.dry_run ?? false {
     nil
   } else {
     p?.session_id
   }
-  let def_op = __refactor_def_op(spec, path, fn_name, new_params)
-  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const def_op = __refactor_def_op(spec, path, fn_name, new_params)
+  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
   if strategy == "strict" {
     if calls.count > 0 {
       return __refactor_conflict(
@@ -2882,7 +2882,7 @@ pub fn edit_change_signature(params) {
     return __refactor_run("change_signature", language, [def_op], p, [])
   }
   if strategy == "manual" {
-    let warns = if calls.count > 0 {
+    const warns = if calls.count > 0 {
       [
         {
           code: "call_sites_unchanged",
@@ -2895,7 +2895,7 @@ pub fn edit_change_signature(params) {
     return __refactor_run("change_signature", language, [def_op], p, warns)
   }
   if strategy == "default_fill" {
-    let fill = p?.fill
+    const fill = p?.fill
     if fill == nil {
       return __refactor_invalid(
         "change_signature",
@@ -2903,11 +2903,11 @@ pub fn edit_change_signature(params) {
         "callsite_strategy `default_fill` requires `fill` (text appended to each call's arguments)",
       )
     }
-    var ops = [def_op]
-    var i = 0
+    let ops = [def_op]
+    let i = 0
     while i < calls.count {
-      let inner = __refactor_paren_inner(calls.originals[i])
-      let new_args = if trim(inner) == "" {
+      const inner = __refactor_paren_inner(calls.originals[i])
+      const new_args = if trim(inner) == "" {
         fill
       } else {
         inner + ", " + fill
@@ -2941,9 +2941,9 @@ pub fn edit_change_signature(params) {
  * @example: edit_add_parameter({path: "src/lib.rs", symbol: {name: "add"}, param: "c: i64", default: "0"})
  */
 pub fn edit_add_parameter(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let spec = __refactor_lang_spec(language)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const spec = __refactor_lang_spec(language)
   if spec == nil {
     return __refactor_unsupported(
       "add_parameter",
@@ -2951,18 +2951,18 @@ pub fn edit_add_parameter(params) {
       "no signature grammar for language `" + language + "`",
     )
   }
-  let path = p?.path ?? ""
-  let fn_name = __refactor_symbol_name(p)
-  let param = p?.param
+  const path = p?.path ?? ""
+  const fn_name = __refactor_symbol_name(p)
+  const param = p?.param
   if path == "" || fn_name == "" || param == nil || param == "" {
     return __refactor_invalid("add_parameter", language, "`path`, `symbol`/`name`, and `param` are required")
   }
-  let probe_session = if p?.dry_run ?? false {
+  const probe_session = if p?.dry_run ?? false {
     nil
   } else {
     p?.session_id
   }
-  let def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  const def = __refactor_read_def_params(spec, path, fn_name, probe_session)
   if !def.ok {
     return __refactor_conflict(
       "add_parameter",
@@ -2970,14 +2970,14 @@ pub fn edit_add_parameter(params) {
       [{code: def.result, message: "could not locate definition of `" + fn_name + "`", path: path}],
     )
   }
-  let index = p?.index ?? len(def.params)
-  let new_inner = join(__refactor_insert_at(def.params, index, param), ", ")
-  let def_op = __refactor_def_op(spec, path, fn_name, new_inner)
-  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const index = p?.index ?? len(def.params)
+  const new_inner = join(__refactor_insert_at(def.params, index, param), ", ")
+  const def_op = __refactor_def_op(spec, path, fn_name, new_inner)
+  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
   if calls.count == 0 {
     return __refactor_run("add_parameter", language, [def_op], p, [])
   }
-  let strategy = p?.callsite_strategy ?? "default_fill"
+  const strategy = p?.callsite_strategy ?? "default_fill"
   if strategy == "strict" {
     return __refactor_conflict(
       "add_parameter",
@@ -2993,7 +2993,7 @@ pub fn edit_add_parameter(params) {
       ],
     )
   }
-  let default_val = p?.default
+  const default_val = p?.default
   if default_val == nil {
     return __refactor_invalid(
       "add_parameter",
@@ -3001,11 +3001,11 @@ pub fn edit_add_parameter(params) {
       "callsite_strategy `default_fill` requires `default` (value inserted at each call site)",
     )
   }
-  var ops = [def_op]
-  var i = 0
+  let ops = [def_op]
+  let i = 0
   while i < calls.count {
-    let arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
-    let new_args = join(__refactor_insert_at(arg_list, index, default_val), ", ")
+    const arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
+    const new_args = join(__refactor_insert_at(arg_list, index, default_val), ", ")
     ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
     i = i + 1
   }
@@ -3027,9 +3027,9 @@ pub fn edit_add_parameter(params) {
  * @example: edit_reorder_parameters({path: "src/lib.rs", symbol: {name: "add"}, order: [1, 0]})
  */
 pub fn edit_reorder_parameters(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let spec = __refactor_lang_spec(language)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const spec = __refactor_lang_spec(language)
   if spec == nil {
     return __refactor_unsupported(
       "reorder_parameters",
@@ -3037,9 +3037,9 @@ pub fn edit_reorder_parameters(params) {
       "no signature grammar for language `" + language + "`",
     )
   }
-  let path = p?.path ?? ""
-  let fn_name = __refactor_symbol_name(p)
-  let order = p?.order
+  const path = p?.path ?? ""
+  const fn_name = __refactor_symbol_name(p)
+  const order = p?.order
   if path == "" || fn_name == "" || order == nil {
     return __refactor_invalid(
       "reorder_parameters",
@@ -3047,12 +3047,12 @@ pub fn edit_reorder_parameters(params) {
       "`path`, `symbol`/`name`, and `order` are required",
     )
   }
-  let probe_session = if p?.dry_run ?? false {
+  const probe_session = if p?.dry_run ?? false {
     nil
   } else {
     p?.session_id
   }
-  let def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  const def = __refactor_read_def_params(spec, path, fn_name, probe_session)
   if !def.ok {
     return __refactor_conflict(
       "reorder_parameters",
@@ -3060,7 +3060,7 @@ pub fn edit_reorder_parameters(params) {
       [{code: def.result, message: "could not locate definition of `" + fn_name + "`", path: path}],
     )
   }
-  let arity = len(def.params)
+  const arity = len(def.params)
   if len(order) != arity {
     return __refactor_invalid(
       "reorder_parameters",
@@ -3077,12 +3077,12 @@ pub fn edit_reorder_parameters(params) {
       )
     }
   }
-  let new_inner = join(order.map({ oi -> def.params[oi] }), ", ")
-  var ops = [__refactor_def_op(spec, path, fn_name, new_inner)]
-  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
-  var i = 0
+  const new_inner = join(order.map({ oi -> def.params[oi] }), ", ")
+  let ops = [__refactor_def_op(spec, path, fn_name, new_inner)]
+  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  let i = 0
   while i < calls.count {
-    let arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
+    const arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
     if len(arg_list) != arity {
       return __refactor_conflict(
         "reorder_parameters",
@@ -3099,7 +3099,7 @@ pub fn edit_reorder_parameters(params) {
         ],
       )
     }
-    let new_args = join(order.map({ oi -> arg_list[oi] }), ", ")
+    const new_args = join(order.map({ oi -> arg_list[oi] }), ", ")
     ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
     i = i + 1
   }
@@ -3123,9 +3123,9 @@ pub fn edit_reorder_parameters(params) {
  * @example: edit_change_return_type({path: "src/lib.rs", symbol: {name: "add"}, new_type: "i32"})
  */
 pub fn edit_change_return_type(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let spec = __refactor_lang_spec(language)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const spec = __refactor_lang_spec(language)
   if spec == nil || spec.ret_field == nil {
     return __refactor_unsupported(
       "change_return_type",
@@ -3133,9 +3133,9 @@ pub fn edit_change_return_type(params) {
       "language `" + language + "` has no return-type annotation to rewrite",
     )
   }
-  let path = p?.path ?? ""
-  let fn_name = __refactor_symbol_name(p)
-  let new_type = p?.new_type
+  const path = p?.path ?? ""
+  const fn_name = __refactor_symbol_name(p)
+  const new_type = p?.new_type
   if path == "" || fn_name == "" || new_type == nil || new_type == "" {
     return __refactor_invalid(
       "change_return_type",
@@ -3143,22 +3143,22 @@ pub fn edit_change_return_type(params) {
       "`path`, `symbol`/`name`, and `new_type` are required",
     )
   }
-  let probe_session = if p?.dry_run ?? false {
+  const probe_session = if p?.dry_run ?? false {
     nil
   } else {
     p?.session_id
   }
-  let query = "(" + spec.fn_node + " name: (identifier) @__n " + spec.ret_field + ": " + spec.ret_node
+  const query = "(" + spec.fn_node + " name: (identifier) @__n " + spec.ret_field + ": " + spec.ret_node
     + " @target (#eq? @__n \""
     + fn_name
     + "\"))"
-  let op = {
+  const op = {
     kind: "node_apply",
     path: path,
     params: {path: path, query: query, replacement: spec.ret_prefix + new_type, select: "unique"},
   }
-  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
-  let warns = if calls.count > 0 {
+  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const warns = if calls.count > 0 {
     [
       {
         code: "callers_not_type_checked",
@@ -3174,7 +3174,7 @@ pub fn edit_change_return_type(params) {
 
 /** --- extract_function ------------------------------------------------------- */
 fn __refactor_fn_synth_kind(language) {
-  let table = {
+  const table = {
     javascript: "brace",
     jsx: "brace",
     python: "python",
@@ -3186,13 +3186,13 @@ fn __refactor_fn_synth_kind(language) {
 }
 
 fn __refactor_min_indent(lines) {
-  var smallest = -1
+  let smallest = -1
   for line in lines {
     if trim(line ?? "") == "" {
       continue
     }
-    let body = regex_replace("^[ \\t]+", "", line)
-    let n = len(line) - len(body)
+    const body = regex_replace("^[ \\t]+", "", line)
+    const n = len(line) - len(body)
     if smallest == -1 || n < smallest {
       smallest = n
     }
@@ -3204,7 +3204,7 @@ fn __refactor_min_indent(lines) {
 }
 
 fn __refactor_strip_n(line, n) {
-  let raw = line ?? ""
+  const raw = line ?? ""
   if len(raw) >= n {
     return raw.substring(n)
   }
@@ -3225,11 +3225,11 @@ fn __refactor_indent_lines(lines, prefix) {
 }
 
 fn __refactor_undef_names(src, language) {
-  let r = hostlib_ast_undefined_names({content: src, language: language})
+  const r = hostlib_ast_undefined_names({content: src, language: language})
   if !(r?.supported ?? false) {
     return []
   }
-  var names = []
+  let names = []
   for d in r?.diagnostics ?? [] {
     if (d?.kind ?? "identifier") == "identifier" && !__refactor_member(names, d.name) {
       names = names + [d.name]
@@ -3239,7 +3239,7 @@ fn __refactor_undef_names(src, language) {
 }
 
 fn __refactor_enclosing_fn(symbols, start_line, end_line) {
-  var best = nil
+  let best = nil
   for sym in symbols ?? [] {
     if sym.kind != "function" || sym.container != nil {
       continue
@@ -3254,7 +3254,7 @@ fn __refactor_enclosing_fn(symbols, start_line, end_line) {
 }
 
 fn __refactor_synth_fn(kind, name, params, body_lines) {
-  let signature = name + "(" + join(params, ", ") + ")"
+  const signature = name + "(" + join(params, ", ") + ")"
   if kind == "python" {
     return ["def " + signature + ":"] + __refactor_indent_lines(body_lines, "    ")
   }
@@ -3302,9 +3302,9 @@ fn __refactor_wrap_probe(kind, body_lines) {
  * @example: edit_extract_function({path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
  */
 pub fn edit_extract_function(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let kind = __refactor_fn_synth_kind(language)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const kind = __refactor_fn_synth_kind(language)
   if kind == nil {
     return __refactor_unsupported(
       "extract_function",
@@ -3312,9 +3312,9 @@ pub fn edit_extract_function(params) {
       "extract_function supports python/javascript/jsx/typescript/tsx/ruby",
     )
   }
-  let {path = "", new_name = "", range = {}} = p ?? {}
-  let start_line = range?.start_line
-  let end_line = range?.end_line ?? start_line
+  const {path = "", new_name = "", range = {}} = p ?? {}
+  const start_line = range?.start_line
+  const end_line = range?.end_line ?? start_line
   if path == "" || new_name == "" || start_line == nil || end_line == nil {
     return __refactor_invalid(
       "extract_function",
@@ -3322,22 +3322,22 @@ pub fn edit_extract_function(params) {
       "`path`, `new_name`, and `range`{start_line, end_line} are required",
     )
   }
-  let probe_session = if p?.dry_run ?? false {
+  const probe_session = if p?.dry_run ?? false {
     nil
   } else {
     p?.session_id
   }
-  let read = hostlib_fs_read_text({path: path, session_id: probe_session})
-  let content = read?.content ?? ""
-  let lines = split(content, "\n")
+  const read = hostlib_fs_read_text({path: path, session_id: probe_session})
+  const content = read?.content ?? ""
+  const lines = split(content, "\n")
   if start_line < 0 || end_line >= len(lines) || end_line < start_line {
     return __refactor_invalid("extract_function", language, "`range` is outside the file")
   }
-  let block_lines = lines[start_line:end_line + 1]
-  let dedent = __refactor_min_indent(block_lines)
-  let dedented = block_lines.map({ l -> __refactor_strip_n(l, dedent) })
-  let symbols = hostlib_ast_symbols({path: path, language: language})?.symbols ?? []
-  let enclosing = __refactor_enclosing_fn(symbols, start_line, end_line)
+  const block_lines = lines[start_line:end_line + 1]
+  const dedent = __refactor_min_indent(block_lines)
+  const dedented = block_lines.map({ l -> __refactor_strip_n(l, dedent) })
+  const symbols = hostlib_ast_symbols({path: path, language: language})?.symbols ?? []
+  const enclosing = __refactor_enclosing_fn(symbols, start_line, end_line)
   if enclosing == nil {
     return __refactor_result(
       "extract_function",
@@ -3349,39 +3349,39 @@ pub fn edit_extract_function(params) {
       },
     )
   }
-  let block_undef = __refactor_undef_names(__refactor_wrap_probe(kind, dedented), language)
-  let enclosing_lines = lines[enclosing.start_row:enclosing.end_row + 1]
-  let enclosing_dedent = __refactor_min_indent(enclosing_lines)
-  let enclosing_src = join(enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }), "\n")
-  let enclosing_undef = __refactor_undef_names(enclosing_src, language)
-  var captures = []
+  const block_undef = __refactor_undef_names(__refactor_wrap_probe(kind, dedented), language)
+  const enclosing_lines = lines[enclosing.start_row:enclosing.end_row + 1]
+  const enclosing_dedent = __refactor_min_indent(enclosing_lines)
+  const enclosing_src = join(enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }), "\n")
+  const enclosing_undef = __refactor_undef_names(enclosing_src, language)
+  let captures = []
   for nm in block_undef {
     if !__refactor_member(enclosing_undef, nm) && nm != new_name && !__refactor_member(captures, nm) {
       captures = captures + [nm]
     }
   }
-  let final_params = p?.params_order ?? captures
-  let def_lines = __refactor_synth_fn(kind, new_name, final_params, dedented)
-  let orig_indent = __refactor_leading_ws(lines[start_line])
-  let term = if kind == "brace" {
+  const final_params = p?.params_order ?? captures
+  const def_lines = __refactor_synth_fn(kind, new_name, final_params, dedented)
+  const orig_indent = __refactor_leading_ws(lines[start_line])
+  const term = if kind == "brace" {
     ";"
   } else {
     ""
   }
-  let call_line = orig_indent + new_name + "(" + join(final_params, ", ") + ")" + term
-  let head = if start_line > 0 {
+  const call_line = orig_indent + new_name + "(" + join(final_params, ", ") + ")" + term
+  const head = if start_line > 0 {
     lines[:start_line]
   } else {
     []
   }
-  let tail = if end_line + 1 < len(lines) {
+  const tail = if end_line + 1 < len(lines) {
     lines[end_line + 1:]
   } else {
     []
   }
-  let replaced = head + [call_line] + tail
-  let target_scope = p?.target_scope ?? "after"
-  let new_lines = if target_scope == "before" {
+  const replaced = head + [call_line] + tail
+  const target_scope = p?.target_scope ?? "after"
+  const new_lines = if target_scope == "before" {
     let pre = if enclosing.start_row > 0 {
       replaced[:enclosing.start_row]
     } else {
@@ -3397,7 +3397,7 @@ pub fn edit_extract_function(params) {
     }
     replaced[:insert_idx] + [""] + def_lines + suffix
   }
-  let after = join(new_lines, "\n")
+  const after = join(new_lines, "\n")
   return __refactor_run("extract_function", language, [{kind: "content", path: path, after: after}], p, [])
 }
 
@@ -3410,18 +3410,18 @@ fn __refactor_inline_kind(language) {
 }
 
 fn __refactor_inline_expr(body_text, kind) {
-  let lines = split(body_text ?? "", "\n")
+  const lines = split(body_text ?? "", "\n")
   // `hostlib_ast_function_body` returns the indented body only for Python,
   // but the whole `fn …{ … }` text for brace languages — so brace bodies
   // drop the signature/opening-brace line and the closing-brace line.
-  let inner = if kind == "python" {
+  const inner = if kind == "python" {
     lines
   } else if len(lines) >= 3 {
     lines[1:len(lines) - 1]
   } else {
     []
   }
-  var body = []
+  let body = []
   for l in inner {
     if trim(l) != "" {
       body = body + [trim(l)]
@@ -3430,11 +3430,11 @@ fn __refactor_inline_expr(body_text, kind) {
   if len(body) != 1 {
     return nil
   }
-  let stmt = body[0]
+  const stmt = body[0]
   if !stmt.starts_with("return ") {
     return nil
   }
-  var expr = trim(stmt.substring(7))
+  let expr = trim(stmt.substring(7))
   if expr.ends_with(";") {
     expr = trim(expr.substring(0, len(expr) - 1))
   }
@@ -3461,24 +3461,24 @@ fn __refactor_inline_expr(body_text, kind) {
  * @example: edit_inline({path: "src/lib.rs", symbol: {name: "answer"}})
  */
 pub fn edit_inline(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let spec = __refactor_lang_spec(language)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const spec = __refactor_lang_spec(language)
   if spec == nil {
     return __refactor_unsupported("inline", language, "no signature grammar for language `" + language + "`")
   }
-  let path = p?.path ?? ""
-  let fn_name = __refactor_symbol_name(p)
+  const path = p?.path ?? ""
+  const fn_name = __refactor_symbol_name(p)
   if path == "" || fn_name == "" {
     return __refactor_invalid("inline", language, "`path` and `symbol`/`name` are required")
   }
-  let probe_session = if p?.dry_run ?? false {
+  const probe_session = if p?.dry_run ?? false {
     nil
   } else {
     p?.session_id
   }
-  let content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
-  let fb = hostlib_ast_function_body({source: content, language: language, function_name: fn_name})
+  const content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
+  const fb = hostlib_ast_function_body({source: content, language: language, function_name: fn_name})
   if !(fb?.found ?? false) {
     return __refactor_conflict(
       "inline",
@@ -3486,7 +3486,7 @@ pub fn edit_inline(params) {
       [{code: "symbol_not_found", message: "no function `" + fn_name + "` found", path: path}],
     )
   }
-  let def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  const def = __refactor_read_def_params(spec, path, fn_name, probe_session)
   if def.ok && len(def.params) != 0 {
     return __refactor_unsupported(
       "inline",
@@ -3494,7 +3494,7 @@ pub fn edit_inline(params) {
       "inline supports zero-parameter functions only (argument substitution is not yet implemented)",
     )
   }
-  let expr = __refactor_inline_expr(fb.body_text, __refactor_inline_kind(language))
+  const expr = __refactor_inline_expr(fb.body_text, __refactor_inline_kind(language))
   if expr == nil {
     return __refactor_unsupported(
       "inline",
@@ -3502,8 +3502,8 @@ pub fn edit_inline(params) {
       "inline requires a body of exactly one `return <expr>` statement",
     )
   }
-  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
-  var i = 0
+  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  let i = 0
   while i < calls.count {
     if trim(__refactor_paren_inner(calls.originals[i])) != "" {
       return __refactor_conflict(
@@ -3520,9 +3520,9 @@ pub fn edit_inline(params) {
     }
     i = i + 1
   }
-  let call_target = "((" + spec.call_node + " function: (identifier) @__f (#eq? @__f \"" + fn_name + "\")) @target)"
-  let def_target = "((" + spec.fn_node + " name: (identifier) @__n (#eq? @__n \"" + fn_name + "\")) @target)"
-  var ops = []
+  const call_target = "((" + spec.call_node + " function: (identifier) @__f (#eq? @__f \"" + fn_name + "\")) @target)"
+  const def_target = "((" + spec.fn_node + " name: (identifier) @__n (#eq? @__n \"" + fn_name + "\")) @target)"
+  let ops = []
   if calls.count > 0 {
     ops = ops
       + [
@@ -3562,21 +3562,21 @@ pub fn edit_inline(params) {
  * @example: edit_move_decl({path: "src/a.rs", symbol: {name: "helper"}, target_file: "src/b.rs"})
  */
 pub fn edit_move_decl(params) {
-  let p = params ?? {}
-  let language = __refactor_detect_language(p)
-  let path = p?.path ?? ""
-  let target_path = p?.target_file
-  let fn_name = __refactor_symbol_name(p)
+  const p = params ?? {}
+  const language = __refactor_detect_language(p)
+  const path = p?.path ?? ""
+  const target_path = p?.target_file
+  const fn_name = __refactor_symbol_name(p)
   if path == "" || target_path == nil || target_path == "" || fn_name == "" {
     return __refactor_invalid("move_decl", language, "`path`, `symbol`/`name`, and `target_file` are required")
   }
-  let probe_session = if p?.dry_run ?? false {
+  const probe_session = if p?.dry_run ?? false {
     nil
   } else {
     p?.session_id
   }
-  let src_content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
-  let extracted = hostlib_ast_symbol_extract({symbol_name: fn_name, source: src_content, language: language})
+  const src_content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
+  const extracted = hostlib_ast_symbol_extract({symbol_name: fn_name, source: src_content, language: language})
   if extracted.result == "unsupported_language" {
     return __refactor_unsupported(
       "move_decl",
@@ -3591,7 +3591,7 @@ pub fn edit_move_decl(params) {
       [{code: extracted.result, message: "cannot extract `" + fn_name + "` from " + path, path: path}],
     )
   }
-  let deleted = hostlib_ast_symbol_delete({symbol_name: fn_name, source: src_content, language: language})
+  const deleted = hostlib_ast_symbol_delete({symbol_name: fn_name, source: src_content, language: language})
   if deleted.result != "removed" {
     return __refactor_conflict(
       "move_decl",
@@ -3599,10 +3599,10 @@ pub fn edit_move_decl(params) {
       [{code: deleted.result, message: "cannot remove `" + fn_name + "` from " + path, path: path}],
     )
   }
-  let moved = extracted.text
-  let target_content = hostlib_fs_read_text({path: target_path, session_id: probe_session})?.content ?? ""
-  let position = p?.target_position ?? "end"
-  let new_target = if position == "start" {
+  const moved = extracted.text
+  const target_content = hostlib_fs_read_text({path: target_path, session_id: probe_session})?.content ?? ""
+  const position = p?.target_position ?? "end"
+  const new_target = if position == "start" {
     moved + "\n\n" + target_content
   } else if trim(target_content) == "" {
     moved + "\n"
@@ -3611,7 +3611,7 @@ pub fn edit_move_decl(params) {
   } else {
     target_content + "\n\n" + moved + "\n"
   }
-  let warns = [
+  const warns = [
     {
       code: "imports_not_rewritten",
       message: "moved `" + fn_name

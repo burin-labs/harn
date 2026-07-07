@@ -12,7 +12,7 @@ pipeline test(task) {
       {text: "would never run", model: "mock", provider: "mock"},
     ],
     { ->
-      let policy = routing_policy(
+      const policy = routing_policy(
         {
           chain: [
             {provider: "mock", model: "mock", label: "cheap"},
@@ -22,7 +22,7 @@ pipeline test(task) {
           label: "narrow-failover",
         },
       )
-      let envelope = try {
+      const envelope = try {
         llm_call("hi", nil, {routing: policy})
       } catch (e) {
         {error_caught: true, category: e.category}

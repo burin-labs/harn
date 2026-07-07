@@ -1,7 +1,7 @@
 import { envelope } from "std/cli/render"
 
 fn main(harness: Harness) {
-  let env = envelope(
+  const env = envelope(
     {
       schema_version: 2,
       api_stability: "experimental",

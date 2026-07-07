@@ -7,7 +7,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * skip (already-corrected commands, sibling subcommands, etc.).
  */
 fn probe(reg, cmd) {
-  let m = tool_hooks_match(reg, cmd, {stacks: ["rust"]})
+  const m = tool_hooks_match(reg, cmd, {stacks: ["rust"]})
   if len(m) > 0 {
     __io_println(m[0].rule_id + " " + m[0].severity)
   } else {
@@ -16,7 +16,7 @@ fn probe(reg, cmd) {
 }
 
 pipeline default() {
-  let reg = tool_hooks_seed_registry(["rust"])
+  const reg = tool_hooks_seed_registry(["rust"])
   /* target_dir_conflict: bare cargo build/test/check/run all fire. */
   probe(reg, "cargo build --release")
   probe(reg, "cargo check")

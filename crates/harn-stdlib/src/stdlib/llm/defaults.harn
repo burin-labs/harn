@@ -164,7 +164,7 @@ fn __thinking_patch(lineage, thinking) {
 // we override it for "balanced" / "quality" to give meaningful output.
 @complexity(allow)
 fn __effort_patch(lineage, effort) {
-  let kind = if effort == "auto" {
+  const kind = if effort == "auto" {
     "balanced"
   } else {
     effort
@@ -291,7 +291,7 @@ fn __safe_resolved_options(opts) {
   // Fall back to a minimal echo dict if resolved_options throws (e.g. when
   // opts.model is missing). pack_for already requires opts.model, so this
   // is defensive — never hit in normal paths.
-  let r = try {
+  const r = try {
     resolved_options(opts)
   }
   if is_err(r) {
@@ -305,7 +305,7 @@ fn __maybe_emit_strip(opts, requested) {
   // session_id is in opts (the usual case for pack_for), skip silently.
   // This mirrors the "emit when bound; punt otherwise" pattern from
   // std/llm/budget.
-  let sid = opts?.session_id ?? opts?._session_id
+  const sid = opts?.session_id ?? opts?._session_id
   if sid == nil || sid == "" {
     return
   }
@@ -321,7 +321,7 @@ fn __maybe_emit_strip(opts, requested) {
 fn __fill_unset(result, overlay) {
   // task_overlay's "fill only when unset" semantics. Iterate overlay keys,
   // assign only those missing from result.
-  var out = result
+  let out = result
   for key in overlay.keys() {
     if !__has_key(out, key) {
       out[key] = overlay[key]
@@ -363,41 +363,41 @@ pub fn pack_for(opts) {
   if opts?.model == nil || opts.model == "" {
     throw "pack_for: opts.model is required"
   }
-  let model = opts.model
+  const model = opts.model
   // 1. Runtime catalog defaults. Pass only model+provider so unrelated
   //    user-supplied keys (task, thinking, effort, etc.) don't leak into
   //    the resolved dict prematurely.
-  let resolved_input = if opts?.provider != nil {
+  const resolved_input = if opts?.provider != nil {
     {model: model, provider: opts.provider}
   } else {
     {model: model}
   }
-  var result = __safe_resolved_options(resolved_input)
+  let result = __safe_resolved_options(resolved_input)
   // Lineage classification uses the inferred provider in the catalog.
-  let lineage = lineage_of(model)
+  const lineage = lineage_of(model)
   // 2. Effort patch. Applied BEFORE the thinking patch so that on families
   //    where both knobs write to the same key (notably openai-gpt5
   //    where both target `reasoning_effort`) an explicit `thinking: ...`
   //    can override the lineage default.
-  let effort = opts?.effort ?? "balanced"
-  let e_patch = __effort_patch(lineage, effort)
+  const effort = opts?.effort ?? "balanced"
+  const e_patch = __effort_patch(lineage, effort)
   result = result + e_patch
   // 3. Thinking patch. Strip + warn for Opus 4.7 adaptive when caller
   //    asked for a manual mode.
-  let thinking_req = opts?.thinking ?? "auto"
+  const thinking_req = opts?.thinking ?? "auto"
   if lineage == "claude-opus-adaptive" && thinking_req != "auto" && thinking_req != nil {
     __maybe_emit_strip(opts, thinking_req)
   }
-  let t_patch = __thinking_patch(lineage, thinking_req)
+  const t_patch = __thinking_patch(lineage, thinking_req)
   result = result + t_patch
   // 4. Task overlay — only fill fields not already set above.
-  let task = opts?.task ?? "chat"
-  let overlay = __task_overlay(task)
+  const task = opts?.task ?? "chat"
+  const overlay = __task_overlay(task)
   result = __fill_unset(result, overlay)
   // 5. Recommended max_tokens when caller supplied a prompt and neither
   //    they nor the effort patch already set max_tokens.
   if opts?.prompt != nil && opts?.max_tokens == nil && !__has_key(result, "max_tokens") {
-    let recommended = try {
+    const recommended = try {
       recommend_max_output_tokens(
         {prompt: opts.prompt, system: opts?.system ?? "", model: model, task_kind: task, headroom: 0.1},
       )
@@ -411,7 +411,7 @@ pub fn pack_for(opts) {
   //    callers can pass provider-specific knobs. (Internal pack control
   //    keys task/thinking/effort are stripped so they don't leak into
   //    the final llm_call dict.)
-  var user_overrides = opts
+  let user_overrides = opts
   for key in ["task", "thinking", "effort"] {
     if __has_key(user_overrides, key) {
       user_overrides = user_overrides.remove(key)
@@ -431,7 +431,7 @@ pub fn pack_for(opts) {
  * @errors: []
  */
 pub fn pack_chat(model, opts = nil) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return pack_for(base + {model: model, task: "chat"})
 }
 
@@ -442,7 +442,7 @@ pub fn pack_chat(model, opts = nil) {
  * @errors: []
  */
 pub fn pack_agent(model, opts = nil) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return pack_for(base + {model: model, task: "agent"})
 }
 
@@ -453,7 +453,7 @@ pub fn pack_agent(model, opts = nil) {
  * @errors: []
  */
 pub fn pack_refine(model, opts = nil) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return pack_for(base + {model: model, task: "refine"})
 }
 
@@ -464,7 +464,7 @@ pub fn pack_refine(model, opts = nil) {
  * @errors: []
  */
 pub fn pack_judge(model, opts = nil) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return pack_for(base + {model: model, task: "judge"})
 }
 
@@ -475,7 +475,7 @@ pub fn pack_judge(model, opts = nil) {
  * @errors: []
  */
 pub fn pack_summarize(model, opts = nil) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return pack_for(base + {model: model, task: "summarize"})
 }
 
@@ -486,7 +486,7 @@ pub fn pack_summarize(model, opts = nil) {
  * @errors: []
  */
 pub fn pack_code(model, opts = nil) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return pack_for(base + {model: model, task: "code"})
 }
 
@@ -497,6 +497,6 @@ pub fn pack_code(model, opts = nil) {
  * @errors: []
  */
 pub fn pack_json(model, opts = nil) {
-  let base = opts ?? {}
+  const base = opts ?? {}
   return pack_for(base + {model: model, task: "json"})
 }

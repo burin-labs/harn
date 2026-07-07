@@ -4,7 +4,7 @@
  * Import with: import "std/math"
  */
 fn _is_number(value) {
-  let t = type_of(value)
+  const t = type_of(value)
   return t == "int" || t == "float"
 }
 
@@ -66,10 +66,10 @@ fn _require_same_vector_dimensions(a, b) {
 
 fn _sum_squared_deltas(a, b) {
   _require_same_vector_dimensions(a, b)
-  var total = 0.0
-  var idx = 0
+  let total = 0.0
+  let idx = 0
   while idx < len(a) {
-    let delta = a[idx] - b[idx]
+    const delta = a[idx] - b[idx]
     total = total + delta * delta
     idx = idx + 1
   }
@@ -79,7 +79,7 @@ fn _sum_squared_deltas(a, b) {
 fn _require_points(points) {
   require type_of(points) == "list", "points must be a list"
   require len(points) > 0, "points must not be empty"
-  let dims = len(_require_vector(points[0], "point"))
+  const dims = len(_require_vector(points[0], "point"))
   require dims > 0, "points must have at least one dimension"
   for point in points {
     _require_vector(point, "point")
@@ -89,7 +89,7 @@ fn _require_points(points) {
 }
 
 fn _copy_list(items) {
-  var out = []
+  let out = []
   for item in items {
     out = out.push(item)
   }
@@ -97,7 +97,7 @@ fn _copy_list(items) {
 }
 
 fn _weight_list(weights, label = "weights") {
-  let ws = _require_non_empty_numeric_list(weights, label)
+  const ws = _require_non_empty_numeric_list(weights, label)
   for weight in ws {
     require weight >= 0, "${label} must contain only non-negative numbers"
   }
@@ -118,11 +118,11 @@ fn _score_item(item, score_fn = nil) {
 }
 
 fn _insert_ranked(ranked, entry, descending = false) {
-  var out = []
-  var inserted = false
+  let out = []
+  let inserted = false
   for existing in ranked {
     if !inserted {
-      let better = if descending {
+      const better = if descending {
         entry.score > existing.score
       } else {
         entry.score < existing.score
@@ -142,10 +142,10 @@ fn _insert_ranked(ranked, entry, descending = false) {
 
 fn _rank_items(items, score_fn = nil, descending = false) {
   require type_of(items) == "list", "items must be a list"
-  var ranked = []
-  var idx = 0
+  let ranked = []
+  let idx = 0
   while idx < len(items) {
-    let entry = {index: idx, item: items[idx], score: _score_item(items[idx], score_fn)}
+    const entry = {index: idx, item: items[idx], score: _score_item(items[idx], score_fn)}
     ranked = _insert_ranked(ranked, entry, descending)
     idx = idx + 1
   }
@@ -153,8 +153,8 @@ fn _rank_items(items, score_fn = nil, descending = false) {
 }
 
 fn _zero_vector(size) {
-  var out = []
-  var idx = 0
+  let out = []
+  let idx = 0
   while idx < size {
     out = out.push(0.0)
     idx = idx + 1
@@ -163,11 +163,11 @@ fn _zero_vector(size) {
 }
 
 fn _nearest_centroid(point, centroids) {
-  var best_index = 0
-  var best_distance = _sum_squared_deltas(point, centroids[0])
-  var idx = 1
+  let best_index = 0
+  let best_distance = _sum_squared_deltas(point, centroids[0])
+  let idx = 1
   while idx < len(centroids) {
-    let distance = _sum_squared_deltas(point, centroids[idx])
+    const distance = _sum_squared_deltas(point, centroids[idx])
     if distance < best_distance {
       best_distance = distance
       best_index = idx
@@ -178,11 +178,11 @@ fn _nearest_centroid(point, centroids) {
 }
 
 fn _farthest_point(points, centroids) {
-  var best_index = 0
-  var best_distance = _nearest_centroid(points[0], centroids).distance
-  var idx = 1
+  let best_index = 0
+  let best_distance = _nearest_centroid(points[0], centroids).distance
+  let idx = 1
   while idx < len(points) {
-    let distance = _nearest_centroid(points[idx], centroids).distance
+    const distance = _nearest_centroid(points[idx], centroids).distance
     if distance > best_distance {
       best_distance = distance
       best_index = idx
@@ -193,19 +193,19 @@ fn _farthest_point(points, centroids) {
 }
 
 fn _init_kmeans_centroids(points, k) {
-  var centroids = [_copy_list(points[0])]
+  let centroids = [_copy_list(points[0])]
   while len(centroids) < k {
-    let next_index = _farthest_point(points, centroids)
+    const next_index = _farthest_point(points, centroids)
     centroids = centroids.push(_copy_list(points[next_index]))
   }
   return centroids
 }
 
 fn _assign_points(points, centroids) {
-  var assignments = []
-  var errors = []
+  let assignments = []
+  let errors = []
   for point in points {
-    let nearest = _nearest_centroid(point, centroids)
+    const nearest = _nearest_centroid(point, centroids)
     assignments = assignments.push(nearest.index)
     errors = errors.push(nearest.distance)
   }
@@ -213,9 +213,9 @@ fn _assign_points(points, centroids) {
 }
 
 fn _largest_error_point(errors) {
-  var best_index = 0
-  var best_error = errors[0]
-  var idx = 1
+  let best_index = 0
+  let best_error = errors[0]
+  let idx = 1
   while idx < len(errors) {
     if errors[idx] > best_error {
       best_error = errors[idx]
@@ -227,9 +227,9 @@ fn _largest_error_point(errors) {
 }
 
 fn _recompute_centroids(points, assignments, k, dims, errors) {
-  var sums = []
-  var counts = []
-  var idx = 0
+  let sums = []
+  let counts = []
+  let idx = 0
   while idx < k {
     sums = sums.push(_zero_vector(dims))
     counts = counts.push(0)
@@ -237,26 +237,26 @@ fn _recompute_centroids(points, assignments, k, dims, errors) {
   }
   idx = 0
   while idx < len(points) {
-    let cluster = assignments[idx]
+    const cluster = assignments[idx]
     counts[cluster] = counts[cluster] + 1
-    var dim = 0
+    let dim = 0
     while dim < dims {
-      var row = sums[cluster]
+      let row = sums[cluster]
       row[dim] = row[dim] + points[idx][dim]
       sums[cluster] = row
       dim = dim + 1
     }
     idx = idx + 1
   }
-  var centroids = []
+  let centroids = []
   idx = 0
   while idx < k {
     if counts[idx] == 0 {
-      let reseed = _largest_error_point(errors)
+      const reseed = _largest_error_point(errors)
       centroids = centroids.push(_copy_list(points[reseed]))
     } else {
-      var centroid = []
-      var dim = 0
+      let centroid = []
+      let dim = 0
       while dim < dims {
         centroid = centroid.push(sums[idx][dim] / counts[idx])
         dim = dim + 1
@@ -304,7 +304,7 @@ pub fn lerp(a, b, t) {
  * @errors: []
  */
 pub fn map_range(value, in_lo, in_hi, out_lo, out_hi) {
-  let t = (value - in_lo) / (in_hi - in_lo)
+  const t = (value - in_lo) / (in_hi - in_lo)
   return lerp(out_lo, out_hi, t)
 }
 
@@ -376,9 +376,9 @@ pub fn mean(items) {
  * @errors: []
  */
 pub fn median(items) {
-  let sorted = _require_non_empty_numeric_list(items).sort()
-  let n = len(sorted)
-  let mid = floor(n / 2)
+  const sorted = _require_non_empty_numeric_list(items).sort()
+  const n = len(sorted)
+  const mid = floor(n / 2)
   if n % 2 == 1 {
     return sorted[mid]
   }
@@ -393,20 +393,20 @@ pub fn median(items) {
  * @errors: []
  */
 pub fn percentile(items, p) {
-  let sorted = _require_non_empty_numeric_list(items).sort()
+  const sorted = _require_non_empty_numeric_list(items).sort()
   _require_number(p, "percentile")
   require p >= 0 && p <= 100, "percentile must be between 0 and 100"
   if len(sorted) == 1 {
     return sorted[0]
   }
-  let n = len(sorted)
-  let h = 1 + (n - 1) * (p / 100.0)
-  let lower = floor(h)
-  let upper = ceil(h)
+  const n = len(sorted)
+  const h = 1 + (n - 1) * (p / 100.0)
+  const lower = floor(h)
+  const upper = ceil(h)
   if lower == upper {
     return sorted[lower - 1]
   }
-  let weight = h - lower
+  const weight = h - lower
   return sorted[lower - 1] + weight * (sorted[upper - 1] - sorted[lower - 1])
 }
 
@@ -418,7 +418,7 @@ pub fn percentile(items, p) {
  * @errors: []
  */
 pub fn argsort(items, score_fn = nil) {
-  let ranked = _rank_items(items, score_fn)
+  const ranked = _rank_items(items, score_fn)
   return ranked.map({ entry -> entry.index })
 }
 
@@ -430,8 +430,8 @@ pub fn argsort(items, score_fn = nil) {
  * @errors: []
  */
 pub fn top_k(items, k, score_fn = nil) {
-  let ranked = _rank_items(items, score_fn, true)
-  let limit = _require_non_negative_int(k, "k")
+  const ranked = _rank_items(items, score_fn, true)
+  const limit = _require_non_negative_int(k, "k")
   return ranked.take(limit).map({ entry -> entry.item })
 }
 
@@ -443,17 +443,17 @@ pub fn top_k(items, k, score_fn = nil) {
  * @errors: []
  */
 pub fn variance(items, sample = false) {
-  let xs = _require_non_empty_numeric_list(items)
+  const xs = _require_non_empty_numeric_list(items)
   if sample {
     require len(xs) >= 2, "sample variance requires at least 2 values"
   }
-  let mu = mean(xs)
-  var total = 0.0
+  const mu = mean(xs)
+  let total = 0.0
   for x in xs {
-    let delta = x - mu
+    const delta = x - mu
     total = total + delta * delta
   }
-  let denom = if sample {
+  const denom = if sample {
     len(xs) - 1
   } else {
     len(xs)
@@ -480,13 +480,13 @@ pub fn stddev(items, sample = false) {
  * @errors: []
  */
 pub fn minmax_scale(items) {
-  let xs = _require_non_empty_numeric_list(items)
-  let lo = xs.min()
-  let hi = xs.max()
+  const xs = _require_non_empty_numeric_list(items)
+  const lo = xs.min()
+  const hi = xs.max()
   if hi == lo {
     return xs.map({ _x -> 0.0 })
   }
-  let span = (hi - lo) * 1.0
+  const span = (hi - lo) * 1.0
   return xs.map({ x -> (x - lo) / span })
 }
 
@@ -498,9 +498,9 @@ pub fn minmax_scale(items) {
  * @errors: []
  */
 pub fn zscore(items, sample = false) {
-  let xs = _require_non_empty_numeric_list(items)
-  let mu = mean(xs)
-  let sigma = stddev(xs, sample)
+  const xs = _require_non_empty_numeric_list(items)
+  const mu = mean(xs)
+  const sigma = stddev(xs, sample)
   if sigma == 0 {
     return xs.map({ _x -> 0.0 })
   }
@@ -515,13 +515,13 @@ pub fn zscore(items, sample = false) {
  * @errors: []
  */
 pub fn weighted_mean(items, weights) {
-  let xs = _require_non_empty_numeric_list(items)
-  let ws = _weight_list(weights)
+  const xs = _require_non_empty_numeric_list(items)
+  const ws = _weight_list(weights)
   require len(xs) == len(ws), "items and weights must have the same length"
-  let total_weight = sum(ws)
+  const total_weight = sum(ws)
   require total_weight > 0, "weights must sum to a positive value"
-  var total = 0.0
-  var idx = 0
+  let total = 0.0
+  let idx = 0
   while idx < len(xs) {
     total = total + xs[idx] * ws[idx]
     idx = idx + 1
@@ -539,17 +539,17 @@ pub fn weighted_mean(items, weights) {
 pub fn weighted_choice(items, weights = nil) {
   require type_of(items) == "list", "items must be a list"
   require len(items) > 0, "items must not be empty"
-  let ws = if weights == nil {
+  const ws = if weights == nil {
     items.map({ _item -> 1.0 })
   } else {
     _weight_list(weights)
   }
   require len(items) == len(ws), "items and weights must have the same length"
-  let total_weight = sum(ws)
+  const total_weight = sum(ws)
   require total_weight > 0, "weights must sum to a positive value"
-  let target = harness.random.gen_f64() * total_weight
-  var cumulative = 0.0
-  var idx = 0
+  const target = harness.random.gen_f64() * total_weight
+  let cumulative = 0.0
+  let idx = 0
   while idx < len(items) {
     cumulative = cumulative + ws[idx]
     if target < cumulative {
@@ -568,11 +568,11 @@ pub fn weighted_choice(items, weights = nil) {
  * @errors: []
  */
 pub fn softmax(items, temperature = 1.0) {
-  let xs = _require_non_empty_numeric_list(items)
+  const xs = _require_non_empty_numeric_list(items)
   _require_positive_number(temperature, "temperature")
-  let max_x = xs.max()
-  let exps = xs.map({ x -> exp((x - max_x) / temperature) })
-  let total = sum(exps)
+  const max_x = xs.max()
+  const exps = xs.map({ x -> exp((x - max_x) / temperature) })
+  const total = sum(exps)
   require total > 0, "softmax total must be positive"
   return exps.map({ x -> x / total })
 }
@@ -588,7 +588,7 @@ pub fn normal_pdf(x, mu = 0, sigma = 1) {
   _require_number(x, "x")
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
-  let z = (x - mu) / sigma
+  const z = (x - mu) / sigma
   return exp(-0.5 * z * z) / (sigma * sqrt(2 * pi))
 }
 
@@ -603,20 +603,20 @@ pub fn normal_cdf(x, mu = 0, sigma = 1) {
   _require_number(x, "x")
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
-  let z = (x - mu) / sigma
-  let sign = if z < 0 {
+  const z = (x - mu) / sigma
+  const sign = if z < 0 {
     -1
   } else {
     1
   }
-  let az = abs(z) / sqrt(2)
-  let t = 1 / (1 + 0.3275911 * az)
-  let a1 = 0.254829592
-  let a2 = -0.284496736
-  let a3 = 1.421413741
-  let a4 = -1.453152027
-  let a5 = 1.061405429
-  let erf = sign * (1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * exp(-az * az))
+  const az = abs(z) / sqrt(2)
+  const t = 1 / (1 + 0.3275911 * az)
+  const a1 = 0.254829592
+  const a2 = -0.284496736
+  const a3 = 1.421413741
+  const a4 = -1.453152027
+  const a5 = 1.061405429
+  const erf = sign * (1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * exp(-az * az))
   return 0.5 * (1 + erf)
 }
 
@@ -628,48 +628,48 @@ pub fn normal_cdf(x, mu = 0, sigma = 1) {
  * @errors: []
  */
 pub fn normal_quantile(prob, mu = 0, sigma = 1) {
-  let p = _require_probability(prob)
+  const p = _require_probability(prob)
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
-  let a1 = -39.69683028665376
-  let a2 = 220.9460984245205
-  let a3 = -275.9285104469687
-  let a4 = 138.357751867269
-  let a5 = -30.66479806614716
-  let a6 = 2.506628277459239
-  let b1 = -54.47609879822406
-  let b2 = 161.5858368580409
-  let b3 = -155.6989798598866
-  let b4 = 66.80131188771972
-  let b5 = -13.28068155288572
-  let c1 = -0.007784894002430293
-  let c2 = -0.3223964580411365
-  let c3 = -2.400758277161838
-  let c4 = -2.549732539343734
-  let c5 = 4.374664141464968
-  let c6 = 2.938163982698783
-  let d1 = 0.007784695709041462
-  let d2 = 0.3224671290700398
-  let d3 = 2.445134137142996
-  let d4 = 3.754408661907416
-  let plow = 0.02425
-  let phigh = 1 - plow
-  var x = 0.0
+  const a1 = -39.69683028665376
+  const a2 = 220.9460984245205
+  const a3 = -275.9285104469687
+  const a4 = 138.357751867269
+  const a5 = -30.66479806614716
+  const a6 = 2.506628277459239
+  const b1 = -54.47609879822406
+  const b2 = 161.5858368580409
+  const b3 = -155.6989798598866
+  const b4 = 66.80131188771972
+  const b5 = -13.28068155288572
+  const c1 = -0.007784894002430293
+  const c2 = -0.3223964580411365
+  const c3 = -2.400758277161838
+  const c4 = -2.549732539343734
+  const c5 = 4.374664141464968
+  const c6 = 2.938163982698783
+  const d1 = 0.007784695709041462
+  const d2 = 0.3224671290700398
+  const d3 = 2.445134137142996
+  const d4 = 3.754408661907416
+  const plow = 0.02425
+  const phigh = 1 - plow
+  let x = 0.0
   if p < plow {
-    let q = sqrt(-2 * ln(p))
-    let num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
-    let den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
+    const q = sqrt(-2 * ln(p))
+    const num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
+    const den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
     x = num / den
   } else if p <= phigh {
-    let q = p - 0.5
-    let r = q * q
-    let num = (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q
-    let den = ((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1
+    const q = p - 0.5
+    const r = q * q
+    const num = (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q
+    const den = ((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1
     x = num / den
   } else {
-    let q = sqrt(-2 * ln(1 - p))
-    let num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
-    let den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
+    const q = sqrt(-2 * ln(1 - p))
+    const num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
+    const den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
     x = -(num / den)
   }
   return mu + sigma * x
@@ -684,8 +684,8 @@ pub fn normal_quantile(prob, mu = 0, sigma = 1) {
  */
 pub fn dot(a, b) {
   _require_same_vector_dimensions(a, b)
-  var total = 0.0
-  var idx = 0
+  let total = 0.0
+  let idx = 0
   while idx < len(a) {
     total = total + a[idx] * b[idx]
     idx = idx + 1
@@ -714,7 +714,7 @@ pub fn vector_norm(v) {
  */
 pub fn vector_normalize(v) {
   _require_vector(v)
-  let norm = vector_norm(v)
+  const norm = vector_norm(v)
   require norm > 0, "cannot normalize a zero vector"
   return v.map({ x -> x / norm })
 }
@@ -727,8 +727,8 @@ pub fn vector_normalize(v) {
  * @errors: []
  */
 pub fn cosine_similarity(a, b) {
-  let an = vector_norm(a)
-  let bn = vector_norm(b)
+  const an = vector_norm(a)
+  const bn = vector_norm(b)
   require an > 0 && bn > 0, "cosine similarity requires non-zero vectors"
   return dot(a, b) / (an * bn)
 }
@@ -753,8 +753,8 @@ pub fn euclidean_distance(a, b) {
  */
 pub fn manhattan_distance(a, b) {
   _require_same_vector_dimensions(a, b)
-  var total = 0.0
-  var idx = 0
+  let total = 0.0
+  let idx = 0
   while idx < len(a) {
     total = total + abs(a[idx] - b[idx])
     idx = idx + 1
@@ -771,10 +771,10 @@ pub fn manhattan_distance(a, b) {
  */
 pub fn chebyshev_distance(a, b) {
   _require_same_vector_dimensions(a, b)
-  var best = 0.0
-  var idx = 0
+  let best = 0.0
+  let idx = 0
   while idx < len(a) {
-    let delta = abs(a[idx] - b[idx])
+    const delta = abs(a[idx] - b[idx])
     if delta > best {
       best = delta
     }
@@ -795,15 +795,15 @@ pub fn covariance(xs, ys, sample = false) {
   if sample {
     require len(xs) >= 2, "sample covariance requires at least 2 values"
   }
-  let mu_x = mean(xs)
-  let mu_y = mean(ys)
-  var total = 0.0
-  var idx = 0
+  const mu_x = mean(xs)
+  const mu_y = mean(ys)
+  let total = 0.0
+  let idx = 0
   while idx < len(xs) {
     total = total + (xs[idx] - mu_x) * (ys[idx] - mu_y)
     idx = idx + 1
   }
-  let denom = if sample {
+  const denom = if sample {
     len(xs) - 1
   } else {
     len(xs)
@@ -823,8 +823,8 @@ pub fn correlation(xs, ys, sample = false) {
   if sample {
     require len(xs) >= 2, "sample correlation requires at least 2 values"
   }
-  let sigma_x = stddev(xs, sample)
-  let sigma_y = stddev(ys, sample)
+  const sigma_x = stddev(xs, sample)
+  const sigma_y = stddev(ys, sample)
   require sigma_x > 0 && sigma_y > 0, "correlation requires non-constant inputs"
   return covariance(xs, ys, sample) / (sigma_x * sigma_y)
 }
@@ -837,11 +837,11 @@ pub fn correlation(xs, ys, sample = false) {
  * @errors: []
  */
 pub fn moving_avg(items, window) {
-  let xs = _require_non_empty_numeric_list(items)
-  let size = _require_positive_int(window, "window")
+  const xs = _require_non_empty_numeric_list(items)
+  const size = _require_positive_int(window, "window")
   require size <= len(xs), "window must not exceed the number of items"
-  var out = []
-  var idx = 0
+  let out = []
+  let idx = 0
   while idx + size <= len(xs) {
     out = out.push(mean(xs.slice(idx, idx + size)))
     idx = idx + 1
@@ -857,11 +857,11 @@ pub fn moving_avg(items, window) {
  * @errors: []
  */
 pub fn ema(items, alpha) {
-  let xs = _require_non_empty_numeric_list(items)
-  let a = _require_probability(alpha, "alpha")
-  var out = [xs[0] * 1.0]
-  var prev = xs[0] * 1.0
-  var idx = 1
+  const xs = _require_non_empty_numeric_list(items)
+  const a = _require_probability(alpha, "alpha")
+  let out = [xs[0] * 1.0]
+  let prev = xs[0] * 1.0
+  let idx = 1
   while idx < len(xs) {
     prev = a * xs[idx] + (1 - a) * prev
     out = out.push(prev)
@@ -878,27 +878,27 @@ pub fn ema(items, alpha) {
  * @errors: []
  */
 pub fn kmeans(points, k, options = nil) {
-  let dims = _require_points(points)
+  const dims = _require_points(points)
   _require_non_negative_int(k, "k")
   require k >= 1, "k must be at least 1"
   require k <= len(points), "k must not exceed the number of points"
-  let max_iterations = if options != nil && options.max_iterations != nil {
+  const max_iterations = if options != nil && options.max_iterations != nil {
     options.max_iterations
   } else {
     100
   }
   _require_positive_int(max_iterations, "max_iterations")
-  var centroids = _init_kmeans_centroids(points, k)
-  var assignments = []
-  var counts = []
-  var iterations = 0
-  var converged = false
-  var inertia = 0.0
+  let centroids = _init_kmeans_centroids(points, k)
+  let assignments = []
+  let counts = []
+  let iterations = 0
+  let converged = false
+  let inertia = 0.0
   while iterations < max_iterations {
-    let assigned = _assign_points(points, centroids)
-    let next_assignments = assigned.assignments
+    const assigned = _assign_points(points, centroids)
+    const next_assignments = assigned.assignments
     inertia = sum(assigned.errors)
-    let updated = _recompute_centroids(points, next_assignments, k, dims, assigned.errors)
+    const updated = _recompute_centroids(points, next_assignments, k, dims, assigned.errors)
     centroids = updated.centroids
     counts = updated.counts
     iterations = iterations + 1
@@ -910,11 +910,11 @@ pub fn kmeans(points, k, options = nil) {
     assignments = next_assignments
   }
   if !converged {
-    let assigned = _assign_points(points, centroids)
+    const assigned = _assign_points(points, centroids)
     assignments = assigned.assignments
     inertia = sum(assigned.errors)
-    var final_counts = []
-    var idx = 0
+    let final_counts = []
+    let idx = 0
     while idx < k {
       final_counts = final_counts.push(0)
       idx = idx + 1

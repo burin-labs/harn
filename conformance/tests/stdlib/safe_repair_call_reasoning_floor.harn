@@ -15,7 +15,7 @@ import { repair_min_max_tokens, structured_min_max_tokens } from "std/llm/safe"
 
 pipeline test(task) {
   // Non-reasoning route (mock model): historical 600 repair baseline, unchanged.
-  let non_reasoning = repair_min_max_tokens({provider: "mock", model: "mock-model"})
+  const non_reasoning = repair_min_max_tokens({provider: "mock", model: "mock-model"})
   __io_println("non_reasoning=" + to_string(non_reasoning))
   __io_println("non_reasoning_is_600=" + to_string(non_reasoning == 600))
   // The non-reasoning repair baseline must NOT regress below the structured
@@ -24,24 +24,24 @@ pipeline test(task) {
   // Reasoning route under Harn's auto policy (gpt-oss-120b -> effort low =
   // 1024 reasoning tokens). The repair floor must clear BOTH the prior 600
   // starvation budget AND the resolved reasoning budget, with verdict headroom.
-  let reasoning = repair_min_max_tokens({provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b"})
+  const reasoning = repair_min_max_tokens({provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b"})
   __io_println("reasoning_exceeds_old_600=" + to_string(reasoning > 600))
   __io_println("reasoning_exceeds_1024_reasoning_budget=" + to_string(reasoning > 1024))
   __io_println("reasoning_value=" + to_string(reasoning))
   // The repair floor tracks the judge floor on a reasoning route (shared route,
   // shared reasoning channel) — they must NOT drift.
-  let judge = structured_min_max_tokens({provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b"})
+  const judge = structured_min_max_tokens({provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b"})
   __io_println("reasoning_matches_judge_floor=" + to_string(reasoning == judge))
   // High explicit reasoning effort scales the repair floor further yet stays
   // clamped to the structured ceiling.
-  let high = repair_min_max_tokens(
+  const high = repair_min_max_tokens(
     {provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b", reasoning_effort: "high"},
   )
   __io_println("high_scales_above_reasoning=" + to_string(high > reasoning))
   __io_println("high_within_ceiling=" + to_string(high <= 32768))
   // Explicit reasoning-off on a reasoning-capable route collapses to the flat
   // 600 baseline (no needless inflation when the caller disabled reasoning).
-  let disabled = repair_min_max_tokens(
+  const disabled = repair_min_max_tokens(
     {provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b", reasoning_effort: "off"},
   )
   __io_println("disabled_is_600=" + to_string(disabled == 600))

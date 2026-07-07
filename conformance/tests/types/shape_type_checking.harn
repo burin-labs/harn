@@ -1,10 +1,10 @@
 pipeline default() {
   // Basic shape annotation
-  let user: {name: string, age: int} = {name: "Alice", age: 30}
+  const user: {name: string, age: int} = {name: "Alice", age: 30}
   __io_println(user["name"])
   __io_println(user["age"])
   // Optional fields — missing optional is fine
-  let config: {host: string, port?: int} = {host: "localhost"}
+  const config: {host: string, port?: int} = {host: "localhost"}
   __io_println(config["host"])
   // Width subtyping — extra fields allowed
   fn greet(u: {name: string}) -> string {
@@ -12,18 +12,18 @@ pipeline default() {
   }
   __io_println(greet({name: "Bob", age: 25, role: "admin"}))
   // Nested shapes
-  let data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: [1, 2]}
+  const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: [1, 2]}
   __io_println(data["user"]["name"])
   // Shape as return type
   fn make_point() -> {x: int, y: int} {
     return {x: 10, y: 20}
   }
-  let p = make_point()
+  const p = make_point()
   __io_println(p["x"] + p["y"])
   // Shape assigned to generic dict
-  let d: dict = {a: 1, b: 2}
+  const d: dict = {a: 1, b: 2}
   __io_println(d["a"])
   // Shape compatible with dict<string, int>
-  let typed: dict<string, int> = {x: 1, y: 2}
+  const typed: dict<string, int> = {x: 1, y: 2}
   __io_println(typed["x"])
 }

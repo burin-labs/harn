@@ -40,13 +40,13 @@ pub fn timed(name: string, attrs: dict = {}, callback = nil) -> dict {
   if callback == nil {
     throw "timed: missing callback (use start_timing for imperative flows)"
   }
-  let handle = __timing_start(name, attrs)
+  const handle = __timing_start(name, attrs)
   try {
-    let value = callback()
-    let timing = __timing_end(handle, {status: "ok"})
+    const value = callback()
+    const timing = __timing_end(handle, {status: "ok"})
     return {result: value, timing: timing}
   } catch (e) {
-    let timing = __timing_end(handle, {status: "error", error: to_string(e)})
+    const timing = __timing_end(handle, {status: "error", error: to_string(e)})
     throw e
   }
 }
@@ -106,6 +106,6 @@ pub fn end_timing(handle: TimingHandle, final_attrs: dict = {}) -> TimingSegment
  * @example: if elapsed_ms(handle) > 5000 { abort("deadline") }
  */
 pub fn elapsed_ms(handle: TimingHandle) -> int {
-  let started = handle?.monotonic_started_ms ?? 0
+  const started = handle?.monotonic_started_ms ?? 0
   return __timing_now_monotonic_ms() - started
 }

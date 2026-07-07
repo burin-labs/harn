@@ -1,13 +1,13 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn_command_policy_hooks")
+  const root = path_join(harness.fs.temp_dir(), "harn_command_policy_hooks")
   if harness.fs.exists(root) {
     harness.fs.delete(root)
   }
   harness.fs.mkdir(root)
-  let marker = path_join(root, "should_not_spawn")
-  let policy = command_policy(
+  const marker = path_join(root, "should_not_spawn")
+  const policy = command_policy(
     {
       workspace_roots: [root],
       deny_patterns: ["*policy-deny-marker*"],
@@ -28,7 +28,7 @@ pipeline default() {
     },
   )
   command_policy_push(policy)
-  let denied = host_call(
+  const denied = host_call(
     "process.exec",
     {
       mode: "argv",
@@ -38,14 +38,14 @@ pipeline default() {
   )
   assert(denied?.status == "blocked", "deny decision returns blocked envelope")
   assert(!harness.fs.exists(marker), "blocked command must not spawn")
-  let rewritten = host_call("process.exec", {mode: "argv", argv: ["printf", "original"], cwd: root})
+  const rewritten = host_call("process.exec", {mode: "argv", argv: ["printf", "original"], cwd: root})
   assert(rewritten?.stdout == "rewritten", "pre-hook rewrite updates argv")
   assert(
     rewritten?.command_policy?.annotation?.annotations?.checked,
     "post-hook annotation is recorded in command audit",
   )
   harness.fs.write_text(path_join(root, ".env"), "TOKEN=secret\n")
-  let approval = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
+  const approval = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
   assert(
     approval?.status == "blocked",
     "approval risk blocks before spawn without a host approval grant",
@@ -58,8 +58,8 @@ pipeline default() {
   // of hard-denying: an approval lets the command run; a denial blocks it with
   // a `consent_denied` disposition. This is the seam that lets a command-safety
   // floor REQUEST CONSENT rather than only allow/deny.
-  let consent_asks = atomic(0)
-  let approve_policy = command_policy(
+  const consent_asks = atomic(0)
+  const approve_policy = command_policy(
     {
       workspace_roots: [root],
       require_approval: ["credential_file_read"],
@@ -74,15 +74,15 @@ pipeline default() {
     },
   )
   command_policy_push(approve_policy)
-  let approved = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
+  const approved = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
   assert(atomic_get(consent_asks) == 1, "consent ask fires for a require_approval command")
   assert(approved?.status != "blocked", "consented command is not blocked")
   assert(approved?.status != "consent_denied", "consented command is not consent-denied")
   assert(contains(approved?.stdout ?? "", "TOKEN=secret"), "consented command actually runs")
   command_policy_pop()
   // Denial via the dict form blocks execution with a consent_denied status.
-  let deny_marker = path_join(root, "consent_should_not_spawn")
-  let deny_policy = command_policy(
+  const deny_marker = path_join(root, "consent_should_not_spawn")
+  const deny_policy = command_policy(
     {
       workspace_roots: [root],
       require_approval: ["credential_file_read"],
@@ -90,7 +90,7 @@ pipeline default() {
     },
   )
   command_policy_push(deny_policy)
-  let refused = host_call(
+  const refused = host_call(
     "process.exec",
     {
       mode: "argv",
@@ -103,7 +103,7 @@ pipeline default() {
   assert(contains(refused?.stderr ?? "", "not this time"), "consent denial reason is surfaced")
   command_policy_pop()
   // Bool-false shorthand denies too (with_consent prompt_fn parity).
-  let bool_deny = command_policy(
+  const bool_deny = command_policy(
     {
       workspace_roots: [root],
       require_approval: ["credential_file_read"],
@@ -111,7 +111,7 @@ pipeline default() {
     },
   )
   command_policy_push(bool_deny)
-  let bool_refused = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
+  const bool_refused = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
   assert(bool_refused?.status == "consent_denied", "bool-false consent blocks execution")
   command_policy_pop()
   // ---- Catastrophic (never-approvable) command floor ----
@@ -119,8 +119,8 @@ pipeline default() {
   // routed to the consent gate — even when a would-approve consent closure is
   // configured AND `catastrophic` is listed in require_approval. This is the
   // floor burin's twin command-safety checkers collapse onto.
-  let floor_asks = atomic(0)
-  let floor_policy = command_policy(
+  const floor_asks = atomic(0)
+  const floor_policy = command_policy(
     {
       workspace_roots: [root],
       require_approval: ["catastrophic", "credential_file_read"],
@@ -133,13 +133,13 @@ pipeline default() {
   command_policy_push(floor_policy)
   // argv-mode catastrophe: `git reset --hard` is blocked even though a consent
   // closure would approve it.
-  let reset_blocked = host_call("process.exec", {mode: "argv", argv: ["git", "reset", "--hard"], cwd: root})
+  const reset_blocked = host_call("process.exec", {mode: "argv", argv: ["git", "reset", "--hard"], cwd: root})
   assert(reset_blocked?.status == "blocked", "catastrophic git reset --hard is hard-denied")
   assert(reset_blocked?.status != "consent_denied", "catastrophic is not a consent disposition")
   assert(contains(reset_blocked?.stderr ?? "", "git reset --hard"), "catastrophic reason is surfaced")
   // Redirection onto a source file is catastrophic and must not spawn.
-  let floor_marker = path_join(root, "floor_should_not_spawn.rs")
-  let redirect_blocked = host_call(
+  const floor_marker = path_join(root, "floor_should_not_spawn.rs")
+  const redirect_blocked = host_call(
     "process.exec",
     {mode: "argv", argv: ["sh", "-c", "echo pwned > \"" + floor_marker + "\""], cwd: root},
   )
@@ -149,8 +149,8 @@ pipeline default() {
   // The canonical agent shape is argv mode with an `sh -c "<script>"` wrapper.
   // A token-based rule inside the wrapped script (`git reset --hard`) must still
   // hard-deny — the floor preserves argv argument boundaries.
-  let wrapped_marker = path_join(root, "wrapped_should_not_spawn")
-  let wrapped_blocked = host_call(
+  const wrapped_marker = path_join(root, "wrapped_should_not_spawn")
+  const wrapped_blocked = host_call(
     "process.exec",
     {
       mode: "argv",
@@ -166,7 +166,7 @@ pipeline default() {
   )
   assert(atomic_get(floor_asks) == 0, "wrapped catastrophic floor never consults the consent gate")
   command_policy_pop()
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run",
@@ -183,7 +183,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let loop = agent_loop(
+      const loop = agent_loop(
         "exercise command policy",
         nil,
         {
@@ -198,7 +198,7 @@ pipeline default() {
         contains(json_stringify(loop), "status: blocked"),
         "agent_loop scoped command policy applies to run handlers",
       )
-      let scan = command_llm_risk_scan(
+      const scan = command_llm_risk_scan(
         {request: {argv: ["curl", "https://example.invalid/secret"]}},
         {model: "cheap"},
       )

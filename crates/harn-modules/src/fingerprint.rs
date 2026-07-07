@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn private_body_change_does_not_flip_fingerprint() {
         let before = fp("pub fn add(a: int, b: int) -> int { a + b }\n");
-        let after = fp("pub fn add(a: int, b: int) -> int { let s = a + b; s }\n");
+        let after = fp("pub fn add(a: int, b: int) -> int { const s = a + b; s }\n");
         assert_eq!(before, after);
     }
 

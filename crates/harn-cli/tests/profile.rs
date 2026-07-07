@@ -117,7 +117,7 @@ fn profile_records_step_spans_and_attributes_llm_to_step() {
         &script,
         r#"
 fn classify(ctx) -> string {
-  let r = llm_call("classify ${ctx}", nil, {provider: "mock"})
+  const r = llm_call("classify ${ctx}", nil, {provider: "mock"})
   return r.text
 }
 
@@ -136,7 +136,7 @@ pipeline main() {
     output_tokens: 3,
     model: "claude-haiku-4-5",
   })
-  let out = classify_step("input")
+  const out = classify_step("input")
   __io_println(out)
 }
 "#,

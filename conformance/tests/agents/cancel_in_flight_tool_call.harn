@@ -9,7 +9,7 @@
  * contract stays observable.
  */
 pipeline main() {
-  let missing = cancel_in_flight_tool_call(
+  const missing = cancel_in_flight_tool_call(
     "no-such-session",
     "no-such-call",
     {reason: "nothing in flight", inject_reminder: false, timeout_ms: 0},

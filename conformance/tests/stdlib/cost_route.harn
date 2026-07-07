@@ -1,7 +1,7 @@
 import { llm_call_count } from "std/testing"
 
 pipeline test(task) {
-  let routed = cost_route {
+  const routed = cost_route {
     budget_usd: 1.0
     prefer: ["mock:mock"]
     fallback_strategy: cheapest_first
@@ -11,7 +11,7 @@ pipeline test(task) {
   assert_eq(routed.provider, "mock")
   assert_eq(routed.model, "mock")
   assert_eq(llm_call_count(), 1)
-  let explicit = cost_route {
+  const explicit = cost_route {
     route_policy: "always(mock:mock)"
 
     llm_call("manual route", nil, {provider: "mock", model: "mock", route_policy: "manual"})

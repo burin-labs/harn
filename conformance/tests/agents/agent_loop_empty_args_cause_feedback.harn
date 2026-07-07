@@ -17,7 +17,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * missing-parameter message.
  */
 fn note_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "write_note",
@@ -56,9 +56,9 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      let result = agent_loop("Write a.txt.", nil, loop_opts())
-      let calls = llm_mock_calls()
-      let feedback = json_stringify(calls[1].messages)
+      const result = agent_loop("Write a.txt.", nil, loop_opts())
+      const calls = llm_mock_calls()
+      const feedback = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(contains(feedback, "[result of write_note]"))
       __io_println(contains(feedback, "[end of write_note result]"))
@@ -78,9 +78,9 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      let result = agent_loop("Write a.txt.", nil, loop_opts())
-      let calls = llm_mock_calls()
-      let feedback = json_stringify(calls[1].messages)
+      const result = agent_loop("Write a.txt.", nil, loop_opts())
+      const calls = llm_mock_calls()
+      const feedback = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(contains(feedback, "[result of write_note]"))
       __io_println(contains(feedback, "[end of write_note result]"))
@@ -101,9 +101,9 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      let result = agent_loop("Write a.txt.", nil, loop_opts())
-      let calls = llm_mock_calls()
-      let feedback = json_stringify(calls[1].messages)
+      const result = agent_loop("Write a.txt.", nil, loop_opts())
+      const calls = llm_mock_calls()
+      const feedback = json_stringify(calls[1].messages)
       __io_println(result.status)
       __io_println(contains(feedback, "[result of write_note]"))
       __io_println(contains(feedback, "[end of write_note result]"))

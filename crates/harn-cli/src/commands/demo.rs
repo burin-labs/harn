@@ -273,8 +273,8 @@ const SCENARIOS: &[Scenario] = &[
         id: "destructure-with-defaults",
         title: "destructuring-with-defaults collapses the `input?.x ?? default` idiom",
         description: "Collapse the most-repeated idiom in our Harn corpus — \
-                      `let x = input?.field ?? default` (~5,700 sites across BurinCore alone) — \
-                      into a single destructuring bind: `let { path = \"\", namespace = nil } = \
+                      `const x = input?.field ?? default` (~5,700 sites across BurinCore alone) — \
+                      into a single destructuring bind: `const { path = \"\", namespace = nil } = \
                       pipeline_input() ?? {}`. Present keys win, missing keys fall to their \
                       defaults, and the type checker now infers each binding's type from \
                       `field + default` exactly as the `?.`/`??` form did, so the migration is \

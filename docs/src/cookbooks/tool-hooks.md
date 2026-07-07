@@ -28,7 +28,7 @@ to `stacks: ["rust"]` is enough.
 import { preset_run_command } from "std/tool_hooks"
 
 pipeline default(task) {
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["rust"],
     inner: { args -> shell(args.command) },
   })
@@ -62,7 +62,7 @@ output visible.
 import { preset_run_command } from "std/tool_hooks"
 
 pipeline default(task) {
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["python"],
     inner: { args -> shell(args.command) },
   })
@@ -80,7 +80,7 @@ strict-CI agent you can promote it to a deny by switching the mode:
 import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
 
 pipeline default(task) {
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["typescript"],
     mode: tool_hooks_mode_deny_with_explanation,
     inner: { args -> shell(args.command) },
@@ -103,7 +103,7 @@ rules for project-specific extensions:
 import { preset_run_command } from "std/tool_hooks"
 
 pipeline default(task) {
-  let xcodebuild_no_destination = tool_rule({
+  const xcodebuild_no_destination = tool_rule({
     id: "swift.xcodebuild_no_destination",
     pattern: { command, _context ->
       if !regex_match("^xcodebuild\\b", command) { return false }
@@ -115,7 +115,7 @@ pipeline default(task) {
     references: ["https://developer.apple.com/library/archive/technotes/tn2339/_index.html"],
   })
 
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["swift"],
     custom_rules: [xcodebuild_no_destination],
     inner: { args -> shell(args.command) },
@@ -135,10 +135,10 @@ priority override in a custom rule that matches first:
 import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
 
 pipeline default(task) {
-  let deny_unbounded_select_star = tool_rule({
+  const deny_unbounded_select_star = tool_rule({
     id: "harness.sql.unbounded_select_star",
     pattern: { command, _context ->
-      let lc = lowercase(command)
+      const lc = lowercase(command)
       if !regex_match("^\\s*select\\s+\\*\\s+from\\s+\\S+", lc) { return false }
       return !(contains(lc, " where ") || contains(lc, " limit "))
     },
@@ -147,7 +147,7 @@ pipeline default(task) {
     explanation: "Unbounded `SELECT *` scans entire tables. Add a WHERE / LIMIT clause.",
   })
 
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["sql"],
     custom_rules: [deny_unbounded_select_star],
     mode: tool_hooks_mode_deny_with_explanation,
@@ -170,7 +170,7 @@ guidance into the dispatcher itself. Opt-in is one line:
 import { preset_run_command } from "std/tool_hooks"
 
 pipeline default(task) {
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["harn"],
     inner: { args -> shell(args.command) },
   })
@@ -192,7 +192,7 @@ fallback for ad-hoc commands. The classifier is opt-in — leaving
 import { preset_run_command } from "std/tool_hooks"
 
 pipeline default(task) {
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["rust", "python", "typescript", "swift", "sql", "harn"],
     llm_classifier: {
       model: "haiku",
@@ -232,14 +232,14 @@ false-positive rate is acceptable, switch to the default mode.
 import { preset_run_command, tool_hooks_mode_passthrough_only_audit } from "std/tool_hooks"
 
 pipeline default(task) {
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["python"],
     mode: tool_hooks_mode_passthrough_only_audit,
     inner: { args -> shell(args.command) },
   })
-  let result = agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
-  let audits = lifecycle_audit_log_take()
-  let warnings = audits |> filter({ a -> a.kind == "tool_rule_warning" })
+  const result = agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  const audits = lifecycle_audit_log_take()
+  const warnings = audits |> filter({ a -> a.kind == "tool_rule_warning" })
   log("matched (audit-only): " + to_string(len(warnings)))
 }
 ```
@@ -258,8 +258,8 @@ different rule shapes:
 import { preset_run_command } from "std/tool_hooks"
 
 pipeline default() {
-  let preview = preset_run_command({stacks: ["rust"]})
-  let envelope = preview("cargo build --release")
+  const preview = preset_run_command({stacks: ["rust"]})
+  const envelope = preview("cargo build --release")
   log(envelope.action)        // "rewrite"
   log(envelope.command)       // "cargo build --release --target-dir target-shared"
   log(envelope.rule_id)       // "rust.cargo.target_dir_conflict"
@@ -287,7 +287,7 @@ import { preset_run_command } from "std/tool_hooks"
 pipeline default(task) {
   register_tool_hook({pattern: "*", max_output: 4000})
 
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["rust"],
     inner: { args -> shell(args.command) },
   })

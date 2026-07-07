@@ -12,7 +12,7 @@ fn events_of(events, kind) {
 }
 
 fn repair_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "run_test",
@@ -49,8 +49,8 @@ pipeline default() {
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      let session = "repair-off-noop-" + uuid()
-      let captured = agent_capture_events(
+      const session = "repair-off-noop-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Make the tests pass.",
@@ -71,7 +71,7 @@ pipeline default() {
           },
         ) },
       )
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
       __io_println(len(stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })))
       __io_println(captured.result?.current_failure == nil)
       __io_println(captured.result.status)

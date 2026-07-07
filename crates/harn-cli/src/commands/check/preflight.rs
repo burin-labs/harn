@@ -304,10 +304,9 @@ fn spawn_site_children(node: &SNode) -> Vec<&SNode> {
                 children.extend(finally_body.iter());
             }
         }
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
             children.push(value.as_ref());
         }
-        Node::ConstBinding { value, .. } => children.push(value.as_ref()),
         Node::ReturnStmt { value } => {
             if let Some(value) = value.as_ref() {
                 children.push(value.as_ref());
@@ -500,7 +499,6 @@ fn collect_static_tool_surface_from_node(
             }
         }
         Node::LetBinding { value, .. }
-        | Node::VarBinding { value, .. }
         | Node::ConstBinding { value, .. }
         | Node::Assignment { value, .. }
         | Node::ThrowStmt { value }
@@ -1919,9 +1917,7 @@ fn scan_node_preflight(
                 );
             }
         }
-        Node::LetBinding { value, .. }
-        | Node::VarBinding { value, .. }
-        | Node::ConstBinding { value, .. } => {
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
             scan_node_preflight(
                 value,
                 file_path,

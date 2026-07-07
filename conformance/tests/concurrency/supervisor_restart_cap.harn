@@ -1,6 +1,6 @@
 pipeline default() {
-  let starts = atomic(0)
-  let sup = supervisor_start(
+  const starts = atomic(0)
+  const sup = supervisor_start(
     {
       name: "capped",
       strategy: "one_for_one",
@@ -18,7 +18,7 @@ pipeline default() {
     },
   )
   sleep(25ms)
-  let state = supervisor_state(sup)
+  const state = supervisor_state(sup)
   __io_println(atomic_get(starts))
   __io_println(state.children[0].status)
   __io_println(state.children[0].current_wait_reason)

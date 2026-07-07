@@ -10,16 +10,16 @@ pub fn agent_tool_entry_annotations(entry) {
   if type_of(entry) != "dict" {
     return {}
   }
-  var annotations = {}
-  let policy = entry?.policy
+  let annotations = {}
+  const policy = entry?.policy
   if type_of(policy) == "dict" {
     annotations = annotations + policy
   }
-  let direct = entry?.annotations
+  const direct = entry?.annotations
   if type_of(direct) == "dict" {
     annotations = annotations + direct
   }
-  let func = entry?.function
+  const func = entry?.function
   if type_of(func) == "dict" && type_of(func?.policy) == "dict" {
     annotations = annotations + func.policy
   }
@@ -41,11 +41,11 @@ pub fn agent_tool_policy_annotations(policy, tool_name) {
   if type_of(policy) != "dict" {
     return {}
   }
-  let registry = policy?.tool_annotations ?? policy?.toolAnnotations ?? {}
+  const registry = policy?.tool_annotations ?? policy?.toolAnnotations ?? {}
   if type_of(registry) != "dict" {
     return {}
   }
-  let annotations = registry[tool_name]
+  const annotations = registry[tool_name]
   if type_of(annotations) == "dict" {
     return annotations
   }

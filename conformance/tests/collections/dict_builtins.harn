@@ -1,8 +1,8 @@
 pipeline test_dict_builtin_keys_values_entries(task) {
-  let d = {b: 2, a: 1}
+  const d = {b: 2, a: 1}
   assert_eq(keys(d), ["a", "b"])
   assert_eq(values(d), [1, 2])
-  let es = entries(d)
+  const es = entries(d)
   assert_eq(es[0]?.key, "a")
   assert_eq(es[0]?.value, 1)
   assert_eq(es[1]?.key, "b")

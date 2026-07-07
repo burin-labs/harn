@@ -44,7 +44,7 @@ the preset wrapper composes under).
 import { preset_run_command } from "std/tool_hooks"
 
 pipeline default(task) {
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["rust", "python"],
     inner: { args -> shell(args.command) },
   })
@@ -143,8 +143,8 @@ modes:
 ```harn,ignore
 import { tool_hooks_emit_audit, tool_hooks_inject_reminder } from "std/tool_hooks"
 
-let warn_then_run = { rule, args, inner ->
-  let cmd = type_of(args) == "string" ? args : to_string(args?.command ?? "")
+const warn_then_run = { rule, args, inner ->
+  const cmd = type_of(args) == "string" ? args : to_string(args?.command ?? "")
   tool_hooks_emit_audit("custom.tool_warn", {rule_id: rule.rule_id, command: cmd})
   tool_hooks_inject_reminder({
     tags: ["custom_warning"],
@@ -152,11 +152,11 @@ let warn_then_run = { rule, args, inner ->
     ttl_turns: 2,
   })
   if inner == nil { return {action: "warn", rule_id: rule.rule_id, command: cmd} }
-  let result = inner(args)
+  const result = inner(args)
   return {action: "warn", rule_id: rule.rule_id, command: cmd, result: result}
 }
 
-let wrapper = preset_run_command({stacks: ["rust"], mode: warn_then_run})
+const wrapper = preset_run_command({stacks: ["rust"], mode: warn_then_run})
 ```
 
 ## Decision envelope
@@ -195,7 +195,7 @@ place for harness-level overrides:
 ```harn,ignore
 import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
 
-let no_curl_pipe_sh = tool_rule({
+const no_curl_pipe_sh = tool_rule({
   id: "harness.curl_pipe_sh",
   pattern: "curl[^|]+\\|\\s*(?:sudo\\s+)?(?:ba)?sh\\b",
   applies_to: [],
@@ -204,7 +204,7 @@ let no_curl_pipe_sh = tool_rule({
   references: ["https://www.idontplaydarts.com/2016/04/detecting-curl-pipe-bash-server-side/"],
 })
 
-let wrapper = preset_run_command({
+const wrapper = preset_run_command({
   stacks: ["rust"],
   custom_rules: [no_curl_pipe_sh],
   mode: tool_hooks_mode_deny_with_explanation,
@@ -219,16 +219,16 @@ substitute your own), build one from scratch:
 import { preset_run_command, tool_hooks_catalogue_universal } from "std/tool_hooks_catalogues"
 import { tool_hooks_register, tool_hooks_registry } from "std/tool_hooks"
 
-let vendor_rust = catalogue({
+const vendor_rust = catalogue({
   id: "vendor/rust",
   stack: "rust",
   rules: [/* ... vendor-pinned rules ... */],
 })
-let registry = tool_hooks_register(
+const registry = tool_hooks_register(
   tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal()),
   vendor_rust,
 )
-let wrapper = preset_run_command({stacks: ["rust"], registry: registry})
+const wrapper = preset_run_command({stacks: ["rust"], registry: registry})
 ```
 
 The registered catalogues' `stack` field cooperates with
@@ -244,7 +244,7 @@ opt-in — leaving `llm_classifier: nil` preserves TH-02 passthrough
 semantics byte-for-byte.
 
 ```harn,ignore
-let wrapper = preset_run_command({
+const wrapper = preset_run_command({
   stacks: ["rust", "python"],
   llm_classifier: {
     model: "haiku",
@@ -391,7 +391,7 @@ pipeline default(task) {
   register_tool_hook({pattern: "*", max_output: 4000})
   register_tool_hook({pattern: "exec_*", deny: "exec_* is gated"})
 
-  let run_command = preset_run_command({
+  const run_command = preset_run_command({
     stacks: ["rust"],
     inner: { args -> shell(args.command) },
   })

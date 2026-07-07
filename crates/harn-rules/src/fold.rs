@@ -28,7 +28,7 @@ use crate::model::Rule;
 /// The matcher for a single migratable site.
 fn site_rule(language: &str) -> CompiledRule {
     let toml = format!(
-        "id = \"destructure-fold\"\nlanguage = \"{language}\"\n[rule]\npattern = \"let $N:identifier = $X?.$K:identifier ?? $D\"\n"
+        "id = \"destructure-fold\"\nlanguage = \"{language}\"\n[rule]\npattern = \"const $N:identifier = $X?.$K:identifier ?? $D\"\n"
     );
     let rule = Rule::from_toml_str(&toml).expect("internal fold rule parses");
     CompiledRule::compile(&rule).expect("internal fold rule compiles")
@@ -105,7 +105,7 @@ pub fn fold_destructure_defaults(source: &str, language: &str) -> Result<String,
         .filter(|group| has_unique_keys(group))
         .map(|group| {
             let fields = group.iter().map(Site::field).collect::<Vec<_>>().join(", ");
-            let replacement = format!("let {{ {fields} }} = {} ?? {{}}", group[0].source);
+            let replacement = format!("const {{ {fields} }} = {} ?? {{}}", group[0].source);
             (
                 group[0].start_byte,
                 group[group.len() - 1].end_byte,
@@ -138,67 +138,68 @@ mod tests {
     #[test]
     fn folds_a_consecutive_run() {
         let src =
-            "fn f() {\n  let timeout = cfg?.timeout ?? 30\n  let retries = cfg?.retries ?? 3\n}\n";
+            "fn f() {\n  const timeout = cfg?.timeout ?? 30\n  const retries = cfg?.retries ?? 3\n}\n";
         let out = fold(src);
         assert_eq!(
             out,
-            "fn f() {\n  let { timeout = 30, retries = 3 } = cfg ?? {}\n}\n"
+            "fn f() {\n  const { timeout = 30, retries = 3 } = cfg ?? {}\n}\n"
         );
     }
 
     #[test]
     fn leaves_a_single_site_untouched() {
         // A lone site is not a "run"; folding it would be a lateral change.
-        let src = "fn f() {\n  let timeout = cfg?.timeout ?? 30\n}\n";
+        let src = "fn f() {\n  const timeout = cfg?.timeout ?? 30\n}\n";
         assert_eq!(fold(src), src);
     }
 
     #[test]
     fn does_not_merge_across_different_sources() {
-        let src = "fn f() {\n  let a = x?.a ?? 1\n  let b = y?.b ?? 2\n}\n";
+        let src = "fn f() {\n  const a = x?.a ?? 1\n  const b = y?.b ?? 2\n}\n";
         // Two different sources, each a lone site → no fold.
         assert_eq!(fold(src), src);
     }
 
     #[test]
     fn does_not_merge_across_a_blank_line() {
-        let src = "fn f() {\n  let a = x?.a ?? 1\n\n  let b = x?.b ?? 2\n}\n";
+        let src = "fn f() {\n  const a = x?.a ?? 1\n\n  const b = x?.b ?? 2\n}\n";
         assert_eq!(fold(src), src);
     }
 
     #[test]
     fn folds_three_and_preserves_surrounding_code() {
-        let src = "fn f() {\n  before()\n  let a = s?.a ?? 1\n  let b = s?.b ?? 2\n  let c = s?.c ?? 3\n  after()\n}\n";
+        let src = "fn f() {\n  before()\n  const a = s?.a ?? 1\n  const b = s?.b ?? 2\n  const c = s?.c ?? 3\n  after()\n}\n";
         let out = fold(src);
         assert_eq!(
             out,
-            "fn f() {\n  before()\n  let { a = 1, b = 2, c = 3 } = s ?? {}\n  after()\n}\n"
+            "fn f() {\n  before()\n  const { a = 1, b = 2, c = 3 } = s ?? {}\n  after()\n}\n"
         );
     }
 
     #[test]
     fn folds_aliased_sites() {
-        let src = "fn f() {\n  let t = cfg?.timeout ?? 30\n  let retries = cfg?.retries ?? 3\n  let label = cfg?.name ?? \"anon\"\n}\n";
+        let src = "fn f() {\n  const t = cfg?.timeout ?? 30\n  const retries = cfg?.retries ?? 3\n  const label = cfg?.name ?? \"anon\"\n}\n";
         let out = fold(src);
         assert_eq!(
             out,
-            "fn f() {\n  let { timeout: t = 30, retries = 3, name: label = \"anon\" } = cfg ?? {}\n}\n"
+            "fn f() {\n  const { timeout: t = 30, retries = 3, name: label = \"anon\" } = cfg ?? {}\n}\n"
         );
     }
 
     #[test]
     fn folds_after_a_wrapped_previous_site() {
-        let src = "fn f() {\n  let path = parse({name: \"x\"}, argv).ok?.path\n    ?? \"\"\n  let verbose = parse({name: \"x\"}, argv).ok?.verbose ?? false\n}\n";
+        let src = "fn f() {\n  const path = parse({name: \"x\"}, argv).ok?.path\n    ?? \"\"\n  const verbose = parse({name: \"x\"}, argv).ok?.verbose ?? false\n}\n";
         let out = fold(src);
         assert_eq!(
             out,
-            "fn f() {\n  let { path = \"\", verbose = false } = parse({name: \"x\"}, argv).ok ?? {}\n}\n"
+            "fn f() {\n  const { path = \"\", verbose = false } = parse({name: \"x\"}, argv).ok ?? {}\n}\n"
         );
     }
 
     #[test]
     fn leaves_duplicate_property_keys_untouched() {
-        let src = "fn f() {\n  let first = cfg?.value ?? 1\n  let second = cfg?.value ?? 2\n}\n";
+        let src =
+            "fn f() {\n  const first = cfg?.value ?? 1\n  const second = cfg?.value ?? 2\n}\n";
         assert_eq!(fold(src), src);
     }
 }

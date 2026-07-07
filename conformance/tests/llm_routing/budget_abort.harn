@@ -9,14 +9,14 @@ pipeline test(task) {
   with_llm_script(
     [{text: "should never reach the provider", model: "gpt-4o-mini", provider: "openai"}],
     { ->
-      let policy = routing_policy(
+      const policy = routing_policy(
         {
           chain: [{provider: "openai", model: "gpt-4o-mini"}],
           budget: {per_call_usd: 0.000001, on_exceed: "abort"},
           label: "tight-budget",
         },
       )
-      let result = try {
+      const result = try {
         llm_call("hi", nil, {routing: policy, max_tokens: 100000})
       } catch (e) {
         {caught: true, category: e.category, limit: e.limit}

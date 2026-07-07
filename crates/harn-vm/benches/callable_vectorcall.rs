@@ -67,10 +67,10 @@ fn callback_chunks() -> (Chunk, Chunk) {
     let numbers = list_literal(0..256);
     let words = list_literal((0..256).map(|index| format!("\"field_{index}\"")));
     let closure_source = format!(
-        "pipeline default(task) {{ let out = [{numbers}].map({{ x -> x + 1 }})\nreturn len(out) }}"
+        "pipeline default(task) {{ const out = [{numbers}].map({{ x -> x + 1 }})\nreturn len(out) }}"
     );
     let builtin_source = format!(
-        "pipeline default(task) {{ let out = [{words}].map(snake_to_camel)\nreturn len(out) }}"
+        "pipeline default(task) {{ const out = [{words}].map(snake_to_camel)\nreturn len(out) }}"
     );
     (compile(&closure_source), compile(&builtin_source))
 }

@@ -24,7 +24,7 @@ pipeline default() {
       },
     ],
     { ->
-      let r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
+      const r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
       __io_println("inline.visible=" + r.visible_text)
       __io_println("inline.prose=" + r.prose)
       __io_println("inline.text=" + r.text)
@@ -42,7 +42,7 @@ pipeline default() {
       },
     ],
     { ->
-      let r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
+      const r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
       __io_println("plain.text=" + r.text)
       __io_println("plain.prose=" + r.prose)
       __io_println("plain.thinking=" + (r.thinking ?? "(none)"))

@@ -153,15 +153,15 @@ fn base_opts() {{
 }}
 
 pipeline main(task) {{
-  var handles = []
+  let handles = []
   for i in 0 to {WORKER_COUNT} exclusive {{
     handles = handles.push(sub_agent_run("bg worker " + to_string(i), base_opts() + {{background: true}}))
   }}
-  let results = wait_agent(handles)
+  const results = wait_agent(handles)
 
-  var conc_done = 0
+  let conc_done = 0
   for r in results {{
-    let env = r?.result
+    const env = r?.result
     if (env?.ok ?? false) == true && contains(to_string(env?.summary ?? ""), "done") {{
       conc_done = conc_done + 1
     }}

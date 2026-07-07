@@ -183,14 +183,14 @@ rule without recompiling:
 ```harn,ignore
 import { rules_search, rules_apply } from "std/rules"
 
-let rule = "id = \"calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
+const rule = "id = \"calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
 
-let found = rules_search({rule: rule, source: "foo();\nbar();\n", language: "typescript"})
+const found = rules_search({rule: rule, source: "foo();\nbar();\n", language: "typescript"})
 __io_println(found.match_count)            // 2
 
 // rules_apply is a gated deterministic tool; dry-run by default.
 hostlib_enable("tools:deterministic")
-let result = rules_apply({rule: codemod_rule, paths: ["src/a.ts"], dry_run: false})
+const result = rules_apply({rule: codemod_rule, paths: ["src/a.ts"], dry_run: false})
 ```
 
 For logic a declarative rule can't express, `rules_visit({rule, ..., on_match:
@@ -231,7 +231,7 @@ A script rule can also delegate to the structural engine and return the
 import { rules_diagnostics } from "std/rules"
 
 pub fn lint(source) {
-  let rule = "id = \"no-foo\"\nlanguage = \"harn\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n"
+  const rule = "id = \"no-foo\"\nlanguage = \"harn\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n"
   return rules_diagnostics({language: "harn", rule: rule, source: source})
 }
 ```

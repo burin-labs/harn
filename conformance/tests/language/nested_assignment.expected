@@ -1,2 +1,3 @@
+warning: Cannot mutate 'frozen' through an immutable binding (declared with 'const'); use 'let' for a mutable binding
 [harn] index evaluated
 [harn] nested assignment: all tests passed

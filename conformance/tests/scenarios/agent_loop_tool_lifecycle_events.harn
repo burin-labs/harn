@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn echo_tools() {
-  let registry = tool_registry()
+  const registry = tool_registry()
   return tool_define(
     registry,
     "echo",
@@ -11,31 +11,31 @@ fn echo_tools() {
 }
 
 fn observe_lifecycle(session_id: string, expected_msg: string) -> dict {
-  let pending = atomic(0)
-  let in_progress = atomic(0)
-  let completed = atomic(0)
-  let failed = atomic(0)
-  let saw_error_category = atomic(0)
-  let saw_args = atomic(0)
+  const pending = atomic(0)
+  const in_progress = atomic(0)
+  const completed = atomic(0)
+  const failed = atomic(0)
+  const saw_error_category = atomic(0)
+  const saw_args = atomic(0)
   agent_subscribe(
     session_id,
     { ev ->
       if ev?.type == "tool_call" && ev?.tool_name == "echo" && ev?.status == "pending" {
-        let _ = atomic_add(pending, 1)
+        const _ = atomic_add(pending, 1)
         if ev?.raw_input?.msg == expected_msg {
-          let _ = atomic_set(saw_args, 1)
+          const _ = atomic_set(saw_args, 1)
         }
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "in_progress" {
-        let _ = atomic_add(in_progress, 1)
+        const _ = atomic_add(in_progress, 1)
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "completed" {
-        let _ = atomic_add(completed, 1)
+        const _ = atomic_add(completed, 1)
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "failed" {
-        let _ = atomic_add(failed, 1)
+        const _ = atomic_add(failed, 1)
         if ev?.error_category == "tool_error" {
-          let _ = atomic_set(saw_error_category, 1)
+          const _ = atomic_set(saw_error_category, 1)
         }
       }
     },
@@ -58,12 +58,12 @@ fn assert_counts(label: string, counters: dict) {
 }
 
 pipeline test(task) {
-  let text_session = "tool-lifecycle-text-" + uuid()
-  let text_events = observe_lifecycle(text_session, "text")
+  const text_session = "tool-lifecycle-text-" + uuid()
+  const text_events = observe_lifecycle(text_session, "text")
   with_llm_script(
     [llm_text("<tool_call>\necho({ msg: \"text\" })\n</tool_call>"), llm_text("##DONE##")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Call echo once.",
         nil,
         {
@@ -80,12 +80,12 @@ pipeline test(task) {
     },
   )
   assert_counts("text tool", text_events)
-  let middleware_session = "tool-lifecycle-middleware-" + uuid()
-  let middleware_events = observe_lifecycle(middleware_session, "short")
+  const middleware_session = "tool-lifecycle-middleware-" + uuid()
+  const middleware_events = observe_lifecycle(middleware_session, "short")
   with_llm_script(
     [{tool_calls: [{id: "short-1", name: "echo", arguments: {msg: "short"}}]}, llm_text("##DONE##")],
     { ->
-      let short_circuit = { envelope, _next -> return {
+      const short_circuit = { envelope, _next -> return {
         ok: true,
         status: "ok",
         tool_name: envelope.tool_name,
@@ -96,7 +96,7 @@ pipeline test(task) {
         observation: "[result of echo]\nshort-circuited\n[end of echo result]\n",
         executor: "harn",
       } }
-      let result = agent_loop(
+      const result = agent_loop(
         "Call echo once.",
         nil,
         {
@@ -114,12 +114,12 @@ pipeline test(task) {
     },
   )
   assert_counts("middleware short-circuit", middleware_events)
-  let failed_session = "tool-lifecycle-failed-" + uuid()
-  let failed_events = observe_lifecycle(failed_session, "failed")
+  const failed_session = "tool-lifecycle-failed-" + uuid()
+  const failed_events = observe_lifecycle(failed_session, "failed")
   with_llm_script(
     [{tool_calls: [{id: "failed-1", name: "echo", arguments: {msg: "failed"}}]}, llm_text("##DONE##")],
     { ->
-      let failed_caller = { envelope, _next -> return {
+      const failed_caller = { envelope, _next -> return {
         ok: false,
         status: "error",
         tool_name: envelope.tool_name,
@@ -130,7 +130,7 @@ pipeline test(task) {
         observation: "[result of echo]\nerror: failed on purpose\n[end of echo result]\n",
         executor: "harn",
       } }
-      let result = agent_loop(
+      const result = agent_loop(
         "Call echo once.",
         nil,
         {

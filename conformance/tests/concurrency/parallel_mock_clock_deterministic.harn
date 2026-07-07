@@ -9,15 +9,15 @@
  */
 pipeline test(task) {
   mock_time(1700000000000)
-  let order = atomic(0)
-  let results = parallel each [10, 20, 30, 40] with { max_concurrent: 2 } { n ->
+  const order = atomic(0)
+  const results = parallel each [10, 20, 30, 40] with { max_concurrent: 2 } { n ->
     sleep(n)
     yield_now()
     return atomic_add(order, 1) * 1000 + n
   }
   log(len(results))
   // Mock time advanced by the largest sleep observed, not the sum.
-  let elapsed_ms = harness.clock.now_ms() - 1700000000000
+  const elapsed_ms = harness.clock.now_ms() - 1700000000000
   log(elapsed_ms >= 40 && elapsed_ms <= 100)
   unmock_time()
 }

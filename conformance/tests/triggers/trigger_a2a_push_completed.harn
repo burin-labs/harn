@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("a2a_push_completed")
+  const result = trigger_test_harness("a2a_push_completed")
   __io_println(result.ok)
   __io_println(result.emitted[0].provider == "a2a-push")
   __io_println(result.emitted[0].kind == "a2a.task.completed")

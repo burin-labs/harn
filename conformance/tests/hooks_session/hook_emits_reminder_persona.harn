@@ -11,7 +11,7 @@ fn persona_work(input) -> string {
 }
 
 fn persona_hook_tools() {
-  let registry = tool_registry()
+  const registry = tool_registry()
   return tool_define(
     registry,
     "persona_hook_tool",
@@ -38,7 +38,7 @@ pipeline main() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "call the persona hook tool",
         nil,
         {
@@ -50,7 +50,7 @@ pipeline main() {
           session_id: "hook-reminder-persona",
         },
       )
-      let events = transcript_events_by_kind(result.transcript, "system_reminder")
+      const events = transcript_events_by_kind(result.transcript, "system_reminder")
       __io_println(result.status)
       __io_println(len(events))
       __io_println(events[0].reminder.body)

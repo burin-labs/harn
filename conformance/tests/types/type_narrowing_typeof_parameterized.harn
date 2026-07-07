@@ -14,7 +14,7 @@ pipeline test(task) {
   }
   fn describe_dict(v: dict<string, int> | int) -> string {
     if type_of(v) == "dict" {
-      let keys: list<string> = v.keys()
+      const keys: list<string> = v.keys()
       return "dict with ${len(keys)} keys"
     }
     return "int: ${v}"

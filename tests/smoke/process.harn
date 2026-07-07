@@ -16,7 +16,7 @@ fn echo_argv(text) {
 }
 
 pipeline default() {
-  let result = command_run(echo_argv("smoke"), {capture: {max_inline_bytes: 64}})
+  const result = command_run(echo_argv("smoke"), {capture: {max_inline_bytes: 64}})
   if !result.success {
     throw "process smoke failed: success=${result.success} exit_code=${result.exit_code} stderr=${result.stderr}"
   }

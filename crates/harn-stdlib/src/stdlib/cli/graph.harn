@@ -77,10 +77,10 @@ fn __safe_dict(value) -> dict {
  * `to_string`.
  */
 fn __join(items: list, sep: string) -> string {
-  var out = ""
-  var first = true
+  let out = ""
+  let first = true
   for item in items {
-    let part = if type_of(item) == "string" {
+    const part = if type_of(item) == "string" {
       item
     } else {
       to_string(item)
@@ -107,24 +107,24 @@ fn __join(items: list, sep: string) -> string {
  *     requires <cap1>, <cap2>
  */
 fn __render_text(report: dict) -> string {
-  var out = ""
-  let modules = __safe_list(report["modules"])
+  let out = ""
+  const modules = __safe_list(report["modules"])
   for module in modules {
-    let m = __safe_dict(module)
+    const m = __safe_dict(module)
     out = out + __safe_string(m["path"], "") + "\n"
-    let symbols = __safe_list(m["public_symbols"])
+    const symbols = __safe_list(m["public_symbols"])
     for symbol in symbols {
-      let s = __safe_dict(symbol)
+      const s = __safe_dict(symbol)
       out = out + "  " + __safe_string(s["kind"], "")
         + " "
         + __safe_string(s["signature"], "")
         + "\n"
     }
-    let imports = __safe_list(m["imports"])
+    const imports = __safe_list(m["imports"])
     for import_path in imports {
       out = out + "  import " + __safe_string(import_path, "") + "\n"
     }
-    let caps = __safe_list(m["requires_capabilities"])
+    const caps = __safe_list(m["requires_capabilities"])
     if len(caps) > 0 {
       out = out + "  requires " + __join(caps, ", ") + "\n"
     }
@@ -139,16 +139,16 @@ fn __render_text(report: dict) -> string {
  * the nested metadata dict through unchanged when present.
  */
 fn __clean_symbol(symbol: dict) -> dict {
-  var entry = {
+  let entry = {
     name: __safe_string(symbol["name"], ""),
     kind: __safe_string(symbol["kind"], ""),
     signature: __safe_string(symbol["signature"], ""),
   }
-  let metadata = symbol["metadata"]
+  const metadata = symbol["metadata"]
   if metadata != nil {
     entry = entry + {metadata: metadata}
   }
-  let derived_example = symbol["derived_example"]
+  const derived_example = symbol["derived_example"]
   if derived_example != nil {
     entry = entry + {derived_example: derived_example}
   }
@@ -161,16 +161,16 @@ fn __clean_symbol(symbol: dict) -> dict {
  * `GraphReport`/`GraphModule`/`GraphSymbol` types apply on the way out.
  */
 fn __strip_absent(report: dict) -> dict {
-  let modules = __safe_list(report["modules"])
-  var cleaned_modules = []
+  const modules = __safe_list(report["modules"])
+  let cleaned_modules = []
   for module in modules {
-    let m = __safe_dict(module)
-    let symbols = __safe_list(m["public_symbols"])
-    var cleaned_symbols = []
+    const m = __safe_dict(module)
+    const symbols = __safe_list(m["public_symbols"])
+    let cleaned_symbols = []
     for symbol in symbols {
       cleaned_symbols = cleaned_symbols.push(__clean_symbol(__safe_dict(symbol)))
     }
-    let entry = {
+    const entry = {
       path: __safe_string(m["path"], ""),
       public_symbols: cleaned_symbols,
       imports: __safe_list(m["imports"]),
@@ -180,31 +180,31 @@ fn __strip_absent(report: dict) -> dict {
     }
     cleaned_modules = cleaned_modules.push(entry)
   }
-  let graph = __safe_dict(report["graph"])
-  let edges = __safe_list(graph["edges"])
-  var cleaned_edges = []
+  const graph = __safe_dict(report["graph"])
+  const edges = __safe_list(graph["edges"])
+  let cleaned_edges = []
   for edge in edges {
-    let e = __safe_dict(edge)
-    let edge_entry = {from: __safe_string(e["from"], ""), to: __safe_string(e["to"], "")}
+    const e = __safe_dict(edge)
+    const edge_entry = {from: __safe_string(e["from"], ""), to: __safe_string(e["to"], "")}
     cleaned_edges = cleaned_edges.push(edge_entry)
   }
   return {modules: cleaned_modules, graph: {nodes: __safe_list(graph["nodes"]), edges: cleaned_edges}}
 }
 
 fn __render_envelope(report: dict) -> string {
-  let cleaned = __strip_absent(report)
-  let envelope = {schemaVersion: 1, ok: true, data: cleaned, error: nil, warnings: []}
+  const cleaned = __strip_absent(report)
+  const envelope = {schemaVersion: 1, ok: true, data: cleaned, error: nil, warnings: []}
   return json_stringify_pretty(envelope)
 }
 
 fn main(harness: Harness) -> int {
-  let raw = harness.env.get_or("HARN_GRAPH_VIEW_JSON", "")
+  const raw = harness.env.get_or("HARN_GRAPH_VIEW_JSON", "")
   if raw == "" {
     harness.stdio
       .eprintln("internal error: HARN_GRAPH_VIEW_JSON not set by dispatch shim")
     return 70
   }
-  let report = try {
+  const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio
@@ -215,14 +215,14 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("internal error: HARN_GRAPH_VIEW_JSON must be a JSON object")
     return 70
   }
-  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     harness.stdio.println(__render_envelope(report))
     return 0
   }
   // Strip the trailing newline so `println` re-adds exactly one.
-  let text = __render_text(report)
-  let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+  const text = __render_text(report)
+  const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
     text[0:len(text) - 1]
   } else {
     text

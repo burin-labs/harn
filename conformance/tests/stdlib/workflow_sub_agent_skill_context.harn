@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn child_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_file",
@@ -22,7 +22,7 @@ fn child_tools() {
 }
 
 fn workflow_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "delegate_readonly",
@@ -45,7 +45,7 @@ pipeline test(task) {
     prompt "Stay read only and inspect the code carefully."
     allowed_tools ["delegate_readonly", "namespace:read"]
   }
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "workflow-sub-agent-skill-context",
       entry: "delegate",
@@ -69,16 +69,16 @@ pipeline test(task) {
       llm_text("Delegation finished."),
     ],
     { ->
-      let result = workflow_execute(
+      const result = workflow_execute(
         "Inspect the config file",
         flow,
         [],
         {max_steps: 2, skills: only_look, skill_match: {strategy: "metadata"}},
       )
-      let calls = llm_mock_calls()
-      let child_tool_schemas = calls[1].tools
-      var seen_read = false
-      var seen_write = false
+      const calls = llm_mock_calls()
+      const child_tool_schemas = calls[1].tools
+      let seen_read = false
+      let seen_write = false
       if child_tool_schemas != nil {
         for t in child_tool_schemas {
           if t?.function?.name == "read_file" {

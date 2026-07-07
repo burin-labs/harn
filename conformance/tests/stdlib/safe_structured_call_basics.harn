@@ -4,12 +4,12 @@
 import { safe_structured_call } from "std/llm/safe"
 
 pipeline test(task) {
-  let schema = {
+  const schema = {
     type: "object",
     required: ["verdict", "bullets"],
     properties: {verdict: {type: "string"}, bullets: {type: "array", items: {type: "string"}}},
   }
-  let envelope = safe_structured_call(
+  const envelope = safe_structured_call(
     "Grade this output.",
     schema,
     {provider: "mock", model: "mock-model", system: "you are a judge", max_tokens: 200},

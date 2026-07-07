@@ -21,10 +21,10 @@ fn styled_plain() {
  * a declared style — and unknown personas — return nil.
  */
 pipeline default() {
-  let a = persona_output_style("styled_reviewer")
+  const a = persona_output_style("styled_reviewer")
   __io_println(a.name)
   __io_println(a.instructions == nil)
-  let b = persona_output_style("styled_helper")
+  const b = persona_output_style("styled_helper")
   __io_println(b.name)
   __io_println(b.instructions)
   __io_println(persona_output_style("styled_plain") == nil)

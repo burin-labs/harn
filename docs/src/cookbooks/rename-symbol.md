@@ -28,7 +28,7 @@ pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   // startup. From a script you can run `hostlib_code_index_rebuild` first.
   hostlib_fs_set_mode({ session_id: session_id, mode: "staged" })
 
-  let plan = edit_rename_symbol({
+  const plan = edit_rename_symbol({
     symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
     new_name: "Gadget",
     scope: "workspace",
@@ -48,7 +48,7 @@ pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   }
 
   // Drop dry_run to actually stage the writes, then commit.
-  let applied = edit_rename_symbol({
+  const applied = edit_rename_symbol({
     symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
     new_name: "Gadget",
     scope: "workspace",
@@ -72,7 +72,7 @@ pipeline rename_would_shadow(harness: Harness) {
   // `src/main.rs` defines both `Widget` and `Gadget`. Renaming Widget
   // to Gadget would create two `Gadget` definitions in the same file —
   // the host rejects before touching disk and surfaces the shadow site.
-  let result = edit_rename_symbol({
+  const result = edit_rename_symbol({
     symbol_ref: { name: "Widget", path: "src/main.rs", kind: "Type" },
     new_name: "Gadget",
     scope: "workspace",

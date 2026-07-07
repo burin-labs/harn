@@ -40,43 +40,43 @@ fn envelope(name, args) {
 }
 
 pipeline default() {
-  let next = synthetic_next()
+  const next = synthetic_next()
   // (1) default_tool_caller passes through unchanged.
-  let dc = default_tool_caller()
-  let r1 = dc(envelope("read", {path: "/etc/hosts"}), next)
+  const dc = default_tool_caller()
+  const r1 = dc(envelope("read", {path: "/etc/hosts"}), next)
   __io_println(r1.ok)
   __io_println(r1.tool_name)
   __io_println(r1.arguments.path)
   // (2) compose ordering: outer wrapper runs first; both args mutations
   // reach `next`; outer's post-wrap field lands on the result.
-  let outer = { call, inner ->
+  const outer = { call, inner ->
     let result = inner(call + {tool_args: call.tool_args + {seen_by: "outer"}})
     return result + {wrapped_by: "outer"}
   }
-  let middle = { call, inner -> return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}}) }
-  let composed = compose_tool_callers([outer, middle])
-  let r2 = composed(envelope("write", {path: "/tmp/x"}), next)
+  const middle = { call, inner -> return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}}) }
+  const composed = compose_tool_callers([outer, middle])
+  const r2 = composed(envelope("write", {path: "/tmp/x"}), next)
   __io_println(r2.wrapped_by)
   __io_println(r2.arguments.seen_by)
   __io_println(r2.arguments.seen_by_middle)
   // (3) tools_use_middleware applies the schema transform per entry.
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read",
     "Read a file",
     {handler: { _ -> "" }, parameters: {path: {type: "string"}}, returns: {type: "string"}},
   )
-  let added = tools_use_middleware(
+  const added = tools_use_middleware(
     tools,
     { entry -> tool_inject_param(entry, "reason", {type: "string", description: "why"}) },
   )
-  let read_entry = added.tools[0]
+  const read_entry = added.tools[0]
   __io_println(contains(read_entry.parameters.keys(), "reason"))
   __io_println(contains(read_entry.parameters.keys(), "path"))
   __io_println(read_entry.parameters.reason.description)
   // (4) JSON-schema-shaped parameters keep `required` updated.
-  var tools2 = tool_registry()
+  let tools2 = tool_registry()
   tools2 = tool_define(
     tools2,
     "edit",
@@ -87,37 +87,37 @@ pipeline default() {
       returns: {type: "string"},
     },
   )
-  let added2 = tools_use_middleware(
+  const added2 = tools_use_middleware(
     tools2,
     { entry -> tool_inject_param(entry, "reason", {type: "string"}, {required: true}) },
   )
-  let edit_entry = added2.tools[0]
+  const edit_entry = added2.tools[0]
   __io_println(contains(edit_entry.parameters.properties.keys(), "reason"))
   __io_println(contains(edit_entry.parameters.required, "reason"))
   // (5) Optional injected params must remain optional in both the full
   // JSON-schema shape and the bare shorthand shape. Provider-facing schema
   // projection reads the param fragment's `required` bit, so the injection
   // helper must reflect opts.required there as well as in object.required.
-  let optional_full = tools_use_middleware(
+  const optional_full = tools_use_middleware(
     tools2,
     { entry -> tool_inject_param(entry, "note", {type: "string"}, {required: false}) },
   )
-  let optional_full_entry = optional_full.tools[0]
+  const optional_full_entry = optional_full.tools[0]
   __io_println(contains(optional_full_entry.parameters.properties.keys(), "note"))
   __io_println(contains(optional_full_entry.parameters.required, "note"))
   __io_println(optional_full_entry.parameters.properties.note.required)
-  var tools3 = tool_registry()
+  let tools3 = tool_registry()
   tools3 = tool_define(
     tools3,
     "read",
     "Read a file",
     {handler: { _ -> "" }, parameters: {path: {type: "string"}}, returns: {type: "string"}},
   )
-  let optional_bare = tools_use_middleware(
+  const optional_bare = tools_use_middleware(
     tools3,
     { entry -> tool_inject_param(entry, "note", {type: "string"}, {required: false}) },
   )
-  let optional_bare_entry = optional_bare.tools[0]
+  const optional_bare_entry = optional_bare.tools[0]
   __io_println(contains(optional_bare_entry.parameters.keys(), "note"))
   __io_println(optional_bare_entry.parameters.note.required)
 }

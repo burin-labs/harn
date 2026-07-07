@@ -16,29 +16,29 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  * Tracking: harn#1864 (S-14).
  */
 pipeline default() {
-  let RB = ResumeBy()
+  const RB = ResumeBy()
   pipeline_on_finish(
     { harness, return_value ->
-      let parent = default_resume_by({conditions: nil, harness: harness})
-      let parent_result = parent(harness, {handle: "h-1", reason: "no conditions"})
-      let parent_audits = lifecycle_audit_log_take()
+      const parent = default_resume_by({conditions: nil, harness: harness})
+      const parent_result = parent(harness, {handle: "h-1", reason: "no conditions"})
+      const parent_audits = lifecycle_audit_log_take()
       harness.stdio.println("parent_mechanism=" + parent_result.mechanism)
       harness.stdio.println("parent_audit_kind=" + parent_audits[0].kind)
-      let local = default_resume_by({conditions: {trigger: {kind: "review.approved"}}, harness: harness})
-      let local_result = local(harness, {handle: "h-2", reason: "trigger", conditions: {trigger: {kind: "review.approved"}}})
-      let local_audits = lifecycle_audit_log_take()
+      const local = default_resume_by({conditions: {trigger: {kind: "review.approved"}}, harness: harness})
+      const local_result = local(harness, {handle: "h-2", reason: "trigger", conditions: {trigger: {kind: "review.approved"}}})
+      const local_audits = lifecycle_audit_log_take()
       harness.stdio.println("local_mechanism=" + local_result.mechanism)
       harness.stdio.println("local_audit_kind=" + local_audits[0].kind)
-      let parent_verify = RB.parent_llm(harness, {handle: "v-1", reason: "verify"})
-      let parent_verify_audits = lifecycle_audit_log_take()
+      const parent_verify = RB.parent_llm(harness, {handle: "v-1", reason: "verify"})
+      const parent_verify_audits = lifecycle_audit_log_take()
       harness.stdio.println("parent_verify_mechanism=" + parent_verify.mechanism)
       harness.stdio.println("parent_verify_kind=" + parent_verify_audits[0].kind)
-      let local_verify = RB
+      const local_verify = RB
         .local_runtime(
         harness,
         {handle: "v-2", reason: "verify", conditions: {trigger: {kind: "x"}}},
       )
-      let local_verify_audits = lifecycle_audit_log_take()
+      const local_verify_audits = lifecycle_audit_log_take()
       harness.stdio.println("local_verify_mechanism=" + local_verify.mechanism)
       harness.stdio.println("local_verify_kind=" + local_verify_audits[0].kind)
       return return_value

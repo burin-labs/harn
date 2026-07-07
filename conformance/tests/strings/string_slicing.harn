@@ -16,7 +16,7 @@ pipeline test(task) {
   log("hello"[0])
   log("hello"[-1])
   // Unicode slicing
-  let emoji = "ab"
+  const emoji = "ab"
   log(emoji[0])
   log(emoji[1])
   log(len(emoji))

@@ -27,7 +27,7 @@ type RunArtifactsRun = {
 }
 
 fn __run_artifacts_required_text(value, label) -> string {
-  let text = trim(to_string(value ?? ""))
+  const text = trim(to_string(value ?? ""))
   if text == "" {
     throw "std/run_artifacts: " + label + " is required"
   }
@@ -35,8 +35,8 @@ fn __run_artifacts_required_text(value, label) -> string {
 }
 
 fn __run_artifacts_clean_relative(value, label) -> string {
-  let raw = __run_artifacts_required_text(value, label)
-  let posix = path_to_posix(raw)
+  const raw = __run_artifacts_required_text(value, label)
+  const posix = path_to_posix(raw)
   if path_is_absolute(posix) {
     throw "std/run_artifacts: " + label + " must be relative"
   }
@@ -45,7 +45,7 @@ fn __run_artifacts_clean_relative(value, label) -> string {
       throw "std/run_artifacts: " + label + " must not contain '..'"
     }
   }
-  let normalized = path_normalize(posix)
+  const normalized = path_normalize(posix)
   if normalized == "." || normalized == "" {
     throw "std/run_artifacts: " + label + " is required"
   }
@@ -56,7 +56,7 @@ fn __run_artifacts_clean_relative(value, label) -> string {
 }
 
 fn __run_artifacts_clean_segment(value, label) -> string {
-  let clean = __run_artifacts_clean_relative(value, label)
+  const clean = __run_artifacts_clean_relative(value, label)
   if contains(clean, "/") {
     throw "std/run_artifacts: " + label + " must be one path segment"
   }
@@ -64,8 +64,8 @@ fn __run_artifacts_clean_segment(value, label) -> string {
 }
 
 fn __run_artifacts_root(options) -> string {
-  let opts = options ?? {}
-  let root = to_string(opts?.root ?? runtime_paths().run_root)
+  const opts = options ?? {}
+  const root = to_string(opts?.root ?? runtime_paths().run_root)
   if root == "" {
     throw "std/run_artifacts: root is required"
   }
@@ -73,7 +73,7 @@ fn __run_artifacts_root(options) -> string {
 }
 
 fn __run_artifacts_namespace(options) {
-  let raw = trim(to_string((options ?? {})?.namespace ?? ""))
+  const raw = trim(to_string((options ?? {})?.namespace ?? ""))
   if raw == "" {
     return nil
   }
@@ -92,7 +92,7 @@ fn __run_artifacts_default_run_id() -> string {
 }
 
 fn __run_artifacts_run_dir(run: {dir: string}) -> string {
-  let dir = to_string(run.dir ?? "")
+  const dir = to_string(run.dir ?? "")
   if dir == "" {
     throw "std/run_artifacts: run.dir is required"
   }
@@ -100,10 +100,10 @@ fn __run_artifacts_run_dir(run: {dir: string}) -> string {
 }
 
 fn __run_artifacts_path(run: {dir: string}, name) -> string {
-  let rel = __run_artifacts_clean_relative(name, "artifact path")
-  let root = path_normalize(__run_artifacts_run_dir(run))
-  let joined = path_normalize(path_join(root, rel))
-  let relative = path_relative_to(joined, root)
+  const rel = __run_artifacts_clean_relative(name, "artifact path")
+  const root = path_normalize(__run_artifacts_run_dir(run))
+  const joined = path_normalize(path_join(root, rel))
+  const relative = path_relative_to(joined, root)
   if relative == nil || relative == ".." || starts_with(relative, "../") {
     throw "std/run_artifacts: artifact path must stay inside the run directory"
   }
@@ -122,7 +122,7 @@ fn __run_artifacts_standard_paths(run: {dir: string}) -> RunArtifactPaths {
 }
 
 fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> RunArtifactsRun {
-  let base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
+  const base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
   return base + {paths: __run_artifacts_standard_paths(base)}
 }
 
@@ -134,16 +134,16 @@ fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) 
  * @example: run_artifacts_open("release", {root: root, run_id: "run-1"})
  */
 pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -> RunArtifactsRun {
-  let opts = options ?? {}
-  let clean_kind = __run_artifacts_clean_segment(kind, "kind")
-  let namespace = __run_artifacts_namespace(opts)
-  let root = __run_artifacts_root(opts)
-  let run_id = if opts.run_id == nil {
+  const opts = options ?? {}
+  const clean_kind = __run_artifacts_clean_segment(kind, "kind")
+  const namespace = __run_artifacts_namespace(opts)
+  const root = __run_artifacts_root(opts)
+  const run_id = if opts.run_id == nil {
     __run_artifacts_default_run_id()
   } else {
     __run_artifacts_clean_segment(opts.run_id, "run_id")
   }
-  let dir = path_join(__run_artifacts_kind_dir(root, clean_kind, namespace), run_id)
+  const dir = path_join(__run_artifacts_kind_dir(root, clean_kind, namespace), run_id)
   harness.fs.mkdir(dir)
   return __run_artifacts_make_run(clean_kind, namespace, root, run_id, dir)
 }
@@ -210,7 +210,7 @@ pub fn run_artifact_write_text(
  * @example: run_artifact_read_text(run, "review.md", "")
  */
 pub fn run_artifact_read_text(run: RunArtifactsRun, name: string, fallback = nil) {
-  let result = try {
+  const result = try {
     harness.fs.read_text(run_artifact_path(run, name))
   }
   if is_ok(result) {
@@ -227,7 +227,7 @@ pub fn run_artifact_read_text(run: RunArtifactsRun, name: string, fallback = nil
  * @example: run_artifact_transcript_dir(run, "agent-llm")
  */
 pub fn run_artifact_transcript_dir(run: RunArtifactsRun, name: string = "agent-llm") -> string {
-  let dir_name = if trim(to_string(name ?? "")) == "" {
+  const dir_name = if trim(to_string(name ?? "")) == "" {
     "agent-llm"
   } else {
     name
@@ -243,7 +243,7 @@ pub fn run_artifact_transcript_dir(run: RunArtifactsRun, name: string = "agent-l
  * @example: run_artifact_transcript_path(run, "agent-llm")
  */
 pub fn run_artifact_transcript_path(run: RunArtifactsRun, name: string = "agent-llm") -> string {
-  let dir_name = if trim(to_string(name ?? "")) == "" {
+  const dir_name = if trim(to_string(name ?? "")) == "" {
     "agent-llm"
   } else {
     name
@@ -259,39 +259,39 @@ pub fn run_artifact_transcript_path(run: RunArtifactsRun, name: string = "agent-
  * @example: run_artifacts_list("release", {limit: 5})
  */
 pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -> list<RunArtifactsRun> {
-  let opts = options ?? {}
-  let clean_kind = __run_artifacts_clean_segment(kind, "kind")
-  let namespace = __run_artifacts_namespace(opts)
-  let root = __run_artifacts_root(opts)
-  let limit = to_int(opts.limit ?? 20) ?? 20
+  const opts = options ?? {}
+  const clean_kind = __run_artifacts_clean_segment(kind, "kind")
+  const namespace = __run_artifacts_namespace(opts)
+  const root = __run_artifacts_root(opts)
+  const limit = to_int(opts.limit ?? 20) ?? 20
   if limit <= 0 {
     return []
   }
-  let kind_dir = __run_artifacts_kind_dir(root, clean_kind, namespace)
+  const kind_dir = __run_artifacts_kind_dir(root, clean_kind, namespace)
   if !is_dir(kind_dir) {
     return []
   }
-  let names_result = try {
+  const names_result = try {
     harness.fs.list_dir(kind_dir)
   }
   if !is_ok(names_result) {
     return []
   }
-  var rows = []
+  let rows = []
   for name in unwrap(names_result) {
-    let dir = path_join(kind_dir, name)
-    let info = try {
+    const dir = path_join(kind_dir, name)
+    const info = try {
       harness.fs.stat(dir)
     }
     if is_ok(info) && (unwrap(info)?.is_dir ?? false) {
-      let stat = unwrap(info)
+      const stat = unwrap(info)
       rows = rows.push(__run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified))
     }
   }
   return rows
     .sort_by(
     { row ->
-      let modified = row.modified ?? 0
+      const modified = row.modified ?? 0
       return pair(0 - modified, row.run_id ?? "")
     },
   )
@@ -307,9 +307,9 @@ pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -
  * @example: run_artifacts_from_dir("release", previous_dir)
  */
 pub fn run_artifacts_from_dir(kind: string, dir: string) -> RunArtifactsRun {
-  let clean_kind = __run_artifacts_clean_segment(kind, "kind")
-  let clean_dir = path_normalize(__run_artifacts_required_text(dir, "dir"))
-  let run_id = __run_artifacts_clean_segment(path_basename(clean_dir), "run_id")
-  let root = path_parent(path_parent(clean_dir))
+  const clean_kind = __run_artifacts_clean_segment(kind, "kind")
+  const clean_dir = path_normalize(__run_artifacts_required_text(dir, "dir"))
+  const run_id = __run_artifacts_clean_segment(path_basename(clean_dir), "run_id")
+  const root = path_parent(path_parent(clean_dir))
   return __run_artifacts_make_run(clean_kind, nil, root, run_id, clean_dir)
 }

@@ -5,11 +5,11 @@
  * `tenant_id` reads an entirely different topic.
  */
 pipeline default() {
-  let _ = emit_channel("pr.merged", {who: "alice"}, {id: "ten-A-1", tenant_id: "tenant-A"})
-  let _ = emit_channel("pr.merged", {who: "bob"}, {id: "ten-B-1", tenant_id: "tenant-B"})
-  let tenant_a = channel_events("pr.merged", {tenant_id: "tenant-A"})
-  let tenant_b = channel_events("pr.merged", {tenant_id: "tenant-B"})
-  let tenant_c = channel_events("pr.merged", {tenant_id: "tenant-C"})
+  const _ = emit_channel("pr.merged", {who: "alice"}, {id: "ten-A-1", tenant_id: "tenant-A"})
+  const _ = emit_channel("pr.merged", {who: "bob"}, {id: "ten-B-1", tenant_id: "tenant-B"})
+  const tenant_a = channel_events("pr.merged", {tenant_id: "tenant-A"})
+  const tenant_b = channel_events("pr.merged", {tenant_id: "tenant-B"})
+  const tenant_c = channel_events("pr.merged", {tenant_id: "tenant-C"})
   __io_println(len(tenant_a))
   __io_println(tenant_a[0].payload.who)
   __io_println(tenant_a[0].scope)

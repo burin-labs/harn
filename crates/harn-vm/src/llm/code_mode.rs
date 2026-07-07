@@ -310,8 +310,8 @@ mod tests {
         // is closed over by the host-side handler and never leaves it.
         let source = r#"
 pipeline main() {
-  let handler = fn(args) {
-    let _credential = "SECRET-TOKEN-do-not-leak"
+  const handler = fn(args) {
+    const _credential = "SECRET-TOKEN-do-not-leak"
     return json_stringify({ records: [{ id: 1, title: args.q + "-alpha" }, { id: 2, title: args.q + "-beta" }] })
   }
   return { tools: [{ name: "connector_read", handler: handler }] }
@@ -330,9 +330,9 @@ pipeline main() {
             // Call the connector twice, compose across both results, return only
             // a small summary — the full record payloads stay in the sandbox.
             let code = r#"
-let first = json_parse(call_tool("connector_read", { q: "one" }))
-let second = json_parse(call_tool("connector_read", { q: "two" }))
-let total = len(first.records) + len(second.records)
+const first = json_parse(call_tool("connector_read", { q: "one" }))
+const second = json_parse(call_tool("connector_read", { q: "two" }))
+const total = len(first.records) + len(second.records)
 return { total: total, first_title: first.records[0].title }
 "#;
             let mut vm = crate::Vm::new();

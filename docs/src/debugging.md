@@ -156,7 +156,7 @@ These metrics appear in run records and are aggregated by `harn eval`.
 Track LLM costs during a run:
 
 ```harn
-let usage = llm_usage()
+const usage = llm_usage()
 log("Tokens used: ${usage.input_tokens + usage.output_tokens}")
 log("LLM calls: ${usage.total_calls}")
 ```

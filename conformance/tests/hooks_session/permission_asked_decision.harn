@@ -5,10 +5,10 @@ import { llm_text, with_llm_script } from "std/testing"
  * policy by returning a `{decision: "allow"|"deny", reason}` dict.
  * `permission_replied` is advisory and observes the final decision.
  */
-let replies = atomic(0)
+const replies = atomic(0)
 
 fn make_tools() {
-  let registry = tool_registry()
+  const registry = tool_registry()
   return tool_define(
     registry,
     "guarded_tool",
@@ -40,7 +40,7 @@ pipeline default() {
   with_llm_script(
     [{tool_calls: [{id: "call_1", name: "guarded_tool", arguments: {}}]}, llm_text("done")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "use guarded tool",
         nil,
         {

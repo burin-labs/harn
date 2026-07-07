@@ -17,7 +17,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *      carries no keyword overlap.
  */
 pipeline test(task) {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "deploy_service",
@@ -43,13 +43,13 @@ pipeline test(task) {
   }
   // Build a joined registry from both skill decls so both match
   // candidates are visible to the ranker.
-  let registry = skill_define(ship, "inspect", skill_find(inspect, "inspect") ?? {})
+  const registry = skill_define(ship, "inspect", skill_find(inspect, "inspect") ?? {})
   // Single-turn mock so the loop completes naturally; we're only
   // observing the system prompt + tool schema filtering on that turn.
   with_llm_script(
     [llm_text("On it.")],
     { ->
-      let result = agent_loop(
+      const result = agent_loop(
         "Ship the new release to production",
         "You are a staff deploy engineer.",
         {
@@ -62,16 +62,16 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop completes")
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
-      let first_system = calls[0].system
+      const first_system = calls[0].system
       assert(contains(first_system, "## Active skills"), "system prompt includes active-skill section")
       assert(contains(first_system, "ship"), "activated skill name surfaces in prompt")
       assert(contains(first_system, "runbook"), "skill body prompt is woven in")
       assert(contains(first_system, "Scoped tools: deploy_service"), "allowed_tools listed in prompt")
-      let first_tools = calls[0].tools
-      var seen_deploy = false
-      var seen_metrics = false
+      const first_tools = calls[0].tools
+      let seen_deploy = false
+      let seen_metrics = false
       if first_tools != nil {
         for t in first_tools {
           if t?.function?.name == "deploy_service" {
@@ -84,10 +84,10 @@ pipeline test(task) {
       }
       assert(seen_deploy, "scoped tool remained in the schema")
       assert(!seen_metrics, "out-of-scope tool was filtered")
-      let events = transcript_events(result?.transcript)
-      var matched = 0
-      var activated = 0
-      var scoped = 0
+      const events = transcript_events(result?.transcript)
+      let matched = 0
+      let activated = 0
+      let scoped = 0
       for ev in events {
         if ev.kind == "skill_matched" {
           matched = matched + 1

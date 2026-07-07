@@ -26,7 +26,7 @@
  * Fully offline — the custom strategy short-circuits any LLM call.
  */
 pipeline default(_task) {
-  let session = agent_session_open("compaction-policy-demo")
+  const session = agent_session_open("compaction-policy-demo")
   agent_session_inject(
     session,
     {role: "user", content: "Investigate the parser regression in stdlib."},
@@ -42,15 +42,15 @@ pipeline default(_task) {
   // 1. Declare the policy. `summarize-then-prune` is the default
   //    strategy choice for IDE-style hosts; we override at run time to
   //    a `custom` strategy so the demo can finish without an LLM call.
-  let policy = compaction
+  const policy = compaction
     .policy({session_id: session, strategy: "summarize-then-prune", max_turns: 2, keep_last: 1})
   // 2. Cheap per-turn check. No mutation; safe to call before every
   //    LLM round-trip.
-  let pre_decision = compaction.check(session)
+  const pre_decision = compaction.check(session)
   // 3. Run the compaction through the canonical lifecycle. The plan
   //    overrides the policy's strategy because the demo has no LLM in
   //    its tape; production callers usually pass `nil` here.
-  let outcome = compaction
+  const outcome = compaction
     .run(
     session,
     {
@@ -59,14 +59,14 @@ pipeline default(_task) {
     },
   )
   // 4. Re-check post-run.
-  let post_decision = compaction.check(session)
+  const post_decision = compaction.check(session)
   __io_println("=== compaction-policy demo ===")
   __io_println("pre.action  = " + pre_decision["action"])
   __io_println("pre.trigger = " + pre_decision["trigger"])
   __io_println("run.engine  = " + outcome["engine_strategy"])
   __io_println("run.kept    = " + to_string(outcome["messages_after"]))
   __io_println("post.action = " + post_decision["action"])
-  let receipt = {
+  const receipt = {
     receipt_kind: "compaction_policy_demo",
     policy_strategy: policy["strategy"],
     pre_decision_action: pre_decision["action"],

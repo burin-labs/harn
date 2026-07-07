@@ -1,33 +1,33 @@
 import { with_approval_gate } from "std/personas/prelude"
 
 pipeline test(task) {
-  let opts = {
+  const opts = {
     persona: "approval_captain",
     step: "merge",
     trace_id: "trace-approval",
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  let suspended_gate = with_approval_gate("merge", fn() { return "ran" }, opts)
-  let suspended = suspended_gate()
+  const suspended_gate = with_approval_gate("merge", fn() { return "ran" }, opts)
+  const suspended = suspended_gate()
   __io_println(suspended.status)
   __io_println(suspended.approval_required)
-  let approved_gate = with_approval_gate(
+  const approved_gate = with_approval_gate(
     "merge",
     fn() { return "ran" },
     opts + {approval: {approved: true, reviewers: ["alice"], reason: "ok"}},
   )
-  let approved = approved_gate()
+  const approved = approved_gate()
   __io_println(approved.status)
   __io_println(approved.result)
   __io_println(len(approved.receipt.approvals))
   __io_println(approved.receipt.status)
-  let denied_gate = with_approval_gate(
+  const denied_gate = with_approval_gate(
     "merge",
     fn() { return "should-not-run" },
     opts + {approval: {approved: false, reviewers: ["alice"], reason: "unsafe"}},
   )
-  let denied = denied_gate()
+  const denied = denied_gate()
   __io_println(denied.status)
   __io_println(denied.result == nil)
   __io_println(denied.error.message)

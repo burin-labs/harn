@@ -10,7 +10,7 @@ import {
 } from "std/agent/completions"
 
 pipeline test(task) {
-  let context = completion_context(
+  const context = completion_context(
     {
       surface: "editor",
       file_path: "Sources/App.swift",
@@ -25,7 +25,7 @@ pipeline test(task) {
       codebase_context: [{path: "Sources/User.swift", text: "struct User { let name: String }"}],
     },
   )
-  let policy = completion_policy(
+  const policy = completion_policy(
     {
       disabled_languages: ["markdown"],
       allowed_providers: ["ollama"],
@@ -33,13 +33,13 @@ pipeline test(task) {
       prompt_recording: "metadata",
     },
   )
-  let allowed = completion_policy_decision(context, {provider: "ollama", model_id: "qwen"}, policy)
-  let blocked = completion_policy_decision(context, {provider: "openai", model_id: "gpt"}, policy)
-  let camel_policy = completion_policy(
+  const allowed = completion_policy_decision(context, {provider: "ollama", model_id: "qwen"}, policy)
+  const blocked = completion_policy_decision(context, {provider: "openai", model_id: "gpt"}, policy)
+  const camel_policy = completion_policy(
     {allowedProviders: ["ollama"], allowRemoteModels: false, promptRecording: "off", maxPromptChars: 12},
   )
-  let camel_blocked = completion_policy_decision(context, {provider: "openai", modelID: "gpt"}, camel_policy)
-  let proposal = completion_proposal(
+  const camel_blocked = completion_policy_decision(context, {provider: "openai", modelID: "gpt"}, camel_policy)
+  const proposal = completion_proposal(
     {
       kind: "inline_replace",
       provider: "ollama",
@@ -48,15 +48,15 @@ pipeline test(task) {
       replacement_range: {location: 42, length: 0},
     },
   )
-  let shown = completion_shown_event(
+  const shown = completion_shown_event(
     proposal,
     context,
     {input_tokens: 100, output_tokens: 4, cost_usd: 0.0},
     {record_id: "rec-1", session_id: "session-1", prompt: "private prompt", policy: policy},
   )
-  let decision = completion_decision_event(shown, "accepted", {decision_latency_ms: 120})
-  let trust = completion_trust_record(decision)
-  let usage = completion_usage_record(shown, {recorded_at_ms: 12345})
+  const decision = completion_decision_event(shown, "accepted", {decision_latency_ms: 120})
+  const trust = completion_trust_record(decision)
+  const usage = completion_usage_record(shown, {recorded_at_ms: 12345})
   log(context.schema)
   log(context.language)
   log(policy.prompt_recording)

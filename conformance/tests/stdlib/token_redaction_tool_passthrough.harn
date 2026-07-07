@@ -8,11 +8,11 @@ import { drain_audit, redact } from "std/oauth/redaction"
 pipeline test(task) {
   // Drop any audit entries left by earlier conformance cases so we
   // can attribute the entries appended below to this scan.
-  let _ = drain_audit()
+  const _ = drain_audit()
   // Synthesize a token at runtime so the file does not itself
   // contain a string that secret scanners flag in code review.
-  let token = "ghp_" + "1234567890abcdefghijklmnopqrstuvwxyz"
-  let header = "Authorization: Bearer " + token
+  const token = "ghp_" + "1234567890abcdefghijklmnopqrstuvwxyz"
+  const header = "Authorization: Bearer " + token
   // The variable still carries the original bytes — a tool call
   // forwarding `token` would see the real secret.
   if !contains(header, token) {
@@ -26,7 +26,7 @@ pipeline test(task) {
   // catalog runs default patterns in order, so a `Bearer ghp_…`
   // string is attributed to whichever specific pattern fires first
   // (typically `github_token` for `ghp_*` prefixes).
-  let display = redact(header)
+  const display = redact(header)
   if contains(display, token) {
     throw "redacted display leaked the raw token: " + display
   }
@@ -36,11 +36,11 @@ pipeline test(task) {
   // The OA-06 contract emits one HARN-OAU-001 audit entry per
   // pattern that matched. At least one entry must reference a
   // catalog pattern with the canonical diagnostic code.
-  let entries = drain_audit()
+  const entries = drain_audit()
   if len(entries) == 0 {
     throw "expected at least one HARN-OAU-001 audit entry"
   }
-  var found = false
+  let found = false
   for entry in entries {
     if entry.code == "HARN-OAU-001" {
       if entry.match_count <= 0 {

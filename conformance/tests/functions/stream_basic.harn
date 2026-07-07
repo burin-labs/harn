@@ -1,14 +1,14 @@
 pipeline test(task) {
   gen fn numbers(start: int, end: int) -> Stream<int> {
-    var n = start
+    let n = start
     while n < end {
       emit n
       n = n + 1
     }
   }
-  let stream = numbers(1, 4)
+  const stream = numbers(1, 4)
   __io_println(type_of(stream))
-  let first = stream.next()
+  const first = stream.next()
   __io_println(first.value)
   __io_println(first.done)
   for n in numbers(10, 13) {

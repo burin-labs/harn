@@ -23,7 +23,7 @@ from `std/tools`.
 import "std/vision"
 
 fn deterministic_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
 
   tools = tool_define(tools, "math::calc", "Deterministic arithmetic", {
     parameters: {
@@ -105,7 +105,7 @@ fn deterministic_tools() {
 Then hand the registry to `agent_loop(...)`:
 
 ```harn,ignore
-let result = agent_loop(
+const result = agent_loop(
   "Read the screenshot, hash the extracted order id, and summarize the UI state.",
   "Use deterministic tools first. Prefer pure stdlib tools over free-form reasoning when possible.",
   {
@@ -147,7 +147,7 @@ the packaged hostlib wrappers instead of hand-rolling tool registries. Import
 ```harn
 import { agent_command_tools, agent_host_tools } from "std/agent/host_tools"
 
-let tools = agent_command_tools(nil, {
+const tools = agent_command_tools(nil, {
   cwd: repo_root,
   max_inline_bytes: 12000,
   command_behavior: {
@@ -177,7 +177,7 @@ coarse `git_inspect` operation switch:
 ```harn,ignore
 import { git_tools } from "std/git"
 
-let tools = git_tools(nil, {
+const tools = git_tools(nil, {
   repo: repo_root,
   enabled_tools: ["git_status", "git_log", "git_switch"],
   names: {git_log: "release_git_log"},
@@ -190,7 +190,7 @@ When small/local models struggle to choose among many individual git schemas,
 use the compact toolbox instead:
 
 ```harn,ignore
-let tools = git_toolbox_tools(nil, {
+const tools = git_toolbox_tools(nil, {
   repo: repo_root,
   include_mutations: true,
 })
@@ -260,7 +260,7 @@ when a loop should be allowed to change the workspace:
 ```harn,ignore
 import { agent_edit_tools, agent_host_tools } from "std/agent/host_tools"
 
-let tools = agent_edit_tools(agent_host_tools(nil, {root: repo_root}), {root: repo_root})
+const tools = agent_edit_tools(agent_host_tools(nil, {root: repo_root}), {root: repo_root})
 ```
 
 Every edit tool is annotated honestly as mutating (`kind: edit`/`delete`,
@@ -304,7 +304,7 @@ of open-coding process execution plus `json_parse`:
 ```harn,ignore
 import { command_json } from "std/command"
 
-let repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
   capture: {max_inline_bytes: 65536},
 })
 ```
@@ -313,7 +313,7 @@ The helpers are deliberately configurable so harness authors can keep their
 script surface product-specific without duplicating implementation details:
 
 ```harn,ignore
-let tools = agent_host_tools(nil, {
+const tools = agent_host_tools(nil, {
   root: repo_root,
   cwd: repo_root,
   max_inline_bytes: 12000,
@@ -379,7 +379,7 @@ Any tool registered via `tool_define` (or the `tool { … }` language
 form) can opt out of eager loading:
 
 ```harn
-var registry = tool_registry()
+let registry = tool_registry()
 registry = tool_define(registry, "deploy", "Deploy to production", {
   parameters: {env: {type: "string", enum: ["staging", "prod"]}},
   defer_loading: true,
@@ -397,7 +397,7 @@ API prefix but not the model's context).
 Turning progressive disclosure on is one option away:
 
 ```harn
-let r = llm_call(prompt, sys, {
+const r = llm_call(prompt, sys, {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: registry,
@@ -551,7 +551,7 @@ deterministic tool receipts. Use OpenAI Responses `provider_tools` only when
 the provider should execute a hosted tool or remote MCP connector:
 
 ```harn
-let result = llm_call("Find the current policy and summarize it.", nil, {
+const result = llm_call("Find the current policy and summarize it.", nil, {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
@@ -580,7 +580,7 @@ Use `mcp_servers` when an agent should use an MCP server's tool catalog without
 manually calling `mcp_connect`, `mcp_list_tools`, and `mcp_call`.
 
 ```harn
-let result = agent_loop(
+const result = agent_loop(
   "Summarize the latest open issue and draft a reply.",
   "You are a concise triage assistant.",
   {

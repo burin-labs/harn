@@ -184,14 +184,19 @@ impl TypeChecker {
     }
 
     /// Define the names a top-level body statement introduces, so subsequent
-    /// `return` expressions resolve locals correctly. Immutable `let`/`const`
-    /// bindings carry their inferred type; `var` and destructured bindings are
-    /// shadowed as unknown (`None`) — a `var` can be reassigned to another type,
-    /// so trusting its initializer would be unsound. Anything that depends on an
-    /// unknown local then makes the function stay dynamic via the bail rule.
+    /// `return` expressions resolve locals correctly. Immutable `const`
+    /// bindings carry their inferred type; mutable `let` and destructured
+    /// bindings are shadowed as unknown (`None`) — a `let` can be reassigned to
+    /// another type, so trusting its initializer would be unsound. Anything
+    /// that depends on an unknown local then makes the function stay dynamic
+    /// via the bail rule.
     fn define_local_binding(&self, stmt: &SNode, scope: &mut TypeScope) {
         match &stmt.node {
-            Node::LetBinding {
+            Node::LetBinding { pattern, .. } => match pattern {
+                BindingPattern::Identifier(name) => scope.define_var(name, None),
+                other => Self::shadow_pattern_names(other, scope),
+            },
+            Node::ConstBinding {
                 pattern,
                 type_ann,
                 value,
@@ -202,18 +207,6 @@ impl TypeChecker {
                 }
                 other => Self::shadow_pattern_names(other, scope),
             },
-            Node::VarBinding { pattern, .. } => match pattern {
-                BindingPattern::Identifier(name) => scope.define_var(name, None),
-                other => Self::shadow_pattern_names(other, scope),
-            },
-            Node::ConstBinding {
-                name,
-                type_ann,
-                value,
-            } => {
-                let ty = type_ann.clone().or_else(|| self.infer_type(value, scope));
-                scope.define_var(name, ty);
-            }
             _ => {}
         }
     }

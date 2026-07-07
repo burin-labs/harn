@@ -1,21 +1,21 @@
 pipeline default(task) {
-  let users = [
+  const users = [
     {name: "Alice", age: 30, role: "engineer"},
     {name: "Bob", age: 25, role: "designer"},
     {name: "Charlie", age: 35, role: "engineer"},
     {name: "Diana", age: 28, role: "manager"},
   ]
-  let engineers = users.filter({ u -> u.role == "engineer" })
+  const engineers = users.filter({ u -> u.role == "engineer" })
   log("Engineers:")
   for eng in engineers {
     log("  ${eng.name} (age ${eng.age})")
   }
-  let names = users.map({ u -> u.name })
+  const names = users.map({ u -> u.name })
   log("All names: ${names}")
-  let total_age = users.reduce(0, { acc, u -> acc + u.age })
+  const total_age = users.reduce(0, { acc, u -> acc + u.age })
   log("Total age: ${total_age}")
-  let has_senior = users.any({ u -> u.age > 30 })
+  const has_senior = users.any({ u -> u.age > 30 })
   log("Has someone over 30: ${has_senior}")
-  let result = users |> { list -> list.filter({ u -> u.age >= 28 }) } |> { list -> list.map({ u -> u.name }) }
+  const result = users |> { list -> list.filter({ u -> u.age >= 28 }) } |> { list -> list.map({ u -> u.name }) }
   log("28+ names: ${result}")
 }

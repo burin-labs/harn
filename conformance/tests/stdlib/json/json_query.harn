@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let api = json_parse(
+  const api = json_parse(
     "{\"users\":[{\"name\":\"Ada\",\"email\":\"ada@example.com\",\"age\":36,\"score\":9,\"active\":true},{\"name\":\"Bob\",\"email\":\"bob@example.com\",\"age\":41,\"score\":5,\"active\":false},{\"name\":\"Cy\",\"email\":\"cy@example.com\",\"age\":29,\"score\":8,\"active\":true}],\"meta\":{\"count\":3,\"next\":null},\"quoted key\":{\"value\":9}}",
   )
   __io_println(jq_first(api, ".users[0].name"))

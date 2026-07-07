@@ -5,14 +5,14 @@ import "std/triggers"
  * emits within the trigger's entitled tenant boundary.
  */
 fn handle_any_tenant(event) {
-  let payload = event.provider_payload
+  const payload = event.provider_payload
   emit_channel("ch.wild.fired", {scope: payload.scope, scope_id: payload.scope_id})
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let _ = trigger_register(
+  const _ = trigger_register(
     {
       id: "channel-wild-" + unique,
       kind: "channel.emit",
@@ -30,8 +30,8 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let _ = emit_channel("wild.input", {n: 1})
-  let fired = channel_events("ch.wild.fired")
+  const _ = emit_channel("wild.input", {n: 1})
+  const fired = channel_events("ch.wild.fired")
   __io_println(len(fired))
   __io_println(fired[0].payload.scope)
   // Default tenant id is `default` when no tenant is set on the runtime.

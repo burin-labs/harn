@@ -1,19 +1,19 @@
 import "std/triggers"
 
 fn gated_handler(event: TriggerEvent) -> dict {
-  let context = handler_context()
-  let file_path = path_join(".harn", "trust_graph_shadow_" + (context?.agent ?? "unknown") + ".txt")
+  const context = handler_context()
+  const file_path = path_join(".harn", "trust_graph_shadow_" + (context?.agent ?? "unknown") + ".txt")
   harness.fs.write_text(file_path, "approved:" + event.kind)
   return {autonomy_tier: context?.autonomy_tier, file_path: file_path}
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
-  let agent_id = "shadow-bot-" + unique
-  let file_path = path_join(".harn", "trust_graph_shadow_" + agent_id + ".txt")
+  const agent_id = "shadow-bot-" + unique
+  const file_path = path_join(".harn", "trust_graph_shadow_" + agent_id + ".txt")
   harness.fs.mkdir(".harn")
-  let handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = trigger_register(
     {
       id: agent_id,
       kind: "issue.opened",
@@ -31,19 +31,19 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  let first: DispatchHandle = trigger_fire(
+  const first: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-shadow-" + unique}},
   )
-  let denied: list<TrustRecord> = trust_query({agent: agent_id, action: "fs.write", outcome: "denied"})
-  let file_after_first = harness.fs.exists(file_path)
-  let promoted: TrustRecord = trust_record(agent_id, "trust.promote", "tester", "success", "act_auto")
-  let promote_records: list<TrustRecord> = trust_query({agent: agent_id, action: "trust.promote"})
-  let second: DispatchHandle = trigger_fire(
+  const denied: list<TrustRecord> = trust_query({agent: agent_id, action: "fs.write", outcome: "denied"})
+  const file_after_first = harness.fs.exists(file_path)
+  const promoted: TrustRecord = trust_record(agent_id, "trust.promote", "tester", "success", "act_auto")
+  const promote_records: list<TrustRecord> = trust_query({agent: agent_id, action: "trust.promote"})
+  const second: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-auto-" + unique}},
   )
-  let successes: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened", outcome: "success", tier: "act_auto"})
+  const successes: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened", outcome: "success", tier: "act_auto"})
   __io_println(first.status == "dispatched" && first.result?.autonomy_tier == "shadow")
   __io_println(!file_after_first)
   __io_println(len(denied) == 1 && denied[0].autonomy_tier == "shadow")

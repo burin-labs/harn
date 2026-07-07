@@ -39,26 +39,26 @@ fn fake_request() {
 }
 
 fn main(_harness: Harness) {
-  let req = fake_request()
+  const req = fake_request()
   // 1. Content negotiation against a simulated `Accept` header.
-  let chosen = http_choose(req.headers.Accept, ["application/xml", "application/json", "text/plain"])
+  const chosen = http_choose(req.headers.Accept, ["application/xml", "application/json", "text/plain"])
   __io_println("chose: ${chosen}")
   // 2. Compute a strong ETag from the serialized payload. The codec's
   //    router-side ETag middleware mirrors this for the auto path;
   //    handlers can also drive the value themselves (e.g. from a row
   //    mtime).
-  let etag = http_etag(json_stringify(payload()))
+  const etag = http_etag(json_stringify(payload()))
   __io_println("etag: ${etag}")
   // 3. Build the conditional-GET reply for the matching case.
-  let not_modified = http_not_modified(etag, {"Cache-Control": "max-age=60"})
+  const not_modified = http_not_modified(etag, {"Cache-Control": "max-age=60"})
   // 4. Construct the WS-upgrade envelope. With both client + server
   //    offering `v1.harn`, that's the negotiated subprotocol.
-  let upgrade = http_upgrade_ws(req, {subprotocols: ["v1.harn", "v2.harn"], idle_ping_ms: 30000})
+  const upgrade = http_upgrade_ws(req, {subprotocols: ["v1.harn", "v2.harn"], idle_ping_ms: 30000})
   // 5. Wrap an http_ok envelope with preload hints. The codec turns
   //    each entry into a separate `Link: <path>; rel=preload; as=...`
   //    header so HTTP/2-enabled clients can prefetch the asset.
-  let page = http_push_hints(http_ok({title: "home"}), ["/main.css", "/app.js", "/hero.webp"])
-  let receipt = {
+  const page = http_push_hints(http_ok({title: "home"}), ["/main.css", "/app.js", "/hero.webp"])
+  const receipt = {
     receipt_kind: "http_transport_receipt",
     chose_content_type: chosen,
     etag: etag,

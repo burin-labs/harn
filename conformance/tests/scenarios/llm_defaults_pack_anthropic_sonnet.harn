@@ -6,7 +6,7 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  let r = pack_for({model: "claude-sonnet-4-5", task: "agent", thinking: "medium"})
+  const r = pack_for({model: "claude-sonnet-4-5", task: "agent", thinking: "medium"})
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, "claude-sonnet-4-5")
   assert_eq(r.provider, "anthropic")

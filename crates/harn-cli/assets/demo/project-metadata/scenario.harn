@@ -23,25 +23,25 @@ pipeline default(_task) {
       },
     },
   )
-  let exact = host_call("project.metadata_get", {dir: "demo", namespace: "learning"})
-  let inherited = host_call("project.metadata_get", {dir: "demo/src", namespace: "learning"})
-  let all = host_call("project.metadata_get", {dir: "demo/src"})
-  let before = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
+  const exact = host_call("project.metadata_get", {dir: "demo", namespace: "learning"})
+  const inherited = host_call("project.metadata_get", {dir: "demo/src", namespace: "learning"})
+  const all = host_call("project.metadata_get", {dir: "demo/src"})
+  const before = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
   require exact.gotchas[0] == "prefer relative imports for sibling modules"
   require inherited.gotchas[1] == "refresh hashes after structural edits"
   require all.learning.source == "demo"
   require before.origin_dir == "demo"
   require before.missing_structure_hash
-  let stale_before = host_call("project.metadata_stale", {dir: "demo"})
+  const stale_before = host_call("project.metadata_stale", {dir: "demo"})
   require type_of(stale_before.tier1) == "list"
   require type_of(stale_before.tier2) == "list"
   host_call("project.metadata_refresh_hashes", {dir: "demo"})
-  let after = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
+  const after = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
   require after.origin_dir == "demo"
   require !after.missing_structure_hash
   require !after.stale_tier1
   host_call("project.metadata_save", {})
-  let receipt = {
+  const receipt = {
     receipt_kind: "project_metadata_receipt",
     origin_dir: after.origin_dir,
     inherited_import_rule: inherited.gotchas[0],

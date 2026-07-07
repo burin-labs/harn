@@ -42,14 +42,14 @@ fn string_value(value) -> string {
 }
 
 fn load_json(path: string, input_findings: list, required: bool, print_lines: bool) -> dict {
-  var findings = input_findings
+  let findings = input_findings
   if !harness.fs.exists(path) {
     if required {
       findings = record(findings, "FAIL", basename(path) + " missing", print_lines)
     }
     return {value: nil, findings: findings}
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(harness.fs.read_text(path) ?? "")
   }
   if is_err(parsed) {
@@ -65,22 +65,22 @@ fn load_json(path: string, input_findings: list, required: bool, print_lines: bo
 }
 
 fn load_jsonl(path: string, input_findings: list, required: bool, print_lines: bool) -> dict {
-  var findings = input_findings
+  let findings = input_findings
   if !harness.fs.exists(path) {
     if required {
       findings = record(findings, "FAIL", basename(path) + " missing", print_lines)
     }
     return {rows: [], findings: findings}
   }
-  var rows: list = []
-  var lineno = 0
+  let rows: list = []
+  let lineno = 0
   for raw_line in split(harness.fs.read_text(path) ?? "", "\n") {
     lineno = lineno + 1
-    let line = trim(raw_line)
+    const line = trim(raw_line)
     if !line {
       continue
     }
-    let parsed = try {
+    const parsed = try {
       json_parse(line)
     }
     if is_err(parsed) {
@@ -93,7 +93,7 @@ fn load_jsonl(path: string, input_findings: list, required: bool, print_lines: b
       )
       continue
     }
-    let value = unwrap(parsed)
+    const value = unwrap(parsed)
     if type_of(value) != "dict" {
       findings = record(
         findings,
@@ -109,25 +109,25 @@ fn load_jsonl(path: string, input_findings: list, required: bool, print_lines: b
 }
 
 fn llm_input_text(call: dict) -> string {
-  var parts: list<string> = []
+  let parts: list<string> = []
   for key in ["input", "prompt", "last_prompt", "rendered_prompt"] {
-    let value = call[key]
+    const value = call[key]
     if type_of(value) == "string" {
       parts = parts + [value]
     }
   }
-  let messages = call?.messages
+  const messages = call?.messages
   if type_of(messages) == "list" {
     for message in messages {
       if type_of(message) == "dict" {
-        let content = message?.content
+        const content = message?.content
         if type_of(content) == "string" {
           parts = parts + [content]
         }
       }
     }
   }
-  let system = call?.system
+  const system = call?.system
   if type_of(system) == "string" {
     parts = parts + [system]
   }
@@ -135,9 +135,9 @@ fn llm_input_text(call: dict) -> string {
 }
 
 fn tool_calls_from_call(call: dict) -> list {
-  let calls = call?.tool_calls
+  const calls = call?.tool_calls
   if type_of(calls) == "list" {
-    var out: list = []
+    let out: list = []
     for item in calls {
       if type_of(item) == "dict" {
         out = out + [item]
@@ -145,11 +145,11 @@ fn tool_calls_from_call(call: dict) -> list {
     }
     return out
   }
-  let message = call?.message
+  const message = call?.message
   if type_of(message) == "dict" {
-    let nested = message?.tool_calls
+    const nested = message?.tool_calls
     if type_of(nested) == "list" {
-      var out: list = []
+      let out: list = []
       for item in nested {
         if type_of(item) == "dict" {
           out = out + [item]
@@ -162,10 +162,10 @@ fn tool_calls_from_call(call: dict) -> list {
 }
 
 fn call_tool_names(call: dict) -> list<string> {
-  var names: list<string> = []
+  let names: list<string> = []
   for tool_call in tool_calls_from_call(call) {
-    let name = tool_call?.name
-    let function = tool_call?.function
+    const name = tool_call?.name
+    const function = tool_call?.function
     if type_of(name) == "string" {
       names = names + [name]
     } else if type_of(function) == "dict" && type_of(function?.name) == "string" {
@@ -176,10 +176,10 @@ fn call_tool_names(call: dict) -> list<string> {
 }
 
 fn inspect_task_json(task_dir: string, input_findings: list, print_lines: bool) -> list {
-  var findings = input_findings
-  let loaded = load_json(path_join(task_dir, "task.json"), findings, true, print_lines)
+  let findings = input_findings
+  const loaded = load_json(path_join(task_dir, "task.json"), findings, true, print_lines)
   findings = loaded.findings
-  let task = loaded.value
+  const task = loaded.value
   if type_of(task) == "dict" && trim(string_value(task?.task)) != "" {
     findings = record(findings, "OK", "task.json has task text", print_lines)
   } else if task != nil {
@@ -189,27 +189,27 @@ fn inspect_task_json(task_dir: string, input_findings: list, print_lines: bool) 
 }
 
 fn inspect_qa(task_dir: string, input_findings: list, print_lines: bool) -> dict {
-  var findings = input_findings
-  let loaded = load_jsonl(path_join(task_dir, "qa.jsonl"), findings, false, print_lines)
+  let findings = input_findings
+  const loaded = load_jsonl(path_join(task_dir, "qa.jsonl"), findings, false, print_lines)
   findings = loaded.findings
-  let qa = loaded.rows
+  const qa = loaded.rows
   if len(qa) == 0 {
     findings = record(findings, "WARN", "qa.jsonl has no entries", print_lines)
     return {findings: findings, qa: []}
   }
-  var last_answered_at = ""
-  var index = 0
+  let last_answered_at = ""
+  let index = 0
   for entry in qa {
     index = index + 1
-    let question = trim(string_value(entry?.question))
-    let answer_present = entry?.answer != nil
+    const question = trim(string_value(entry?.question))
+    const answer_present = entry?.answer != nil
     if question == "" {
       findings = record(findings, "FAIL", "qa.jsonl entry " + to_string(index) + " missing question", print_lines)
     }
     if !answer_present {
       findings = record(findings, "FAIL", "qa.jsonl entry " + to_string(index) + " missing answer", print_lines)
     }
-    let answered_at = string_value(entry?.answered_at)
+    const answered_at = string_value(entry?.answered_at)
     if answered_at != "" && last_answered_at != "" && answered_at < last_answered_at {
       findings = record(
         findings,
@@ -227,16 +227,16 @@ fn inspect_qa(task_dir: string, input_findings: list, print_lines: bool) -> dict
 }
 
 fn inspect_terminal_state(task_dir: string, input_findings: list, print_lines: bool) -> list {
-  var findings = input_findings
-  let pending = path_join(task_dir, "pending.json")
-  let plan = path_join(task_dir, "plan.json")
+  let findings = input_findings
+  const pending = path_join(task_dir, "pending.json")
+  const plan = path_join(task_dir, "plan.json")
   if harness.fs.exists(pending) && harness.fs.exists(plan) {
     return record(findings, "FAIL", "pending.json and plan.json are both present", print_lines)
   }
   if harness.fs.exists(pending) {
-    let loaded = load_json(pending, findings, false, print_lines)
+    const loaded = load_json(pending, findings, false, print_lines)
     findings = loaded.findings
-    let value = loaded.value
+    const value = loaded.value
     if type_of(value) == "dict" && trim(string_value(value?.question)) != "" {
       findings = record(findings, "OK", "pending.json has a question", print_lines)
     } else if value != nil {
@@ -245,11 +245,11 @@ fn inspect_terminal_state(task_dir: string, input_findings: list, print_lines: b
     return findings
   }
   if harness.fs.exists(plan) {
-    let loaded = load_json(plan, findings, false, print_lines)
+    const loaded = load_json(plan, findings, false, print_lines)
     findings = loaded.findings
-    let value = loaded.value
+    const value = loaded.value
     if type_of(value) == "dict" {
-      var missing: list<string> = []
+      let missing: list<string> = []
       for key in ["mode", "direction", "tasks", "ready"] {
         if value[key] == nil {
           missing = missing + [key]
@@ -267,18 +267,18 @@ fn inspect_terminal_state(task_dir: string, input_findings: list, print_lines: b
 }
 
 fn inspect_llm_mock(task_dir: string, input_findings: list, print_lines: bool) -> list {
-  var findings = input_findings
-  let loaded = load_jsonl(path_join(task_dir, "llm-mock.jsonl"), findings, false, print_lines)
+  let findings = input_findings
+  const loaded = load_jsonl(path_join(task_dir, "llm-mock.jsonl"), findings, false, print_lines)
   findings = loaded.findings
-  let rows = loaded.rows
+  const rows = loaded.rows
   if len(rows) == 0 {
     return record(findings, "WARN", "llm-mock.jsonl missing or empty", print_lines)
   }
-  var last_input_tokens = nil
-  var index = 0
+  let last_input_tokens = nil
+  let index = 0
   for call in rows {
     index = index + 1
-    let input_tokens = call?.input_tokens
+    const input_tokens = call?.input_tokens
     if type_of(input_tokens) == "int" {
       if last_input_tokens != nil && input_tokens < last_input_tokens {
         findings = record(
@@ -296,9 +296,9 @@ fn inspect_llm_mock(task_dir: string, input_findings: list, print_lines: bool) -
       }
       last_input_tokens = input_tokens
     }
-    let prompt = llm_input_text(call)
+    const prompt = llm_input_text(call)
     if prompt != "" {
-      let marker_count = len(split(prompt, "## Question-at-a-time planner")) - 1
+      const marker_count = len(split(prompt, "## Question-at-a-time planner")) - 1
       if marker_count == 1 {
         findings = record(findings, "OK", "llm-mock call " + to_string(index) + " has one system prompt", print_lines)
       } else if marker_count == 0 {
@@ -317,8 +317,8 @@ fn inspect_llm_mock(task_dir: string, input_findings: list, print_lines: bool) -
         )
       }
     }
-    let names = call_tool_names(call)
-    var terminal_names: list<string> = []
+    const names = call_tool_names(call)
+    let terminal_names: list<string> = []
     for name in names {
       if contains(TERMINAL_TOOLS, name) {
         terminal_names = terminal_names + [name]
@@ -341,10 +341,10 @@ fn inspect_llm_mock(task_dir: string, input_findings: list, print_lines: bool) -
 }
 
 fn inspect_step_transcript(task_dir: string, input_findings: list, print_lines: bool) -> list {
-  var findings = input_findings
-  var loaded = load_json(path_join(task_dir, "step-transcript.json"), findings, false, print_lines)
+  let findings = input_findings
+  let loaded = load_json(path_join(task_dir, "step-transcript.json"), findings, false, print_lines)
   findings = loaded.findings
-  var step = loaded.value
+  let step = loaded.value
   if step == nil {
     loaded = load_json(path_join(task_dir, "step.json"), findings, false, print_lines)
     findings = loaded.findings
@@ -353,13 +353,13 @@ fn inspect_step_transcript(task_dir: string, input_findings: list, print_lines: 
   if type_of(step) != "dict" {
     return record(findings, "WARN", "step-transcript.json/step.json missing", print_lines)
   }
-  let tool_calls = step?.tool_calls
+  const tool_calls = step?.tool_calls
   if type_of(tool_calls) != "list" {
     return record(findings, "WARN", "step transcript has no tool_calls list", print_lines)
   }
-  var terminal: list<string> = []
+  let terminal: list<string> = []
   for call in tool_calls {
-    let name = if type_of(call) == "dict" {
+    const name = if type_of(call) == "dict" {
       trim(string_value(call?.name))
     } else {
       ""
@@ -383,19 +383,19 @@ fn inspect_step_transcript(task_dir: string, input_findings: list, print_lines: 
 }
 
 fn inspect_last_prompt(task_dir: string, qa: list, input_findings: list, print_lines: bool) -> list {
-  var findings = input_findings
-  let path = path_join(task_dir, "last-prompt.txt")
+  let findings = input_findings
+  const path = path_join(task_dir, "last-prompt.txt")
   if !harness.fs.exists(path) {
     return record(findings, "WARN", "last-prompt.txt missing", print_lines)
   }
-  let body = harness.fs.read_text(path) ?? ""
+  const body = harness.fs.read_text(path) ?? ""
   if body.contains("- Q: \n") || body.contains("  A: \n") {
     findings = record(findings, "FAIL", "last-prompt.txt contains an empty Q/A interpolation", print_lines)
   }
-  var missing: list<string> = []
+  let missing: list<string> = []
   for entry in qa {
-    let question = trim(string_value(entry?.question))
-    let answer = trim(string_value(entry?.answer))
+    const question = trim(string_value(entry?.question))
+    const answer = trim(string_value(entry?.answer))
     if question != "" && !body.contains(question) {
       missing = missing + ["Q: " + question[0:min(len(question), 40)]]
     }
@@ -415,13 +415,13 @@ fn inspect_last_prompt(task_dir: string, qa: list, input_findings: list, print_l
 }
 
 pub fn qmode_inspect_task_dir(task_dir: string, print_lines: bool = false) -> dict {
-  var findings: list = []
+  let findings: list = []
   if !harness.fs.exists(task_dir) || !(harness.fs.stat(task_dir)?.is_dir ?? false) {
     findings = record(findings, "FAIL", "not a directory: " + task_dir, print_lines)
     return {exit_code: 2, findings: findings}
   }
   findings = inspect_task_json(task_dir, findings, print_lines)
-  let qa_result = inspect_qa(task_dir, findings, print_lines)
+  const qa_result = inspect_qa(task_dir, findings, print_lines)
   findings = qa_result.findings
   findings = inspect_terminal_state(task_dir, findings, print_lines)
   findings = inspect_llm_mock(task_dir, findings, print_lines)
@@ -442,6 +442,6 @@ fn main(_harness: Harness) -> int {
     harness.stdio.println(qmode_inspect_usage())
     return 64
   }
-  let result = qmode_inspect_task_dir(argv[0], true)
+  const result = qmode_inspect_task_dir(argv[0], true)
   return to_int(result.exit_code) ?? 1
 }

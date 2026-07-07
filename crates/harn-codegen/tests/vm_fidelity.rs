@@ -233,6 +233,6 @@ fn int_divide_by_zero_traps_on_both() {
 fn loop_kernel_in_range_matches_vm() {
     // A representative hot kernel: sum 1..=n. Stays in range for small n, so
     // the VM and JIT must produce the identical int.
-    let sum = "fn sum_to(n: int) -> int {\n  var total = 0\n  var i = 1\n  while i <= n {\n    total = total + i\n    i = i + 1\n  }\n  return total\n}";
+    let sum = "fn sum_to(n: int) -> int {\n  let total = 0\n  let i = 1\n  while i <= n {\n    total = total + i\n    i = i + 1\n  }\n  return total\n}";
     check_fidelity(sum, "sum_to", &[Int(100)], Expect::IntValue(5050));
 }

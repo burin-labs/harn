@@ -24,7 +24,7 @@ const __JUDGE_LLM_OVERRIDE_KEYS = ["temperature", "max_tokens", "top_p", "tool_f
  * @api_stability: internal
  */
 pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
-  var out = llm_opts
+  let out = llm_opts
   for key in __JUDGE_LLM_OVERRIDE_KEYS {
     if judge_cfg[key] != nil {
       out = out + {[key]: judge_cfg[key]}
@@ -55,8 +55,8 @@ pub fn __judge_run_checkpoint(
   user,
   schema,
 ) {
-  let base = opts?.llm_options ?? {}
-  let llm_opts = __judge_apply_llm_overrides(
+  const base = opts?.llm_options ?? {}
+  const llm_opts = __judge_apply_llm_overrides(
     base
       + {
       model: judge_cfg?.model ?? opts?.model,
@@ -67,9 +67,9 @@ pub fn __judge_run_checkpoint(
     },
     judge_cfg,
   )
-  let started = harness.clock.monotonic_ms()
-  let checkpoint = agent_typed_output_checkpoint(checkpoint_name, user, schema, llm_opts)
-  let duration_ms = harness.clock.monotonic_ms() - started
+  const started = harness.clock.monotonic_ms()
+  const checkpoint = agent_typed_output_checkpoint(checkpoint_name, user, schema, llm_opts)
+  const duration_ms = harness.clock.monotonic_ms() - started
   return {checkpoint: checkpoint, duration_ms: duration_ms}
 }
 
@@ -94,10 +94,10 @@ const __JUDGE_VERDICT_JSON_JUNK = ["\"", ",", "{", "}", ":", "\\"]
  * @example: __judge_verdict_token("continue\",,")
  */
 pub fn __judge_verdict_token(raw_verdict) {
-  let normalized = lowercase(trim(to_string(raw_verdict ?? "")))
-  var cut = len(normalized)
+  const normalized = lowercase(trim(to_string(raw_verdict ?? "")))
+  let cut = len(normalized)
   for junk in __JUDGE_VERDICT_JSON_JUNK {
-    let idx = normalized.index_of(junk)
+    const idx = normalized.index_of(junk)
     if idx >= 0 && idx < cut {
       cut = idx
     }
@@ -130,19 +130,19 @@ const __JUDGE_TOKEN_PUNCT = ".,;:!?\"'`*_-)("
  * @example: __judge_leading_word("done.")
  */
 pub fn __judge_leading_word(normalized) {
-  var first = ""
+  let first = ""
   for piece in normalized.split(" ") {
     if first == "" && trim(piece) != "" {
       first = trim(piece)
     }
   }
   // Strip leading punctuation.
-  var start = 0
+  let start = 0
   while start < len(first) && __JUDGE_TOKEN_PUNCT.contains(first.char_at(start)) {
     start = start + 1
   }
   // Strip trailing punctuation.
-  var stop = len(first)
+  let stop = len(first)
   while stop > start && __JUDGE_TOKEN_PUNCT.contains(first.char_at(stop - 1)) {
     stop = stop - 1
   }
@@ -168,11 +168,11 @@ pub fn __judge_leading_word(normalized) {
  * @example: __judge_classify_verdict("pass", ["pass", "yes"], [critique], default)
  */
 pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, feedback_default) {
-  let normalized = __judge_leading_word(__judge_verdict_token(raw_verdict))
+  const normalized = __judge_leading_word(__judge_verdict_token(raw_verdict))
   if contains(pass_tokens, normalized) {
     return {vetoed: false, verdict: normalized}
   }
-  var feedback = ""
+  let feedback = ""
   for candidate in feedback_candidates {
     if feedback == "" && candidate != nil && to_string(candidate) != "" {
       feedback = to_string(candidate)
@@ -211,12 +211,12 @@ pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, f
  * @api_stability: internal
  */
 pub fn __completion_gate_classify_writes(writes, classify_write) {
-  var source = 0
-  var cosmetic = 0
-  var other = 0
+  let source = 0
+  let cosmetic = 0
+  let other = 0
   for write in writes ?? [] {
-    let path = to_string(write?.path ?? "")
-    let kind = if classify_write != nil && path != "" {
+    const path = to_string(write?.path ?? "")
+    const kind = if classify_write != nil && path != "" {
       to_string(classify_write(path, write?.diff) ?? "source")
     } else {
       to_string(write?.kind ?? "source")
@@ -247,7 +247,7 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
   if verify == nil {
     return nil
   }
-  let verdicts = if type_of(verify) == "list" {
+  const verdicts = if type_of(verify) == "list" {
     verify
   } else {
     [verify]
@@ -258,12 +258,12 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
   if veto_combine != nil {
     return veto_combine(verdicts)
   }
-  var all_ok = true
-  var findings = []
+  let all_ok = true
+  let findings = []
   for verdict in verdicts {
     if !(verdict?.ok ?? false) {
       all_ok = false
-      let finding = to_string(verdict?.findings ?? "")
+      const finding = to_string(verdict?.findings ?? "")
       if finding != "" {
         findings = findings.push(finding)
       }
@@ -294,20 +294,20 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
  * @api_stability: internal
  */
 pub fn __completion_gate_ladder(derived) {
-  let source_known = derived?.source_known ?? false
-  let source_writes = to_int(derived?.source_write_count ?? 0) ?? 0
-  let cosmetic_writes = to_int(derived?.cosmetic_write_count ?? 0) ?? 0
-  let saw_source = source_known && source_writes > 0
-  let requires_write = derived?.requires_write ?? true
-  let verify = derived?.verify
-  let verify_known = verify != nil
-  let verify_ok = verify_known && (verify?.ok ?? false)
-  let findings = to_string(verify?.findings ?? "")
-  let oracle_expected = derived?.oracle_expected ?? false
+  const source_known = derived?.source_known ?? false
+  const source_writes = to_int(derived?.source_write_count ?? 0) ?? 0
+  const cosmetic_writes = to_int(derived?.cosmetic_write_count ?? 0) ?? 0
+  const saw_source = source_known && source_writes > 0
+  const requires_write = derived?.requires_write ?? true
+  const verify = derived?.verify
+  const verify_known = verify != nil
+  const verify_ok = verify_known && (verify?.ok ?? false)
+  const findings = to_string(verify?.findings ?? "")
+  const oracle_expected = derived?.oracle_expected ?? false
   // 1. Evidence requirement (ledger ⛔#5): a task that must change source may not
   // finish with zero SOURCE writes. Cosmetic/test-scaffold writes are not progress.
   if source_known && requires_write && !saw_source {
-    let message = if cosmetic_writes > 0 {
+    const message = if cosmetic_writes > 0 {
       "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing."
     } else {
       "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing."
@@ -318,7 +318,7 @@ pub fn __completion_gate_ladder(derived) {
   // a RED verifier blocks, and this class is strict — the budget can never let it
   // through; only a fresh green verifier ends it.
   if verify_known && !verify_ok && (saw_source || !source_known) {
-    let detail = if findings != "" {
+    const detail = if findings != "" {
       " Findings: " + findings + "."
     } else {
       ""
@@ -387,7 +387,7 @@ pub fn __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes) {
   if verdict?.ok ?? false {
     return {verdict: verdict, charge: false}
   }
-  let strict = verdict?.strict ?? false
+  const strict = verdict?.strict ?? false
   if !strict && max_vetoes > 0 && vetoes_used >= max_vetoes {
     return {
       verdict: {ok: true, reason: "veto_budget_exhausted", converted_from: verdict?.reason ?? ""},

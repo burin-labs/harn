@@ -15,49 +15,49 @@ fn seed_corpus(root: string) {
 }
 
 pipeline default() {
-  let root = path_join(
+  const root = path_join(
     harness.fs.temp_dir(),
     "harn_code_librarian_" + to_string(harness.random.gen_range(100000, 999999)),
   )
   seed_corpus(root)
-  let _ = hostlib_code_index_rebuild({root: root})
+  const _ = hostlib_code_index_rebuild({root: root})
   // 1) Cypher pass-through returns rows + overlay nil on base.
-  let cy: LibrarianCypherResult = code_librarian_query("MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path")
+  const cy: LibrarianCypherResult = code_librarian_query("MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path")
   __io_println(len(cy.rows) == 1 && cy.rows[0].path == "src/a.rs")
   __io_println(cy.overlay == nil)
   // 2) outline returns typed symbols + import edges for known files.
   //    Since #2458, the symbol-graph rebuild also populates the flat
   //    `IndexedFile.symbols` list that `outline_get` returns, so the
   //    corpus's two `pub fn`s show up here.
-  let outline: LibrarianOutline = code_librarian_outline("src/a.rs")
+  const outline: LibrarianOutline = code_librarian_outline("src/a.rs")
   __io_println(outline.known && outline.path == "src/a.rs")
   __io_println(len(outline.symbols) >= 2)
   // 3) outline on an unknown path returns known=false (not a throw).
-  let absent: LibrarianOutline = code_librarian_outline("src/does-not-exist.rs")
+  const absent: LibrarianOutline = code_librarian_outline("src/does-not-exist.rs")
   __io_println(!absent.known && len(absent.symbols) == 0)
   // 4) who_calls returns the CallSite list for the target symbol.
-  let callers: list<LibrarianCallSite> = code_librarian_who_calls("alpha")
+  const callers: list<LibrarianCallSite> = code_librarian_who_calls("alpha")
   __io_println(len(callers) >= 1)
   __io_println(callers[0].path == "src/a.rs" && callers[0].symbol == "alpha")
   // 5) what_imports returns a list (empty here — corpus has no imports).
-  let imps: list<LibrarianImport> = code_librarian_what_imports("src/a.rs")
+  const imps: list<LibrarianImport> = code_librarian_what_imports("src/a.rs")
   __io_println(type_of(imps) == "list")
   // 6) recent_changes from seq=0 returns a list shape.
-  let changes: list<LibrarianFileChange> = code_librarian_recent_changes(0)
+  const changes: list<LibrarianFileChange> = code_librarian_recent_changes(0)
   __io_println(type_of(changes) == "list")
   // 7) freshness reports known/not-stale for an indexed file.
-  let fresh: LibrarianFreshness = code_librarian_freshness("src/a.rs")
+  const fresh: LibrarianFreshness = code_librarian_freshness("src/a.rs")
   __io_println(fresh.known && !fresh.stale)
   // 8) freshness on an unknown path reports known=false.
-  let unknown_fresh: LibrarianFreshness = code_librarian_freshness("src/does-not-exist.rs")
+  const unknown_fresh: LibrarianFreshness = code_librarian_freshness("src/does-not-exist.rs")
   __io_println(!unknown_fresh.known)
   // 9) file_hash_snapshot returns the direct path->hash map expected by
   //    verification_diagnostic_classify plus missing-path metadata.
-  let hash_snapshot: LibrarianFileHashSnapshot = code_librarian_file_hash_snapshot(["src/a.rs", "src/does-not-exist.rs"])
+  const hash_snapshot: LibrarianFileHashSnapshot = code_librarian_file_hash_snapshot(["src/a.rs", "src/does-not-exist.rs"])
   __io_println(hash_snapshot.seq == 0)
   __io_println(hash_snapshot.snapshot["src/a.rs"] != nil)
   __io_println(hash_snapshot.missing[0] == "src/does-not-exist.rs")
-  let diagnostic = verification_diagnostic_classify(
+  const diagnostic = verification_diagnostic_classify(
     {
       rung: "R2",
       rowId: "code-librarian",
@@ -68,8 +68,8 @@ pipeline default() {
   )
   __io_println(diagnostic.status == "bound_fresh" && diagnostic.feedsGates)
   // 10) branch_overlay(branch) activates; nil deactivates.
-  let on: LibrarianOverlay = code_librarian_branch_overlay("topic/test")
+  const on: LibrarianOverlay = code_librarian_branch_overlay("topic/test")
   __io_println(on.active == "topic/test")
-  let off: LibrarianOverlay = code_librarian_branch_overlay(nil)
+  const off: LibrarianOverlay = code_librarian_branch_overlay(nil)
   __io_println(off.active == nil)
 }

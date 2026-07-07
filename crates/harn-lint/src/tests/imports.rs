@@ -70,7 +70,7 @@ fn test_fix_unused_import_partial() {
 fn test_import_used_in_destructuring_default_is_kept() {
     let source = r#"import { seed_registry } from "mod"
 pipeline default(task) {
-  let { registry = seed_registry(task), custom_rules = [] } = {}
+  const { registry = seed_registry(task), custom_rules = [] } = {}
   log(registry)
   log(custom_rules)
 }

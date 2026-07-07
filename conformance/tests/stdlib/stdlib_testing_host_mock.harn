@@ -23,9 +23,9 @@ pipeline test(task) {
     {result: {value: "facts"}, params: {namespace: "facts"}},
   )
   mock_host_error("project", "metadata_set", "write denied", {dir: "pkg"})
-  let note = host_call("workspace.read_text", {path: "note.txt"})
-  let facts = host_call("project.metadata_get", {dir: "pkg", namespace: "facts"})
-  let denied = try {
+  const note = host_call("workspace.read_text", {path: "note.txt"})
+  const facts = host_call("project.metadata_get", {dir: "pkg", namespace: "facts"})
+  const denied = try {
     host_call("project.metadata_set", {dir: "pkg", namespace: "facts", value: {}})
   }
   assert_eq(note, "hello")

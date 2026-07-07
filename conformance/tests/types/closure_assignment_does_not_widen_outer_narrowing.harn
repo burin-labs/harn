@@ -1,7 +1,7 @@
 fn upper_if_present(input: string?) -> string {
-  var value = input
+  let value = input
   if value != nil {
-    let _ = fn() { value = nil }
+    const _ = fn() { value = nil }
     return value.upper()
   }
   return "missing"

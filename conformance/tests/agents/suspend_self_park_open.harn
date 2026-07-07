@@ -28,18 +28,18 @@ pipeline main() {
       llm_text("resumed by operator"),
     ],
     { ->
-      let handle = sub_agent_run(
+      const handle = sub_agent_run(
         "Park open until an operator resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      let suspended = wait_agent(handle)
+      const suspended = wait_agent(handle)
       __io_println("status=" + suspended.status)
       __io_println("initiator=" + (suspended?.suspension?.initiator ?? ""))
       __io_println("reason=" + (suspended?.suspension?.reason ?? ""))
       __io_println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
       __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
-      let resumed = resume_agent(handle)
-      let done = wait_agent(handle)
+      const resumed = resume_agent(handle)
+      const done = wait_agent(handle)
       __io_println("resume_status=" + resumed.status)
       __io_println("final_status=" + done.status)
       __io_println("has_transcript=" + to_string(done.has_transcript))

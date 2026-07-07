@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lookup_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "lookup",
@@ -37,7 +37,7 @@ pipeline default() {
       llm_text("<user_response>Released.</user_response>"),
     ],
     { ->
-      let required_path = agent_loop(
+      const required_path = agent_loop(
         "Run the release",
         nil,
         {
@@ -63,7 +63,7 @@ pipeline default() {
       llm_text("<user_response>Done by user.</user_response>"),
     ],
     { ->
-      let custom_policy = agent_loop(
+      const custom_policy = agent_loop(
         "Iterate until policy says stop",
         nil,
         {
@@ -94,7 +94,7 @@ pipeline default() {
       llm_text("<user_response>quick stop</user_response>"),
     ],
     { ->
-      let no_op_policy = agent_loop(
+      const no_op_policy = agent_loop(
         "Stop quickly",
         nil,
         {
@@ -119,7 +119,7 @@ pipeline default() {
       llm_text("<user_response>final</user_response>"),
     ],
     { ->
-      let until_policy = agent_loop(
+      const until_policy = agent_loop(
         "Until-target extension",
         nil,
         {

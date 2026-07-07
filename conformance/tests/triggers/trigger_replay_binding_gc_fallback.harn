@@ -1,5 +1,5 @@
 pipeline test(task) {
-  let result = trigger_test_harness("replay_binding_gc_fallback")
+  const result = trigger_test_harness("replay_binding_gc_fallback")
   __io_println(result.ok)
   __io_println(result.details.trigger_id == "replay.gc.fixture")
   __io_println(result.details.recorded_version == 1)

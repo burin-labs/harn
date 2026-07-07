@@ -124,7 +124,7 @@ pub fn parts(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarPa
  * @errors: []
  */
 pub fn iso_week(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarIsoWeek {
-  let p = parts(timestamp, timezone)
+  const p = parts(timestamp, timezone)
   return {year: p.iso_week_year, week: p.iso_week}
 }
 
@@ -359,7 +359,7 @@ pub fn country_info(code: string) -> CalendarCountry? {
  * @errors: []
  */
 pub fn country_timezones(code: string) -> list<string>? {
-  let info = country_info(code)
+  const info = country_info(code)
   if info == nil {
     return nil
   }
@@ -374,7 +374,7 @@ pub fn country_timezones(code: string) -> list<string>? {
  * @errors: []
  */
 pub fn default_timezone_for_country(code: string) -> string? {
-  let info = country_info(code)
+  const info = country_info(code)
   if info == nil || info.default_timezone_ambiguous {
     return nil
   }
@@ -422,7 +422,7 @@ pub fn is_holiday(
  * @errors: []
  */
 pub fn is_weekend(timestamp: CalendarInstant, timezone: string = "UTC") -> bool {
-  let weekday = parts(timestamp, timezone).iso_weekday
+  const weekday = parts(timestamp, timezone).iso_weekday
   return weekday == 6 || weekday == 7
 }
 

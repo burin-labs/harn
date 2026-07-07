@@ -41,7 +41,7 @@ fn __with_overrides(record, overrides = nil) {
 }
 
 fn __trim_trailing_slash(value) {
-  var text = trim(to_string(value ?? ""))
+  let text = trim(to_string(value ?? ""))
   while ends_with(text, "/") {
     text = substring(text, 0, len(text) - 1)
   }
@@ -49,7 +49,7 @@ fn __trim_trailing_slash(value) {
 }
 
 fn __require_url(value, field) {
-  let text = trim(to_string(value ?? ""))
+  const text = trim(to_string(value ?? ""))
   if text == "" {
     throw "std/oauth/providers: " + field + " is required"
   }
@@ -104,11 +104,11 @@ pub fn github(overrides = nil) -> OAuthProvider {
  * @example: github_enterprise("https://ghe.example.com")
  */
 pub fn github_enterprise(base_url, overrides = nil) -> OAuthProvider {
-  let web_url = __trim_trailing_slash(base_url)
+  const web_url = __trim_trailing_slash(base_url)
   if web_url == "" {
     throw "std/oauth/providers: github_enterprise base_url is required"
   }
-  let api_url = __trim_trailing_slash(overrides?.api_url ?? (web_url + "/api/v3"))
+  const api_url = __trim_trailing_slash(overrides?.api_url ?? (web_url + "/api/v3"))
   return __with_overrides(
     __github_record()
       + {
@@ -482,7 +482,7 @@ pub fn provider_names() -> list<string> {
  * @example: provider("github", {default_scopes: ["read:user"]})
  */
 pub fn provider(name, overrides = nil) -> OAuthProvider {
-  let key = lowercase(trim(to_string(name ?? "")))
+  const key = lowercase(trim(to_string(name ?? "")))
   if key == "github" {
     return github(overrides)
   }
@@ -525,7 +525,7 @@ pub fn provider(name, overrides = nil) -> OAuthProvider {
  * @example: provider_catalog({github: {default_scopes: ["read:user"]}})
  */
 pub fn provider_catalog(overrides = nil) {
-  var out = {}
+  let out = {}
   for name in provider_names() {
     out = out + {[name]: provider(name, overrides?.[name])}
   }
@@ -561,7 +561,7 @@ pub fn custom(config, overrides = nil) -> OAuthProvider {
   if type_of(config) != "dict" {
     throw "std/oauth/providers: custom config must be a dict"
   }
-  let id = trim(to_string(config?.id ?? config?.name ?? "custom"))
+  const id = trim(to_string(config?.id ?? config?.name ?? "custom"))
   if id == "" {
     throw "std/oauth/providers: custom id is required"
   }

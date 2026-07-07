@@ -294,13 +294,13 @@ fn control_flow_branches_and_loops() {
         ],
     );
 
-    let sum = "fn sum_to(n: int) -> int {\n  var total = 0\n  var i = 1\n  while i <= n {\n    total = total + i\n    i = i + 1\n  }\n  return total\n}";
+    let sum = "fn sum_to(n: int) -> int {\n  let total = 0\n  let i = 1\n  while i <= n {\n    total = total + i\n    i = i + 1\n  }\n  return total\n}";
     check(sum, "sum_to", &ints(&[0, 1, 5, 10, 100, -5]));
 }
 
 #[test]
 fn nested_loops_collatz_steps() {
-    let src = "fn collatz(start: int) -> int {\n  var n = start\n  var steps = 0\n  while n > 1 {\n    if n % 2 == 0 {\n      n = n / 2\n    } else {\n      n = 3 * n + 1\n    }\n    steps = steps + 1\n  }\n  return steps\n}";
+    let src = "fn collatz(start: int) -> int {\n  let n = start\n  let steps = 0\n  while n > 1 {\n    if n % 2 == 0 {\n      n = n / 2\n    } else {\n      n = 3 * n + 1\n    }\n    steps = steps + 1\n  }\n  return steps\n}";
     check(src, "collatz", &ints(&[1, 2, 3, 6, 7, 27]));
 }
 
@@ -311,7 +311,7 @@ fn unsupported_constructs_are_reported() {
         ("fn f(a: int) -> int { return a ** 2 }", "f"),
         ("fn f(a: float, b: float) -> float { return a % b }", "f"),
         ("fn f(a: int) -> string { return \"hi\" }", "f"),
-        ("fn f(a: int) { let x = a }", "f"),
+        ("fn f(a: int) { const x = a }", "f"),
     ];
     for (src, name) in cases {
         let err = analyze_named(src, name)

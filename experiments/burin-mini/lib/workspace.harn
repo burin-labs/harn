@@ -6,7 +6,7 @@ pub fn workspace_root() {
 }
 
 fn workspace_alias_path(path) {
-  let raw = (path ?? "").trim()
+  const raw = (path ?? "").trim()
   if starts_with(raw, "/workspace/") {
     return raw.replace("/workspace/", "")
   }
@@ -15,7 +15,7 @@ fn workspace_alias_path(path) {
 
 /** Normalize a model-provided path into a workspace-relative path. */
 pub fn workspace_path(path) {
-  let normalized = workspace_normalize(workspace_alias_path(path), workspace_root())
+  const normalized = workspace_normalize(workspace_alias_path(path), workspace_root())
   guard normalized else {
     throw "Path is outside the experiment workspace: ${path ?? ""}"
   }
@@ -34,14 +34,14 @@ pub fn read_workspace(path) {
 
 /** Write one file inside the sample workspace. */
 pub fn write_workspace(path, content) {
-  let resolved = resolve_workspace_path(path)
+  const resolved = resolve_workspace_path(path)
   harness.fs.write_text(resolved, content)
   return resolved
 }
 
 /** Search the sample workspace with ripgrep. */
 pub fn search_workspace(query) {
-  let result = exec_at(
+  const result = exec_at(
     workspace_root(),
     "rg",
     "-n",
@@ -60,7 +60,7 @@ pub fn search_workspace(query) {
 
 /** List every workspace file in deterministic (path-sorted) order. */
 pub fn list_workspace_files() {
-  let result = exec_at(
+  const result = exec_at(
     workspace_root(),
     "rg",
     "--files",
@@ -76,7 +76,7 @@ pub fn list_workspace_files() {
     "--glob",
     "!coverage",
   )
-  let out = (result?.stdout ?? "").trim()
+  const out = (result?.stdout ?? "").trim()
   if out == "" {
     return []
   }
@@ -93,19 +93,19 @@ pub fn list_workspace_files() {
  * is what saves them.
  */
 pub fn find_workspace(query) {
-  let q = (query ?? "").trim()
+  const q = (query ?? "").trim()
   if q == "" {
     return "(empty query)"
   }
   // Filename pass: path-sorted file list, filter by case-insensitive substring.
-  var name_hits = []
+  let name_hits = []
   for path in list_workspace_files() {
     if contains(lowercase(path), lowercase(q)) {
       name_hits = name_hits + [path]
     }
   }
   // Content pass: ripgrep -n -i, capped at 80 lines.
-  let rg = exec_at(
+  const rg = exec_at(
     workspace_root(),
     "rg",
     "-n",
@@ -126,20 +126,20 @@ pub fn find_workspace(query) {
     q,
     ".",
   )
-  let content_lines = split((rg?.stdout ?? "").trim(), "\n")
-  let trimmed_content = if len(content_lines) > 80 {
+  const content_lines = split((rg?.stdout ?? "").trim(), "\n")
+  const trimmed_content = if len(content_lines) > 80 {
     content_lines[0:80]
   } else {
     content_lines
   }
-  let truncated = len(content_lines) > 80
-  var sections = []
+  const truncated = len(content_lines) > 80
+  let sections = []
   if len(name_hits) > 0 {
-    let hdr = "## Filename matches (${len(name_hits)})"
+    const hdr = "## Filename matches (${len(name_hits)})"
     sections = sections + [hdr + "\n" + join(name_hits, "\n")]
   }
   if (rg?.stdout ?? "").trim() != "" {
-    var body = join(trimmed_content, "\n")
+    let body = join(trimmed_content, "\n")
     if truncated {
       body = body + "\n... (truncated; refine query or use read on a specific file)"
     }

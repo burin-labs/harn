@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn repair_quickfix_actions_carry_safety_kind_and_flat_data() {
         let source =
-            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n";
+            "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n";
         let state = DocumentState::new(source.to_string());
         let diagnostic = state
             .diagnostics
@@ -568,9 +568,9 @@ mod tests {
 
     #[test]
     fn whole_document_format_edit_reuses_formatter_for_on_type_formatting() {
-        let source = "fn main(){\nlet x=1;\n}\n";
+        let source = "fn main(){\nconst x=1;\n}\n";
         let edit = format_whole_document_edit(source).expect("expected formatting edit");
         assert!(edit.new_text.contains("fn main() {"), "{}", edit.new_text);
-        assert!(edit.new_text.contains("let x = 1"), "{}", edit.new_text);
+        assert!(edit.new_text.contains("const x = 1"), "{}", edit.new_text);
     }
 }

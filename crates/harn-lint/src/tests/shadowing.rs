@@ -7,9 +7,9 @@ fn test_shadow_variable() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-let x = 1
+const x = 1
 if true {
-    let x = 2
+    const x = 2
     log(x)
 }
 log(x)
@@ -29,7 +29,7 @@ fn test_no_shadow_same_scope() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-let x = 1
+const x = 1
 log(x)
 }
 ",

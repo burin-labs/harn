@@ -1,7 +1,7 @@
 pipeline main(task) {
-  let src = agent_session_open()
+  const src = agent_session_open()
   agent_session_inject(src, {role: "user", content: "shared"})
-  let dst = agent_session_fork(src)
+  const dst = agent_session_fork(src)
   assert(src != dst, "fork mints a new id")
   assert(agent_session_length(dst) == 1, "fork copies transcript")
   agent_session_inject(src, {role: "user", content: "src-only"})

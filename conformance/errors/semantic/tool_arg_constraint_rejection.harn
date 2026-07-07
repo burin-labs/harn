@@ -1,5 +1,5 @@
 fn list_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "list_directory",
@@ -14,7 +14,7 @@ fn list_tools() {
 }
 
 pipeline test(task) {
-  let result = agent_loop(
+  const result = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {

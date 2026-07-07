@@ -16,12 +16,12 @@ pipeline test(task) {
       {text: "ok", model: "mock-strong", provider: "mock"},
     ],
     { ->
-      let _ = llm_call(
+      const _ = llm_call(
         "hi",
         nil,
         {models: [{model: "mock", provider: "mock"}, {model: "mock-strong", provider: "mock"}]},
       )
-      let advances = agent_trace().filter({ e -> e.type == "models_advance" })
+      const advances = agent_trace().filter({ e -> e.type == "models_advance" })
       __io_println(len(advances))
       __io_println(advances[0].from_index)
       __io_println(advances[0].from_model)

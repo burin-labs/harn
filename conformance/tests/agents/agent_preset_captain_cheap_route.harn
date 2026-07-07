@@ -18,15 +18,15 @@
 import { agent_preset } from "std/agent/presets"
 
 fn preset_agent(kind, prompt, options = nil) {
-  let opts = agent_preset(kind, options)
+  const opts = agent_preset(kind, options)
   return agent_loop(prompt, opts?.system, opts)
 }
 
 pipeline default() {
-  let cheap_calls = atomic(0)
-  let frontier_calls = atomic(0)
-  let log_records = atomic(0)
-  let cheap = { _call ->
+  const cheap_calls = atomic(0)
+  const frontier_calls = atomic(0)
+  const log_records = atomic(0)
+  const cheap = { _call ->
     let _ = atomic_add(cheap_calls, 1)
     return {
       ok: true,
@@ -39,7 +39,7 @@ pipeline default() {
       },
     }
   }
-  let frontier = { _call ->
+  const frontier = { _call ->
     let _ = atomic_add(frontier_calls, 1)
     return {
       ok: true,
@@ -52,12 +52,12 @@ pipeline default() {
       },
     }
   }
-  let escalate = { call -> call?.opts?.escalate ?? false }
-  let logging_sink = { _record ->
+  const escalate = { call -> call?.opts?.escalate ?? false }
+  const logging_sink = { _record ->
     let _ = atomic_add(log_records, 1)
   }
   // Default route: cheap caller handles the call without escalation.
-  let cheap_run = preset_agent(
+  const cheap_run = preset_agent(
     "release_captain",
     "Cheap path.",
     {
@@ -76,7 +76,7 @@ pipeline default() {
   __io_println(atomic_get(frontier_calls))
   __io_println(atomic_get(log_records))
   // Escalated route: predicate matches via `escalate: true` in opts.
-  let frontier_run = preset_agent(
+  const frontier_run = preset_agent(
     "release_captain",
     "Frontier path.",
     {

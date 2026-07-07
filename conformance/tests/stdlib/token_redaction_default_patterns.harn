@@ -4,11 +4,11 @@
 import { default_patterns, redact } from "std/oauth/redaction"
 
 fn expect_redacted(label, input, expected_pattern, expected_raw_substring) {
-  let out = redact(input)
+  const out = redact(input)
   if contains(out, expected_raw_substring) {
     throw label + ": raw token leaked into redacted output: " + out
   }
-  let needle = "<redacted:" + expected_pattern + ":"
+  const needle = "<redacted:" + expected_pattern + ":"
   if !contains(out, needle) {
     throw label + ": expected `" + needle + "` in output, got `" + out + "`"
   }
@@ -17,8 +17,8 @@ fn expect_redacted(label, input, expected_pattern, expected_raw_substring) {
 pipeline test(task) {
   // The catalog must include every default provider so audit
   // consumers can rely on the names being stable across releases.
-  let catalog = default_patterns()
-  let expected_names = [
+  const catalog = default_patterns()
+  const expected_names = [
     "jwt",
     "github_token",
     "github_pat_fine",
@@ -71,13 +71,13 @@ pipeline test(task) {
     "aws_access_key",
     "AKIAABCDEFGHIJKLMNOP",
   )
-  let huggingface = "hf_" + "abcdefghijklmnopqrstuvwx"
+  const huggingface = "hf_" + "abcdefghijklmnopqrstuvwx"
   expect_redacted("huggingface_token", "hf=" + huggingface + " ok", "huggingface_token", huggingface)
-  let cerebras = "csk-" + "aaaaaaaaaaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaaaaaaaaaa"
+  const cerebras = "csk-" + "aaaaaaaaaaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaaaaaaaaaa"
   expect_redacted("cerebras_key", "cerebras=" + cerebras + " ok", "cerebras_key", cerebras)
-  let together = "tgp_v1_" + "aaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaa"
+  const together = "tgp_v1_" + "aaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaa"
   expect_redacted("together_key", "together=" + together + " ok", "together_key", together)
-  let google = "AI" + "za" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+  const google = "AI" + "za" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
   expect_redacted("google_api_key", "google=" + google + " ok", "google_api_key", google)
   // `Authorization: Bearer <token>` header form. Using a non-prefixed
   // opaque token here so no earlier provider-specific pattern wins.

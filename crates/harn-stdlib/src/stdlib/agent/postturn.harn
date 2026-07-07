@@ -38,7 +38,7 @@ fn __tool_result_ok(result) {
   if result?.success != nil {
     return result.success ? true : false
   }
-  let status = result?.status ?? ""
+  const status = result?.status ?? ""
   return status == "ok" || status == "success"
 }
 
@@ -47,10 +47,10 @@ fn __tool_result_name(result) {
 }
 
 fn __tool_names_by_status(dispatch, want_ok) {
-  let results = __dispatch_results_list(dispatch)
-  var names = []
+  const results = __dispatch_results_list(dispatch)
+  let names = []
   for result in results {
-    let name = __tool_result_name(result)
+    const name = __tool_result_name(result)
     if name != "" && __tool_result_ok(result) == want_ok {
       names = names.push(name)
     }
@@ -59,11 +59,11 @@ fn __tool_names_by_status(dispatch, want_ok) {
 }
 
 fn __post_turn_callback_verdict(opts, payload) {
-  let cb = opts?.post_turn_callback
+  const cb = opts?.post_turn_callback
   if cb == nil {
     return {kind: "none"}
   }
-  let verdict = cb(payload)
+  const verdict = cb(payload)
   return __interpret_verdict(verdict)
 }
 
@@ -82,13 +82,13 @@ fn __interpret_verdict(verdict) {
     return {kind: "inject", message: verdict}
   }
   if type_of(verdict) == "dict" {
-    let stop = verdict?.stop ?? false
-    let base_llm_options = if type_of(verdict?.llm_options) == "dict" {
+    const stop = verdict?.stop ?? false
+    const base_llm_options = if type_of(verdict?.llm_options) == "dict" {
       verdict.llm_options
     } else {
       {}
     }
-    let llm_options = if verdict?.prefill != nil && verdict?.prefill != "" {
+    const llm_options = if verdict?.prefill != nil && verdict?.prefill != "" {
       base_llm_options + {prefill: verdict?.prefill}
     } else {
       verdict?.llm_options
@@ -114,11 +114,11 @@ fn __post_turn_stop_needs_verify(verdict) {
 }
 
 fn __terminal_callback_verdict(opts, payload) {
-  let cb = opts?.terminal_callback
+  const cb = opts?.terminal_callback
   if cb == nil {
     return {kind: "none"}
   }
-  let verdict = cb(payload)
+  const verdict = cb(payload)
   return __interpret_verdict(verdict)
 }
 
@@ -131,11 +131,11 @@ fn __rejected_tool_names(dispatch) {
 }
 
 fn __stop_after_successful_tools(opts, dispatch) {
-  let names = opts?.stop_after_successful_tools
+  const names = opts?.stop_after_successful_tools
   if names == nil || len(names) == 0 {
     return false
   }
-  let successful = __successful_tool_names(dispatch)
+  const successful = __successful_tool_names(dispatch)
   for required in names {
     if contains(successful, required) {
       return true
@@ -182,8 +182,8 @@ fn __zero_tool_completion_context(opts, has_tool_calls, text) {
   if !__native_completion_context(opts, has_tool_calls, text) {
     return false
   }
-  let successful = len(opts?._session_successful_tools ?? [])
-  let rejected = len(opts?._session_rejected_tools ?? [])
+  const successful = len(opts?._session_successful_tools ?? [])
+  const rejected = len(opts?._session_rejected_tools ?? [])
   return successful + rejected == 0
 }
 
@@ -250,7 +250,7 @@ fn __required_tools_text_completion(opts, has_tool_calls, text) {
   if has_tool_calls || trim(text) == "" || opts?.require_successful_tools == nil {
     return false
   }
-  let successful = opts?._session_successful_tools ?? []
+  const successful = opts?._session_successful_tools ?? []
   return len(agent_required_tools_missing_from_session(opts, successful)) == 0
 }
 
@@ -265,7 +265,7 @@ fn __text_mode_toolless_turn(opts, has_tool_calls, text) {
   if opts?.daemon {
     return false
   }
-  let fmt = lowercase(to_string(opts?.tool_format ?? ""))
+  const fmt = lowercase(to_string(opts?.tool_format ?? ""))
   if fmt != "text" {
     return false
   }
@@ -283,8 +283,8 @@ fn __text_mode_toolless_turn(opts, has_tool_calls, text) {
  * any model name. Returns the offending fence language or nil.
  */
 fn __detect_fenced_call_attempt(text) {
-  let lowered = lowercase(to_string(text ?? ""))
-  let openers = ["```tool_code", "```call", "```edit", "```python", "```bash", "```run", "```shell"]
+  const lowered = lowercase(to_string(text ?? ""))
+  const openers = ["```tool_code", "```call", "```edit", "```python", "```bash", "```run", "```shell"]
   for opener in openers {
     if contains(lowered, opener) {
       return opener[3:len(opener)]
@@ -298,10 +298,10 @@ fn __detect_fenced_call_attempt(text) {
  * The registry carries a `.tools` list of entries each with a `.name`.
  */
 fn __agent_bound_tool_names(tools) {
-  let entries = tools?.tools ?? []
-  var names = []
+  const entries = tools?.tools ?? []
+  let names = []
   for entry in entries {
-    let name = entry?.name ?? ""
+    const name = entry?.name ?? ""
     if name != "" {
       names = names.push(name)
     }
@@ -316,7 +316,7 @@ fn __agent_bound_tool_names(tools) {
  * already contains call syntax.
  */
 fn __text_has_call_shape(text) {
-  let body = to_string(text ?? "")
+  const body = to_string(text ?? "")
   if regex_match("[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*\\{", body) != nil {
     return true
   }
@@ -327,11 +327,11 @@ fn __text_has_call_shape(text) {
 }
 
 fn __missing_tool_call_recovery_config(opts) {
-  let raw = opts?.missing_tool_call_recovery
+  const raw = opts?.missing_tool_call_recovery
   if type_of(raw) == "bool" && !raw {
     return {enabled: false, options: {}}
   }
-  var options = if type_of(raw) == "dict" {
+  let options = if type_of(raw) == "dict" {
     raw
   } else {
     {}
@@ -349,12 +349,12 @@ fn __missing_tool_call_recovery_config(opts) {
 }
 
 fn __missing_tool_call_recovery_classifier(opts) {
-  let recovery = __missing_tool_call_recovery_config(opts)
+  const recovery = __missing_tool_call_recovery_config(opts)
   if !recovery.enabled {
     return nil
   }
-  let options = recovery.options
-  let has_test_classifier = type_of(options?.classifier) == "closure"
+  const options = recovery.options
+  const has_test_classifier = type_of(options?.classifier) == "closure"
   if lowercase(to_string(opts?.provider ?? "")) == "mock" && !has_test_classifier {
     return nil
   }
@@ -381,19 +381,19 @@ fn __classify_missing_tool_call(session, text, opts, iteration) {
   if __text_has_call_shape(text) {
     return nil
   }
-  let classifier = __missing_tool_call_recovery_classifier(opts)
+  const classifier = __missing_tool_call_recovery_classifier(opts)
   if classifier == nil {
     return nil
   }
-  let tools = opts?.tools
+  const tools = opts?.tools
   if tools == nil {
     return nil
   }
-  let names = __agent_bound_tool_names(tools)
+  const names = __agent_bound_tool_names(tools)
   if len(names) == 0 {
     return nil
   }
-  let verdict = try {
+  const verdict = try {
     classifier(
       {
         session_id: session.session_id,
@@ -407,13 +407,13 @@ fn __classify_missing_tool_call(session, text, opts, iteration) {
     )
   }
   if is_err(verdict) {
-    let err = unwrap_err(verdict)
+    const err = unwrap_err(verdict)
     if error_category(err) == "cancelled" {
       throw err
     }
     return nil
   }
-  let result = unwrap(verdict)
+  const result = unwrap(verdict)
   if type_of(result) != "dict" {
     return nil
   }
@@ -423,7 +423,7 @@ fn __classify_missing_tool_call(session, text, opts, iteration) {
     result
       + {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
   )
-  let tool_name = result?.tool_name ?? ""
+  const tool_name = result?.tool_name ?? ""
   if result?.action == "tool_call_intended" && tool_name != "" && __tool_name_in_list(tool_name, names) {
     return result
   }
@@ -444,7 +444,7 @@ fn __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, it
   if !__text_mode_toolless_turn(opts, has_tool_calls, text) {
     return false
   }
-  let fenced = __detect_fenced_call_attempt(text)
+  const fenced = __detect_fenced_call_attempt(text)
   if fenced != nil {
     agent_session_inject_feedback(
       session.session_id,
@@ -460,9 +460,9 @@ fn __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, it
     )
     return true
   }
-  let missing = __classify_missing_tool_call(session, text, opts, iteration)
+  const missing = __classify_missing_tool_call(session, text, opts, iteration)
   if missing != nil {
-    let tool_name = missing.tool_name
+    const tool_name = missing.tool_name
     agent_session_inject_feedback(
       session.session_id,
       "missing_tool_call",
@@ -490,7 +490,7 @@ fn __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, it
 }
 
 fn __done_judge_config(opts) {
-  let judge = opts?.done_judge
+  const judge = opts?.done_judge
   if judge == nil {
     return nil
   }
@@ -508,11 +508,11 @@ fn __done_judge_config(opts) {
 }
 
 fn __done_judge_cadence(opts) {
-  let judge = __done_judge_config(opts)
+  const judge = __done_judge_config(opts)
   if judge == nil {
     return nil
   }
-  let cadence = judge?.cadence
+  const cadence = judge?.cadence
   if type_of(cadence) == "dict" {
     return cadence
   }
@@ -520,14 +520,14 @@ fn __done_judge_cadence(opts) {
 }
 
 fn __done_judge_loop_state(opts, completion_proposed) {
-  let state = opts?._done_judge_loop_state ?? {}
-  let base_completion = state?.completion ?? {}
-  let completion = base_completion + {proposed: completion_proposed}
+  const state = opts?._done_judge_loop_state ?? {}
+  const base_completion = state?.completion ?? {}
+  const completion = base_completion + {proposed: completion_proposed}
   return state + {completion: completion}
 }
 
 fn __done_judge_when_due(opts, cadence, state) {
-  let when = cadence?.when ?? "always"
+  const when = cadence?.when ?? "always"
   if type_of(when) == "closure" {
     return when(state) ? true : false
   }
@@ -535,15 +535,15 @@ fn __done_judge_when_due(opts, cadence, state) {
     return true
   }
   if when == "stalled" {
-    let trigger = opts?._done_judge_trigger ?? ""
-    let stalled = state?.stall?.triggered ?? false
+    const trigger = opts?._done_judge_trigger ?? ""
+    const stalled = state?.stall?.triggered ?? false
     return trigger == "stalled" || stalled
   }
   return false
 }
 
 fn __done_judge_every_due(cadence, turn_number) {
-  let every = cadence?.every
+  const every = cadence?.every
   if every == nil {
     return true
   }
@@ -551,7 +551,7 @@ fn __done_judge_every_due(cadence, turn_number) {
 }
 
 fn __done_judge_past_warmup(cadence, turn_number) {
-  let min_iterations = cadence?.min_iterations_before_first
+  const min_iterations = cadence?.min_iterations_before_first
   if min_iterations == nil {
     return true
   }
@@ -559,22 +559,22 @@ fn __done_judge_past_warmup(cadence, turn_number) {
 }
 
 fn __done_judge_under_cap(opts, cadence) {
-  let max_invocations = cadence?.max_invocations
+  const max_invocations = cadence?.max_invocations
   if max_invocations == nil {
     return true
   }
-  let invocations = opts?._done_judge_invocations ?? 0
+  const invocations = opts?._done_judge_invocations ?? 0
   return invocations < max_invocations
 }
 
 fn __done_judge_due(opts, payload, completion_proposed) {
-  let cadence = __done_judge_cadence(opts)
+  const cadence = __done_judge_cadence(opts)
   if cadence == nil {
     return false
   }
-  let raw_iteration = payload?.iteration ?? 0
-  let turn_number = raw_iteration + 1
-  let state = __done_judge_loop_state(opts, completion_proposed)
+  const raw_iteration = payload?.iteration ?? 0
+  const turn_number = raw_iteration + 1
+  const state = __done_judge_loop_state(opts, completion_proposed)
   return __done_judge_under_cap(opts, cadence)
     && __done_judge_past_warmup(cadence, turn_number)
     && __done_judge_every_due(cadence, turn_number)
@@ -582,8 +582,8 @@ fn __done_judge_due(opts, payload, completion_proposed) {
 }
 
 fn __completion_result(opts, payload, stop_reason) {
-  let verify_due = opts?.verify_completion != nil || opts?.verify_completion_judge != nil
-  let done_due = __done_judge_due(opts, payload, true)
+  const verify_due = opts?.verify_completion != nil || opts?.verify_completion_judge != nil
+  const done_due = __done_judge_due(opts, payload, true)
   if verify_due || done_due {
     return {kind: "break", stop_reason: stop_reason, needs_verify: true, done_judge_due: done_due}
   }
@@ -608,7 +608,7 @@ fn __post_turn_verdict_result(session, _opts, verdict, feedback_kind = "post_tur
     agent_session_inject_feedback(session.session_id, feedback_kind, verdict.message)
   }
   if verdict.stop {
-    let stop_reason = if verdict?.stop_reason != nil && verdict.stop_reason != "" {
+    const stop_reason = if verdict?.stop_reason != nil && verdict.stop_reason != "" {
       to_string(verdict.stop_reason)
     } else {
       "post_turn_stop"
@@ -632,18 +632,18 @@ fn __tool_surface_name(entry) {
 }
 
 fn __tool_surface_current_entries(opts) {
-  let registry = opts?.tools
-  let entries = if type_of(registry) == "dict" {
+  const registry = opts?.tools
+  const entries = if type_of(registry) == "dict" {
     registry?.tools ?? []
   } else if type_of(registry) == "list" {
     registry
   } else {
     []
   }
-  var selected = []
-  var names = []
+  let selected = []
+  let names = []
   for entry in entries {
-    let name = __tool_surface_name(entry)
+    const name = __tool_surface_name(entry)
     if name != "" && !contains(names, name) {
       names = names.push(name)
       selected = selected.push(entry)
@@ -653,7 +653,7 @@ fn __tool_surface_current_entries(opts) {
 }
 
 fn __tool_surface_current_names(opts) {
-  var names = []
+  let names = []
   for entry in __tool_surface_current_entries(opts) {
     names = names.push(__tool_surface_name(entry))
   }
@@ -665,15 +665,15 @@ fn __tool_surface_call_name(call) {
 }
 
 fn __tool_surface_attempted_names(llm_result, dispatch_results) {
-  var names = []
+  let names = []
   for call in llm_result?.tool_calls ?? [] {
-    let name = __tool_surface_call_name(call)
+    const name = __tool_surface_call_name(call)
     if name != "" && !contains(names, name) {
       names = names.push(name)
     }
   }
   for result in dispatch_results {
-    let name = __tool_result_name(result)
+    const name = __tool_result_name(result)
     if name != "" && !contains(names, name) {
       names = names.push(name)
     }
@@ -682,7 +682,7 @@ fn __tool_surface_attempted_names(llm_result, dispatch_results) {
 }
 
 fn __tool_surface_append_history(history, attempted, window_turns) {
-  var next = history.push(attempted)
+  let next = history.push(attempted)
   while len(next) > window_turns {
     next = next[1:]
   }
@@ -690,7 +690,7 @@ fn __tool_surface_append_history(history, attempted, window_turns) {
 }
 
 fn __tool_surface_window_used(history) {
-  var used = []
+  let used = []
   for turn in history {
     for name in turn {
       if name != "" && !contains(used, name) {
@@ -702,11 +702,11 @@ fn __tool_surface_window_used(history) {
 }
 
 fn __tool_surface_annotations(entry) {
-  let direct = entry?.annotations
+  const direct = entry?.annotations
   if type_of(direct) == "dict" {
     return direct
   }
-  let func = entry?.function
+  const func = entry?.function
   if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
     return func.annotations
   }
@@ -725,13 +725,13 @@ fn __tool_surface_enabled(value) {
 }
 
 fn __tool_surface_entry_class(entry) {
-  let annotations = __tool_surface_annotations(entry)
-  let side_effect = __tool_surface_text(
+  const annotations = __tool_surface_annotations(entry)
+  const side_effect = __tool_surface_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
       ?? annotations?.sideEffect,
   )
-  let kind = __tool_surface_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
-  let name = __tool_surface_text(__tool_surface_name(entry))
+  const kind = __tool_surface_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  const name = __tool_surface_text(__tool_surface_name(entry))
   if __tool_surface_enabled(annotations?.agent_lifecycle)
     || __tool_surface_enabled(annotations?.structural)
     || contains(["session_control", "lifecycle", "suspend", "resume"], kind)
@@ -789,7 +789,7 @@ fn __tool_surface_entry_class(entry) {
 }
 
 fn __tool_surface_entry_detail(entry, class, reason) {
-  let annotations = __tool_surface_annotations(entry)
+  const annotations = __tool_surface_annotations(entry)
   return {
     name: __tool_surface_name(entry),
     class: class,
@@ -803,16 +803,16 @@ fn __tool_surface_entry_detail(entry, class, reason) {
 }
 
 fn __tool_surface_entry_prunable(entry, config) {
-  let class = __tool_surface_entry_class(entry)
-  let keep_classes = config?.keep_classes ?? []
+  const class = __tool_surface_entry_class(entry)
+  const keep_classes = config?.keep_classes ?? []
   if contains(keep_classes, class) {
     return false
   }
   if class == "unknown" {
-    let unknown_tool_policy = config?.unknown_tool_policy ?? "keep"
+    const unknown_tool_policy = config?.unknown_tool_policy ?? "keep"
     return unknown_tool_policy == "prune"
   }
-  let mode = config?.mode ?? "safe"
+  const mode = config?.mode ?? "safe"
   if mode == "aggressive" {
     return true
   }
@@ -820,14 +820,14 @@ fn __tool_surface_entry_prunable(entry, config) {
 }
 
 fn __tool_surface_removed(candidates, used, config) {
-  let hard_keep = config?.hard_keep ?? []
-  var removed = []
+  const hard_keep = config?.hard_keep ?? []
+  let removed = []
   for entry in candidates {
-    let name = __tool_surface_name(entry)
+    const name = __tool_surface_name(entry)
     if name == "" || contains(used, name) || contains(hard_keep, name) {
       continue
     }
-    let class = __tool_surface_entry_class(entry)
+    const class = __tool_surface_entry_class(entry)
     if __tool_surface_entry_prunable(entry, config) {
       removed = removed.push(__tool_surface_entry_detail(entry, class, "unused_prunable_class"))
     }
@@ -836,9 +836,9 @@ fn __tool_surface_removed(candidates, used, config) {
 }
 
 fn __tool_surface_removed_names(details) {
-  var names = []
+  let names = []
   for detail in details {
-    let name = detail?.name ?? ""
+    const name = detail?.name ?? ""
     if name != "" && !contains(names, name) {
       names = names.push(name)
     }
@@ -847,14 +847,14 @@ fn __tool_surface_removed_names(details) {
 }
 
 fn __tool_surface_keep_details(candidates, removed, used, hard_keep) {
-  var details = []
+  let details = []
   for entry in candidates {
-    let name = __tool_surface_name(entry)
+    const name = __tool_surface_name(entry)
     if name == "" || contains(removed, name) {
       continue
     }
-    let class = __tool_surface_entry_class(entry)
-    let reason = if contains(used, name) {
+    const class = __tool_surface_entry_class(entry)
+    const reason = if contains(used, name) {
       "used_in_window"
     } else if contains(hard_keep, name) {
       "hard_keep"
@@ -867,7 +867,7 @@ fn __tool_surface_keep_details(candidates, removed, used, hard_keep) {
 }
 
 fn __tool_surface_remaining(candidates, removed) {
-  var remaining = []
+  let remaining = []
   for name in candidates {
     if !contains(removed, name) {
       remaining = remaining.push(name)
@@ -877,28 +877,28 @@ fn __tool_surface_remaining(candidates, removed) {
 }
 
 fn __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opts) {
-  let config = opts?.tool_surface_narrowing ?? {}
+  const config = opts?.tool_surface_narrowing ?? {}
   if !(config?.enabled ?? true) {
     return {history: [], narrowed_tools: nil, changed: false}
   }
-  let window_turns = config?.window_turns ?? 5
-  let attempted = __tool_surface_attempted_names(llm_result, dispatch_results)
-  let history = __tool_surface_append_history(opts?._tool_surface_narrowing_history ?? [], attempted, window_turns)
-  let candidate_entries = __tool_surface_current_entries(opts)
-  let candidates = __tool_surface_current_names(opts)
+  const window_turns = config?.window_turns ?? 5
+  const attempted = __tool_surface_attempted_names(llm_result, dispatch_results)
+  const history = __tool_surface_append_history(opts?._tool_surface_narrowing_history ?? [], attempted, window_turns)
+  const candidate_entries = __tool_surface_current_entries(opts)
+  const candidates = __tool_surface_current_names(opts)
   if len(candidates) == 0 || len(history) < window_turns {
     return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
   }
-  let used = __tool_surface_window_used(history)
-  let hard_keep = config?.hard_keep ?? []
-  let removed_details = __tool_surface_removed(candidate_entries, used, config)
-  let removed = __tool_surface_removed_names(removed_details)
+  const used = __tool_surface_window_used(history)
+  const hard_keep = config?.hard_keep ?? []
+  const removed_details = __tool_surface_removed(candidate_entries, used, config)
+  const removed = __tool_surface_removed_names(removed_details)
   if len(removed) == 0 {
     return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
   }
-  let remaining = __tool_surface_remaining(candidates, removed)
-  let kept_details = __tool_surface_keep_details(candidate_entries, removed, used, hard_keep)
-  let reason = "unused across last " + to_string(window_turns) + " turns"
+  const remaining = __tool_surface_remaining(candidates, removed)
+  const kept_details = __tool_surface_keep_details(candidate_entries, removed, used, hard_keep)
+  const reason = "unused across last " + to_string(window_turns) + " turns"
   agent_session_record_skill_event(
     session.session_id,
     "skill_narrow",
@@ -954,7 +954,7 @@ pub fn __tool_surface_filter_registry(registry, names) {
     return registry
   }
   if type_of(registry) == "dict" {
-    var kept = []
+    let kept = []
     for entry in registry?.tools ?? [] {
       if __tool_surface_keep_entry(entry, names) {
         kept = kept.push(entry)
@@ -963,7 +963,7 @@ pub fn __tool_surface_filter_registry(registry, names) {
     return registry + {tools: kept}
   }
   if type_of(registry) == "list" {
-    var kept = []
+    let kept = []
     for entry in registry {
       if __tool_surface_keep_entry(entry, names) {
         kept = kept.push(entry)
@@ -993,10 +993,10 @@ pub fn __tool_surface_policy_tools(policy, names) {
   if policy != nil && type_of(policy) != "dict" {
     return policy
   }
-  let base = policy ?? {}
-  let existing = base?.tools ?? []
+  const base = policy ?? {}
+  const existing = base?.tools ?? []
   if type_of(existing) == "list" && len(existing) > 0 {
-    var intersected = []
+    let intersected = []
     for name in existing {
       if contains(names, name) {
         intersected = intersected.push(name)
@@ -1015,7 +1015,7 @@ pub fn __tool_surface_policy_tools(policy, names) {
  * @api_stability: experimental
  */
 pub fn agent_apply_tool_surface_narrowing(opts) {
-  let names = opts?._tool_surface_narrowed_tools
+  const names = opts?._tool_surface_narrowed_tools
   if len(names ?? []) == 0 {
     return opts
   }
@@ -1052,7 +1052,7 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
   if opts?.tools == nil {
     return []
   }
-  let parsed = agent_parse_tool_calls(llm_result?.text ?? "", opts.tools, opts?.tool_format)
+  const parsed = agent_parse_tool_calls(llm_result?.text ?? "", opts.tools, opts?.tool_format)
   return parsed?.calls ?? []
 }
 
@@ -1064,15 +1064,15 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
  * @api_stability: experimental
  */
 pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
-  let sentinel = __default_done_sentinel(opts)
-  let text = llm_result?.text ?? ""
-  let sentinel_text = llm_result?.raw_text ?? text
-  let parsed_done_marker = llm_result?.parsed_done_marker
-  let dispatch_results = __dispatch_results_list(dispatch)
-  let successful_tool_names = __successful_tool_names(dispatch)
-  let rejected_tool_names = __rejected_tool_names(dispatch)
-  let has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || len(dispatch_results) > 0
-  let payload = {
+  const sentinel = __default_done_sentinel(opts)
+  const text = llm_result?.text ?? ""
+  const sentinel_text = llm_result?.raw_text ?? text
+  const parsed_done_marker = llm_result?.parsed_done_marker
+  const dispatch_results = __dispatch_results_list(dispatch)
+  const successful_tool_names = __successful_tool_names(dispatch)
+  const rejected_tool_names = __rejected_tool_names(dispatch)
+  const has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || len(dispatch_results) > 0
+  const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
     iteration: iteration,
@@ -1089,7 +1089,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   }
   __host_fire_session_hook("post_turn", payload)
   agent_session_apply_reminder_post_turn(session.session_id, iteration)
-  let narrowing = if contains(successful_tool_names, "load_skill") {
+  const narrowing = if contains(successful_tool_names, "load_skill") {
     {history: [], narrowed_tools: nil, changed: false}
   } else {
     __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opts)
@@ -1103,8 +1103,8 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
       narrowing,
     )
   }
-  let verdict = __post_turn_callback_verdict(opts, payload)
-  let verdict_result = __post_turn_verdict_result(session, opts, verdict)
+  const verdict = __post_turn_callback_verdict(opts, payload)
+  const verdict_result = __post_turn_verdict_result(session, opts, verdict)
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
   }
@@ -1120,12 +1120,12 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
       narrowing,
     )
   }
-  let {loop_until_done = false, daemon = false} = opts ?? {}
+  const {loop_until_done = false, daemon = false} = opts ?? {}
   if !has_tool_calls && !loop_until_done && !daemon {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
-  let confirmation_nudged = __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
-  let action_nudged = __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, iteration)
+  const confirmation_nudged = __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
+  const action_nudged = __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, iteration)
   return __post_turn_with_narrowing(
     {kind: "continue", done_judge_due: false, nudged_this_turn: confirmation_nudged || action_nudged},
     narrowing,
@@ -1144,7 +1144,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
  * @errors: []
  */
 pub fn agent_compute_terminal_callback(session, opts, terminal) {
-  let payload = {
+  const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
     terminal: true,
@@ -1167,8 +1167,8 @@ pub fn agent_compute_terminal_callback(session, opts, terminal) {
     visible_text: "",
     last_assistant_text: "",
   }
-  let verdict = __terminal_callback_verdict(opts, payload)
-  let verdict_result = __post_turn_verdict_result(session, opts, verdict, "terminal_callback")
+  const verdict = __terminal_callback_verdict(opts, payload)
+  const verdict_result = __post_turn_verdict_result(session, opts, verdict, "terminal_callback")
   if verdict_result != nil {
     return verdict_result
   }
@@ -1176,7 +1176,7 @@ pub fn agent_compute_terminal_callback(session, opts, terminal) {
 }
 
 fn visible_text_excerpt(text) {
-  let trimmed = trim(text ?? "")
+  const trimmed = trim(text ?? "")
   if len(trimmed) <= 160 {
     return trimmed
   }

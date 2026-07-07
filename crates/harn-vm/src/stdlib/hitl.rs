@@ -1959,7 +1959,7 @@ mod tests {
                 let source = r#"
 pipeline test(task) {
   host_mock("hitl", "question", {answer: "9"})
-  let answer: int = ask_user("Pick a number", {default: 0})
+  const answer: int = ask_user("Pick a number", {default: 0})
   __io_println(answer)
 }
 "#;
@@ -2000,7 +2000,7 @@ pipeline test(task) {
     {approved: true, reviewer: "alice", reason: "ok"},
     {approved: true, reviewer: "bob", reason: "ship it"},
   ])
-  let record = request_approval(
+  const record = request_approval(
     "deploy production",
     {quorum: 2, reviewers: ["alice", "bob", "carol"]},
   )
@@ -2081,7 +2081,7 @@ pipeline test(task) {
                 let source = r#"
 pipeline test(task) {
   host_mock("hitl", "approval", {approved: false, reviewer: "alice", reason: "unsafe"})
-  let denied = try {
+  const denied = try {
     request_approval("drop table", {reviewers: ["alice"]})
   }
   __io_println(is_err(denied))
@@ -2116,7 +2116,7 @@ pipeline test(task) {
     {approved: true, reviewer: "alice"},
     {approved: true, reviewer: "bob"},
   ])
-  let result = dual_control(2, 3, { -> "launched" }, ["alice", "bob", "carol"])
+  const result = dual_control(2, 3, { -> "launched" }, ["alice", "bob", "carol"])
   __io_println(result)
 }
 "#;
@@ -2147,7 +2147,7 @@ pipeline test(task) {
                 let source = r#"
 pipeline test(task) {
   host_mock("hitl", "escalation", {accepted: true, reviewer: "lead", reason: "taking over"})
-  let handle = escalate_to("admin", "need override")
+  const handle = escalate_to("admin", "need override")
   __io_println(handle.status)
   __io_println(handle.reviewer)
 }
@@ -2209,7 +2209,7 @@ pipeline test(task) {
                 let source = r#"
 pipeline test(task) {
   host_mock("hitl", "question", {answer: "ok"})
-  let answer: string = ask_user("Are you sure?", {default: "no"})
+  const answer: string = ask_user("Are you sure?", {default: "no"})
   __io_println(answer)
 }
 "#;

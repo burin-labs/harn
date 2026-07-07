@@ -88,11 +88,11 @@ results, preferring `path` plus line metadata when present. Set
 a terser reminder.
 
 ```harn,ignore
-let report = flow_evaluate_invariants("", slice, {
+const report = flow_evaluate_invariants("", slice, {
   path: "invariants.harn",
   budget_ms: 50,
 })
-let feedback = flow_invariant_feedback(report)
+const feedback = flow_invariant_feedback(report)
 if feedback != "" {
   agent_inject_feedback(session_id, "flow_invariants", feedback)
 }

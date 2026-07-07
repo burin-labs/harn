@@ -4,7 +4,7 @@ import "../check_diagnostic_codes.harn"
 
 @test
 pipeline test_line_of_counts_newlines(task) {
-  let text = "a\nbb\nccc"
+  const text = "a\nbb\nccc"
   // offset 0 → line 1; offset inside line 2 → line 2; near end → line 3.
   assert_eq(line_of(text, 0), 1)
   assert_eq(line_of(text, 2), 2)
@@ -19,7 +19,7 @@ pipeline test_rel_path_extracts_suffix(task) {
 
 @test
 pipeline test_find_from_offset_semantics(task) {
-  let t = "abXabXab"
+  const t = "abXabXab"
   assert_eq(find_from(t, "X", 0), 2)
   // Search starting past the first hit finds the second.
   assert_eq(find_from(t, "X", 3), 5)
@@ -29,7 +29,7 @@ pipeline test_find_from_offset_semantics(task) {
 
 @test
 pipeline test_starts_with_at(task) {
-  let t = "let x = Code::Foo"
+  const t = "let x = Code::Foo"
   assert_eq(starts_with_at(t, "Code::", 8), true)
   assert_eq(starts_with_at(t, "Code::", 0), false)
   // Past end-of-string is false, not a crash.
@@ -38,7 +38,7 @@ pipeline test_starts_with_at(task) {
 
 @test
 pipeline test_first_non_ws_skips_whitespace(task) {
-  let t = "fn(  \n\tCode::A)"
+  const t = "fn(  \n\tCode::A)"
   // index 3 is the first space after "fn("; skip to "C" at 7.
   assert_eq(first_non_ws(t, 3), 7)
   // Already on a non-space char → unchanged.
@@ -54,8 +54,8 @@ pipeline test_category_code_uppercases_known(task) {
 
 @test
 pipeline test_find_struct_literals_brace_match(task) {
-  let text = "Foo { a: Bar { x }, b: 2 } trailing"
-  let lits = find_struct_literals(text, "Foo {")
+  const text = "Foo { a: Bar { x }, b: 2 } trailing"
+  const lits = find_struct_literals(text, "Foo {")
   assert_eq(lits.count, 1)
   assert_eq(lits[0].start, 0)
   // End is exclusive, just past the matching outer '}'.
@@ -64,31 +64,31 @@ pipeline test_find_struct_literals_brace_match(task) {
 
 @test
 pipeline test_find_struct_literals_unbalanced_runs_to_end(task) {
-  let text = "Foo { a: 1"
-  let lits = find_struct_literals(text, "Foo {")
+  const text = "Foo { a: 1"
+  const lits = find_struct_literals(text, "Foo {")
   assert_eq(lits.count, 1)
   assert_eq(lits[0].end, text.len())
 }
 
 @test
 pipeline test_find_struct_literals_multiple(task) {
-  let text = "Foo { x } and Foo { y }"
-  let lits = find_struct_literals(text, "Foo {")
+  const text = "Foo { x } and Foo { y }"
+  const lits = find_struct_literals(text, "Foo {")
   assert_eq(lits.count, 2)
 }
 
 @test
 pipeline test_struct_literal_missing_code_flagged(task) {
   // A bare literal with no `code:` field → one violation.
-  let text = "let d = LintDiagnostic { message: \"x\", span: s };"
-  let v = check_struct_literals_text("a.rs", "LintDiagnostic", text)
+  const text = "let d = LintDiagnostic { message: \"x\", span: s };"
+  const v = check_struct_literals_text("a.rs", "LintDiagnostic", text)
   assert_eq(v.count, 1)
   assert_eq(v[0], "a.rs:1: LintDiagnostic literal missing code")
 }
 
 @test
 pipeline test_struct_literal_with_code_ok(task) {
-  let text = "let d = LintDiagnostic { code: Code::Foo, message: \"x\" };"
+  const text = "let d = LintDiagnostic { code: Code::Foo, message: \"x\" };"
   assert_eq(check_struct_literals_text("a.rs", "LintDiagnostic", text).count, 0)
 }
 
@@ -98,12 +98,12 @@ pipeline test_struct_literal_definition_marker_only_skips_when_name_in_prefix(ta
   // 80-char prefix *before* the `{name} {` needle. A real definition body
   // that itself carries a `code:` field is therefore skipped by the
   // code-present check, mirroring how the real registry structs pass.
-  let with_code = "pub struct LintDiagnostic {\n  pub code: Code,\n}"
+  const with_code = "pub struct LintDiagnostic {\n  pub code: Code,\n}"
   assert_eq(check_struct_literals_text("a.rs", "LintDiagnostic", with_code).count, 0)
   // A definition with NO code field is flagged exactly like Python does —
   // the `pub struct` marker sits before the name, never inside the prefix.
-  let no_code = "pub struct LintDiagnostic {\n  pub message: string,\n}"
-  let v = check_struct_literals_text("a.rs", "LintDiagnostic", no_code)
+  const no_code = "pub struct LintDiagnostic {\n  pub message: string,\n}"
+  const v = check_struct_literals_text("a.rs", "LintDiagnostic", no_code)
   assert_eq(v.count, 1)
   assert_eq(v[0], "a.rs:1: LintDiagnostic literal missing code")
 }
@@ -112,70 +112,70 @@ pipeline test_struct_literal_definition_marker_only_skips_when_name_in_prefix(ta
 pipeline test_struct_literal_def_marker_in_prefix_skipped(task) {
   // When the marker text precedes a later `Name {` occurrence within 80
   // chars, the guard skips that occurrence (Python behavior).
-  let text = "pub struct LintDiagnostic; let d = LintDiagnostic { message: \"x\" };"
+  const text = "pub struct LintDiagnostic; let d = LintDiagnostic { message: \"x\" };"
   assert_eq(check_struct_literals_text("a.rs", "LintDiagnostic", text).count, 0)
 }
 
 @test
 pipeline test_struct_literal_impl_block_skipped(task) {
-  let text = "impl LintDiagnostic {\n  fn n() {}\n}"
+  const text = "impl LintDiagnostic {\n  fn n() {}\n}"
   assert_eq(check_struct_literals_text("a.rs", "LintDiagnostic", text).count, 0)
 }
 
 @test
 pipeline test_struct_literal_return_type_skipped(task) {
   // `-> TypeDiagnostic {` is a fn body opening, not a literal.
-  let text = "fn make() -> TypeDiagnostic {\n  todo()\n}"
+  const text = "fn make() -> TypeDiagnostic {\n  todo()\n}"
   assert_eq(check_struct_literals_text("a.rs", "TypeDiagnostic", text).count, 0)
 }
 
 @test
 pipeline test_struct_literal_qualified_return_type_skipped(task) {
-  let text = "fn make() -> crate::TypeDiagnostic {\n  todo()\n}"
+  const text = "fn make() -> crate::TypeDiagnostic {\n  todo()\n}"
   assert_eq(check_struct_literals_text("a.rs", "TypeDiagnostic", text).count, 0)
 }
 
 @test
 pipeline test_helper_calls_missing_code_flagged(task) {
   // `self.error_at(` without a leading `Code::` → violation.
-  let text = "self.error_at(span, \"oops\")"
-  let v = check_helper_calls_text("a.rs", text)
+  const text = "self.error_at(span, \"oops\")"
+  const v = check_helper_calls_text("a.rs", text)
   assert_eq(v.count, 1)
   assert_eq(v[0], "a.rs:1: self.error_at must pass Code::* first")
 }
 
 @test
 pipeline test_helper_calls_with_code_ok(task) {
-  let text = "self.error_at(Code::Foo, span)"
+  const text = "self.error_at(Code::Foo, span)"
   assert_eq(check_helper_calls_text("a.rs", text).count, 0)
 }
 
 @test
 pipeline test_helper_calls_whitespace_before_code_ok(task) {
   // Leading whitespace / newline before Code:: is allowed.
-  let text = "self.warning_at(\n    Code::Bar, span)"
+  const text = "self.warning_at(\n    Code::Bar, span)"
   assert_eq(check_helper_calls_text("a.rs", text).count, 0)
 }
 
 @test
 pipeline test_constructor_calls_missing_code_flagged(task) {
-  let text = "FormatError::new(span, \"bad\")"
-  let v = check_constructor_calls_text("a.rs", "FormatError::new", text)
+  const text = "FormatError::new(span, \"bad\")"
+  const v = check_constructor_calls_text("a.rs", "FormatError::new", text)
   assert_eq(v.count, 1)
   assert_eq(v[0], "a.rs:1: FormatError::new must pass Code::* first")
 }
 
 @test
 pipeline test_constructor_calls_with_code_ok(task) {
-  let text = "FormatError::new(Code::Foo, span)"
+  const text = "FormatError::new(Code::Foo, span)"
   assert_eq(check_constructor_calls_text("a.rs", "FormatError::new", text).count, 0)
 }
 
 @test
 pipeline test_unknown_variant_flagged(task) {
-  let known = ["TypeMismatch", "InvalidBinaryOperator"]
-  let text = "match c { Code::TypeMismatch => 1, Code::Bogus => 2 }"
-  let v = check_unknown_variants_text("a.rs", text, known)
+  const known = ["TypeMismatch", "InvalidBinaryOperator"]
+  const text = "match c { Code::TypeMismatch => 1, Code::Bogus => 2 }"
+  const v = check_unknown_variants_text("a.rs", text, known)
   assert_eq(v.count, 1)
   assert_eq(v[0], "a.rs:1: unknown Code::Bogus")
 }
@@ -183,8 +183,8 @@ pipeline test_unknown_variant_flagged(task) {
 @test
 pipeline test_unknown_variant_ignores_snake_case_methods(task) {
   // Lowercase-first inherent methods are not variants.
-  let known: list<string> = []
-  let text = "Code::repair_template() + Code::as_str()"
+  const known: list<string> = []
+  const text = "Code::repair_template() + Code::as_str()"
   assert_eq(check_unknown_variants_text("a.rs", text, known).count, 0)
 }
 
@@ -197,8 +197,8 @@ pipeline test_format_str_list_python_repr(task) {
 @test
 pipeline test_check_registry_text_happy_path(task) {
   // Two well-formed entries across two categories → no errors, both variants.
-  let text = "  TypeMismatch, \"HARN-TYP-001\", Typ, \"a\";\n  ParseFail, \"HARN-PAR-001\", Par, \"b\";"
-  let reg = check_registry_text(text)
+  const text = "  TypeMismatch, \"HARN-TYP-001\", Typ, \"a\";\n  ParseFail, \"HARN-PAR-001\", Par, \"b\";"
+  const reg = check_registry_text(text)
   // Fewer than 40 entries → the count error, but not malformed/category errors.
   assert_eq(reg.variants.contains("TypeMismatch"), true)
   assert_eq(reg.variants.contains("ParseFail"), true)
@@ -208,9 +208,9 @@ pipeline test_check_registry_text_happy_path(task) {
 
 @test
 pipeline test_check_registry_text_duplicate_identifier(task) {
-  let text = "  A, \"HARN-TYP-001\", Typ, \"a\";\n  B, \"HARN-TYP-001\", Typ, \"b\";"
-  let reg = check_registry_text(text)
-  var found = false
+  const text = "  A, \"HARN-TYP-001\", Typ, \"a\";\n  B, \"HARN-TYP-001\", Typ, \"b\";"
+  const reg = check_registry_text(text)
+  let found = false
   for e in reg.errors {
     if e.contains("duplicate diagnostic identifier HARN-TYP-001") {
       found = true
@@ -221,9 +221,9 @@ pipeline test_check_registry_text_duplicate_identifier(task) {
 
 @test
 pipeline test_check_registry_text_unknown_category(task) {
-  let text = "  A, \"HARN-XYZ-001\", Xyz, \"a\";"
-  let reg = check_registry_text(text)
-  var found = false
+  const text = "  A, \"HARN-XYZ-001\", Xyz, \"a\";"
+  const reg = check_registry_text(text)
+  let found = false
   for e in reg.errors {
     if e.contains("unknown category enum variant Xyz") {
       found = true
@@ -234,9 +234,9 @@ pipeline test_check_registry_text_unknown_category(task) {
 
 @test
 pipeline test_check_registry_text_malformed_identifier(task) {
-  let text = "  A, \"HARN-TYP-01\", Typ, \"a\";"
-  let reg = check_registry_text(text)
-  var found = false
+  const text = "  A, \"HARN-TYP-01\", Typ, \"a\";"
+  const reg = check_registry_text(text)
+  let found = false
   for e in reg.errors {
     if e.contains("malformed diagnostic identifier HARN-TYP-01") {
       found = true
@@ -248,9 +248,9 @@ pipeline test_check_registry_text_malformed_identifier(task) {
 @test
 pipeline test_check_registry_text_category_mismatch(task) {
   // Identifier category PAR but enum variant Typ → mismatch.
-  let text = "  A, \"HARN-PAR-001\", Typ, \"a\";"
-  let reg = check_registry_text(text)
-  var found = false
+  const text = "  A, \"HARN-PAR-001\", Typ, \"a\";"
+  const reg = check_registry_text(text)
+  let found = false
   for e in reg.errors {
     if e.contains("identifier HARN-PAR-001 does not match category Typ") {
       found = true
@@ -261,9 +261,9 @@ pipeline test_check_registry_text_category_mismatch(task) {
 
 @test
 pipeline test_check_registry_text_missing_categories_sorted(task) {
-  let text = "  A, \"HARN-TYP-001\", Typ, \"a\";"
-  let reg = check_registry_text(text)
-  var found = false
+  const text = "  A, \"HARN-TYP-001\", Typ, \"a\";"
+  const reg = check_registry_text(text)
+  let found = false
   for e in reg.errors {
     if e.contains("missing populated categories") && e.contains("'Cap'") {
       found = true

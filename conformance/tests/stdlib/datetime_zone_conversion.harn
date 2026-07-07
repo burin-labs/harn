@@ -1,6 +1,6 @@
 pipeline default() {
-  let ts = date_parse("2026-04-25T17:32:09Z")
-  let la = date_in_zone(ts, "America/Los_Angeles")
+  const ts = date_parse("2026-04-25T17:32:09Z")
+  const la = date_in_zone(ts, "America/Los_Angeles")
   __io_println(la.year)
   __io_println(la.month)
   __io_println(la.day)

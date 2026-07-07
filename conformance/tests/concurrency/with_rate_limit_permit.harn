@@ -10,8 +10,8 @@ pipeline default(task) {
   with_llm_script(
     [llm_text("one"), llm_text("two")],
     { ->
-      let a = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
-      let b = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
+      const a = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
+      const b = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
       __io_println(a.text)
       __io_println(b.text)
       llm_rate_limit("mock", {rpm: 0})

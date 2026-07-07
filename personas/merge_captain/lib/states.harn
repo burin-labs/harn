@@ -59,7 +59,7 @@ pub fn all_actions() {
 
 /** True when the action mutates remote state. */
 pub fn action_is_mutating(action) {
-  let read_only = ["noop", "wait", "comment"]
+  const read_only = ["noop", "wait", "comment"]
   return !read_only.contains(action)
 }
 
@@ -102,8 +102,8 @@ pub fn is_valid_transition(prior, next) {
   if prior == next {
     return true
   }
-  let table = _transitions()
-  let allowed = table[prior]
+  const table = _transitions()
+  const allowed = table[prior]
   if allowed == nil {
     return false
   }
@@ -112,6 +112,6 @@ pub fn is_valid_transition(prior, next) {
 
 /** Returns the allowed next-states from prior. */
 pub fn allowed_next(prior) {
-  let table = _transitions()
+  const table = _transitions()
   return table[prior] ?? []
 }

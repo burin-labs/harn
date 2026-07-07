@@ -239,9 +239,9 @@ load from scratch.
 Harn code can query the same chain from the active skill registry:
 
 ```harn
-let chain = skill_who_signed(skills, "deploy")
-let trust_inputs = chain.trust_policy_input
-let signer_history = trust.query({
+const chain = skill_who_signed(skills, "deploy")
+const trust_inputs = chain.trust_policy_input
+const signer_history = trust.query({
   actor: trust_inputs.author_actor_id,
   action: trust_inputs.action,
 })

@@ -2,6 +2,6 @@ pipeline test(task) {
   gen fn values() -> Stream<int> {
     emit 1
   }
-  let wrong: Generator<int> = values()
+  const wrong: Generator<int> = values()
   __io_println(wrong)
 }

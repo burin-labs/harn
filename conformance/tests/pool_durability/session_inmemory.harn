@@ -4,18 +4,18 @@
 import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
 pipeline default() {
-  let pool = pool_create({name: "session-demo", max_concurrent: 1})
+  const pool = pool_create({name: "session-demo", max_concurrent: 1})
   log(pool.scope)
   log(pool.durable)
-  let h1 = pool.submit({ -> 11 })
-  let r1 = pool_wait(h1)
+  const h1 = pool.submit({ -> 11 })
+  const r1 = pool_wait(h1)
   log(r1.status)
   log(r1.result)
   // After restart, the registry forgets the pool entirely. Re-creating
   // by the same name observes a fresh handle with no carried-over
   // tasks.
   pool_simulate_restart()
-  let again = pool_create({name: "session-demo", max_concurrent: 1})
+  const again = pool_create({name: "session-demo", max_concurrent: 1})
   log(again.scope)
   log(again.total)
 }

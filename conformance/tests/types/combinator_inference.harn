@@ -1,20 +1,20 @@
 pipeline default() {
   // filter preserves the element type; map transforms it via the closure.
   // The chain stays list<int>, so the int annotations below type-check.
-  let xs = [1, 2, 3, 4]
-  let ys = xs.filter({ n -> n > 1 }).map({ n -> n * 10 })
+  const xs = [1, 2, 3, 4]
+  const ys = xs.filter({ n -> n > 1 }).map({ n -> n * 10 })
   for v in ys {
-    let kept: int = v
+    const kept: int = v
     __io_println(kept)
   }
   // keys()/values() project the dict's key/value type parameters.
-  let counts: dict<string, int> = {a: 1, b: 2}
+  const counts: dict<string, int> = {a: 1, b: 2}
   for value in counts.values() {
-    let n: int = value
+    const n: int = value
     __io_println(n)
   }
   for key in counts.keys() {
-    let s: string = key
+    const s: string = key
     __io_println(s)
   }
 }

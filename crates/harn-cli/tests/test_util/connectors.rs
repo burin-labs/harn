@@ -27,8 +27,8 @@ pub fn init(_ctx) {}
 pub fn activate(_bindings) {}
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
-  let secret = secret_get("github/webhook-secret")
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const secret = secret_get("github/webhook-secret")
   if !verify_hmac_signature(raw.body_text ?? "", header(raw.headers, "X-Hub-Signature-256"), secret) {
     return {type: "reject", status: 400, body: "invalid github signature"}
   }
@@ -70,15 +70,15 @@ pub fn init(_ctx) {}
 pub fn activate(_bindings) {}
 
 fn verified_slack_signature(raw) {
-  let timestamp = header(raw.headers, "X-Slack-Request-Timestamp")
-  let signature = header(raw.headers, "X-Slack-Signature")
-  let secret = secret_get("slack/signing-secret")
-  let expected = "v0=" + hmac_sha256(secret, "v0:" + timestamp + ":" + (raw.body_text ?? ""))
+  const timestamp = header(raw.headers, "X-Slack-Request-Timestamp")
+  const signature = header(raw.headers, "X-Slack-Signature")
+  const secret = secret_get("slack/signing-secret")
+  const expected = "v0=" + hmac_sha256(secret, "v0:" + timestamp + ":" + (raw.body_text ?? ""))
   return constant_time_eq(expected, signature)
 }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
+  const body = raw.body_json ?? json_parse(raw.body_text)
   if !verified_slack_signature(raw) {
     return {type: "reject", status: 400, body: "invalid slack signature"}
   }
@@ -128,7 +128,7 @@ pub fn init(_ctx) {}
 pub fn activate(_bindings) {}
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json ?? json_parse(raw.body_text)
+  const body = raw.body_json ?? json_parse(raw.body_text)
   if body.verification_token != nil {
     return {
       type: "immediate_response",
@@ -139,7 +139,7 @@ pub fn normalize_inbound(raw) {
       },
     }
   }
-  let secret = secret_get("notion/verification-token")
+  const secret = secret_get("notion/verification-token")
   if !verify_hmac_signature(raw.body_text ?? "", header(raw.headers, "X-Notion-Signature"), secret) {
     return {type: "reject", status: 400, body: "invalid notion signature"}
   }

@@ -1,7 +1,7 @@
 import "std/project"
 
 pipeline test(task) {
-  let namespace = "ambient-${uuid()}"
+  const namespace = "ambient-${uuid()}"
   harness.fs.mkdir("project_deep_scan_ignore/app/src")
   harness.fs.mkdir("project_deep_scan_ignore/ignored/src")
   harness.fs.mkdir("project_deep_scan_ignore/target/tooling")
@@ -22,7 +22,7 @@ pipeline test(task) {
   )
   harness.fs
     .write_text("project_deep_scan_ignore/node_modules/pkg/package.json", "{\"name\":\"pkg\"}\n")
-  let tree = project_deep_scan(
+  const tree = project_deep_scan(
     "project_deep_scan_ignore",
     {namespace: namespace, tiers: ["ambient"], incremental: true, depth: nil},
   )

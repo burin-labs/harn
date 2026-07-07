@@ -1,5 +1,5 @@
 fn read_tools() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "read_file",
@@ -14,7 +14,7 @@ fn read_tools() {
 }
 
 pipeline main() {
-  let result = agent_loop(
+  const result = agent_loop(
     "Call read",
     "You are helpful",
     {

@@ -170,7 +170,7 @@ pub fn side_effect_policy() {
 
 /** Prompt text for one narrow decision. */
 pub fn prompt_text(id) {
-  let shared = side_effect_policy()
+  const shared = side_effect_policy()
   if id == "classify_pr" {
     return "${shared}\nClassify exactly one pull request from the compact observation. Use only the provided evidence keys. Return JSON matching merge_captain.prompt_pack.classify_pr.v1."
   }
@@ -275,9 +275,9 @@ fn _take(items, count) {
 
 /** Assemble the compact context the prompt is allowed to see. */
 pub fn assemble_context(id, evidence) {
-  let budget = context_budget_for(id)
-  let selected_log_spans = _take(evidence?.selected_log_spans ?? [], budget.max_log_spans ?? 0)
-  let commits = _take(evidence?.commits ?? [], budget.max_commits ?? 0)
+  const budget = context_budget_for(id)
+  const selected_log_spans = _take(evidence?.selected_log_spans ?? [], budget.max_log_spans ?? 0)
+  const commits = _take(evidence?.commits ?? [], budget.max_commits ?? 0)
   return {
     _type: "merge_captain.prompt_context",
     version: 1,
@@ -300,15 +300,15 @@ pub fn assemble_context(id, evidence) {
 
 /** Verify context assembly did not leak raw logs or exceed simple count budgets. */
 pub fn validate_context(context) {
-  var errors = []
+  let errors = []
   if context.raw_logs_included {
     errors = errors + ["raw logs must not enter prompt context"]
   }
-  let max_log_spans = context.budget?.max_log_spans
+  const max_log_spans = context.budget?.max_log_spans
   if max_log_spans != nil && len(context.selected_log_spans ?? []) > max_log_spans {
     errors = errors + ["selected_log_spans exceeds budget"]
   }
-  let max_commits = context.budget?.max_commits
+  const max_commits = context.budget?.max_commits
   if max_commits != nil && len(context.commits ?? []) > max_commits {
     errors = errors + ["commits exceeds budget"]
   }
@@ -321,14 +321,14 @@ fn _allowed_keys(schema) {
 
 /** Lightweight schema validator for golden fixtures and mock value-model outputs. */
 pub fn validate_output(id, output) {
-  let schema = schema_for(id)
+  const schema = schema_for(id)
   if schema == nil {
     return {ok: false, errors: ["unknown prompt id '${id}'"]}
   }
   if output == nil || type_of(output) != "dict" {
     return {ok: false, errors: ["output must be a dict"]}
   }
-  var errors = []
+  let errors = []
   for key in schema.required {
     if !contains(output.keys(), key) {
       errors = errors + ["missing required key '${key}'"]
@@ -343,7 +343,7 @@ pub fn validate_output(id, output) {
 }
 
 fn _ids(items) {
-  var ids = []
+  let ids = []
   for item in items ?? [] {
     if item?.id != nil {
       ids = ids + [to_string(item.id)]
@@ -356,7 +356,7 @@ fn _ids(items) {
 }
 
 fn _classify_pr_errors(output) {
-  var errors = []
+  let errors = []
   if output.confidence < 0.7 && len(output.missing_context ?? []) == 0 {
     errors = errors + ["low-confidence PR classifications must name missing_context"]
   }
@@ -367,7 +367,7 @@ fn _classify_pr_errors(output) {
 }
 
 fn _next_action_errors(output) {
-  var errors = []
+  let errors = []
   if output.action != "wait" && len(output.deterministic_inputs ?? []) == 0 {
     errors = errors + ["non-wait actions must cite deterministic_inputs"]
   }
@@ -379,8 +379,8 @@ fn _next_action_errors(output) {
 }
 
 fn _ci_category_errors(context, output) {
-  var errors = []
-  let allowed_spans = _ids(context.selected_log_spans)
+  let errors = []
+  const allowed_spans = _ids(context.selected_log_spans)
   if ["deterministic_failure", "flaky_test", "infra_failure"].contains(output.category)
     && len(output.selected_log_span_ids ?? []) == 0 {
     errors = errors + ["CI diagnoses must cite selected_log_span_ids unless context is missing"]
@@ -397,11 +397,11 @@ fn _ci_category_errors(context, output) {
 }
 
 fn _release_audit_errors(context, output) {
-  var errors = []
+  let errors = []
   if len(output.evidence_checked ?? []) == 0 {
     errors = errors + ["release/changelog audits must list evidence_checked"]
   }
-  let commit_shas = _ids(context.commits)
+  const commit_shas = _ids(context.commits)
   for section in output.rewrite_sections ?? [] {
     for sha in section.evidence_commit_shas ?? [] {
       if !commit_shas.contains(to_string(sha)) {
@@ -416,7 +416,7 @@ fn _release_audit_errors(context, output) {
 }
 
 fn _approval_errors(output) {
-  var errors = []
+  let errors = []
   if output.ask_approval && len(output.action_kinds ?? []) == 0 {
     errors = errors + ["approval requests must list action_kinds"]
   }
@@ -457,14 +457,14 @@ fn _field_errors(id, context, output) {
 
 fn _checkpoint_validator(id, context, extra_validator) {
   return fn(output) {
-    var errors = []
-    let schema_validation = validate_output(id, output)
+    let errors = []
+    const schema_validation = validate_output(id, output)
     if !schema_validation.ok {
       errors = errors + schema_validation.errors
     }
     errors = errors + _field_errors(id, context, output)
     if extra_validator != nil {
-      let extra = extra_validator(output, context)
+      const extra = extra_validator(output, context)
       if extra == nil {
         return {ok: len(errors) == 0, errors: errors}
       }
@@ -474,7 +474,7 @@ fn _checkpoint_validator(id, context, extra_validator) {
         }
       } else if type_of(extra) == "dict" {
         if !(extra?.ok ?? false) {
-          let extra_errors = extra?.errors ?? extra?.validation_errors
+          const extra_errors = extra?.errors ?? extra?.validation_errors
             ?? [extra?.message ?? "custom validator rejected output"]
           errors = errors + extra_errors
         }
@@ -490,7 +490,7 @@ fn _checkpoint_validator(id, context, extra_validator) {
 
 /** Run one prompt-pack decision through a strict typed-output checkpoint. */
 pub fn typed_prompt_checkpoint(id, evidence, options = nil, validator = nil) {
-  let schema = schema_for(id)
+  const schema = schema_for(id)
   if schema == nil {
     return {
       _type: "typed_output_checkpoint",
@@ -505,8 +505,8 @@ pub fn typed_prompt_checkpoint(id, evidence, options = nil, validator = nil) {
       final_accepted: false,
     }
   }
-  let context = assemble_context(id, evidence)
-  let context_validation = validate_context(context)
+  const context = assemble_context(id, evidence)
+  const context_validation = validate_context(context)
   if !context_validation.ok {
     return {
       _type: "typed_output_checkpoint",
@@ -522,9 +522,9 @@ pub fn typed_prompt_checkpoint(id, evidence, options = nil, validator = nil) {
       context: context,
     }
   }
-  let opts = options ?? {}
-  let prompt = prompt_text(id) + "\n\nContext JSON:\n" + json_stringify(context)
-  let checkpoint = typed_output_checkpoint(
+  const opts = options ?? {}
+  const prompt = prompt_text(id) + "\n\nContext JSON:\n" + json_stringify(context)
+  const checkpoint = typed_output_checkpoint(
     "merge_captain." + id,
     prompt,
     schema,
@@ -691,10 +691,10 @@ pub fn golden_examples_for(id) {
 
 /** Deterministic eval fixture for the configured value-model route. */
 pub fn value_model_eval_fixture() {
-  var cases = []
+  let cases = []
   for id in prompt_ids() {
-    let example = golden_examples_for(id)[0]
-    let validation = validate_output(id, example.output)
+    const example = golden_examples_for(id)[0]
+    const validation = validate_output(id, example.output)
     cases = cases
       + [
       {
@@ -738,7 +738,7 @@ pub fn revision_gate() {
 
 /** Full pack manifest for docs, evals, and inspection. */
 pub fn pack_manifest() {
-  var prompts = []
+  let prompts = []
   for id in prompt_ids() {
     prompts = prompts
       + [
@@ -767,15 +767,15 @@ pub fn pack_manifest() {
 /** Prompt used by the repair checkpoint while preserving repair_output validation. */
 pub fn repair_checkpoint_prompt(kind) {
   if kind == "release_audit" {
-    let prompt = prompt_text("audit_release_changelog")
+    const prompt = prompt_text("audit_release_changelog")
     return "${prompt}\nAfter the audit recommendation, fill the universal merge_captain.repair_output v1 JSON object, including release_outputs. Keep blockers and uncertainty visible."
   }
   if kind == "ci_failure" {
-    let prompt = prompt_text("diagnose_ci_category")
+    const prompt = prompt_text("diagnose_ci_category")
     return "${prompt}\nAfter diagnosing the CI category, perform only allowed repair work through deterministic tools and fill the universal merge_captain.repair_output v1 JSON object."
   }
   if kind == "flaky_test" {
-    let prompt = prompt_text("diagnose_ci_category")
+    const prompt = prompt_text("diagnose_ci_category")
     return "${prompt}\nFocus on nondeterminism evidence. Then fill the universal merge_captain.repair_output v1 JSON object."
   }
   if kind == "merge_conflict" {

@@ -1,14 +1,14 @@
 import "std/signal"
 
 pipeline default() {
-  let first = on_interrupt({ -> __io_println("a") }, {once: false})
-  let second = on_interrupt({ -> __io_println("b") }, {once: false})
+  const first = on_interrupt({ -> __io_println("a") }, {once: false})
+  const second = on_interrupt({ -> __io_println("b") }, {once: false})
   __signal_raise("SIGINT")
   off_interrupt(second)
   __signal_raise("SIGINT")
   __io_println(interrupted())
   off_interrupt(first)
-  let raised = try {
+  const raised = try {
     __signal_raise("SIGINT")
     "not interrupted"
   } catch (e) {
@@ -17,14 +17,14 @@ pipeline default() {
   __io_println(raised)
   on_interrupt(
     { ->
-      var spin = 0
+      let spin = 0
       while true {
         spin = spin + 1
       }
     },
     {graceful_timeout_ms: 0},
   )
-  let timed_out = try {
+  const timed_out = try {
     __signal_raise("SIGINT")
     "missed timeout"
   } catch (e) {

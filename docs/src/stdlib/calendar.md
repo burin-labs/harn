@@ -21,8 +21,8 @@ Public calendar helpers use reusable shapes instead of anonymous records:
 import { iso_week, next_weekday, quarter, start_of_day } from "std/calendar"
 
 pipeline default() {
-  let now = date_parse("2026-05-11T17:00:00-04:00")
-  let next_monday = start_of_day(
+  const now = date_parse("2026-05-11T17:00:00-04:00")
+  const next_monday = start_of_day(
     next_weekday(now, "monday", "America/New_York"),
     "America/New_York",
   )
@@ -60,12 +60,12 @@ fields.
 import { local_datetime } from "std/calendar"
 
 pipeline default() {
-  let first = local_datetime(
+  const first = local_datetime(
     {year: 2024, month: 11, day: 3, hour: 1, minute: 30},
     "America/New_York",
     "earlier",
   )
-  let second = local_datetime(
+  const second = local_datetime(
     {year: 2024, month: 11, day: 3, hour: 1, minute: 30},
     "America/New_York",
     "later",
@@ -93,9 +93,9 @@ import {
 } from "std/calendar"
 
 pipeline default() {
-  let calendar = "US-FEDERAL"
-  let timezone = "America/New_York"
-  let window = {timezone: timezone, start: "09:00", end: "17:00"}
+  const calendar = "US-FEDERAL"
+  const timezone = "America/New_York"
+  const window = {timezone: timezone, start: "09:00", end: "17:00"}
 
   log(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
   log(date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone))
@@ -110,7 +110,7 @@ Custom calendar example:
 import { is_business_day } from "std/calendar"
 
 pipeline default() {
-  let company_calendar = {
+  const company_calendar = {
     timezone: "UTC",
     holiday_calendar: "US-FEDERAL",
     holidays: [{date: "2026-12-24", name: "Company winter closure"}],
@@ -131,7 +131,7 @@ instead of picking an arbitrary default.
 import { country_info, country_timezones, default_timezone_for_country } from "std/calendar"
 
 pipeline default() {
-  let us = country_info("US")
+  const us = country_info("US")
   log(us.name)
   log(default_timezone_for_country("US") == nil)
   log(country_timezones("GB")?.[0])

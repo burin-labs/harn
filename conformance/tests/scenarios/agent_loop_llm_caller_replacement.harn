@@ -3,7 +3,7 @@
  * agent_loop returns the caller's `value` payload as the visible text.
  */
 pipeline default() {
-  let fake_caller = { _call -> return {
+  const fake_caller = { _call -> return {
     ok: true,
     value: {
       text: "FAKE",
@@ -14,7 +14,7 @@ pipeline default() {
       usage: {input_tokens: 0, output_tokens: 0},
     },
   } }
-  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: fake_caller})
+  const result = agent_loop("hi", nil, {provider: "mock", llm_caller: fake_caller})
   __io_println(result.status)
   __io_println(result.visible_text)
 }

@@ -1,11 +1,11 @@
 import "../_common"
 
 pipeline default(task) {
-  let unique = uuid()
-  let root = path_join(harness.fs.temp_dir(), "harn-worker-enqueue-drain-" + unique)
-  let producer_dir = path_join(root, "producer")
-  let consumer_dir = path_join(root, "consumer")
-  let state_dir = path_join(root, "state")
+  const unique = uuid()
+  const root = path_join(harness.fs.temp_dir(), "harn-worker-enqueue-drain-" + unique)
+  const producer_dir = path_join(root, "producer")
+  const consumer_dir = path_join(root, "consumer")
+  const state_dir = path_join(root, "state")
   harness.fs.mkdir(root)
   harness.fs.mkdir(producer_dir)
   harness.fs.mkdir(consumer_dir)
@@ -25,10 +25,10 @@ pipeline default(task) {
     path_join(consumer_dir, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, kind: event.kind, event_id: event.id}\n}\n",
   )
-  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  let fire = exec(
+  const fire = exec(
     harn_bin,
     "orchestrator",
     "fire",
@@ -38,7 +38,7 @@ pipeline default(task) {
     "--state-dir",
     state_dir,
   )
-  let queue_before = exec(
+  const queue_before = exec(
     harn_bin,
     "orchestrator",
     "queue",
@@ -49,7 +49,7 @@ pipeline default(task) {
     "ls",
     "--json",
   )
-  let before = json_parse(queue_before.stdout)
+  const before = json_parse(queue_before.stdout)
   __io_println(
     fire.success
       && contains(fire.stdout, "\"queue\":\"triage\"")
@@ -57,7 +57,7 @@ pipeline default(task) {
       && before.worker_queues[0].queue == "triage"
       && before.worker_queues[0].ready == 1,
   )
-  let drain = exec(
+  const drain = exec(
     harn_bin,
     "orchestrator",
     "queue",
@@ -71,7 +71,7 @@ pipeline default(task) {
     "consumer-a",
     "--json",
   )
-  let data = json_parse(drain.stdout)
+  const data = json_parse(drain.stdout)
   __io_println(drain.success && data.drained == 1 && data.acked == 1 && data.deferred == 0)
   __io_println(data.summary.ready == 0 && data.summary.in_flight == 0 && data.summary.responses == 1)
   __io_println(data.responses[0].outcome?.status == "succeeded" && data.responses[0].error == nil)

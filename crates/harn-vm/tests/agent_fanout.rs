@@ -228,8 +228,8 @@ fn base_opts(caller) {
 
 fn emit_rows(results) {
   for r in results {
-    let summary = to_string(r?.result?.summary ?? "")
-    let err_present = to_string(r?.error != nil)
+    const summary = to_string(r?.result?.summary ?? "")
+    const err_present = to_string(r?.error != nil)
     log(
       "R=" + to_string(r?.index) + "|" + to_string(r?.label) + "|"
         + to_string(r?.status) + "|" + to_string(r?.ok) + "|" + summary + "|" + err_present,
@@ -244,15 +244,15 @@ fn fanout_preserves_order_labels_and_isolates_children() {
     let source = format!(
         r#"{PRELUDE}
 pipeline main(task) {{
-  let labels = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
-  var reqs = []
-  var i = 0
+  const labels = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+  let reqs = []
+  let i = 0
   for label in labels {{
-    let marker = "MARK-" + to_string(i)
+    const marker = "MARK-" + to_string(i)
     reqs = reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
-  let results = agent_fanout(reqs, {{max_parallel: 8}})
+  const results = agent_fanout(reqs, {{max_parallel: 8}})
   log("COUNT=" + to_string(len(results)))
   emit_rows(results)
 }}
@@ -302,16 +302,16 @@ fn fanout_isolates_a_single_child_failure() {
     let source = format!(
         r#"{PRELUDE}
 pipeline main(task) {{
-  let labels = ["alpha", "bravo", "charlie", "delta", "echo"]
-  var reqs = []
-  var i = 0
+  const labels = ["alpha", "bravo", "charlie", "delta", "echo"]
+  let reqs = []
+  let i = 0
   for label in labels {{
-    let marker = "MARK-" + to_string(i)
-    let caller = if i == 2 {{ fail_caller(marker) }} else {{ ok_caller(marker) }}
+    const marker = "MARK-" + to_string(i)
+    const caller = if i == 2 {{ fail_caller(marker) }} else {{ ok_caller(marker) }}
     reqs = reqs.push({{task: "do " + marker, options: base_opts(caller), label: label}})
     i = i + 1
   }}
-  let results = agent_fanout(reqs, {{max_parallel: 8}})
+  const results = agent_fanout(reqs, {{max_parallel: 8}})
   log("COUNT=" + to_string(len(results)))
   emit_rows(results)
 }}
@@ -373,15 +373,15 @@ fn fanout_runs_all_waves_without_dropping_or_reordering() {
     let source = format!(
         r#"{PRELUDE}
 pipeline main(task) {{
-  let labels = ["w0", "w1", "w2", "w3", "w4"]
-  var reqs = []
-  var i = 0
+  const labels = ["w0", "w1", "w2", "w3", "w4"]
+  let reqs = []
+  let i = 0
   for label in labels {{
-    let marker = "WAVE-" + to_string(i)
+    const marker = "WAVE-" + to_string(i)
     reqs = reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
-  let results = agent_fanout(reqs, {{max_parallel: 2}})
+  const results = agent_fanout(reqs, {{max_parallel: 2}})
   log("COUNT=" + to_string(len(results)))
   emit_rows(results)
 }}
@@ -428,8 +428,8 @@ fn fanout_child_write_inherits_parent_workspace_anchor_for_scope() {
         r#"{PRELUDE}
 pipeline main(task) {{
   clear_tool_hooks()
-  let registry = tool_registry()
-  let tools = tool_define(
+  const registry = tool_registry()
+  const tools = tool_define(
     registry,
     "write_child_file",
     "Write a fixture file from inside a child sub-agent.",
@@ -441,12 +441,12 @@ pipeline main(task) {{
       }},
     }},
   )
-  let call_count = shared_cell(
+  const call_count = shared_cell(
     {{scope: "task_group", key: "fanout-child-write-scope", initial: 0}},
   )
-  let mock_llm = {{ _call ->
-    let snap = shared_snapshot(call_count)
-    let n = snap.value
+  const mock_llm = {{ _call ->
+    const snap = shared_snapshot(call_count)
+    const n = snap.value
     shared_cas(call_count, snap, n + 1)
     if n == 0 {{
       return {{
@@ -469,7 +469,7 @@ pipeline main(task) {{
       }},
     }}
   }}
-  let results = agent_fanout(
+  const results = agent_fanout(
     [
       {{
         task: "write the child output file",
@@ -541,12 +541,12 @@ fn fanout_isolates_a_spawn_time_throw() {
     let source = format!(
         r#"{PRELUDE}
 pipeline main(task) {{
-  let labels = ["alpha", "bravo", "charlie"]
-  var reqs = []
-  var i = 0
+  const labels = ["alpha", "bravo", "charlie"]
+  let reqs = []
+  let i = 0
   for label in labels {{
-    let marker = "MARK-" + to_string(i)
-    let opts = if i == 1 {{
+    const marker = "MARK-" + to_string(i)
+    const opts = if i == 1 {{
       base_opts(ok_caller(marker)) + {{allowed_tools: [123]}}
     }} else {{
       base_opts(ok_caller(marker))
@@ -554,7 +554,7 @@ pipeline main(task) {{
     reqs = reqs.push({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
-  let results = agent_fanout(reqs, {{max_parallel: 8}})
+  const results = agent_fanout(reqs, {{max_parallel: 8}})
   log("COUNT=" + to_string(len(results)))
   emit_rows(results)
 }}
@@ -627,12 +627,12 @@ fn fanout_spawn_throw_in_first_wave_does_not_drop_later_waves() {
     let source = format!(
         r#"{PRELUDE}
 pipeline main(task) {{
-  let labels = ["w0", "w1", "w2", "w3"]
-  var reqs = []
-  var i = 0
+  const labels = ["w0", "w1", "w2", "w3"]
+  let reqs = []
+  let i = 0
   for label in labels {{
-    let marker = "WAVE-" + to_string(i)
-    let opts = if i == 0 {{
+    const marker = "WAVE-" + to_string(i)
+    const opts = if i == 0 {{
       base_opts(ok_caller(marker)) + {{allowed_tools: [123]}}
     }} else {{
       base_opts(ok_caller(marker))
@@ -640,7 +640,7 @@ pipeline main(task) {{
     reqs = reqs.push({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
-  let results = agent_fanout(reqs, {{max_parallel: 2}})
+  const results = agent_fanout(reqs, {{max_parallel: 2}})
   log("COUNT=" + to_string(len(results)))
   emit_rows(results)
 }}

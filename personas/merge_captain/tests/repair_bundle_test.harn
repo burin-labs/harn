@@ -27,7 +27,7 @@ fn _ci_failure_args() {
 }
 
 pipeline test_canonical_kind_set(task) {
-  let kinds = all_kinds()
+  const kinds = all_kinds()
   assert_eq(len(kinds), 4)
   assert(kinds.contains("ci_failure"))
   assert(kinds.contains("merge_conflict"))
@@ -38,7 +38,7 @@ pipeline test_canonical_kind_set(task) {
 }
 
 pipeline test_canonical_action_kinds(task) {
-  let actions = all_action_kinds()
+  const actions = all_action_kinds()
   assert_eq(len(actions), 5)
   assert(actions.contains("semantic_repair"))
   assert(actions.contains("force_push"))
@@ -50,7 +50,7 @@ pipeline test_canonical_action_kinds(task) {
 }
 
 pipeline test_defaults_lock_in_safe_values(task) {
-  let d = defaults()
+  const d = defaults()
   // Empty lists are intentional: we make the caller declare intent.
   assert_eq(len(d.changed_files), 0)
   assert_eq(len(d.allowed_write_scope), 0)
@@ -61,7 +61,7 @@ pipeline test_defaults_lock_in_safe_values(task) {
 }
 
 pipeline test_build_assembles_full_shape(task) {
-  let bundle = build(_ci_failure_args())
+  const bundle = build(_ci_failure_args())
   assert_eq(bundle._type, "merge_captain.repair_bundle")
   assert_eq(bundle.version, 1)
   assert_eq(bundle.kind, "ci_failure")
@@ -78,26 +78,26 @@ pipeline test_build_assembles_full_shape(task) {
 }
 
 pipeline test_validate_accepts_well_formed(task) {
-  let bundle = build(_ci_failure_args())
+  const bundle = build(_ci_failure_args())
   assert_eq(validate_bundle(bundle), nil)
 }
 
 pipeline test_validate_requires_repo(task) {
-  let bundle = build(_ci_failure_args() + {repo: ""})
-  let err = validate_bundle(bundle)
+  const bundle = build(_ci_failure_args() + {repo: ""})
+  const err = validate_bundle(bundle)
   assert(err != nil)
   assert(err.contains("repo"))
 }
 
 pipeline test_validate_requires_failing_checks_for_ci(task) {
-  let bundle = build(_ci_failure_args() + {failing_checks: []})
-  let err = validate_bundle(bundle)
+  const bundle = build(_ci_failure_args() + {failing_checks: []})
+  const err = validate_bundle(bundle)
   assert(err != nil)
   assert(err.contains("failing_check"))
 }
 
 pipeline test_validate_requires_conflict_paths_for_merge(task) {
-  let bundle = build(
+  const bundle = build(
     {
       kind: "merge_conflict",
       repo: "x/y",
@@ -107,13 +107,13 @@ pipeline test_validate_requires_conflict_paths_for_merge(task) {
       allowed_write_scope: ["src/**"],
     },
   )
-  let err = validate_bundle(bundle)
+  const err = validate_bundle(bundle)
   assert(err != nil)
   assert(err.contains("conflict_path"))
 }
 
 pipeline test_validate_requires_release_facts_for_release_audit(task) {
-  let bundle = build(
+  const bundle = build(
     {
       kind: "release_audit",
       repo: "x/y",
@@ -122,27 +122,27 @@ pipeline test_validate_requires_release_facts_for_release_audit(task) {
       allowed_write_scope: ["CHANGELOG.md"],
     },
   )
-  let err = validate_bundle(bundle)
+  const err = validate_bundle(bundle)
   assert(err != nil)
   assert(err.contains("release_facts"))
 }
 
 pipeline test_validate_requires_write_scope(task) {
-  let bundle = build(_ci_failure_args() + {allowed_write_scope: []})
-  let err = validate_bundle(bundle)
+  const bundle = build(_ci_failure_args() + {allowed_write_scope: []})
+  const err = validate_bundle(bundle)
   assert(err != nil)
   assert(err.contains("allowed_write_scope"))
 }
 
 pipeline test_validate_rejects_unknown_action(task) {
-  let bundle = build(_ci_failure_args() + {approval_required_for: ["semantic_repair", "drop_db"]})
-  let err = validate_bundle(bundle)
+  const bundle = build(_ci_failure_args() + {approval_required_for: ["semantic_repair", "drop_db"]})
+  const err = validate_bundle(bundle)
   assert(err != nil)
   assert(err.contains("approval_required_for"))
 }
 
 pipeline test_output_schema_advertises_required_fields(task) {
-  let s = output_schema()
+  const s = output_schema()
   assert_eq(s.type, "object")
   assert(s.required.contains("diagnosis"))
   assert(s.required.contains("files_changed"))

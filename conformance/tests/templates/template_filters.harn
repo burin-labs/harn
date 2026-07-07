@@ -1,5 +1,5 @@
 pipeline default() {
-  let data = {
+  const data = {
     name: "alice",
     NAME: "BOB",
     items: ["x", "y", "z"],

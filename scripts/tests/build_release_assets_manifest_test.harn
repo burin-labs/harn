@@ -21,7 +21,7 @@ pipeline test_target_triples_order(task) {
 
 @test
 pipeline test_target_meta_darwin(task) {
-  let m = target_meta("aarch64-apple-darwin")
+  const m = target_meta("aarch64-apple-darwin")
   assert_eq(m.filename, "harn-aarch64-apple-darwin.tar.gz")
   assert_eq(m.format, "tar.gz")
   assert_eq(m.binaries, ["harn", "harn-dap", "harn-lsp"])
@@ -29,13 +29,13 @@ pipeline test_target_meta_darwin(task) {
 
 @test
 pipeline test_target_meta_linux_has_container_probe(task) {
-  let m = target_meta("x86_64-unknown-linux-gnu")
+  const m = target_meta("x86_64-unknown-linux-gnu")
   assert_eq(m.binaries, ["harn", "harn-dap", "harn-lsp", "harn-container-probe"])
 }
 
 @test
 pipeline test_target_meta_windows_zip_exe(task) {
-  let m = target_meta("x86_64-pc-windows-msvc")
+  const m = target_meta("x86_64-pc-windows-msvc")
   assert_eq(m.filename, "harn-x86_64-pc-windows-msvc.zip")
   assert_eq(m.format, "zip")
   assert_eq(m.binaries, ["harn.exe", "harn-dap.exe", "harn-lsp.exe"])
@@ -90,8 +90,8 @@ pipeline test_join_path(task) {
 
 @test
 pipeline test_asset_record_shape(task) {
-  let base = "https://github.com/burin-labs/harn/releases/download/v0.8.21"
-  let rec = asset_record("aarch64-apple-darwin", base, "deadbeef", 1234)
+  const base = "https://github.com/burin-labs/harn/releases/download/v0.8.21"
+  const rec = asset_record("aarch64-apple-darwin", base, "deadbeef", 1234)
   assert_eq(rec.filename, "harn-aarch64-apple-darwin.tar.gz")
   assert_eq(rec.url, base + "/harn-aarch64-apple-darwin.tar.gz")
   assert_eq(rec.sha256, "deadbeef")
@@ -103,7 +103,7 @@ pipeline test_asset_record_shape(task) {
 @test
 pipeline test_missing_message_sorts(task) {
   // Accumulation order is TARGETS order; the message sorts before joining.
-  let missing = [
+  const missing = [
     "harn-x86_64-pc-windows-msvc.zip",
     "harn-aarch64-apple-darwin.tar.gz",
     "harn-x86_64-apple-darwin.tar.gz",
@@ -124,8 +124,8 @@ pipeline test_missing_message_single(task) {
 
 @test
 pipeline test_build_manifest_shape(task) {
-  let assets = {"aarch64-apple-darwin": {filename: "harn-aarch64-apple-darwin.tar.gz"}}
-  let m = build_manifest("0.8.21", "v0.8.21", "https://x/tag", assets)
+  const assets = {"aarch64-apple-darwin": {filename: "harn-aarch64-apple-darwin.tar.gz"}}
+  const m = build_manifest("0.8.21", "v0.8.21", "https://x/tag", assets)
   assert_eq(m.version, "0.8.21")
   assert_eq(m.tag, "v0.8.21")
   assert_eq(m.release_url, "https://x/tag")
@@ -137,22 +137,22 @@ pipeline test_full_manifest_json_byte_format(task) {
   // End-to-end of the pure assembly + serialization: the JSON must match
   // Python `json.dumps(indent=2, sort_keys=True)` (sorted keys, 2-space
   // indent, expanded lists). This locks the on-disk byte format.
-  let base = "https://github.com/burin-labs/harn/releases/download/v0.8.21"
-  var assets: any = {}
+  const base = "https://github.com/burin-labs/harn/releases/download/v0.8.21"
+  let assets: any = {}
   assets = {...assets, "aarch64-apple-darwin": asset_record("aarch64-apple-darwin", base, "aaa", 100)}
-  let manifest = build_manifest(
+  const manifest = build_manifest(
     "0.8.21",
     "v0.8.21",
     "https://github.com/burin-labs/harn/releases/tag/v0.8.21",
     assets,
   )
-  let expected = "{\n  \"assets\": {\n    \"aarch64-apple-darwin\": {\n      \"binaries\": [\n        \"harn\",\n        \"harn-dap\",\n        \"harn-lsp\"\n      ],\n      \"filename\": \"harn-aarch64-apple-darwin.tar.gz\",\n      \"format\": \"tar.gz\",\n      \"sha256\": \"aaa\",\n      \"size\": 100,\n      \"url\": \"https://github.com/burin-labs/harn/releases/download/v0.8.21/harn-aarch64-apple-darwin.tar.gz\"\n    }\n  },\n  \"release_url\": \"https://github.com/burin-labs/harn/releases/tag/v0.8.21\",\n  \"tag\": \"v0.8.21\",\n  \"version\": \"0.8.21\"\n}"
+  const expected = "{\n  \"assets\": {\n    \"aarch64-apple-darwin\": {\n      \"binaries\": [\n        \"harn\",\n        \"harn-dap\",\n        \"harn-lsp\"\n      ],\n      \"filename\": \"harn-aarch64-apple-darwin.tar.gz\",\n      \"format\": \"tar.gz\",\n      \"sha256\": \"aaa\",\n      \"size\": 100,\n      \"url\": \"https://github.com/burin-labs/harn/releases/download/v0.8.21/harn-aarch64-apple-darwin.tar.gz\"\n    }\n  },\n  \"release_url\": \"https://github.com/burin-labs/harn/releases/tag/v0.8.21\",\n  \"tag\": \"v0.8.21\",\n  \"version\": \"0.8.21\"\n}"
   assert_eq(json_stringify_pretty(manifest), expected)
 }
 
 @test
 pipeline test_help_text_starts_with_usage(task) {
-  let h = help_text()
+  const h = help_text()
   assert_eq(
     h.starts_with("usage: build_release_assets_manifest.py [-h] --artifacts-dir ARTIFACTS_DIR"),
     true,
@@ -163,7 +163,7 @@ pipeline test_help_text_starts_with_usage(task) {
 
 @test
 pipeline test_parse_args_success(task) {
-  let p = parse_args(["--artifacts-dir", "arts", "--tag", "v1", "--output", "o.json"])
+  const p = parse_args(["--artifacts-dir", "arts", "--tag", "v1", "--output", "o.json"])
   assert_eq(p.help, false)
   assert_eq(p.error, nil)
   assert_eq(p.artifacts_dir, "arts")
@@ -173,7 +173,7 @@ pipeline test_parse_args_success(task) {
 
 @test
 pipeline test_parse_args_equals_syntax(task) {
-  let p = parse_args(["--artifacts-dir=arts", "--tag=v1", "--output=o.json"])
+  const p = parse_args(["--artifacts-dir=arts", "--tag=v1", "--output=o.json"])
   assert_eq(p.error, nil)
   assert_eq(p.artifacts_dir, "arts")
   assert_eq(p.tag, "v1")
@@ -182,7 +182,7 @@ pipeline test_parse_args_equals_syntax(task) {
 
 @test
 pipeline test_parse_args_duplicate_last_wins(task) {
-  let p = parse_args(["--artifacts-dir", "arts", "--tag", "v1", "--tag", "v2", "--output", "o"])
+  const p = parse_args(["--artifacts-dir", "arts", "--tag", "v1", "--tag", "v2", "--output", "o"])
   assert_eq(p.error, nil)
   assert_eq(p.tag, "v2")
 }
@@ -197,7 +197,7 @@ pipeline test_parse_args_help_flag(task) {
 
 @test
 pipeline test_parse_args_missing_all_required(task) {
-  let p = parse_args([])
+  const p = parse_args([])
   assert_eq(p.help, false)
   assert_eq(p.error, "the following arguments are required: --artifacts-dir, --tag, --output")
 }
@@ -205,7 +205,7 @@ pipeline test_parse_args_missing_all_required(task) {
 @test
 pipeline test_parse_args_missing_some_required_in_decl_order(task) {
   // Only --tag given → the other two are reported in declaration order.
-  let p = parse_args(["--tag", "v1"])
+  const p = parse_args(["--tag", "v1"])
   assert_eq(p.error, "the following arguments are required: --artifacts-dir, --output")
 }
 
@@ -213,25 +213,25 @@ pipeline test_parse_args_missing_some_required_in_decl_order(task) {
 pipeline test_parse_args_missing_beats_unrecognized(task) {
   // When BOTH a required arg is missing AND there are extras, argparse
   // reports the missing-required error first.
-  let p = parse_args(["--bogus", "xyz"])
+  const p = parse_args(["--bogus", "xyz"])
   assert_eq(p.error, "the following arguments are required: --artifacts-dir, --tag, --output")
 }
 
 @test
 pipeline test_parse_args_unrecognized_when_required_present(task) {
-  let p = parse_args(["--artifacts-dir", "a", "--tag", "v1", "--output", "o", "--bogus"])
+  const p = parse_args(["--artifacts-dir", "a", "--tag", "v1", "--output", "o", "--bogus"])
   assert_eq(p.error, "unrecognized arguments: --bogus")
 }
 
 @test
 pipeline test_parse_args_positional_is_unrecognized(task) {
-  let p = parse_args(["foo", "--artifacts-dir", "a", "--tag", "v1", "--output", "o"])
+  const p = parse_args(["foo", "--artifacts-dir", "a", "--tag", "v1", "--output", "o"])
   assert_eq(p.error, "unrecognized arguments: foo")
 }
 
 @test
 pipeline test_parse_args_dangling_value(task) {
   // A required flag with no following value → "expected one argument".
-  let p = parse_args(["--tag"])
+  const p = parse_args(["--tag"])
   assert_eq(p.error, "argument --tag: expected one argument")
 }

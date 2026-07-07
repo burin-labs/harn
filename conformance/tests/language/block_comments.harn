@@ -1,8 +1,8 @@
 pipeline test(task) {
   /* this is a comment */
-  let x = 42
+  const x = 42
   log(x)
   /* outer /* nested */ still comment */
-  let y = "survived"
+  const y = "survived"
   log(y)
 }

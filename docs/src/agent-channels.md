@@ -42,7 +42,7 @@ Two anti-patterns worth calling out:
 returns a receipt:
 
 ```harn,ignore
-let receipt = emit_channel("pr.merged", {
+const receipt = emit_channel("pr.merged", {
   repo: "burin-labs/harn",
   number: 1984,
   sha: "3e949640",
@@ -119,7 +119,7 @@ tampering during cross-run comparisons.
 for tests, diagnostics, and local orchestration inspection:
 
 ```harn,ignore
-let events = channel_events("pr.merged", {limit: 10})
+const events = channel_events("pr.merged", {limit: 10})
 for event in events {
   log(event.payload.repo)
 }
@@ -154,22 +154,22 @@ import {
   coord_subscribe,
 } from "std/coordination"
 
-let receipt = coord_post(
+const receipt = coord_post(
   "session",
   "release",
   {kind: "claim", subject: "release ownership", body: "Codex-2 owns v0.8.167"},
   {id: "release-claim", session_id: "agent-session-1"},
 )
 
-let messages = coord_read("session", "release", {session_id: "agent-session-1"})
-let stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
-let memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
-let request = coord_send("workspace", "release", "build-agent", {
+const messages = coord_read("session", "release", {session_id: "agent-session-1"})
+const stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
+const memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+const request = coord_send("workspace", "release", "build-agent", {
   kind: "request",
   subject: "verify release",
   body: "Please audit the new patch release.",
 })
-let inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
+const inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
 coord_ack("workspace", "release", "build-agent", inbox.next_cursor)
 ```
 
@@ -257,7 +257,7 @@ trigger_register({
   match: {events: ["channel:pr.merged"]},
   batch: {count: 3, window: "1h", key: "repo", expire_action: "fire_partial"},
   handler: { event ->
-    let merged = event.batch
+    const merged = event.batch
     log("Cutting release with " + to_string(len(merged)) + " merged PRs")
   },
 })
@@ -359,10 +359,10 @@ Register guardrails with `channel_guardrail_register(config)`:
 import { prompt_injection_scanner, register_guardrail } from "std/channel_guardrails"
 
 // Built-in: heuristic prompt-injection signature scan.
-let pi_id = prompt_injection_scanner({})
+const pi_id = prompt_injection_scanner({})
 
 // Custom: any closure returning nil / "allow" | "warn" | "block" / {verdict, reason?}.
-let custom_id = register_guardrail({
+const custom_id = register_guardrail({
   id: "block-secrets-in-payload",
   applies_to: ["channel:learnings.*"],
   evaluate: { payload, context ->

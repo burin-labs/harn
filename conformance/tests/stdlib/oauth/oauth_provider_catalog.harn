@@ -9,7 +9,7 @@ import {
 } from "std/oauth/providers"
 
 fn missing_core_fields(record) {
-  var missing = []
+  let missing = []
   for field in [
     "auth_url",
     "token_url",
@@ -29,8 +29,8 @@ fn missing_core_fields(record) {
 }
 
 fn mock_flow_for_provider(harness: Harness, name) {
-  let base = "https://mock-oauth.example/" + name
-  let record = provider(
+  const base = "https://mock-oauth.example/" + name
+  const record = provider(
     name,
     {
       auth_url: base + "/authorize",
@@ -40,8 +40,8 @@ fn mock_flow_for_provider(harness: Harness, name) {
       userinfo_url: base + "/userinfo",
     },
   )
-  let userinfo_url = record.userinfo_url ?? ""
-  let revoke_url = record.revoke_url ?? ""
+  const userinfo_url = record.userinfo_url ?? ""
+  const revoke_url = record.revoke_url ?? ""
   require record.auth_url == base + "/authorize", name + " auth override"
   require record.token_url == base + "/token", name + " token override"
   require userinfo_url == base + "/userinfo", name + " userinfo override"
@@ -68,7 +68,7 @@ fn mock_flow_for_provider(harness: Harness, name) {
     },
   )
   http_mock("POST", revoke_url, {status: 200, body: "{\"revoked\":true}", headers: {}})
-  let token_resp = harness.net
+  const token_resp = harness.net
     .post(
     record.token_url,
     "grant_type=authorization_code&code=code-" + name
@@ -76,20 +76,20 @@ fn mock_flow_for_provider(harness: Harness, name) {
     {headers: {"Content-Type": "application/x-www-form-urlencoded"}},
   )
   require token_resp.status == 200, name + " token response"
-  let token = json_parse(token_resp.body)
+  const token = json_parse(token_resp.body)
   require token.access_token == "access-" + name, name + " access token"
-  let profile_resp = harness.net.get(userinfo_url, {headers: {Authorization: "Bearer " + token.access_token}})
+  const profile_resp = harness.net.get(userinfo_url, {headers: {Authorization: "Bearer " + token.access_token}})
   require profile_resp.status == 200, name + " userinfo response"
-  let profile = json_parse(profile_resp.body)
+  const profile = json_parse(profile_resp.body)
   require profile.provider == name, name + " profile provider"
-  let revoke_resp = harness.net
+  const revoke_resp = harness.net
     .post(
     revoke_url,
     "token=" + token.access_token,
     {headers: {"Content-Type": "application/x-www-form-urlencoded"}},
   )
   require revoke_resp.status == 200, name + " revoke response"
-  let calls = http_mock_calls({include_sensitive: true})
+  const calls = http_mock_calls({include_sensitive: true})
   require len(calls) == 3, name + " mock flow call count"
   require calls[0].method == "POST", name + " token call method"
   require contains(calls[0].body, "grant_type=authorization_code"), name + " token grant body"
@@ -99,26 +99,26 @@ fn mock_flow_for_provider(harness: Harness, name) {
 }
 
 pipeline test(task) {
-  let names = provider_names()
+  const names = provider_names()
   assert_eq(len(names), 10, "ten named providers")
   assert(names.contains("github"), "github named provider")
   assert(names.contains("bitbucket"), "bitbucket named provider")
-  let catalog = provider_catalog()
+  const catalog = provider_catalog()
   assert_eq(len(catalog.keys()), 10, "catalogue contains ten provider records")
   for name in names {
     assert_eq(missing_core_fields(catalog[name]), [], name + " carries core fields")
     assert_eq(catalog[name].id, name, name + " id")
     mock_flow_for_provider(harness, name)
   }
-  let gh = github()
+  const gh = github()
   assert_eq(gh.auth_url, "https://github.com/login/oauth/authorize", "github auth url")
   assert_eq(gh.device_code_url, "https://github.com/login/device/code", "github device url")
   assert(gh.default_scopes.contains("read:user"), "github default scope")
-  let ghes = github_enterprise("https://ghe.example.com/")
+  const ghes = github_enterprise("https://ghe.example.com/")
   assert_eq(ghes.auth_url, "https://ghe.example.com/login/oauth/authorize", "ghes auth url")
   assert_eq(ghes.token_url, "https://ghe.example.com/login/oauth/access_token", "ghes token url")
   assert_eq(ghes.userinfo_url, "https://ghe.example.com/api/v3/user", "ghes api url")
-  let discord_override = provider(
+  const discord_override = provider(
     "discord",
     {auth_url: "https://discord.example/oauth2/authorize", default_scopes: ["identify"]},
   )
@@ -128,14 +128,14 @@ pipeline test(task) {
     "override auth url",
   )
   assert_eq(discord_override.default_scopes, ["identify"], "override scopes")
-  let namespace = providers()
+  const namespace = providers()
   assert_eq(namespace.github.id, "github", "Providers exposes github record")
   assert_eq(
     namespace.github_enterprise("https://gh.example").token_url,
     "https://gh.example/login/oauth/access_token",
     "Providers exposes GHES factory",
   )
-  let custom_provider = custom(
+  const custom_provider = custom(
     {
       id: "acme",
       label: "Acme",

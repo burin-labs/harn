@@ -102,7 +102,7 @@ runs at loop entry, before any LLM or MCP work fires — scripts can't bypass
 it by skipping the option in a nested call.
 
 ```harn
-let result = agent_loop(
+const result = agent_loop(
   prompt,
   system,
   {

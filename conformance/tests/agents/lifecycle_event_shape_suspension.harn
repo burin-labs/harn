@@ -1,5 +1,5 @@
 pipeline main() {
-  let evt = transcript_suspension_event(
+  const evt = transcript_suspension_event(
     {
       handle: "worker://triage/42",
       initiator: "operator",

@@ -10,7 +10,7 @@ type GraderOut = {verdict: "pass" | "fail", summary: string}
  * via its own generic signature.
  */
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-  let r = llm_call(
+  const r = llm_call(
     prompt,
     nil,
     {provider: "mock", output_schema: schema, output_validation: "error", response_format: "json"},
@@ -22,7 +22,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
     { ->
-      let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+      const out: GraderOut = grade("Grade this", schema_of(GraderOut))
       __io_println(out.verdict)
       __io_println(out.summary)
     },

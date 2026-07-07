@@ -27,7 +27,7 @@
 
 // std::thread::sleep in test files
 // Legitimate uses: waiting on real subprocess I/O that cannot be time-paused.
-let THREAD_SLEEP_ALLOWLIST: list<string> = [
+const THREAD_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-hostlib/tests/process_tools.rs",
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
@@ -44,7 +44,7 @@ let THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `agent_sessions_tests.rs`: pre-existing real-time delivery test
 //     for the event-log sink (extracted from agent_sessions.rs's inline
 //     test mod, which was previously below this lint's file filter).
-let TOKIO_SLEEP_ALLOWLIST: list<string> = [
+const TOKIO_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/orchestration/tests.rs",
   "crates/harn-vm/src/agent_sessions_tests.rs",
   "crates/harn-cli/tests/orchestrator_http/support.rs",
@@ -52,7 +52,7 @@ let TOKIO_SLEEP_ALLOWLIST: list<string> = [
 
 // Wall-clock `Instant::now() < deadline` comparisons inside any loop or
 // guard.
-let INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
+const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/process_tools_e2e.rs",
@@ -61,17 +61,17 @@ let INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
 // SystemTime::now() in test files — use injected clock / MockClock instead.
 // Remaining entries: legitimate fixture-setup uses against real OS time
 // (httpdate Retry-After parsing, real-mtime touch fixtures).
-let SYSTEM_TIME_ALLOWLIST: list<string> = ["crates/harn-vm/src/http/tests.rs", "crates/harn-hostlib/tests/scanner_e2e.rs"]
+const SYSTEM_TIME_ALLOWLIST: list<string> = ["crates/harn-vm/src/http/tests.rs", "crates/harn-hostlib/tests/scanner_e2e.rs"]
 
 // recv_timeout with an explicit sub-second Duration literal.
 // Named-constant variants are not caught here because the constant value
 // cannot be resolved by a static text search.
-let RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = []
+const RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = []
 
 // Conformance tests that exercise real subprocesses should share the bounded
 // polling helpers from `conformance/tests/_common.harn` instead of copying
 // ad hoc loops into each fixture.
-let CONFORMANCE_HELPER_ALLOWLIST: list<string> = ["conformance/tests/_common.harn"]
+const CONFORMANCE_HELPER_ALLOWLIST: list<string> = ["conformance/tests/_common.harn"]
 
 // Conformance fixtures that are allowed to call `sleep(<literal>)` /
 // `time.sleep(<literal>)` because they exercise real subprocess I/O,
@@ -82,7 +82,7 @@ let CONFORMANCE_HELPER_ALLOWLIST: list<string> = ["conformance/tests/_common.har
 // (see docs/src/dev/testing.md). Add an entry here only when there is
 // no deterministic alternative — and prefer shrinking this list over
 // growing it.
-let CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
+const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
   "conformance/tests/_common.harn",
   "conformance/tests/agents/daemon_stdlib_wrappers.harn",
   "conformance/tests/agents/worker_retriggerable.harn",
@@ -115,7 +115,7 @@ let CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // E2E subprocess test files where `harn_e2e_command` / `spawn_orchestrator`
 // are the intended surface. Mirrors the bash `is_e2e_subprocess_path` case
 // arms; `crates/harn-cli/tests/orchestrator_http/` is a prefix match.
-let E2E_SUBPROCESS_PATHS: list<string> = [
+const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/attributed_decl_cli.rs",
   "crates/harn-cli/tests/acp_server_cli.rs",
   "crates/harn-cli/tests/burin_mini_playground.rs",
@@ -142,7 +142,7 @@ let E2E_SUBPROCESS_PATHS: list<string> = [
 // real-time logging, etc. — or where Clock injection is tracked as gradual
 // cleanup under the testbench epic (#1438). Drop entries as call sites
 // migrate to `Arc<dyn Clock>`.
-let NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
+const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/agents_conformance.rs",
   "crates/harn-cli/src/commands/bench.rs",
   "crates/harn-cli/src/commands/connect.rs",
@@ -370,7 +370,7 @@ let NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
 
 /** Repo-relative form of a glob result (strip the `/./` search-root marker). */
 pub fn rel_path(path: string) -> string {
-  let idx = path.index_of("/./")
+  const idx = path.index_of("/./")
   if idx >= 0 {
     return path.substring(idx + 3, path.len())
   }
@@ -379,9 +379,9 @@ pub fn rel_path(path: string) -> string {
 
 /** The trailing path component of `p` (after the last `/`). */
 pub fn base_name(p: string) -> string {
-  var found = -1
-  var i = 0
-  let n = p.len()
+  let found = -1
+  let i = 0
+  const n = p.len()
   while i < n {
     if p.char_at(i) == "/" {
       found = i
@@ -408,7 +408,7 @@ pub fn is_test_rs_path(rel: string) -> bool {
   if !rel.contains("/src/") {
     return false
   }
-  let name = base_name(rel)
+  const name = base_name(rel)
   return name == "tests.rs" || name.starts_with("tests_") || name.ends_with("_tests.rs")
 }
 
@@ -427,7 +427,7 @@ pub fn is_runtime_rs_path(rel: string) -> bool {
   if rel.contains("/tests/") {
     return false
   }
-  let name = base_name(rel)
+  const name = base_name(rel)
   if name == "tests.rs" || name.starts_with("tests_") || name.ends_with("_tests.rs") {
     return false
   }
@@ -451,13 +451,13 @@ pub fn is_e2e_subprocess_path(rel: string) -> bool {
  * ~50x slower.
  */
 pub fn find_hits(text: string, pattern: string) -> list {
-  let ms = regex_captures(pattern, text, "m")
+  const ms = regex_captures(pattern, text, "m")
   if ms.count == 0 {
     return []
   }
-  let lines = text.lines()
-  var hits: list = []
-  var last_line = -1
+  const lines = text.lines()
+  let hits: list = []
+  let last_line = -1
   for m in ms {
     if m.line == last_line {
       continue
@@ -550,7 +550,7 @@ pub fn has_mock_time(text: string) -> bool {
  * followed by the pre-formatted `hint_lines`; returns the violation count.
  */
 fn report_pattern(files: list, skip: fn(string) -> bool, pattern: string, hint_lines: list<string>) -> int {
-  var count = 0
+  let count = 0
   for f in files {
     if skip(f.rel) {
       continue
@@ -568,7 +568,7 @@ fn report_pattern(files: list, skip: fn(string) -> bool, pattern: string, hint_l
 
 /** Load `{rel, text}` records for each repo-relative path, sorted. */
 fn load_files(rels: list<string>) -> list {
-  var out: list = []
+  let out: list = []
   for rel in rels.sort() {
     out = out + [{rel: rel, text: harness.fs.read_text(rel)}]
   }
@@ -576,10 +576,10 @@ fn load_files(rels: list<string>) -> list {
 }
 
 pipeline main(task) {
-  var test_rels: list<string> = []
-  var runtime_rels: list<string> = []
+  let test_rels: list<string> = []
+  let runtime_rels: list<string> = []
   for g in harness.fs.glob("crates/**/*.rs") {
-    let rel = rel_path(g)
+    const rel = rel_path(g)
     if !harness.fs.stat(rel).is_file {
       // Mirror `find -type f`: a directory can match the glob (e.g. a
       // state dir literally named `.harn` matching `*.harn`).
@@ -592,17 +592,17 @@ pipeline main(task) {
       runtime_rels = runtime_rels + [rel]
     }
   }
-  var harn_rels: list<string> = []
+  let harn_rels: list<string> = []
   for g in harness.fs.glob("conformance/tests/**/*.harn") {
-    let rel = rel_path(g)
+    const rel = rel_path(g)
     if harness.fs.stat(rel).is_file {
       harn_rels = harn_rels + [rel]
     }
   }
-  let test_files = load_files(test_rels)
-  let harn_files = load_files(harn_rels)
-  let runtime_files = load_files(runtime_rels)
-  var violations = 0
+  const test_files = load_files(test_rels)
+  const harn_files = load_files(harn_rels)
+  const runtime_files = load_files(runtime_rels)
+  let violations = 0
   __io_println("=== Checking test files for wall-clock patterns ===")
   __io_println("--- std::thread::sleep ---")
   violations = violations

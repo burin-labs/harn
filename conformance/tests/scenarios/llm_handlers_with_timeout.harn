@@ -6,8 +6,8 @@ import { with_timeout } from "std/llm/handlers"
 
 pipeline default() {
   // Fast call under the deadline passes through; timeout_ms is forwarded.
-  let seen_timeout = atomic(0)
-  let fast = { call ->
+  const seen_timeout = atomic(0)
+  const fast = { call ->
     if call.opts?.timeout_ms != nil {
       let _ = atomic_set(seen_timeout, to_int(call.opts.timeout_ms))
     }
@@ -16,35 +16,35 @@ pipeline default() {
       value: {text: "fast", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  let _ = mock_time(0)
-  let fast_caller = with_timeout(fast, {ms: 1000})
-  let fast_env = fast_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const _ = mock_time(0)
+  const fast_caller = with_timeout(fast, {ms: 1000})
+  const fast_env = fast_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(fast_env.ok)
   __io_println(fast_env.value.text)
   __io_println(atomic_get(seen_timeout))
   // Slow success that overran the deadline: relabel to timeout.
-  let slow = { _call ->
+  const slow = { _call ->
     let _ = advance_time(2000)
     return {
       ok: true,
       value: {text: "late", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  let slow_caller = with_timeout(slow, {ms: 500})
-  let slow_env = slow_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const slow_caller = with_timeout(slow, {ms: 500})
+  const slow_env = slow_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(slow_env.ok)
   __io_println(slow_env.status)
   __io_println(slow_env.error.timeout_ms)
   __io_println(slow_env.error.elapsed_ms >= 500)
   // Slow failure with relabel_failures: false preserves the original status.
-  let slow_failure = { _call ->
+  const slow_failure = { _call ->
     let _ = advance_time(2000)
     return {ok: false, status: "rate_limited", error: "429"}
   }
-  let preserve = with_timeout(slow_failure, {ms: 500, relabel_failures: false})
-  let preserve_env = preserve({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const preserve = with_timeout(slow_failure, {ms: 500, relabel_failures: false})
+  const preserve_env = preserve({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   __io_println(preserve_env.ok)
   __io_println(preserve_env.status)
   __io_println(preserve_env.elapsed_ms >= 500)
-  let _ = unmock_time()
+  const _ = unmock_time()
 }

@@ -3,7 +3,7 @@ import { cache_get, cache_put } from "std/cache"
 import { safe_parse } from "std/json"
 
 fn __web_header(headers, name) {
-  let wanted = lowercase(name)
+  const wanted = lowercase(name)
   for entry in headers ?? {} {
     if lowercase(entry.key) == wanted {
       return entry.value
@@ -24,12 +24,12 @@ fn __web_cache_key(method, url, opts) {
 }
 
 fn __web_effective_url(url, http_opts) {
-  let query = http_opts?.query
+  const query = http_opts?.query
   if query == nil {
     return url
   }
-  let parsed = url_parse(url)
-  var pairs = query_parse(parsed?.query ?? "")
+  const parsed = url_parse(url)
+  let pairs = query_parse(parsed?.query ?? "")
   for entry in query {
     if entry.value != nil {
       pairs = pairs + [{key: entry.key, value: to_string(entry.value)}]
@@ -50,8 +50,8 @@ fn __web_effective_url(url, http_opts) {
 }
 
 fn __web_base_headers(opts) {
-  let http_headers = opts?.http_options?.headers ?? {}
-  let headers = opts?.headers
+  const http_headers = opts?.http_options?.headers ?? {}
+  const headers = opts?.headers
   if headers == nil {
     return http_headers
   }
@@ -62,7 +62,7 @@ fn __web_conditional_headers(headers, previous, enabled) {
   if !enabled || previous == nil {
     return headers
   }
-  var next = headers
+  let next = headers
   if __web_header(next, "if-none-match") == nil && previous?.etag != nil {
     next = next + {"If-None-Match": previous.etag}
   }
@@ -73,7 +73,7 @@ fn __web_conditional_headers(headers, previous, enabled) {
 }
 
 fn __web_fetch_envelope(source_url, response, fetched_at, cache_status) {
-  let headers = response?.headers ?? {}
+  const headers = response?.headers ?? {}
   return {
     ok: response?.ok ?? false,
     status: response?.status,
@@ -91,8 +91,8 @@ fn __web_fetch_envelope(source_url, response, fetched_at, cache_status) {
 }
 
 fn __web_not_modified(source_url, response, previous, fetched_at) {
-  let headers = response?.headers ?? {}
-  var next = previous
+  const headers = response?.headers ?? {}
+  let next = previous
   next = next
     + {
     ok: true,
@@ -104,15 +104,15 @@ fn __web_not_modified(source_url, response, previous, fetched_at) {
     final_url: response?.final_url ?? previous?.final_url ?? source_url,
     not_modified: true,
   }
-  let etag = __web_header(headers, "etag")
+  const etag = __web_header(headers, "etag")
   if etag != nil {
     next = next + {etag: etag}
   }
-  let last_modified = __web_header(headers, "last-modified")
+  const last_modified = __web_header(headers, "last-modified")
   if last_modified != nil {
     next = next + {last_modified: last_modified}
   }
-  let content_type = __web_header(headers, "content-type")
+  const content_type = __web_header(headers, "content-type")
   if content_type != nil {
     next = next + {content_type: content_type}
   }
@@ -139,37 +139,37 @@ fn __web_not_modified(source_url, response, previous, fetched_at) {
  * @errors: []
  */
 pub fn web_fetch(url: string, options = nil) -> dict {
-  let opts = options ?? {}
-  let method = uppercase(opts?.method ?? opts?.http_options?.method ?? "GET")
-  var http_opts = opts?.http_options ?? opts
-  let source_url = __web_effective_url(url, http_opts)
-  let store_opts = __web_store_options(opts)
-  let cache_key = __web_cache_key(method, source_url, opts)
-  var previous = opts?.previous
-  var cache_status = if store_opts == nil {
+  const opts = options ?? {}
+  const method = uppercase(opts?.method ?? opts?.http_options?.method ?? "GET")
+  let http_opts = opts?.http_options ?? opts
+  const source_url = __web_effective_url(url, http_opts)
+  const store_opts = __web_store_options(opts)
+  const cache_key = __web_cache_key(method, source_url, opts)
+  let previous = opts?.previous
+  let cache_status = if store_opts == nil {
     "bypass"
   } else {
     "miss"
   }
   if previous == nil && store_opts != nil {
-    let cached = cache_get(cache_key, store_opts)
+    const cached = cache_get(cache_key, store_opts)
     if cached.hit {
       previous = cached.value
       cache_status = "refresh"
     }
   }
-  let headers = __web_conditional_headers(__web_base_headers(opts), previous, opts?.conditional ?? true)
+  const headers = __web_conditional_headers(__web_base_headers(opts), previous, opts?.conditional ?? true)
   http_opts = http_opts + {headers: headers}
-  let response = harness.net.request(method, url, http_opts)
-  let fetched_at = opts?.fetched_at ?? harness.clock.timestamp()
+  const response = harness.net.request(method, url, http_opts)
+  const fetched_at = opts?.fetched_at ?? harness.clock.timestamp()
   if response.status == 304 && previous != nil {
-    let not_modified = __web_not_modified(source_url, response, previous, fetched_at)
+    const not_modified = __web_not_modified(source_url, response, previous, fetched_at)
     if store_opts != nil {
       cache_put(cache_key, not_modified, store_opts)
     }
     return not_modified
   }
-  let envelope = __web_fetch_envelope(source_url, response, fetched_at, cache_status)
+  const envelope = __web_fetch_envelope(source_url, response, fetched_at, cache_status)
   if store_opts != nil && envelope.ok {
     cache_put(cache_key, envelope, store_opts)
   }
@@ -177,8 +177,8 @@ pub fn web_fetch(url: string, options = nil) -> dict {
 }
 
 fn __web_search_tokens(query) {
-  let normalized = regex_replace("[^A-Za-z0-9_./@:-]+", " ", lowercase(query ?? ""))
-  var out = []
+  const normalized = regex_replace("[^A-Za-z0-9_./@:-]+", " ", lowercase(query ?? ""))
+  let out = []
   for token in split(trim(normalized), " ") {
     if token != "" && len(token) > 1 && !out.contains(token) {
       out = out.push(token)
@@ -204,14 +204,14 @@ fn __web_search_text(entry) {
 }
 
 fn __web_search_score(entry, query, tokens) {
-  let haystack = __web_search_text(entry)
-  var score = 0
-  let phrase = lowercase(trim(query ?? ""))
+  const haystack = __web_search_text(entry)
+  let score = 0
+  const phrase = lowercase(trim(query ?? ""))
   if phrase != "" && contains(haystack, phrase) {
     score = score + 25
   }
-  let title = lowercase(to_string(entry?.title ?? entry?.name ?? ""))
-  let url = lowercase(to_string(entry?.url ?? entry?.href ?? entry?.source_url ?? ""))
+  const title = lowercase(to_string(entry?.title ?? entry?.name ?? ""))
+  const url = lowercase(to_string(entry?.url ?? entry?.href ?? entry?.source_url ?? ""))
   for token in tokens {
     if contains(title, token) {
       score = score + 8
@@ -221,7 +221,7 @@ fn __web_search_score(entry, query, tokens) {
       score = score + 2
     }
   }
-  let source_type = entry?.source_type ?? entry?.kind
+  const source_type = entry?.source_type ?? entry?.kind
   if ["docs", "pinned_docs", "package_registry", "registry"].contains(source_type) {
     score = score + 6
   }
@@ -235,7 +235,7 @@ fn __web_search_score(entry, query, tokens) {
 }
 
 fn __web_search_take(items, limit) {
-  var out = []
+  let out = []
   for item in items {
     if len(out) >= limit {
       return out
@@ -249,12 +249,12 @@ fn __web_search_path_get(value, path, fallback = nil) {
   if path == nil {
     return fallback
   }
-  let parts = if type_of(path) == "list" {
+  const parts = if type_of(path) == "list" {
     path
   } else {
     split(to_string(path), ".").filter({ part -> part != "" })
   }
-  var current = value
+  let current = value
   for part in parts {
     if current == nil {
       return fallback
@@ -265,19 +265,19 @@ fn __web_search_path_get(value, path, fallback = nil) {
 }
 
 fn __web_search_merge_headers(left, right) {
-  let merged = left ?? {}
-  let extra = right ?? {}
+  const merged = left ?? {}
+  const extra = right ?? {}
   return merged + extra
 }
 
 fn __web_search_tool_options(base, args) {
-  let merged = base ?? {}
-  let extra = args?.options ?? args ?? {}
+  const merged = base ?? {}
+  const extra = args?.options ?? args ?? {}
   return merged + extra
 }
 
 fn __web_search_backend(opts) {
-  let explicit = opts?.backend
+  const explicit = opts?.backend
   if type_of(explicit) == "dict" {
     return explicit
       + {
@@ -293,7 +293,7 @@ fn __web_search_backend(opts) {
     return {kind: "provider_hosted", id: "provider_results", deterministic: true, evidence: "provider_results"}
   }
   if opts?.api != nil {
-    let api = opts.api
+    const api = opts.api
     return {
       kind: "api",
       id: api?.id ?? api?.name ?? api?.url ?? "configured_search_api",
@@ -302,10 +302,10 @@ fn __web_search_backend(opts) {
       api: api,
     }
   }
-  let env_url = harness.env.get("HARN_WEB_SEARCH_URL")
+  const env_url = harness.env.get("HARN_WEB_SEARCH_URL")
   if env_url != nil && env_url != "" {
-    var headers = {}
-    let bearer = harness.env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
+    let headers = {}
+    const bearer = harness.env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
     if bearer != nil && bearer != "" {
       headers = {Authorization: "Bearer " + bearer}
     }
@@ -330,7 +330,7 @@ fn __web_search_backend(opts) {
 }
 
 fn __web_search_public_backend(backend) {
-  var public = {
+  let public = {
     kind: backend.kind,
     id: backend.id,
     deterministic: backend?.deterministic ?? true,
@@ -346,7 +346,7 @@ fn __web_search_public_backend(backend) {
 }
 
 fn __web_search_normalize(entry, rank, backend, score = nil) {
-  let url = entry?.url ?? entry?.href ?? entry?.source_url ?? entry?.docs_url
+  const url = entry?.url ?? entry?.href ?? entry?.source_url ?? entry?.docs_url
   return {
     rank: rank,
     title: to_string(entry?.title ?? entry?.name ?? url ?? ""),
@@ -373,18 +373,18 @@ fn __web_search_normalize(entry, rank, backend, score = nil) {
 }
 
 fn __web_search_curated(query, opts, backend) {
-  let tokens = __web_search_tokens(query)
-  let limit = opts?.limit ?? 10
-  var scored = []
+  const tokens = __web_search_tokens(query)
+  const limit = opts?.limit ?? 10
+  let scored = []
   for entry in opts?.index ?? opts?.results ?? backend?.index ?? [] {
-    let score = __web_search_score(entry, query, tokens)
+    const score = __web_search_score(entry, query, tokens)
     if score > 0 || opts?.include_zero_score {
       scored = scored.push({entry: entry, score: score})
     }
   }
-  let ordered = scored.sort_by({ item -> 0 - item.score })
-  var results = []
-  var rank = 1
+  const ordered = scored.sort_by({ item -> 0 - item.score })
+  let results = []
+  let rank = 1
   for item in __web_search_take(ordered, limit) {
     results = results.push(__web_search_normalize(item.entry, rank, backend, item.score))
     rank = rank + 1
@@ -399,8 +399,8 @@ fn __web_search_curated(query, opts, backend) {
 }
 
 fn __web_search_provider_results(query, opts, backend) {
-  var results = []
-  var rank = 1
+  let results = []
+  let rank = 1
   for entry in __web_search_take(opts.provider_results ?? [], opts?.limit ?? 10) {
     results = results.push(__web_search_normalize(entry, rank, backend))
     rank = rank + 1
@@ -432,34 +432,34 @@ fn __web_search_api_item(item, api) {
 }
 
 fn __web_search_api(query, opts, backend) {
-  let api = backend.api ?? opts.api
-  let limit = opts?.limit ?? api?.limit ?? 10
-  var fetch_options = api?.fetch_options ?? {}
-  let method = uppercase(api?.method ?? fetch_options?.method ?? "GET")
+  const api = backend.api ?? opts.api
+  const limit = opts?.limit ?? api?.limit ?? 10
+  let fetch_options = api?.fetch_options ?? {}
+  const method = uppercase(api?.method ?? fetch_options?.method ?? "GET")
   if method == "GET" {
-    let query_param = api?.query_param ?? "q"
-    let existing_query = fetch_options?.query ?? {}
+    const query_param = api?.query_param ?? "q"
+    const existing_query = fetch_options?.query ?? {}
     fetch_options = fetch_options + {method: method, query: existing_query + {[query_param]: query}}
   } else {
-    let headers = __web_search_merge_headers(fetch_options?.headers, api?.headers)
+    const headers = __web_search_merge_headers(fetch_options?.headers, api?.headers)
     fetch_options = fetch_options
       + {method: method, headers: headers, body: api?.body ?? json_stringify({query: query, limit: limit})}
   }
   if api?.headers != nil && method == "GET" {
     fetch_options = fetch_options + {headers: __web_search_merge_headers(fetch_options?.headers, api.headers)}
   }
-  let fetched = web_fetch(api.url, fetch_options)
-  let parsed = safe_parse(fetched.body)
-  let items = __web_search_path_get(parsed, api?.results_path ?? "results", [])
-  let raw_results = if type_of(items) == "list" {
+  const fetched = web_fetch(api.url, fetch_options)
+  const parsed = safe_parse(fetched.body)
+  const items = __web_search_path_get(parsed, api?.results_path ?? "results", [])
+  const raw_results = if type_of(items) == "list" {
     items
   } else {
     []
   }
-  var results = []
-  var rank = 1
+  let results = []
+  let rank = 1
   for item in __web_search_take(raw_results, limit) {
-    let normalized = __web_search_api_item(item, api)
+    const normalized = __web_search_api_item(item, api)
     results = results
       .push(
       __web_search_normalize(
@@ -471,8 +471,8 @@ fn __web_search_api(query, opts, backend) {
     )
     rank = rank + 1
   }
-  let fetch_ok = fetched.ok ?? false
-  let parsed_ok = parsed != nil
+  const fetch_ok = fetched.ok ?? false
+  const parsed_ok = parsed != nil
   return {
     ok: fetch_ok && parsed_ok,
     query: query,
@@ -508,8 +508,8 @@ fn __web_search_api(query, opts, backend) {
  * @api_stability: experimental
  */
 pub fn web_search(query: string, options = nil) -> dict {
-  let opts = options ?? {}
-  let backend = __web_search_backend(opts)
+  const opts = options ?? {}
+  const backend = __web_search_backend(opts)
   if backend.kind == "api" {
     return __web_search_api(query, opts, backend)
   }
@@ -541,8 +541,8 @@ pub fn verify_imports(paths, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn web_grounding_tools(registry = nil, options = nil) {
-  let opts = options ?? {}
-  var tools = registry ?? tool_registry()
+  const opts = options ?? {}
+  let tools = registry ?? tool_registry()
   tools = tool_define(
     tools,
     opts?.search_tool_name ?? "web_search",
@@ -676,7 +676,7 @@ fn __web_robots_url(url) {
 }
 
 fn __web_line_value(line) {
-  let parts = split(line, ":")
+  const parts = split(line, ":")
   if len(parts) < 2 {
     return nil
   }
@@ -684,11 +684,11 @@ fn __web_line_value(line) {
 }
 
 fn __web_robots_rows(body) {
-  var rows = []
+  let rows = []
   for line in split(body ?? "", "\n") {
-    let clean = trim(split(line, "#")[0])
+    const clean = trim(split(line, "#")[0])
     if clean != "" {
-      let row = __web_line_value(clean)
+      const row = __web_line_value(clean)
       if row != nil {
         rows = rows + [row]
       }
@@ -698,9 +698,9 @@ fn __web_robots_rows(body) {
 }
 
 fn __web_robots_group_score(agents, target) {
-  var score = 0
+  let score = 0
   for agent in agents {
-    let normalized = lowercase(trim(agent))
+    const normalized = lowercase(trim(agent))
     if normalized == target {
       score = 2
     } else if normalized == "*" && score < 1 {
@@ -714,7 +714,7 @@ fn __web_robots_push_group(groups, agents, rules, target) {
   if len(agents) == 0 || len(rules) == 0 {
     return groups
   }
-  let score = __web_robots_group_score(agents, target)
+  const score = __web_robots_group_score(agents, target)
   if score <= 0 {
     return groups
   }
@@ -722,10 +722,10 @@ fn __web_robots_push_group(groups, agents, rules, target) {
 }
 
 fn __web_robots_rules(body, user_agent) {
-  let target = lowercase(trim(user_agent ?? "*"))
-  var groups = []
-  var agents = []
-  var group_rules = []
+  const target = lowercase(trim(user_agent ?? "*"))
+  let groups = []
+  let agents = []
+  let group_rules = []
   for row in __web_robots_rows(body) {
     if row.field == "user-agent" {
       if len(group_rules) > 0 {
@@ -739,13 +739,13 @@ fn __web_robots_rules(body, user_agent) {
     }
   }
   groups = __web_robots_push_group(groups, agents, group_rules, target)
-  var best_score = 0
+  let best_score = 0
   for group in groups {
     if group.score > best_score {
       best_score = group.score
     }
   }
-  var rules = []
+  let rules = []
   for group in groups {
     if group.score == best_score {
       rules = rules + group.rules
@@ -755,12 +755,12 @@ fn __web_robots_rules(body, user_agent) {
 }
 
 fn __web_path_for_robots(url) {
-  let parsed = url_parse(url)
-  let query = parsed?.query
+  const parsed = url_parse(url)
+  const query = parsed?.query
   if query == nil || query == "" {
     return parsed.path ?? "/"
   }
-  let path = parsed.path ?? "/"
+  const path = parsed.path ?? "/"
   return path + "?" + query
 }
 
@@ -775,21 +775,21 @@ fn __web_path_for_robots(url) {
  * @errors: []
  */
 pub fn robots_allowed(url: string, user_agent: string = "*", options = nil) -> bool {
-  let opts = options ?? {}
-  let robots_url = opts?.robots_url ?? __web_robots_url(url)
-  let response = web_fetch(robots_url, opts?.fetch_options ?? {})
+  const opts = options ?? {}
+  const robots_url = opts?.robots_url ?? __web_robots_url(url)
+  const response = web_fetch(robots_url, opts?.fetch_options ?? {})
   if !(response.ok ?? false) {
     return true
   }
-  let path = __web_path_for_robots(url)
-  var best_len = -1
-  var allowed = true
+  const path = __web_path_for_robots(url)
+  let best_len = -1
+  let allowed = true
   for rule in __web_robots_rules(response.body, user_agent) {
     if rule.path == "" {
       continue
     }
     if starts_with(path, rule.path) {
-      let score = len(rule.path)
+      const score = len(rule.path)
       if score > best_len || (score == best_len && rule.kind == "allow") {
         best_len = score
         allowed = rule.kind == "allow"
@@ -800,7 +800,7 @@ pub fn robots_allowed(url: string, user_agent: string = "*", options = nil) -> b
 }
 
 fn __web_xml_unescape(text) {
-  var out = regex_replace("&amp;", "&", text)
+  let out = regex_replace("&amp;", "&", text)
   out = regex_replace("&lt;", "<", out)
   out = regex_replace("&gt;", ">", out)
   out = regex_replace("&quot;", "\"", out)
@@ -809,9 +809,9 @@ fn __web_xml_unescape(text) {
 }
 
 fn __web_sitemap_locs(xml) {
-  var urls = []
+  let urls = []
   for capture in regex_captures("(?is)<loc\\b[^>]*>(.*?)</loc>", xml ?? "") {
-    let loc = trim(__web_xml_unescape(capture.groups[0] ?? ""))
+    const loc = trim(__web_xml_unescape(capture.groups[0] ?? ""))
     if loc != "" && !urls.contains(loc) {
       urls = urls + [loc]
     }
@@ -823,8 +823,8 @@ fn __web_sitemap_candidates(base_url, opts) {
   if opts?.sitemap_urls != nil {
     return opts.sitemap_urls
   }
-  var urls = []
-  let robots = web_fetch(opts?.robots_url ?? web_origin_url(base_url, "/robots.txt"), opts?.fetch_options ?? {})
+  let urls = []
+  const robots = web_fetch(opts?.robots_url ?? web_origin_url(base_url, "/robots.txt"), opts?.fetch_options ?? {})
   if robots.ok {
     for row in __web_robots_rows(robots.body) {
       if row.field == "sitemap" && row.value != "" && !urls.contains(row.value) {
@@ -847,16 +847,16 @@ fn __web_sitemap_candidates(base_url, opts) {
  * @errors: []
  */
 pub fn sitemap_urls(base_url: string, options = nil) -> list<string> {
-  let opts = options ?? {}
-  let max_sitemaps = opts?.max_sitemaps ?? 10
-  var found = []
-  var count = 0
+  const opts = options ?? {}
+  const max_sitemaps = opts?.max_sitemaps ?? 10
+  let found = []
+  let count = 0
   for sitemap_url in __web_sitemap_candidates(base_url, opts) {
     if count >= max_sitemaps {
       return found
     }
     count = count + 1
-    let response = web_fetch(sitemap_url, opts?.fetch_options ?? {})
+    const response = web_fetch(sitemap_url, opts?.fetch_options ?? {})
     if response.ok {
       for loc in __web_sitemap_locs(response.body) {
         if !found.contains(loc) {

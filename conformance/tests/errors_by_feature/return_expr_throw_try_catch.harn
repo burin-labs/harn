@@ -47,7 +47,7 @@ pipeline default() {
     ),
   )
   __io_println(pipe_return_catches())
-  let propagated = try {
+  const propagated = try {
     typed_catch_mismatch_propagates(
       { ->
         throw other_error()

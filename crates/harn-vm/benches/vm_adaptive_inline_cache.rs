@@ -24,8 +24,8 @@ fn bench_stable_integer_add_and_closure_call(c: &mut Criterion) {
 fn erase(x) {
   return x
 }
-var i = erase(0)
-var total = erase(0)
+let i = erase(0)
+let total = erase(0)
 while i < erase(200) {
   total = total + i
   i = i + erase(1)
@@ -50,9 +50,9 @@ fn bench_mixed_numeric_add_deopt(c: &mut Criterion) {
 fn erase(x) {
   return x
 }
-let values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
-var total = erase(0)
-var i = 0
+const values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
+let total = erase(0)
+let i = 0
 while i < 40 {
   for value in values {
     total = total + value

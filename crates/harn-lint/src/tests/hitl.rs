@@ -20,7 +20,7 @@ fn request_approval_bound_result_is_handled() {
     let diags = lint_source(
         r#"
 pipeline deploy(task) {
-  let approval = request_approval("deploy prod", {reviewers: ["alice"]})
+  const approval = request_approval("deploy prod", {reviewers: ["alice"]})
   __io_println(approval.approved)
 }
 "#,
@@ -36,7 +36,7 @@ fn request_approval_as_try_value_is_handled() {
     let diags = lint_source(
         r#"
 pipeline deploy(task) {
-  let result = try {
+  const result = try {
     request_approval("deploy prod", {reviewers: ["alice"]})
   }
   __io_println(is_ok(result))

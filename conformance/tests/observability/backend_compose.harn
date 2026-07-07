@@ -1,7 +1,7 @@
 import { obs } from "std/observability"
 
 pipeline default() {
-  let o = obs()
+  const o = obs()
   o.reset()
   o
     .configure(
@@ -13,7 +13,7 @@ pipeline default() {
     },
   )
   o.log("fanout", "info", {component: "compose"})
-  let emitted = o.events_take()
+  const emitted = o.events_take()
   __io_println(len(emitted))
   __io_println(emitted[0].backend)
   __io_println(emitted[1].backend)

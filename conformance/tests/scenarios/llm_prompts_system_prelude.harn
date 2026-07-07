@@ -2,7 +2,7 @@
 import { system_prelude } from "std/llm/prompts"
 
 pipeline default() {
-  let opts = {
+  const opts = {
     persona: "You are a careful research assistant.",
     tools: ["web_search", "fetch"],
     constraints: ["Cite all sources.", "Never speculate."],
@@ -10,8 +10,8 @@ pipeline default() {
     examples: [{input: "what is rust?", output: "{\"title\":\"Rust\"}"}],
     tone: "professional",
   }
-  let first = system_prelude(opts)
-  let second = system_prelude(opts)
+  const first = system_prelude(opts)
+  const second = system_prelude(opts)
   __io_println(first == second)
   __io_println(contains(first, "research assistant"))
   __io_println(contains(first, "web_search"))
@@ -19,6 +19,6 @@ pipeline default() {
   __io_println(contains(first, "Output:"))
   __io_println(contains(first, "Examples:"))
   // tone variation
-  let terse = system_prelude({persona: "Hi", tone: "terse"})
+  const terse = system_prelude({persona: "Hi", tone: "terse"})
   __io_println(contains(terse, "terse and direct"))
 }

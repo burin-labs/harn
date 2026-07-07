@@ -85,9 +85,7 @@ pub fn compile_module_artifact(
         .filter(|sn| {
             matches!(
                 &sn.node,
-                harn_parser::Node::VarBinding { .. }
-                    | harn_parser::Node::LetBinding { .. }
-                    | harn_parser::Node::ConstBinding { .. }
+                harn_parser::Node::LetBinding { .. } | harn_parser::Node::ConstBinding { .. }
             )
         })
         .cloned()

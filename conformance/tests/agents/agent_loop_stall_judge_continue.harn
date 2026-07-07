@@ -7,7 +7,7 @@ fn events_of(events, kind) {
 }
 
 fn tool_message_count(session_id) {
-  var count = 0
+  let count = 0
   for message in agent_session_messages(session_id) {
     if message?.role == "tool" && message?.name == "noop" {
       count = count + 1
@@ -17,7 +17,7 @@ fn tool_message_count(session_id) {
 }
 
 pipeline default() {
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "noop",
@@ -40,8 +40,8 @@ pipeline default() {
       llm_text("still working"),
     ],
     { ->
-      let session = "stall-judge-continue-" + uuid()
-      let captured = agent_capture_events(
+      const session = "stall-judge-continue-" + uuid()
+      const captured = agent_capture_events(
         session,
         fn() { return agent_loop(
           "Continue when the stall judge vetoes.",
@@ -58,9 +58,9 @@ pipeline default() {
           },
         ) },
       )
-      let stalls = events_of(captured.events, "agent_loop_stall_warning")
-      let judges = events_of(captured.events, "judge_decision")
-      let messages = json_stringify(agent_session_messages(session))
+      const stalls = events_of(captured.events, "agent_loop_stall_warning")
+      const judges = events_of(captured.events, "judge_decision")
+      const messages = json_stringify(agent_session_messages(session))
       __io_println(captured.result.status)
       __io_println(len(stalls))
       __io_println(len(judges))
@@ -71,7 +71,7 @@ pipeline default() {
       __io_println(len(llm_mock_calls()))
     },
   )
-  var other_tools = tool_registry()
+  let other_tools = tool_registry()
   other_tools = tool_define(
     other_tools,
     "noop",
@@ -89,8 +89,8 @@ pipeline default() {
       {text: "", tool_calls: [{id: "noopB", name: "noop", arguments: {}}]},
     ],
     { ->
-      let other_session = "stall-judge-other-" + uuid()
-      let other = agent_capture_events(
+      const other_session = "stall-judge-other-" + uuid()
+      const other = agent_capture_events(
         other_session,
         fn() { return agent_loop(
           "Do not run a stall judge for non-stalled cadence.",

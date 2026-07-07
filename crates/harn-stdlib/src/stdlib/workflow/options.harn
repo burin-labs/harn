@@ -246,7 +246,7 @@ fn __workflow_non_empty_string(value) {
   if type_of(value) != "string" {
     return nil
   }
-  let trimmed = trim(value)
+  const trimmed = trim(value)
   if trimmed == "" {
     return nil
   }
@@ -254,15 +254,15 @@ fn __workflow_non_empty_string(value) {
 }
 
 fn __workflow_stage_tool_format(model_policy: WorkflowModelPolicy, host: WorkflowStageHostConfig) -> string {
-  let explicit = __workflow_non_empty_string(model_policy.tool_format)
+  const explicit = __workflow_non_empty_string(model_policy.tool_format)
   if explicit != nil {
     return explicit
   }
-  let env = __workflow_non_empty_string(host.env_tool_format)
+  const env = __workflow_non_empty_string(host.env_tool_format)
   if env != nil {
     return env
   }
-  let default_format = __workflow_non_empty_string(host.default_tool_format)
+  const default_format = __workflow_non_empty_string(host.default_tool_format)
   if default_format != nil {
     return default_format
   }
@@ -270,7 +270,7 @@ fn __workflow_stage_tool_format(model_policy: WorkflowModelPolicy, host: Workflo
 }
 
 fn __workflow_native_tool_fallback(value) -> string {
-  let policy = __workflow_non_empty_string(value)
+  const policy = __workflow_non_empty_string(value)
   if policy != nil {
     return policy
   }
@@ -278,7 +278,7 @@ fn __workflow_native_tool_fallback(value) -> string {
 }
 
 fn __workflow_autonomy_tier(value) -> WorkflowAutonomyTier {
-  let tier = value ?? "act_auto"
+  const tier = value ?? "act_auto"
   if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
     return tier
   }
@@ -308,8 +308,8 @@ fn __workflow_llm_options(
   model_policy: WorkflowModelPolicy,
   tool_format: string,
 ) -> dict {
-  let model_option_keys = ["provider", "model", "model_tier", "temperature", "max_tokens", "thinking", "reasoning_effort"]
-  var options = {tool_format: tool_format} + pick_keys(model_policy, model_option_keys, {drop_nil: true})
+  const model_option_keys = ["provider", "model", "model_tier", "temperature", "max_tokens", "thinking", "reasoning_effort"]
+  let options = {tool_format: tool_format} + pick_keys(model_policy, model_option_keys, {drop_nil: true})
   if __workflow_non_empty_string(config.session_id) != nil {
     options = options + {session_id: __workflow_non_empty_string(config.session_id)}
   }
@@ -321,7 +321,7 @@ fn __workflow_agent_loop_options(
   model_policy: WorkflowModelPolicy,
   tool_format: string,
 ) -> dict {
-  let loop_option_keys = [
+  const loop_option_keys = [
     "nudge",
     "tool_examples",
     "turn_policy",
@@ -334,7 +334,7 @@ fn __workflow_agent_loop_options(
     "problem_scale",
     "reasoning_task",
   ]
-  var options = {
+  let options = {
     loop_until_done: true,
     max_iterations: model_policy.max_iterations ?? 16,
     max_nudges: model_policy.max_nudges ?? 3,
@@ -379,11 +379,11 @@ pub fn workflow_stage_spec(spec: StageSpec = {}) -> StageSpec {
  * @api_stability: experimental
  */
 pub fn workflow_stage_agent_options(config: WorkflowStageOptionsConfig = {}) -> WorkflowStageAgentOptions {
-  let model_policy: WorkflowModelPolicy = config.model_policy ?? {}
-  let host: WorkflowStageHostConfig = config.host ?? {}
-  let tool_format: string = __workflow_stage_tool_format(model_policy, host)
-  let llm_options = __workflow_llm_options(config, model_policy, tool_format)
-  let loop_options = __workflow_agent_loop_options(config, model_policy, tool_format)
+  const model_policy: WorkflowModelPolicy = config.model_policy ?? {}
+  const host: WorkflowStageHostConfig = config.host ?? {}
+  const tool_format: string = __workflow_stage_tool_format(model_policy, host)
+  const llm_options = __workflow_llm_options(config, model_policy, tool_format)
+  const loop_options = __workflow_agent_loop_options(config, model_policy, tool_format)
   return {
     run_agent_loop: config.mode == "agent" || (config.has_tools ?? false),
     tool_format: tool_format,

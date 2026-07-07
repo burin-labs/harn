@@ -50,7 +50,7 @@ as described below.
 A long-running call returns immediately with a handle envelope:
 
 ```harn
-let handle = walk_dir(".", {long_running: true})
+const handle = walk_dir(".", {long_running: true})
 ```
 
 The returned dict includes:
@@ -85,7 +85,7 @@ handle when the script no longer needs the result.
 
 ```harn
 pipeline main() {
-  let handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {long_running: true})
   defer {
     host_tool_call("cancel_handle", {handle_id: handle.handle_id})
   }
@@ -106,7 +106,7 @@ This starts background work but has no cleanup path if the pipeline exits early:
 
 ```harn
 pipeline main() {
-  let handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {long_running: true})
   log(handle.handle_id)
 }
 ```

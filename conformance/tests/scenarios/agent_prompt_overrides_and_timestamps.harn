@@ -16,11 +16,11 @@ pipeline test(task) {
           prompts: {"agent.loop_contract": {text: "CUSTOM LOOP CONTRACT {{ done_sentinel }}"}},
         },
       )
-      let calls = llm_mock_calls()
+      const calls = llm_mock_calls()
       assert(contains(calls[0].system, "CUSTOM LOOP CONTRACT ##DONE##"), "prompt override rendered")
       assert(!contains(calls[0].system, "Keep working until"), "default loop prompt was replaced")
       assert(contains(calls[0].messages[0].content, "[harn timestamp:"), "message timestamp visible")
-      let bad_override = try {
+      const bad_override = try {
         agent_loop(
           "bad prompt id",
           "Base system.",
@@ -42,15 +42,15 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("<done>##DONE##</done>")],
     { ->
-      let typed_prompt_values = {loop_contract: {text: "TYPED LOOP CONTRACT {{ done_sentinel }}"}}
-      let typed_prompt_options = agent_prompt_overrides(typed_prompt_values)
+      const typed_prompt_values = {loop_contract: {text: "TYPED LOOP CONTRACT {{ done_sentinel }}"}}
+      const typed_prompt_options = agent_prompt_overrides(typed_prompt_values)
       agent_loop(
         "typed override",
         "Base system.",
         typed_prompt_options
           + {provider: "mock", loop_until_done: true, max_iterations: 1},
       )
-      let typed_calls = llm_mock_calls()
+      const typed_calls = llm_mock_calls()
       assert(
         contains(typed_calls[0].system, "TYPED LOOP CONTRACT ##DONE##"),
         "typed prompt helper rendered",
@@ -71,14 +71,14 @@ pipeline test(task) {
           prompts: {"agent.turn_preamble": {text: "CUSTOM TURN PREAMBLE"}},
         },
       )
-      let turn_calls = llm_mock_calls()
+      const turn_calls = llm_mock_calls()
       assert(
         contains(turn_calls[0].system, "CUSTOM TURN PREAMBLE"),
         "agent_turn preamble override rendered",
       )
     },
   )
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "greet",
@@ -102,7 +102,7 @@ pipeline test(task) {
           prompts: {"agent.tool_contract_action_text": {text: "CUSTOM TEXT ACTION {{ done_sentinel }}"}},
         },
       )
-      let text_contract = llm_mock_calls()[0].system
+      const text_contract = llm_mock_calls()[0].system
       assert(contains(text_contract, "name({ key: value })"), "text tool syntax is Harn-call shaped")
       assert(contains(text_contract, "### greet"), "Harn-rendered tool listing included")
       assert(

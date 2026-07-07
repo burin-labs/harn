@@ -3,25 +3,25 @@ import { merge, omit, pick, safe_parse } from "std/json"
 
 pipeline default(task) {
   // safe_parse: valid JSON
-  let data = safe_parse("{\"name\":\"test\",\"value\":42}")
+  const data = safe_parse("{\"name\":\"test\",\"value\":42}")
   __io_println(data.name)
   __io_println(data.value)
   // safe_parse: invalid JSON returns nil
-  let bad = safe_parse("not json {{{")
+  const bad = safe_parse("not json {{{")
   __io_println(bad)
   // merge: combine two dicts
-  let merged = merge({a: 1, b: 2}, {b: 3, c: 4})
+  const merged = merge({a: 1, b: 2}, {b: 3, c: 4})
   __io_println(merged.a)
   __io_println(merged.b)
   __io_println(merged.c)
   // pick: select specific keys
-  let picked = pick({a: 1, b: 2, c: 3}, ["a", "c"])
+  const picked = pick({a: 1, b: 2, c: 3}, ["a", "c"])
   __io_println(json_stringify(picked))
   // omit: remove specific keys
-  let omitted = omit({a: 1, b: 2, c: 3}, ["b"])
+  const omitted = omit({a: 1, b: 2, c: 3}, ["b"])
   __io_println(json_stringify(omitted))
-  let non_finite = json_stringify([sqrt(-1.0)])
+  const non_finite = json_stringify([sqrt(-1.0)])
   __io_println(non_finite)
-  let parsed_non_finite: list = json_parse(non_finite)
+  const parsed_non_finite: list = json_parse(non_finite)
   __io_println(parsed_non_finite[0])
 }

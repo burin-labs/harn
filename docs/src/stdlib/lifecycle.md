@@ -305,7 +305,7 @@ import { counts, summary } from "std/lifecycle"
 pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
-      let state = harness.unsettled_state()
+      const state = harness.unsettled_state()
       if !harness.is_empty(state) {
         harness.emit_audit(
           "custom_drain",

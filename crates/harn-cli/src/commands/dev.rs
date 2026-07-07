@@ -652,7 +652,7 @@ mod tests {
         write(
             &root,
             "lib.harn",
-            "pub fn add(a: int, b: int) -> int { let s = a + b; s }\n",
+            "pub fn add(a: int, b: int) -> int { const s = a + b; s }\n",
         );
         let changed = state.refresh_filesystem(&root);
         assert_eq!(changed, vec![canonical(&lib)]);
@@ -710,7 +710,7 @@ mod tests {
         write(
             &root,
             "lib.harn",
-            "pub fn add(a: int, b: int) -> int { let s = a + b; s }\n",
+            "pub fn add(a: int, b: int) -> int { const s = a + b; s }\n",
         );
         let _ = state.refresh_filesystem(&root);
         let (event, dependents) = state.apply_change(&lib);

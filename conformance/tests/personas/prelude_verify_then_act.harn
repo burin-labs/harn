@@ -1,14 +1,14 @@
 import { verify_then_act } from "std/personas/prelude"
 
 pipeline test(task) {
-  let receipt_options = {
+  const receipt_options = {
     persona: "merge_captain",
     step: "merge_pr",
     trace_id: "trace-prelude",
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  let accepted = verify_then_act(fn() { return Ok({clean: true}) }, fn() { return "merged" }, receipt_options)
+  const accepted = verify_then_act(fn() { return Ok({clean: true}) }, fn() { return "merged" }, receipt_options)
   __io_println(accepted.status)
   __io_println(accepted.verified)
   __io_println(accepted.acted)
@@ -16,7 +16,7 @@ pipeline test(task) {
   __io_println(accepted.receipt.schema)
   __io_println(accepted.receipt.status)
   __io_println(len(accepted.receipt.tool_calls))
-  let blocked = verify_then_act(
+  const blocked = verify_then_act(
     fn() { return false },
     fn() {
       throw "actor should not run"

@@ -9,7 +9,7 @@ fn test_unused_variable() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let unused = 42
+const unused = 42
 log("hello")
 }
 "#,
@@ -25,7 +25,7 @@ fn test_unused_underscore_ignored() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let _ = 42
+const _ = 42
 log("hello")
 }
 "#,
@@ -40,7 +40,7 @@ log("hello")
 fn test_unused_underscore_prefixed_local_warns() {
     let source = r#"
 pipeline default(task) {
-let _cleanup = cleanup()
+const _cleanup = cleanup()
 log("hello")
 }
 "#;
@@ -53,7 +53,7 @@ log("hello")
     );
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let _ = cleanup()"),
+        result.contains("const _ = cleanup()"),
         "expected underscore-prefixed local to autofix to discard binding, got: {result}"
     );
 }
@@ -62,7 +62,7 @@ log("hello")
 fn test_used_underscore_prefixed_local_is_not_rewritten() {
     let source = r"
 pipeline default(task) {
-let _totals = record_usage()
+const _totals = record_usage()
 log(_totals)
 }
 ";
@@ -75,7 +75,7 @@ log(_totals)
     );
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let _totals = record_usage()"),
+        result.contains("const _totals = record_usage()"),
         "used underscore-prefixed local must not be rewritten: {result}"
     );
 }
@@ -85,7 +85,7 @@ fn test_unused_underscore_prefixed_pattern_binding_ignored() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let { _ignored } = { _ignored: 42 }
+const { _ignored } = { _ignored: 42 }
 log("hello")
 }
 "#,
@@ -104,7 +104,7 @@ pipeline default(task) {
 fn greet(name, _) {
     log(name)
 }
-let f = { _, value -> log(value) }
+const f = { _, value -> log(value) }
 greet("hi", "there")
 f("ignored", "kept")
 }
@@ -144,7 +144,7 @@ fn test_unused_closure_param() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-let f = { x, y -> log(x) }
+const f = { x, y -> log(x) }
 f(1, 2)
 }
 ",
@@ -196,8 +196,8 @@ fn test_parallel_options_mark_variables_used() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-let concurrency = 2
-let results = parallel each [1, 2] with { max_concurrent: concurrency } { n -> n }
+const concurrency = 2
+const results = parallel each [1, 2] with { max_concurrent: concurrency } { n -> n }
 log(results)
 }
 ",
@@ -213,10 +213,10 @@ fn test_destructuring_defaults_mark_referenced_variables_used() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let persona = "p"
-let kind = "repair"
-let downstream = "review"
-let { step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step" } = {}
+const persona = "p"
+const kind = "repair"
+const downstream = "review"
+const { step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step" } = {}
 log(function_name)
 }
 "#,
@@ -252,7 +252,7 @@ fn test_mutex_key_marks_variable_used() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let key = "tenant-a"
+const key = "tenant-a"
 mutex(key) {
     log("locked")
 }
@@ -270,7 +270,7 @@ fn test_multiple_rules() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-var unused = 1
+let unused = 1
 return 0
 log("dead")
 }
@@ -284,21 +284,21 @@ log("dead")
 
 #[test]
 fn test_fix_unused_variable_simple_let_binding() {
-    let source = "pipeline default(task) {\n  let unused_thing = 42\n  log(\"hi\")\n}";
+    let source = "pipeline default(task) {\n  const unused_thing = 42\n  log(\"hi\")\n}";
     let diags = lint_source(source);
     assert!(has_rule(&diags, "unused-variable"));
     let fix = get_fix(&diags, "unused-variable");
     assert!(
         fix.is_some(),
-        "expected autofix for simple let binding, got: {diags:?}"
+        "expected autofix for simple const binding, got: {diags:?}"
     );
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let _ = 42"),
+        result.contains("const _ = 42"),
         "expected discard binding, got: {result}"
     );
     assert!(
-        !result.contains("let unused_thing"),
+        !result.contains("const unused_thing"),
         "original name should be replaced, got: {result}"
     );
 }
@@ -308,7 +308,7 @@ fn test_fix_unused_variable_simple_let_binding_with_type() {
     // Type annotation between the name and `=` must not confuse the scan.
     // We use `let` (not `var`) so the `mutable-never-reassigned` autofix
     // doesn't also fire and combine with this one.
-    let source = "pipeline default(task) {\n  let leftover: int = 3\n  log(\"hi\")\n}";
+    let source = "pipeline default(task) {\n  const leftover: int = 3\n  log(\"hi\")\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "unused-variable").expect("expected autofix");
     assert_eq!(fix.len(), 1, "expected single-edit fix");
@@ -319,11 +319,11 @@ fn test_fix_unused_variable_simple_let_binding_with_type() {
         format!("{before}{}{after}", edit.replacement)
     };
     assert!(
-        renamed.contains("let _: int = 3"),
+        renamed.contains("const _: int = 3"),
         "expected discard binding with type annotation, got: {renamed}"
     );
     assert!(
-        !renamed.contains("let leftover:"),
+        !renamed.contains("const leftover:"),
         "original name should be replaced, got: {renamed}"
     );
 }
@@ -334,7 +334,7 @@ fn test_no_fix_for_unused_variable_in_dict_destructuring() {
     // rename would need a per-field span we do not currently track. The
     // diagnostic must still fire with a suggestion so the user can fix
     // manually.
-    let source = "pipeline default(task) {\n  let { a, b } = { a: 1, b: 2 }\n  log(a)\n}";
+    let source = "pipeline default(task) {\n  const { a, b } = { a: 1, b: 2 }\n  log(a)\n}";
     let diags = lint_source(source);
     let unused: Vec<_> = diags
         .iter()
@@ -365,13 +365,13 @@ fn test_fix_unused_variable_is_word_boundary_safe() {
     // must only rewrite the binding occurrence, not the reference inside
     // the initializer, so the resulting source still parses.
     let source =
-        "pipeline default(task) {\n  let threshold_ms = threshold_ms_default()\n  log(\"hi\")\n}";
+        "pipeline default(task) {\n  const threshold_ms = threshold_ms_default()\n  log(\"hi\")\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "unused-variable");
     assert!(fix.is_some(), "expected autofix, got: {diags:?}");
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let _ = threshold_ms_default()"),
+        result.contains("const _ = threshold_ms_default()"),
         "expected only the LHS binding renamed, got: {result}"
     );
 }

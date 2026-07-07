@@ -458,7 +458,7 @@ mod tests {
         let chunk = crate::compile_source(
             r"
 fn __probe_global_harness_clock() {
-  let now = harness.clock.now_ms()
+  const now = harness.clock.now_ms()
   return now >= 0
 }
 

@@ -75,7 +75,7 @@ type Envelope = {schema_version: int, api_stability: string, payload: any, warni
 pub fn envelope(spec: Envelope) -> dict {
   // Insertion order doesn't matter — json_stringify sorts keys
   // alphabetically — but build the dict in a readable order anyway.
-  var out = {schemaVersion: spec.schema_version, apiStability: spec.api_stability}
+  let out = {schemaVersion: spec.schema_version, apiStability: spec.api_stability}
   if spec.warnings != nil && len(spec.warnings) > 0 {
     out = out + {warnings: spec.warnings}
   }
@@ -97,17 +97,17 @@ type CliJsonEnvelope = {schema_version: int, ok: bool, data?: any, error?: any, 
  * @errors: []
  */
 pub fn cli_json_envelope(spec: CliJsonEnvelope) -> dict {
-  let data = if spec.data == nil {
+  const data = if spec.data == nil {
     nil
   } else {
     spec.data
   }
-  let error = if spec.error == nil {
+  const error = if spec.error == nil {
     nil
   } else {
     spec.error
   }
-  let warnings = if spec.warnings == nil {
+  const warnings = if spec.warnings == nil {
     []
   } else {
     spec.warnings
@@ -125,7 +125,7 @@ pub fn cli_json_envelope(spec: CliJsonEnvelope) -> dict {
  * @example: write_envelope(envelope({schema_version: 1, api_stability: "stable", payload: result}))
  */
 pub fn write_envelope(env: dict) {
-  let text = if is_tty(1) {
+  const text = if is_tty(1) {
     json_stringify_pretty(env)
   } else {
     json_stringify(env)
@@ -153,7 +153,7 @@ pub fn safe_string(value, fallback: string) -> string {
  * @errors: []
  */
 pub fn nonempty_string(value, fallback: string) -> string {
-  let text = safe_string(value, "")
+  const text = safe_string(value, "")
   if text == "" {
     return fallback
   }
@@ -219,7 +219,7 @@ pub fn safe_int_string(value, fallback: string) -> string {
  * @errors: []
  */
 pub fn safe_number_string(value, fallback: string) -> string {
-  let kind = type_of(value)
+  const kind = type_of(value)
   if kind == "int" || kind == "float" {
     return to_string(value)
   }
@@ -249,10 +249,10 @@ pub fn shell_quote(value: string) -> string {
  * @errors: []
  */
 pub fn join_shell_argv(items: list, sep: string) -> string {
-  var out = ""
-  var first = true
+  let out = ""
+  let first = true
   for item in items {
-    let text = shell_quote(safe_string(item, ""))
+    const text = shell_quote(safe_string(item, ""))
     if text == "" {
       continue
     }
@@ -277,7 +277,7 @@ pub fn print_list(harness: Harness, label: string, items: list) {
   }
   harness.stdio.println("  " + label + ":")
   for item in items {
-    let text = safe_string(item, "")
+    const text = safe_string(item, "")
     if text != "" {
       harness.stdio.println("    - " + text)
     }

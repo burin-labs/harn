@@ -6,7 +6,7 @@ use super::*;
 fn test_strict_types_json_parse_property_access() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let data = json_parse("{}")
+  const data = json_parse("{}")
   log(data.name)
 }"#,
     );
@@ -33,8 +33,8 @@ fn test_strict_types_direct_chain_access() {
 fn test_strict_types_schema_expect_clears() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let my_schema = {type: "object", properties: {name: {type: "string"}}}
-  let data = json_parse("{}")
+  const my_schema = {type: "object", properties: {name: {type: "string"}}}
+  const data = json_parse("{}")
   schema_expect(data, my_schema)
   log(data.name)
 }"#,
@@ -49,8 +49,8 @@ fn test_strict_types_schema_expect_clears() {
 fn test_strict_types_schema_is_if_guard() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let my_schema = {type: "object", properties: {name: {type: "string"}}}
-  let data = json_parse("{}")
+  const my_schema = {type: "object", properties: {name: {type: "string"}}}
+  const data = json_parse("{}")
   if schema_is(data, my_schema) {
 log(data.name)
   }
@@ -66,7 +66,7 @@ log(data.name)
 fn test_strict_types_shape_annotation_clears() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let data: {name: string, age: int} = json_parse("{}")
+  const data: {name: string, age: int} = json_parse("{}")
   log(data.name)
 }"#,
     );
@@ -80,8 +80,8 @@ fn test_strict_types_shape_annotation_clears() {
 fn test_strict_types_propagation() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let data = json_parse("{}")
-  let x = data
+  const data = json_parse("{}")
+  const x = data
   log(x.name)
 }"#,
     );
@@ -97,7 +97,7 @@ fn test_strict_types_propagation() {
 fn test_strict_types_non_boundary_no_warning() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let x = len("hello")
+  const x = len("hello")
   log(x)
 }"#,
     );
@@ -111,7 +111,7 @@ fn test_strict_types_non_boundary_no_warning() {
 fn test_strict_types_subscript_access() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let data = json_parse("{}")
+  const data = json_parse("{}")
   log(data["name"])
 }"#,
     );
@@ -125,7 +125,7 @@ fn test_strict_types_subscript_access() {
 fn test_strict_types_disabled_by_default() {
     let diags = check_source(
         r#"pipeline t(task) {
-  let data = json_parse("{}")
+  const data = json_parse("{}")
   log(data.name)
 }"#,
     );
@@ -139,7 +139,7 @@ fn test_strict_types_disabled_by_default() {
 fn test_strict_types_llm_call_without_schema() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let result = llm_call("prompt", "system")
+  const result = llm_call("prompt", "system")
   log(result.text)
 }"#,
     );
@@ -153,7 +153,7 @@ fn test_strict_types_llm_call_without_schema() {
 fn test_strict_types_llm_call_with_schema_clean() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let result = llm_call("prompt", "system", {
+  const result = llm_call("prompt", "system", {
 schema: {type: "object", properties: {name: {type: "string"}}}
   })
   log(result.data)
@@ -170,8 +170,8 @@ schema: {type: "object", properties: {name: {type: "string"}}}
 fn test_strict_types_schema_expect_result_typed() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let my_schema = {type: "object", properties: {name: {type: "string"}}}
-  let validated = schema_expect(json_parse("{}"), my_schema)
+  const my_schema = {type: "object", properties: {name: {type: "string"}}}
+  const validated = schema_expect(json_parse("{}"), my_schema)
   log(validated.name)
 }"#,
     );
@@ -185,21 +185,21 @@ fn test_strict_types_schema_expect_result_typed() {
 fn test_strict_types_realistic_orchestration() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let payload_schema = {type: "object", properties: {
+  const payload_schema = {type: "object", properties: {
 name: {type: "string"},
 steps: {type: "list", items: {type: "string"}}
   }}
 
   // Good: schema-aware llm_call
-  let result = llm_call("generate a workflow", "system", {
+  const result = llm_call("generate a workflow", "system", {
 schema: payload_schema
   })
-  let workflow_name = result.data.name
+  const workflow_name = result.data.name
 
   // Good: validate then access
-  let raw = json_parse("{}")
+  const raw = json_parse("{}")
   schema_expect(raw, payload_schema)
-  let steps = raw.steps
+  const steps = raw.steps
 
   log(workflow_name)
   log(steps)
@@ -215,8 +215,8 @@ schema: payload_schema
 fn test_strict_types_llm_call_with_schema_via_variable() {
     let warns = strict_warnings(
         r#"pipeline t(task) {
-  let my_schema = {type: "object", properties: {score: {type: "float"}}}
-  let result = llm_call("rate this", "system", {
+  const my_schema = {type: "object", properties: {score: {type: "float"}}}
+  const result = llm_call("rate this", "system", {
 schema: my_schema
   })
   log(result.data.score)

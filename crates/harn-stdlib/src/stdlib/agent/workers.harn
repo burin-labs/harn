@@ -64,7 +64,7 @@ pub fn agent(name, config = nil) {
   if type_of(name) != "string" {
     throw "agent: name must be a string"
   }
-  let cfg = config ?? {}
+  const cfg = config ?? {}
   if type_of(cfg) != "dict" {
     throw "agent: second argument must be a config dict"
   }
@@ -96,7 +96,7 @@ pub fn agent_config(spec, prompt) {
   if type_of(spec) != "dict" || spec?._type != "agent" {
     throw "agent_config: first argument must be an agent (created with agent())"
   }
-  let options = pick_keys(spec, __agent_option_keys(), {drop_nil: true})
+  const options = pick_keys(spec, __agent_option_keys(), {drop_nil: true})
   return {prompt: prompt, system: spec?.system, options: options}
 }
 
@@ -125,15 +125,15 @@ fn __worker_options(value, label) {
 }
 
 fn __agent_stop_options(options, label) {
-  let opts = __worker_options(options, label)
-  let graceful = opts?.graceful ?? false
+  const opts = __worker_options(options, label)
+  const graceful = opts?.graceful ?? false
   if type_of(graceful) != "bool" {
     throw label + ": options.graceful must be a bool"
   }
   if opts?.reason != nil && type_of(opts.reason) != "string" {
     throw label + ": options.reason must be a string"
   }
-  let reason = trim(to_string(opts?.reason ?? ""))
+  const reason = trim(to_string(opts?.reason ?? ""))
   return filter_nil({graceful: graceful, reason: reason == "" ? nil : reason})
 }
 
@@ -151,7 +151,7 @@ fn __agent_tool_entry_name(entry) {
   if entry?.name != nil {
     return to_string(entry.name)
   }
-  let func = entry?.function
+  const func = entry?.function
   if type_of(func) == "dict" {
     return to_string(func?.name ?? "")
   }
@@ -159,7 +159,7 @@ fn __agent_tool_entry_name(entry) {
 }
 
 fn __agent_tool_registry_has(registry, name) {
-  let entries = registry?.tools ?? []
+  const entries = registry?.tools ?? []
   if type_of(entries) != "list" {
     return false
   }
@@ -172,11 +172,11 @@ fn __agent_tool_registry_has(registry, name) {
 }
 
 fn __agent_lifecycle_tool_audit(tool_name, initiator, reason, handle = nil, conditions = nil) {
-  let session_id = agent_session_current_id()
+  const session_id = agent_session_current_id()
   if session_id == nil || session_id == "" {
     return
   }
-  let _ = try {
+  const _ = try {
     agent_emit_event(
       session_id,
       "tool_call_audit",
@@ -199,11 +199,11 @@ fn __agent_lifecycle_tool_audit(tool_name, initiator, reason, handle = nil, cond
 }
 
 fn __subagent_pause_tool(args) {
-  let handle = args?.handle
+  const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_pause: handle is required"
   }
-  let reason = trim(to_string(args?.reason ?? ""))
+  const reason = trim(to_string(args?.reason ?? ""))
   if reason == "" {
     throw "subagent_pause: reason is required"
   }
@@ -212,11 +212,11 @@ fn __subagent_pause_tool(args) {
 }
 
 fn __subagent_resume_tool(args) {
-  let handle = args?.handle
+  const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_resume: handle is required"
   }
-  let continue_transcript = args?.continue_transcript ?? true
+  const continue_transcript = args?.continue_transcript ?? true
   if type_of(continue_transcript) != "bool" {
     throw "subagent_resume: continue_transcript must be a bool"
   }
@@ -225,15 +225,15 @@ fn __subagent_resume_tool(args) {
 }
 
 fn __subagent_stop_tool(args) {
-  let handle = args?.handle
+  const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_stop: handle is required"
   }
-  let graceful = args?.graceful ?? true
+  const graceful = args?.graceful ?? true
   if type_of(graceful) != "bool" {
     throw "subagent_stop: graceful must be a bool"
   }
-  var reason = trim(to_string(args?.reason ?? "parent requested stop"))
+  let reason = trim(to_string(args?.reason ?? "parent requested stop"))
   if reason == "" {
     reason = "parent requested stop"
   }
@@ -257,7 +257,7 @@ fn __agent_lifecycle_has_subagent_capability(registry, opts) {
 }
 
 fn __agent_lifecycle_await_enabled(opts) {
-  let value = opts?.agent_await_resumption_enabled
+  const value = opts?.agent_await_resumption_enabled
   if value == nil {
     return true
   }
@@ -292,7 +292,7 @@ fn __agent_lifecycle_add_await_tool(registry) {
 }
 
 fn __agent_lifecycle_add_subagent_tools(registry) {
-  var tools = registry
+  let tools = registry
   if !__agent_tool_registry_has(tools, "subagent_pause") {
     tools = tool_define(
       tools,
@@ -369,9 +369,9 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
  * @api_stability: experimental
  */
 pub fn agent_lifecycle_tools(registry = nil, options = nil) {
-  let opts = __worker_options(options, "agent_lifecycle_tools")
-  let base = registry ?? tool_registry()
-  var tools = if __agent_lifecycle_await_enabled(opts) {
+  const opts = __worker_options(options, "agent_lifecycle_tools")
+  const base = registry ?? tool_registry()
+  let tools = if __agent_lifecycle_await_enabled(opts) {
     __agent_lifecycle_add_await_tool(base)
   } else {
     base
@@ -390,7 +390,7 @@ fn __worker_mode(config) {
 }
 
 fn __worker_workflow_config(config) {
-  let options = __worker_resume_options(__worker_dict(config?.options))
+  const options = __worker_resume_options(__worker_dict(config?.options))
   return filter_nil(
     config
       + {graph: workflow_graph(config.graph), artifacts: __worker_list(config?.artifacts), options: options},
@@ -408,8 +408,8 @@ fn __worker_stage_config(config) {
 }
 
 fn __worker_config(config) {
-  let cfg = __worker_dict(config)
-  let mode = __worker_mode(cfg)
+  const cfg = __worker_dict(config)
+  const mode = __worker_mode(cfg)
   if mode == "workflow" {
     return __worker_workflow_config(cfg)
   }
@@ -466,7 +466,7 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
  */
 pub fn agent_await_resumption(reason, conditions = nil, resume_by = nil) -> AgentAwaitResumptionRequest {
-  let normalized_reason = trim(to_string(reason ?? ""))
+  const normalized_reason = trim(to_string(reason ?? ""))
   if normalized_reason == "" {
     throw "HARN-SUS-005: agent_await_resumption reason is required"
   }
@@ -511,7 +511,7 @@ pub fn wait_agent(worker_or_workers) {
     return __pool_wait(worker_or_workers)
   }
   if type_of(worker_or_workers) == "list" {
-    var results = []
+    let results = []
     for item in worker_or_workers {
       results = results.push(wait_agent(item))
     }
@@ -597,7 +597,7 @@ fn __sub_agent_string(value, fallback = "") {
   if type_of(value) != "string" {
     return fallback
   }
-  let text = trim(value)
+  const text = trim(value)
   if text == "" {
     return fallback
   }
@@ -611,12 +611,12 @@ fn __sub_agent_string_list(value, label) {
   if type_of(value) != "list" {
     throw label + ": expected a list of strings"
   }
-  var out = []
+  let out = []
   for item in value {
     if type_of(item) != "string" {
       throw label + ": expected a list of strings"
     }
-    let text = trim(item)
+    const text = trim(item)
     if text != "" && !contains(out, text) {
       out = out.push(text)
     }
@@ -632,7 +632,7 @@ fn __sub_agent_base_tools(opts) {
 }
 
 fn __sub_agent_selected_tools(opts, allowed_tools) {
-  let base = __sub_agent_base_tools(opts)
+  const base = __sub_agent_base_tools(opts)
   if len(allowed_tools) == 0 {
     return base
   }
@@ -643,8 +643,8 @@ fn __sub_agent_selected_tools(opts, allowed_tools) {
 }
 
 fn __sub_agent_options(opts, session_id, selected_tools) {
-  var out = {}
-  let internal = [
+  let out = {}
+  const internal = [
     "background",
     "carry",
     "returns",
@@ -676,14 +676,14 @@ fn __sub_agent_options(opts, session_id, selected_tools) {
  * @api_stability: experimental
  */
 pub fn sub_agent_request(task, options = nil) {
-  let task_text = __sub_agent_string(task)
+  const task_text = __sub_agent_string(task)
   if task_text == "" {
     throw "sub_agent_run: task is required"
   }
-  let opts = __worker_resume_options(__worker_options(options, "sub_agent_run"))
-  let allowed_tools = __sub_agent_string_list(opts?.allowed_tools, "sub_agent_run.allowed_tools")
-  let selected_tools = __sub_agent_selected_tools(opts, allowed_tools)
-  let session_id = __sub_agent_string(opts?.session_id, "sub_agent_session_" + uuid_v7())
+  const opts = __worker_resume_options(__worker_options(options, "sub_agent_run"))
+  const allowed_tools = __sub_agent_string_list(opts?.allowed_tools, "sub_agent_run.allowed_tools")
+  const selected_tools = __sub_agent_selected_tools(opts, allowed_tools)
+  const session_id = __sub_agent_string(opts?.session_id, "sub_agent_session_" + uuid_v7())
   return filter_nil(
     {
       _type: "sub_agent_request",
@@ -726,7 +726,7 @@ fn __fanout_options(options) {
 }
 
 fn __fanout_max_parallel(options) {
-  let raw = options?.max_parallel
+  const raw = options?.max_parallel
   if raw == nil {
     return 8
   }
@@ -740,9 +740,9 @@ fn __fanout_max_parallel(options) {
 }
 
 fn __fanout_normalize_request(entry, index) {
-  let fallback_label = "unit-" + to_string(index + 1)
+  const fallback_label = "unit-" + to_string(index + 1)
   if type_of(entry) == "string" {
-    let task = trim(entry)
+    const task = trim(entry)
     if task == "" {
       throw "agent_fanout: request #" + to_string(index + 1) + " has an empty task"
     }
@@ -752,12 +752,12 @@ fn __fanout_normalize_request(entry, index) {
     throw "agent_fanout: request #" + to_string(index + 1)
       + " must be a string or {task, options?, label?}"
   }
-  let task = trim(to_string(entry?.task ?? ""))
+  const task = trim(to_string(entry?.task ?? ""))
   if task == "" {
     throw "agent_fanout: request #" + to_string(index + 1) + " is missing a non-empty task"
   }
-  let raw_label = trim(to_string(entry?.label ?? entry?.name ?? ""))
-  let label = if raw_label == "" {
+  const raw_label = trim(to_string(entry?.label ?? entry?.name ?? ""))
+  const label = if raw_label == "" {
     fallback_label
   } else {
     raw_label
@@ -766,13 +766,13 @@ fn __fanout_normalize_request(entry, index) {
 }
 
 fn __fanout_chunks(items, width) {
-  let size = if width < 1 {
+  const size = if width < 1 {
     1
   } else {
     width
   }
-  var chunks = []
-  var current = []
+  let chunks = []
+  let current = []
   for item in items {
     current = current.push(item)
     if len(current) >= size {
@@ -787,7 +787,7 @@ fn __fanout_chunks(items, width) {
 }
 
 fn __fanout_envelope(summary) {
-  let result = summary?.result
+  const result = summary?.result
   if type_of(result) == "dict" {
     return result
   }
@@ -795,16 +795,16 @@ fn __fanout_envelope(summary) {
 }
 
 fn __fanout_ok(summary) {
-  let envelope = __fanout_envelope(summary)
+  const envelope = __fanout_envelope(summary)
   if type_of(envelope?.ok) == "bool" {
     return envelope.ok
   }
-  let status = trim(to_string(summary?.status ?? "")).lower()
+  const status = trim(to_string(summary?.status ?? "")).lower()
   return contains(["completed", "done", "succeeded", "success"], status)
 }
 
 fn __fanout_error(summary) {
-  let envelope_error = __fanout_envelope(summary)?.error
+  const envelope_error = __fanout_envelope(summary)?.error
   if envelope_error != nil {
     return envelope_error
   }
@@ -880,16 +880,16 @@ pub fn agent_fanout(requests, options = nil) {
   if type_of(requests) != "list" {
     throw "agent_fanout: requests must be a list of {task, options?, label?}"
   }
-  let opts = __fanout_options(options)
-  let max_parallel = __fanout_max_parallel(opts)
-  var normalized = []
-  var index = 0
+  const opts = __fanout_options(options)
+  const max_parallel = __fanout_max_parallel(opts)
+  let normalized = []
+  let index = 0
   for entry in requests {
     normalized = normalized.push(__fanout_normalize_request(entry, index))
     index = index + 1
   }
-  var results = []
-  var base = 0
+  let results = []
+  let base = 0
   for wave in __fanout_chunks(normalized, max_parallel) {
     // Spawn the whole wave as background workers BEFORE joining: each
     // background `sub_agent_run` returns its handle immediately, so the
@@ -901,9 +901,9 @@ pub fn agent_fanout(requests, options = nil) {
     // result instead of aborting the whole wave and every later wave. The
     // outcome list stays positionally aligned with `wave`; only the units that
     // actually spawned are joined via `wait_agent`.
-    var outcomes = []
+    let outcomes = []
     for request in wave {
-      let outcome = try {
+      const outcome = try {
         let handle = sub_agent_run(request.task, request.options + {background: true, name: request.label})
         {spawned: true, handle: handle}
       } catch (spawn_error) {
@@ -911,18 +911,18 @@ pub fn agent_fanout(requests, options = nil) {
       }
       outcomes = outcomes.push(outcome)
     }
-    var live_handles = []
+    let live_handles = []
     for outcome in outcomes {
       if outcome.spawned {
         live_handles = live_handles.push(outcome.handle)
       }
     }
-    let waited = wait_agent(live_handles)
-    var offset = 0
-    var live_index = 0
+    const waited = wait_agent(live_handles)
+    let offset = 0
+    let live_index = 0
     for request in wave {
-      let outcome = outcomes[offset]
-      var summary = {}
+      const outcome = outcomes[offset]
+      let summary = {}
       if outcome.spawned {
         if type_of(waited) == "list" {
           summary = waited[live_index] ?? {}

@@ -10,7 +10,7 @@
  * The events also round-trip through `parse_session_event` so they can
  * be registered via the snake_case names exposed in user scripts.
  */
-let observed = atomic(0)
+const observed = atomic(0)
 
 fn record(_payload) {
   atomic_add(observed, 1)
@@ -33,7 +33,7 @@ pipeline default() {
   register_session_hook("on_unsettled_detected", { _event -> record(_event) })
   // Each call fires the registered hook through the shared dispatcher.
   // The runtime parses the snake_case name and returns control allow.
-  let events = [
+  const events = [
     "pre_suspend",
     "post_suspend",
     "pre_resume",
@@ -46,7 +46,7 @@ pipeline default() {
     "on_unsettled_detected",
   ]
   for event in events {
-    let result = __host_fire_session_hook(event, {})
+    const result = __host_fire_session_hook(event, {})
     __io_println(event + "=" + result.control)
   }
   __io_println("observed=" + to_string(atomic_get(observed)))

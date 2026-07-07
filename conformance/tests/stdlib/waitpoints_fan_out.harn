@@ -6,7 +6,7 @@ pipeline test(task) {
   waitpoint_create("fan-out-c")
   waitpoint_create("fan-out-d")
   waitpoint_create("fan-out-e")
-  let completer = spawn {
+  const completer = spawn {
     sleep(20ms)
     waitpoint_complete("fan-out-a")
     waitpoint_complete("fan-out-b")
@@ -14,7 +14,7 @@ pipeline test(task) {
     waitpoint_complete("fan-out-d")
     waitpoint_complete("fan-out-e")
   }
-  let result = waitpoint_wait(
+  const result = waitpoint_wait(
     ["fan-out-a", "fan-out-b", "fan-out-c", "fan-out-d", "fan-out-e"],
     {wait_id: "fan-out-wait"},
   )

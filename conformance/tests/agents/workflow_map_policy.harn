@@ -6,7 +6,7 @@ import {
 } from "std/workflow/map"
 
 fn item_kinds(items) {
-  var out = []
+  let out = []
   for item in items {
     out = out.push(item.kind)
   }
@@ -14,7 +14,7 @@ fn item_kinds(items) {
 }
 
 pipeline default() {
-  let artifact_plan = workflow_map_work_items(
+  const artifact_plan = workflow_map_work_items(
     {
       node: {
         context_policy: {max_artifacts: 2, prioritize_kinds: ["diff"]},
@@ -32,7 +32,7 @@ pipeline default() {
   __io_println(artifact_plan.items[0].kind)
   __io_println(artifact_plan.items[0].artifact.id)
   __io_println(json_stringify(artifact_plan.selected_artifact_ids))
-  let explicit_plan = workflow_map_work_items(
+  const explicit_plan = workflow_map_work_items(
     {
       node: {
         context_policy: {include_kinds: ["summary"]},
@@ -52,13 +52,13 @@ pipeline default() {
   __io_println(
     workflow_map_join_target({join_policy: {strategy: "quorum", min_completed: 2}, total: 3}),
   )
-  let direct_plan = workflow_map_stage_plan(
+  const direct_plan = workflow_map_stage_plan(
     {node: {map_policy: {output_kind: "work"}, output_contract: {output_kinds: ["summary"]}}},
   )
   __io_println(direct_plan.runs_stage)
   __io_println(direct_plan.output_kind)
   __io_println(direct_plan.stage_node == nil)
-  let stage_plan = workflow_map_stage_plan(
+  const stage_plan = workflow_map_stage_plan(
     {
       node: {
         kind: "map",
@@ -75,7 +75,7 @@ pipeline default() {
   __io_println(json_stringify(stage_plan.stage_node.map_policy))
   __io_println(json_stringify(stage_plan.stage_node.join_policy))
   __io_println(stage_plan.stage_node.output_contract.output_kinds[0])
-  let completed = workflow_map_finalize(
+  const completed = workflow_map_finalize(
     {
       strategy: "quorum",
       total_items: 3,
@@ -88,7 +88,7 @@ pipeline default() {
   __io_println(completed.result.text)
   __io_println(completed.outcome)
   __io_println(completed.branch)
-  let failed = workflow_map_finalize(
+  const failed = workflow_map_finalize(
     {
       strategy: "all",
       total_items: 3,

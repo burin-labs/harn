@@ -524,7 +524,7 @@ fn node_children(node: &SNode) -> Vec<&SNode> {
             out
         }
         Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => args.iter().collect(),
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => vec![value.as_ref()],
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => vec![value.as_ref()],
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             value.iter().map(|v| v.as_ref()).collect()
         }
@@ -573,7 +573,7 @@ mod tests {
     fn finds_render_prompt_string_under_cursor() {
         let source = r#"
 pipeline test() {
-  let x = render_prompt("@/prompts/foo.harn.prompt", {})
+  const x = render_prompt("@/prompts/foo.harn.prompt", {})
   __io_println(x)
 }
 "#;
@@ -589,7 +589,7 @@ pipeline test() {
     fn ignores_other_function_calls() {
         let source = r#"
 pipeline test() {
-  let x = __io_println("@/not-a-prompt")
+  const x = __io_println("@/not-a-prompt")
 }
 "#;
         let program = parse_source(source).expect("parse");
@@ -601,7 +601,7 @@ pipeline test() {
     fn finds_render_string_outside_string_returns_none() {
         let source = r#"
 pipeline test() {
-  let x = render_prompt("@/prompts/foo.harn.prompt", {})
+  const x = render_prompt("@/prompts/foo.harn.prompt", {})
 }
 "#;
         let program = parse_source(source).expect("parse");

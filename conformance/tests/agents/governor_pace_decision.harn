@@ -14,7 +14,7 @@ import { governor_decision } from "std/agent/governors"
 const POLICY = {budget: 10.0, checkpoint: 1.0, hard: 3.0, over_estimate: 2.0, signal: "iterations"}
 
 fn row(consumed, made_progress) {
-  let decision = governor_decision(
+  const decision = governor_decision(
     POLICY,
     {ceiling: 10.0, consumed: consumed, made_progress: made_progress, signal: "iterations"},
   )

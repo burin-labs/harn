@@ -25,7 +25,7 @@ fn __fs_with_newline(text, trailing_newline) {
  * @errors: []
  */
 pub fn ensure_parent_dir(path: string) {
-  let parent = __fs_parent(path)
+  const parent = __fs_parent(path)
   if parent != "" && parent != "." {
     harness.fs.mkdir(parent)
   }
@@ -41,7 +41,7 @@ pub fn read_json(path: string, fallback = nil) {
   if !harness.fs.exists(path) {
     return fallback
   }
-  let parsed = safe_parse(harness.fs.read_text(path))
+  const parsed = safe_parse(harness.fs.read_text(path))
   if parsed == nil {
     return fallback
   }
@@ -58,7 +58,7 @@ pub fn read_json_result(path: string) -> dict {
   if !harness.fs.exists(path) {
     return {ok: false, error: "file not found: " + path}
   }
-  let parsed = try {
+  const parsed = try {
     json_parse(harness.fs.read_text(path))
   }
   if is_ok(parsed) {
@@ -74,11 +74,11 @@ pub fn read_json_result(path: string) -> dict {
  * @errors: []
  */
 pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  let body = if opts.pretty ?? false {
+  const body = if opts.pretty ?? false {
     pretty(value)
   } else {
     json_stringify(value)
@@ -96,7 +96,7 @@ pub fn read_yaml(path: string, fallback = nil) {
   if !harness.fs.exists(path) {
     return fallback
   }
-  let parsed = try {
+  const parsed = try {
     yaml_parse(harness.fs.read_text(path))
   }
   if is_ok(parsed) {
@@ -112,7 +112,7 @@ pub fn read_yaml(path: string, fallback = nil) {
  * @errors: []
  */
 pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
@@ -130,7 +130,7 @@ pub fn read_toml(path: string, fallback = nil) {
   if !harness.fs.exists(path) {
     return fallback
   }
-  let parsed = try {
+  const parsed = try {
     toml_parse(harness.fs.read_text(path))
   }
   if is_ok(parsed) {
@@ -146,7 +146,7 @@ pub fn read_toml(path: string, fallback = nil) {
  * @errors: []
  */
 pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
@@ -161,7 +161,7 @@ pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
  * @errors: []
  */
 pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions = {}) {
-  let opts = options ?? {}
+  const opts = options ?? {}
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
@@ -176,7 +176,7 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
  * @errors: []
  */
 pub fn append_line(path: string, line: string) {
-  let text = line ?? ""
+  const text = line ?? ""
   harness.fs.append(path, text + "\n")
 }
 
@@ -200,7 +200,7 @@ pub fn touch(path: string) {
  * @errors: []
  */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
-  let matches = harness.fs.glob(pattern, {base: root, long_running: options?.long_running ?? false})
+  const matches = harness.fs.glob(pattern, {base: root, long_running: options?.long_running ?? false})
   if options?.relative ?? false {
     return matches.map({ path -> relative_path(root, path) }).to_list()
   }
@@ -214,9 +214,9 @@ pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
  * @errors: []
  */
 pub fn relative_path(root: string, path: string) -> string {
-  let base_raw = __fs_norm(root)
-  let target = __fs_norm(path)
-  let base = if ends_with(base_raw, "/") {
+  const base_raw = __fs_norm(root)
+  const target = __fs_norm(path)
+  const base = if ends_with(base_raw, "/") {
     base_raw
   } else {
     base_raw + "/"
@@ -234,7 +234,7 @@ pub fn relative_path(root: string, path: string) -> string {
  * @errors: []
  */
 pub fn is_file(path: string) -> bool {
-  let info = try {
+  const info = try {
     harness.fs.stat(path)
   }
   if !is_ok(info) {
@@ -250,7 +250,7 @@ pub fn is_file(path: string) -> bool {
  * @errors: []
  */
 pub fn is_dir(path: string) -> bool {
-  let info = try {
+  const info = try {
     harness.fs.stat(path)
   }
   if !is_ok(info) {
@@ -266,7 +266,7 @@ pub fn is_dir(path: string) -> bool {
  * @errors: []
  */
 pub fn file_size(path: string) {
-  let info = try {
+  const info = try {
     harness.fs.stat(path)
   }
   if is_ok(info) {
@@ -292,7 +292,7 @@ pub fn file_size(path: string) {
  * @errors: []
  */
 fn __fs_snapshot_session(opts) -> string {
-  let session = opts?.session_id ?? agent_session_current_id()
+  const session = opts?.session_id ?? agent_session_current_id()
   if session == nil || session == "" {
     throw "fs_snapshot: no active agent session; pass an explicit `session_id`"
   }
@@ -314,8 +314,8 @@ fn __fs_snapshot_session(opts) -> string {
  * @example: let snap = fs_snapshot(["src/lib.rs"]); fs_restore(snap.snapshot_id)
  */
 pub fn fs_snapshot(paths: list<string> = [], opts = {}) -> dict {
-  let session = __fs_snapshot_session(opts)
-  let scope = opts?.snapshot_id ?? ("snapshot-" + uuid_v7())
+  const session = __fs_snapshot_session(opts)
+  const scope = opts?.snapshot_id ?? ("snapshot-" + uuid_v7())
   return hostlib_fs_snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
 }
 
@@ -330,7 +330,7 @@ pub fn fs_snapshot(paths: list<string> = [], opts = {}) -> dict {
  * @example: fs_restore(snap.snapshot_id)
  */
 pub fn fs_restore(snapshot_id: string, paths: list<string> = [], opts = {}) -> dict {
-  let session = __fs_snapshot_session(opts)
+  const session = __fs_snapshot_session(opts)
   return hostlib_fs_restore({session_id: session, snapshot_id: snapshot_id, paths: paths ?? []})
 }
 
@@ -344,8 +344,8 @@ pub fn fs_restore(snapshot_id: string, paths: list<string> = [], opts = {}) -> d
  * @example: for snap in fs_list_snapshots() { log(snap.snapshot_id) }
  */
 pub fn fs_list_snapshots(opts = {}) -> list<dict> {
-  let session = __fs_snapshot_session(opts)
-  let result = hostlib_fs_list_snapshots({session_id: session})
+  const session = __fs_snapshot_session(opts)
+  const result = hostlib_fs_list_snapshots({session_id: session})
   return result?.snapshots ?? []
 }
 
@@ -360,6 +360,6 @@ pub fn fs_list_snapshots(opts = {}) -> list<dict> {
  * @example: fs_drop_snapshot(snap.snapshot_id)
  */
 pub fn fs_drop_snapshot(snapshot_id: string, opts = {}) -> dict {
-  let session = __fs_snapshot_session(opts)
+  const session = __fs_snapshot_session(opts)
   return hostlib_fs_drop_snapshot({session_id: session, snapshot_id: snapshot_id})
 }

@@ -1,9 +1,9 @@
 import { parse, parser } from "std/cli/argparse"
 
 fn main(harness: Harness) {
-  let spec = parser({name: "demo", args: [{name: "json", kind: "switch", long: "--json"}]})
-  let r = parse(spec, ["--nope"])
-  let err = r.err
+  const spec = parser({name: "demo", args: [{name: "json", kind: "switch", long: "--json"}]})
+  const r = parse(spec, ["--nope"])
+  const err = r.err
   if err != nil {
     harness.stdio.println(err.kind)
     harness.stdio.println(err.arg)

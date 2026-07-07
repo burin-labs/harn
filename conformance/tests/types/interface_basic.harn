@@ -9,7 +9,7 @@ pipeline default() {
     y: int
   }
   // Create struct instances (dict-style construction)
-  let p = {x: 10, y: 20}
+  const p = {x: 10, y: 20}
   __io_println(p.x)
   __io_println(p.y)
   // Interfaces are declarative type contracts

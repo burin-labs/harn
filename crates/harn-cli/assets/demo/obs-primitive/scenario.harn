@@ -46,7 +46,7 @@ import {
 } from "std/observability"
 
 fn record_session_put() {
-  let handle = start_span("harn.session.put", {"harn.session.id": "sess_demo"})
+  const handle = start_span("harn.session.put", {"harn.session.id": "sess_demo"})
   counter("harn.session.put_total", 1, {"harn.session.op": "put"})
   histogram("harn.session.duration_ms", 12, {"harn.session.op": "put"})
   gauge("harn.session.bytes", 256, {"harn.session.op": "put"})
@@ -55,13 +55,13 @@ fn record_session_put() {
 }
 
 fn count_by_kind(events) {
-  var span_end = 0
-  var metric = 0
-  var log_count = 0
-  var other = 0
+  let span_end = 0
+  let metric = 0
+  let log_count = 0
+  let other = 0
   for event in events {
-    let payload = event?.payload ?? {}
-    let kind = payload?.kind ?? "other"
+    const payload = event?.payload ?? {}
+    const kind = payload?.kind ?? "other"
     if kind == "span_end" {
       span_end = span_end + 1
     } else if kind == "metric" {
@@ -81,9 +81,9 @@ fn main(_harness: Harness) {
   reset()
   configure({backend: backends().test()})
   record_session_put()
-  let events = events_take()
-  let counts = count_by_kind(events)
-  let req_id = request_id() ?? "<unbound>"
+  const events = events_take()
+  const counts = count_by_kind(events)
+  const req_id = request_id() ?? "<unbound>"
   __io_println("obs_primitive_receipt={")
   __io_println("  span_end_count: " + to_string_lossy(counts.span_end))
   __io_println("  metric_count: " + to_string_lossy(counts.metric))

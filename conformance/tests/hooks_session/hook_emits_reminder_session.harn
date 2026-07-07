@@ -12,8 +12,8 @@ pipeline main() {
   with_llm_script(
     [llm_text("done")],
     { ->
-      let result = agent_loop("session hook reminder", nil, {provider: "mock", session_id: "hook-reminder-session"})
-      let events = transcript_events_by_kind(result.transcript, "system_reminder")
+      const result = agent_loop("session hook reminder", nil, {provider: "mock", session_id: "hook-reminder-session"})
+      const events = transcript_events_by_kind(result.transcript, "system_reminder")
       __io_println(result.status)
       __io_println(len(events))
       __io_println(events[0].reminder.body)

@@ -1,5 +1,5 @@
 fn main(harness: Harness) {
-  let path = harness.fs.path_join(harness.fs.temp_dir(), "harn_e4_4_fs.txt")
+  const path = harness.fs.path_join(harness.fs.temp_dir(), "harn_e4_4_fs.txt")
   if harness.fs.exists(path) {
     harness.fs.delete(path)
   }

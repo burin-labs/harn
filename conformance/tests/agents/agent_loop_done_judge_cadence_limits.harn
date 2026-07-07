@@ -13,8 +13,8 @@ pipeline default() {
       llm_text("<user_response>healthy three</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      let stalled_session = "done-judge-stalled-" + uuid()
-      let stalled = agent_capture_events(
+      const stalled_session = "done-judge-stalled-" + uuid()
+      const stalled = agent_capture_events(
         stalled_session,
         fn() { return agent_loop(
           "Do not judge unless stalled.",
@@ -46,8 +46,8 @@ pipeline default() {
       llm_text("<user_response>capped four</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      let capped_session = "done-judge-cap-" + uuid()
-      let capped = agent_capture_events(
+      const capped_session = "done-judge-cap-" + uuid()
+      const capped = agent_capture_events(
         capped_session,
         fn() { return agent_loop(
           "Judge once at most.",
@@ -75,8 +75,8 @@ pipeline default() {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"closure accepted on turn two\"}"),
     ],
     { ->
-      let closure_session = "done-judge-closure-" + uuid()
-      let closure = agent_capture_events(
+      const closure_session = "done-judge-closure-" + uuid()
+      const closure = agent_capture_events(
         closure_session,
         fn() { return agent_loop(
           "Judge when the loop-state predicate says so.",

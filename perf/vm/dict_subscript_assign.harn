@@ -4,7 +4,7 @@
  * iteration grows a dict by setting a single key.
  */
 pipeline default(task) {
-  let keys = [
+  const keys = [
     "alpha",
     "beta",
     "gamma",
@@ -18,10 +18,10 @@ pipeline default(task) {
     "lambda",
     "mu",
   ]
-  var iteration = 0
-  var total = 0
+  let iteration = 0
+  let total = 0
   while iteration < 4000 {
-    var out = {}
+    let out = {}
     for key in keys {
       out[key] = iteration
     }

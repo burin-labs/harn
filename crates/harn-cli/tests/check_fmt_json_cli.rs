@@ -78,7 +78,7 @@ fn check_json_reports_success_and_diagnostics() {
     assert_eq!(data["summary"]["ok"], 1);
     assert_eq!(data["files"][0]["status"], "ok");
 
-    std::fs::write(&script, "let p = Point { x: 3, y: 4 }\n").expect("rewrite script");
+    std::fs::write(&script, "const p = Point { x: 3, y: 4 }\n").expect("rewrite script");
     let failed = Command::new(binary_path())
         .args(["check", "--json", script.to_str().unwrap()])
         .output()
@@ -110,7 +110,7 @@ fn check_reports_bytecode_compile_errors_not_just_type_errors() {
     let script = temp.path().join("main.harn");
     std::fs::write(
         &script,
-        "pipeline main(task) {\n  let xs = [[1, 2]]\n  return match xs {\n    [[a, b]] -> { a + b }\n    _ -> { 0 }\n  }\n}\n",
+        "pipeline main(task) {\n  const xs = [[1, 2]]\n  return match xs {\n    [[a, b]] -> { a + b }\n    _ -> { 0 }\n  }\n}\n",
     )
     .expect("write script");
 

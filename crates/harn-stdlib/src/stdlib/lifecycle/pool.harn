@@ -16,7 +16,7 @@
  *   import { Backpressure, pool_create, pool_get, pool_list, pool_wait, fifo } from "std/lifecycle/pool"
  */
 fn __queue_strategy(kind, options = nil) {
-  let base = {_type: "queue_strategy", kind: kind}
+  const base = {_type: "queue_strategy", kind: kind}
   if options == nil {
     return base
   }
@@ -86,7 +86,7 @@ pub fn QueueStrategy() {
 }
 
 fn __backpressure(kind, options = nil) {
-  let base = {_type: "backpressure", kind: kind}
+  const base = {_type: "backpressure", kind: kind}
   if options == nil {
     return base
   }
@@ -150,8 +150,8 @@ fn __pool_attach_methods(snapshot) {
   if type_of(snapshot) != "dict" {
     return snapshot
   }
-  let pool_id = snapshot.id
-  let methods = {
+  const pool_id = snapshot.id
+  const methods = {
     _namespace: "pool",
     submit: { closure, options = nil -> __pool_submit(pool_id, closure, options) },
     size: { -> __pool_size(pool_id) },
@@ -181,7 +181,7 @@ pub fn pool_create(options = nil) {
  * @example: pool_get("review")
  */
 pub fn pool_get(name_or_id) {
-  let snapshot = __pool_get(name_or_id)
+  const snapshot = __pool_get(name_or_id)
   if snapshot == nil {
     return nil
   }
@@ -196,8 +196,8 @@ pub fn pool_get(name_or_id) {
  * @api_stability: experimental
  */
 pub fn pool_list() {
-  let snapshots = __pool_list()
-  var out = []
+  const snapshots = __pool_list()
+  let out = []
   for snapshot in snapshots {
     out = out.push(__pool_attach_methods(snapshot))
   }

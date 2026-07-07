@@ -1,5 +1,5 @@
 pipeline main() {
-  let flow = workflow_graph(
+  const flow = workflow_graph(
     {
       name: "trigger_predicate_observability",
       entry: "gate",
@@ -11,7 +11,7 @@ pipeline main() {
       edges: [{from: "gate", to: "act", branch: "true"}, {from: "gate", to: "skip", branch: "false"}],
     },
   )
-  let trigger = {
+  const trigger = {
     id: "trigger_evt_conformance",
     provider: "cron",
     kind: "tick",
@@ -30,7 +30,7 @@ pipeline main() {
     },
     signature_status: {state: "unsigned"},
   }
-  let result = workflow_execute(
+  const result = workflow_execute(
     "Handle a scheduled review",
     flow,
     [artifact({kind: "plan", text: "go inspect the repo"})],
@@ -40,13 +40,13 @@ pipeline main() {
       trigger_event: trigger,
     },
   )
-  let loaded = run_record_load(result?.path)
-  let nodes = loaded?.observability?.action_graph_nodes ?? []
-  let edges = loaded?.observability?.action_graph_edges ?? []
-  var trigger_trace = nil
-  var predicate_trace = nil
-  var saw_trigger_dispatch = false
-  var saw_predicate_gate = false
+  const loaded = run_record_load(result?.path)
+  const nodes = loaded?.observability?.action_graph_nodes ?? []
+  const edges = loaded?.observability?.action_graph_edges ?? []
+  let trigger_trace = nil
+  let predicate_trace = nil
+  let saw_trigger_dispatch = false
+  let saw_predicate_gate = false
   for node in nodes {
     if node?.kind == "trigger" {
       trigger_trace = node?.trace_id

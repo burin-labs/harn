@@ -14,8 +14,8 @@ import {
 import { assert_throws } from "std/testing"
 
 fn gc_transcript() {
-  var stale = "src/old.rs\n"
-  var rooted = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
+  let stale = "src/old.rs\n"
+  let rooted = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
   for i in range(0, 80) {
     stale = stale + "old stale line " + to_string(i) + "\n"
     rooted = rooted + "live rooted line " + to_string(i) + "\n"
@@ -45,23 +45,23 @@ pipeline test() {
   // Taxonomy is data; role_hint lanes mirror Burin (binding vs evidence).
   assert(contains(pin_kinds(), "goal"), "goal kind registered")
   assert(contains(pin_kinds(), "no_compact"), "no_compact kind registered")
-  let goal_pin = pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
+  const goal_pin = pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
   assert(goal_pin.kind == "goal" && goal_pin.role_hint == "system", "goal rides system lane")
-  let artifact = pin("artifact_ref", "src/old.rs", {})
+  const artifact = pin("artifact_ref", "src/old.rs", {})
   assert(artifact.role_hint == "developer", "artifact_ref rides developer lane")
   assert_throws({ -> return pin("bogus", "x") }, "unknown pin kind rejected")
   // unpin is a pure removal over a caller-held collection.
-  let pins = [goal_pin, artifact]
+  const pins = [goal_pin, artifact]
   assert(len(unpin(pins, goal_pin.id)) == 1, "unpin removes by id")
   assert(len(pin_reachability_roots(pins)) == 2, "roots collected from content")
   // `[no-compact]` ingestion adapter.
-  let recognized = recognize_no_compact("## Session goal [no-compact]\nObjective: X")
+  const recognized = recognize_no_compact("## Session goal [no-compact]\nObjective: X")
   assert(recognized != nil && recognized.kind == "no_compact", "marker recognized as pin")
   assert(!recognized.content.contains("[no-compact]"), "marker stripped from content")
   assert(recognize_no_compact("## plain heading") == nil, "no marker yields nil")
   // Pins survive a FORCED compaction by construction: the pin reminder carries
   // preserve_on_compact and remains after truncating compaction drops turns.
-  let base = transcript_from_messages(
+  const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
       {role: "assistant", content: "two"},
@@ -69,19 +69,19 @@ pipeline test() {
       {role: "assistant", content: "four"},
     ],
   )
-  let pinned = transcript.inject_reminder(base, pin_reminder(goal_pin)).transcript
-  let compacted = transcript_compact(pinned, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  let survivors = transcript_events_by_kind(compacted, "system_reminder")
+  const pinned = transcript.inject_reminder(base, pin_reminder(goal_pin)).transcript
+  const compacted = transcript_compact(pinned, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const survivors = transcript_events_by_kind(compacted, "system_reminder")
   assert(len(survivors) == 1, "pin reminder survived compaction")
   assert(survivors[0].reminder.body == goal_pin.content, "pinned content preserved verbatim")
   assert(survivors[0].reminder.preserve_on_compact, "preserve_on_compact carried")
   assert(contains(survivors[0].reminder.tags, "pin"), "pin tag carried")
   // Pins double as reachability-GC roots: a stale tool result referencing a
   // pinned path is kept instead of reclaimed.
-  let transcript_value = gc_transcript()
-  let opts = {min_chars: 100, policy: "reachability_gc", root_window: 1}
-  let without_pin = transcript_project(transcript_value, opts)
-  let with_pin = transcript_project(transcript_value, with_pin_roots(opts, [pin("artifact_ref", "src/old.rs")]))
+  const transcript_value = gc_transcript()
+  const opts = {min_chars: 100, policy: "reachability_gc", root_window: 1}
+  const without_pin = transcript_project(transcript_value, opts)
+  const with_pin = transcript_project(transcript_value, with_pin_roots(opts, [pin("artifact_ref", "src/old.rs")]))
   assert(
     without_pin.redacted_count > with_pin.redacted_count,
     "pin root keeps referenced stale result alive",

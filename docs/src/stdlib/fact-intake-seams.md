@@ -32,7 +32,7 @@ the build is clean and `0` when it isn't. Return `nil` when this turn produced
 no verification evidence at all.
 
 ```harn,ignore
-let opts = {...base, stall_diagnostics: {
+const opts = {...base, stall_diagnostics: {
   progress_signal: { payload -> host_passing_test_count() },
 }}
 ```
@@ -76,7 +76,7 @@ Set `remediation_delivered` in `stall_diagnostics` to a closure that returns
 whether the last fix Harn asked for was actually applied on your side.
 
 ```harn,ignore
-let opts = {...base, stall_diagnostics: {
+const opts = {...base, stall_diagnostics: {
   remediation_delivered: { info -> host_last_patch_applied(info.session_id) },
 }}
 ```
@@ -110,7 +110,7 @@ touches the loop directly. You call it and act on the verdict.
 ```harn,ignore
 import { governor_pace_decision } from "std/agent/governors"
 
-let decision = governor_pace_decision(
+const decision = governor_pace_decision(
   {extend_max: 6, pace_check_max: 2},
   {
     armed_budget_ms: 60000,

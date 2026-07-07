@@ -7,7 +7,7 @@ fn test_invalid_binary_op_literal_bool() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-let x = true + 1
+const x = true + 1
 log(x)
 }
 ",
@@ -23,7 +23,7 @@ fn test_invalid_binary_op_literal_nil() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-let x = nil - 5
+const x = nil - 5
 log(x)
 }
 ",
@@ -39,8 +39,8 @@ fn test_no_invalid_binary_op_for_valid_types() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-let x = 1 + 2
-let y = "a" + "b"
+const x = 1 + 2
+const y = "a" + "b"
 log(x)
 log(y)
 }
@@ -54,7 +54,7 @@ log(y)
 
 #[test]
 fn test_fix_invalid_binop_string_plus_bool() {
-    let source = "pipeline default(task) {\n  let x = \"hello\" + true\n  log(x)\n}";
+    let source = "pipeline default(task) {\n  const x = \"hello\" + true\n  log(x)\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "invalid-binary-op-literal");
     assert!(
@@ -70,7 +70,7 @@ fn test_fix_invalid_binop_string_plus_bool() {
 
 #[test]
 fn test_fix_invalid_binop_no_fix_for_non_string() {
-    let source = "pipeline default(task) {\n  let x = true + 1\n  log(x)\n}";
+    let source = "pipeline default(task) {\n  const x = true + 1\n  log(x)\n}";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "invalid-binary-op-literal");
     assert!(

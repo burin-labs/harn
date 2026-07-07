@@ -65,7 +65,7 @@ of failures.
 ### parallel each as stream
 
 ```harn
-let results = parallel each list with { max_concurrent: 4 } { item ->
+const results = parallel each list with { max_concurrent: 4 } { item ->
   // body for each item
 } as stream
 
@@ -111,8 +111,8 @@ All parallel forms accept `with { max_concurrent: N }` before the body:
 
 ```harn
 fn fetch_page(cursor) { cursor }
-let cursors = ["a", "b", "c"]
-let pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
+const cursors = ["a", "b", "c"]
+const pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
   fetch_page(cursor)
 }
 ```
@@ -143,7 +143,7 @@ inside an `if` block fires when control leaves that `if`. A `defer` inside a
 ```harn
 fn open(path) { path }
 fn close(f) { log("closing ${f}") }
-let f = open("data.txt")
+const f = open("data.txt")
 defer { close(f) }
 // ... use f ...
 // close(f) runs automatically on scope exit
@@ -152,7 +152,7 @@ defer { close(f) }
 ### owned\<T\> and drop()
 
 ```harn
-let ch: owned<channel> = channel("log", 64)
+const ch: owned<channel> = channel("log", 64)
 // implicit: defer { drop(ch) } registered at this `let`
 ```
 
@@ -176,7 +176,7 @@ return type as `owned<T>`:
 
 ```harn
 fn open_log() -> owned<channel> {
-  let ch: owned<channel> = channel("log", 64)
+  const ch: owned<channel> = channel("log", 64)
   return ch                              // ownership transfers to caller
 }
 ```
@@ -184,12 +184,12 @@ fn open_log() -> owned<channel> {
 ### spawn/await/cancel
 
 ```harn
-let handle = spawn {
+const handle = spawn {
   // async body
 }
-let result = await(handle)
+const result = await(handle)
 cancel(handle)
-let outcome = cancel_graceful(handle, 2s)
+const outcome = cancel_graceful(handle, 2s)
 ```
 
 `spawn` launches an async task and returns a `taskHandle`.
@@ -210,7 +210,7 @@ When a VM exits, any un-awaited spawned tasks it owns are cancelled and aborted.
 ```harn
 import "std/signal"
 
-let registration = on_interrupt({ ->
+const registration = on_interrupt({ ->
   agent_session_close(session, {status: "interrupted"})
 }, {signals: ["SIGINT", "SIGTERM"], once: true})
 
@@ -262,9 +262,9 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-let lock = sync_mutex_acquire("state:customer-42", 250ms)
-let slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
-let gate = sync_gate_acquire("workflow-runner", 8, 5s)
+const lock = sync_mutex_acquire("state:customer-42", 250ms)
+const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
+const gate = sync_gate_acquire("workflow-runner", 8, 5s)
 ```
 
 - `sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
@@ -403,12 +403,12 @@ host approval payloads and permission transcript events carry that receipt for
 audit and replay.
 
 ```harn
-let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
 
 parallel 10 { i ->
-  var updated = false
+  let updated = false
   while !updated {
-    let snap = shared_snapshot(budget)
+    const snap = shared_snapshot(budget)
     updated = shared_cas(budget, snap, snap.value + 1)
   }
 }
@@ -458,8 +458,8 @@ for cells and maps.
 Use named synchronization around multi-step updates:
 
 ```harn
-let memo = shared_map({scope: "workflow_run", key: "memo"})
-let lock = sync_mutex_acquire("memo:customer-42", 250ms)
+const memo = shared_map({scope: "workflow_run", key: "memo"})
+const lock = sync_mutex_acquire("memo:customer-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
 try {
   shared_map_set(memo, "customer-42", "summary")
@@ -475,11 +475,11 @@ tasks and long-lived workers. They provide targeted messages without using
 transcript mutation as the transport.
 
 ```harn
-let inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
 spawn {
   mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
 }
-let msg = mailbox_receive(inbox)
+const msg = mailbox_receive(inbox)
 ```
 
 - `mailbox_open(name_or_options, capacity?)` opens or creates an inbox.
@@ -505,7 +505,7 @@ fn poll_connector(name) {
   name
 }
 
-let sup = supervisor_start({
+const sup = supervisor_start({
   name: "ops",
   strategy: "one_for_one",
   children: [
@@ -527,9 +527,9 @@ let sup = supervisor_start({
   ],
 })
 
-let _state = supervisor_state(sup)
+const _state = supervisor_state(sup)
 
-let _events = supervisor_events(sup)
+const _events = supervisor_events(sup)
 supervisor_stop(sup, 2s)
 ```
 
@@ -558,9 +558,9 @@ active EventLog topic `supervisor.lifecycle` when an EventLog is installed.
 Channels provide typed message-passing between concurrent tasks.
 
 ```harn
-let ch = channel("name", 10)   // buffered channel with capacity 10
+const ch = channel("name", 10)   // buffered channel with capacity 10
 send(ch, "hello")               // send a value, returns true
-let msg = receive(ch)           // blocking receive
+const msg = receive(ch)           // blocking receive
 ```
 
 #### Channel iteration
@@ -569,7 +569,7 @@ A `for`-`in` loop over a channel asynchronously receives values until the
 channel is closed and drained:
 
 ```harn
-let ch = channel("stream", 10)
+const ch = channel("stream", 10)
 spawn {
   send(ch, "a")
   send(ch, "b")
@@ -618,7 +618,7 @@ corresponding body. Only one case fires per select.
 
 ```harn
 fn handle(msg) { log(msg) }
-let ch1 = channel("events")
+const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   timeout 5s {
@@ -633,7 +633,7 @@ If no channel produces a value within the duration, the timeout body runs.
 
 ```harn
 fn handle(msg) { log(msg) }
-let ch1 = channel("events")
+const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   default {
@@ -659,7 +659,7 @@ producer is declared with the contextual `gen fn` modifier and returns
 
 ```harn
 gen fn numbers(start: int, end: int) -> Stream<int> {
-  var n = start
+  let n = start
   while n < end {
     emit n
     n = n + 1
@@ -677,7 +677,7 @@ Streams are single-pass. They can be consumed directly in `for` loops:
 
 ```harn
 gen fn numbers(start: int, end: int) -> Stream<int> {
-  var n = start
+  let n = start
   while n < end {
     emit n
     n = n + 1

@@ -635,9 +635,9 @@ fn build_run_script(
     let template_path_lit = json_string_literal(&template_path.to_string_lossy());
     let bindings_load = if let Some(path) = bindings_path {
         let path_lit = json_string_literal(path);
-        format!("    let bindings = json_parse(read_file({path_lit}))\n")
+        format!("    const bindings = json_parse(read_file({path_lit}))\n")
     } else {
-        "    let bindings = {}\n".to_string()
+        "    const bindings = {}\n".to_string()
     };
     let fleet_items: Vec<String> = fleet
         .iter()
@@ -659,12 +659,12 @@ fn build_run_script(
     format!(
         "pipeline main() {{\n\
 {bindings_load}\
-    let fleet = {fleet_list}\n\
+    const fleet = {fleet_list}\n\
     for entry in fleet {{\n\
-        let pushed = __push_llm_render_context(entry.provider, entry.model)\n\
-        let rendered = render({template_path_lit}, bindings)\n\
+        const pushed = __push_llm_render_context(entry.provider, entry.model)\n\
+        const rendered = render({template_path_lit}, bindings)\n\
         try {{\n\
-            let resp = llm_call(rendered, nil, {{\n\
+            const resp = llm_call(rendered, nil, {{\n\
                 provider: entry.provider,\n\
                 model: entry.model,\n\
                 max_tokens: {max_tokens}\n\
@@ -786,12 +786,12 @@ async fn execute_judge(
 
     let script = format!(
         "pipeline main() {{\n\
-    let entries = json_parse({entries_lit})\n\
-    let prompt = render_string({template_lit}, {{\n\
+    const entries = json_parse({entries_lit})\n\
+    const prompt = render_string({template_lit}, {{\n\
         template_source: {source_lit},\n\
         entries: entries\n\
     }})\n\
-    let verdict = llm_call(prompt, nil, {{\n\
+    const verdict = llm_call(prompt, nil, {{\n\
         provider: {provider_lit},\n\
         model: {model_lit},\n\
         max_tokens: {max_tokens}\n\
