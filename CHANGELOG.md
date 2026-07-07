@@ -9,6 +9,88 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.22
+
+### Added
+
+- **Agent transcript normalizers now expose schema-backed diagnostics (#4211).**
+  `std/agent/transcript` can return normalized rows with structured validation
+  issues for malformed records and publishes reusable row/report schemas for
+  downstream eval and analyzer code.
+- **Harn-served MCP scripts can now declare server metadata (#4219).** The new
+  `mcp_server_metadata({name?, version?, instructions?})` builtin lets
+  script-driven `harn serve mcp` endpoints advertise stable identity and
+  client instructions without custom helper servers.
+- **`harn codemod` rules can now rewrite a single sub-node of a match.** A raw
+  `query` atomic matcher (used verbatim, must bind `@__match`) plus a `fixTarget`
+  field splice the `fix` over only a named capture's span, leaving the rest of the
+  node byte-for-byte intact — closing the data-loss gap where a whole-match
+  `pattern`+`fix` dropped un-captured parts (e.g. a binding's `: Type` annotation).
+- **Sandbox write roots and portable document PDF rendering.** `harn run` and
+  `harn time run` now accept repeatable `--write-root` / `--writable-root`
+  flags for sandboxed writes to declared external output folders, and
+  `std/document` adds dependency-free text, HTML, and Markdown-to-PDF helpers
+  backed by Harn's built-in `document_render_pdf` primitive.
+- `std/testing` gained `assert_snapshot(name, actual, options?)`, a golden-file
+  snapshot assertion in the style of Jest's `toMatchSnapshot` / insta. Goldens
+  live at `__snapshots__/<name>.harn.snap` next to the test by default (override
+  with `options.dir`); running with `HARN_UPDATE_SNAPSHOTS=1` writes them and
+  drift fails with a unified diff. In CI (`CI`/`HARN_CI` set) the
+  `HARN_UPDATE_SNAPSHOTS` trigger is ignored — the primitive compares only and
+  never writes, so a leaked update flag can't turn the gate into a silent no-op.
+  The explicit `options.update = true` seam stays honored (deliberate in-source
+  code, used to drive the write path in tests). `options.redact` accepts
+  `{pattern, replacement?}` regex scrubs applied before write/compare.
+
+### Changed
+
+- **LoRA serving contracts are now machine-readable (#4214).** `harn models
+  lora plan --json`, `harn models lora manifest --json`, and `harn models lora
+  inspect --json` expose `serving.serving_requirements` entries for parser
+  ownership, vLLM tool-parser flags, chat-template ids, manifest metadata, and
+  promotion gates.
+- Promote the settled re-architecture orchestration stdlib surfaces from
+  `@api_stability: experimental` to `stable`: `std/agent/{pins,goal,lanes,overlays,host_tools}`
+  (including `agent_edit_tools`) and `std/workflow/repair`. The governor / stall /
+  judge / agent-loop-options surfaces stay experimental while #3943 (editless-stop
+  eval convergence) is in flight.
+- **Connector secrets and inline runner ergonomics.** `harn run` now installs
+  the configured secret provider chain for package-scoped scripts by default,
+  connector OAuth secrets share canonical `namespace/name` parsing and exported
+  token-name constants, and `harn run -e` accepts complete Harn programs with
+  pipeline entrypoints instead of always wrapping inline source as a snippet.
+- **Workspace-local scratch directories.** `harness.fs.workspace_temp_dir()` and
+  `harness.fs.mkdtemp_in_workspace(prefix?)` let sandboxed workflows create
+  intermediate files inside the active workspace instead of escaping to host
+  temp paths.
+- **String scanning ergonomics.** `string.rfind(substr)` is now a typed alias
+  for `string.last_index_of(substr)`.
+- **`release_ship.sh` now refuses to ship unfolded changelog fragments.** A new
+  `require_no_unfolded_fragments` preflight (run first in every release mode,
+  before the audit) fails loud with the exact remediation if
+  `changelog.d/<id>.<category>.md` fragments remain, instead of silently cutting
+  a release whose notes omit them. Closes the gap where invoking `release_ship`
+  directly (bypassing the `release_harn` fold) produced empty release notes.
+
+### Fixed
+
+- Register `harn models batch ... --json` commands in the `harn --json-schemas`
+  catalog.
+- **Agent loop hard-stop recovery receipts (#4231).** Repeated-tool hard stops now get
+  one bounded recovery turn with a typed `harn.agent_loop_recovery_receipt.v1`
+  checkpoint, and final-wrapup tool-call leaks are reported instead of being silent.
+- **OpenAI-compatible text-tool wrapper recovery (#4235).** Harn now recovers
+  complete text-tool calls when a provider returns a generic `tool_call`
+  wrapper with a malformed provider-boundary close suffix.
+- Dependency package loads no longer leak the thread-local source dir, so
+  top-level `@asset`/relative prompt resolution anchors on the project root even
+  when `[dependencies]` are present.
+
+### Security
+
+- Harden scoped content writes so parent directory creation carries the final
+  parent file descriptor into the write path and rejects excessive path depth.
+
 ## v0.9.21
 
 ### Added
