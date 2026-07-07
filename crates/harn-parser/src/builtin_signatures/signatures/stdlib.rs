@@ -474,6 +474,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple("env", &[Param::new("name", TY_STRING)], TY_STRING_OR_NIL),
     BuiltinSignature::simple("file_exists", &[Param::new("path", TY_STRING)], TY_BOOL),
     BuiltinSignature::simple(
+        "path_status",
+        &[
+            Param::new("path", TY_STRING),
+            Param::optional("access", TY_STRING),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "flow_evaluate_invariants",
         &[
             Param::new("source", TY_STRING),

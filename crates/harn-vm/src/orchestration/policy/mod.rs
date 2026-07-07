@@ -176,7 +176,7 @@ fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &st
     }
     // Capability subsumption: a stronger read grant implies the weaker
     // observations it already exposes. An existence/metadata probe
-    // (`workspace.exists`, used by `file_exists`/`stat`) reveals strictly less
+    // (`workspace.exists`, used by `file_exists`/`path_status`/`stat`) reveals strictly less
     // than reading file contents (`workspace.read_text`) or listing a directory
     // (`workspace.list`) — both of which already disclose whether a path
     // exists. A policy that grants read/list but withholds the existence probe
@@ -337,7 +337,9 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         {
             return reject_policy(format!("builtin '{name}' exceeds workspace.list ceiling"));
         }
-        "file_exists" | "stat" if !policy_allows_capability(&policy, "workspace", "exists") => {
+        "file_exists" | "path_status" | "stat"
+            if !policy_allows_capability(&policy, "workspace", "exists") =>
+        {
             return reject_policy(format!("builtin '{name}' exceeds workspace.exists ceiling"));
         }
         "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "copy_file" | "move_file"
@@ -949,7 +951,8 @@ mod approval_policy_tests {
     fn read_text_subsumes_exists_probe() {
         // A narrowed worker policy that grants read_text/list (the shape derived
         // from look/edit/scaffold tool annotations) but never declares the
-        // weaker `workspace.exists` op must still permit `file_exists`/`stat`:
+        // weaker `workspace.exists` op must still permit `file_exists`,
+        // `path_status`, and `stat`:
         // existence is strictly less information than reading the file. Without
         // subsumption this silently wedged every parallel sub-agent (look denied
         // -> zero progress -> zero edits).
@@ -960,6 +963,7 @@ mod approval_policy_tests {
             "apply_edit",
         ]));
         assert!(enforce_current_policy_for_builtin("file_exists", &[]).is_ok());
+        assert!(enforce_current_policy_for_builtin("path_status", &[]).is_ok());
         assert!(enforce_current_policy_for_builtin("stat", &[]).is_ok());
         pop_execution_policy();
     }
@@ -969,6 +973,7 @@ mod approval_policy_tests {
         // Listing a directory already reveals which entries exist.
         push_execution_policy(workspace_caps(&["list"]));
         assert!(enforce_current_policy_for_builtin("file_exists", &[]).is_ok());
+        assert!(enforce_current_policy_for_builtin("path_status", &[]).is_ok());
         pop_execution_policy();
     }
 
@@ -978,6 +983,7 @@ mod approval_policy_tests {
         // genuinely above the ceiling and must still be rejected.
         push_execution_policy(workspace_caps(&["write_text", "apply_edit"]));
         assert!(enforce_current_policy_for_builtin("file_exists", &[]).is_err());
+        assert!(enforce_current_policy_for_builtin("path_status", &[]).is_err());
         pop_execution_policy();
     }
 

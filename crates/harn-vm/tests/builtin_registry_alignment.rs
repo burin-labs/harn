@@ -268,7 +268,7 @@ fn migrated_stdlib_modules_publish_runtime_metadata() {
     let metadata = harn_vm::stdlib::stdlib_builtin_metadata();
     let migrated_categories = [
         ("concurrency", 53usize),
-        ("fs", 22usize),
+        ("fs", 23usize),
         ("io", 35usize),
         ("tui", 3usize),
     ];

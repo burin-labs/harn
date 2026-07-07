@@ -35,11 +35,24 @@ fn ambient_fs_mkdtemp_inside_main_rewrites_to_harness_fs() {
 }
 
 #[test]
+fn ambient_fs_path_status_inside_main_rewrites_to_harness_fs_status() {
+    let source = "fn main(harness: Harness) {\n  let status = path_status(\"path.txt\")\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(count_rule(&diags, "ambient-fs-builtin"), 1);
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("harness.fs.status(\"path.txt\")"),
+        "expected rewrite to harness.fs.status, got: {fixed}"
+    );
+}
+
+#[test]
 fn ambient_fs_lints_full_surface_inside_main() {
     let source = r#"fn main(harness: Harness) {
   read_file("a")
   write_file("b", "x")
   file_exists("c")
+  path_status("c")
   delete_file("d")
   append_file("e", "y")
   list_dir("f")
@@ -57,7 +70,7 @@ fn ambient_fs_lints_full_surface_inside_main() {
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-fs-builtin"),
-        15,
+        16,
         "expected one lint per ambient fs call, got: {diags:?}"
     );
 }

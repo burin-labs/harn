@@ -1,0 +1,47 @@
+/**
+ * Structured path visibility keeps missing, out-of-scope, and read-only
+ * denials distinguishable under a restricted worktree policy.
+ */
+pipeline default() {
+  const base = path_join(
+    harness.fs.temp_dir(),
+    "harn_fs_path_status_scope_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  const root = path_join(base, "workspace")
+  const readonly = path_join(base, "readonly")
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(readonly)
+  const in_path = path_join(root, "in.txt")
+  const out_path = path_join(base, "outside.txt")
+  const readonly_path = path_join(readonly, "read-only.txt")
+  harness.fs.write_text(in_path, "ok\n")
+  harness.fs.write_text(out_path, "secret\n")
+  harness.fs.write_text(readonly_path, "readonly\n")
+  with_execution_policy(
+    {sandbox_profile: "worktree", workspace_roots: [root], read_only_roots: [readonly]},
+    { ->
+      const in_status = harness.fs.status(in_path)
+      __io_println(in_status.status)
+      __io_println(in_status.visible)
+      __io_println(in_status.exists)
+      const missing_status = harness.fs.status(path_join(root, "missing.txt"))
+      __io_println(missing_status.status)
+      __io_println(missing_status.visible)
+      __io_println(missing_status.exists)
+      const out_status = harness.fs.status(out_path)
+      __io_println(out_status.status)
+      __io_println(out_status.visible)
+      __io_println(out_status.exists == nil)
+      __io_println(contains(out_status.message, "outside workspace_roots"))
+      const readonly_read = harness.fs.status(readonly_path)
+      __io_println(readonly_read.status)
+      __io_println(readonly_read.exists)
+      const readonly_write = harness.fs.status(readonly_path, "write")
+      __io_println(readonly_write.status)
+      __io_println(readonly_write.visible)
+      __io_println(readonly_write.exists == nil)
+      __io_println(readonly_write.read_only)
+    },
+  )
+  harness.fs.delete(base)
+}

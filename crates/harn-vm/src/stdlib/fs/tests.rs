@@ -32,6 +32,15 @@ fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
     )
 }
 
+fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
+    match value {
+        VmValue::Dict(fields) => fields
+            .get(key)
+            .unwrap_or_else(|| panic!("missing field {key}")),
+        other => panic!("expected dict, got {other:?}"),
+    }
+}
+
 fn drain_feedback(session_id: &str, handle_id: &str) -> serde_json::Value {
     const FEEDBACK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -112,6 +121,99 @@ fn file_exists_outside_sandbox_reads_as_absent_not_error() {
     );
 
     pop_execution_policy();
+}
+
+#[test]
+fn path_status_distinguishes_missing_scope_and_read_only_denials() {
+    use crate::orchestration::{
+        clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
+        CapabilityPolicy, SandboxProfile,
+    };
+
+    clear_execution_policy_stacks();
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let readonly = tempfile::tempdir().unwrap();
+    let inside_file = workspace.path().join("inside.txt");
+    let inside_dir = workspace.path().join("dir");
+    let outside_file = outside.path().join("present.txt");
+    let readonly_file = readonly.path().join("read-only.txt");
+    std::fs::write(&inside_file, "ok").unwrap();
+    std::fs::create_dir(&inside_dir).unwrap();
+    std::fs::write(&outside_file, "secret").unwrap();
+    std::fs::write(&readonly_file, "readonly").unwrap();
+
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        read_only_roots: vec![readonly.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    let mut vm = vm();
+    let file_status = call(
+        &mut vm,
+        "path_status",
+        vec![s(&inside_file.to_string_lossy())],
+    )
+    .unwrap();
+    assert_eq!(field(&file_status, "status").display(), "present_file");
+    assert_eq!(field(&file_status, "kind").display(), "file");
+    assert!(matches!(field(&file_status, "exists"), VmValue::Bool(true)));
+
+    let dir_status = call(
+        &mut vm,
+        "path_status",
+        vec![s(&inside_dir.to_string_lossy())],
+    )
+    .unwrap();
+    assert_eq!(field(&dir_status, "status").display(), "present_dir");
+    assert_eq!(field(&dir_status, "kind").display(), "dir");
+
+    let missing_status = call(
+        &mut vm,
+        "path_status",
+        vec![s(&workspace.path().join("missing.txt").to_string_lossy())],
+    )
+    .unwrap();
+    assert_eq!(field(&missing_status, "status").display(), "missing");
+    assert!(matches!(
+        field(&missing_status, "exists"),
+        VmValue::Bool(false)
+    ));
+
+    let outside_status = call(
+        &mut vm,
+        "path_status",
+        vec![s(&outside_file.to_string_lossy())],
+    )
+    .unwrap();
+    assert_eq!(field(&outside_status, "status").display(), "scope_denied");
+    assert!(matches!(
+        field(&outside_status, "visible"),
+        VmValue::Bool(false)
+    ));
+    assert!(field(&outside_status, "message")
+        .display()
+        .contains("outside workspace_roots"));
+
+    let readonly_status = call(
+        &mut vm,
+        "path_status",
+        vec![s(&readonly_file.to_string_lossy()), s("write")],
+    )
+    .unwrap();
+    assert_eq!(
+        field(&readonly_status, "status").display(),
+        "read_only_denied"
+    );
+    assert!(matches!(
+        field(&readonly_status, "read_only"),
+        VmValue::Bool(true)
+    ));
+
+    pop_execution_policy();
+    clear_execution_policy_stacks();
 }
 
 #[test]
