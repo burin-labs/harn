@@ -12,6 +12,7 @@ use crate::env_guard::ScopedEnvVar;
 mod export;
 mod manifest;
 mod preflight;
+mod train;
 
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
@@ -28,6 +29,7 @@ pub(crate) async fn run(args: ModelsLoraArgs) {
         ModelsLoraCommand::Manifest(args) => Box::pin(manifest::manifest(&args)).await,
         ModelsLoraCommand::Plan(args) => Box::pin(plan(&args)).await,
         ModelsLoraCommand::Preflight(args) => Box::pin(preflight::preflight(&args)).await,
+        ModelsLoraCommand::Train(args) => Box::pin(train::train(&args)).await,
     };
     if exit_code != 0 {
         std::process::exit(exit_code);
@@ -513,6 +515,16 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         .as_ref()
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
         .is_some();
+    let serving = serving_recipe(
+        &resolved.id,
+        &provider,
+        &request_model,
+        &adapter_name,
+        &decision.effective,
+        dataset_format,
+        provider_supports_lora_launch,
+        &lora_module_value_format,
+    );
     let launch_command = if provider_supports_lora_launch {
         let mut command = vec![
             "harn".to_string(),
@@ -592,6 +604,49 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         template.name.clone(),
     ];
     export_command.extend(precision_target_metadata(&precision));
+    let mut train_command = vec![
+        "harn".to_string(),
+        "models".to_string(),
+        "lora".to_string(),
+        "train".to_string(),
+        "--base".to_string(),
+        args.base_model.clone(),
+        "--provider".to_string(),
+        provider.clone(),
+        "--tool-format".to_string(),
+        decision.effective.clone(),
+        "--dataset".to_string(),
+        "ADAPTER_DATASET.jsonl".to_string(),
+        "--export-manifest".to_string(),
+        "ADAPTER_DATASET.manifest.json".to_string(),
+        "--output-dir".to_string(),
+        "ADAPTER_OUTPUT_DIR".to_string(),
+        "--receipt-out".to_string(),
+        "ADAPTER_OUTPUT_DIR/train.receipt.json".to_string(),
+        "--adapter-name".to_string(),
+        adapter_name.clone(),
+        "--request-model".to_string(),
+        request_model.clone(),
+        "--chat-template".to_string(),
+        template.name.clone(),
+        "--trainer".to_string(),
+        trainer.clone(),
+        "--method".to_string(),
+        method.clone(),
+        "--rank".to_string(),
+        rank.to_string(),
+        "--alpha".to_string(),
+        alpha.to_string(),
+        "--dropout".to_string(),
+        dropout.to_string(),
+    ];
+    if let Some(teacher) = &teacher {
+        train_command.extend(["--teacher".to_string(), teacher.selector.clone()]);
+    }
+    train_command.extend(precision_target_metadata(&precision));
+    train_command.extend(target_metadata_args_from_map(&serving_target_metadata(
+        &serving,
+    )));
     let mut manifest_command = vec![
         "harn".to_string(),
         "models".to_string(),
@@ -610,7 +665,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "--export-manifest".to_string(),
         "ADAPTER_DATASET.manifest.json".to_string(),
         "--adapter-name".to_string(),
-        adapter_name.clone(),
+        adapter_name,
         "--adapter-path".to_string(),
         adapter_ref,
         "--request-model".to_string(),
@@ -632,6 +687,9 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         manifest_command.extend(["--teacher".to_string(), teacher.selector.clone()]);
     }
     manifest_command.extend(precision_target_metadata(&precision));
+    manifest_command.extend(target_metadata_args_from_map(&serving_target_metadata(
+        &serving,
+    )));
     let tool_probe_command = vec![
         "harn".to_string(),
         "provider".to_string(),
@@ -645,16 +703,6 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "5".to_string(),
         "--json".to_string(),
     ];
-    let serving = serving_recipe(
-        &resolved.id,
-        &provider,
-        &request_model,
-        &adapter_name,
-        &decision.effective,
-        dataset_format,
-        provider_supports_lora_launch,
-        &lora_module_value_format,
-    );
     let mut warnings = plan_warnings(
         &provider,
         &decision,
@@ -749,6 +797,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         launch: PlanLaunchHints {
             preflight_command,
             export_command,
+            train_command,
             manifest_command,
             inspect_command,
             local_launch_command: launch_command,
@@ -1100,6 +1149,91 @@ fn precision_target_metadata(precision: &PrecisionContract) -> Vec<String> {
     .into_iter()
     .flat_map(|(key, value)| ["--target-metadata".to_string(), format!("{key}={value}")])
     .collect()
+}
+
+fn merge_serving_target_metadata(
+    metadata: &mut BTreeMap<String, String>,
+    serving: &ServingRecipe,
+    warnings: &mut Vec<String>,
+) {
+    for (key, value) in serving_target_metadata(serving) {
+        if let Some(existing) = metadata.get(&key) {
+            if existing != &value {
+                warnings.push(format!(
+                    "--target-metadata {key}={existing} overrides Harn-derived serving metadata {key}={value}; verify the manifest records the actual serving route"
+                ));
+            }
+        } else {
+            metadata.insert(key, value);
+        }
+    }
+}
+
+fn target_metadata_args_from_map(metadata: &BTreeMap<String, String>) -> Vec<String> {
+    metadata
+        .iter()
+        .flat_map(|(key, value)| ["--target-metadata".to_string(), format!("{key}={value}")])
+        .collect()
+}
+
+fn serving_target_metadata(serving: &ServingRecipe) -> BTreeMap<String, String> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "serving_adapter_binding".to_string(),
+        serving.adapter_binding.clone(),
+    );
+    metadata.insert(
+        "serving_lora_modules_value_format".to_string(),
+        serving.lora_module_value_format.clone(),
+    );
+    metadata.insert("serving_provider".to_string(), serving.provider.clone());
+    metadata.insert(
+        "serving_request_model".to_string(),
+        serving.request_model.clone(),
+    );
+    for requirement in &serving.serving_requirements {
+        match (
+            requirement.kind.as_str(),
+            requirement.name.as_str(),
+            requirement.value.as_deref(),
+        ) {
+            ("parser_owner", "tool_call_parser", Some(value)) => {
+                metadata.insert("serving_tool_parser_owner".to_string(), value.to_string());
+            }
+            ("provider_native_tool_parser", "native_tool_parser_mode", Some(value)) => {
+                metadata.insert("provider_native_tool_parser".to_string(), value.to_string());
+            }
+            ("server_flag", "--enable-auto-tool-choice", _) => {
+                metadata.insert("vllm_auto_tool_choice".to_string(), "required".to_string());
+            }
+            ("server_flag", "--tool-call-parser", Some(value)) => {
+                metadata.insert("tool_parser_id".to_string(), value.to_string());
+            }
+            ("server_flag", "--reasoning-parser", Some(value)) => {
+                metadata.insert("reasoning_parser".to_string(), value.to_string());
+            }
+            ("chat_template", "chat_template", Some(value)) => {
+                metadata.insert("serving_chat_template".to_string(), value.to_string());
+            }
+            ("stop_sequence", "inference_stop_sequence", Some(value)) => {
+                metadata.insert("inference_stop_sequence".to_string(), value.to_string());
+            }
+            ("manifest_metadata", "tool_parser_id", Some(value)) => {
+                metadata.insert("tool_parser_id".to_string(), value.to_string());
+            }
+            ("manifest_metadata", "chat_template_hash", _) => {
+                metadata.insert(
+                    "chat_template_hash_requirement".to_string(),
+                    "required_after_rendering".to_string(),
+                );
+            }
+            ("promotion_gate", "parser_concurrency_policy", Some(value)) => {
+                metadata.insert("parser_concurrency_policy".to_string(), value.to_string());
+            }
+            _ => {}
+        }
+    }
+    metadata
 }
 
 fn dataset_format_for_tool_format(tool_format: &str) -> &'static str {
@@ -2399,6 +2533,7 @@ struct ServingRequirement {
 struct PlanLaunchHints {
     preflight_command: Vec<String>,
     export_command: Vec<String>,
+    train_command: Vec<String>,
     manifest_command: Vec<String>,
     inspect_command: Vec<String>,
     local_launch_command: Vec<String>,
@@ -2713,6 +2848,21 @@ mod tests {
             .manifest_command
             .windows(2)
             .any(|pair| pair == ["--trainer", "unsloth_sft"]));
+        assert!(report
+            .launch
+            .train_command
+            .windows(2)
+            .any(|pair| pair == ["--trainer", "unsloth_sft"]));
+        assert!(report
+            .launch
+            .train_command
+            .windows(2)
+            .any(|pair| pair == ["--receipt-out", "ADAPTER_OUTPUT_DIR/train.receipt.json"]));
+        assert!(report
+            .launch
+            .train_command
+            .windows(2)
+            .any(|pair| pair == ["--export-manifest", "ADAPTER_DATASET.manifest.json"]));
         assert!(report.launch.manifest_command.windows(2).any(|pair| pair
             == [
                 "--target-metadata",

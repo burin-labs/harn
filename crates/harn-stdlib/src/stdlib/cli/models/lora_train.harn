@@ -1,0 +1,232 @@
+/**
+ * `harn models lora train` renderer.
+ *
+ * Rust resolves route/catalog facts, local input hashes, and optional backend
+ * execution. This Harn source owns the human/JSON presentation for the training
+ * receipt.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON   - compact report JSON.
+ *   HARN_MODELS_LORA_TRAIN_PAYLOAD_PRETTY - pretty report JSON.
+ *   HARN_OUTPUT_JSON                      - "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  print_list,
+  render_command,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_number_string,
+  safe_string,
+} from "std/cli/render"
+
+fn __path_line(harness: Harness, label: string, value: unknown) {
+  const path_ref = safe_dict(value)
+  const path = safe_string(path_ref["path"], "")
+  if path == "" {
+    return
+  }
+  const exists = if safe_bool(path_ref["exists"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  const hash = safe_string(path_ref["sha256"], "")
+  const suffix = if hash == "" {
+    ""
+  } else {
+    " sha256=" + hash
+  }
+  harness.stdio
+    .println(
+    "  "
+      + label
+      + ": "
+      + path
+      + " ("
+      + safe_string(path_ref["kind"], "")
+      + ", exists="
+      + exists
+      + ")"
+      + suffix,
+  )
+}
+
+fn __render_human(harness: Harness, report: dict) {
+  const base = safe_dict(report["base"])
+  const request = safe_dict(report["request"])
+  const training = safe_dict(report["training"])
+  const precision = safe_dict(training["precision"])
+  const template = safe_dict(training["template"])
+  const contract = safe_dict(report["contract"])
+  const target = safe_dict(report["target"])
+  const inputs = safe_dict(report["inputs"])
+  const dataset_audit = safe_dict(report["dataset_audit"])
+  const backend = safe_dict(report["backend"])
+  const backend_argv = safe_list(backend["argv"])
+  const serving = safe_dict(report["serving"])
+  const promotion = safe_dict(report["promotion"])
+  const evidence = safe_dict(promotion["evidence_contract"])
+  const post_training = safe_dict(report["post_training"])
+  const warnings = safe_list(report["warnings"])
+  harness.stdio
+    .println(
+    "LoRA train "
+      + safe_string(report["mode"], "")
+      + " for "
+      + safe_string(target["adapter_name"], "")
+      + " on "
+      + safe_string(base["id"], "")
+      + " via "
+      + safe_string(base["provider"], ""),
+  )
+  harness.stdio.println("  producer: " + safe_string(report["producer"], ""))
+  harness.stdio.println("  request model: " + safe_string(target["request_model"], ""))
+  harness.stdio.println("  output dir: " + safe_string(target["output_dir"], ""))
+  harness.stdio.println("  contract: " + safe_string(contract["id"], ""))
+  harness.stdio
+    .println(
+    "  tool format: "
+      + safe_string(request["effective_tool_format"], "")
+      + " (requested "
+      + safe_string(request["requested_tool_format"], "auto")
+      + ")",
+  )
+  harness.stdio.println("  dataset format: " + safe_string(request["dataset_format"], ""))
+  harness.stdio.println("  trainer: " + safe_string(training["trainer"], ""))
+  harness.stdio
+    .println(
+    "  training: "
+      + safe_string(training["method"], "")
+      + " + "
+      + safe_string(training["adapter_type"], ""),
+  )
+  harness.stdio
+    .println(
+    "  LoRA hparams: rank="
+      + safe_int_string(training["rank"], "")
+      + " alpha="
+      + safe_int_string(training["alpha"], "")
+      + " dropout="
+      + safe_number_string(training["dropout"], ""),
+  )
+  const max_seq_length = safe_int_string(training["max_seq_length"], "")
+  if max_seq_length != "" {
+    harness.stdio.println("  max_seq_length: " + max_seq_length)
+  }
+  harness.stdio.println("  template: " + safe_string(template["name"], ""))
+  harness.stdio
+    .println("  training base precision: " + safe_string(precision["training_base_precision"], ""))
+  harness.stdio
+    .println(
+    "  training compute precision: " + safe_string(precision["training_compute_precision"], ""),
+  )
+  harness.stdio
+    .println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
+  harness.stdio.println("  backend status: " + safe_string(backend["status"], ""))
+  const exit_code = safe_int_string(backend["exit_code"], "")
+  if exit_code != "" {
+    harness.stdio.println("  backend exit code: " + exit_code)
+  }
+  if safe_bool(backend["argv_required"], false) {
+    harness.stdio.println("  backend argv: required")
+  }
+  __path_line(harness, "dataset", inputs["dataset"])
+  harness.stdio
+    .println(
+    "  dataset audit: status="
+      + safe_string(dataset_audit["status"], "")
+      + " rows="
+      + safe_int_string(dataset_audit["rows"], "0")
+      + " invalid_tool_blocks="
+      + safe_int_string(dataset_audit["invalid_tool_block_rows"], "0")
+      + " parse_errors="
+      + safe_int_string(dataset_audit["json_parse_errors"], "0"),
+  )
+  harness.stdio
+    .println(
+    "  dataset coverage: text_tool_rows="
+      + safe_int_string(dataset_audit["assistant_tool_text_rows"], "0")
+      + " native_tool_rows="
+      + safe_int_string(dataset_audit["native_tool_call_rows"], "0")
+      + " no_tool_rows="
+      + safe_int_string(dataset_audit["no_tool_rows"], "0")
+      + " parallel_rows="
+      + safe_int_string(dataset_audit["parallel_tool_call_rows"], "0")
+      + " multi_turn_rows="
+      + safe_int_string(dataset_audit["multi_turn_rows"], "0"),
+  )
+  harness.stdio
+    .println(
+    "  dataset repairs: schema_repaired="
+      + safe_int_string(dataset_audit["schema_repaired_rows"], "0")
+      + " unavailable_tool="
+      + safe_int_string(dataset_audit["unavailable_tool_rows"], "0")
+      + " tool_result_rows="
+      + safe_int_string(dataset_audit["tool_result_rows"], "0"),
+  )
+  __path_line(harness, "corpus", inputs["corpus"])
+  __path_line(harness, "export manifest", inputs["export_manifest"])
+  const teacher = safe_dict(inputs["teacher"])
+  const teacher_id = safe_string(teacher["id"], "")
+  if teacher_id != "" {
+    harness.stdio.println("  teacher: " + teacher_id + " via " + safe_string(teacher["provider"], ""))
+  }
+  harness.stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
+  harness.stdio.println("  promotion id: " + safe_string(evidence["promotion_id"], ""))
+  print_list(harness, "trainer contract", safe_list(training["trainer_contract"]))
+  print_list(harness, "precision gates", safe_list(precision["promotion_gates"]))
+  print_list(harness, "promotion receipts", safe_list(evidence["required_receipts"]))
+  print_list(harness, "warnings", warnings)
+  if len(backend_argv) > 0 {
+    render_command(harness, "backend", backend_argv)
+  }
+  render_command(harness, "post-training manifest", safe_list(post_training["manifest_command"]))
+  render_command(harness, "inspect adapter", safe_list(post_training["inspect_command"]))
+}
+
+fn __render_json(report: dict) -> string {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
+    cli_json_envelope({schema_version: 1, ok: true, data: report})
+  } else {
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "lora_train_failed",
+          message: "LoRA trainer backend failed or did not produce a usable receipt.",
+          details: report,
+        },
+      },
+    )
+  }
+  return json_stringify_pretty(envelope)
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("internal error: HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON not set")
+    return 70
+  }
+  const report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse LoRA train payload: " + to_string(e))
+    return 70
+  }
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness, report)
+  }
+  if safe_bool(report["ok"], false) {
+    return 0
+  }
+  return 1
+}

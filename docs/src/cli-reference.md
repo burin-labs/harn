@@ -1557,6 +1557,33 @@ after a run and produce the same manifest shape. The resulting JSON is accepted
 by `harn models lora inspect --manifest`, so adapter promotion can compare the
 training contract with the served route before any eval or launch.
 
+## harn models lora train
+
+Render or execute a named LoRA trainer backend and write a training receipt:
+
+```bash
+harn models lora train --base local-gemma4-e4b --provider vllm \
+  --tool-format json --dataset ./train.jsonl --export-manifest ./train.manifest.json \
+  --output-dir ./adapter --receipt-out ./adapter/train.receipt.json \
+  --adapter-name burin-tools --request-model burin-tools --trainer unsloth_sft --json
+harn models lora train --base local-gemma4-e4b --provider vllm \
+  --dataset ./train.jsonl --output-dir ./adapter --execute -- \
+  uv run python train.py config/e4b.yaml
+```
+
+Without `--execute`, the command is a deterministic dry-run: it hashes local
+input files when present, records trainer/backend name and version, resolves the
+same Harn LoRA contract as plan/export/manifest, and emits the post-training
+`harn models lora manifest` plus `harn models lora inspect` commands. The
+receipt also includes a structural dataset audit with parse-error,
+invalid-tool-block, schema-repair, no-tool, unavailable-tool, parallel-call,
+multi-turn, and tool-result counters. With `--execute`, Harn launches only the
+caller-supplied backend argv and records the exit status in the same receipt
+shape. Python, Unsloth, TRL, MLX, Modal, or cloud trainers remain backend shims;
+Harn owns config normalization, route metadata, serving requirements, manifest
+shaping, and promotion receipts. Dry-runs with no backend argv set
+`backend.argv_required` instead of inventing a trainer command.
+
 ## harn models lora preflight
 
 Check a tool-calling corpus before spending GPU time on LoRA training:
@@ -1623,12 +1650,13 @@ The report lists provenance manifest fields, hard-negative slices, and holdout
 gates so generated data cannot silently contaminate evaluation fixtures. It
 also lists the trainer contract Harn expects for tool-calling SFT, including
 assistant-only loss masks, `messages`/`tools` columns, packing boundaries, and
-method-specific target modules. Use `--trainer trl_sft_trainer`,
-`--trainer unsloth_sft`, or `--trainer external_sft_trainer` to make the
-backend contract explicit; Harn still owns export, manifests, eval, and serving
-promotion, while trainer-specific runtimes only fit the adapter weights. QLoRA
-plans use PEFT's `all-linear` target module shorthand; full LoRA plans keep
-explicit attention projection modules in `training.target_modules`.
+method-specific target modules. Omitting `--trainer` uses the neutral
+`external_sft_trainer` contract. Use `--trainer trl_sft_trainer`,
+`--trainer unsloth_sft`, or `--trainer external_sft_trainer` to pin a
+backend-specific contract explicitly; Harn still owns export, manifests, eval,
+and serving promotion, while trainer-specific runtimes only fit the adapter
+weights. QLoRA plans use PEFT's `all-linear` target module shorthand; full LoRA
+plans keep explicit attention projection modules in `training.target_modules`.
 The `corpus_refresh.model_aware_selection` block records base-model failure
 buckets, parser/schema difficulty signals, sampling policy, refinement loops,
 and stop conditions so corpus refresh jobs prioritize failures the target model

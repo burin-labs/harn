@@ -7,12 +7,12 @@ use crate::cli::ModelsLoraManifestArgs;
 use super::{
     adapter_name_from_input, dataset_format_for_tool_format, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
-    lora_training_contract, normalize_lora_alpha, normalize_lora_dropout, normalize_lora_method,
-    normalize_lora_rank, normalize_plan_tool_format, parse_target_metadata,
-    render_embedded_lora_report, serving_recipe, sha256_file, target_modules_for_route,
-    teacher_report, template_recipe_for_route, BaseModelReport, EvaluationRecipe,
-    LoraContractReport, LoraTrainingContract, PrecisionContract, ServingRecipe, TeacherReport,
-    TemplateRecipe, ToolCallingReport,
+    lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
+    normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_plan_tool_format,
+    parse_target_metadata, render_embedded_lora_report, serving_recipe, sha256_file,
+    target_modules_for_route, teacher_report, template_recipe_for_route, BaseModelReport,
+    EvaluationRecipe, LoraContractReport, LoraTrainingContract, PrecisionContract, ServingRecipe,
+    TeacherReport, TemplateRecipe, ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -162,8 +162,9 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
     let precision = super::precision_contract_for_method(&method);
     let target_modules =
         target_modules_for_route(&method, &resolved.id, &resolved.family, &resolved.lineage);
-    let metadata = parse_target_metadata(&args.target_metadata)?;
     let mut warnings = Vec::new();
+    let mut metadata = parse_target_metadata(&args.target_metadata)?;
+    merge_serving_target_metadata(&mut metadata, &serving, &mut warnings);
     if let Some(correction) = &decision.correction {
         warnings.push(correction.clone());
     }
@@ -236,6 +237,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         training: ManifestTraining {
             run_id: args.training_run_id.clone(),
             trainer: args.trainer.clone(),
+            trainer_version: args.trainer_version.clone(),
             method,
             adapter_type: "peft_lora".to_string(),
             rank,
@@ -399,6 +401,7 @@ struct ManifestTarget {
 struct ManifestTraining {
     run_id: Option<String>,
     trainer: String,
+    trainer_version: Option<String>,
     method: String,
     adapter_type: String,
     rank: u32,

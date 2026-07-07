@@ -177,7 +177,8 @@ start training or inference. The plan also reports the template convention to
 train against: native Gemma 4 or FunctionGemma tool templates stay distinct from
 Harn text/json `<tool_call>` adapters, and the trainer contract calls out
 assistant-only loss masks plus `messages`/`tools` columns, so train and serving
-do not silently cross tool-call contracts. `--trainer trl_sft_trainer`,
+do not silently cross tool-call contracts. Omitting `--trainer` uses the neutral
+`external_sft_trainer` contract; `--trainer trl_sft_trainer`,
 `--trainer unsloth_sft`, and `--trainer external_sft_trainer` select
 backend-specific contract notes without moving export, manifests, eval, or
 promotion policy out of Harn. The JSON report exposes the machine-readable
@@ -209,11 +210,14 @@ promotion recipe carries `evaluation.evidence_contract`, which names the
 preflight/export/manifest/inspect/tool-probe/base-eval/adapter-eval receipts
 required for promotion plus optional `harn models batch` receipts for
 latency-tolerant eval or corpus-refresh sweeps. The
-plan's `launch` block also emits the
-post-training `harn models lora manifest` command that records the adapter path,
-request model, trainer, teacher, precision metadata, and export manifest before
-inspection or serving. Treat that manifest as the handoff receipt from any
-external trainer back into Harn; the same block includes a
+plan's `launch` block also emits `harn models lora train` and post-training
+`harn models lora manifest` commands. The train command is deterministic unless
+`--execute` is supplied: it records caller-supplied backend argv, marks
+`backend.argv_required` when dry-runs omit argv, captures trainer version and
+input hashes, records Harn-derived serving metadata and structural dataset audit
+counters, and emits the exact manifest/inspect commands to run after fitting.
+Treat the train receipt plus manifest as the handoff from any external trainer
+back into Harn; the same block includes a
 `harn provider tool-probe` command for validating the served adapter route before
 promotion evals.
 

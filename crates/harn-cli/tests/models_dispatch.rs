@@ -2496,6 +2496,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "promotion gates:",
         "harn models lora preflight --base local-gemma4-e4b --provider vllm --tool-format json --corpus ./lora-corpus --source-tool-format json --check",
         "harn models lora export --base local-gemma4-e4b --provider vllm --tool-format json --corpus ./lora-corpus --out ADAPTER_DATASET.jsonl --manifest ADAPTER_DATASET.manifest.json --adapter-name ADAPTER_NAME --chat-template harn_text_tool_calls_json_fences",
+        "harn models lora train --base local-gemma4-e4b --provider vllm --tool-format json --dataset ADAPTER_DATASET.jsonl --export-manifest ADAPTER_DATASET.manifest.json --output-dir ADAPTER_OUTPUT_DIR --receipt-out ADAPTER_OUTPUT_DIR/train.receipt.json",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
         "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
         "harn local launch local-gemma4-e4b --provider vllm --model-source gemma-4-e4b-it",
@@ -2536,7 +2537,7 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(report["request"]["requested_tool_format"], "native");
     assert_eq!(report["request"]["effective_tool_format"], "native");
     assert_eq!(report["training"]["adapter_type"], "peft_lora");
-    assert_eq!(report["training"]["trainer"], "trl_sft_trainer");
+    assert_eq!(report["training"]["trainer"], "external_sft_trainer");
     assert_eq!(report["training"]["rank"], 16);
     assert_eq!(report["training"]["alpha"], 32);
     assert_eq!(report["training"]["dropout"], 0.05);
@@ -2675,6 +2676,22 @@ fn models_lora_plan_json_shape_is_stable() {
             && pair[1]
                 == "serving_base_precision=same_base_model_precision_as_training_or_revalidate"),
         "export argv={export:?}"
+    );
+    let train = report["launch"]["train_command"]
+        .as_array()
+        .expect("train argv");
+    assert!(
+        train
+            .windows(2)
+            .any(|pair| pair[0] == "--tool-format" && pair[1] == "native"),
+        "train argv={train:?}"
+    );
+    assert!(
+        train
+            .windows(2)
+            .any(|pair| pair[0] == "--receipt-out"
+                && pair[1] == "ADAPTER_OUTPUT_DIR/train.receipt.json"),
+        "train argv={train:?}"
     );
     let serving_notes = report["serving"]["runtime_notes"]
         .as_array()
@@ -3283,6 +3300,8 @@ fn models_lora_manifest_json_writes_training_manifest() {
             "burin-tools",
             "--trainer",
             "unsloth_sft",
+            "--trainer-version",
+            "unsloth-2026.7",
             "--method",
             "qlora",
             "--rank",
@@ -3430,6 +3449,138 @@ fn models_lora_manifest_json_writes_training_manifest() {
     let inspect_report = success_data(&inspect_value);
     assert_eq!(inspect_report["contract"]["status"], "pass");
     assert_eq!(inspect_report["contract"]["contract_id"], contract_id);
+}
+
+#[test]
+fn models_lora_train_json_writes_dry_run_receipt() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dataset = tmp.path().join("train.jsonl");
+    fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+    let export_manifest = tmp.path().join("export.manifest.json");
+    fs::write(&export_manifest, "{}\n").expect("export manifest");
+    let output_dir = tmp.path().join("burin-tools");
+    let receipt = tmp.path().join("train.receipt.json");
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "train",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "json",
+            "--dataset",
+            dataset.to_str().expect("utf8 dataset path"),
+            "--export-manifest",
+            export_manifest.to_str().expect("utf8 export manifest path"),
+            "--output-dir",
+            output_dir.to_str().expect("utf8 output path"),
+            "--receipt-out",
+            receipt.to_str().expect("utf8 receipt path"),
+            "--adapter-name",
+            "burin-tools",
+            "--request-model",
+            "burin-tools",
+            "--trainer",
+            "unsloth_sft",
+            "--trainer-version",
+            "unsloth-2026.7",
+            "--method",
+            "qlora",
+            "--rank",
+            "24",
+            "--alpha",
+            "48",
+            "--max-seq-length",
+            "8192",
+            "--target-metadata",
+            "lane=structured",
+            "--json",
+            "--",
+            "uv",
+            "run",
+            "python",
+            "train.py",
+            "config/e4b.yaml",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn lora train");
+    let report = success_data(&harn_value);
+    assert_eq!(report["producer"], "harn_models_lora_train_v1");
+    assert_eq!(report["mode"], "dry_run");
+    assert_eq!(report["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(report["request"]["effective_tool_format"], "json");
+    assert_eq!(
+        report["request"]["dataset_format"],
+        "harn_text_tool_calls_json_fences"
+    );
+    assert_eq!(report["target"]["adapter_name"], "burin-tools");
+    assert_eq!(report["target"]["request_model"], "burin-tools");
+    assert_eq!(report["target"]["metadata"]["lane"], "structured");
+    assert_eq!(
+        report["target"]["metadata"]["serving_tool_parser_owner"],
+        "harn_text_tool_parser"
+    );
+    assert_eq!(
+        report["target"]["metadata"]["serving_adapter_binding"],
+        "runtime_lora_adapter"
+    );
+    assert_eq!(report["training"]["trainer"], "unsloth_sft");
+    assert_eq!(report["training"]["trainer_version"], "unsloth-2026.7");
+    assert_eq!(report["training"]["rank"], 24);
+    assert_eq!(report["training"]["alpha"], 48);
+    assert_eq!(report["training"]["max_seq_length"], 8192);
+    assert_eq!(report["inputs"]["dataset"]["exists"], true);
+    assert_eq!(report["inputs"]["dataset"]["kind"], "file");
+    assert!(
+        report["inputs"]["dataset"]["sha256"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 64),
+        "dataset input={:?}",
+        report["inputs"]["dataset"]
+    );
+    assert_eq!(report["backend"]["trainer"], "unsloth_sft");
+    assert_eq!(report["backend"]["execute"], false);
+    assert_eq!(report["backend"]["status"], "dry_run");
+    assert_eq!(
+        report["backend"]["argv"]
+            .as_array()
+            .expect("backend argv")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>(),
+        vec!["uv", "run", "python", "train.py", "config/e4b.yaml"]
+    );
+    assert!(
+        report["post_training"]["manifest_command"]
+            .as_array()
+            .expect("manifest command")
+            .iter()
+            .any(|arg| arg == "--export-manifest"),
+        "post_training={:?}",
+        report["post_training"]
+    );
+    assert!(
+        report["post_training"]["manifest_command"]
+            .as_array()
+            .expect("manifest command")
+            .windows(2)
+            .any(|pair| pair[0] == "--trainer-version" && pair[1] == "unsloth-2026.7"),
+        "post_training={:?}",
+        report["post_training"]
+    );
+
+    let receipt_value = parse_json(
+        &fs::read_to_string(&receipt).expect("read receipt"),
+        "train receipt",
+    );
+    assert_eq!(receipt_value["producer"], "harn_models_lora_train_v1");
+    assert_eq!(receipt_value["backend"]["status"], "dry_run");
 }
 
 #[test]
