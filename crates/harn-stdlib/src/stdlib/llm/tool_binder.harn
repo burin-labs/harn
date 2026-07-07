@@ -48,6 +48,7 @@
 //     attempts:   int,            // 0 or 1 (no retry on the hot path)
 //   }
 import { tool_inject_param } from "std/llm/tool_middleware"
+import "std/schema"
 
 // -------------------------------------------------------------------------------------------------
 // shared helpers
@@ -74,51 +75,6 @@ fn __binder_drop_key(args, field) {
     }
   }
   return cleaned
-}
-
-fn __binder_positive_int(value, default_value, name) -> int {
-  if value == nil {
-    return default_value
-  }
-  let parsed = to_int(value)
-  if parsed == nil {
-    throw "with_natural_language_executor: `" + name + "` must be an integer; got "
-      + type_of(value)
-  }
-  if parsed <= 0 {
-    throw "with_natural_language_executor: `" + name + "` must be > 0; got " + to_string(parsed)
-  }
-  return parsed
-}
-
-fn __binder_int(value, default_value, name) -> int {
-  if value == nil {
-    return default_value
-  }
-  let parsed = to_int(value)
-  if parsed == nil {
-    throw "with_natural_language_executor: `" + name + "` must be an integer; got "
-      + type_of(value)
-  }
-  return parsed
-}
-
-fn __binder_bool(value, default_value, name) -> bool {
-  if value == nil {
-    return default_value
-  }
-  if type_of(value) != "bool" {
-    throw "with_natural_language_executor: `" + name + "` must be bool; got " + type_of(value)
-  }
-  return value
-}
-
-fn __binder_intent_field(cfg) -> string {
-  let intent_field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
-  if intent_field == "" {
-    throw "with_natural_language_executor: `intent_field` must not be empty"
-  }
-  return intent_field
 }
 
 fn __binder_short_circuit(envelope, reason) {
@@ -156,6 +112,33 @@ fn __binder_audit(provider, model, status, latency_ms, reason, attempts) {
     return base
   }
   return base + {reason: reason}
+}
+
+fn __binder_options_schema() {
+  return schema_object(
+    {
+      provider: schema_field(schema_string() + {min_length: 1}),
+      model: schema_field(schema_string() + {min_length: 1}),
+      timeout_ms: schema_default(schema_int() + {min: 1}, 500),
+      max_retries: schema_default(schema_int(), 0),
+      intent_field: schema_default(schema_string() + {min_length: 1}, "_nl_intent"),
+      passthrough_when_args_valid: schema_default(schema_bool(), true),
+      on_failure: schema_default(schema_enum(["passthrough", "reject", "raise"]), "passthrough"),
+      temperature: schema_default(schema_union([schema_int(), schema_float()]), 0.0),
+      max_tokens: schema_default(schema_int() + {min: 1}, 1024),
+      system: schema_default(schema_string(), __binder_default_system()),
+      binder_fn: schema_field(schema_any(), false),
+    },
+    {additional_properties: true},
+  )
+}
+
+fn __binder_typed_opts(cfg) {
+  let report = get_typed_report(cfg, __binder_options_schema(), true)
+  if !report.ok {
+    throw "with_natural_language_executor: " + report.message
+  }
+  return report.value
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -256,44 +239,34 @@ fn __binder_handle_failure(envelope, next, ctx, status, reason) {
 // -------------------------------------------------------------------------------------------------
 
 fn __binder_validate_opts(cfg) {
-  let provider = to_string(cfg?.provider ?? "")
-  let model = to_string(cfg?.model ?? "")
-  if provider == "" {
-    throw "with_natural_language_executor: `provider` is required"
-  }
-  if model == "" {
-    throw "with_natural_language_executor: `model` is required"
-  }
-  let timeout_ms = __binder_positive_int(cfg?.timeout_ms, 500, "timeout_ms")
-  let max_retries = __binder_int(cfg?.max_retries, 0, "max_retries")
-  if max_retries != 0 {
+  let typed = __binder_typed_opts(cfg)
+  if typed.max_retries != 0 {
     throw "with_natural_language_executor: `max_retries` must be 0; retries defeat the latency win; got "
-      + to_string(max_retries)
+      + to_string(typed.max_retries)
   }
-  let on_failure = to_string(cfg?.on_failure ?? "passthrough")
-  if on_failure != "passthrough" && on_failure != "reject" && on_failure != "raise" {
-    throw "with_natural_language_executor: `on_failure` must be one of passthrough|reject|raise; got "
-      + on_failure
+  let intent_field = trim(typed.intent_field)
+  if intent_field == "" {
+    throw "with_natural_language_executor: `intent_field` must not be empty"
   }
-  let binder_fn = if cfg?.binder_fn != nil {
-    if !__binder_is_callable(cfg.binder_fn) {
-      throw "with_natural_language_executor: `binder_fn` must be callable; got " + type_of(cfg.binder_fn)
+  let binder_fn = if typed?.binder_fn != nil {
+    if !__binder_is_callable(typed.binder_fn) {
+      throw "with_natural_language_executor: `binder_fn` must be callable; got "
+        + type_of(typed.binder_fn)
     }
-    cfg.binder_fn
+    typed.binder_fn
   } else {
     { binder_prompt, binder_system, binder_opts -> llm_call(binder_prompt, binder_system, binder_opts) }
   }
-  let intent_field = __binder_intent_field(cfg)
   return {
-    provider: provider,
-    model: model,
-    timeout_ms: timeout_ms,
+    provider: typed.provider,
+    model: typed.model,
+    timeout_ms: typed.timeout_ms,
     intent_field: intent_field,
-    passthrough_when_args_valid: __binder_bool(cfg?.passthrough_when_args_valid, true, "passthrough_when_args_valid"),
-    on_failure: on_failure,
-    temperature: cfg?.temperature ?? 0.0,
-    max_tokens: __binder_positive_int(cfg?.max_tokens, 1024, "max_tokens"),
-    system_prompt: to_string(cfg?.system ?? __binder_default_system()),
+    passthrough_when_args_valid: typed.passthrough_when_args_valid,
+    on_failure: typed.on_failure,
+    temperature: typed.temperature,
+    max_tokens: typed.max_tokens,
+    system_prompt: typed.system,
     binder_fn: binder_fn,
   }
 }
@@ -317,7 +290,10 @@ fn __binder_validate_opts(cfg) {
  */
 pub fn natural_language_executor_schema_transform(opts = nil) {
   let cfg = __binder_dict(opts)
-  let field = __binder_intent_field(cfg)
+  let field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
+  if field == "" {
+    throw "natural_language_executor_schema_transform: `intent_field` must not be empty"
+  }
   let description = to_string(
     cfg?.intent_description
       ?? "Natural-language fallback intent for the tool binder. Use when the intended tool action is clear but structured arguments are uncertain.",
