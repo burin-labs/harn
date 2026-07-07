@@ -1,8 +1,10 @@
 import { ensure_parent_dir } from "std/fs"
+import "../_common"
 
 pipeline default() {
   const root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const server_path = path_join(root, "conformance/helpers/mcp_file_input_server.py")
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, root))
+  const server_path = path_join(root, "conformance/helpers/mcp_file_input_server.harn")
   const sample_path = path_join(root, ".harn", "mcp-file-upload.txt")
   ensure_parent_dir(sample_path)
   harness.fs.write_text(sample_path, "hello upload")
@@ -11,7 +13,7 @@ pipeline default() {
     {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},
   )
   __io_println(config.experimental.file_upload.enabled)
-  const client = mcp_connect("python3", [server_path])
+  const client = mcp_connect(harn_bin, ["serve", "mcp", server_path])
   const tools = mcp_list_tools(client)
   __io_println(json_stringify(tools[0].inputSchema).contains("\"x-mcp-file\""))
   const uri = harn.mcp.upload_file(client, sample_path, {accept: ["text/*"], max_size: 64})

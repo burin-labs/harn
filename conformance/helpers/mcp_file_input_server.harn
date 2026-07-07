@@ -1,0 +1,51 @@
+fn decode_data_uri(value: string) -> dict {
+  require starts_with(value, "data:"), "upload must be a data URI"
+  let comma = value.index_of(",")
+  require comma >= 0, "upload data URI is missing payload separator"
+  let header = substring(value, 5, comma)
+  let payload = substring(value, comma + 1)
+  let parts = split(header, ";")
+  let media_type = if parts[0] == "" {
+    "text/plain"
+  } else {
+    parts[0]
+  }
+  let text = if contains(parts, "base64") {
+    base64_decode(payload)
+  } else {
+    url_decode(payload)
+  }
+  return {media_type: media_type, size: len(text), text: text}
+}
+
+pipeline default() {
+  harn.mcp
+    .configure(
+    {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},
+  )
+  mcp_server_metadata({name: "test-file-input-server", version: "1.0.0"})
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect_upload",
+    "Inspect an inline MCP file input.",
+    {
+      parameters: {
+        upload: harn.mcp
+          .file_input({accept: ["text/*"], max_size: 64}),
+      },
+      handler: { args ->
+        let decoded = decode_data_uri(args.upload)
+        return decoded.media_type + ":" + to_string(decoded.size) + ":" + decoded.text
+      },
+      annotations: {
+        title: "Inspect upload",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+  )
+  mcp_tools(tools)
+}
