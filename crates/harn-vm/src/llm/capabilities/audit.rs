@@ -436,7 +436,7 @@ preferred_tool_format = "native"
                     deprecated: false,
                     deprecation_note: None,
                     superseded_by: None,
-                    fast_mode: None,
+                    serving_tiers: Vec::new(),
                     quality_tags: Vec::new(),
                     availability: crate::llm_config::ModelAvailability::Serverless,
                     tier: None,

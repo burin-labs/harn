@@ -8,6 +8,7 @@ use crate::llm_config::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderCatalogArtifact {
     pub schema_version: u32,
     pub schema: String,
@@ -98,6 +99,7 @@ pub struct CatalogAlias {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CatalogModel {
     pub id: String,
     pub name: String,
@@ -159,9 +161,9 @@ pub struct CatalogModel {
     /// Public benchmark numbers, snake_case identifier -> score.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub benchmarks: BTreeMap<String, f64>,
-    /// Accelerated-serving ("fast mode") tier metadata, when offered.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fast_mode: Option<ModelFastMode>,
+    /// Non-default synchronous serving tiers such as fast, priority, or flex.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub serving_tiers: Vec<llm_config::ServingTierDef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -236,6 +238,8 @@ pub struct ModelBatchSupport {
     pub result_retention_days: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub security_notes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operational_notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -304,26 +308,6 @@ pub struct ModelDeprecation {
 pub enum DeprecationStatus {
     Active,
     Deprecated,
-}
-
-/// Catalog projection of an accelerated-serving ("fast mode") tier.
-/// Surfaces `ModelDef::fast_mode` so downstream consumers can show the
-/// opt-in knob, premium pricing, and lifecycle without re-parsing the
-/// source TOML. Absent on models with no faster serving path.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelFastMode {
-    pub param: String,
-    pub value: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub beta_header: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub otps_speedup: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pricing: Option<ModelPricing>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

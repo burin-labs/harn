@@ -568,7 +568,7 @@ impl AnthropicProvider {
                 });
             }
         }
-        crate::llm::fast_mode::apply_request_knob(&mut body, &opts.model, opts.fast);
+        crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
         body
     }
 
@@ -2022,7 +2022,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_mode_injects_speed_knob_and_beta_header() {
+    fn fast_tier_injects_speed_knob_and_beta_header() {
         // `fast: true` on a model whose catalog tier rides `speed` sets the
         // top-level request knob and the beta header flows through the
         // payload's resolved Anthropic beta features.
@@ -2047,7 +2047,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_mode_knob_absent_when_off() {
+    fn fast_tier_knob_absent_when_off() {
         let mut payload = base_payload();
         payload.model = "claude-opus-4-8".to_string();
         payload.fast = false;

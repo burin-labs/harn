@@ -10,6 +10,12 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
             PROVIDER_CATALOG_SCHEMA_VERSION, artifact.schema_version
         ));
     }
+    if artifact.schema != PROVIDER_CATALOG_SCHEMA_ID {
+        result.errors.push(format!(
+            "schema must be {}, got {}",
+            PROVIDER_CATALOG_SCHEMA_ID, artifact.schema
+        ));
+    }
     if artifact.providers.is_empty() {
         result.errors.push("catalog has no providers".to_string());
     }
@@ -156,17 +162,30 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 model.id
             ));
         }
-        if let Some(fast) = &model.fast_mode {
-            if let Some(pricing) = &fast.pricing {
+        let mut serving_tier_ids = BTreeSet::new();
+        for tier in &model.serving_tiers {
+            if !serving_tier_ids.insert(tier.id.as_str()) {
+                result.errors.push(format!(
+                    "model {} declares duplicate serving_tiers id {:?}",
+                    model.id, tier.id
+                ));
+            }
+            if let Some(pricing) = &tier.pricing {
                 validate_pricing(model, pricing, &mut result);
             }
-            if let Some(status) = fast.status.as_deref() {
+            if let Some(status) = tier.status.as_deref() {
                 if !matches!(status, "ga" | "research_preview" | "deprecated") {
                     result.warnings.push(format!(
-                        "model {} fast_mode.status {:?} is not one of ga|research_preview|deprecated",
-                        model.id, status
+                        "model {} serving_tiers[{}].status {:?} is not one of ga|research_preview|deprecated",
+                        model.id, tier.id, status
                     ));
                 }
+            }
+            if tier.request.is_none() && tier.id == crate::llm::serving_tiers::FAST_TIER_ID {
+                result.errors.push(format!(
+                    "model {} fast serving tier must declare a request knob",
+                    model.id
+                ));
             }
         }
         let has_batch_tag = model.capability_tags.iter().any(|tag| tag == "batch");

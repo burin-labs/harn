@@ -32,7 +32,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 2
+  schema_version: 3
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -188,7 +188,7 @@ export interface HarnCatalogModel {
   open_weight?: boolean
   strengths?: string[]
   benchmarks?: Record<string, number>
-  fast_mode?: HarnModelFastMode
+  serving_tiers?: HarnModelServingTier[]
 }
 
 export interface HarnModelBatchSupport {
@@ -203,6 +203,7 @@ export interface HarnModelBatchSupport {
   max_input_bytes?: number
   result_retention_days?: number
   security_notes?: string[]
+  operational_notes?: string[]
 }
 
 export interface HarnToolEmpiricalParity {
@@ -278,13 +279,28 @@ export interface HarnLocalMemory {
   notes?: string
 }
 
-export interface HarnModelFastMode {
+export interface HarnModelServingTierRequest {
   param: string
   value: string
   beta_header?: string
+}
+
+export interface HarnModelServingTier {
+  id: string
+  label?: string
+  mode: "synchronous"
+  economics: "discounted" | "standard" | "premium"
+  request?: HarnModelServingTierRequest
   otps_speedup?: number
+  cost_multiplier?: number
+  discount_percent?: number
   status?: string
   pricing?: HarnModelPricing
+  latency?: string
+  reliability?: string
+  quota?: string
+  suitable_workloads?: string[]
+  unsuitable_workloads?: string[]
   note?: string
 }
 
@@ -532,8 +548,8 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let strengths: [String]
     /// Public benchmark numbers keyed by `snake_case` identifier.
     public let benchmarks: [String: Double]
-    /// Accelerated-serving ("fast mode") tier metadata, when offered.
-    public let fastMode: HarnModelFastMode?
+    /// Non-default synchronous serving tiers such as fast, priority, or flex.
+    public let servingTiers: [HarnModelServingTier]
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -572,7 +588,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case openWeight = "open_weight"
         case strengths
         case benchmarks
-        case fastMode = "fast_mode"
+        case servingTiers = "serving_tiers"
     }
 
     public init(from decoder: Decoder) throws {
@@ -613,7 +629,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
         benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
-        fastMode = try container.decodeIfPresent(HarnModelFastMode.self, forKey: .fastMode)
+        servingTiers = try container.decodeIfPresent([HarnModelServingTier].self, forKey: .servingTiers) ?? []
     }
 }
 
@@ -629,6 +645,7 @@ public struct HarnModelBatchSupport: Codable, Sendable, Equatable {
     public let maxInputBytes: Int?
     public let resultRetentionDays: Int?
     public let securityNotes: [String]?
+    public let operationalNotes: [String]?
 
     enum CodingKeys: String, CodingKey {
         case wireFormat = "wire_format"
@@ -642,6 +659,7 @@ public struct HarnModelBatchSupport: Codable, Sendable, Equatable {
         case maxInputBytes = "max_input_bytes"
         case resultRetentionDays = "result_retention_days"
         case securityNotes = "security_notes"
+        case operationalNotes = "operational_notes"
     }
 }
 
@@ -866,23 +884,73 @@ public struct HarnModelDeprecation: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnModelFastMode: Codable, Sendable, Equatable {
+public struct HarnModelServingTierRequest: Codable, Sendable, Equatable {
     public let param: String
     public let value: String
     public let betaHeader: String?
-    public let otpsSpeedup: Double?
-    public let status: String?
-    public let pricing: HarnModelPricing?
-    public let note: String?
 
     enum CodingKeys: String, CodingKey {
         case param
         case value
         case betaHeader = "beta_header"
+    }
+}
+
+public struct HarnModelServingTier: Codable, Sendable, Equatable {
+    public let id: String
+    public let label: String?
+    public let mode: String
+    public let economics: String
+    public let request: HarnModelServingTierRequest?
+    public let otpsSpeedup: Double?
+    public let costMultiplier: Double?
+    public let discountPercent: Int?
+    public let status: String?
+    public let pricing: HarnModelPricing?
+    public let latency: String?
+    public let reliability: String?
+    public let quota: String?
+    public let suitableWorkloads: [String]
+    public let unsuitableWorkloads: [String]
+    public let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case mode
+        case economics
+        case request
         case otpsSpeedup = "otps_speedup"
+        case costMultiplier = "cost_multiplier"
+        case discountPercent = "discount_percent"
         case status
         case pricing
+        case latency
+        case reliability
+        case quota
+        case suitableWorkloads = "suitable_workloads"
+        case unsuitableWorkloads = "unsuitable_workloads"
         case note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        mode = try container.decode(String.self, forKey: .mode)
+        economics = try container.decode(String.self, forKey: .economics)
+        request = try container.decodeIfPresent(HarnModelServingTierRequest.self, forKey: .request)
+        otpsSpeedup = try container.decodeIfPresent(Double.self, forKey: .otpsSpeedup)
+        costMultiplier = try container.decodeIfPresent(Double.self, forKey: .costMultiplier)
+        discountPercent = try container.decodeIfPresent(Int.self, forKey: .discountPercent)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        pricing = try container.decodeIfPresent(HarnModelPricing.self, forKey: .pricing)
+        latency = try container.decodeIfPresent(String.self, forKey: .latency)
+        reliability = try container.decodeIfPresent(String.self, forKey: .reliability)
+        quota = try container.decodeIfPresent(String.self, forKey: .quota)
+        suitableWorkloads = try container.decodeIfPresent([String].self, forKey: .suitableWorkloads) ?? []
+        unsuitableWorkloads = try container.decodeIfPresent([String].self, forKey: .unsuitableWorkloads) ?? []
+        note = try container.decodeIfPresent(String.self, forKey: .note)
     }
 }
 

@@ -469,9 +469,9 @@ pub(crate) struct PricingDetail {
 pub(crate) enum PricingSource {
     /// Exact model entry in the catalog (configured `[llm.models.<id>]`).
     CatalogModel,
-    /// The model's accelerated-serving tier (`fast_mode.pricing`), used when
-    /// the provider confirmed it served the request fast.
-    CatalogFastMode,
+    /// The model's accelerated-serving tier (`serving_tiers[].pricing`), used
+    /// when the provider confirmed it served the request fast.
+    CatalogServingTier,
     /// Provider-level catalog economics (`[llm.providers.<name>]`).
     ProviderEconomics,
 }
@@ -480,7 +480,7 @@ impl PricingSource {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             PricingSource::CatalogModel => "catalog_model",
-            PricingSource::CatalogFastMode => "catalog_fast_mode",
+            PricingSource::CatalogServingTier => "catalog_serving_tier",
             PricingSource::ProviderEconomics => "provider_economics",
         }
     }
@@ -519,7 +519,7 @@ pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f6
 
 /// Resolve pricing for a (provider, model) pair, billing at the premium
 /// accelerated-serving tier when `served_fast` is set and the catalog
-/// declares `fast_mode.pricing`. Falls back to standard pricing when the
+/// declares `serving_tiers[].pricing`. Falls back to standard pricing when the
 /// request was served at the standard tier (e.g. a capacity downgrade) or
 /// the fast tier omits explicit rates.
 pub(crate) fn pricing_detail_for_tier(
@@ -528,13 +528,16 @@ pub(crate) fn pricing_detail_for_tier(
     served_fast: bool,
 ) -> Option<PricingDetail> {
     if served_fast {
-        if let Some(pricing) = crate::llm_config::model_fast_pricing_per_mtok(model) {
+        if let Some(pricing) = crate::llm_config::model_serving_tier_pricing_per_mtok(
+            model,
+            crate::llm::serving_tiers::FAST_TIER_ID,
+        ) {
             return Some(PricingDetail {
                 input_per_1k: pricing.input_per_mtok / 1000.0,
                 output_per_1k: pricing.output_per_mtok / 1000.0,
                 cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
                 cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
-                source: PricingSource::CatalogFastMode,
+                source: PricingSource::CatalogServingTier,
             });
         }
     }
@@ -1188,7 +1191,7 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 superseded_by: None,
-                fast_mode: None,
+                serving_tiers: Vec::new(),
                 quality_tags: Vec::new(),
                 availability: crate::llm_config::ModelAvailability::default(),
                 tier: None,
@@ -1283,7 +1286,7 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 superseded_by: None,
-                fast_mode: None,
+                serving_tiers: Vec::new(),
                 quality_tags: Vec::new(),
                 availability: crate::llm_config::ModelAvailability::default(),
                 tier: None,
@@ -1394,7 +1397,7 @@ mod tests {
         let standard = pricing_detail_for_tier("anthropic", "claude-opus-4-8", false).unwrap();
         let fast = pricing_detail_for_tier("anthropic", "claude-opus-4-8", true).unwrap();
         assert_eq!(standard.source, PricingSource::CatalogModel);
-        assert_eq!(fast.source, PricingSource::CatalogFastMode);
+        assert_eq!(fast.source, PricingSource::CatalogServingTier);
         assert!((fast.input_per_1k - 2.0 * standard.input_per_1k).abs() < 1e-9);
         assert!((fast.output_per_1k - 2.0 * standard.output_per_1k).abs() < 1e-9);
 

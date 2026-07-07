@@ -109,7 +109,7 @@ fn test_equivalent_model_with_context(
         deprecated: false,
         deprecation_note: None,
         superseded_by: None,
-        fast_mode: None,
+        serving_tiers: Vec::new(),
         quality_tags: Vec::new(),
         availability: ModelAvailability::Serverless,
         tier: Some("mid".to_string()),
@@ -455,15 +455,17 @@ fn fast_opts_into_tier_for_supported_model_and_guards_others() {
 
     // Deprecated tier -> rejected. Keep this covered with a synthetic catalog
     // row now that no built-in model has a deprecated fast tier.
-    let overlay = crate::llm_config::parse_config_toml(
-        r#"
-[models."test-deprecated-fast"]
-name = "Deprecated Fast Test"
-provider = "anthropic"
-context_window = 128000
-fast_mode = { param = "speed", value = "fast", status = "deprecated", note = "removed" }
-"#,
-    )
+    let overlay = crate::llm_config::parse_config_toml(concat!(
+        "[models.\"test-deprecated-fast\"]\n",
+        "name = \"Deprecated Fast Test\"\n",
+        "provider = \"anthropic\"\n",
+        "context_window = 128000\n",
+        "serving_tiers = [\n",
+        "  { id = \"fast\", mode = \"synchronous\", economics = \"premium\", ",
+        "request = { param = \"speed\", value = \"fast\" }, ",
+        "status = \"deprecated\", note = \"removed\" },\n",
+        "]\n",
+    ))
     .expect("test catalog overlay");
     crate::llm_config::set_user_overrides(Some(overlay));
     super::super::reset_provider_key_cache();

@@ -503,7 +503,7 @@ base_url_env = "AZURE_OPENAI_ENDPOINT"
 auth_style = "azure_openai"
 auth_env = ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_AD_TOKEN", "AZURE_OPENAI_BEARER_TOKEN"]
 chat_endpoint = "/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
-features = ["native_tools"]
+features = ["native_tools", "batch"]
 cost_per_1k_in = 0.0025
 cost_per_1k_out = 0.010
 latency_p50_ms = 1900

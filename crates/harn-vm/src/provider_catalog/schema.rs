@@ -221,7 +221,10 @@ pub fn schema_value() -> Value {
                     "open_weight": {"type": "boolean"},
                     "strengths": {"type": "array", "items": {"type": "string"}},
                     "benchmarks": {"type": "object", "additionalProperties": {"type": "number"}},
-                    "fast_mode": {"$ref": "#/$defs/fast_mode"}
+                    "serving_tiers": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/serving_tier"}
+                    }
                 },
                 "additionalProperties": false
             },
@@ -315,6 +318,10 @@ pub fn schema_value() -> Value {
                     "max_input_bytes": {"type": "integer", "minimum": 1},
                     "result_retention_days": {"type": "integer", "minimum": 1},
                     "security_notes": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1}
+                    },
+                    "operational_notes": {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1}
                     }
@@ -415,16 +422,35 @@ pub fn schema_value() -> Value {
                 },
                 "additionalProperties": false
             },
-            "fast_mode": {
+            "serving_tier_request": {
                 "type": "object",
                 "required": ["param", "value"],
                 "properties": {
                     "param": {"type": "string", "minLength": 1},
                     "value": {"type": "string", "minLength": 1},
-                    "beta_header": {"type": "string"},
+                    "beta_header": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
+            "serving_tier": {
+                "type": "object",
+                "required": ["id", "mode", "economics"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+                    "label": {"type": "string", "minLength": 1},
+                    "mode": {"enum": ["synchronous"]},
+                    "economics": {"enum": ["discounted", "standard", "premium"]},
+                    "request": {"$ref": "#/$defs/serving_tier_request"},
                     "otps_speedup": {"type": "number", "exclusiveMinimum": 0},
+                    "cost_multiplier": {"type": "number", "exclusiveMinimum": 0},
+                    "discount_percent": {"type": "integer", "minimum": 0, "maximum": 100},
                     "status": {"type": "string"},
                     "pricing": {"$ref": "#/$defs/pricing"},
+                    "latency": {"type": "string", "minLength": 1},
+                    "reliability": {"type": "string", "minLength": 1},
+                    "quota": {"type": "string", "minLength": 1},
+                    "suitable_workloads": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                    "unsuitable_workloads": {"type": "array", "items": {"type": "string", "minLength": 1}},
                     "note": {"type": "string"}
                 },
                 "additionalProperties": false

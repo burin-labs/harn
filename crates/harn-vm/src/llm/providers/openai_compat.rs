@@ -352,7 +352,7 @@ impl OpenAiCompatibleProvider {
             body[field] = chat_template_kwargs;
         }
         apply_prompt_cache_breakpoint(&mut body, opts.cache, &caps);
-        crate::llm::fast_mode::apply_request_knob(&mut body, &opts.model, opts.fast);
+        crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
         body
     }
 
@@ -1414,7 +1414,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_mode_injects_service_tier_for_openai() {
+    fn fast_tier_injects_service_tier_for_openai() {
         // `fast: true` on GPT-5.5 rides the catalog's `service_tier` knob;
         // OpenAI needs no beta header so none is added.
         let mut payload = base_request_payload();
