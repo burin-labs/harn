@@ -278,12 +278,23 @@ jobs:
                 echo "::notice::Release $REF has all assets but is still marked prerelease; finalizing without rebuilding."
               fi
 
-              echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null 2>&1 || true
-              if docker manifest inspect "ghcr.io/burin-labs/harn:$VERSION" >/dev/null 2>&1; then
-                echo "::notice::Versioned container image ghcr.io/burin-labs/harn:$VERSION already exists; skipping container publish."
+              anonymous_docker_config="${RUNNER_TEMP}/anonymous-docker-config"
+              rm -rf "$anonymous_docker_config"
+              mkdir -p "$anonymous_docker_config"
+              MISSING_PUBLIC_CONTAINER_TAGS=()
+              for TAG in "$VERSION" "$MAJOR_MINOR" latest; do
+                IMAGE="ghcr.io/burin-labs/harn:${TAG}"
+                if docker --config "$anonymous_docker_config" manifest inspect "$IMAGE" >/dev/null 2>&1; then
+                  echo "::notice::Container image $IMAGE is already publicly pullable."
+                else
+                  MISSING_PUBLIC_CONTAINER_TAGS+=("$TAG")
+                fi
+              done
+              if (( ${#MISSING_PUBLIC_CONTAINER_TAGS[@]} == 0 )); then
+                echo "::notice::All release container tags are publicly pullable; skipping container publish."
               else
                 SHOULD_PUBLISH_CONTAINER=true
-                echo "::notice::Versioned container image ghcr.io/burin-labs/harn:$VERSION is missing; publishing container tags."
+                echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Publishing container tags."
               fi
             fi
           fi
