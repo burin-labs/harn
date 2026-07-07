@@ -696,7 +696,7 @@ mod tests {
 import { wait_for } from "std/monitors"
 
 pipeline test(task) {
-  let result = wait_for({
+  const result = wait_for({
     wait_id: "poll-demo",
     timeout: 500ms,
     poll_interval: 10ms,
@@ -738,7 +738,7 @@ pipeline test(task) {
 import { wait_for } from "std/monitors"
 
 pipeline test(task) {
-  let result = wait_for({
+  const result = wait_for({
     wait_id: "replay-demo",
     timeout: 500ms,
     poll_interval: 10ms,
@@ -757,7 +757,7 @@ pipeline test(task) {
 import { wait_for } from "std/monitors"
 
 pipeline test(task) {
-  let result = wait_for({
+  const result = wait_for({
     wait_id: "replay-demo",
     timeout: 1ms,
     poll_interval: 1ms,
@@ -808,7 +808,7 @@ pipeline test(task) {
 import { wait_for } from "std/monitors"
 
 pipeline test(task) {
-  let result = wait_for({
+  const result = wait_for({
     wait_id: "push-demo",
     timeout: 500ms,
     poll_interval: 1h,

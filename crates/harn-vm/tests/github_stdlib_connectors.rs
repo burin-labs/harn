@@ -91,18 +91,18 @@ import {
 } from "std/connectors/github"
 
 pipeline main(task) {
-  let dispatch = workflow_dispatch("git@github.com:octo-org/octo-repo.git", "release.yml", "main", {version: "v0.8.4"})
+  const dispatch = workflow_dispatch("git@github.com:octo-org/octo-repo.git", "release.yml", "main", {version: "v0.8.4"})
   assert_eq(dispatch.workflow_run_id, 123, "dispatch result")
   assert_eq(workflow_runs("octo-org/octo-repo", {event: "workflow_dispatch"}).workflow_runs[0].id, 123, "runs result")
   assert_eq(workflow_run("octo-org/octo-repo", 123).status, "completed", "run result")
   assert_eq(trim(read_file_at_ref("https://github.com/octo-org/octo-repo.git", ".harn-version", "main").text), "v0.8.4", "file text")
   assert_eq(latest_release("octo-org/octo-repo").tag_name, "v0.8.4", "release tag")
   assert_eq(release_assets("octo-org/octo-repo", 501).asset_names[0], "harn-x86_64-unknown-linux-gnu.tar.gz", "asset names")
-  let auto_merge = enable_auto_merge("octo-org/octo-repo", 7, {method: "squash"})
+  const auto_merge = enable_auto_merge("octo-org/octo-repo", 7, {method: "squash"})
   assert_eq(auto_merge.ok, true, "auto-merge ok")
   assert_eq(auto_merge.state, "already_enabled", "auto-merge state")
   assert_eq(auto_merge.strategy, "graphql_auto_merge", "auto-merge strategy")
-  let closed = close_pr("octo-org/octo-repo", 7, "Closing in favor of the release branch.")
+  const closed = close_pr("octo-org/octo-repo", 7, "Closing in favor of the release branch.")
   assert_eq(closed.ok, true, "close ok")
   assert_eq(closed.comment_posted, true, "close comment")
   log("github wrappers ok")

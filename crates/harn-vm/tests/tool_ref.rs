@@ -88,7 +88,7 @@ pipeline main(task) {
   let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file in place", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
-  let def = tool_def("edit")
+  const def = tool_def("edit")
   log(def.name)
   log(def.description)
 }

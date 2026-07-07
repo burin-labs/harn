@@ -49,11 +49,11 @@ fn out(source: &str) -> Vec<String> {
 fn post_event_then_drain_round_trips_through_inbox() {
     let lines = out(r#"
 pipeline main(task) {
-  let s = agent_session_open()
+  const s = agent_session_open()
   agent_session_post_event(s, "tool_result", "first", "test")
   agent_session_post_event(s, "mcp_progress", "halfway", "mcp")
   agent_session_post_event(s, "tool_result", "second", "test")
-  let drained = agent_session_drain_inbox(s)
+  const drained = agent_session_drain_inbox(s)
   log(len(drained))
   log(drained[0].kind)
   log(drained[0].content)

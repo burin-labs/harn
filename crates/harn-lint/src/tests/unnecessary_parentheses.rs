@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn test_unnecessary_parentheses_autofixes_ternary_list_branch() {
     let source = r#"pipeline default() {
-  let args = repo ? (["--repo", repo]) : []
+  const args = repo ? (["--repo", repo]) : []
 }
 "#;
     let diags = lint_source(source);
@@ -67,8 +67,8 @@ fn test_unnecessary_parentheses_ignores_call_and_decl_parens() {
 #[test]
 fn test_unnecessary_parentheses_ignores_precedence_grouping() {
     let source = r"pipeline default() {
-  let x = a * (b + c)
-  let y = (a || b) && c
+  const x = a * (b + c)
+  const y = (a || b) && c
 }
 ";
     let diags = lint_source(source);
@@ -81,7 +81,7 @@ fn test_unnecessary_parentheses_ignores_precedence_grouping() {
 #[test]
 fn test_unnecessary_parentheses_only_unwraps_inner_nested_pair() {
     let source = r"pipeline default() {
-  let repo = ((name))
+  const repo = ((name))
 }
 ";
     let diags = lint_source(source);

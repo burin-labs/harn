@@ -120,8 +120,8 @@ mod tests {
         Url::parse("file:///repair.harn").unwrap()
     }
 
-    /// `var` that is never reassigned trips the `mutable-never-reassigned`
-    /// lint, whose repair rewrites the `var` keyword to `let`.
+    /// A `let` that is never reassigned trips the `mutable-never-reassigned`
+    /// lint, whose repair rewrites the `let` keyword to `const`.
     fn make_immutable_repair_id(state: &DocumentState) -> String {
         state
             .lint_diagnostics

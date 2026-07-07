@@ -434,7 +434,7 @@ mod tests {
         let mut db = AnalysisDatabase::new();
         let id = source_id();
         assert_eq!(
-            db.set_source(id.clone(), "let x = 1\n".to_string(), SourceVersion(1)),
+            db.set_source(id.clone(), "const x = 1\n".to_string(), SourceVersion(1)),
             SourceUpdate::Inserted
         );
         db.parse(&id).expect("initial parse");
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(db.stats().parse_runs, 1);
 
         assert_eq!(
-            db.set_source(id.clone(), "let x = 1\n".to_string(), SourceVersion(2)),
+            db.set_source(id.clone(), "const x = 1\n".to_string(), SourceVersion(2)),
             SourceUpdate::Unchanged
         );
         db.parse(&id).expect("same digest parse");
@@ -455,11 +455,11 @@ mod tests {
     fn source_change_invalidates_parse_and_typecheck_outputs() {
         let mut db = AnalysisDatabase::new();
         let id = source_id();
-        db.set_source(id.clone(), "let x = 1\n".to_string(), SourceVersion(1));
+        db.set_source(id.clone(), "const x = 1\n".to_string(), SourceVersion(1));
         db.typecheck(&id, TypeCheckConfig::new())
             .expect("initial check");
         assert_eq!(
-            db.set_source(id.clone(), "let x = 2\n".to_string(), SourceVersion(2)),
+            db.set_source(id.clone(), "const x = 2\n".to_string(), SourceVersion(2)),
             SourceUpdate::Changed
         );
         db.typecheck(&id, TypeCheckConfig::new())
@@ -473,7 +473,7 @@ mod tests {
     fn parsed_source_seed_skips_lex_and_parse() {
         let mut db = AnalysisDatabase::new();
         let id = source_id();
-        let source = "let x = 1\n".to_string();
+        let source = "const x = 1\n".to_string();
         let mut lexer = Lexer::new(&source);
         let tokens = lexer.tokenize().expect("tokenize");
         let mut parser = Parser::new(tokens);
@@ -496,7 +496,7 @@ mod tests {
         let id = source_id();
         db.set_source(
             id.clone(),
-            "pipeline main() {\n  let x = read_file(\"a\")\n  log(x.foo)\n}\n".to_string(),
+            "pipeline main() {\n  const x = read_file(\"a\")\n  log(x.foo)\n}\n".to_string(),
             SourceVersion(1),
         );
         db.typecheck(&id, TypeCheckConfig::new())
@@ -514,7 +514,7 @@ mod tests {
         let id = source_id();
         db.set_source(
             id.clone(),
-            "pipeline main() {\n  let x: int = \"nope\"\n}\n".to_string(),
+            "pipeline main() {\n  const x: int = \"nope\"\n}\n".to_string(),
             SourceVersion(1),
         );
         let first = db.typecheck(&id, TypeCheckConfig::new()).expect("check");

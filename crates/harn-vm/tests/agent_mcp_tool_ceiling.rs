@@ -78,15 +78,15 @@ fn bootstrap_snippet(mcp_servers: &str, policy: &str) -> String {
         r#"
 import {{ agent_mcp_bootstrap_if_needed }} from "std/agent/mcp"
 pipeline main(task) {{
-  let session = {{session_id: "sess-mcp-ceiling"}}
-  let opts = {{
+  const session = {{session_id: "sess-mcp-ceiling"}}
+  const opts = {{
     mcp_servers: {mcp_servers},
     tools: {{_type: "tool_registry", tools: [{{name: "look"}}]}},
     policy: {policy},
   }}
-  let out = agent_mcp_bootstrap_if_needed(session, opts)
-  let catalog = (out?.tools?.tools ?? []).map({{ t -> to_string(t?.name ?? "") }})
-  let ceiling = out?.policy?.tools ?? []
+  const out = agent_mcp_bootstrap_if_needed(session, opts)
+  const catalog = (out?.tools?.tools ?? []).map({{ t -> to_string(t?.name ?? "") }})
+  const ceiling = out?.policy?.tools ?? []
   log("catalog=" + join(catalog, ","))
   log("ceiling=" + join(ceiling, ","))
   log("ceiling_type=" + type_of(out?.policy?.tools))

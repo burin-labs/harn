@@ -100,7 +100,7 @@ import "std/code_librarian"
 fn project(rows, key) {{
   let out = []
   for row in rows {{
-    let v = row?[key]
+    const v = row?[key]
     if v != nil {{
       out = out + [to_string(v)]
     }}
@@ -108,7 +108,7 @@ fn project(rows, key) {{
   return out
 }}
 
-let _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
+const _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
 let rows = []
 {query_lines}
 return rows
@@ -172,8 +172,8 @@ fn librarian_who_calls_returns_call_sites() {
     let source = format!(
         r#"
 import "std/code_librarian"
-let _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
-let callers = code_librarian_who_calls("fetchUser")
+const _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
+const callers = code_librarian_who_calls("fetchUser")
 let paths = []
 for c in callers {{
   paths = paths + [c.path]
@@ -231,11 +231,11 @@ fn librarian_freshness_and_overlay_roundtrip() {
     let source = format!(
         r#"
 import "std/code_librarian"
-let _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
-let fresh = code_librarian_freshness("src/util.ts")
-let unknown = code_librarian_freshness("src/no-such-file.ts")
-let on = code_librarian_branch_overlay("topic/test")
-let off = code_librarian_branch_overlay(nil)
+const _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
+const fresh = code_librarian_freshness("src/util.ts")
+const unknown = code_librarian_freshness("src/no-such-file.ts")
+const on = code_librarian_branch_overlay("topic/test")
+const off = code_librarian_branch_overlay(nil)
 return {{
   fresh_known: fresh.known,
   fresh_stale: fresh.stale,

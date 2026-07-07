@@ -124,7 +124,7 @@ fn __render_tools_harn(package_name: string, handler: string, description: strin
     + "pub fn "
     + handler
     + "(args) {\n"
-    + "  let input = schema_expect(args, {\n"
+    + "  const input = schema_expect(args, {\n"
     + "    type: \"object\",\n"
     + "    properties: {\n"
     + "      text: {type: \"string\"}\n"
@@ -138,7 +138,7 @@ fn __render_tools_harn(package_name: string, handler: string, description: strin
     + package_name
     + "`. */\n"
     + "pub fn tools(registry = nil) {\n"
-    + "  var reg = registry ?? tool_registry()\n"
+    + "  let reg = registry ?? tool_registry()\n"
     + "  reg = tool_define(reg, "
     + tool_name
     + ", "
@@ -170,12 +170,12 @@ fn __render_main_harn(package_name: string) -> string {
     + "import { tools } from \"lib/tools\"\n"
     + "\n"
     + "pipeline default() {\n"
-    + "  let registry = tools()\n"
-    + "  var text = \"hello\"\n"
+    + "  const registry = tools()\n"
+    + "  let text = \"hello\"\n"
     + "  if len(argv) > 0 {\n"
     + "    text = argv[0]\n"
     + "  }\n"
-    + "  let result = agent_dispatch_tool_call({\n"
+    + "  const result = agent_dispatch_tool_call({\n"
     + "    name: "
     + tool_name
     + ",\n"
@@ -196,8 +196,8 @@ fn __render_test_harn(package_name: string, ident: string) -> string {
     + "pipeline test_"
     + ident
     + "_tool(task) {\n"
-    + "  let registry = tools()\n"
-    + "  let ok = agent_dispatch_tool_call({\n"
+    + "  const registry = tools()\n"
+    + "  const ok = agent_dispatch_tool_call({\n"
     + "    name: "
     + tool_name
     + ",\n"
@@ -206,7 +206,7 @@ fn __render_test_harn(package_name: string, ident: string) -> string {
     + "  assert(ok.ok, ok.error?.message ?? \"tool call should pass\")\n"
     + "  assert_eq(ok.rendered_result, \"hello\")\n"
     + "\n"
-    + "  let bad = agent_dispatch_tool_call({\n"
+    + "  const bad = agent_dispatch_tool_call({\n"
     + "    name: "
     + tool_name
     + ",\n"

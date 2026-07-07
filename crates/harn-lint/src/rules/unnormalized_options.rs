@@ -143,7 +143,7 @@ pipeline default(task) {
         let diags = lint(
             r#"
 pipeline default(task) {
-    let opts = {loop_until_done: true}
+    const opts = {loop_until_done: true}
     agent_loop(task, "system", opts)
 }
 "#,

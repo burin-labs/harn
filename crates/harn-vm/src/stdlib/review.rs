@@ -812,11 +812,11 @@ pipeline test(task) {
   llm_mock({
     text: "{\"summary\":\"Parser change needs a regression test.\",\"findings\":[{\"severity\":\"blocking\",\"category\":\"test_coverage\",\"title\":\"Missing regression test\",\"detail\":\"The parser behavior changed without a focused regression test.\",\"suggestion\":\"Add a conformance case.\",\"file\":\"conformance/tests/parser_case.harn\",\"line_start\":1,\"line_end\":1}]}"
   })
-  let result: ReviewResult = self_review("diff --git a/src/parser.rs b/src/parser.rs\n+parse_new_branch()", "code", 1)
+  const result: ReviewResult = self_review("diff --git a/src/parser.rs b/src/parser.rs\n+parse_new_branch()", "code", 1)
   __io_println(result.rubric_preset == "code")
   __io_println(result.has_blocking_findings)
   __io_println(result.findings[0].source == "llm")
-  let records: list<TrustRecord> = trust_query({action: "pr.self_review"})
+  const records: list<TrustRecord> = trust_query({action: "pr.self_review"})
   __io_println(len(records) == 1)
   __io_println(records[0].metadata.blocking_finding_count == 1)
 }
@@ -835,7 +835,7 @@ import "std/review"
 
 pipeline test(task) {
   llm_mock({text: "{\"summary\":\"No extra issues.\",\"findings\":[]}"})
-  let result: ReviewResult = self_review("diff --git a/.env b/.env\n+OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx123456", "default", 1)
+  const result: ReviewResult = self_review("diff --git a/.env b/.env\n+OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx123456", "default", 1)
   __io_println(result.has_blocking_findings)
   __io_println(len(result.secret_scan_findings) == 1)
   __io_println(result.findings[0].source == "secret_scan")
@@ -857,7 +857,7 @@ pipeline test(task) {
   llm_mock({
     text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"detail\":\"The changed path can crash on startup.\"}]}"
   })
-  let result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
+  const result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
   __io_println(len(result.findings) == 1)
   __io_println(result.findings[0].title == "Review finding")
   __io_println(result.findings[0].detail == "The changed path can crash on startup.")
@@ -879,7 +879,7 @@ pipeline test(task) {
   llm_mock({
     text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"title\":\"Startup crash\",\"description\":\"The changed path can crash on startup.\",\"path\":\"src/main.rs\",\"line\":1}]}"
   })
-  let result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
+  const result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
   __io_println(result.findings[0].detail == "The changed path can crash on startup.")
   __io_println(result.findings[0].file == "src/main.rs")
   __io_println(result.findings[0].line_start == 1)
@@ -904,9 +904,9 @@ pipeline test(task) {
   llm_mock({
     text: "{\"summary\":\"Clean after reconsidering the evidence.\",\"findings\":[]}"
   })
-  let result: ReviewResult = self_review("diff --git a/src/lib.rs b/src/lib.rs\n+let value = 1", "default", 2)
-  let calls = llm_mock_calls()
-  let second_prompt = calls[1].messages[0].content
+  const result: ReviewResult = self_review("diff --git a/src/lib.rs b/src/lib.rs\n+const value = 1", "default", 2)
+  const calls = llm_mock_calls()
+  const second_prompt = calls[1].messages[0].content
   __io_println(len(result.rounds) == 2)
   __io_println(result.rounds[1].summary == "Clean after reconsidering the evidence.")
   __io_println(contains(second_prompt, "Candidate findings JSON"))

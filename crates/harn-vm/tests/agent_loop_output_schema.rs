@@ -71,18 +71,18 @@ fn off_shape_terminal_answer_reasks_once_and_validates() {
     let raw = run_with_bridge(
         r#"
 pipeline main(task) {
-  let session = "output-schema-repair"
-  let repair_counter = shared_cell(
+  const session = "output-schema-repair"
+  const repair_counter = shared_cell(
     {scope: "task_group", key: "os-repair-" + session, initial: 0},
   )
-  let schema = {
+  const schema = {
     type: "object",
     properties: {answer: {type: "int"}},
     required: ["answer"],
   }
-  let mock_llm = { _call ->
+  const mock_llm = { _call ->
     if _call?.opts?._output_schema_repair == true {
-      let snap = shared_snapshot(repair_counter)
+      const snap = shared_snapshot(repair_counter)
       shared_cas(repair_counter, snap, snap.value + 1)
       return {ok: true, value: {text: "{\"answer\": 42}", provider: "mock", model: "mock"}}
     }
@@ -95,7 +95,7 @@ pipeline main(task) {
       },
     }
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "answer",
     nil,
     {
@@ -139,18 +139,18 @@ fn already_valid_terminal_answer_fires_no_repair() {
     let raw = run_with_bridge(
         r#"
 pipeline main(task) {
-  let session = "output-schema-direct"
-  let repair_counter = shared_cell(
+  const session = "output-schema-direct"
+  const repair_counter = shared_cell(
     {scope: "task_group", key: "os-direct-" + session, initial: 0},
   )
-  let schema = {
+  const schema = {
     type: "object",
     properties: {answer: {type: "int"}},
     required: ["answer"],
   }
-  let mock_llm = { _call ->
+  const mock_llm = { _call ->
     if _call?.opts?._output_schema_repair == true {
-      let snap = shared_snapshot(repair_counter)
+      const snap = shared_snapshot(repair_counter)
       shared_cas(repair_counter, snap, snap.value + 1)
     }
     return {
@@ -162,7 +162,7 @@ pipeline main(task) {
       },
     }
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "answer",
     nil,
     {
@@ -207,13 +207,13 @@ fn persistently_off_shape_yields_output_valid_false() {
     let raw = run_with_bridge(
         r#"
 pipeline main(task) {
-  let session = "output-schema-fail"
-  let schema = {
+  const session = "output-schema-fail"
+  const schema = {
     type: "object",
     properties: {answer: {type: "int"}},
     required: ["answer"],
   }
-  let mock_llm = { _call ->
+  const mock_llm = { _call ->
     return {
       ok: true,
       value: {
@@ -223,7 +223,7 @@ pipeline main(task) {
       },
     }
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "answer",
     nil,
     {
@@ -258,8 +258,8 @@ fn unset_output_schema_leaves_run_unchanged() {
     let raw = run_with_bridge(
         r#"
 pipeline main(task) {
-  let session = "output-schema-unset"
-  let mock_llm = { _call ->
+  const session = "output-schema-unset"
+  const mock_llm = { _call ->
     return {
       ok: true,
       value: {
@@ -269,7 +269,7 @@ pipeline main(task) {
       },
     }
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "answer",
     nil,
     {
@@ -307,28 +307,28 @@ fn tool_calling_still_works_with_output_schema_set() {
         r#"
 pipeline main(task) {
   clear_tool_hooks()
-  let session = "output-schema-tools"
-  let registry = tool_registry()
-  let tools = tool_define(
+  const session = "output-schema-tools"
+  const registry = tool_registry()
+  const tools = tool_define(
     registry,
     "lookup",
     "Return a fixed value.",
     {parameters: {}, handler: { _args -> return "looked up" }},
   )
-  let tool_counter = shared_cell(
+  const tool_counter = shared_cell(
     {scope: "task_group", key: "os-tools-" + session, initial: 0},
   )
-  let schema = {
+  const schema = {
     type: "object",
     properties: {answer: {type: "int"}},
     required: ["answer"],
   }
-  let mock_llm = { _call ->
+  const mock_llm = { _call ->
     if _call?.opts?._output_schema_repair == true {
       return {ok: true, value: {text: "{\"answer\": 99}", provider: "mock", model: "mock"}}
     }
-    let snap = shared_snapshot(tool_counter)
-    let n = snap.value
+    const snap = shared_snapshot(tool_counter)
+    const n = snap.value
     shared_cas(tool_counter, snap, n + 1)
     if n == 0 {
       return {
@@ -351,7 +351,7 @@ pipeline main(task) {
       },
     }
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "do the work",
     nil,
     {

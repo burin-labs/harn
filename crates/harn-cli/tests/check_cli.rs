@@ -54,8 +54,8 @@ fn check_reports_unknown_struct_type_with_precise_location() {
     let (line, column) = line_column_for_offset(source, span.start);
     assert_eq!(
         (line, column),
-        (1, 9),
-        "expected diagnostic at 1:9, got {line}:{column} (span={span:?})"
+        (1, 11),
+        "expected diagnostic at 1:11, got {line}:{column} (span={span:?})"
     );
 }
 

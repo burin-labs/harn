@@ -38,7 +38,7 @@ fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
 #[test]
 fn test_eager_collection_conversion_let_list() {
     let source = r"pipeline default(task) {
-  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  const xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
   log(xs)
 }
 ";
@@ -58,7 +58,7 @@ fn test_eager_collection_conversion_let_list() {
 #[test]
 fn test_eager_collection_conversion_no_flag_when_already_to_list() {
     let source = r"pipeline default(task) {
-  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 }).to_list()
+  const xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 }).to_list()
   log(xs)
 }
 ";
@@ -119,7 +119,7 @@ fn test_blank_line_between_items_does_not_fire_between_imports() {
 #[test]
 fn test_trailing_comma_fires_on_multiline_list() {
     let source =
-        "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3\n  ]\n  log(xs[0])\n}\n";
+        "pipeline default(task) {\n  const xs = [\n    1,\n    2,\n    3\n  ]\n  log(xs[0])\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),
@@ -129,7 +129,7 @@ fn test_trailing_comma_fires_on_multiline_list() {
 
 #[test]
 fn test_trailing_comma_autofixes_multiline_single_item_list() {
-    let source = "pipeline default(task) {\n  let xs = [\n    1\n  ]\n}\n";
+    let source = "pipeline default(task) {\n  const xs = [\n    1\n  ]\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),
@@ -159,7 +159,7 @@ fn test_trailing_comma_autofixes_multiline_single_arg_call() {
 
 #[test]
 fn test_trailing_comma_fires_on_computed_dict_key() {
-    let source = "pipeline default(task) {\n  let k = \"a\"\n  let d = {\n    [k]: 1\n  }\n}\n";
+    let source = "pipeline default(task) {\n  const k = \"a\"\n  const d = {\n    [k]: 1\n  }\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),
@@ -170,7 +170,7 @@ fn test_trailing_comma_fires_on_computed_dict_key() {
 #[test]
 fn test_trailing_comma_ok_when_present() {
     let source =
-        "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3,\n  ]\n  log(xs[0])\n}\n";
+        "pipeline default(task) {\n  const xs = [\n    1,\n    2,\n    3,\n  ]\n  log(xs[0])\n}\n";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "trailing-comma"),
@@ -180,7 +180,7 @@ fn test_trailing_comma_ok_when_present() {
 
 #[test]
 fn test_trailing_comma_removes_single_line_list_comma() {
-    let source = "pipeline default(task) {\n  let xs = [1, 2, 3, ]\n  log(xs[0])\n}\n";
+    let source = "pipeline default(task) {\n  const xs = [1, 2, 3, ]\n  log(xs[0])\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),
@@ -210,7 +210,7 @@ fn test_trailing_comma_removes_single_line_call_comma() {
 
 #[test]
 fn test_trailing_comma_removes_single_line_dict_comma() {
-    let source = "pipeline default(task) {\n  let d = {name: \"ship\", }\n}\n";
+    let source = "pipeline default(task) {\n  const d = {name: \"ship\", }\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),
@@ -225,7 +225,7 @@ fn test_trailing_comma_removes_single_line_dict_comma() {
 
 #[test]
 fn test_trailing_comma_ignores_single_line_list() {
-    let source = "pipeline default(task) {\n  let xs = [1, 2, 3]\n  log(xs[0])\n}\n";
+    let source = "pipeline default(task) {\n  const xs = [1, 2, 3]\n  log(xs[0])\n}\n";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "trailing-comma"),
@@ -236,7 +236,7 @@ fn test_trailing_comma_ignores_single_line_list() {
 #[test]
 fn test_trailing_comma_ignores_fn_body_block() {
     // fn body is `{ ... }` but not a dict/struct — must not fire.
-    let source = "fn x() -> int {\n  let y = 1\n  return y\n}\n";
+    let source = "fn x() -> int {\n  const y = 1\n  return y\n}\n";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "trailing-comma"),
@@ -246,7 +246,7 @@ fn test_trailing_comma_ignores_fn_body_block() {
 
 #[test]
 fn test_trailing_comma_ignores_multiline_parenthesized_expression() {
-    let source = "pipeline default(task) {\n  let x = (\n    1 + 2\n  )\n  log(x)\n}\n";
+    let source = "pipeline default(task) {\n  const x = (\n    1 + 2\n  )\n  log(x)\n}\n";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "trailing-comma"),
@@ -257,7 +257,7 @@ fn test_trailing_comma_ignores_multiline_parenthesized_expression() {
 #[test]
 fn test_trailing_comma_fires_on_dict_literal() {
     let source =
-        "pipeline default(task) {\n  let d = {\n    \"a\": 1,\n    \"b\": 2\n  }\n  log(d)\n}\n";
+        "pipeline default(task) {\n  const d = {\n    \"a\": 1,\n    \"b\": 2\n  }\n  log(d)\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),
@@ -278,7 +278,7 @@ fn test_trailing_comma_fires_on_fn_call_args() {
 #[test]
 fn test_eager_collection_conversion_ignores_iter_annotation() {
     let source = r"pipeline default(task) {
-  let xs: Iter<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  const xs: Iter<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
   log(xs)
 }
 ";

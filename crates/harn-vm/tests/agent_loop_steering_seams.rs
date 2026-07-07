@@ -103,25 +103,25 @@ import {{ agent_session_push_bridge_injection }} from "std/agent/state"
 
 pipeline main(task) {{
   clear_tool_hooks()
-  let registry = tool_registry()
-  let handler_calls = shared_cell({{scope: "task_group", key: "handler-{session_id}", initial: 0}})
-  let tools = tool_define(
+  const registry = tool_registry()
+  const handler_calls = shared_cell({{scope: "task_group", key: "handler-{session_id}", initial: 0}})
+  const tools = tool_define(
     registry,
     "would_force_push",
     "Test stand-in for an irreversible side-effect tool.",
     {{
       parameters: {{}},
       handler: {{ _args ->
-        let hsnap = shared_snapshot(handler_calls)
+        const hsnap = shared_snapshot(handler_calls)
         shared_cas(handler_calls, hsnap, hsnap.value + 1)
         return "would have force-pushed"
       }},
     }},
   )
-  let iteration_state = shared_cell({{scope: "task_group", key: "iter-{session_id}", initial: 0}})
-  let mock_llm = {{ _call ->
-    let snap = shared_snapshot(iteration_state)
-    let n = snap.value
+  const iteration_state = shared_cell({{scope: "task_group", key: "iter-{session_id}", initial: 0}})
+  const mock_llm = {{ _call ->
+    const snap = shared_snapshot(iteration_state)
+    const n = snap.value
     shared_cas(iteration_state, snap, n + 1)
     if n == 0 {{
 {push_line}
@@ -140,7 +140,7 @@ pipeline main(task) {{
       value: {{text: "acknowledged ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
     }}
   }}
-  let result = agent_loop(
+  const result = agent_loop(
     "do the push",
     nil,
     {{
@@ -154,7 +154,7 @@ pipeline main(task) {{
     }},
   )
   log(result.status)
-  let checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
+  const checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
   let skipped_count = 0
   for event in checkpoints {{
     if event?.metadata?.dispatch_skipped == true {{
@@ -162,13 +162,13 @@ pipeline main(task) {{
     }}
   }}
   log(skipped_count)
-  let stats = transcript_stats(result.transcript)
+  const stats = transcript_stats(result.transcript)
   log(stats.tool_result_message_count)
   log(shared_get(handler_calls))
-  let messages = transcript_messages(result.transcript)
+  const messages = transcript_messages(result.transcript)
   let placeholder_count = 0
   for message in messages {{
-    let role = message?.role ?? ""
+    const role = message?.role ?? ""
     if role == "tool" || role == "tool_result" {{
       if contains(to_string(message?.content ?? ""), "was not dispatched: interrupted") {{
         placeholder_count = placeholder_count + 1
@@ -275,18 +275,18 @@ import {{ agent_session_push_bridge_injection }} from "std/agent/state"
 pipeline main(task) {{
   clear_tool_hooks()
 {push_block}
-  let call_counter = shared_cell(
+  const call_counter = shared_cell(
     {{scope: "task_group", key: "audit-only-llm-calls-{session_id}", initial: 0}},
   )
-  let stub_llm = {{ _call ->
-    let snap = shared_snapshot(call_counter)
+  const stub_llm = {{ _call ->
+    const snap = shared_snapshot(call_counter)
     shared_cas(call_counter, snap, snap.value + 1)
     return {{
       ok: true,
       value: {{text: "all set ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
     }}
   }}
-  let result = agent_loop(
+  const result = agent_loop(
     "wrap up",
     nil,
     {{
@@ -299,7 +299,7 @@ pipeline main(task) {{
   )
   log(result.status)
   log(shared_get(call_counter))
-  let reminder_events = transcript_events_by_kind(result.transcript, "system_reminder")
+  const reminder_events = transcript_events_by_kind(result.transcript, "system_reminder")
   let saw_audit_reminder = false
   for event in reminder_events {{
     if event?.reminder?.body == "audit trail: agent finished the merge" {{
@@ -307,7 +307,7 @@ pipeline main(task) {{
     }}
   }}
   log(saw_audit_reminder)
-  let checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
+  const checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
   let loop_exit_deliveries = 0
   for event in checkpoints {{
     if event?.metadata?.kind == "loop_exit" && (event?.metadata?.delivered ?? 0) >= 1 {{
@@ -412,20 +412,20 @@ import {{ agent_session_push_user_message }} from "std/agent/state"
 
 pipeline main(task) {{
   clear_tool_hooks()
-  let registry = tool_registry()
-  let tools = tool_define(
+  const registry = tool_registry()
+  const tools = tool_define(
     registry,
     "would_force_push",
     "Test stand-in for an irreversible side-effect tool.",
     {{parameters: {{}}, handler: {{ _args -> return "would have force-pushed" }}}},
   )
-  let iteration_state = shared_cell({{scope: "task_group", key: "steer-iter-{session_id}", initial: 0}})
-  let call_counter = shared_cell({{scope: "task_group", key: "steer-calls-{session_id}", initial: 0}})
-  let mock_llm = {{ _call ->
-    let csnap = shared_snapshot(call_counter)
+  const iteration_state = shared_cell({{scope: "task_group", key: "steer-iter-{session_id}", initial: 0}})
+  const call_counter = shared_cell({{scope: "task_group", key: "steer-calls-{session_id}", initial: 0}})
+  const mock_llm = {{ _call ->
+    const csnap = shared_snapshot(call_counter)
     shared_cas(call_counter, csnap, csnap.value + 1)
-    let snap = shared_snapshot(iteration_state)
-    let n = snap.value
+    const snap = shared_snapshot(iteration_state)
+    const n = snap.value
     shared_cas(iteration_state, snap, n + 1)
     if n == 0 {{
 {push_line}
@@ -444,7 +444,7 @@ pipeline main(task) {{
       value: {{text: "acknowledged ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
     }}
   }}
-  let result = agent_loop(
+  const result = agent_loop(
     "do the push",
     nil,
     {{
@@ -459,14 +459,14 @@ pipeline main(task) {{
   )
   log(result.status)
   log(shared_get(call_counter))
-  let stats = transcript_stats(result.transcript)
+  const stats = transcript_stats(result.transcript)
   log(stats.tool_result_message_count)
 
-  let checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
+  const checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
   let mid_turn_deliveries = 0
   let loop_exit_deliveries = 0
   for event in checkpoints {{
-    let delivered = event?.metadata?.delivered ?? 0
+    const delivered = event?.metadata?.delivered ?? 0
     if delivered >= 1 {{
       if event?.metadata?.kind == "loop_exit" {{
         loop_exit_deliveries = loop_exit_deliveries + 1
@@ -481,15 +481,15 @@ pipeline main(task) {{
   // Walk the transcript messages IN ORDER to prove chronological splice:
   // the steer user message must land after the tool_result and before the
   // final assistant message.
-  let messages = transcript_messages(result.transcript)
+  const messages = transcript_messages(result.transcript)
   let steer_user_count = 0
   let tool_result_idx = -1
   let steer_idx = -1
   let last_assistant_idx = -1
   let idx = 0
   for message in messages {{
-    let role = message?.role ?? ""
-    let content = message?.content ?? ""
+    const role = message?.role ?? ""
+    const content = message?.content ?? ""
     if (role == "tool_result" || role == "tool") && tool_result_idx == -1 {{
       tool_result_idx = idx
     }}

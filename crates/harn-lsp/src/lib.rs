@@ -185,7 +185,7 @@ mod tests {
  *
  * @effects: [fs.read]
  * @errors: [FileNotFound, PermissionDenied]
- * @example: let s = read_to_string(\"/tmp/x\")
+ * @example: const s = read_to_string(\"/tmp/x\")
  */
 fn read_to_string(path: string) -> string {
   return \"\"
@@ -202,7 +202,7 @@ fn read_to_string(path: string) -> string {
         assert_eq!(meta.effects.as_deref(), Some(&["fs.read".to_string()][..]));
         // Authored example wins over the derived one in the rendered block.
         let md = meta.to_markdown_with_derived_example(fn_sym.derived_example.as_deref());
-        assert!(md.contains("let s = read_to_string(\"/tmp/x\")"));
+        assert!(md.contains("const s = read_to_string(\"/tmp/x\")"));
         assert!(!md.contains("derived from signature"));
     }
 
@@ -227,12 +227,12 @@ fn read_to_string(path: string) -> string {
             .expect("should find fn");
         assert_eq!(
             fn_sym.derived_example.as_deref(),
-            Some("let out = read_to_string(path)")
+            Some("const out = read_to_string(path)")
         );
         let meta = fn_sym.stdlib_metadata.as_ref().expect("metadata present");
         let md = meta.to_markdown_with_derived_example(fn_sym.derived_example.as_deref());
         assert!(md.contains("derived from signature"));
-        assert!(md.contains("let out = read_to_string(path)"));
+        assert!(md.contains("const out = read_to_string(path)"));
     }
 
     #[test]
@@ -266,7 +266,7 @@ fn read_to_string(path: string) -> string {
     #[test]
     fn hover_fn_no_doc_comment() {
         let source =
-            "let x = 1\n\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
+            "const x = 1\n\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
         let state = DocumentState::new(source.to_string());
         let fn_sym = state
             .symbols
@@ -291,8 +291,8 @@ fn read_to_string(path: string) -> string {
             "  }\n",
             "}\n",
             "\n",
-            "let p = Point({x: 1, y: 2})\n",
-            "let s = p.sum()\n",
+            "const p = Point({x: 1, y: 2})\n",
+            "const s = p.sum()\n",
         );
         let sym = hover_symbol_at(source, 10, 12, "sum").expect("should find sum method");
         assert_eq!(sym.kind, HarnSymbolKind::Function);

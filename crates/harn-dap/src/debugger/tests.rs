@@ -266,7 +266,7 @@ fn test_parallel_runs_under_debugger_runtime() {
         "parallel_debugger_runtime.harn",
         r"
 pipeline test(task) {
-  let results = parallel 3 { i -> i * 10 }
+  const results = parallel 3 { i -> i * 10 }
   log(results)
 }
 ",
@@ -292,13 +292,13 @@ fn test_pool_workers_run_under_debugger_runtime() {
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
 pipeline test(task) {
-  let pool = pool_create({name: "dap-pool-runtime", max_concurrent: 4})
+  const pool = pool_create({name: "dap-pool-runtime", max_concurrent: 4})
   let handles = []
   for i in 0 to 8 exclusive {
-    let seed = i
+    const seed = i
     handles = handles.push(pool.submit({ -> seed + 10 }))
   }
-  let results = pool_wait(handles)
+  const results = pool_wait(handles)
   let completed = 0
   for result in results {
     if result.status == "completed" && result.result >= 10 {
@@ -457,7 +457,7 @@ fn test_evaluate_with_context() {
 fn test_source_returns_launch_source_content() {
     let mut dbg = Debugger::new();
     dbg.source_path = Some("/tmp/main.harn".to_string());
-    dbg.source_content = Some("let x = 1\n".to_string());
+    dbg.source_content = Some("const x = 1\n".to_string());
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -467,7 +467,7 @@ fn test_source_returns_launch_source_content() {
     assert_eq!(responses.len(), 1);
     assert_eq!(responses[0].success, Some(true));
     let body = responses[0].body.as_ref().unwrap();
-    assert_eq!(body["content"], "let x = 1\n");
+    assert_eq!(body["content"], "const x = 1\n");
     assert_eq!(body["mimeType"], "text/x-harn");
 }
 
@@ -655,7 +655,7 @@ fn test_breakpoint_stop() {
 
     let (_dir, file) = write_temp_program(
         "test_bp.harn",
-        "pipeline test(task) {\n  let x = 1\n  let y = 2\n  log(x + y)\n}",
+        "pipeline test(task) {\n  const x = 1\n  const y = 2\n  log(x + y)\n}",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -704,7 +704,7 @@ fn test_clearing_breakpoints_updates_live_vm() {
 
     let (_dir, file) = write_temp_program(
         "clear_breakpoints.harn",
-        "pipeline test(task) {\n  let x = 1\n  let y = 2\n  log(x + y)\n}\n",
+        "pipeline test(task) {\n  const x = 1\n  const y = 2\n  log(x + y)\n}\n",
     );
     let path = file.to_string_lossy().to_string();
 
@@ -757,7 +757,7 @@ fn test_pause_interrupts_running_vm() {
 
     let (_dir, file) = write_temp_program(
         "test_pause.harn",
-        "pipeline test(task) {\n  let x = 1\n  let y = 2\n  let z = 3\n}",
+        "pipeline test(task) {\n  const x = 1\n  const y = 2\n  const z = 3\n}",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -802,7 +802,7 @@ fn test_completions_returns_frame_scope_and_builtins() {
 
     let (_dir, file) = write_temp_program(
         "completions.harn",
-        "pipeline t(task) { let local_name = 1\nlog(local_name) }",
+        "pipeline t(task) { const local_name = 1\nlog(local_name) }",
     );
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -1128,7 +1128,7 @@ fn test_function_breakpoint_fires_on_matching_call() {
 
     let (_dir, file) = write_temp_program(
         "fn_bp.harn",
-        "fn helper() -> int { return 42 }\npipeline t(task) { let x = helper()\n log(x) }",
+        "fn helper() -> int { return 42 }\npipeline t(task) { const x = helper()\n log(x) }",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));

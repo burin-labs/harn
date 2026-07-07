@@ -105,7 +105,7 @@ fn build() -> Helper {
 }
 
 pipeline default(task) {
-  let item = build()
+  const item = build()
   log(item.value)
 }
 ",
@@ -144,7 +144,7 @@ fn build() -> Payload {
 }
 
 pipeline default(task) {
-  let item = build()
+  const item = build()
   log(item.value)
 }
 ",
@@ -162,7 +162,7 @@ fn test_unused_type_ignores_binding_annotation_reference() {
 type Payload = {value: int}
 
 pipeline default(task) {
-  let item: Payload = {value: 1}
+  const item: Payload = {value: 1}
   log(item.value)
 }
 ",
@@ -197,7 +197,7 @@ fn test_unused_type_ignores_closure_param_annotation_reference() {
 type Payload = {value: int}
 
 pipeline default(task) {
-  let read_value = { item: Payload -> item.value }
+  const read_value = { item: Payload -> item.value }
   log(read_value({value: 1}))
 }
 ",
@@ -219,7 +219,7 @@ fn identity<T>(item: T) -> T {
 }
 
 pipeline default(task) {
-  let item = identity<Payload>({value: 1})
+  const item = identity<Payload>({value: 1})
   log(item.value)
 }
 ",
@@ -237,7 +237,7 @@ fn test_unused_type_ignores_schema_of_reference() {
 type Payload = {value: int}
 
 pipeline default(task) {
-  let schema = schema_of(Payload)
+  const schema = schema_of(Payload)
   log(schema)
 }
 ",

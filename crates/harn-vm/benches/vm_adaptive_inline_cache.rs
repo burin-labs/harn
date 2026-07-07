@@ -50,7 +50,7 @@ fn bench_mixed_numeric_add_deopt(c: &mut Criterion) {
 fn erase(x) {
   return x
 }
-let values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
+const values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
 let total = erase(0)
 let i = 0
 while i < 40 {

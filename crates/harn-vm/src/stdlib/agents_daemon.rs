@@ -1048,11 +1048,11 @@ mod tests {
         let result = run_harn_result(
             r#"
 pipeline test(task) {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let root = path_join(temp_dir(), "harn-daemon-overflow-" + unique)
+  const unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  const root = path_join(temp_dir(), "harn-daemon-overflow-" + unique)
   mkdir(root)
   llm_mock({text: "daemon ready"})
-  let daemon = daemon_spawn({
+  const daemon = daemon_spawn({
     name: "overflow",
     task: "Wait for daemon trigger messages.",
     provider: "mock",
@@ -1088,12 +1088,12 @@ fn wait_for_iterations(handle, min_iterations) {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let root = path_join(temp_dir(), "harn-daemon-requeue-" + unique)
+  const unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  const root = path_join(temp_dir(), "harn-daemon-requeue-" + unique)
   mkdir(root)
   llm_mock({text: "daemon ready"})
   llm_mock({text: "handled alpha"})
-  let daemon = daemon_spawn({
+  const daemon = daemon_spawn({
     name: "requeue",
     task: "Wait for daemon trigger messages and echo the latest payload.",
     provider: "mock",
@@ -1101,10 +1101,10 @@ pipeline test(task) {
     wake_interval_ms: 1000,
   })
   daemon_trigger(daemon, {kind: "trigger", payload: {path: "alpha.txt"}})
-  let stopped = daemon_stop(daemon)
+  const stopped = daemon_stop(daemon)
   __io_println(stopped?.queued_event_count == 1)
-  let resumed = daemon_resume(root)
-  let final_snap = wait_for_iterations(resumed, 2)
+  const resumed = daemon_resume(root)
+  const final_snap = wait_for_iterations(resumed, 2)
   __io_println(contains(json_stringify(final_snap?.recorded_messages ?? []), "alpha.txt"))
   __io_println(final_snap?.queued_event_count == 0)
   daemon_stop(resumed)

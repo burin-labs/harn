@@ -130,13 +130,13 @@ fn callback_methods_do_not_accumulate_frames_per_item() {
     let (vm, result) = execute_with_limits(
         r"
 pipeline main() {
-  let xs = range(0, 256).to_list()
-  let mapped = xs.map({ x -> x + 1 })
-  let filtered = mapped.filter({ x -> x % 64 == 0 })
-  let dict = {a: 1, b: 2, c: 3, d: 4}
+  const xs = range(0, 256).to_list()
+  const mapped = xs.map({ x -> x + 1 })
+  const filtered = mapped.filter({ x -> x % 64 == 0 })
+  const dict = {a: 1, b: 2, c: 3, d: 4}
     .map_values({ v -> v + 10 })
     .filter({ v -> v > 12 })
-  let set_out = set(xs)
+  const set_out = set(xs)
     .map({ x -> x % 11 })
     .filter({ x -> x < 3 })
 

@@ -1052,7 +1052,7 @@ mod tests {
     #[test]
     fn import_path_inside_string_literal_is_ignored() {
         let source = r#"
-            let payload = "import { foo } from \"./other\""
+            const payload = "import { foo } from \"./other\""
             import "./real"
         "#;
         let imports = collect_user_imports(source);

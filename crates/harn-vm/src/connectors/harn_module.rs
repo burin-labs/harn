@@ -1849,10 +1849,10 @@ pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GenericWebhookPayload" }
 
 pub fn normalize_inbound(raw) {
-  let decoded = base64_decode(raw.body_base64)
-  let body = json_parse(decoded)
-  let secret = secret_get("test/signing-secret")
-  let signature = hmac_sha256(secret, decoded)
+  const decoded = base64_decode(raw.body_base64)
+  const body = json_parse(decoded)
+  const secret = secret_get("test/signing-secret")
+  const signature = hmac_sha256(secret, decoded)
   metrics_inc("normalize_ok")
   return {
     type: "event",
@@ -1900,7 +1900,7 @@ pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GitHubEventPayload" }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json
+  const body = raw.body_json
   return {
     type: "event",
     event: {
@@ -1947,7 +1947,7 @@ pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "SlackEventPayload" }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json
+  const body = raw.body_json
   return {
     type: "event",
     event: {
@@ -2002,7 +2002,7 @@ pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "LinearEventPayload" }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json
+  const body = raw.body_json
   return {
     type: "event",
     event: {
@@ -2061,7 +2061,7 @@ pub fn kinds() { return ["webhook", "poll"] }
 pub fn payload_schema() { return "NotionEventPayload" }
 
 pub fn normalize_inbound(raw) {
-  let body = raw.body_json
+  const body = raw.body_json
   return {
     type: "event",
     event: {
@@ -2188,7 +2188,7 @@ pub fn poll_tick(ctx) {
   if ctx.cursor != nil && ctx.cursor.count != nil {
     previous = ctx.cursor.count
   }
-  let next = previous + 1
+  const next = previous + 1
   return {
     cursor: {count: next},
     state: {last_lease_id: ctx.lease.id, tenant_id: ctx.tenant_id},

@@ -73,7 +73,7 @@ fn tokens_json_emits_kinds_lexemes_and_byte_spans() {
     assert_eq!(string["start"], quote);
     assert_eq!(string["end"], quote + "\"é\"".len());
     assert_eq!(string["line"], 1);
-    assert_eq!(string["column"], 9);
+    assert_eq!(string["column"], 11);
 
     assert!(
         tokens

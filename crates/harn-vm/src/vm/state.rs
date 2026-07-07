@@ -1197,7 +1197,7 @@ mod tests {
             .run_until(async {
                 let source = r#"
 pipeline main() {
-  let cell = shared_cell({scope: "task_group", key: "turn", initial: 0})
+  const cell = shared_cell({scope: "task_group", key: "turn", initial: 0})
   __io_println(shared_get(cell))
   shared_set(cell, shared_get(cell) + 1)
 }"#;

@@ -5,7 +5,7 @@ fn long_running_flag_without_cleanup_warns() {
     let diags = lint_source(
         r#"
 pipeline main() {
-  let handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {long_running: true})
   __io_println(handle.handle_id)
 }
 "#,
@@ -22,7 +22,7 @@ fn long_running_flag_with_defer_cleanup_is_ok() {
     let diags = lint_source(
         r#"
 pipeline main() {
-  let handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {long_running: true})
   defer {
     host_tool_call("cancel_handle", {handle_id: handle.handle_id})
   }

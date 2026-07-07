@@ -10,8 +10,8 @@ use harn_lexer::Lexer;
 fn top_level_bindings_replace_forward_placeholders_with_real_types() {
     let errs = errors(
         r"
-let x: int = 1
-let y: string = x
+const x: int = 1
+const y: string = x
 ",
     );
     assert_eq!(errs.len(), 1, "expected top-level mismatch, got: {errs:?}");
@@ -74,7 +74,7 @@ fn non_nil_return_type_rejects_fallthrough() {
     let errs = errors(
         r"
 fn bad() -> int {
-  let x = 1
+  const x = 1
 }
 ",
     );
@@ -136,7 +136,7 @@ fn typed_pipeline_rejects_nil_fallthrough() {
     let errs = errors(
         r"
 pipeline test(task) -> int {
-  let x = 1
+  const x = 1
 }
 ",
     );
@@ -331,7 +331,7 @@ fn schema_typed_llm_call_data_flows_through_generic_wrapper() {
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 fn grade<T>(schema: Schema<T>) -> T {
-  let r = llm_call("Grade this", nil, {output_schema: schema, output_validation: "error"})
+  const r = llm_call("Grade this", nil, {output_schema: schema, output_validation: "error"})
   return r.data
 }
 
@@ -350,7 +350,7 @@ fn schema_typed_llm_call_data_stays_optional_without_error_validation() {
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 fn grade<T>(schema: Schema<T>) -> T {
-  let r = llm_call("Grade this", nil, {output_schema: schema})
+  const r = llm_call("Grade this", nil, {output_schema: schema})
   return r.data
 }
 "#,
@@ -364,7 +364,7 @@ fn grade<T>(schema: Schema<T>) -> T {
 #[test]
 fn check_strict_with_source_enables_strict_mode() {
     let source = r#"pipeline t(task) {
-  let data = json_parse("{}")
+  const data = json_parse("{}")
   log(data.name)
 }"#;
     let mut lexer = Lexer::new(source);
@@ -540,7 +540,7 @@ fn arithmetic_without_assert_guard_still_flagged() {
 fn test_list_subscript_write_checks_element_type() {
     let errs = errors(
         r#"fn f() -> int {
-  let xs: list<int> = [1, 2]
+  const xs: list<int> = [1, 2]
   xs[0] = "not an int"
   return xs[0]
 }"#,
@@ -556,7 +556,7 @@ fn test_list_subscript_write_checks_element_type() {
 fn test_dict_subscript_write_checks_value_and_key_types() {
     let errs = errors(
         r#"fn f() -> int {
-  let d: dict<string, int> = {a: 1}
+  const d: dict<string, int> = {a: 1}
   d["b"] = "nope"
   d[0] = 2
   return 0
@@ -578,7 +578,7 @@ fn test_dict_subscript_write_checks_value_and_key_types() {
 fn test_shape_field_write_checks_field_type() {
     let errs = errors(
         r#"fn f() -> int {
-  let s: {n: int} = {n: 1}
+  const s: {n: int} = {n: 1}
   s.n = "nope"
   return s.n
 }"#,
@@ -596,7 +596,7 @@ fn test_struct_field_write_checks_type_and_existence() {
         r#"struct Point { x: int, y: int }
 
 fn f() -> int {
-  let p = Point({x: 1, y: 2})
+  const p = Point({x: 1, y: 2})
   p.x = "nope"
   p.z = 1
   return p.x
@@ -617,7 +617,7 @@ fn f() -> int {
 fn test_optional_shape_field_write_accepts_nil() {
     let errs = errors(
         r#"fn f() -> int {
-  let s: {n: int, m?: string} = {n: 1}
+  const s: {n: int, m?: string} = {n: 1}
   s.m = nil
   s.m = "ok"
   return s.n
@@ -632,10 +632,10 @@ fn test_unannotated_dict_literal_writes_stay_lenient() {
     // heterogeneous writes, matching read-side leniency.
     let errs = errors(
         r#"pipeline t(task) {
-  let d = {a: 1}
+  const d = {a: 1}
   d.b = "hello"
   d["c"] = true
-  let xs = [1, 2]
+  const xs = [1, 2]
   xs[0] = "loose"
 }"#,
     );
@@ -646,7 +646,7 @@ fn test_unannotated_dict_literal_writes_stay_lenient() {
 fn test_compound_assignment_to_list_element_type_checks() {
     let errs = errors(
         r"fn f() -> int {
-  let xs: list<int> = [1, 2]
+  const xs: list<int> = [1, 2]
   xs[0] += 1
   return xs[0]
 }",

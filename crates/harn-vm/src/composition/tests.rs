@@ -252,7 +252,7 @@ async fn harn_composition_executes_read_only_binding_and_records_child_trace() {
     let report = execute_harn_composition(
         CompositionExecutionRequest {
             run_id: "run-test".to_string(),
-            snippet: "let file = read_file({path: \"README.md\"})\nreturn {text: file.text}"
+            snippet: "const file = read_file({path: \"README.md\"})\nreturn {text: file.text}"
                 .to_string(),
             manifest,
             ..CompositionExecutionRequest::default()
@@ -271,15 +271,15 @@ async fn harn_composition_dispatcher_closure_can_call_host_has() {
     let report = run_composition_dispatcher_source(
         r#"
 pipeline default(task) {
-  let tools = [
+  const tools = [
     {
       "name": "look",
       "parameters": {"type": "object", "required": ["path"]},
       "annotations": {"side_effect_level": "read_only"}
     }
   ]
-  let manifest = composition_binding_manifest(tools)
-  let dispatcher = { binding, input ->
+  const manifest = composition_binding_manifest(tools)
+  const dispatcher = { binding, input ->
     return {
       "binding": binding,
       "has_runtime_result": host_has("runtime", "set_result"),
@@ -287,7 +287,7 @@ pipeline default(task) {
     }
   }
   return composition_execute(
-    "let result = look({path: \"README.md\"})\nreturn result",
+    "const result = look({path: \"README.md\"})\nreturn result",
     manifest,
     {"dispatcher": dispatcher}
   )
@@ -310,15 +310,15 @@ async fn harn_composition_dispatcher_closure_preserves_custom_host_has() {
     let report = run_composition_dispatcher_source(
         r#"
 pipeline default(task) {
-  let tools = [
+  const tools = [
     {
       "name": "look",
       "parameters": {"type": "object", "required": ["path"]},
       "annotations": {"side_effect_level": "read_only"}
     }
   ]
-  let manifest = composition_binding_manifest(tools)
-  let dispatcher = { binding, input ->
+  const manifest = composition_binding_manifest(tools)
+  const dispatcher = { binding, input ->
     return {
       "binding": binding,
       "has_runtime_result": host_has("runtime", "set_result"),
@@ -326,7 +326,7 @@ pipeline default(task) {
     }
   }
   return composition_execute(
-    "let result = look({path: \"README.md\"})\nreturn result",
+    "const result = look({path: \"README.md\"})\nreturn result",
     manifest,
     {"dispatcher": dispatcher}
   )
@@ -435,7 +435,7 @@ async fn harn_composition_enforces_child_call_cap() {
     let report = execute_harn_composition(
         CompositionExecutionRequest {
             run_id: "run-cap".to_string(),
-            snippet: "let _a = read_file({path: \"a\"})\nreturn read_file({path: \"b\"})"
+            snippet: "const _a = read_file({path: \"a\"})\nreturn read_file({path: \"b\"})"
                 .to_string(),
             manifest,
             limits: CompositionExecutionLimits {
@@ -492,7 +492,7 @@ async fn harn_composition_dispatcher_closure_receives_real_inputs_and_returns_ou
     let report = execute_harn_composition(
         CompositionExecutionRequest {
             run_id: "run-dispatch".into(),
-            snippet: "let f = read_file({path: \"README.md\"})\nreturn f.text".into(),
+            snippet: "const f = read_file({path: \"README.md\"})\nreturn f.text".into(),
             manifest,
             ..CompositionExecutionRequest::default()
         },
@@ -843,7 +843,7 @@ async fn map_bounded_respects_per_server_bulkhead() {
     let report = execute_harn_composition(
         CompositionExecutionRequest {
             run_id: "run-map-bounded".to_string(),
-            snippet: "let settled = map_bounded([1, 2, 3, 4, 5], { item -> docs_search({query: to_string(item)}) }, {concurrency: 5})\nreturn {succeeded: settled.succeeded, failed: settled.failed}".to_string(),
+            snippet: "const settled = map_bounded([1, 2, 3, 4, 5], { item -> docs_search({query: to_string(item)}) }, {concurrency: 5})\nreturn {succeeded: settled.succeeded, failed: settled.failed}".to_string(),
             manifest: mcp_world_manifest(&tool),
             limits: CompositionExecutionLimits {
                 max_concurrent_operations: 8,

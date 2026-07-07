@@ -87,7 +87,7 @@ fn string_constant_count(chunk: &Chunk, value: &str) -> usize {
 #[test]
 fn test_compile_arithmetic() {
     let chunk = compile_source_with_options(
-        "pipeline test(task) { let x = 2 + 3 }",
+        "pipeline test(task) { const x = 2 + 3 }",
         CompilerOptions::without_optimizations(),
     );
     assert!(!chunk.code.is_empty());
@@ -118,9 +118,9 @@ fn test_compile_typed_int_loop_ops() {
 fn test_compile_typed_float_ops() {
     let chunk = compile_source(
         "pipeline test(task) {
-  let a = 1.0
-  let b = 2.0
-  let c = a + b
+  const a = 1.0
+  const b = 2.0
+  const c = a + b
   log(c < 4.0)
 }",
     );
@@ -133,10 +133,10 @@ fn test_compile_typed_float_ops() {
 fn test_compile_typed_equality_ops() {
     let chunk = compile_source(
         r#"pipeline test(task) {
-  let a = true
-  let b = false
-  let left = "a"
-  let right = "b"
+  const a = true
+  const b = false
+  const left = "a"
+  const right = "b"
   log(a == b)
   log(left != right)
 }"#,
@@ -150,12 +150,12 @@ fn test_compile_typed_equality_ops() {
 fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
     let chunk = compile_source(
         r#"pipeline test(task) {
-  let left = "a"
-  let right = "b"
-  let one = 1
-  let two = 2.0
-  let xs = [1]
-  let ys = [2]
+  const left = "a"
+  const right = "b"
+  const one = 1
+  const two = 2.0
+  const xs = [1]
+  const ys = [2]
   log(left + right)
   log(one + two)
   log(xs + ys)
@@ -201,7 +201,7 @@ fn polymorphic_var_reassigned_from_dynamic_falls_back_to_generic() {
     let chunk = compile_source(
         "pipeline test(task) {
   let x = 0
-  let cell = shared_cell(\"k\", 2.5)
+  const cell = shared_cell(\"k\", 2.5)
   log(x + 1)
   x = shared_get(cell)
 }",
@@ -225,7 +225,7 @@ fn polymorphic_var_demotes_dependent_sibling() {
         "pipeline test(task) {
   let x = 0
   let sum = 0
-  let cell = shared_cell(\"k\", 2.5)
+  const cell = shared_cell(\"k\", 2.5)
   sum = sum + x
   x = shared_get(cell)
   log(sum)
@@ -246,7 +246,7 @@ fn for_item_reassigned_from_dynamic_falls_back_to_generic() {
     let chunk = compile_source(
         "pipeline test(task) {
   let sum = 0
-  let cell = shared_cell(\"k\", 2.5)
+  const cell = shared_cell(\"k\", 2.5)
   for n in [1, 2, 3] {
     sum = sum + n
     n = shared_get(cell)
@@ -335,7 +335,7 @@ fn test_compiler_reuses_string_constants_within_chunk() {
         r#"pipeline test(task) {
   log("same")
   log("same")
-  let row = {status: "same"}
+  const row = {status: "same"}
   log(row.status)
 }"#,
     );
@@ -412,7 +412,7 @@ fn test_compile_while() {
 fn test_compile_locals_to_slots() {
     let chunk = compile_source(
         "pipeline test(task) {
-  let a = 1
+  const a = 1
   let i = 0
   while i < 3 {
     i = i + a
@@ -454,11 +454,11 @@ fn loop_guard_break_keeps_later_bindings_in_local_slots() {
         r#"pipeline test(task) {
   let index = 0
   while index < 1 {
-    let name = "abc"
+    const name = "abc"
     if name == "" {
       break
     }
-    let value = name + "!"
+    const value = name + "!"
     index = index + 1
   }
 }"#,
@@ -471,11 +471,11 @@ fn loop_guard_continue_keeps_later_bindings_in_local_slots() {
         r#"pipeline test(task) {
   let index = 0
   while index < 1 {
-    let name = "abc"
+    const name = "abc"
     if name == "" {
       continue
     }
-    let value = name + "!"
+    const value = name + "!"
     index = index + 1
   }
 }"#,
@@ -500,7 +500,7 @@ fn test_compile_function_params_to_slots() {
 
 #[test]
 fn test_compile_closure() {
-    let chunk = compile_source("pipeline test(task) { let f = { x -> x * 2 } }");
+    let chunk = compile_source("pipeline test(task) { const f = { x -> x * 2 } }");
     assert!(!chunk.functions.is_empty());
     assert_eq!(
         chunk.functions[0].param_names().collect::<Vec<_>>(),
@@ -510,14 +510,14 @@ fn test_compile_closure() {
 
 #[test]
 fn test_compile_list() {
-    let chunk = compile_source("pipeline test(task) { let a = [1, 2, 3] }");
+    let chunk = compile_source("pipeline test(task) { const a = [1, 2, 3] }");
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("BUILD_LIST"));
 }
 
 #[test]
 fn test_compile_dict() {
-    let chunk = compile_source(r#"pipeline test(task) { let d = {name: "test"} }"#);
+    let chunk = compile_source(r#"pipeline test(task) { const d = {name: "test"} }"#);
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("BUILD_DICT"));
 }
@@ -539,9 +539,9 @@ fn test_compile_discard_bindings_do_not_define_underscore() {
     let chunk = compile_source(
         r#"
 pipeline test(task) {
-  let _ = 1
-  let [_, keep, _] = [10, 20, 30]
-  let {drop: _, keep_dict} = {drop: 1, keep_dict: 2}
+  const _ = 1
+  const [_, keep, _] = [10, 20, 30]
+  const {drop: _, keep_dict} = {drop: 1, keep_dict: 2}
   for (_, value) in [pair("left", "right")] {
     log(value)
   }
@@ -574,10 +574,10 @@ pipeline test(task) {
 #[test]
 fn attributed_top_level_fn_does_not_emit_spurious_pop() {
     let bare = compile_source(
-        "fn f(x: int) -> int { return x + 1 }\nfn main(harness: Harness) { let _ = 1 }",
+        "fn f(x: int) -> int { return x + 1 }\nfn main(harness: Harness) { const _ = 1 }",
     );
     let attributed = compile_source(
-        "@deprecated\nfn f(x: int) -> int { return x + 1 }\nfn main(harness: Harness) { let _ = 1 }",
+        "@deprecated\nfn f(x: int) -> int { return x + 1 }\nfn main(harness: Harness) { const _ = 1 }",
     );
 
     let pop_count = |chunk: &Chunk| {
@@ -649,7 +649,7 @@ fn miswired_produces_value_trips_balance_assertion() {
     let prior_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        compile_source("fn f() -> int { return 1 }\nfn main(harness: Harness) { let _ = 1 }")
+        compile_source("fn f() -> int { return 1 }\nfn main(harness: Harness) { const _ = 1 }")
     }));
     std::panic::set_hook(prior_hook);
 

@@ -47,7 +47,7 @@ fn out(source: &str) -> Vec<String> {
 fn runtime_introspection_starts_unresolved() {
     let lines = out(r"
 pipeline main(task) {
-  let snap = runtime_introspection()
+  const snap = runtime_introspection()
   log(snap.provider == nil)
   log(snap.model == nil)
   log(snap.harn_version != nil)
@@ -61,8 +61,8 @@ pipeline main(task) {
 fn introspection_tools_bundle_adds_all_by_default() {
     let lines = out(r#"
 pipeline main(task) {
-  let reg = runtime_introspection_tools(tool_registry())
-  let names = []
+  const reg = runtime_introspection_tools(tool_registry())
+  const names = []
   let collected = names
   for entry in reg.tools {
     collected = collected + [entry.name]
@@ -100,12 +100,12 @@ pipeline main(task) {
 fn introspection_tools_only_narrows_surface() {
     let lines = out(r#"
 pipeline main(task) {
-  let reg = runtime_introspection_tools(
+  const reg = runtime_introspection_tools(
     tool_registry(),
     {only: ["current_model", "current_provider"]},
   )
   log(len(reg.tools))
-  let sorted = []
+  const sorted = []
   let collected = sorted
   for entry in reg.tools {
     collected = collected + [entry.name]
@@ -124,7 +124,7 @@ pipeline main(task) {
 fn introspection_tools_exclude_drops_specified() {
     let lines = out(r#"
 pipeline main(task) {
-  let reg = runtime_introspection_tools(
+  const reg = runtime_introspection_tools(
     tool_registry(),
     {exclude: ["current_compaction_policy", "available_runtime_capabilities"]},
   )
@@ -154,8 +154,8 @@ pipeline main(task) {
 fn introspection_tools_are_idempotent() {
     let lines = out(r"
 pipeline main(task) {
-  let once = runtime_introspection_tools(tool_registry())
-  let twice = runtime_introspection_tools(once)
+  const once = runtime_introspection_tools(tool_registry())
+  const twice = runtime_introspection_tools(once)
   log(len(once.tools) == len(twice.tools))
 }
 ");
@@ -166,7 +166,7 @@ pipeline main(task) {
 fn introspection_tools_executor_is_harn() {
     let lines = out(r#"
 pipeline main(task) {
-  let reg = runtime_introspection_tools(tool_registry())
+  const reg = runtime_introspection_tools(tool_registry())
   for entry in reg.tools {
     log(entry.name + ":" + to_string(entry.executor))
   }
@@ -285,7 +285,7 @@ fn host_disabled_means_no_tools_attached() {
     // empty registry literally cannot expose the introspection surface.
     let lines = out(r#"
 pipeline main(task) {
-  let reg = tool_registry()
+  const reg = tool_registry()
   log(len(reg.tools))
   log(tool_find(reg, "current_model") == nil)
 }

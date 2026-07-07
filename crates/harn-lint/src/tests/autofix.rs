@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn test_fix_multiple_fixes_applied() {
-    let source = "pipeline default(task) {\n  let x = 10\n  const y = x == true\n  log(y)\n}";
+    let source = "pipeline default(task) {\n  const x = 10\n  const y = x == true\n  log(y)\n}";
     let diags = lint_source(source);
     let result = apply_fixes(source, &diags);
     assert!(
@@ -21,7 +21,7 @@ fn test_fix_multiple_fixes_applied() {
 #[test]
 fn test_no_fix_when_source_unavailable() {
     // lint without source — fixes should be None
-    let source = "pipeline default(task) {\n  let x = 10\n  log(x)\n}";
+    let source = "pipeline default(task) {\n  const x = 10\n  log(x)\n}";
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);

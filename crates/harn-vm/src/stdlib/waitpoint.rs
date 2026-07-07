@@ -1232,9 +1232,9 @@ mod tests {
 import { create, complete, wait } from "std/waitpoint"
 
 pipeline test(task) {
-  let wp = create("outside-dispatch")
+  const wp = create("outside-dispatch")
   complete(wp, 9)
-  let resolved = wait(wp)
+  const resolved = wait(wp)
   __io_println(resolved.value)
 }
 "#,

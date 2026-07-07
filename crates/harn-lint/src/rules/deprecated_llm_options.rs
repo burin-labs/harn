@@ -474,7 +474,7 @@ pipeline default(task) {
         let diags = lint(
             r#"
 pipeline default(task) {
-    let opts = {llm_retries: 3}
+    const opts = {llm_retries: 3}
     llm_call("hi", nil, opts)
 }
 "#,

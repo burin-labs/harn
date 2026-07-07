@@ -58,7 +58,7 @@ fn test_evaluate_in_frame_literal() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
-    let chunk = crate::compile_source("let __seed__: int = 0\nlog(__seed__)\n").unwrap();
+    let chunk = crate::compile_source("const __seed__: int = 0\nlog(__seed__)\n").unwrap();
     run_until_paused(&mut vm, &chunk);
 
     assert!(values_equal(
@@ -81,7 +81,7 @@ fn test_evaluate_in_frame_sees_locals() {
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
     let chunk =
-        crate::compile_source("let user: string = \"alice\"\nlet count: int = 42\nlog(count)\n")
+        crate::compile_source("const user: string = \"alice\"\nconst count: int = 42\nlog(count)\n")
             .unwrap();
     run_until_paused(&mut vm, &chunk);
 
@@ -106,7 +106,7 @@ fn test_evaluate_in_frame_does_not_leak_state() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
-    let chunk = crate::compile_source("let x: int = 7\nlog(x)\n").unwrap();
+    let chunk = crate::compile_source("const x: int = 7\nlog(x)\n").unwrap();
     run_until_paused(&mut vm, &chunk);
 
     let pre_stack = vm.stack.len();
@@ -130,7 +130,7 @@ fn test_set_variable_in_frame_updates_let_binding() {
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
     let chunk =
-        crate::compile_source("let count: int = 7\nlet label: string = \"before\"\nlog(count)\n")
+        crate::compile_source("const count: int = 7\nconst label: string = \"before\"\nlog(count)\n")
             .unwrap();
     run_until_paused(&mut vm, &chunk);
 
@@ -173,7 +173,7 @@ fn test_set_variable_in_frame_rejects_undefined() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
-    let chunk = crate::compile_source("let x: int = 1\nlog(x)\n").unwrap();
+    let chunk = crate::compile_source("const x: int = 1\nlog(x)\n").unwrap();
     run_until_paused(&mut vm, &chunk);
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -204,7 +204,7 @@ fn test_restart_frame_rewinds_ip_and_rebinds_args() {
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
     let chunk = crate::compile_source(
-        "fn inner(n: int) -> int { \n  let doubled: int = n * 2\n  log(doubled)\n  return doubled\n}\nlog(inner(21))\n",
+        "fn inner(n: int) -> int { \n  const doubled: int = n * 2\n  log(doubled)\n  return doubled\n}\nlog(inner(21))\n",
     )
     .unwrap();
     run_until_paused(&mut vm, &chunk);
@@ -245,7 +245,7 @@ fn test_restart_frame_rejects_scratch_frames() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
-    let chunk = crate::compile_source("let x: int = 1\nlog(x)\n").unwrap();
+    let chunk = crate::compile_source("const x: int = 1\nlog(x)\n").unwrap();
     run_until_paused(&mut vm, &chunk);
     // The top-level pipeline frame has `initial_env: Some(_)` so
     // restartFrame *is* valid there — our script has no inner
@@ -294,7 +294,7 @@ fn test_function_breakpoint_stops_on_entry() {
     register_vm_stdlib(&mut vm);
     vm.set_function_breakpoints(vec!["do_work".to_string()]);
     let chunk = crate::compile_source(
-        "fn do_work(n: int) -> int { return n + 1 }\npipeline t(task) { let x = do_work(41)\nlog(x) }\n",
+        "fn do_work(n: int) -> int { return n + 1 }\npipeline t(task) { const x = do_work(41)\nlog(x) }\n",
     )
     .unwrap();
     run_until_paused(&mut vm, &chunk);
@@ -340,7 +340,7 @@ fn test_function_breakpoint_unknown_name_does_not_fire() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
     vm.set_function_breakpoints(vec!["nonexistent".to_string()]);
-    let chunk = crate::compile_source("pipeline t(task) { let x = 1\nlog(x) }\n").unwrap();
+    let chunk = crate::compile_source("pipeline t(task) { const x = 1\nlog(x) }\n").unwrap();
     // With no matching callee, the program runs to completion
     // without latching a hit; run_until_paused would have panicked
     // with "step budget exceeded" if the VM idled, so wrap with a

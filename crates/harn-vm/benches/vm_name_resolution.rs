@@ -41,7 +41,7 @@ fn rt() -> tokio::runtime::Runtime {
 /// resolves `a` to a `GetLocalSlot`, the O(1) fast path.
 const LOCAL_READ: &str = r"pipeline t(task) {
   fn work() {
-    let a = 1
+    const a = 1
     let total = 0
     let i = 0
     while i < 50000 {
@@ -57,7 +57,7 @@ const LOCAL_READ: &str = r"pipeline t(task) {
 /// emits `GetVar`, so each read runs the dead local-slot scan + env walk +
 /// `module_state` mutex before hitting the binding.
 const GLOBAL_READ: &str = r"pipeline t(task) {
-  let a = 1
+  const a = 1
   fn work() {
     let total = 0
     let i = 0
@@ -73,28 +73,28 @@ const GLOBAL_READ: &str = r"pipeline t(task) {
 /// Same global read, but `work` carries many local slots so the linear
 /// `active_local_slot_index` scan each `GetVar` pays is wide.
 const GLOBAL_READ_MANY_LOCALS: &str = r"pipeline t(task) {
-  let a = 1
+  const a = 1
   fn work() {
-    let l0 = 0
-    let l1 = 1
-    let l2 = 2
-    let l3 = 3
-    let l4 = 4
-    let l5 = 5
-    let l6 = 6
-    let l7 = 7
-    let l8 = 8
-    let l9 = 9
-    let l10 = 10
-    let l11 = 11
-    let l12 = 12
-    let l13 = 13
-    let l14 = 14
-    let l15 = 15
-    let l16 = 16
-    let l17 = 17
-    let l18 = 18
-    let l19 = 19
+    const l0 = 0
+    const l1 = 1
+    const l2 = 2
+    const l3 = 3
+    const l4 = 4
+    const l5 = 5
+    const l6 = 6
+    const l7 = 7
+    const l8 = 8
+    const l9 = 9
+    const l10 = 10
+    const l11 = 11
+    const l12 = 12
+    const l13 = 13
+    const l14 = 14
+    const l15 = 15
+    const l16 = 16
+    const l17 = 17
+    const l18 = 18
+    const l19 = 19
     let total = l0 + l19
     let i = 0
     while i < 50000 {

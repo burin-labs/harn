@@ -9,7 +9,7 @@ use super::*;
 
 #[test]
 fn test_fix_string_plus_int_literal() {
-    let source = "pipeline t(task) {\n  let x = \"hello \" + 42\n  log(x)\n}";
+    let source = "pipeline t(task) {\n  const x = \"hello \" + 42\n  log(x)\n}";
     let diags = check_source_with_source(source);
     let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
     assert_eq!(fixable.len(), 1, "expected 1 fixable diagnostic");
@@ -20,7 +20,7 @@ fn test_fix_string_plus_int_literal() {
 
 #[test]
 fn test_fix_int_plus_string_literal() {
-    let source = "pipeline t(task) {\n  let x = 42 + \"hello\"\n  log(x)\n}";
+    let source = "pipeline t(task) {\n  const x = 42 + \"hello\"\n  log(x)\n}";
     let diags = check_source_with_source(source);
     let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
     assert_eq!(fixable.len(), 1, "expected 1 fixable diagnostic");
@@ -30,7 +30,7 @@ fn test_fix_int_plus_string_literal() {
 
 #[test]
 fn test_fix_string_plus_variable() {
-    let source = "pipeline t(task) {\n  let n: int = 5\n  let x = \"count: \" + n\n  log(x)\n}";
+    let source = "pipeline t(task) {\n  const n: int = 5\n  const x = \"count: \" + n\n  log(x)\n}";
     let diags = check_source_with_source(source);
     let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
     assert_eq!(fixable.len(), 1, "expected 1 fixable diagnostic");
@@ -42,7 +42,7 @@ fn test_fix_string_plus_variable() {
 fn test_no_fix_int_plus_int() {
     // int + float should error but no interpolation fix
     let source =
-        "pipeline t(task) {\n  let x: int = 5\n  let y: float = 3.0\n  let z = x - y\n  log(z)\n}";
+        "pipeline t(task) {\n  const x: int = 5\n  const y: float = 3.0\n  const z = x - y\n  log(z)\n}";
     let diags = check_source_with_source(source);
     let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
     assert!(
@@ -53,7 +53,7 @@ fn test_no_fix_int_plus_int() {
 
 #[test]
 fn test_no_fix_without_source() {
-    let source = "pipeline t(task) {\n  let x = \"hello \" + 42\n  log(x)\n}";
+    let source = "pipeline t(task) {\n  const x = \"hello \" + 42\n  log(x)\n}";
     let diags = check_source(source);
     let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
     assert!(
@@ -66,7 +66,7 @@ fn test_no_fix_without_source() {
 fn test_union_exhaustive_match_no_warning() {
     let warns = warnings(
         r#"pipeline t(task) {
-  let x: string | int | nil = nil
+  const x: string | int | nil = nil
   match x {
 "hello" -> { log("s") }
 42 -> { log("i") }
@@ -86,7 +86,7 @@ fn test_union_non_exhaustive_match_errors() {
     // Phase C: missing-variant `match` is now a hard error, not a warning.
     let errs = errors(
         r#"pipeline t(task) {
-  let x: string | int | nil = nil
+  const x: string | int | nil = nil
   match x {
 "hello" -> { log("s") }
 42 -> { log("i") }
@@ -106,8 +106,8 @@ fn test_nil_coalesce_non_union_preserves_left_type() {
     // When left is a known non-nil type, ?? should preserve it
     let errs = errors(
         r"pipeline t(task) {
-  let x: int = 42
-  let y: int = x ?? 0
+  const x: int = 42
+  const y: int = x ?? 0
 }",
     );
     assert!(errs.is_empty());
@@ -117,7 +117,7 @@ fn test_nil_coalesce_non_union_preserves_left_type() {
 fn test_nil_coalesce_nil_returns_right_type() {
     let errs = errors(
         r#"pipeline t(task) {
-  let x: string = nil ?? "fallback"
+  const x: string = nil ?? "fallback"
 }"#,
     );
     assert!(errs.is_empty());
@@ -222,8 +222,8 @@ return "other"
 fn test_unknown_without_narrowing_errors() {
     let errs = errors(
         r#"pipeline t(task) {
-  let u: unknown = "hello"
-  let s: string = u
+  const u: unknown = "hello"
+  const s: string = u
 }"#,
     );
     assert!(
@@ -267,7 +267,7 @@ fn test_if_else_one_branch_throws_infers_other() {
     let errs = errors(
         r#"pipeline t(task) {
   fn foo(x: bool) -> int {
-let result: int = if x { 42 } else { throw "err" }
+const result: int = if x { 42 } else { throw "err" }
 return result
   }
 }"#,
@@ -281,7 +281,7 @@ fn test_if_else_both_branches_throw_infers_never() {
     let errs = errors(
         r#"pipeline t(task) {
   fn foo(x: bool) -> string {
-let result: string = if x { throw "a" } else { throw "b" }
+const result: string = if x { throw "a" } else { throw "b" }
 return result
   }
 }"#,
@@ -295,7 +295,7 @@ fn test_unreachable_after_return() {
         r"pipeline t(task) {
   fn foo() -> int {
 return 1
-let x = 2
+const x = 2
   }
 }",
     );
@@ -311,7 +311,7 @@ fn test_unreachable_after_throw() {
         r#"pipeline t(task) {
   fn foo() {
 throw "err"
-let x = 2
+const x = 2
   }
 }"#,
     );
@@ -327,7 +327,7 @@ fn test_unreachable_after_composite_exit() {
         r#"pipeline t(task) {
   fn foo(x: bool) {
 if x { return 1 } else { throw "err" }
-let y = 2
+const y = 2
   }
 }"#,
     );
@@ -343,7 +343,7 @@ fn test_no_unreachable_warning_when_reachable() {
         r"pipeline t(task) {
   fn foo(x: bool) {
 if x { return 1 }
-let y = 2
+const y = 2
   }
 }",
     );
@@ -362,7 +362,7 @@ fn test_catch_typed_error_variable() {
   try {
 throw AppError.NotFound
   } catch (e: AppError) {
-let x: AppError = e
+const x: AppError = e
   }
 }",
     );

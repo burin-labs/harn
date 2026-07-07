@@ -2476,7 +2476,7 @@ mod tests {
         let report = analyze(
             r#"
 fn main(harness: Harness) {
-  let body = harness.fs.read_text("notes.txt")
+  const body = harness.fs.read_text("notes.txt")
   harness.fs.mkdtemp("harn-ir-")
   harness.stdio.println(body)
 }

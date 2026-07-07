@@ -61,8 +61,8 @@ fn cancel_in_flight_tool_call_overrides_dispatch_with_cancelled_result() {
     let source = r#"
 pipeline main(_) {
   clear_tool_hooks()
-  let registry = tool_registry()
-  let tools = tool_define(
+  const registry = tool_registry()
+  const tools = tool_define(
     registry,
     "slow_tool",
     "A tool that sleeps long enough that we can cancel mid-flight.",
@@ -71,9 +71,9 @@ pipeline main(_) {
       return "should not arrive"
     }},
   )
-  let counter = shared_cell({scope: "task_group", key: "llm-cancel-test", initial: 0})
-  let mock_llm = { _call ->
-    let snap = shared_snapshot(counter)
+  const counter = shared_cell({scope: "task_group", key: "llm-cancel-test", initial: 0})
+  const mock_llm = { _call ->
+    const snap = shared_snapshot(counter)
     shared_cas(counter, snap, snap.value + 1)
     if snap.value == 0 {
       return {
@@ -91,7 +91,7 @@ pipeline main(_) {
       value: {text: "ok ##DONE##", tool_calls: [], provider: "mock", model: "mock"},
     }
   }
-  let canceller = spawn {
+  const canceller = spawn {
     sleep_ms(100)
     cancel_in_flight_tool_call(
       "tcc-test-session",
@@ -99,7 +99,7 @@ pipeline main(_) {
       {reason: "test cancel mid-flight", inject_reminder: false},
     )
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "do slow work",
     nil,
     {
@@ -112,21 +112,21 @@ pipeline main(_) {
       llm_caller: mock_llm,
     },
   )
-  let cancel_outcome = await(canceller)
+  const cancel_outcome = await(canceller)
   log(result.status)
   log(cancel_outcome.status)
   log(cancel_outcome.tool ?? "<no tool>")
   // The tool_result message recorded in the transcript renders the
   // observation text from the cancellation result. Verify the
   // "cancelled call to slow_tool" stamp made it in.
-  let messages = transcript_messages(result.transcript)
+  const messages = transcript_messages(result.transcript)
   let saw_cancellation_observation = false
   for msg in messages {
-    let role = to_string(msg?.role ?? "")
+    const role = to_string(msg?.role ?? "")
     if role != "tool" && role != "tool_result" {
       continue
     }
-    let content = to_string(msg?.content ?? "")
+    const content = to_string(msg?.content ?? "")
     if contains(content, "cancelled call to slow_tool") {
       saw_cancellation_observation = true
     }
@@ -154,7 +154,7 @@ pipeline main(_) {
 fn cancel_in_flight_tool_call_returns_not_found_for_unknown_call_id() {
     let source = r#"
 pipeline main(_) {
-  let outcome = cancel_in_flight_tool_call(
+  const outcome = cancel_in_flight_tool_call(
     "no-such-session",
     "no-such-call",
     {reason: "missing", inject_reminder: false, timeout_ms: 0},
@@ -181,8 +181,8 @@ fn cancel_in_flight_tool_call_returns_already_cancelled_on_repeat() {
     let source = r#"
 pipeline main(_) {
   clear_tool_hooks()
-  let registry = tool_registry()
-  let tools = tool_define(
+  const registry = tool_registry()
+  const tools = tool_define(
     registry,
     "slow_tool",
     "A tool that sleeps long enough that we can cancel mid-flight.",
@@ -191,9 +191,9 @@ pipeline main(_) {
       return "should not arrive"
     }},
   )
-  let counter = shared_cell({scope: "task_group", key: "llm-cancel-repeat", initial: 0})
-  let mock_llm = { _call ->
-    let snap = shared_snapshot(counter)
+  const counter = shared_cell({scope: "task_group", key: "llm-cancel-repeat", initial: 0})
+  const mock_llm = { _call ->
+    const snap = shared_snapshot(counter)
     shared_cas(counter, snap, snap.value + 1)
     if snap.value == 0 {
       return {
@@ -211,21 +211,21 @@ pipeline main(_) {
       value: {text: "ok ##DONE##", tool_calls: [], provider: "mock", model: "mock"},
     }
   }
-  let canceller = spawn {
+  const canceller = spawn {
     sleep_ms(100)
-    let first = cancel_in_flight_tool_call(
+    const first = cancel_in_flight_tool_call(
       "tcc-test-session-repeat",
       "slow_call_repeat",
       {reason: "first cancel", inject_reminder: false, timeout_ms: 0},
     )
-    let second = cancel_in_flight_tool_call(
+    const second = cancel_in_flight_tool_call(
       "tcc-test-session-repeat",
       "slow_call_repeat",
       {reason: "second cancel", inject_reminder: false, timeout_ms: 0},
     )
     return [first.status, second.status]
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "do slow work",
     nil,
     {
@@ -238,7 +238,7 @@ pipeline main(_) {
       llm_caller: mock_llm,
     },
   )
-  let statuses = await(canceller)
+  const statuses = await(canceller)
   log(result.status)
   log(statuses[0])
   log(statuses[1])
@@ -265,8 +265,8 @@ fn cancel_in_flight_tool_call_pushes_reminder_when_requested() {
     let source = r#"
 pipeline main(_) {
   clear_tool_hooks()
-  let registry = tool_registry()
-  let tools = tool_define(
+  const registry = tool_registry()
+  const tools = tool_define(
     registry,
     "slow_tool",
     "A tool that sleeps long enough that we can cancel mid-flight.",
@@ -275,9 +275,9 @@ pipeline main(_) {
       return "should not arrive"
     }},
   )
-  let counter = shared_cell({scope: "task_group", key: "llm-cancel-reminder", initial: 0})
-  let mock_llm = { _call ->
-    let snap = shared_snapshot(counter)
+  const counter = shared_cell({scope: "task_group", key: "llm-cancel-reminder", initial: 0})
+  const mock_llm = { _call ->
+    const snap = shared_snapshot(counter)
     shared_cas(counter, snap, snap.value + 1)
     if snap.value == 0 {
       return {
@@ -295,7 +295,7 @@ pipeline main(_) {
       value: {text: "ok ##DONE##", tool_calls: [], provider: "mock", model: "mock"},
     }
   }
-  let canceller = spawn {
+  const canceller = spawn {
     sleep_ms(100)
     cancel_in_flight_tool_call(
       "tcc-test-session-reminder",
@@ -303,7 +303,7 @@ pipeline main(_) {
       {reason: "user clicked stop", inject_reminder: true, timeout_ms: 0},
     )
   }
-  let result = agent_loop(
+  const result = agent_loop(
     "do slow work",
     nil,
     {
@@ -316,9 +316,9 @@ pipeline main(_) {
       llm_caller: mock_llm,
     },
   )
-  let _ = await(canceller)
+  const _ = await(canceller)
   log(result.status)
-  let reminders = transcript_events_by_kind(result.transcript, "system_reminder")
+  const reminders = transcript_events_by_kind(result.transcript, "system_reminder")
   let saw_cancellation = false
   for event in reminders {
     if contains(event?.reminder?.body ?? "", "cancelled by the host") {

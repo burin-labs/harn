@@ -5,7 +5,7 @@ fn push_pr_without_prior_secret_scan_warns() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-  let client = mcp_connect("harn", [])
+  const client = mcp_connect("harn", [])
   mcp_call(client, "git::push_pr", {title: "unsafe"})
 }
 "#,
@@ -22,10 +22,10 @@ fn push_pr_after_secret_scan_is_not_flagged() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-  let diff = "token = ghp_123"
-  let findings = secret_scan(diff)
+  const diff = "token = ghp_123"
+  const findings = secret_scan(diff)
   if len(findings) == 0 {
-    let client = mcp_connect("harn", [])
+    const client = mcp_connect("harn", [])
     mcp_call(client, "git::push_pr", {title: "safe"})
   }
 }
@@ -46,7 +46,7 @@ pipeline default(task) {
   if true {
     secret_scan("diff")
   }
-  let client = mcp_connect("harn", [])
+  const client = mcp_connect("harn", [])
   mcp_call(client, "git::push_pr", {title: "still unsafe"})
 }
 "#,

@@ -1513,18 +1513,18 @@ fn main(harness: Harness) {
 
         let source = r#"
 fn main(harness: Harness) {
-  let scope = {kind: "workspace", id: "workspace-a"}
-  let written = harness.secrets.write("github.token", "v1", scope, 5000)
+  const scope = {kind: "workspace", id: "workspace-a"}
+  const written = harness.secrets.write("github.token", "v1", scope, 5000)
   __io_println(written.provider)
   __io_println(written.scope.kind)
   __io_println(written.scope.id)
   __io_println(written.id.namespace)
   __io_println(written.version)
   __io_println(harness.secrets.read("github.token", scope))
-  let rotated = harness.secrets.rotate("github.token", { -> "v2" }, scope, {grace_ms: 250, ttl_ms: 7500})
+  const rotated = harness.secrets.rotate("github.token", { -> "v2" }, scope, {grace_ms: 250, ttl_ms: 7500})
   __io_println(rotated.from_version)
   __io_println(rotated.to_version)
-  let grant = harness.secrets.lease("github.token", 1000, scope)
+  const grant = harness.secrets.lease("github.token", 1000, scope)
   __io_println(grant.value)
   __io_println(grant.scope.id)
 }
@@ -1699,8 +1699,8 @@ fn main(harness: Harness) {
 fn main(harness: Harness) {
   let i = 0
   while i < 3 {
-    let _ = harness.clock.elapsed()
-    let value = harness.env.get_or("KEY", "")
+    const _ = harness.clock.elapsed()
+    const value = harness.env.get_or("KEY", "")
     harness.stdio.println(value)
     i = i + 1
   }
@@ -1835,7 +1835,7 @@ fn main(harness: Harness) {
 fn main(harness: Harness) {
   harness.stdio.println(harness.stdio.read_line())
   harness.stdio.println(harness.stdio.prompt("answer: "))
-  let eof = harness.stdio.read_line({trim: false})
+  const eof = harness.stdio.read_line({trim: false})
   harness.stdio.println(eof.status)
 }
 "#,

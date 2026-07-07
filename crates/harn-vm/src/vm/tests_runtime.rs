@@ -122,7 +122,7 @@ fn optimizer_differential_success_programs_match() {
   fn add(a: int, b: int = 4) {
     return a + b
   }
-  let base = 3
+  const base = 3
   __io_println(add(base))
   __io_println(add(1 + 1, 2 + 2))
 }",
@@ -207,7 +207,7 @@ fn runtime_error_renderer_normalizes_frame_paths() {
     let mut vm = Vm::new();
     vm.set_source_info(
         "/workspace/pipelines/mode/../mode/auto.harn",
-        "let run = agent_loop(message, system_prompt, opts)\n",
+        "const run = agent_loop(message, system_prompt, opts)\n",
     );
     vm.error_stack_trace = vec![
         (
@@ -356,7 +356,7 @@ fn test_typed_opcode_drift_falls_back_to_generic() {
     // covered in `vm::tests_typed_op_fallback`.
     let err = run_vm_err(
         r#"pipeline t(task) {
-  let x: int = "bad"
+  const x: int = "bad"
   log(x + 1)
 }"#,
     );
@@ -396,7 +396,7 @@ fn test_comparisons() {
 
 #[test]
 fn test_let_var() {
-    let out = run_output("pipeline t(task) { let x = 42\nlog(x)\nlet y = 1\ny = 2\nlog(y) }");
+    let out = run_output("pipeline t(task) { const x = 42\nlog(x)\nlet y = 1\ny = 2\nlog(y) }");
     assert_eq!(out, "[harn] 42\n[harn] 2");
 }
 
@@ -450,14 +450,14 @@ fn test_fn_decl_and_call() {
 
 #[test]
 fn test_closure() {
-    let out = run_output("pipeline t(task) { let double = { x -> x * 2 }\nlog(double(5)) }");
+    let out = run_output("pipeline t(task) { const double = { x -> x * 2 }\nlog(double(5)) }");
     assert_eq!(out, "[harn] 10");
 }
 
 #[test]
 fn test_closure_capture() {
     let out = run_output(
-        "pipeline t(task) { let base = 10\nfn offset(x) { return x + base }\nlog(offset(5)) }",
+        "pipeline t(task) { const base = 10\nfn offset(x) { return x + base }\nlog(offset(5)) }",
     );
     assert_eq!(out, "[harn] 15");
 }
@@ -465,7 +465,7 @@ fn test_closure_capture() {
 #[test]
 fn test_string_concat() {
     let out = run_output(
-        r#"pipeline t(task) { let a = "hello" + " " + "world"
+        r#"pipeline t(task) { const a = "hello" + " " + "world"
 log(a) }"#,
     );
     assert_eq!(out, "[harn] hello world");
@@ -474,7 +474,7 @@ log(a) }"#,
 #[test]
 fn test_list_map() {
     let out = run_output(
-        "pipeline t(task) { let doubled = [1, 2, 3].map({ x -> x * 2 })\nlog(doubled) }",
+        "pipeline t(task) { const doubled = [1, 2, 3].map({ x -> x * 2 })\nlog(doubled) }",
     );
     assert_eq!(out, "[harn] [2, 4, 6]");
 }
@@ -482,7 +482,7 @@ fn test_list_map() {
 #[test]
 fn test_list_filter() {
     let out = run_output(
-        "pipeline t(task) { let big = [1, 2, 3, 4, 5].filter({ x -> x > 3 })\nlog(big) }",
+        "pipeline t(task) { const big = [1, 2, 3, 4, 5].filter({ x -> x > 3 })\nlog(big) }",
     );
     assert_eq!(out, "[harn] [4, 5]");
 }
@@ -490,7 +490,7 @@ fn test_list_filter() {
 #[test]
 fn test_list_reduce() {
     let out = run_output(
-        "pipeline t(task) { let sum = [1, 2, 3, 4].reduce(0, { acc, x -> acc + x })\nlog(sum) }",
+        "pipeline t(task) { const sum = [1, 2, 3, 4].reduce(0, { acc, x -> acc + x })\nlog(sum) }",
     );
     assert_eq!(out, "[harn] 10");
 }
@@ -498,7 +498,7 @@ fn test_list_reduce() {
 #[test]
 fn test_dict_access() {
     let out = run_output(
-        r#"pipeline t(task) { let d = {name: "test", value: 42}
+        r#"pipeline t(task) { const d = {name: "test", value: 42}
 log(d.name)
 log(d.value) }"#,
     );
@@ -508,7 +508,7 @@ log(d.value) }"#,
 #[test]
 fn test_dict_methods() {
     let out = run_output(
-        r#"pipeline t(task) { let d = {a: 1, b: 2}
+        r#"pipeline t(task) { const d = {a: 1, b: 2}
 log(d.keys())
 log(d.values())
 log(d.has("a"))
@@ -523,21 +523,21 @@ log(d.has("z")) }"#,
 #[test]
 fn test_string_repeat_operator_rejects_oversized_count() {
     // `"a" * <huge>` must error cleanly, never OOM / panic `capacity overflow`.
-    let result = run_harn_result(r#"pipeline t(task) { let s = "ab" * 9999999999 }"#);
+    let result = run_harn_result(r#"pipeline t(task) { const s = "ab" * 9999999999 }"#);
     let err = result.unwrap_err().to_string();
     assert!(err.contains("repeat") && err.contains("limit"), "{err}");
 }
 
 #[test]
 fn test_string_repeat_method_rejects_oversized_count() {
-    let result = run_harn_result(r#"pipeline t(task) { let s = "ab".repeat(9999999999) }"#);
+    let result = run_harn_result(r#"pipeline t(task) { const s = "ab".repeat(9999999999) }"#);
     let err = result.unwrap_err().to_string();
     assert!(err.contains("repeat") && err.contains("limit"), "{err}");
 }
 
 #[test]
 fn test_str_pad_rejects_oversized_width() {
-    let result = run_harn_result(r#"pipeline t(task) { let s = str_pad("x", 9999999999, "-") }"#);
+    let result = run_harn_result(r#"pipeline t(task) { const s = str_pad("x", 9999999999, "-") }"#);
     let err = result.unwrap_err().to_string();
     assert!(err.contains("repeat") && err.contains("limit"), "{err}");
 }
@@ -621,7 +621,7 @@ fn test_pipe_operator() {
 #[test]
 fn test_pipe_with_closure() {
     let out = run_output(
-        r#"pipeline t(task) { let r = "hello world" |> { s -> s.split(" ") }
+        r#"pipeline t(task) { const r = "hello world" |> { s -> s.split(" ") }
 log(r) }"#,
     );
     assert_eq!(out, "[harn] [hello, world]");
@@ -630,9 +630,9 @@ log(r) }"#,
 #[test]
 fn test_nil_coalescing() {
     let out = run_output(
-        r#"pipeline t(task) { let a = nil ?? "fallback"
+        r#"pipeline t(task) { const a = nil ?? "fallback"
 log(a)
-let b = "present" ?? "fallback"
+const b = "present" ?? "fallback"
 log(b) }"#,
     );
     assert_eq!(out, "[harn] fallback\n[harn] present");
@@ -647,7 +647,7 @@ fn test_logical_operators() {
 #[test]
 fn test_match() {
     let out = run_output(
-        r#"pipeline t(task) { let x = "b"
+        r#"pipeline t(task) { const x = "b"
 match x { "a" -> { log("first") } "b" -> { log("second") } "c" -> { log("third") } } }"#,
     );
     assert_eq!(out, "[harn] second");
@@ -657,8 +657,8 @@ match x { "a" -> { log("first") } "b" -> { log("second") } "c" -> { log("third")
 fn test_subscript() {
     let out = run_output(
         r#"pipeline t(task) {
-let arr = [10, 20, 30]
-let dict = {name: "harn"}
+const arr = [10, 20, 30]
+const dict = {name: "harn"}
 log(arr[1])
 log(dict["name"])
 log("abc"[1])
@@ -714,7 +714,7 @@ log("é🙂".len())
 #[test]
 fn test_list_properties() {
     let out = run_output(
-        "pipeline t(task) { let list = [1, 2, 3]\nlog(list.count)\nlog(list.empty)\nlog(list.first)\nlog(list.last) }",
+        "pipeline t(task) { const list = [1, 2, 3]\nlog(list.count)\nlog(list.empty)\nlog(list.first)\nlog(list.last) }",
     );
     assert_eq!(out, "[harn] 3\n[harn] false\n[harn] 1\n[harn] 3");
 }
@@ -723,9 +723,9 @@ fn test_list_properties() {
 fn test_inline_cache_warms_property_sites() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
         r#"pipeline t(task) {
-let list = [1, 2, 3]
-let text = ""
-let p = pair("left", "right")
+const list = [1, 2, 3]
+const text = ""
+const p = pair("left", "right")
 let i = 0
 let total = 0
 while i < 3 {
@@ -784,8 +784,8 @@ struct Point {
   x: int
   y: int
 }
-let record = {hot: 7}
-let point = Point {x: 2, y: 3}
+const record = {hot: 7}
+const point = Point {x: 2, y: 3}
 let i = 0
 let total = 0
 while i < 3 {
@@ -846,11 +846,11 @@ for value in [[1, 2], "ab"] {
 fn test_inline_cache_warms_method_sites() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
         r#"pipeline t(task) {
-let list = [1, 2, 3]
-let text = "abc"
-let dict = {a: 1, b: 2}
-let range = 1 to 3
-let values = set(1, 2)
+const list = [1, 2, 3]
+const text = "abc"
+const dict = {a: 1, b: 2}
+const range = 1 to 3
+const values = set(1, 2)
 let i = 0
 let total = 0
 while i < 3 {
@@ -904,7 +904,7 @@ fn test_inline_cache_warms_harness_property_and_method_sites() {
     if harness.env.get_or("__HARN_TEST_MISSING__", "fallback") == "fallback" {
       hits = hits + 1
     }
-    let _ = harness.clock.monotonic_ms()
+    const _ = harness.clock.monotonic_ms()
     i = i + 1
   }
   return hits
@@ -986,7 +986,7 @@ fn test_adaptive_inline_cache_deoptimizes_mixed_binary_shapes() {
 fn erase(x) {
   return x
 }
-let values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
+const values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
 let acc = erase(0)
 for value in values {
   acc = acc + value
@@ -1081,8 +1081,8 @@ log(total)
 fn test_inline_cache_warms_spread_method_site() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
         r"pipeline t(task) {
-let list = [1, 2, 3]
-let args = []
+const list = [1, 2, 3]
+const args = []
 let i = 0
 while i < 3 {
   log(list.count(...args))
@@ -1115,8 +1115,8 @@ fn test_recursive_function() {
 #[test]
 fn test_ternary() {
     let out = run_output(
-        r#"pipeline t(task) { let x = 5
-let r = x > 0 ? "positive" : "non-positive"
+        r#"pipeline t(task) { const x = 5
+const r = x > 0 ? "positive" : "non-positive"
 log(r) }"#,
     );
     assert_eq!(out, "[harn] positive");
@@ -1125,14 +1125,14 @@ log(r) }"#,
 #[test]
 fn test_for_in_dict() {
     let out =
-        run_output("pipeline t(task) { let d = {a: 1, b: 2}\nfor entry in d { log(entry.key) } }");
+        run_output("pipeline t(task) { const d = {a: 1, b: 2}\nfor entry in d { log(entry.key) } }");
     assert_eq!(out, "[harn] a\n[harn] b");
 }
 
 #[test]
 fn test_list_any_all() {
     let out = run_output(
-        "pipeline t(task) { let nums = [2, 4, 6]\nlog(nums.any({ x -> x > 5 }))\nlog(nums.all({ x -> x > 0 }))\nlog(nums.all({ x -> x > 3 })) }",
+        "pipeline t(task) { const nums = [2, 4, 6]\nlog(nums.any({ x -> x > 5 }))\nlog(nums.all({ x -> x > 0 }))\nlog(nums.all({ x -> x > 3 })) }",
     );
     assert_eq!(out, "[harn] true\n[harn] true\n[harn] false");
 }
@@ -1169,7 +1169,7 @@ fn test_direct_builtin_call_uses_registered_sync_id() {
 fn test_direct_builtin_call_uses_registered_async_id() {
     let (out, _) = run_harn_with_setup(
         r#"pipeline t(task) {
-let value = test_async("ok")
+const value = test_async("ok")
 log(value)
 }"#,
         |vm| {
@@ -1189,7 +1189,7 @@ log(value)
 fn test_direct_builtin_callback_uses_builtin_ref_id() {
     let out = run_output(
         r#"pipeline t(task) {
-let converted = ["first_name"].map(snake_to_camel)
+const converted = ["first_name"].map(snake_to_camel)
 log(converted[0])
 }"#,
     );
@@ -1213,7 +1213,7 @@ push([1], 2)
 fn test_direct_builtin_call_preserves_local_closure_shadowing() {
     let out = run_output(
         r#"pipeline t(task) {
-let push = { xs, x -> log("local") }
+const push = { xs, x -> log("local") }
 push([1], 2)
 }"#,
     );
@@ -1301,7 +1301,7 @@ fn test_slot_locals_sync_for_closure_capture() {
         r"pipeline t(task) {
 let x = 1
 x = 7
-let f = { -> x + 1 }
+const f = { -> x + 1 }
 log(f())
 }",
     );
@@ -1485,7 +1485,7 @@ fn test_function_call_new() {
 
 #[test]
 fn test_closure_new() {
-    let out = run_vm("pipeline default(task) { let f = { x -> x * 2 }\nlog(f(5)) }");
+    let out = run_vm("pipeline default(task) { const f = { x -> x * 2 }\nlog(f(5)) }");
     assert_eq!(out, "[harn] 10\n");
 }
 
@@ -1509,40 +1509,40 @@ fn test_try_no_error_new() {
 
 #[test]
 fn test_list_map_new() {
-    let out = run_vm("pipeline default(task) { let r = [1, 2, 3].map({ x -> x * 2 })\nlog(r) }");
+    let out = run_vm("pipeline default(task) { const r = [1, 2, 3].map({ x -> x * 2 })\nlog(r) }");
     assert_eq!(out, "[harn] [2, 4, 6]\n");
 }
 
 #[test]
 fn test_list_filter_new() {
     let out =
-        run_vm("pipeline default(task) { let r = [1, 2, 3, 4].filter({ x -> x > 2 })\nlog(r) }");
+        run_vm("pipeline default(task) { const r = [1, 2, 3, 4].filter({ x -> x > 2 })\nlog(r) }");
     assert_eq!(out, "[harn] [3, 4]\n");
 }
 
 #[test]
 fn test_dict_access_new() {
-    let out = run_vm("pipeline default(task) { let d = {name: \"Alice\"}\nlog(d.name) }");
+    let out = run_vm("pipeline default(task) { const d = {name: \"Alice\"}\nlog(d.name) }");
     assert_eq!(out, "[harn] Alice\n");
 }
 
 #[test]
 fn test_string_interpolation() {
-    let out = run_vm("pipeline default(task) { let x = 42\nlog(\"val=${x}\") }");
+    let out = run_vm("pipeline default(task) { const x = 42\nlog(\"val=${x}\") }");
     assert_eq!(out, "[harn] val=42\n");
 }
 
 #[test]
 fn test_match_new() {
     let out = run_vm(
-        "pipeline default(task) { let x = \"b\"\nmatch x { \"a\" -> { log(1) } \"b\" -> { log(2) } } }",
+        "pipeline default(task) { const x = \"b\"\nmatch x { \"a\" -> { log(1) } \"b\" -> { log(2) } } }",
     );
     assert_eq!(out, "[harn] 2\n");
 }
 
 #[test]
 fn test_json_roundtrip() {
-    let out = run_vm("pipeline default(task) { let s = json_stringify({a: 1})\nlog(s) }");
+    let out = run_vm("pipeline default(task) { const s = json_stringify({a: 1})\nlog(s) }");
     assert!(out.contains("\"a\""));
     assert!(out.contains('1'));
 }
@@ -1575,7 +1575,7 @@ fn test_division_by_zero() {
 fn test_int_division_overflow_promotes_instead_of_wrapping() {
     let out = run_output(
         r"pipeline default(task) {
-  let min = -9223372036854775807 - 1
+  const min = -9223372036854775807 - 1
   log(min / -1)
   log(min % -1)
 }",
@@ -1640,20 +1640,20 @@ try {
 #[test]
 fn test_parallel_basic() {
     let out =
-        run_output("pipeline t(task) { let results = parallel(3) { i -> i * 10 }\nlog(results) }");
+        run_output("pipeline t(task) { const results = parallel(3) { i -> i * 10 }\nlog(results) }");
     assert_eq!(out, "[harn] [0, 10, 20]");
 }
 
 #[test]
 fn test_parallel_no_variable() {
-    let out = run_output("pipeline t(task) { let results = parallel(3) { 42 }\nlog(results) }");
+    let out = run_output("pipeline t(task) { const results = parallel(3) { 42 }\nlog(results) }");
     assert_eq!(out, "[harn] [42, 42, 42]");
 }
 
 #[test]
 fn test_parallel_each_basic() {
     let out = run_output(
-        "pipeline t(task) { let results = parallel each [1, 2, 3] { x -> x * x }\nlog(results) }",
+        "pipeline t(task) { const results = parallel each [1, 2, 3] { x -> x * x }\nlog(results) }",
     );
     assert_eq!(out, "[harn] [1, 4, 9]");
 }
@@ -1669,7 +1669,7 @@ async fn test_parallel_fail_fast_cancels_slow_sibling() {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
                     r#"pipeline t(task) {
-let survived = atomic(0)
+const survived = atomic(0)
 try {
   parallel 2 { i ->
     if i == 0 {
@@ -1704,7 +1704,7 @@ async fn test_parallel_each_fail_fast_cancels_slow_sibling() {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
                     r#"pipeline t(task) {
-let survived = atomic(0)
+const survived = atomic(0)
 try {
   parallel each ["fail", "slow"] { item ->
     if item == "fail" {
@@ -1737,7 +1737,7 @@ fn test_parallel_fail_fast_skips_unstarted_branches() {
     // branches are never started at all — fully deterministic, no timing.
     let out = run_output(
         r#"pipeline t(task) {
-let started = atomic(0)
+const started = atomic(0)
 try {
   parallel each [1, 2, 3] with { max_concurrent: 1 } { n ->
     if n == 1 {
@@ -1785,8 +1785,8 @@ async fn test_parallel_settle_still_runs_all_branches() {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
                     r#"pipeline t(task) {
-let completed = atomic(0)
-let outcome = parallel settle [1, 2, 3] { item ->
+const completed = atomic(0)
+const outcome = parallel settle [1, 2, 3] { item ->
   if item == 1 {
     throw "early failure"
   }
@@ -1817,8 +1817,8 @@ async fn test_parallel_each_stream_break_cancels_remaining_work() {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
                     r"pipeline t(task) {
-let completed = atomic(0)
-let results = parallel each [1, 2, 3] with { max_concurrent: 1 } { item ->
+const completed = atomic(0)
+const results = parallel each [1, 2, 3] with { max_concurrent: 1 } { item ->
   sleep(1s)
   atomic_add(completed, 1)
   return item
@@ -1844,8 +1844,8 @@ log(atomic_get(completed))
 fn test_spawn_await() {
     let out = run_output(
         r#"pipeline t(task) {
-let handle = spawn { log("spawned") }
-let result = await(handle)
+const handle = spawn { log("spawned") }
+const result = await(handle)
 log("done")
 }"#,
     );
@@ -1856,7 +1856,7 @@ log("done")
 fn test_spawn_cancel() {
     let out = run_output(
         r#"pipeline t(task) {
-let handle = spawn { log("should be cancelled") }
+const handle = spawn { log("should be cancelled") }
 cancel(handle)
 log("cancelled")
 }"#,
@@ -1868,13 +1868,13 @@ log("cancelled")
 fn test_cancel_graceful_propagates_to_cpu_bound_spawn() {
     let out = run_output(
         r#"pipeline t(task) {
-let handle = spawn {
+const handle = spawn {
   let i = 0
   while true {
     i = i + 1
   }
 }
-let result = cancel_graceful(handle, 100ms)
+const result = cancel_graceful(handle, 100ms)
 log(is_err(result))
 log(contains(unwrap_err(result), "cancelled"))
 }"#,
@@ -1889,8 +1889,8 @@ fn test_std_signal_handlers_are_lifo_and_removable() {
 import "std/signal"
 
 pipeline t() {
-  let first = on_interrupt({ -> log("a") }, {once: false})
-  let second = on_interrupt({ -> log("b") }, {once: false})
+  const first = on_interrupt({ -> log("a") }, {once: false})
+  const second = on_interrupt({ -> log("b") }, {once: false})
   __signal_raise("SIGINT")
   off_interrupt(second)
   __signal_raise("SIGINT")
@@ -1913,7 +1913,7 @@ pipeline t() {
     with_interrupt({ -> log("leaked") }, { -> throw "boom" }, {once: false})
   } catch (e) {
   }
-  let raised = try {
+  const raised = try {
     __signal_raise("SIGINT")
     "not interrupted"
   } catch (e) {
@@ -1937,7 +1937,7 @@ pipeline t() {
     let spin = 0
     while true { spin = spin + 1 }
   }, {graceful_timeout_ms: 0})
-  let result = try {
+  const result = try {
     __signal_raise("SIGINT")
     "missed timeout"
   } catch (e) {
@@ -2001,7 +2001,7 @@ fn test_host_signal_token_dispatches_matching_signal() {
 
 #[test]
 fn test_spawn_returns_value() {
-    let out = run_output("pipeline t(task) { let h = spawn { 42 }\nlet r = await(h)\nlog(r) }");
+    let out = run_output("pipeline t(task) { const h = spawn { 42 }\nconst r = await(h)\nlog(r) }");
     assert_eq!(out, "[harn] 42");
 }
 
@@ -2011,7 +2011,7 @@ fn test_spawn_returns_value() {
 fn test_deadline_success() {
     let out = run_output(
         r#"pipeline t(task) {
-let result = deadline 5s { log("within deadline")
+const result = deadline 5s { log("within deadline")
 42 }
 log(result)
 }"#,
@@ -2107,7 +2107,7 @@ async fn test_cancel_during_await_aborts_spawned_task() {
     local
         .run_until(async {
             let source = r"pipeline t(task) {
-let handle = spawn {
+const handle = spawn {
   sleep(1s)
   mark()
 }
@@ -2187,7 +2187,7 @@ fn test_sandbox_deny_builtin() {
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
         r"pipeline t(task) {
-let xs = [1, 2]
+const xs = [1, 2]
 push(xs, 3)
 }",
         denied,
@@ -2227,8 +2227,8 @@ fn test_sandbox_propagates_to_spawn() {
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
         r"pipeline t(task) {
-let handle = spawn {
-  let xs = [1, 2]
+const handle = spawn {
+  const xs = [1, 2]
   push(xs, 3)
 }
 await(handle)
@@ -2249,8 +2249,8 @@ fn test_sandbox_propagates_to_parallel() {
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
         r"pipeline t(task) {
-let results = parallel(2) { i ->
-  let xs = [1, 2]
+const results = parallel(2) { i ->
+  const xs = [1, 2]
   push(xs, 3)
 }
 }",
@@ -2805,12 +2805,12 @@ fn harn_string_escape(value: &str) -> String {
 fn test_if_else_has_lexical_block_scope() {
     let out = run_output(
         r#"pipeline t(task) {
-let x = "outer"
+const x = "outer"
 if true {
-  let x = "inner"
+  const x = "inner"
   log(x)
 } else {
-  let x = "other"
+  const x = "other"
   log(x)
 }
 log(x)
@@ -2823,9 +2823,9 @@ log(x)
 fn test_loop_and_catch_bindings_are_block_scoped() {
     let out = run_output(
         r#"pipeline t(task) {
-let label = "outer"
+const label = "outer"
 for item in [1, 2] {
-  let label = "loop ${item}"
+  const label = "loop ${item}"
   log(label)
 }
 try {
@@ -2885,8 +2885,8 @@ pipeline main(task) {
 fn inline_arithmetic_lambda_map_filter_optimization_path() {
     let out = run_vm(
         r"pipeline default(task) {
-            let evens = [1, 2, 3, 4, 5, 6].filter({ x -> x % 2 == 0 })
-            let doubled = evens.map({ x -> x * 2 })
+            const evens = [1, 2, 3, 4, 5, 6].filter({ x -> x % 2 == 0 })
+            const doubled = evens.map({ x -> x * 2 })
             log(doubled)
         }",
     );
@@ -2935,7 +2935,7 @@ fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
     let out = run_vm(
         r"pipeline default(task) {
             fn helper(x) { return x + 100 }
-            let r = [1, 2, 3].map({ v -> helper(v) })
+            const r = [1, 2, 3].map({ v -> helper(v) })
             log(r)
         }",
     );
@@ -2946,8 +2946,8 @@ fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
 fn anonymous_lambda_with_get_var_capture_flags() {
     let out = run_vm(
         r"pipeline default(task) {
-            let bonus = 10
-            let r = [1, 2, 3].map({ v -> v + bonus })
+            const bonus = 10
+            const r = [1, 2, 3].map({ v -> v + bonus })
             log(r)
         }",
     );
@@ -2960,7 +2960,7 @@ fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
         r"pipeline default(task) {
             fn helper_a(x) { return x + 1 }
             fn helper_b(x) { return x + 2 }
-            let r = [10, 20, 30].map({ v -> v * 2 })
+            const r = [10, 20, 30].map({ v -> v * 2 })
             log(r)
             log(helper_a(0))
             log(helper_b(0))
@@ -2973,8 +2973,8 @@ fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
 fn nested_map_lambdas_skip_walk_independently() {
     let out = run_vm(
         r"pipeline default(task) {
-            let grid = [[1, 2], [3, 4]]
-            let r = grid.map({ row -> row.map({ x -> x * 10 }) })
+            const grid = [[1, 2], [3, 4]]
+            const r = grid.map({ row -> row.map({ x -> x * 10 }) })
             log(r)
         }",
     );
@@ -2985,7 +2985,7 @@ fn nested_map_lambdas_skip_walk_independently() {
 fn typed_param_lambda_uses_check_type_and_walks() {
     let out = run_vm(
         r"pipeline default(task) {
-            let r = [1, 2, 3].map({ v: int -> v + 1 })
+            const r = [1, 2, 3].map({ v: int -> v + 1 })
             log(r)
         }",
     );
@@ -3004,7 +3004,7 @@ fn var_reassigned_via_any_matches_unoptimized() {
   let x = 0
   let sum = 0
   let i = 0
-  let cell = shared_cell("k", 2.5)
+  const cell = shared_cell("k", 2.5)
   while i < 3 {
     sum = sum + x
     if i == 0 { x = shared_get(cell) }
@@ -3031,7 +3031,7 @@ fn var_reassigned_via_any_matches_unoptimized() {
 fn for_item_reassigned_via_any_matches_unoptimized() {
     let source = r#"pipeline default(task) {
   let sum = 0
-  let cell = shared_cell("k", 2.5)
+  const cell = shared_cell("k", 2.5)
   for n in [1, 2, 3] {
     sum = sum + n
     n = shared_get(cell)
@@ -3098,7 +3098,7 @@ fn list_push_assign_preserves_alias_immutability() {
 pipeline t(task) {
   let x = []
   x = x.push(1)
-  let y = x
+  const y = x
   x = x.push(2)
   log("${x} ${y}")
 }"#;

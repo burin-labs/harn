@@ -14,7 +14,7 @@
  */
 pub fn wait_for(timeout_ms, interval_ms, predicate) {
   const end_time = harness.clock.timestamp() * 1000 + timeout_ms
-  const interval = interval_ms
+  let interval = interval_ms
   if interval <= 0 {
     interval = 100
   }

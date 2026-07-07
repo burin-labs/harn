@@ -815,7 +815,7 @@ fn preflight_accepts_process_spawn_lifecycle_ops() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  let h = host_call("process.spawn", {mode: "argv", argv: ["echo", "hi"]})
+  const h = host_call("process.spawn", {mode: "argv", argv: ["echo", "hi"]})
   host_call("process.poll", {handle_id: h.handle_id})
   host_call("process.wait", {handle_id: h.handle_id, timeout_ms: 1000})
   host_call("process.kill", {handle_id: h.handle_id})

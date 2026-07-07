@@ -311,7 +311,7 @@ fn unsupported_constructs_are_reported() {
         ("fn f(a: int) -> int { return a ** 2 }", "f"),
         ("fn f(a: float, b: float) -> float { return a % b }", "f"),
         ("fn f(a: int) -> string { return \"hi\" }", "f"),
-        ("fn f(a: int) { let x = a }", "f"),
+        ("fn f(a: int) { const x = a }", "f"),
     ];
     for (src, name) in cases {
         let err = analyze_named(src, name)

@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn references_to_let_binding_refine_to_identifier_tokens() {
-        let source = "pipeline t(task) {\n  let total = 1\n  log(total)\n}\n";
+        let source = "pipeline t(task) {\n  const total = 1\n  log(total)\n}\n";
         let program = parse(source);
         let raw = find_references(&program, "total");
         let refined = identifier_token_spans_within(source, "total", &raw);

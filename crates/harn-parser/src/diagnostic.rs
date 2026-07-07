@@ -637,7 +637,7 @@ mod tests {
     #[test]
     fn test_basic_diagnostic() {
         disable_colors();
-        let source = "pipeline default(task) {\n    let y = x + 1\n}";
+        let source = "pipeline default(task) {\n    const y = x + 1\n}";
         let span = Span {
             start: 28,
             end: 29,
@@ -656,14 +656,14 @@ mod tests {
         );
         assert!(output.contains("error: undefined variable `x`"));
         assert!(output.contains("--> example.harn:2:13"));
-        assert!(output.contains("let y = x + 1"));
+        assert!(output.contains("const y = x + 1"));
         assert!(output.contains("^ not found in this scope"));
     }
 
     #[test]
     fn test_diagnostic_normalizes_filename() {
         disable_colors();
-        let source = "let value = thing";
+        let source = "const value = thing";
         let span = Span {
             start: 12,
             end: 17,
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn test_diagnostic_with_help() {
         disable_colors();
-        let source = "let y = xx + 1";
+        let source = "const y = xx + 1";
         let span = Span {
             start: 8,
             end: 10,
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     fn test_single_char_span() {
         disable_colors();
-        let source = "let x = 42";
+        let source = "const x = 42";
         let span = Span::with_offsets(4, 5, 1, 5); // "x"
         let result = render_diagnostic(
             source,
@@ -746,7 +746,7 @@ mod tests {
     #[test]
     fn test_with_help() {
         disable_colors();
-        let source = "let y = reponse";
+        let source = "const y = reponse";
         let span = Span::with_offsets(8, 15, 1, 9);
         let result = render_diagnostic(
             source,

@@ -592,7 +592,7 @@ mod tests {
         let chunk = compile_source(
             r"
 pipeline test(task) {
-  let rows = hitl_pending({})
+  const rows = hitl_pending({})
   __io_println(len(rows))
 }
 ",

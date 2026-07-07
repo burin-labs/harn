@@ -239,14 +239,14 @@ async fn harn_builtin_returns_structured_timeout_without_real_sleep() {
             let source = r#"
 pipeline main(task) {
   mock_time(1000)
-  let first = durable_rate_limit_acquire({
+  const first = durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",
     limit: 1,
     units: 1,
     window_ms: 1000,
   })
-  let second = durable_rate_limit_acquire({
+  const second = durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",
     limit: 1,
@@ -276,7 +276,7 @@ async fn harn_parallel_tasks_share_one_durable_bucket() {
             let source = r#"
 pipeline main(task) {
   mock_time(1000)
-  let attempts = parallel each [1, 2, 3, 4] with { max_concurrent: 4 } { _ ->
+  const attempts = parallel each [1, 2, 3, 4] with { max_concurrent: 4 } { _ ->
     durable_rate_limit_acquire({
       state_path: "__STATE_PATH__",
       key: "provider:rpm",
@@ -315,7 +315,7 @@ fn harn_vms_on_multiple_threads_share_one_durable_bucket() {
     let source = Arc::new(
         r#"
 pipeline main(task) {
-  let attempt = durable_rate_limit_acquire({
+  const attempt = durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",
     limit: 1,

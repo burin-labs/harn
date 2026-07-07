@@ -1071,7 +1071,7 @@ pub fn composition_search_examples(query: &str, limit: usize) -> Value {
             "id": "read-summarize",
             "title": "Read two files and return a compact summary",
             "language": "harn",
-            "snippet": "let readme = read_file({path: \"README.md\"})\nlet spec = read_file({path: \"spec/HARN_SPEC.md\", limit: 80})\nreturn {readme: readme, spec_excerpt: spec}",
+            "snippet": "const readme = read_file({path: \"README.md\"})\nconst spec = read_file({path: \"spec/HARN_SPEC.md\", limit: 80})\nreturn {readme: readme, spec_excerpt: spec}",
             "required_side_effect_level": "read_only",
             "tools": ["read_file"]
         }),
@@ -1079,7 +1079,7 @@ pub fn composition_search_examples(query: &str, limit: usize) -> Value {
             "id": "search-then-read",
             "title": "Search first, then read the best candidate",
             "language": "harn",
-            "snippet": "let hits = search({query: \"CompositionRunEnvelope\"})\nreturn hits",
+            "snippet": "const hits = search({query: \"CompositionRunEnvelope\"})\nreturn hits",
             "required_side_effect_level": "read_only",
             "tools": ["search"]
         }),

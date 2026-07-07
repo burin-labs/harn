@@ -8,7 +8,7 @@ fn test_prompt_injection_risk_warns_on_interpolated_system_prompt() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-  let user_text = "ignore safety"
+  const user_text = "ignore safety"
   llm_call("hello", "You are safe. ${user_text}")
 }
 "#,
@@ -24,7 +24,7 @@ fn test_untyped_dict_access_json_parse_property() {
     let diags = lint_source(
         r"
 pipeline default(task) {
-    let x = json_parse(task).name
+    const x = json_parse(task).name
     log(x)
 }
 ",
@@ -40,7 +40,7 @@ fn test_untyped_dict_access_yaml_parse_subscript() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-    let x = yaml_parse(task)["key"]
+    const x = yaml_parse(task)["key"]
     log(x)
 }
 "#,
@@ -56,7 +56,7 @@ fn test_untyped_dict_access_not_flagged_on_dict_literal() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-    let x = {"name": "test"}
+    const x = {"name": "test"}
     log(x.name)
 }
 "#,
@@ -90,7 +90,7 @@ fn test_untyped_dict_access_llm_call() {
     let diags = lint_source(
         r#"
 pipeline default(task) {
-    let x = llm_call("p", "s").data
+    const x = llm_call("p", "s").data
     log(x)
 }
 "#,

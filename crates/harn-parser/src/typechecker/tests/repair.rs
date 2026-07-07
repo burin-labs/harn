@@ -33,7 +33,7 @@ fn type_mismatch_attaches_scope_local_repair() {
     let diag = first_with_code(
         r#"
             pipeline main() {
-                let x: int = "not an int"
+                const x: int = "not an int"
             }
         "#,
         Code::VariableTypeMismatch,
@@ -51,7 +51,7 @@ fn non_exhaustive_match_attaches_scope_local_repair() {
         r#"
             type Color = "red" | "green" | "blue"
             pipeline main() {
-                let c: Color = "red"
+                const c: Color = "red"
                 match c {
                     "red" -> { 1 }
                     "green" -> { 2 }
@@ -90,7 +90,7 @@ fn string_interpolation_rewrite_attaches_behavior_preserving_repair() {
     // build_interpolation_fix only runs when the checker has source text
     // attached, so route through the source-aware helper.
     let diag = first_with_code_with_source(
-        "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }",
+        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }",
         Code::StringInterpolationRewrite,
     );
     let repair = diag
@@ -132,7 +132,7 @@ fn diagnostics_without_registered_template_have_no_repair() {
     let diags = check_source(
         r#"
             pipeline main() {
-                let r = llm_call("you", "instructions", {
+                const r = llm_call("you", "instructions", {
                     "schema": 42,
                 })
                 r
@@ -155,9 +155,9 @@ fn every_emitted_repair_matches_registry_safety() {
     // emitter constructs a Repair inline instead of going through the
     // central registry-driven default.
     let sources = [
-        "pipeline main() { let x: int = \"nope\" }",
-        "pipeline main() { let x = 1; x = 2 }",
-        "type Color = \"red\" | \"green\"\npipeline main() { let c: Color = \"red\"; match c { \"red\" -> { 1 } } }",
+        "pipeline main() { const x: int = \"nope\" }",
+        "pipeline main() { const x = 1; x = 2 }",
+        "type Color = \"red\" | \"green\"\npipeline main() { const c: Color = \"red\"; match c { \"red\" -> { 1 } } }",
     ];
     for source in sources {
         for diag in check_source(source) {

@@ -1295,16 +1295,16 @@ mod tests {
         // the line counter, so every token after the string reported a
         // line number too low — by the number of newlines consumed inside
         // the interpolation. Downstream lint spans pointed to wrong lines.
-        let src = "let x = \"${render(\n  \"a\",\n  b,\n)}\"\nlet y = 1\n";
+        let src = "const x = \"${render(\n  \"a\",\n  b,\n)}\"\nconst y = 1\n";
         let mut lexer = Lexer::new(src);
         let tokens = lexer.tokenize().unwrap();
-        // `let y` is on line 5 of the source.
-        let let_y = tokens
+        // `const y` is on line 5 of the source.
+        let const_y = tokens
             .iter()
-            .skip(1) // the first `let` at line 1
-            .find(|t| matches!(t.kind, TokenKind::Let))
-            .expect("second `let`");
-        assert_eq!(let_y.span.line, 5);
+            .skip(1) // the first `const` at line 1
+            .find(|t| matches!(t.kind, TokenKind::Const))
+            .expect("second `const`");
+        assert_eq!(const_y.span.line, 5);
     }
 
     #[test]
@@ -1337,7 +1337,7 @@ mod tests {
         // at the closing `*/` (line 4) — matching how multi-line strings record
         // their span. Downstream consumers (`harn fmt`, the LSP) key comments by
         // `span.line`, so reporting the end line there misplaces the comment.
-        let src = "let a = 1\n/* block\n   spanning\n   lines */\nlet b = 2";
+        let src = "const a = 1\n/* block\n   spanning\n   lines */\nconst b = 2";
         let mut lex = Lexer::new(src);
         let tokens = lex.tokenize_with_comments().unwrap();
         let block = tokens
