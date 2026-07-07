@@ -15,8 +15,6 @@ const SKIP_SEGMENTS = [
 
 const HARN_MCP_HELPER_DEBT_REASON = "Tracked by harn#4219: Harn owns MCP fixture serving; Python remains only as a cutover shim."
 
-const HARN_REST_HELPER_DEBT_REASON = "Tracked by harn#4219 and harn#4264: Harn owns generic REST mock fixture serving; Python remains only as a cutover shim."
-
 const HARN_PROXY_HELPER_DEBT_REASON = "Tracked by harn#4219: Harn owns deterministic proxy fixture serving and capture; Python remains only as a cutover shim."
 
 const PYTHON_ALLOWLIST = [
@@ -55,24 +53,6 @@ const PYTHON_ALLOWLIST = [
     pattern: "conformance/helpers/mcp_roots_server.py",
     category: "harn-cutover-debt",
     reason: HARN_MCP_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
-    pattern: "conformance/helpers/github_mock_server.py",
-    category: "harn-cutover-debt",
-    reason: HARN_REST_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
-    pattern: "conformance/helpers/linear_mock_server.py",
-    category: "harn-cutover-debt",
-    reason: HARN_REST_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
-    pattern: "conformance/helpers/slack_mock_server.py",
-    category: "harn-cutover-debt",
-    reason: HARN_REST_HELPER_DEBT_REASON,
   },
   {
     kind: "exact",
