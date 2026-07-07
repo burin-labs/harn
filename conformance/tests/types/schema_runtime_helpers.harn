@@ -7,18 +7,21 @@ fn alias_report_user_name(user: AliasReportUser) {
 }
 
 pipeline test(task) {
-  const user_schema = schema_object(
+  let user_schema = schema_object(
     {name: schema_field(schema_string()), role: schema_default(schema_string(), "user")},
     {additional_properties: false},
   )
   __io_println(is_type({name: "Ada"}, user_schema))
-  const parsed = get_typed_value({name: "Ada"}, user_schema, true)
+  let parsed = get_typed_value({name: "Ada"}, user_schema, true)
   __io_println(parsed.role)
-  const openapi = schema_openapi(user_schema)
+  let missing_required = get_typed_report({}, user_schema, true)
+  __io_println(!missing_required.ok)
+  __io_println(contains(join(missing_required.errors, "\n"), "missing required key 'name'"))
+  let openapi = schema_openapi(user_schema)
   __io_println(openapi.type)
-  const from_json = from_json_schema({type: "object", properties: {name: {type: "string"}}, required: ["name"]})
+  let from_json = from_json_schema({type: "object", properties: {name: {type: "string"}}, required: ["name"]})
   __io_println(is_type({name: "Bob"}, from_json))
-  const report_schema = schema_object(
+  let report_schema = schema_object(
     {
       age: schema_field(schema_int() + {min: 0}),
       name: schema_field(schema_string() + {min_length: 2}),
@@ -26,19 +29,19 @@ pipeline test(task) {
     },
     {additional_properties: false},
   )
-  const report = get_typed_report({age: -1, name: "A"}, report_schema)
-  const issue_text = json_stringify(report.issues)
-  const error_text = join(report.errors, "\n")
+  let report = get_typed_report({age: -1, name: "A"}, report_schema)
+  let issue_text = json_stringify(report.issues)
+  let error_text = join(report.errors, "\n")
   __io_println(report.ok)
   __io_println(len(report.issues) == 2)
   __io_println(contains(issue_text, "\"path\":\"age\""))
   __io_println(contains(issue_text, "\"path\":\"name\""))
   __io_println(contains(error_text, "at age: expected value >= 0"))
   __io_println(contains(error_text, "at name: expected length >= 2"))
-  const defaulted = get_typed_report({age: 3, name: "Jo"}, report_schema, true)
+  let defaulted = get_typed_report({age: 3, name: "Jo"}, report_schema, true)
   __io_println(defaulted.ok)
   __io_println(defaulted.value.role)
-  const alias_report = schema_report({name: "Kai"}, AliasReportUser)
+  let alias_report = schema_report({name: "Kai"}, AliasReportUser)
   __io_println(alias_report.ok)
   __io_println(alias_report_user_name({name: "Kai"}))
 }

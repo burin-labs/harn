@@ -34,10 +34,10 @@ name = "harn"
 path = "src/main.rs"
 
 [dependencies]
-harn-glob = { path = "../harn-glob", version = "=0.9.21", default-features = false }
-harn-lexer = { path = "../harn-lexer", version = "=0.9.21" }
-harn-parser = { path = "../harn-parser", version = "=0.9.21" }
-harn-ir = { path = "../harn-ir", version = "=0.9.21" }
+harn-glob = { path = "../harn-glob", version = "=0.9.22", default-features = false }
+harn-lexer = { path = "../harn-lexer", version = "=0.9.22" }
+harn-parser = { path = "../harn-parser", version = "=0.9.22" }
+harn-ir = { path = "../harn-ir", version = "=0.9.22" }
 # testbench-wasi (wasmtime + the cranelift JIT, ~36 crates, ~8.6 MB of the
 # stripped binary plus real compile time) is NOT enabled by default — it only
 # backs the advanced `harn testbench run --process-wasi <dir>`
@@ -47,26 +47,26 @@ harn-ir = { path = "../harn-ir", version = "=0.9.21" }
 # sidecars) works without it, so the default binary stays lean. Opt in with the
 # `testbench-wasi` feature below; without it `--process-wasi` returns a clear
 # "requires the testbench-wasi Cargo feature" error.
-harn-vm = { path = "../harn-vm", version = "=0.9.21", features = ["otel"] }
-harn-hostlib = { path = "../harn-hostlib", version = "=0.9.21", optional = true }
-harn-rules = { path = "../harn-rules", version = "=0.9.21", optional = true }
-harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.9.21", optional = true }
-harn-lint = { path = "../harn-lint", version = "=0.9.21" }
-harn-modules = { path = "../harn-modules", version = "=0.9.21" }
-harn-fmt = { path = "../harn-fmt", version = "=0.9.21" }
+harn-vm = { path = "../harn-vm", version = "=0.9.22", features = ["otel"] }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.9.22", optional = true }
+harn-rules = { path = "../harn-rules", version = "=0.9.22", optional = true }
+harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.9.22", optional = true }
+harn-lint = { path = "../harn-lint", version = "=0.9.22" }
+harn-modules = { path = "../harn-modules", version = "=0.9.22" }
+harn-fmt = { path = "../harn-fmt", version = "=0.9.22" }
 # Management layer for downloadable injection-detection models (Layer 2). Light
 # (no model runtime); the heavy neural backend is behind `harn-guard/neural`,
 # pulled in only by the off-by-default `guard-neural` feature below.
-harn-guard = { path = "../harn-guard", version = "=0.9.21" }
-harn-serve = { path = "../harn-serve", version = "=0.9.21" }
-harn-skills = { path = "../harn-skills", version = "=0.9.21" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.9.21" }
+harn-guard = { path = "../harn-guard", version = "=0.9.22" }
+harn-serve = { path = "../harn-serve", version = "=0.9.22" }
+harn-skills = { path = "../harn-skills", version = "=0.9.22" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.9.22" }
 # LSP and DAP are linked into the single multi-call `harn` binary and reached
 # via argv[0] dispatch (when invoked as `harn-lsp` / `harn-dap`). This replaces
 # shipping two additional fully-linked binaries that each re-statically-linked
 # nearly the same dependency closure — collapsing 3 release binaries into 1.
-harn-lsp = { path = "../harn-lsp", version = "=0.9.21" }
-harn-dap = { path = "../harn-dap", version = "=0.9.21" }
+harn-lsp = { path = "../harn-lsp", version = "=0.9.22" }
+harn-dap = { path = "../harn-dap", version = "=0.9.22" }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
@@ -145,8 +145,8 @@ libc = "0.2"
 # (it only compiles/encodes bytecode), so wasmtime stays out of this compile
 # unit; the optional `testbench-wasi` feature only toggles the runtime dep.
 [build-dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.9.21", features = ["otel"] }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.9.21" }
+harn-vm = { path = "../harn-vm", version = "=0.9.22", features = ["otel"] }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.9.22" }
 
 [features]
 default = ["hostlib", "mimalloc"]

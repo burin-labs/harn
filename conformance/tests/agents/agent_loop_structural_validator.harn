@@ -6,6 +6,10 @@ fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
 }
 
+fn error_contains(result, fragment) {
+  return is_err(result) && contains(to_string(unwrap_err(result)), fragment)
+}
+
 fn write_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -405,4 +409,26 @@ pipeline default() {
       __io_println(!warn_only_messages.contains("structural_validator"))
     },
   )
+  // Option validation is schema-backed: malformed public options fail at
+  // construction time before any validator turn can run.
+  let bad_options_type = try {
+    with_structural_validator("invalid")
+  }
+  __io_println(error_contains(bad_options_type, "dict"))
+  let bad_on_failure = try {
+    with_structural_validator({on_failure: "passthrough"})
+  }
+  __io_println(error_contains(bad_on_failure, "on_failure"))
+  let bad_max_attempts = try {
+    with_structural_validator({max_attempts: 0})
+  }
+  __io_println(error_contains(bad_max_attempts, "max_attempts"))
+  let bad_catalog = try {
+    with_structural_validator({no_phantom_completion_catalog: {en: "done"}})
+  }
+  __io_println(error_contains(bad_catalog, "no_phantom_completion_catalog"))
+  let bad_warn_only = try {
+    with_structural_validator({rules: [{name: "tool_calls_well_formed", warn_only: "yes"}]})
+  }
+  __io_println(error_contains(bad_warn_only, "rules[0]"))
 }

@@ -61,6 +61,10 @@ fn file_schema() {
   }
 }
 
+fn error_contains(result, fragment) {
+  return is_err(result) && contains(to_string(unwrap_err(result)), fragment)
+}
+
 pipeline default() {
   const next = synthetic_next()
   const schema = file_schema()
@@ -226,4 +230,32 @@ pipeline default() {
   __io_println(r7.ok)
   __io_println(r7.audit.binder.status)
   __io_println(r7.arguments.path)
+  // (9) Option validation is schema-backed: malformed public options fail
+  // deterministically before any binder hop can run.
+  let missing_provider = try {
+    with_natural_language_executor({model: "gpt-oss-120b", binder_fn: mock_binder})
+  }
+  __io_println(error_contains(missing_provider, "provider"))
+  let bad_timeout = try {
+    with_natural_language_executor(
+      {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 0, binder_fn: mock_binder},
+    )
+  }
+  __io_println(error_contains(bad_timeout, "timeout_ms"))
+  let bad_intent_field = try {
+    with_natural_language_executor(
+      {provider: "cerebras", model: "gpt-oss-120b", intent_field: "   ", binder_fn: mock_binder},
+    )
+  }
+  __io_println(error_contains(bad_intent_field, "intent_field"))
+  let bad_failure_mode = try {
+    with_natural_language_executor(
+      {provider: "cerebras", model: "gpt-oss-120b", on_failure: "retry", binder_fn: mock_binder},
+    )
+  }
+  __io_println(error_contains(bad_failure_mode, "on_failure"))
+  let bad_binder_fn = try {
+    with_natural_language_executor({provider: "cerebras", model: "gpt-oss-120b", binder_fn: "nope"})
+  }
+  __io_println(error_contains(bad_binder_fn, "binder_fn"))
 }
