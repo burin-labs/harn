@@ -39,21 +39,21 @@ otel = [
 testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"]
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.9.22" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.9.22" }
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.9.22" }
-harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.9.22" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.0" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.0" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.0" }
+harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.0" }
 linkme = "0.3"
 parking_lot = "0.12"
 pin-project-lite = "0.2"
-harn-clock = { path = "../harn-clock", version = "=0.9.22" }
-harn-glob = { path = "../harn-glob", version = "=0.9.22" }
-harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.9.22" }
-harn-ir = { path = "../harn-ir", version = "=0.9.22" }
-harn-lexer = { path = "../harn-lexer", version = "=0.9.22" }
-harn-modules = { path = "../harn-modules", version = "=0.9.22" }
-harn-parser = { path = "../harn-parser", version = "=0.9.22" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.9.22" }
+harn-clock = { path = "../harn-clock", version = "=0.10.0" }
+harn-glob = { path = "../harn-glob", version = "=0.10.0" }
+harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.0" }
+harn-ir = { path = "../harn-ir", version = "=0.10.0" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.0" }
+harn-modules = { path = "../harn-modules", version = "=0.10.0" }
+harn-parser = { path = "../harn-parser", version = "=0.10.0" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.0" }
 async-trait = "0.1"
 bincode = { version = "2.0", features = ["serde"] }
 # Persistent (immutable, structurally shared) collections backing VmValue's
