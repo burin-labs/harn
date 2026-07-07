@@ -24,7 +24,7 @@ pipeline default() {
     {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},
   )
   mcp_server_metadata({name: "test-file-input-server", version: "1.0.0"})
-  var tools = tool_registry()
+  let tools = tool_registry()
   tools = tool_define(
     tools,
     "inspect_upload",
