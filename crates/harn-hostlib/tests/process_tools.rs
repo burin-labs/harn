@@ -1497,3 +1497,19 @@ fn run_command_allows_benign_command() {
         "benign command must be spawned"
     );
 }
+
+#[test]
+fn run_command_allows_scoped_delete_followed_by_cmake_configure() {
+    let (spawner, result) = run_command_argv(&[
+        "sh",
+        "-c",
+        "rm -rf build/burin-eval-setup && if command -v ninja >/dev/null 2>&1; then cmake -S . -B build/burin-eval-setup -G Ninja; else cmake -S . -B build/burin-eval-setup; fi",
+    ]);
+    let resp = require_dict(result.unwrap());
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    assert_eq!(
+        spawner.captured().len(),
+        1,
+        "scoped build-dir cleanup must be spawned"
+    );
+}
