@@ -337,6 +337,7 @@ test-pr-gate-scripts:
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/nextest_filters_from_paths_test.sh
+	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh

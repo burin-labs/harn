@@ -232,9 +232,31 @@ hook_push_base() {
   fi
 }
 
+hook_validation_base() {
+  if [ -n "${HARN_PREPUSH_VALIDATION_BASE:-}" ]; then
+    base=$(git merge-base HEAD "$HARN_PREPUSH_VALIDATION_BASE" 2>/dev/null || true)
+    if [ -n "$base" ]; then
+      printf '%s\n' "$base"
+      return 0
+    fi
+  fi
+
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  if [ -n "$branch" ] && [ "$branch" != "HEAD" ] && [ "$branch" != "main" ] && \
+     git rev-parse --verify origin/main >/dev/null 2>&1; then
+    base=$(git merge-base HEAD origin/main 2>/dev/null || true)
+    if [ -n "$base" ]; then
+      printf '%s\n' "$base"
+      return 0
+    fi
+  fi
+
+  hook_push_base
+}
+
 hook_write_push_files() {
   output=$1
-  base=$(hook_push_base)
+  base=${2:-$(hook_validation_base)}
   git diff --name-only --diff-filter=ACMR "$base"...HEAD > "$output"
 }
 
