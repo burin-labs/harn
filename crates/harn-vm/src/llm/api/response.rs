@@ -1879,6 +1879,42 @@ mod tests {
     }
 
     #[test]
+    fn openai_parser_recovers_text_tool_call_with_malformed_wrapper_suffix() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_wrapper_args",
+                            "type": "function",
+                            "function": {
+                                "name": "tool_call",
+                                "arguments": "<tool_call>\nlook({ file: \"app/Enums/FieldType.php\", intent: \"read\" })\n</tool_call<|message|>"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 30}
+        });
+
+        let result = parse_llm_response(&response, "fireworks", "gpt-oss-120b", false, false)
+            .expect("parser succeeds");
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_wrapper_args");
+        assert_eq!(result.tool_calls[0]["name"], "look");
+        assert_eq!(
+            result.tool_calls[0]["arguments"]["file"],
+            "app/Enums/FieldType.php"
+        );
+        assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
+    }
+
+    #[test]
     fn openai_parser_rejects_partial_text_tool_call_wrapped_in_native_tool_call_arguments() {
         let response = serde_json::json!({
             "choices": [{
