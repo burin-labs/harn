@@ -296,6 +296,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "models lora train",
+            schema_version: 1,
+            description:
+                "LoRA trainer backend receipt with route contract, dataset hashes, backend argv, and post-training manifest commands.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "check connector-matrix",
             schema_version: crate::commands::check::connector_matrix::CONNECTOR_MATRIX_SCHEMA_VERSION,
             description: "Connector package capability matrix rows.",
@@ -524,6 +531,7 @@ mod tests {
             "models lora export",
             "models lora manifest",
             "models lora preflight",
+            "models lora train",
         ] {
             let entry = entries
                 .iter()

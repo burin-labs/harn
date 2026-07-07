@@ -466,6 +466,8 @@ fn test_parses_models_lora_manifest_args() {
         "harn_text_tool_calls_json_fences",
         "--trainer",
         "unsloth_sft",
+        "--trainer-version",
+        "unsloth-2026.7",
         "--method",
         "lora",
         "--rank",
@@ -531,6 +533,7 @@ fn test_parses_models_lora_manifest_args() {
         Some("harn_text_tool_calls_json_fences")
     );
     assert_eq!(args.trainer, "unsloth_sft");
+    assert_eq!(args.trainer_version.as_deref(), Some("unsloth-2026.7"));
     assert_eq!(args.method, "lora");
     assert_eq!(args.rank, 32);
     assert_eq!(args.alpha, Some(64));
@@ -539,6 +542,163 @@ fn test_parses_models_lora_manifest_args() {
     assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
     assert_eq!(args.target_metadata, vec!["lane=structured"]);
     assert!(args.json);
+}
+
+#[test]
+fn test_parses_models_lora_train_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "train",
+        "--base",
+        "local-gemma4-e4b",
+        "--provider",
+        "vllm",
+        "--tool-format",
+        "json",
+        "--dataset",
+        "./data/tool-calls.jsonl",
+        "--corpus",
+        "./lora-corpus",
+        "--export-manifest",
+        "./data/tool-calls.manifest.json",
+        "--output-dir",
+        "./adapters/burin-tools",
+        "--receipt-out",
+        "./adapters/train.receipt.json",
+        "--adapter-name",
+        "burin-tools",
+        "--request-model",
+        "burin-tools",
+        "--chat-template",
+        "harn_text_tool_calls_json_fences",
+        "--trainer",
+        "unsloth_sft",
+        "--trainer-version",
+        "unsloth-2026.7",
+        "--method",
+        "lora",
+        "--rank",
+        "32",
+        "--alpha",
+        "64",
+        "--dropout",
+        "0.1",
+        "--max-seq-length",
+        "8192",
+        "--teacher",
+        "dashscope/qwen3-coder-next",
+        "--target-metadata",
+        "lane=structured",
+        "--backend-cwd",
+        "./scripts/train-lora-gemma4",
+        "--execute",
+        "--json",
+        "--",
+        "uv",
+        "run",
+        "python",
+        "train.py",
+        "config/e4b.yaml",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Train(args) = args.command else {
+        panic!("expected models lora train command");
+    };
+    assert_eq!(args.base_model, "local-gemma4-e4b");
+    assert_eq!(args.provider.as_deref(), Some("vllm"));
+    assert_eq!(args.tool_format, "json");
+    assert_eq!(
+        args.dataset.display().to_string(),
+        "./data/tool-calls.jsonl"
+    );
+    assert_eq!(
+        args.corpus
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./lora-corpus")
+    );
+    assert_eq!(
+        args.export_manifest
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./data/tool-calls.manifest.json")
+    );
+    assert_eq!(
+        args.output_dir.display().to_string(),
+        "./adapters/burin-tools"
+    );
+    assert_eq!(
+        args.receipt_out
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./adapters/train.receipt.json")
+    );
+    assert_eq!(args.adapter_name.as_deref(), Some("burin-tools"));
+    assert_eq!(args.request_model.as_deref(), Some("burin-tools"));
+    assert_eq!(
+        args.chat_template.as_deref(),
+        Some("harn_text_tool_calls_json_fences")
+    );
+    assert_eq!(args.trainer, "unsloth_sft");
+    assert_eq!(args.trainer_version.as_deref(), Some("unsloth-2026.7"));
+    assert_eq!(args.method, "lora");
+    assert_eq!(args.rank, 32);
+    assert_eq!(args.alpha, Some(64));
+    assert_eq!(args.dropout, 0.1);
+    assert_eq!(args.max_seq_length, Some(8192));
+    assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
+    assert_eq!(args.target_metadata, vec!["lane=structured"]);
+    assert_eq!(
+        args.backend_cwd
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./scripts/train-lora-gemma4")
+    );
+    assert!(args.execute);
+    assert!(args.json);
+    assert_eq!(
+        args.backend_argv,
+        vec!["uv", "run", "python", "train.py", "config/e4b.yaml"]
+    );
+}
+
+#[test]
+fn test_models_lora_train_defaults_to_external_trainer_contract() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "train",
+        "--base",
+        "local-gemma4-e4b",
+        "--dataset",
+        "./data/tool-calls.jsonl",
+        "--output-dir",
+        "./adapters/burin-tools",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Train(args) = args.command else {
+        panic!("expected models lora train command");
+    };
+    assert_eq!(args.trainer, "external_sft_trainer");
 }
 
 #[test]
@@ -594,6 +754,29 @@ fn test_parses_models_lora_plan_args() {
     assert_eq!(args.alpha, Some(64));
     assert_eq!(args.dropout, 0.1);
     assert!(args.json);
+}
+
+#[test]
+fn test_models_lora_plan_defaults_to_external_trainer_contract() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "plan",
+        "--base",
+        "local-gemma4-e4b",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Plan(args) = args.command else {
+        panic!("expected models lora plan command");
+    };
+    assert_eq!(args.trainer, "external_sft_trainer");
 }
 
 #[test]

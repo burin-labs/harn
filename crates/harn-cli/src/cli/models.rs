@@ -204,6 +204,8 @@ pub(crate) enum ModelsLoraCommand {
     Plan(ModelsLoraPlanArgs),
     /// Check a tool-calling corpus before spending GPU time on LoRA training.
     Preflight(ModelsLoraPreflightArgs),
+    /// Render or launch a named LoRA trainer backend and write a training receipt.
+    Train(Box<ModelsLoraTrainArgs>),
 }
 
 #[derive(Debug, Args)]
@@ -311,6 +313,9 @@ pub(crate) struct ModelsLoraManifestArgs {
     /// Trainer/backend name to record in the manifest.
     #[arg(long, default_value = "external_sft_trainer")]
     pub trainer: String,
+    /// Trainer/backend version or package revision to record.
+    #[arg(long = "trainer-version")]
+    pub trainer_version: Option<String>,
     /// Adapter training method (`qlora` or `lora`).
     #[arg(long, default_value = "qlora")]
     pub method: String,
@@ -361,7 +366,7 @@ pub(crate) struct ModelsLoraPlanArgs {
     #[arg(long, default_value = "qlora")]
     pub method: String,
     /// Trainer/backend contract (`trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`).
-    #[arg(long, default_value = "trl_sft_trainer")]
+    #[arg(long, default_value = "external_sft_trainer")]
     pub trainer: String,
     /// LoRA rank to plan for training and serving.
     #[arg(long, default_value_t = 16)]
@@ -375,6 +380,82 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraTrainArgs {
+    /// Base model alias or provider-native id the adapter targets.
+    #[arg(long = "base", value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub base_model: String,
+    /// Provider/runtime to record instead of inferring from the base model.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Tool-call format the adapter dataset targets (`auto`, `native`, `text`, or `json`).
+    #[arg(long = "tool-format", default_value = "auto")]
+    pub tool_format: String,
+    /// Trainer-ready dataset JSONL produced by `harn models lora export`.
+    #[arg(long, value_name = "PATH")]
+    pub dataset: std::path::PathBuf,
+    /// Source corpus path used to build the trainer dataset.
+    #[arg(long, value_name = "PATH")]
+    pub corpus: Option<std::path::PathBuf>,
+    /// Harn LoRA export manifest that produced the trainer dataset.
+    #[arg(long = "export-manifest", value_name = "PATH")]
+    pub export_manifest: Option<std::path::PathBuf>,
+    /// Directory where the trainer should write adapter artifacts.
+    #[arg(long = "output-dir", value_name = "DIR")]
+    pub output_dir: std::path::PathBuf,
+    /// Write the training receipt JSON to this path.
+    #[arg(long = "receipt-out", value_name = "PATH")]
+    pub receipt_out: Option<std::path::PathBuf>,
+    /// Served LoRA adapter/model name.
+    #[arg(long = "adapter-name")]
+    pub adapter_name: Option<String>,
+    /// Request model name clients should use for the adapter.
+    #[arg(long = "request-model")]
+    pub request_model: Option<String>,
+    /// Chat template identifier used for training and serving.
+    #[arg(long = "chat-template")]
+    pub chat_template: Option<String>,
+    /// Trainer/backend contract (`trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`).
+    #[arg(long, default_value = "external_sft_trainer")]
+    pub trainer: String,
+    /// Trainer/backend version or package revision to record.
+    #[arg(long = "trainer-version")]
+    pub trainer_version: Option<String>,
+    /// Adapter training method (`qlora` or `lora`).
+    #[arg(long, default_value = "qlora")]
+    pub method: String,
+    /// LoRA rank used for training and serving.
+    #[arg(long, default_value_t = 16)]
+    pub rank: u32,
+    /// LoRA alpha. Defaults to 2 * --rank.
+    #[arg(long)]
+    pub alpha: Option<u32>,
+    /// LoRA dropout probability.
+    #[arg(long, default_value_t = 0.05)]
+    pub dropout: f64,
+    /// Maximum sequence length passed to the backend when it supports one.
+    #[arg(long = "max-seq-length")]
+    pub max_seq_length: Option<u64>,
+    /// Optional teacher model route used for corpus refresh or distillation.
+    #[arg(long, value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub teacher: Option<String>,
+    /// Extra target provenance copied into the receipt and manifest command, as KEY=VALUE.
+    #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
+    pub target_metadata: Vec<String>,
+    /// Execute the backend argv after rendering the receipt plan. Omit for deterministic dry-run.
+    #[arg(long)]
+    pub execute: bool,
+    /// Backend working directory. Defaults to the current process directory.
+    #[arg(long = "backend-cwd", value_name = "DIR")]
+    pub backend_cwd: Option<std::path::PathBuf>,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Backend command argv. Pass after `--`, for example: `-- uv run python train.py config.yaml`.
+    #[arg(last = true, value_name = "BACKEND_ARGV")]
+    pub backend_argv: Vec<String>,
 }
 
 #[derive(Debug, Args)]

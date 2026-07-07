@@ -103,6 +103,7 @@ versions.
 | `harn models lora inspect --json` | PEFT adapter compatibility report, launch metadata, and `serving.serving_requirements` |
 | `harn models lora export --json` | Trainer dataset export report with contract id, stats, and promotion evidence contract |
 | `harn models lora manifest --json` | LoRA training-run manifest with route, data, artifact, structured serving requirements, and promotion evidence contracts |
+| `harn models lora train --json` | LoRA trainer receipt with backend argv/status, `backend.argv_required` when argv is omitted, input hashes, route metadata, `dataset_audit`, and post-training commands |
 | `harn models lora preflight --json` | Corpus readiness report before LoRA training |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |

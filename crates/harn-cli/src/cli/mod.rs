@@ -143,7 +143,7 @@ pub(crate) use models::{
     ModelsBatchPrepareArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs, ModelsCommand,
     ModelsInstallArgs, ModelsListArgs, ModelsLoraArgs, ModelsLoraCommand, ModelsLoraExportArgs,
     ModelsLoraInspectArgs, ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs,
-    ModelsTestArgs,
+    ModelsLoraTrainArgs, ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
