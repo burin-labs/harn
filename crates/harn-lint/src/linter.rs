@@ -1528,7 +1528,7 @@ impl<'a> Linter<'a> {
                         span,
                         severity: LintSeverity::Warning,
                         suggestion: Some(format!(
-                            "use `var {name}` for a mutable binding, or choose a different name"
+                            "use `let {name}` for a mutable binding, or choose a different name"
                         )),
                         fix: None,
                     });
@@ -2164,6 +2164,15 @@ impl<'a> Linter<'a> {
 
         for decl in &self.declarations {
             if !decl.is_mutable {
+                continue;
+            }
+            // Only tighten simple `let x = …` bindings. A destructuring `let`
+            // governs every name it binds, so it can only become `const` when
+            // *all* of those names are never reassigned; tightening because a
+            // single field is never reassigned would freeze a sibling that IS
+            // reassigned (HARN-OWN-001, immutable assignment). Skip
+            // destructuring here — a sound all-fields check can come later.
+            if !decl.is_simple_ident {
                 continue;
             }
             if !self.assignments.contains(&decl.name) {
