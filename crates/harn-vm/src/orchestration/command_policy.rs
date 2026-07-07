@@ -2726,12 +2726,25 @@ mod catastrophic {
 
     // ---- In-root project-wipe family (`rm -rf .` / `*` / `${PWD}/*` / … ) ----
 
+    fn command_deletes_project(command: &str, depth: usize) -> bool {
+        if depth > MAX_DEPTH {
+            return false;
+        }
+        split_chained_command(command)
+            .iter()
+            .any(|segment| segment_deletes_project_inner(segment, depth))
+    }
+
     fn segment_deletes_project(segment: &str) -> bool {
+        segment_deletes_project_inner(segment, 0)
+    }
+
+    fn segment_deletes_project_inner(segment: &str, depth: usize) -> bool {
         let tokens = shell_words(segment);
         let mut start = 0;
         while start < tokens.len() {
             let end = next_pipeline_boundary(&tokens, start);
-            if invocation_deletes_project(&tokens, start, end) {
+            if invocation_deletes_project(&tokens, start, end, depth) {
                 return true;
             }
             start = end + 1;
@@ -2739,13 +2752,18 @@ mod catastrophic {
         false
     }
 
-    fn invocation_deletes_project(tokens: &[String], start: usize, end: usize) -> bool {
+    fn invocation_deletes_project(
+        tokens: &[String],
+        start: usize,
+        end: usize,
+        depth: usize,
+    ) -> bool {
         let mut command_index = unwrapped_command_index(tokens, start, end);
         if command_index >= end {
             return false;
         }
         let command = command_basename(&tokens[command_index]);
-        if shell_c_invocation_deletes_project(command, tokens, command_index, end) {
+        if shell_c_invocation_deletes_project(command, tokens, command_index, end, depth) {
             return true;
         }
         if command != "rm" {
@@ -2789,6 +2807,7 @@ mod catastrophic {
         tokens: &[String],
         command_index: usize,
         end: usize,
+        depth: usize,
     ) -> bool {
         if !matches!(command, "bash" | "sh" | "zsh") {
             return false;
@@ -2804,7 +2823,7 @@ mod catastrophic {
                 if token.chars().skip(1).any(|flag| flag == 'c') {
                     return tokens
                         .get(index + 1)
-                        .map(|script| segment_deletes_project(script))
+                        .map(|script| command_deletes_project(script, depth + 1))
                         .unwrap_or(false);
                 }
                 index += 1;
@@ -3683,6 +3702,8 @@ mod tests {
             "rm -rf node_modules",
             "rm -rf build",
             "rm -rf target/debug",
+            "rm -rf build/burin-eval-setup",
+            "rm -rf build/burin-eval-setup && if command -v ninja >/dev/null 2>&1; then cmake -S . -B build/burin-eval-setup -G Ninja; else cmake -S . -B build/burin-eval-setup; fi",
             "rm -rf ./dist",
             "grep -r TODO .",
             "ls -la",
@@ -4074,6 +4095,12 @@ mod tests {
         // Benign commands never fire.
         assert!(universal_catastrophic_reason("ls", &s(&["-la"]), &root).is_none());
         assert!(universal_catastrophic_reason("rm", &s(&["-rf", "build"]), &root).is_none());
+        let cmake_setup = universal_catastrophic_reason(
+            "sh",
+            &s(&["-c", "rm -rf build/burin-eval-setup && if command -v ninja >/dev/null 2>&1; then cmake -S . -B build/burin-eval-setup -G Ninja; else cmake -S . -B build/burin-eval-setup; fi"]),
+            &root,
+        );
+        assert!(cmake_setup.is_none(), "unexpected block: {cmake_setup:?}");
     }
 
     #[tokio::test]
