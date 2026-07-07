@@ -59,6 +59,7 @@ pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
 mod token_count;
 pub mod tool_conformance;
+pub mod tool_scorecard;
 mod tool_search_score;
 mod trace_builtins;
 pub(crate) mod transcript_seed;

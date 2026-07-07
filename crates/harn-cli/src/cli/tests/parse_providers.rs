@@ -1412,6 +1412,35 @@ fn test_parses_provider_tool_probe_args() {
 }
 
 #[test]
+fn test_parses_provider_tool_scorecard_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider",
+        "tool-scorecard",
+        "--tool-probe-report",
+        "anthropic.json",
+        "--tool-probe-report",
+        "fireworks.json",
+        "--json=false",
+    ]);
+
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::ToolScorecard(args) = provider.command else {
+        panic!("expected provider tool-scorecard command");
+    };
+    assert_eq!(
+        args.tool_probe_reports,
+        vec![
+            PathBuf::from("anthropic.json"),
+            PathBuf::from("fireworks.json")
+        ]
+    );
+    assert!(!args.json);
+}
+
+#[test]
 fn test_provider_model_completion_candidates_stay_permissive() {
     let cli = Cli::parse_from([
         "harn",

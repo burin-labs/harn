@@ -422,7 +422,10 @@ jobs:
         # repo via `rg` — install it explicitly so the runner matches
         # the local dev expectation when reaudit is on.
         if: inputs.reaudit
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ripgrep
+          check-command: rg
 
       - name: Build tree-sitter grammar
         # Only needed when --reaudit re-runs the grammar-audit lane

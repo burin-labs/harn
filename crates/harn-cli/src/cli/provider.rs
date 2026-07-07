@@ -25,6 +25,8 @@ pub(crate) enum ProviderCommand {
     Probe(ProviderProbeArgs),
     /// Run one-tool provider conformance and classify native/text fallback.
     ToolProbe(ProviderToolProbeArgs),
+    /// Aggregate saved tool-probe reports into a provider/model scorecard.
+    ToolScorecard(ProviderToolScorecardArgs),
     /// Classify prompt-cache conformance from a saved repeat-run usage fixture:
     /// resolve capability support, normalize each run's usage, and emit one
     /// cache verdict. Live repeat probing is not yet wired; pass
@@ -245,6 +247,28 @@ pub(crate) struct ProviderToolProbeArgs {
     pub timeout_secs: u64,
     /// Emit JSON. Defaults to true because evals and setup scripts consume
     /// the structured conformance report.
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = ArgAction::Set
+    )]
+    pub json: bool,
+}
+
+/// Aggregate saved `harn provider tool-probe` JSON reports into one
+/// deterministic provider/model tool-call quality scorecard. This first slice
+/// is fixture-only by design: it never calls providers and never mutates the
+/// catalog.
+#[derive(Debug, Args)]
+pub(crate) struct ProviderToolScorecardArgs {
+    /// Saved JSON output from `harn provider tool-probe`. Repeat the flag to
+    /// aggregate several routes into one scorecard.
+    #[arg(long = "tool-probe-report", required = true)]
+    pub tool_probe_reports: Vec<PathBuf>,
+    /// Emit JSON. Defaults to true because catalog reviews and promotion gates
+    /// consume the structured scorecard.
     #[arg(
         long,
         default_value_t = true,

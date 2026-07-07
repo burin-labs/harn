@@ -1,0 +1,150 @@
+/**
+ * `harn provider tool-scorecard` render layer — see harn#4192.
+ *
+ * The scorecard aggregator stays in Rust because it consumes typed
+ * `ToolConformanceReport` fixtures and will later compare those observations
+ * with provider catalog rows. This script only renders the JSON envelope.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON — JSON envelope matching the
+ *     `ToolScorecardReport` shape.
+ *   HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_PRETTY — pretty-printed companion,
+ *     forwarded verbatim in JSON mode to preserve serde float fidelity.
+ *   HARN_OUTPUT_JSON — "1" for the JSON envelope, else the human summary.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_int(value, fallback: int) -> int {
+  if type_of(value) == "int" {
+    return value
+  }
+  return fallback
+}
+
+fn __join_strings(values: list, fallback: string) -> string {
+  let out = ""
+  let first = true
+  for value in values {
+    if type_of(value) != "string" {
+      continue
+    }
+    if !first {
+      out = out + ","
+    }
+    out = out + value
+    first = false
+  }
+  if out == "" {
+    return fallback
+  }
+  return out
+}
+
+fn __render_human(report: dict) -> string {
+  const summary = __safe_dict(report["summary"])
+  let out = "provider tool-call scorecard: routes="
+    + to_string(__safe_int(report["route_count"], 0))
+    + " pass="
+    + to_string(__safe_int(summary["pass"], 0))
+    + " warn="
+    + to_string(__safe_int(summary["warn"], 0))
+    + " fail="
+    + to_string(__safe_int(summary["fail"], 0))
+    + "\n"
+  const best = __safe_dict(summary["best_route"])
+  const best_provider = __safe_string(best["provider"], "")
+  if best_provider != "" {
+    out = out + "best="
+      + best_provider
+      + " "
+      + __safe_string(best["model"], "")
+      + " score="
+      + to_string(__safe_int(best["quality_score"], 0))
+      + "\n"
+  }
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const cases = __safe_int(route["case_count"], 0)
+    const passed = __safe_int(route["successful_cases"], 0)
+    out = out + "  "
+      + __safe_string(route["provider"], "")
+      + " "
+      + __safe_string(route["model"], "")
+      + " score="
+      + to_string(__safe_int(route["quality_score"], 0))
+      + " status="
+      + __safe_string(route["status"], "")
+      + " mode="
+      + __safe_string(route["recommended_tool_mode"], "")
+      + " pass="
+      + to_string(passed)
+      + "/"
+      + to_string(cases)
+      + " parseable="
+      + to_string(__safe_int(route["parseable_tool_call_cases"], 0))
+      + "/"
+      + to_string(cases)
+      + " actionless="
+      + to_string(__safe_int(route["actionless_cases"], 0))
+      + " issues="
+      + __join_strings(__safe_list(route["issues"]), "-")
+      + "\n"
+  }
+  return out
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln(
+      "internal error: HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON not set by dispatch shim",
+    )
+    return 70
+  }
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    const pretty = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_PRETTY", raw)
+    harness.stdio.println(pretty)
+  } else {
+    const report = try {
+      json_parse(raw)
+    } catch (e) {
+      harness.stdio
+        .eprintln(
+        "internal error: failed to parse provider-tool-scorecard payload: " + to_string(e),
+      )
+      return 70
+    }
+    const text = __render_human(report)
+    const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+      text[0:len(text) - 1]
+    } else {
+      text
+    }
+    harness.stdio.println(trimmed)
+  }
+  return 0
+}
