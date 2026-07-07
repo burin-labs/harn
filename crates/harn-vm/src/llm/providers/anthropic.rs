@@ -917,23 +917,17 @@ fn sanitize_anthropic_tool_for_request(
         object.remove("defer_loading");
         object.remove("namespace");
         object.remove("namespaces");
-        if object
-            .get("strict")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            if let Some(schema) = object.get("input_schema").cloned() {
-                object.insert(
-                    "input_schema".to_string(),
-                    sanitize_schema_for_provider(
-                        provider,
-                        model,
-                        SchemaCompatProfile::AnthropicStrict,
-                        SchemaSurface::ToolParameters,
-                        &schema,
-                    ),
-                );
-            }
+        if let Some(schema) = object.get("input_schema").cloned() {
+            object.insert(
+                "input_schema".to_string(),
+                sanitize_schema_for_provider(
+                    provider,
+                    model,
+                    SchemaCompatProfile::AnthropicStrict,
+                    SchemaSurface::ToolParameters,
+                    &schema,
+                ),
+            );
         }
     }
     tool
@@ -2221,7 +2215,6 @@ mod tests {
         payload.native_tools = Some(vec![serde_json::json!({
             "name": "read_file",
             "description": "Read a file",
-            "strict": true,
             "input_schema": {
                 "type": "object",
                 "properties": {

@@ -228,21 +228,13 @@ fn bedrock_tool_config(
             .get("parameters")
             .or_else(|| function.get("input_schema"))
         {
-            let schema = if function
-                .get("strict")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                sanitize_schema_for_provider(
-                    provider,
-                    model,
-                    SchemaCompatProfile::AnthropicStrict,
-                    SchemaSurface::ToolParameters,
-                    schema,
-                )
-            } else {
-                schema.clone()
-            };
+            let schema = sanitize_schema_for_provider(
+                provider,
+                model,
+                SchemaCompatProfile::AnthropicStrict,
+                SchemaSurface::ToolParameters,
+                schema,
+            );
             spec["inputSchema"] = serde_json::json!({ "json": schema });
         }
         specs.push(serde_json::json!({ "toolSpec": spec }));
@@ -532,6 +524,10 @@ mod tests {
             body["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]["type"],
             "object"
         );
+        let schema = &body["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"];
+        assert_eq!(schema["additionalProperties"], false);
+        assert!(schema["properties"]["query"].get("pattern").is_none());
+        assert!(schema["properties"]["query"].get("default").is_none());
     }
 
     #[test]
@@ -754,7 +750,16 @@ aws_secret_access_key = dev-secret
                 "function": {
                     "name": "lookup",
                     "description": "Lookup",
-                    "parameters": {"type": "object"}
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "pattern": "^harn",
+                                "default": "harn"
+                            }
+                        }
+                    }
                 }
             })]),
             provider_tools: Vec::new(),
