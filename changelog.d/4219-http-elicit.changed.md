@@ -1,0 +1,1 @@
+- Replaced the HTTP MCP elicitation conformance helper with a Harn-served MCP fixture.
