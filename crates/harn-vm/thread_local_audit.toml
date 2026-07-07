@@ -255,7 +255,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/mcp_elicit.rs"
+path = "src/mcp_client_request.rs"
 statics = ["CURRENT_BUS"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
