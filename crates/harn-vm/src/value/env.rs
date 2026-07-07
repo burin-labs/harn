@@ -250,7 +250,7 @@ impl VmEnv {
             if let Some((_, existing_mutable)) = scope.vars.get(name) {
                 if !existing_mutable && !mutable {
                     return Err(VmError::Runtime(format!(
-                        "Cannot redeclare immutable variable '{name}' in the same scope (use 'var' for mutable bindings)"
+                        "Cannot redeclare immutable variable '{name}' in the same scope (use 'let' for mutable bindings)"
                     )));
                 }
             }

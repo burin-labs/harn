@@ -9,7 +9,7 @@ pub(crate) struct Declaration {
     pub(crate) name: String,
     pub(crate) span: Span,
     pub(crate) is_mutable: bool,
-    /// True for simple `let x = ...` / `var x = ...` bindings, false for
+    /// True for simple `let x = ...` / `const x = ...` bindings, false for
     /// destructuring patterns. The `unused-variable` autofix only rewrites
     /// identifiers when true, since destructuring renames would need
     /// per-field spans we don't currently track.
