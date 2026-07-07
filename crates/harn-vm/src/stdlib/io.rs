@@ -1230,7 +1230,7 @@ mod tests {
     #[cfg(unix)]
     use std::sync::Arc;
     #[cfg(unix)]
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use crate::value::VmValue;
 
@@ -1356,7 +1356,10 @@ mod tests {
         let cancel_from_thread = Arc::clone(&cancel);
         let _guard = crate::op_interrupt::install(Some(cancel), None);
         let interrupter = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(40));
+            // No fixed "wait for the reader to park" sleep: the reader re-checks
+            // the cancel flag every `READ_LINE_INTERRUPT_POLL` heartbeat, so it
+            // observes this store within one interval regardless of ordering.
+            // A blind sleep would only add wall time and reintroduce a race.
             cancel_from_thread.store(true, Ordering::SeqCst);
         });
 
@@ -1366,8 +1369,10 @@ mod tests {
         interrupter.join().expect("interrupter thread joins");
         assert_eq!(outcome, ReadLineOutcome::Interrupt);
         assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "interrupt heartbeat should wake idle read_line promptly"
+            started.elapsed() < super::READ_LINE_INTERRUPT_POLL * 25,
+            "interrupt heartbeat should wake idle read_line within a few poll \
+             intervals, took {:?}",
+            started.elapsed()
         );
     }
 
