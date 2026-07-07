@@ -1,0 +1,98 @@
+import {
+  coord_event_message_schema,
+  coord_inbox,
+  coord_inbox_report,
+  coord_inbox_schema,
+  coord_message_report,
+  coord_message_schema,
+  coord_message_value,
+  coord_post,
+  coord_receipt_report,
+  coord_receipt_schema,
+  coord_receipt_value,
+  coord_reply,
+  coord_request,
+  coord_wait_reply,
+  coord_wait_reply_report,
+  coord_wait_reply_schema,
+} from "std/coordination"
+import { is_type } from "std/schema"
+
+pipeline default() {
+  mock_time(6000)
+  const opts = {session_id: "coord-schema-session"}
+  const receipt = coord_post(
+    "session",
+    "schema",
+    {
+      kind: "claim",
+      subject: "schema promotion",
+      body: "Harn owns the coordination envelope schema.",
+      data: {repo: "harn", version: 1},
+      from: {agent: "codex-2", run_id: "schema-run"},
+      refs: [{kind: "issue", ref: "harn#4254", extra: {priority: "north-star"}}],
+      extension: {accepted_by_future_schema: true},
+    },
+    opts + {id: "coord-schema-1"},
+  )
+  __io_println(is_type(receipt.message, coord_message_schema()))
+  __io_println(is_type(receipt, coord_receipt_schema()))
+  __io_println(coord_message_report(receipt.message).ok)
+  __io_println(coord_receipt_report(receipt).ok)
+  __io_println(coord_message_value(receipt.message).id)
+  __io_println(coord_receipt_value(receipt).message.data.repo)
+  const extended_message = receipt.message + {future_extension: {schema: "harn.future.v1"}}
+  const extended_receipt = receipt + {future_extension: {schema: "harn.future.receipt.v1"}}
+  __io_println(coord_message_report(extended_message).ok)
+  __io_println(coord_receipt_report(extended_receipt).ok)
+  const missing = coord_message_report({schema: "harn.coordination.message.v1", id: "missing"})
+  __io_println(!missing.ok)
+  __io_println(contains(join(missing.errors, "\n"), "missing required key 'scope'"))
+  const request = coord_request(
+    "session",
+    "schema",
+    "agent-A",
+    {
+      subject: "schema query",
+      body: "Can you validate this envelope?",
+      from: {agent: "agent-B"},
+      data: {paths: ["coordination"]},
+    },
+    opts + {id: "coord-schema-request"},
+  )
+  const _ = coord_reply(
+    "session",
+    "schema",
+    request,
+    {
+      kind: "decision",
+      subject: "schema reply",
+      body: "Validated.",
+      from: {agent: "agent-A"},
+      data: {verdict: "valid"},
+    },
+    opts + {id: "coord-schema-reply"},
+  )
+  const inbox = coord_inbox("session", "schema", opts + {consumer_id: "agent-A"})
+  __io_println(is_type(inbox, coord_inbox_schema()))
+  __io_println(coord_inbox_report(inbox).ok)
+  const inbox_with_events = coord_inbox("session", "schema", opts + {consumer_id: "agent-A", include_events: true})
+  __io_println(is_type(inbox_with_events, coord_inbox_schema()))
+  __io_println(is_type(inbox_with_events.messages[0], coord_event_message_schema()))
+  const wait = coord_wait_reply(
+    "session",
+    "schema",
+    request,
+    opts
+      + {
+      response_kind: "decision",
+      response_subject: "schema reply",
+      response_from: "agent-A",
+      timeout_ms: 0,
+    },
+  )
+  __io_println(is_type(wait, coord_wait_reply_schema()))
+  __io_println(coord_wait_reply_report(wait).ok)
+  __io_println(wait.reply.data.verdict)
+  unmock_time()
+}
