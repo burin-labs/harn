@@ -228,6 +228,7 @@ const greeting = """
 "  hello  ".trim()              // "hello"
 "hello".starts_with("he")       // true
 "hello".ends_with("lo")         // true
+"hello hello".rfind("lo")       // 9
 "hello".uppercase()             // "HELLO"
 "hello".lowercase()             // "hello"
 "hello world".substring(0, 5)   // "hello"

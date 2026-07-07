@@ -36,6 +36,20 @@ when a script needs to consume files from a sibling checkout or shared
 assets without disabling sandboxing. `--read-only-root` cannot be
 combined with `--no-sandbox`.
 
+### --write-root
+
+```bash
+harn run --write-root /path/to/output main.harn
+```
+
+Permit reads and writes under additional filesystem roots while keeping
+the default `harn run` sandbox policy intact. Each `--write-root` entry
+is added to the run's `workspace_roots`, so the same filesystem builtins,
+process cwd checks, and OS sandbox backends enforce it as a first-class
+writable mount. Use this for external output folders such as iCloud Drive
+exports without falling back to `--no-sandbox`. `--write-root` cannot be
+combined with `--no-sandbox`.
+
 ### --deny
 
 ```bash
@@ -129,4 +143,3 @@ testbench-only — subprocesses are intercepted by the process tape and
 resolved against recorded WASI modules. See the
 [sandboxing guide](https://harnlang.com/sandboxing.html) for the full
 per-platform capability → kernel-knob mapping table.
-

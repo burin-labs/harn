@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::TimeCommand;
 
 #[test]
 fn test_parses_agents_conformance_target_url() {
@@ -42,12 +43,16 @@ fn test_run_rejects_deny_allow_conflict() {
 }
 
 #[test]
-fn test_run_parses_read_only_roots_and_rejects_no_sandbox_conflict() {
+fn test_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
     let cli = Cli::parse_from([
         "harn",
         "run",
+        "--write-root",
+        "../receipts",
         "--read-only-root",
         "../shared",
+        "--writable-root",
+        "/tmp/cache",
         "--read-only-root",
         "/tmp/assets",
         "main.harn",
@@ -57,6 +62,10 @@ fn test_run_parses_read_only_roots_and_rejects_no_sandbox_conflict() {
         panic!("expected run command");
     };
     assert_eq!(
+        args.write_root,
+        vec![PathBuf::from("../receipts"), PathBuf::from("/tmp/cache")]
+    );
+    assert_eq!(
         args.read_only_root,
         vec![PathBuf::from("../shared"), PathBuf::from("/tmp/assets")]
     );
@@ -65,8 +74,57 @@ fn test_run_parses_read_only_roots_and_rejects_no_sandbox_conflict() {
         "harn",
         "run",
         "--no-sandbox",
+        "--write-root",
+        "../receipts",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
         "--read-only-root",
         "../shared",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn test_time_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
+    let cli = Cli::parse_from([
+        "harn",
+        "time",
+        "run",
+        "--write-root",
+        "../receipts",
+        "--read-only-root",
+        "../shared",
+        "--writable-root",
+        "/tmp/cache",
+        "main.harn",
+    ]);
+
+    let Command::Time(args) = cli.command.unwrap() else {
+        panic!("expected time command");
+    };
+    let TimeCommand::Run(args) = args.command;
+    assert_eq!(
+        args.write_root,
+        vec![PathBuf::from("../receipts"), PathBuf::from("/tmp/cache")]
+    );
+    assert_eq!(args.read_only_root, vec![PathBuf::from("../shared")]);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "time",
+        "run",
+        "--no-sandbox",
+        "--write-root",
+        "../receipts",
         "main.harn",
     ])
     .unwrap_err();

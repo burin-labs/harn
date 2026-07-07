@@ -1124,8 +1124,9 @@ log(r) }"#,
 
 #[test]
 fn test_for_in_dict() {
-    let out =
-        run_output("pipeline t(task) { const d = {a: 1, b: 2}\nfor entry in d { log(entry.key) } }");
+    let out = run_output(
+        "pipeline t(task) { const d = {a: 1, b: 2}\nfor entry in d { log(entry.key) } }",
+    );
     assert_eq!(out, "[harn] a\n[harn] b");
 }
 
@@ -1639,8 +1640,9 @@ try {
 
 #[test]
 fn test_parallel_basic() {
-    let out =
-        run_output("pipeline t(task) { const results = parallel(3) { i -> i * 10 }\nlog(results) }");
+    let out = run_output(
+        "pipeline t(task) { const results = parallel(3) { i -> i * 10 }\nlog(results) }",
+    );
     assert_eq!(out, "[harn] [0, 10, 20]");
 }
 

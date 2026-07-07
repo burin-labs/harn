@@ -145,8 +145,43 @@ pub(crate) enum NativeToolNameTextCall {
 /// recovery as [`parse_text_tool_call_from_native_name`], with text-tool wrapper
 /// tags stripped before parsing the inner call expression.
 pub(crate) fn parse_text_tool_call_from_native_arguments(text: &str) -> NativeToolNameTextCall {
-    let unwrapped = syntax::strip_tool_call_wrappers(text);
+    let repaired = repair_malformed_wrapper_provider_suffixes(text);
+    let unwrapped = syntax::strip_tool_call_wrappers(repaired.as_ref());
     parse_text_tool_call_from_native_name(unwrapped.as_ref())
+}
+
+fn repair_malformed_wrapper_provider_suffixes(text: &str) -> std::borrow::Cow<'_, str> {
+    const WRAPPER_SUFFIX_REPAIRS: [(&str, &str, &str); 2] = [
+        (
+            "<tool_call>",
+            "</tool_call<|message|>",
+            "</tool_call><|message|>",
+        ),
+        (
+            "<toolcall>",
+            "</toolcall<|message|>",
+            "</toolcall><|message|>",
+        ),
+    ];
+
+    let trimmed_start = text.trim_start();
+    let trimmed_end_len = text.trim_end().len();
+    let trailing = &text[trimmed_end_len..];
+    let without_trailing = &text[..trimmed_end_len];
+
+    for (open, malformed_close, repaired_close) in WRAPPER_SUFFIX_REPAIRS {
+        if trimmed_start.starts_with(open) {
+            if let Some(prefix) = without_trailing.strip_suffix(malformed_close) {
+                let mut out = String::with_capacity(text.len() + 1);
+                out.push_str(prefix);
+                out.push_str(repaired_close);
+                out.push_str(trailing);
+                return std::borrow::Cow::Owned(out);
+            }
+        }
+    }
+
+    std::borrow::Cow::Borrowed(text)
 }
 
 /// Recover Harn text-tool syntax that an OpenAI-compatible provider misplaced
@@ -190,6 +225,7 @@ fn strip_native_name_provider_suffixes(mut text: &str) -> &str {
             .strip_suffix("</arg_value>")
             .or_else(|| trimmed.strip_suffix("</tool_call>"))
             .or_else(|| trimmed.strip_suffix("</toolcall>"))
+            .or_else(|| trimmed.strip_suffix("<|message|>"))
         else {
             return trimmed;
         };
@@ -243,8 +279,8 @@ pub(crate) struct TextToolParseResult {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_text_tool_argument_payload, parse_text_tool_call_from_native_name,
-        NativeToolNameTextCall,
+        parse_text_tool_argument_payload, parse_text_tool_call_from_native_arguments,
+        parse_text_tool_call_from_native_name, NativeToolNameTextCall,
     };
 
     #[test]
@@ -311,6 +347,43 @@ EOF
                     serde_json::json!("include/kvdb/status.h")
                 );
                 assert_eq!(arguments["intent"], serde_json::json!("read"));
+            }
+            other => panic!("expected recovered text tool call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_arguments_recover_malformed_wrapper_provider_suffix() {
+        let parsed = parse_text_tool_call_from_native_arguments(
+            "<tool_call>\nlook({ file: \"app/Enums/FieldType.php\", intent: \"read\" })\n</tool_call<|message|>",
+        );
+
+        match parsed {
+            NativeToolNameTextCall::Parsed { name, arguments } => {
+                assert_eq!(name, "look");
+                assert_eq!(
+                    arguments["file"],
+                    serde_json::json!("app/Enums/FieldType.php")
+                );
+                assert_eq!(arguments["intent"], serde_json::json!("read"));
+            }
+            other => panic!("expected recovered text tool call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_arguments_preserve_malformed_wrapper_marker_inside_content() {
+        let parsed = parse_text_tool_call_from_native_arguments(
+            "edit({ action: \"create\", path: \"fixture.txt\", content: \"literal </tool_call<|message|> marker\" })",
+        );
+
+        match parsed {
+            NativeToolNameTextCall::Parsed { name, arguments } => {
+                assert_eq!(name, "edit");
+                assert_eq!(
+                    arguments["content"],
+                    serde_json::json!("literal </tool_call<|message|> marker")
+                );
             }
             other => panic!("expected recovered text tool call, got {other:?}"),
         }

@@ -78,6 +78,21 @@ fn json_schemas_filters_to_single_command() {
 }
 
 #[test]
+fn json_schemas_filters_to_models_batch_command() {
+    let output = Command::new(binary_path())
+        .args(["--json-schemas", "--command", "models batch plan"])
+        .output()
+        .expect("spawn harn --json-schemas --command models batch plan");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let parsed = parse_stdout(&output);
+    let data = assert_envelope(&parsed, CATALOG_SCHEMA_VERSION);
+    let entries = data.as_array().expect("data is an array");
+    assert_eq!(entries.len(), 1, "expected single-entry catalog");
+    assert_eq!(entries[0]["command"], "models batch plan");
+}
+
+#[test]
 fn json_schemas_unknown_command_returns_error_envelope_and_nonzero_exit() {
     let output = Command::new(binary_path())
         .args(["--json-schemas", "--command", "definitely-not-real"])

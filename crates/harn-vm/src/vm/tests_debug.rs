@@ -80,9 +80,10 @@ fn test_evaluate_in_frame_sees_locals() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
-    let chunk =
-        crate::compile_source("const user: string = \"alice\"\nconst count: int = 42\nlog(count)\n")
-            .unwrap();
+    let chunk = crate::compile_source(
+        "const user: string = \"alice\"\nconst count: int = 42\nlog(count)\n",
+    )
+    .unwrap();
     run_until_paused(&mut vm, &chunk);
 
     assert!(values_equal(
@@ -129,9 +130,10 @@ fn test_set_variable_in_frame_updates_let_binding() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
-    let chunk =
-        crate::compile_source("const count: int = 7\nconst label: string = \"before\"\nlog(count)\n")
-            .unwrap();
+    let chunk = crate::compile_source(
+        "const count: int = 7\nconst label: string = \"before\"\nlog(count)\n",
+    )
+    .unwrap();
     run_until_paused(&mut vm, &chunk);
 
     let rt = tokio::runtime::Builder::new_current_thread()

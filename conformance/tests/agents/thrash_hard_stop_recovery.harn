@@ -1,0 +1,93 @@
+import { agent_capture_events } from "std/agent/events"
+import { AgentLoopOptions } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * A repeated identical successful observation gets one bounded recovery turn.
+ * Diagnostic hard stops are covered separately by the no-net-progress and
+ * repair-summary fixtures; this row locks the positive rescue path.
+ */
+fn toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a command.",
+    {
+      handler: { _args -> "same capped listing" },
+      parameters: {command: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn run_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "run", arguments: {command: "ls -R"}}]}
+}
+
+fn look_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "app/Models/Entry.php"}}]}
+}
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      run_call("r1"),
+      run_call("r2"),
+      look_call("look_recovery"),
+      llm_text("Read the Entry model. ##DONE##"),
+    ],
+    { ->
+      let session = "thrash-recovery-conformance-" + uuid()
+      let opts: AgentLoopOptions = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          repeat_same_observation: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 2,
+        },
+      }
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Write tests after inspecting the target model.", nil, opts) },
+      )
+      let receipts = events_of(captured.events, "typed_checkpoint")
+        .filter({ event -> event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1" })
+      let decisions = events_of(captured.events, "loop_control_decision")
+        .filter({ event -> event.reason == "thrash_recovery_continue" })
+      __io_println(captured.result.status)
+      __io_println(contains(captured.result.tools.successful, "look"))
+      __io_println(len(receipts))
+      __io_println(receipts[0].checkpoint.reason)
+      __io_println(receipts[0].checkpoint.warning.pattern)
+      __io_println(len(decisions))
+    },
+  )
+}

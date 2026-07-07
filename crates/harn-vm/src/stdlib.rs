@@ -38,6 +38,7 @@ mod cookies;
 mod crypto;
 mod csv;
 mod datetime;
+mod document;
 mod durable_step;
 mod event_log;
 mod external_agent;
@@ -138,6 +139,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     json_stream::register_json_stream_builtins(vm);
     xml::register_xml_builtins(vm);
     datetime::register_datetime_builtins(vm);
+    document::register_document_builtins(vm);
     calendar::register_calendar_builtins(vm);
     regex::register_regex_builtins(vm);
     bytes::register_bytes_builtins(vm);

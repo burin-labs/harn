@@ -1,0 +1,26 @@
+import { extract_text, pdf_bytes, pdf_capabilities, write_pdf } from "std/document"
+
+pipeline test(task) {
+  let capabilities = pdf_capabilities()
+  __io_println(capabilities.default_renderer)
+  __io_println(len(capabilities.renderers))
+  __io_println(
+    extract_text(
+      "<html><body><h1>Receipt</h1><p>Amount $5.00</p></body></html>",
+      {source_format: "html"},
+    ),
+  )
+  let rendered = pdf_bytes("# Receipt\n- **Amount** $5.00", {source_format: "markdown", title: "Receipt"})
+  let pdf_text = bytes_to_string(rendered)
+  __io_println(starts_with(pdf_text, "%PDF-1.4"))
+  __io_println(contains(pdf_text, "xref\n"))
+  __io_println(contains(pdf_text, "trailer\n"))
+  let path = path_join(harness.fs.temp_dir(), "harn-document-" + uuid() + ".pdf")
+  defer {
+    harness.fs.delete(path)
+  }
+  let result = write_pdf(path, "Portable PDF", {title: "Portable"})
+  __io_println(result.media_type)
+  __io_println(result.bytes > 0)
+  __io_println(harness.fs.exists(path))
+}

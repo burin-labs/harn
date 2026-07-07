@@ -5084,6 +5084,8 @@ are not required to be present.
 | `lowercase()` | (none) | string |
 | `uppercase()` | (none) | string |
 | `substring(start, end?)` | int, int? | string -- character range |
+| `index_of(substr)` | string | int -- first character offset, or -1 |
+| `last_index_of(substr)` / `rfind(substr)` | string | int -- last character offset, or -1 |
 | `chars()` | (none) | list of single-character strings |
 
 `chars()` (also the `chars(text)` builtin) materializes a string into a list of
@@ -7032,6 +7034,20 @@ Permit reads from additional filesystem roots while keeping the default
 are allowed for read-style operations but rejected for writes. Use this
 when a script needs to consume files from a sibling checkout or shared
 assets without disabling sandboxing. `--read-only-root` cannot be
+combined with `--no-sandbox`.
+
+### --write-root
+
+```bash
+harn run --write-root /path/to/output main.harn
+```
+
+Permit reads and writes under additional filesystem roots while keeping
+the default `harn run` sandbox policy intact. Each `--write-root` entry
+is added to the run's `workspace_roots`, so the same filesystem builtins,
+process cwd checks, and OS sandbox backends enforce it as a first-class
+writable mount. Use this for external output folders such as iCloud Drive
+exports without falling back to `--no-sandbox`. `--write-root` cannot be
 combined with `--no-sandbox`.
 
 ### --deny

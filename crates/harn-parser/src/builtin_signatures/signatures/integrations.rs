@@ -484,6 +484,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple("mcp_server_info", &[Param::new("client", TY_ANY)], TY_DICT),
+    BuiltinSignature::simple(
+        "mcp_server_metadata",
+        &[Param::new("metadata", TY_DICT)],
+        TY_NIL,
+    ),
     BuiltinSignature::simple("mcp_tools", &[Param::new("registry", TY_DICT)], TY_NIL),
     BuiltinSignature::simple(
         "mcp_upload_file",

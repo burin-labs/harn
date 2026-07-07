@@ -458,7 +458,51 @@ sys.exit(1)
 PY
 }
 
+# Fail loud if unfolded `changelog.d/<id>.<category>.md` fragments remain.
+#
+# The fold (fragments -> `## vX.Y.Z` CHANGELOG.md section) lives in the
+# bump-fleet `release_harn.harn prepare` flow (apply_draft_release_notes ->
+# lib/changelog.harn). `release_ship.sh` does NOT fold. So invoking release_ship
+# directly (the recovery/legacy path) with fragments still present would ship a
+# release whose CHANGELOG has no entries for them and whose --finalize renders
+# empty release notes. This guardrail makes that impossible from any mode: every
+# release-producing path routes through run_common_gates, and this runs first —
+# before the ~12-minute audit — so the failure is instant and self-explanatory.
+require_no_unfolded_fragments() {
+  local dir="changelog.d"
+  [[ -d "$dir" ]] || return 0
+  local frags=()
+  local cat f base
+  for cat in breaking added changed deprecated removed fixed security; do
+    for f in "$dir"/*."$cat".md; do
+      [[ -e "$f" ]] || continue
+      base="$(basename "$f")"
+      # Skip the lint config / templates that happen to look like fragments.
+      [[ "$base" == README* || "$base" == _* ]] && continue
+      frags+=("$f")
+    done
+  done
+  if (( ${#frags[@]} > 0 )); then
+    {
+      echo "error: ${#frags[@]} unfolded changelog fragment(s) remain in $dir/:"
+      printf '  - %s\n' "${frags[@]}"
+      echo "hint: release_ship.sh does not fold changelog fragments — the fold is"
+      echo "      part of the release_harn.harn 'prepare' flow. Either:"
+      echo "        (a) drive the release through 'release_harn.harn ... prepare'"
+      echo "            (recommended — it folds fragments, drafts + repairs notes), or"
+      echo "        (b) fold them into CHANGELOG.md's top '## vX.Y.Z' section by hand"
+      echo "            and 'git rm' the fragment files, then re-run."
+      echo "      Shipping now would omit these entries from the release notes."
+    } >&2
+    exit 1
+  fi
+}
+
 run_common_gates() {
+  # Never ship a release with unfolded changelog fragments (fails fast, before
+  # the expensive audit). See require_no_unfolded_fragments above.
+  require_no_unfolded_fragments
+
   # Build the portal frontend up front so `portal-dist/` exists for every
   # downstream step. The `harn-cli` crate embeds portal-dist via `include_dir!`
   # at compile time and ships it via the crate's `include = [...]` field, so

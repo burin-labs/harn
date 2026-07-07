@@ -332,7 +332,7 @@ jobs:
           cache-bin: false
       - name: Install cargo-nextest
         if: matrix.kind == 'test'
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2.82.6
         continue-on-error: true
         with:
           tool: nextest@0.9.133
@@ -548,7 +548,7 @@ jobs:
           # (hostlib was absent from the pattern) and only surfaced on the
           # main-push backstop. Route the whole crate — the windows job's
           # nextest filter already builds+tests `package(harn-hostlib)`.
-          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
+          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
 
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves
@@ -626,7 +626,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2.82.6
         continue-on-error: true
         with:
           tool: nextest@0.9.133
@@ -699,6 +699,70 @@ jobs:
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           ./target/debug/harn.exe run smoke.harn
 
+  # Deterministic, always-on Windows *compile* gate. Unlike the path-gated
+  # `windows` job above (which skips on routine PRs + the whole merge queue and
+  # is subject to Windows-runner flakiness), this runs on every PR, merge_group,
+  # and push, on a Linux runner, and is a hard-required check in `ci-status`.
+  # It exists to catch the recurring cfg-gating / missing-`#[cfg(unix)]` break
+  # class (#4199 scoped-write, #3914 hostlib) at merge time instead of letting
+  # it slip to main and resurface as phantom "Windows flakiness" on an unrelated
+  # PR. `cargo check` performs no linking, so the windows-gnu (mingw) target
+  # compiles the C-dependency graph on Linux and reaches the workspace Rust —
+  # `x86_64-pc-windows-msvc` cannot (it needs the Windows SDK headers). The
+  # `cfg(windows)` / `cfg(not(unix))` surface is identical across gnu/msvc, so a
+  # missing unix cfg-gate is caught here regardless of the ABI difference. The
+  # full `windows` job stays the source of truth for msvc-specific + runtime
+  # behavior (build + smoke test).
+  windows-cross-check:
+    name: Windows cross-compile check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: stable
+      - name: Add windows-gnu target to the repo-pinned toolchain
+        # rust-toolchain.toml pins a specific channel (e.g. 1.95.0), and cargo
+        # respects that override in-repo — NOT the `stable` the action installs.
+        # So the cross target must be added to the PINNED toolchain (rustup reads
+        # the override from the working directory here), otherwise cargo check
+        # fails with `can't find crate for core`. Do not pass the target via the
+        # toolchain action's `targets:` — that adds it to the wrong toolchain.
+        run: rustup target add x86_64-pc-windows-gnu
+      - name: Install mingw-w64 cross toolchain
+        run: |
+          sudo apt-get update
+          # gcc-mingw-w64-x86-64 provides x86_64-w64-mingw32-{gcc,g++,ar}, which
+          # cc-rs / the C build scripts (ring, aws-lc-sys) use to cross-compile.
+          # cmake + nasm are needed by aws-lc-sys's assembly/build; they are the
+          # only non-mingw prerequisites this cross-check adds.
+          sudo apt-get install -y --no-install-recommends \
+            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm cmake
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: windows-cross-check
+          cache-on-failure: true
+      - name: cargo check (x86_64-pc-windows-gnu)
+        env:
+          # cargo check does not link; keep sccache out of the way and let
+          # rust-cache handle incrementality (mirrors the Windows job's rationale).
+          CARGO_INCREMENTAL: "0"
+          # Point the C build scripts + linker at the mingw toolchain explicitly
+          # (matches the validated local repro) rather than relying on cc-rs
+          # target auto-detection.
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+        run: |
+          # --workspace (libs + bins + build scripts), not --all-targets: keep
+          # the required gate reliable by not depending on dev-only deps
+          # cross-compiling cleanly. The recurring cfg-gate break class lives in
+          # lib/bin code; test-only cfg breaks stay covered by windows-nightly.yml.
+          cargo check --workspace --target x86_64-pc-windows-gnu
+
   macos-plan:
     name: macOS CI routing
     runs-on: ubuntu-latest
@@ -736,7 +800,7 @@ jobs:
           # `grep -rl 'target_os = "macos"' crates/` plus the workflow
           # itself and the Cargo graph roots. When in doubt, the daily
           # macos-nightly.yml backstop covers the rest.
-          macos_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
+          macos_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
 
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves
@@ -930,7 +994,7 @@ jobs:
           shared-key: e2e
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2.82.6
         with:
           tool: nextest@0.9.133
       - run: make test-e2e
@@ -947,7 +1011,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [changes, fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs: [changes, fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -988,6 +1052,17 @@ jobs:
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then
             echo "::error::Windows job failed."
+            exit 1
+          fi
+
+          # The cross-compile check runs on EVERY event (no path gate, no skip),
+          # so it must actually succeed — `skipped` is not acceptable here. This
+          # is the non-flaky Windows-compile gate that closes the path-filter /
+          # merge-queue coverage gaps that let #4199 through.
+          windows_cross_result="${{ needs['windows-cross-check'].result }}"
+          echo "Windows cross-compile check: $windows_cross_result"
+          if [ "$windows_cross_result" != "success" ]; then
+            echo "::error::Windows cross-compile check failed."
             exit 1
           fi
 

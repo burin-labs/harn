@@ -126,8 +126,9 @@ fn row_generic_merge_keeps_precision_for_wrong_annotation() {
 fn spread_of_open_dict_degrades_to_dict() {
     // Spreading a value typed `dict` (unknown fields) can't yield a closed
     // shape, so the result is `dict` and field access stays gradual — no error.
-    let errs =
-        errors("pipeline t(task) { const d: dict = task\nconst m = {...d, k: 1}\nlog(m.anything) }");
+    let errs = errors(
+        "pipeline t(task) { const d: dict = task\nconst m = {...d, k: 1}\nlog(m.anything) }",
+    );
     assert!(
         !has(&errs, "does not exist") && !has(&errs, "cannot access"),
         "spread of an open dict should degrade gracefully; got: {errs:?}"

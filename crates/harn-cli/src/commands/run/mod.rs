@@ -593,6 +593,10 @@ pub struct RunSandboxOptions {
     /// intended for host-generated scripts whose source file lives outside
     /// the workspace they operate on.
     pub workspace_root: Option<PathBuf>,
+    /// Extra writable filesystem roots mounted into the direct-run
+    /// sandbox. These extend the write jail without disabling path
+    /// enforcement or egress policy.
+    pub write_roots: Vec<PathBuf>,
     /// Extra read-only filesystem roots. `path` resolving under one of
     /// these entries is scoped for reads, but writes still fail.
     pub read_only_roots: Vec<PathBuf>,
@@ -603,6 +607,7 @@ impl Default for RunSandboxOptions {
         Self {
             enabled: true,
             workspace_root: None,
+            write_roots: Vec::new(),
             read_only_roots: Vec::new(),
         }
     }
@@ -614,6 +619,7 @@ impl RunSandboxOptions {
         Self {
             enabled: false,
             workspace_root: None,
+            write_roots: Vec::new(),
             read_only_roots: Vec::new(),
         }
     }
@@ -621,6 +627,15 @@ impl RunSandboxOptions {
     /// Constrain the default sandbox to an explicit workspace root.
     pub fn with_workspace_root(mut self, workspace_root: impl Into<PathBuf>) -> Self {
         self.workspace_root = Some(workspace_root.into());
+        self
+    }
+
+    /// Add writable roots to the default sandbox policy.
+    pub fn with_write_roots<I>(mut self, write_roots: I) -> Self
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
+        self.write_roots = write_roots.into_iter().collect();
         self
     }
 
@@ -955,6 +970,7 @@ fn install_run_sandbox_scope(
     let execution_policy = if harn_vm::orchestration::current_execution_policy().is_none() {
         harn_vm::orchestration::push_execution_policy(default_run_capability_policy(
             workspace_root,
+            &options.write_roots,
             &options.read_only_roots,
         ));
         Some(ExecutionPolicyGuard)
@@ -976,12 +992,24 @@ fn install_run_sandbox_scope(
 
 fn default_run_capability_policy(
     workspace_root: &Path,
+    write_roots: &[PathBuf],
     read_only_roots: &[PathBuf],
 ) -> harn_vm::orchestration::CapabilityPolicy {
-    harn_vm::orchestration::CapabilityPolicy {
-        workspace_roots: vec![normalize_run_workspace_root(workspace_root)
+    let mut workspace_roots = Vec::with_capacity(1 + write_roots.len());
+    workspace_roots.push(
+        normalize_run_workspace_root(workspace_root)
             .display()
-            .to_string()],
+            .to_string(),
+    );
+    workspace_roots.extend(
+        write_roots
+            .iter()
+            .map(|path| normalize_run_workspace_root(path.as_path()))
+            .map(|path| path.display().to_string()),
+    );
+
+    harn_vm::orchestration::CapabilityPolicy {
+        workspace_roots,
         read_only_roots: read_only_roots
             .iter()
             .map(|path| normalize_run_workspace_root(path.as_path()))
@@ -1031,11 +1059,17 @@ fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json::Value {
     } else {
         "unrestricted"
     };
+    let write_roots = sandbox
+        .write_roots
+        .iter()
+        .map(|path| normalize_run_workspace_root(path).display().to_string())
+        .collect::<Vec<_>>();
 
     serde_json::json!({
         "run_default_enabled": sandbox.enabled,
         "active": active,
         "workspace_roots": workspace_roots,
+        "write_roots": write_roots,
         "read_only_roots": read_only_roots,
         "profile": profile,
         "egress": egress,
@@ -1534,29 +1568,30 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // Install the script's `Harness` capability handle so the auto-call
     // emitted by `Compiler::compile()` for `fn main(harness: Harness)`
     // entrypoints can read it.
-    let runtime_harness = match crate::default_harness_for_base_dir(store_base) {
-        Ok(harness) => harness,
-        Err(error) => {
-            stderr.push_str(&format!(
-                "error: failed to configure harness secret provider: {error}\n"
-            ));
-            return finalize_run_error(
-                stdout,
-                stderr,
-                json_session,
-                summary.as_ref(),
-                phase.as_ref(),
-                rusage.as_ref(),
-                run_started,
-                None,
-                timing.as_deref(),
-                0,
-                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-                "harness_secret_provider",
-                error,
-            );
-        }
-    };
+    let runtime_harness =
+        match crate::default_harness_for_manifest_or_base_dir(Path::new(path), store_base) {
+            Ok(harness) => harness,
+            Err(error) => {
+                stderr.push_str(&format!(
+                    "error: failed to configure harness secret provider: {error}\n"
+                ));
+                return finalize_run_error(
+                    stdout,
+                    stderr,
+                    json_session,
+                    summary.as_ref(),
+                    phase.as_ref(),
+                    rusage.as_ref(),
+                    run_started,
+                    None,
+                    timing.as_deref(),
+                    0,
+                    cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                    "harness_secret_provider",
+                    error,
+                );
+            }
+        };
     vm.set_harness(runtime_harness);
 
     let extensions = package::load_runtime_extensions(Path::new(path));
@@ -2576,12 +2611,19 @@ pub(crate) async fn run_file_mcp_serve(
             let resources = harn_vm::take_mcp_serve_resources();
             let resource_templates = harn_vm::take_mcp_serve_resource_templates();
             let prompts = harn_vm::take_mcp_serve_prompts();
+            let metadata = harn_vm::take_mcp_serve_metadata();
 
-            let server_name = std::path::Path::new(path)
+            let mut server_name = std::path::Path::new(path)
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("harn")
                 .to_string();
+            if let Some(name) = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.name.as_ref())
+            {
+                server_name = name.clone();
+            }
 
             let mut caps = Vec::new();
             if !tools.is_empty() {
@@ -2612,6 +2654,9 @@ pub(crate) async fn run_file_mcp_serve(
 
             let mut server =
                 harn_vm::McpServer::new(server_name, tools, resources, resource_templates, prompts);
+            if let Some(metadata) = metadata {
+                server = server.with_metadata(metadata);
+            }
             if let Some(source) = card_source {
                 match resolve_card_source(source) {
                     Ok(card) => server = server.with_server_card(card),

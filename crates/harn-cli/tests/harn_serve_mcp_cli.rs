@@ -210,6 +210,16 @@ fn parse_sse_messages(body: &str) -> Vec<JsonValue> {
         .collect()
 }
 
+fn parse_http_messages(body: &str) -> Vec<JsonValue> {
+    let messages = parse_sse_messages(body);
+    if !messages.is_empty() {
+        return messages;
+    }
+    serde_json::from_str(body)
+        .map(|message| vec![message])
+        .unwrap_or_default()
+}
+
 async fn collect_sse_body_after_progress(
     mut response: reqwest::Response,
     mut progress_seen: Option<oneshot::Sender<()>>,
@@ -665,6 +675,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .post(&url)
         .header("Accept", "application/json, text/event-stream")
         .header("mcp-session-id", &session_id)
+        .header("authorization", "Bearer secret-token")
         .json(&json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -675,7 +686,13 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .await
         .unwrap();
     let tools_json: JsonValue = tools.json().await.unwrap();
-    assert_eq!(tools_json["result"]["tools"][1]["name"], "greet");
+    let tool_names: Vec<&str> = tools_json["result"]["tools"]
+        .as_array()
+        .expect("tools list")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert!(tool_names.contains(&"greet"), "tools={tool_names:?}");
 
     let unauthorized = client
         .post(&url)
@@ -694,7 +711,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .await
         .unwrap();
     let unauthorized_body = unauthorized.text().await.unwrap();
-    let unauthorized_messages = parse_sse_messages(&unauthorized_body);
+    let unauthorized_messages = parse_http_messages(&unauthorized_body);
     assert_eq!(unauthorized_messages[0]["error"]["code"], json!(-32001));
 
     let (progress_tx, progress_rx) = oneshot::channel();
@@ -750,7 +767,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .await
         .expect("timed out waiting for cancelled MCP stream to close")
         .unwrap();
-    let messages = parse_sse_messages(&body);
+    let messages = parse_http_messages(&body);
     assert!(messages
         .iter()
         .any(|message| message["method"] == "notifications/progress"));
@@ -774,7 +791,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .await
         .unwrap();
     let greet_body = greet.text().await.unwrap();
-    let greet_messages = parse_sse_messages(&greet_body);
+    let greet_messages = parse_http_messages(&greet_body);
     let final_response = greet_messages
         .iter()
         .find(|message| message["id"] == 5)

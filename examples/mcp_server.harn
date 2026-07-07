@@ -17,6 +17,12 @@
  * }
  */
 pipeline main(task) {
+  mcp_server_metadata(
+    {
+      name: "harn-demo",
+      instructions: "Use this server's tools, resources, and prompts for Harn MCP demonstrations.",
+    },
+  )
   // ---- Tools (with annotations) ----
   let tools = tool_registry()
   tools = tool_define(

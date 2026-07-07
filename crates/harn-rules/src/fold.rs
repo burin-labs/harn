@@ -198,7 +198,8 @@ mod tests {
 
     #[test]
     fn leaves_duplicate_property_keys_untouched() {
-        let src = "fn f() {\n  const first = cfg?.value ?? 1\n  const second = cfg?.value ?? 2\n}\n";
+        let src =
+            "fn f() {\n  const first = cfg?.value ?? 1\n  const second = cfg?.value ?? 2\n}\n";
         assert_eq!(fold(src), src);
     }
 }

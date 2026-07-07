@@ -189,7 +189,7 @@ pub type ValidateRepairConfig = {
  *
  * @effects: [host]
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn workflow_run_repair(config: ValidateRepairConfig) {
   const cfg = __repair_dict(config)

@@ -737,6 +737,10 @@ async fn execute_conformance_source(
     let state_dir = state_dir.to_string_lossy().into_owned();
     let _state_dir_guard =
         ScopedEnvVar::set(harn_vm::runtime_paths::HARN_STATE_DIR_ENV, &state_dir);
+    let harn_bin = std::env::current_exe()
+        .map_err(|error| format!("failed to resolve current harn executable: {error}"))?;
+    let harn_bin = harn_bin.to_string_lossy().into_owned();
+    let _harn_bin_guard = ScopedEnvVar::set("HARN_BIN", &harn_bin);
     let harness_sidecar = match testbench.harness.as_ref() {
         Some(path) => Some(HarnessSidecar::load(path)?),
         None => None,

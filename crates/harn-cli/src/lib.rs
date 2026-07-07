@@ -275,6 +275,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 commands::run::RunSandboxOptions::disabled()
             } else {
                 commands::run::RunSandboxOptions::default()
+                    .with_write_roots(args.write_root.iter().cloned())
                     .with_read_only_roots(args.read_only_root.iter().cloned())
             };
             let json_options = args
@@ -2941,12 +2942,18 @@ async fn execute_with_skill_dirs_and_optional_harness(
             skill_loader::install_skills_global(&mut vm, &loaded);
             let runtime_harness = match harness {
                 Some(harness) => harness,
-                None => default_harness_for_base_dir(store_base).map_err(|error| {
-                    ExecError::new(
-                        ExecStage::Runtime,
-                        format!("failed to configure harness secret provider: {error}"),
-                    )
-                })?,
+                None => {
+                    let resolved = match source_path {
+                        Some(path) => default_harness_for_manifest_or_base_dir(path, store_base),
+                        None => default_harness_for_base_dir(store_base),
+                    };
+                    resolved.map_err(|error| {
+                        ExecError::new(
+                            ExecStage::Runtime,
+                            format!("failed to configure harness secret provider: {error}"),
+                        )
+                    })
+                }?,
             };
             vm.set_harness(runtime_harness);
             if let Some(path) = source_path {
@@ -3065,6 +3072,22 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
 
 pub(crate) fn default_harness_for_base_dir(base_dir: &Path) -> Result<harn_vm::Harness, String> {
     let secret_namespace = connector_secret_namespace(base_dir);
+    default_harness_for_secret_namespace(secret_namespace)
+}
+
+pub(crate) fn default_harness_for_manifest_or_base_dir(
+    source_path: &Path,
+    base_dir: &Path,
+) -> Result<harn_vm::Harness, String> {
+    let secret_namespace = package::find_nearest_manifest(source_path)
+        .map(|(_, manifest_dir)| connector_secret_namespace(&manifest_dir))
+        .unwrap_or_else(|| connector_secret_namespace(base_dir));
+    default_harness_for_secret_namespace(secret_namespace)
+}
+
+fn default_harness_for_secret_namespace(
+    secret_namespace: String,
+) -> Result<harn_vm::Harness, String> {
     let secret_provider = Arc::new(
         harn_vm::secrets::configured_default_chain(secret_namespace)
             .map_err(|error| error.to_string())?,

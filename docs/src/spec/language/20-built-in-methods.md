@@ -17,6 +17,8 @@
 | `lowercase()` | (none) | string |
 | `uppercase()` | (none) | string |
 | `substring(start, end?)` | int, int? | string -- character range |
+| `index_of(substr)` | string | int -- first character offset, or -1 |
+| `last_index_of(substr)` / `rfind(substr)` | string | int -- last character offset, or -1 |
 | `chars()` | (none) | list of single-character strings |
 
 `chars()` (also the `chars(text)` builtin) materializes a string into a list of
@@ -334,4 +336,3 @@ and optional `max_batch_size`. `poll_tick` returns either a list of normalized
 event dicts or `{events, cursor?, state?}`. Returned events enter the same
 post-normalize dedupe and trigger inbox path as connector ingress events, and
 the returned cursor/state is persisted for the next tick.
-

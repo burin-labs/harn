@@ -221,7 +221,13 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "stat" => Some(EffectRecord::new(EffectKind::Fs, EffectScope::Read)),
 
         // fs writes
-        "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "mkdtemp" | "copy_file"
+        "write_file"
+        | "write_file_bytes"
+        | "append_file"
+        | "mkdir"
+        | "mkdtemp"
+        | "mkdtemp_in_workspace"
+        | "copy_file"
         | "move_file" => Some(EffectRecord::new(EffectKind::Fs, EffectScope::Write)),
         "delete_file" => Some(EffectRecord::new(EffectKind::Fs, EffectScope::Mutate)),
         "apply_edit" => Some(EffectRecord::new(EffectKind::Fs, EffectScope::Mutate)),
@@ -455,9 +461,16 @@ fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
         ("fs", "read_file" | "read_text" | "read" | "exists" | "list_dir" | "stat") => {
             (EffectKind::Fs, EffectScope::Read)
         }
-        ("fs", "write_file" | "write_text" | "append_file" | "mkdir" | "mkdtemp" | "copy_file") => {
-            (EffectKind::Fs, EffectScope::Write)
-        }
+        (
+            "fs",
+            "write_file"
+            | "write_text"
+            | "append_file"
+            | "mkdir"
+            | "mkdtemp"
+            | "mkdtemp_in_workspace"
+            | "copy_file",
+        ) => (EffectKind::Fs, EffectScope::Write),
         ("fs", "delete_file" | "delete" | "remove") => (EffectKind::Fs, EffectScope::Mutate),
         ("fs", _) => (EffectKind::Fs, EffectScope::Read),
         ("net", _) => (EffectKind::Net, EffectScope::Write),
@@ -1057,7 +1070,7 @@ fn main() { upload("/tmp/input.pdf", "gemini") }
 
     #[test]
     fn harness_fs_mkdtemp_yields_fs_write_effect() {
-        let source = r#"fn main(harness: Harness) { harness.fs.mkdtemp("harn-") }"#;
+        let source = r#"fn main(harness: Harness) { harness.fs.mkdtemp_in_workspace("harn-") }"#;
         let effects = compute_handoff_effects(source, None);
         assert!(
             effects

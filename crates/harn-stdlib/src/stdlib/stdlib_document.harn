@@ -1,0 +1,74 @@
+/** std/document — portable document conversion helpers. */
+type DocumentSourceFormat = "text" | "html" | "markdown"
+
+type PdfRenderer = "auto" | "builtin_text_pdf"
+
+type PdfRenderOptions = {
+  renderer?: PdfRenderer,
+  source_format?: DocumentSourceFormat,
+  title?: string,
+  page_width_pt?: int,
+  page_height_pt?: int,
+  margin_pt?: int,
+  font_size_pt?: int,
+  line_height_pt?: int,
+  max_line_chars?: int,
+  metadata?: dict,
+  provider_options?: dict,
+  renderer_options?: dict,
+}
+
+type TextExtractOptions = {source_format?: DocumentSourceFormat}
+
+type PdfWriteResult = {path: string, bytes: int, media_type: string, renderer: string}
+
+/**
+ * Return the document/PDF renderers available in this runtime.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pdf_capabilities() -> dict {
+  return document_pdf_capabilities()
+}
+
+/**
+ * Extract normalized text from text, HTML, or Markdown input.
+ *
+ * @effects: []
+ * @errors: [document_extract_text]
+ */
+pub fn extract_text(source: string | bytes | nil, options: TextExtractOptions = {}) -> string {
+  return document_extract_text(source, options ?? {})
+}
+
+/**
+ * Render text-like input to PDF bytes using the selected renderer.
+ *
+ * The built-in renderer is dependency-free and cross-platform. It preserves
+ * readable text layout but is not a browser-grade CSS renderer.
+ *
+ * @effects: []
+ * @errors: [document_render_pdf]
+ */
+pub fn pdf_bytes(source: string | bytes | nil, options: PdfRenderOptions = {}) -> bytes {
+  return document_render_pdf(source, options ?? {})
+}
+
+/**
+ * Render text-like input to a PDF file through `harness.fs`.
+ *
+ * @effects: [fs]
+ * @errors: [document_render_pdf, fs]
+ */
+pub fn write_pdf(path: string, source: string | bytes | nil, options: PdfRenderOptions = {}) -> PdfWriteResult {
+  let opts = options ?? {}
+  let bytes = pdf_bytes(source, opts)
+  harness.fs.write_bytes(path, bytes)
+  return {
+    path: path,
+    bytes: bytes_len(bytes),
+    media_type: "application/pdf",
+    renderer: opts.renderer ?? "builtin_text_pdf",
+  }
+}

@@ -2,6 +2,14 @@ use std::collections::BTreeMap;
 
 use crate::value::VmClosure;
 
+/// Script-supplied metadata for a Harn-served MCP endpoint.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct McpServerMetadata {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub instructions: Option<String>,
+}
+
 /// A tool extracted from a Harn tool_registry, ready to serve over MCP.
 pub struct McpToolDef {
     pub name: String,

@@ -423,7 +423,8 @@ mod tests {
 
     #[test]
     fn fires_on_computed_dict_key() {
-        let src = "fn f() {\n  const k = \"a\"\n  const d = {\n    [k]: 1,\n    b: 2\n  }\n  d\n}\n";
+        let src =
+            "fn f() {\n  const k = \"a\"\n  const d = {\n    [k]: 1,\n    b: 2\n  }\n  d\n}\n";
         assert_eq!(
             fix(src),
             "fn f() {\n  const k = \"a\"\n  const d = {\n    [k]: 1,\n    b: 2,\n  }\n  d\n}\n"

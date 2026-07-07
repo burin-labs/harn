@@ -340,7 +340,8 @@ regex = "debugger;"
         // HARN-OWN-001 with a `bindings/make-mutable` repair. The
         // LSP-side code-action provider reads the safety class from
         // `Diagnostic.data` to decide whether to auto-apply.
-        let state = DocumentState::new("pipeline main() {\n  const x = 1\n  x = 2\n}\n".to_string());
+        let state =
+            DocumentState::new("pipeline main() {\n  const x = 1\n  x = 2\n}\n".to_string());
         let diag = state
             .diagnostics
             .iter()

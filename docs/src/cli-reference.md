@@ -19,6 +19,7 @@ harn run -e 'log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
 harn run --no-sandbox <file.harn>
+harn run --write-root /path/to/output main.harn
 harn run --read-only-root /path/to/other-repo main.harn
 harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
@@ -41,6 +42,7 @@ harn run --resume .harn/workers/worker_...json
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
+| `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
@@ -488,6 +490,7 @@ harn time run main.harn
 harn time run main.harn --json
 harn time run main.harn --json --no-cache
 harn time run main.harn --no-sandbox
+harn time run main.harn --write-root /path/to/output
 harn time run -e 'log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```
@@ -1546,8 +1549,9 @@ harn models lora manifest --base local-gemma4-e4b --provider vllm \
 
 The command records the resolved base route, effective tool-call format, Harn
 LoRA contract id, trainer hyperparameters, corpus/export inputs, adapter
-artifact paths and hashes when local files exist, serving hints, and the
-promotion/eval recipe. It is intentionally trainer-agnostic: Python, MLX,
+artifact paths and hashes when local files exist, serving hints,
+`serving.serving_requirements`, and the promotion/eval recipe. It is
+intentionally trainer-agnostic: Python, MLX,
 Unsloth, TRL, cloud, or future Harn-native trainers can all call this surface
 after a run and produce the same manifest shape. The resulting JSON is accepted
 by `harn models lora inspect --manifest`, so adapter promotion can compare the
@@ -1586,10 +1590,13 @@ harn models lora inspect --base local-gemma4-e4b --provider vllm --name tools or
 The report checks local `adapter_config.json` metadata when present, compares
 `base_model_name_or_path` with the resolved Harn model id, shows the route's
 tool-calling capability metadata, and prints the matching `harn local launch`
-command. When local metadata declares a LoRA rank and the cataloged runtime has
-a max-rank flag, the launch command includes `--max-lora-rank` so runtime
-defaults cannot silently under-provision the adapter. Remote adapter ids are
-treated as runtime-resolved and warned rather than rejected.
+command. Inspect JSON also includes `serving.serving_requirements`, so promotion
+automation can verify parser ownership, runtime flags, and template metadata for
+the served adapter route. When local metadata declares a LoRA rank and the
+cataloged runtime has a max-rank flag, the launch command includes
+`--max-lora-rank` so runtime defaults cannot silently under-provision the
+adapter. Remote adapter ids are treated as runtime-resolved and warned rather
+than rejected.
 
 ## harn models lora plan
 
@@ -1628,6 +1635,11 @@ and stop conditions so corpus refresh jobs prioritize failures the target model
 almost solves instead of adding near-duplicate syntax examples.
 The JSON report exposes the same machine-readable contract under
 `training.contract` for automation that prepares TRL/PEFT trainer configs.
+The `serving.serving_requirements` array records machine-readable serving
+requirements such as parser ownership, vLLM tool-parser flags, chat-template
+ids, required manifest metadata, and promotion gates. Plan, manifest, and inspect
+automation should satisfy those requirements before serving or promoting an
+adapter instead of scraping runtime notes.
 The `evaluation.evidence_contract` block adds the promotion receipt contract:
 stable promotion id, paired base/adapter routes, required preflight, export,
 manifest, inspect, tool-probe, and eval receipts, optional Batch API receipts,

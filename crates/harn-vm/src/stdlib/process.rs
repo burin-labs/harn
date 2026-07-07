@@ -60,6 +60,38 @@ pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
     VM_SOURCE_DIR.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
 }
 
+/// RAII guard that snapshots the thread-local VM source dir on creation and
+/// restores it on drop.
+///
+/// Out-of-band module loads — a connector contract load, a dependency package
+/// load — spin up their own isolated `Vm` but call `Vm::set_source_dir`, which
+/// unconditionally writes the *shared* thread-local `VM_SOURCE_DIR`. Left
+/// unrestored, that leaves the caller's resting source-dir context pointing at
+/// the loaded dependency, so a subsequent top-level `render("@alias/...")` /
+/// `render("relative/...")` in the entry module resolves against the
+/// dependency's `harn.toml` instead of the project root. Holding this guard
+/// across such a load keeps the load invisible to the caller's source-dir
+/// context — mirroring the per-frame save/restore discipline in `vm::execution`.
+pub(crate) struct SourceDirGuard {
+    previous: Option<PathBuf>,
+}
+
+impl SourceDirGuard {
+    /// Snapshot the current thread-local source dir.
+    pub(crate) fn capture() -> Self {
+        Self {
+            previous: VM_SOURCE_DIR.with(|sd| sd.borrow().clone()),
+        }
+    }
+}
+
+impl Drop for SourceDirGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = previous);
+    }
+}
+
 /// Reset thread-local process state (for test isolation).
 pub(crate) fn reset_process_state() {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);

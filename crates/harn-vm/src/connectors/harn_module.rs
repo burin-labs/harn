@@ -869,6 +869,17 @@ fn default_ok_status() -> u16 {
 async fn load_module_runtime(
     module_path: &Path,
 ) -> Result<(Vm, BTreeMap<String, Arc<VmClosure>>), ConnectorError> {
+    // `set_source_dir` writes the *shared* thread-local source dir. This
+    // connector module lives outside the caller's project (e.g. under
+    // `<project>/.harn/packages/<dep>/`), so leaking that write would re-anchor
+    // the caller's top-level `render("@alias/...")` / source-relative asset
+    // resolution on the dependency's `harn.toml` instead of the project root.
+    // Snapshot and restore the thread-local around the load so the isolated
+    // `base_vm` gets its own source dir without mutating the caller's resting
+    // context. The `base_vm`'s per-instance `source_dir` field is what drives
+    // this module's own import resolution, so keeping the thread-local pinned
+    // is purely a caller-facing concern.
+    let _source_dir_guard = crate::stdlib::process::SourceDirGuard::capture();
     let mut base_vm = Vm::new();
     register_vm_stdlib(&mut base_vm);
     let store_base = module_path.parent().unwrap_or_else(|| Path::new("."));
@@ -1838,6 +1849,45 @@ mod tests {
         let path = dir.path().join("connector.harn");
         std::fs::write(&path, source).unwrap();
         (dir, path)
+    }
+
+    /// Regression test for the dependency-package source-dir leak: loading a
+    /// connector contract (as `harn run` does for every installed
+    /// `[dependencies]` provider before executing the entry pipeline) spins up
+    /// an isolated `Vm` and calls `set_source_dir` on the connector's own dir,
+    /// which writes the *shared* thread-local `VM_SOURCE_DIR`. Before the fix,
+    /// that write was never restored, so the caller's resting source-dir
+    /// context — the anchor for top-level `render("@alias/...")` and
+    /// source-relative asset resolution — was left pointing at the dependency
+    /// package instead of the project root. The load must leave the caller's
+    /// thread-local source dir exactly as it found it.
+    #[tokio::test]
+    async fn load_contract_does_not_leak_thread_source_dir() {
+        // Stand in for the entry project: a dir whose `harn.toml` the caller's
+        // top-level asset resolution should keep anchoring on.
+        let project_dir = tempfile::tempdir().unwrap();
+        crate::stdlib::process::reset_process_state();
+        crate::stdlib::set_thread_source_dir(project_dir.path());
+        let before = crate::stdlib::process::source_root_path();
+
+        // The connector module lives in a *different* dir, like a materialized
+        // `<project>/.harn/packages/<dep>/` dependency.
+        let (_dir, module_path) = write_connector(
+            r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+"#,
+        );
+        let _contract = load_contract(&module_path).await.unwrap();
+
+        let after = crate::stdlib::process::source_root_path();
+        assert_eq!(
+            after, before,
+            "loading a connector contract must not leak the thread-local source \
+             dir (before={before:?}, after={after:?})"
+        );
+        crate::stdlib::process::reset_process_state();
     }
 
     #[tokio::test]

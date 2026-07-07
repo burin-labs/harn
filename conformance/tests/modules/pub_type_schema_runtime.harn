@@ -1,0 +1,24 @@
+import { FacadeTarget } from "pub_type_schema_runtime_facade"
+import { DirectTarget } from "pub_type_schema_runtime_lib"
+
+fn direct_ok(value: unknown) -> bool {
+  return schema_is(value, DirectTarget)
+}
+
+fn direct_schema_name_type() -> string {
+  return schema_of(DirectTarget).properties.name.type
+}
+
+pipeline default() {
+  let direct_schema = schema_of(DirectTarget)
+  __io_println(direct_schema.type)
+  __io_println(direct_schema.required)
+  __io_println(direct_schema_name_type())
+  __io_println(direct_ok({name: "Ada", score: 2}))
+  __io_println(direct_ok({name: "Ada", score: "bad"}))
+  let facade_schema = schema_of(FacadeTarget)
+  __io_println(facade_schema.type)
+  __io_println(facade_schema.required)
+  __io_println(schema_is({label: "via-facade"}, FacadeTarget))
+  __io_println(schema_is({label: 12}, FacadeTarget))
+}

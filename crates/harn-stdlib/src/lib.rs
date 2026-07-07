@@ -170,6 +170,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_files.harn"),
     },
     StdlibSource {
+        module: "document",
+        source: include_str!("stdlib/stdlib_document.harn"),
+    },
+    StdlibSource {
         module: "mcp",
         source: include_str!("stdlib/stdlib_mcp.harn"),
     },

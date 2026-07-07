@@ -45,7 +45,7 @@ pub type OverlayRow = {mode: string, lane?: string, lines: list<string>, enabled
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn default_overlay_rows() {
   return [
@@ -106,7 +106,7 @@ fn __overlay_row_key(mode, lane) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn agent_overlay_match(rows, mode, lane = nil) {
   const mode_text = to_string(mode ?? "")
@@ -140,7 +140,7 @@ pub fn agent_overlay_match(rows, mode, lane = nil) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
+ * @api_stability: stable
  */
 pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
   const key = __overlay_row_key(mode, lane)
@@ -181,7 +181,7 @@ pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
  *
  * @effects: []
  * @errors: [runtime]
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: agent_loop(task, nil, with_overlay({provider: "anthropic"}, default_overlay_rows(), "agent"))
  */
 pub fn with_overlay(agent_options, rows, mode, options = nil) {
@@ -200,7 +200,7 @@ pub fn with_overlay(agent_options, rows, mode, options = nil) {
  *
  * @effects: []
  * @errors: [runtime]
- * @api_stability: experimental
+ * @api_stability: stable
  * @example: agent_loop(task, nil, overlay_policy(default_overlay_rows(), "agent", {provider: "anthropic"}))
  */
 pub fn overlay_policy(rows, mode, agent_options = nil, options = nil) {

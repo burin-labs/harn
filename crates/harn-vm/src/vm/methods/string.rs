@@ -134,10 +134,10 @@ impl crate::vm::Vm {
                     .map(VmValue::char_value)
                     .unwrap_or(VmValue::Nil))
             }
-            "last_index_of" => {
-                let needle = args.first().map(|a| a.display()).unwrap_or_default();
+            "last_index_of" | "rfind" => {
+                let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
                 let idx = s
-                    .rfind(&needle)
+                    .rfind(&*needle)
                     .map(|byte_pos| s[..byte_pos].chars().count() as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }

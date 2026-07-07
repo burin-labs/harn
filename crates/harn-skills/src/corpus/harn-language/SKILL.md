@@ -18,6 +18,11 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Treat `spec/HARN_SPEC.md` as the canonical language reference.
 - Default new script entrypoints to `fn main(harness: Harness) { ... }` and
   route side effects through `harness.*`.
+- Use `harness.fs.mkdtemp_in_workspace(prefix?)` for scratch files that must be
+  visible under sandbox policy; avoid composing `.harn/tmp` paths by hand.
+- For connector credentials, read canonical ids such as
+  `provider/access-token` through `harness.secrets` from a package script; the
+  runner scopes the default provider from the nearest `harn.toml`.
 - Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`, for spec changes.
 - Regenerate generated spec docs with `make sync-language-spec`.
 - Check user-visible behavior with conformance fixtures under `conformance/tests/`.

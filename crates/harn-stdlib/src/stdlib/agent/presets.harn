@@ -138,9 +138,12 @@ fn __validate_pin_policy(kind, pin_policy) {
  * promoted to fill-nil data rows. Captains carry longer timeouts and larger
  * budgets by design.
  *
- * TODO(PR-C): `model_ladder` is a plain models list today; once the
- * `[model_ladders.*]` catalog rows land, replace these with catalog
- * ladder-name references and lower them into `fallback_chain` at resolve time.
+ * `model_ladder` is a plain `list<string>` fallback chain by design. The
+ * named `[model_ladders.*]` catalog rows (providers.toml + catalog_sources/
+ * 62-ladders) have since landed, resolved via a `ladder: "<name>"` option on
+ * `llm_call`; packs intentionally do NOT reference them by name so a pack row
+ * stays self-contained and takes no hard dependency on catalog ladder names.
+ * Callers who want a named catalog ladder pass `ladder:` on their own options.
  * Budgets are session-cumulative (`total_budget_usd`), NOT per-call ceilings:
  * `budget.max_cost_usd` is pre-flight-checked against the worst-case
  * projection (full `max_tokens` as output), so a tight per-call default would

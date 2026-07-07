@@ -1,0 +1,61 @@
+pipeline default() {
+  mcp_server_metadata(
+    {
+      name: "test-echo-server",
+      version: "1.0.0",
+      instructions: "Use echo server tools only for conformance.",
+    },
+  )
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "echo",
+    "Echo a message back",
+    {
+      parameters: {message: "string"},
+      handler: { args -> args.message ?? "" },
+      annotations: {
+        title: "Echo",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "add",
+    "Add two numbers",
+    {
+      parameters: {a: "number", b: "number"},
+      handler: { args -> to_string((args.a ?? 0) + (args.b ?? 0)) },
+      annotations: {
+        title: "Add",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "fail",
+    "Always fails with an error",
+    {
+      parameters: {},
+      handler: { _args ->
+        throw "intentional error"
+      },
+      annotations: {
+        title: "Fail",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+  )
+  mcp_tools(tools)
+}
