@@ -16,9 +16,13 @@ changed_packages=$(mktemp)
 # temp files, then let hook_timing_finish append the NDJSON timing line and
 # re-exit with the captured code.
 trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"; hook_timing_finish "$hook_timing_exit_code"' EXIT
-hook_write_push_files "$changed"
+push_base=$(hook_push_base)
+validation_base=$(hook_validation_base)
+# Expensive changed-file gates should validate the PR delta against the base
+# branch, not the stale upstream range used below to inspect pushed commits.
+hook_write_push_files "$changed" "$validation_base"
 hook_export_cargo_target_dir
-hook_disable_cargo_incremental_if_release_bump "push $(hook_push_base)"
+hook_disable_cargo_incremental_if_release_bump "push $validation_base"
 hook_export_existing_harn_bin_for_non_rust_changes "$changed"
 
 # Signature guard (cheapest gate — local, no network). main enforces the
@@ -35,7 +39,7 @@ hook_export_existing_harn_bin_for_non_rust_changes "$changed"
 # trips a `;;`-in-command-substitution parse error in POSIX sh). Commit SHAs
 # never contain whitespace, so word-splitting the rev-list output is safe.
 unsigned_found=0
-for commit in $(git rev-list "$(hook_push_base)..HEAD" 2>/dev/null); do
+for commit in $(git rev-list "$push_base..HEAD" 2>/dev/null); do
   sig=$(git log -1 --format='%G?' "$commit" 2>/dev/null)
   if [ "$sig" = "N" ] || [ "$sig" = "B" ]; then
     if [ "$unsigned_found" -eq 0 ]; then
