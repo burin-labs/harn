@@ -1,0 +1,111 @@
+import {
+  agent_capture_events,
+  agent_event_capture_report,
+  agent_event_capture_schema,
+  agent_event_capture_value,
+  agent_event_report,
+  agent_event_schema,
+  agent_event_value,
+  agent_tool_audit_event_schema,
+  agent_tool_call_receipt_schema,
+  agent_tool_lifecycle_event_schema,
+  agent_typed_checkpoint_event_schema,
+} from "std/agent/events"
+import { agent_emit_event } from "std/agent/state"
+import { is_type } from "std/schema"
+
+pipeline default() {
+  const session = "agent-event-schema-" + uuid()
+  const captured = agent_capture_events(
+    session,
+    fn() {
+      const args_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+      const result_hash = "1111111111111111111111111111111111111111111111111111111111111111"
+      agent_emit_event(
+        session,
+        "tool_call_update",
+        {
+          tool_call_id: "call-1",
+          tool_name: "edit",
+          status: "completed",
+          raw_output: {ok: true},
+          duration_ms: 12,
+          future_extension: {schema: "harn.future.event.v1"},
+        },
+      )
+      agent_emit_event(
+        session,
+        "tool_call_audit",
+        {
+          tool_call_id: "call-1",
+          tool_name: "edit",
+          audit: {stage: "post_edit"},
+          receipt: {
+            schema_version: 1,
+            session_id: session,
+            run_id: nil,
+            tool_call_id: "call-1",
+            tool_name: "edit",
+            iteration: 2,
+            turn_index: nil,
+            emit_order: 0,
+            reason: "post-edit verification",
+            kind: "edit",
+            executor: "harn",
+            status: "ok",
+            error_category: nil,
+            duration_ms: 12,
+            args_hash: args_hash,
+            result_hash: result_hash,
+            audit: {stage: "post_edit"},
+            emitted_at: "2026-05-16T00:00:00Z",
+            model: "mock-model",
+            provider: "mock",
+          },
+        },
+      )
+      agent_emit_event(
+        session,
+        "typed_checkpoint",
+        {
+          kind: "llm_call_start",
+          phase: "llm_call",
+          iteration: 2,
+          attempt: 1,
+          provider: "mock",
+          model: "mock-model",
+          tool_format: "native",
+          final_wrapup: false,
+        },
+      )
+      return {ok: true}
+    },
+  )
+  __io_println(is_type(captured, agent_event_capture_schema()))
+  __io_println(agent_event_capture_report(captured).ok)
+  __io_println(agent_event_capture_value(captured).result.ok)
+  __io_println(is_type(captured.events[0], agent_event_schema()))
+  __io_println(agent_event_report(captured.events[0], agent_tool_lifecycle_event_schema()).ok)
+  __io_println(agent_event_value(captured.events[0], agent_tool_lifecycle_event_schema()).tool_name)
+  __io_println(agent_event_report(captured.events[1], agent_tool_audit_event_schema()).ok)
+  __io_println(agent_event_value(captured.events[1], agent_tool_audit_event_schema()).receipt.status)
+  __io_println(agent_event_report(captured.events[1].receipt, agent_tool_call_receipt_schema()).ok)
+  __io_println(agent_event_report(captured.events[2], agent_typed_checkpoint_event_schema()).ok)
+  const missing = agent_event_report(
+    {type: "tool_call_update", tool_call_id: "missing-name", status: "completed"},
+    agent_tool_lifecycle_event_schema(),
+  )
+  __io_println(!missing.ok)
+  __io_println(contains(join(missing.errors, "\n"), "missing required key 'tool_name'"))
+  const bad_receipt = agent_event_report(
+    {
+      type: "tool_call_audit",
+      tool_call_id: "call-2",
+      tool_name: "edit",
+      audit: {},
+      receipt: {path: "src/main.zig"},
+    },
+    agent_tool_audit_event_schema(),
+  )
+  __io_println(!bad_receipt.ok)
+}

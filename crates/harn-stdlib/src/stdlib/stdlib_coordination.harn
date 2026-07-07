@@ -6,6 +6,7 @@
 import { filter_nil } from "std/collections"
 import { ensure_parent_dir, read_json, write_json } from "std/fs"
 import { memory_store } from "std/memory"
+import "std/schema"
 
 const __COORD_SCHEMA = "harn.coordination.message.v1"
 
@@ -20,6 +21,251 @@ const __COORD_KINDS = ["status", "claim", "handoff", "blocker", "decision", "req
 const __COORD_DIR_LOCK_TTL_MS = 10 * 60 * 1000
 
 const __COORD_DIR_LOCK_REAPER_TTL_MS = 60 * 1000
+
+fn __coord_number_schema() {
+  return schema_union([schema_int(), schema_float()])
+}
+
+/**
+ * Schema for normalized coordination actor/address dictionaries.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_actor_schema() {
+  return schema_object(
+    {
+      agent: schema_field(schema_string(), false),
+      session_id: schema_field(schema_string(), false),
+      root_session_id: schema_field(schema_string(), false),
+      worker_id: schema_field(schema_string(), false),
+      run_id: schema_field(schema_string(), false),
+      task_id: schema_field(schema_string(), false),
+      root_task_id: schema_field(schema_string(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for normalized coordination references.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_ref_schema() {
+  return schema_object(
+    {
+      kind: schema_field(schema_string(), false),
+      ref: schema_field(schema_string(), false),
+      url: schema_field(schema_string(), false),
+      title: schema_field(schema_string(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for durable coordination messages returned by `coord_post`,
+ * `coord_read`, `coord_inbox`, and `coord_wait_reply`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_message_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__COORD_SCHEMA),
+      id: schema_string(),
+      scope: schema_enum(["session", "pipeline", "tenant", "workspace", "task"]),
+      scope_id: schema_string(),
+      room: schema_string(),
+      kind: schema_enum(__COORD_KINDS),
+      from: coord_actor_schema(),
+      to: schema_field(
+        schema_union([schema_string(), coord_actor_schema(), schema_list(schema_any())]),
+        false,
+      ),
+      subject: schema_string(),
+      body: schema_string(),
+      data: schema_field(schema_any(), false),
+      refs: schema_list(coord_ref_schema()),
+      related_ids: schema_list(schema_string()),
+      reply_to: schema_field(schema_string(), false),
+      thread_id: schema_field(schema_string(), false),
+      dedupe_key: schema_field(schema_string(), false),
+      created_at: schema_string(),
+      ttl: schema_field(schema_any(), false),
+      privacy: schema_field(schema_any(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for receipts returned by `coord_post`, `coord_send`,
+ * `coord_request`, and `coord_reply`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_receipt_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__COORD_RECEIPT_SCHEMA),
+      id: schema_string(),
+      event_id: schema_union([schema_string(), schema_int()]),
+      duplicate: schema_bool(),
+      scope: schema_enum(["session", "pipeline", "tenant", "workspace", "task"]),
+      scope_id: schema_string(),
+      room: schema_string(),
+      kind: schema_enum(__COORD_KINDS),
+      subject: schema_string(),
+      channel: schema_dict(schema_any()),
+      message: coord_message_schema(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for event/message wrappers returned by `coord_read` and `coord_inbox`
+ * when callers pass `{include_events: true}`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_event_message_schema() {
+  return schema_object(
+    {event: schema_dict(schema_any()), message: coord_message_schema()},
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __coord_inbox_message_schema() {
+  return schema_union([coord_message_schema(), coord_event_message_schema()])
+}
+
+/**
+ * Schema for `coord_inbox` results.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_inbox_schema() {
+  return schema_object(
+    {
+      consumer_id: schema_string(),
+      from_cursor: schema_field(schema_any(), false),
+      last_scanned_cursor: schema_field(schema_any(), false),
+      next_cursor: schema_field(schema_any(), false),
+      scanned: schema_int(),
+      messages: schema_list(__coord_inbox_message_schema()),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for `coord_wait_reply` results.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_wait_reply_schema() {
+  return schema_object(
+    {
+      status: schema_enum(["matched", "timeout"]),
+      matched: schema_bool(),
+      timed_out: schema_bool(),
+      request_id: schema_string(),
+      thread_id: schema_string(),
+      consumer_id: schema_string(),
+      reply: schema_field(__coord_inbox_message_schema(), false),
+      replies: schema_list(__coord_inbox_message_schema()),
+      inbox: schema_field(coord_inbox_schema(), false),
+      next_cursor: schema_field(schema_any(), false),
+      acknowledged: schema_field(schema_any(), false),
+      elapsed_ms: __coord_number_schema(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Validate a coordination message and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_message_report(value, apply_defaults = false) {
+  return get_typed_report(value, coord_message_schema(), apply_defaults)
+}
+
+/**
+ * Validate a coordination message and return the typed value, throwing on
+ * validation failure.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn coord_message_value(value, apply_defaults = false) {
+  return get_typed_value(value, coord_message_schema(), apply_defaults)
+}
+
+/**
+ * Validate a coordination receipt and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_receipt_report(value, apply_defaults = false) {
+  return get_typed_report(value, coord_receipt_schema(), apply_defaults)
+}
+
+/**
+ * Validate a coordination receipt and return the typed value, throwing on
+ * validation failure.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn coord_receipt_value(value, apply_defaults = false) {
+  return get_typed_value(value, coord_receipt_schema(), apply_defaults)
+}
+
+/**
+ * Validate a coordination inbox result and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_inbox_report(value, apply_defaults = false) {
+  return get_typed_report(value, coord_inbox_schema(), apply_defaults)
+}
+
+/**
+ * Validate a `coord_wait_reply` result and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn coord_wait_reply_report(value, apply_defaults = false) {
+  return get_typed_report(value, coord_wait_reply_schema(), apply_defaults)
+}
 
 fn __coord_string(value) {
   if value == nil {
