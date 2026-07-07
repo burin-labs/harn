@@ -497,11 +497,11 @@ fn install_default_wires_every_module_into_a_vm() {
 fn registered_hostlib_builtins_validate_request_schema_before_handler() {
     permissions::reset();
     let result = execute_harn(
-        r#"
+        r"
 pipeline default(task) {
   return hostlib_tools_run_command({argv: [1]})
 }
-"#,
+",
     );
     let error = match result {
         Err(VmError::Thrown(VmValue::Dict(error))) => error,
