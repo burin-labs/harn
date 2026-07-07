@@ -1,0 +1,141 @@
+// Run: harn test tests/agent/thrash_recovery_test.harn
+//
+// Regression coverage for #3943: a cheap model can repeat the same broad read
+// until the stall detector reaches `thrash_hard_stop`, then recover on the very
+// next model call by reading the exact target file. The loop must give that
+// natural recovery one bounded chance instead of converting it into a final
+// wrapup whose tool call is silently dropped.
+import { agent_capture_events } from "std/agent/events"
+import { AgentLoopOptions } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn toolset() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a command.",
+    {
+      handler: { _args -> "same capped listing" },
+      parameters: {command: {type: "string", description: "Command to run"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + args.path },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn run_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "run", arguments: {command: "ls -R"}}]}
+}
+
+fn look_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "app/Models/Entry.php"}}]}
+}
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
+  with_llm_script(
+    [
+      run_call("r1"),
+      run_call("r2"),
+      look_call("look_recovery"),
+      llm_text("Read the Entry model. ##DONE##"),
+    ],
+    { ->
+      let session = "thrash-recovery-" + uuid()
+      let opts: AgentLoopOptions = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          repeat_same_observation: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 2,
+        },
+      }
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Write tests after inspecting the target model.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      assert(contains(captured.result.tools.successful, "look"), "recovery look should dispatch")
+      let decisions = events_of(captured.events, "loop_control_decision")
+        .filter({ event -> event.reason == "thrash_recovery_continue" })
+      assert_eq(len(decisions), 1)
+      assert_eq(decisions[0].action, "extend")
+      let iteration_ends = events_of(captured.events, "iteration_end")
+        .filter({ event -> event.iteration_info?.skip_reason == "thrash_recovery" })
+      assert_eq(len(iteration_ends), 1)
+      let receipts = events_of(captured.events, "typed_checkpoint")
+        .filter({ event -> event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1" })
+      assert_eq(len(receipts), 1)
+      assert_eq(receipts[0].checkpoint.receipt_kind, "thrash_hard_stop_recovery")
+      assert_eq(receipts[0].checkpoint.reason, "thrash_recovery_continue")
+      assert_eq(receipts[0].checkpoint.warning.pattern, "repeated_same_observation")
+      assert(contains(receipts[0].checkpoint.tool_names, "run"))
+      let calls = llm_mock_calls()
+      let recovery_prompt = json_stringify(calls[2].messages)
+      assert(contains(recovery_prompt, "thrash_recovery"))
+      assert(contains(recovery_prompt, "Do not issue that same call again"))
+    },
+  )
+}
+
+pipeline test_final_wrapup_tool_call_skip_is_observable(task) {
+  let session = "wrapup-tool-skip-" + uuid()
+  let wrapup_counter = shared_cell({scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0})
+  let mock_llm = { call ->
+    if call?.opts?._final_wrapup == true {
+      let snap = shared_snapshot(wrapup_counter)
+      shared_cas(wrapup_counter, snap, snap.value + 1)
+      return {ok: true, value: look_call("wrapup_look") + {provider: "mock", model: "mock"}}
+    }
+    return {ok: true, value: run_call("r1") + {provider: "mock", model: "mock"}}
+  }
+  let opts: AgentLoopOptions = {
+    provider: "mock",
+    tools: toolset(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    done_judge: nil,
+    max_iterations: 1,
+    session_id: session,
+    llm_caller: mock_llm,
+  }
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop("Run out of budget while still trying tools.", nil, opts) },
+  )
+  assert_eq(captured.result.status, "budget_exhausted")
+  assert_eq(shared_get(wrapup_counter), 1)
+  let skipped = events_of(captured.events, "typed_checkpoint")
+    .filter({ event -> event.checkpoint?.kind == "final_wrapup_tool_calls_skipped" })
+  assert_eq(len(skipped), 1)
+  assert_eq(skipped[0].checkpoint.schema, "harn.agent_loop_final_wrapup_receipt.v1")
+  assert_eq(skipped[0].checkpoint.tool_count, 1)
+  assert(contains(skipped[0].checkpoint.tool_names, "look"))
+}
