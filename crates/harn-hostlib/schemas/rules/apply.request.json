@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/rules/apply.request.json",
+  "title": "rules.apply request",
+  "description": "Apply a rule fix in dry-run mode by default, writing only when explicitly requested and safe.",
+  "type": "object",
+  "properties": {
+    "rule": { "type": "string", "minLength": 1 },
+    "source": { "type": "string" },
+    "language": { "type": "string" },
+    "path": { "type": "string" },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "dry_run": { "type": "boolean", "default": true },
+    "allow_unsafe": { "type": "boolean", "default": false },
+    "format": { "type": "boolean", "default": true }
+  },
+  "required": ["rule"],
+  "additionalProperties": false
+}

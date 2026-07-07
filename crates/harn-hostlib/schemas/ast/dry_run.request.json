@@ -99,6 +99,16 @@
               }
             },
             "required": ["op", "symbol_ref", "new_name"]
+          },
+          {
+            "title": "op_rejected_by_handler",
+            "type": "object",
+            "description": "Compatibility lane for unknown or malformed plan ops. `ast.dry_run` rejects these per-op and returns structured `ops[*].result = rejected` instead of failing the whole request before the handler can build a diff bundle.",
+            "properties": {
+              "op": { "type": "string", "minLength": 1 }
+            },
+            "required": ["op"],
+            "additionalProperties": true
           }
         ]
       }

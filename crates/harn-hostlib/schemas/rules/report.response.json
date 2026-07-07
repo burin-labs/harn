@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/rules/report.response.json",
+  "title": "rules.report response",
+  "description": "Data-table report emitted by the harn-rules engine.",
+  "type": "object",
+  "additionalProperties": true
+}

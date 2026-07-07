@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/lint/run.request.json",
+  "title": "lint.run request",
+  "description": "Run the Harn linter over an in-memory source string.",
+  "type": "object",
+  "properties": {
+    "source": { "type": "string" },
+    "disabled": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "severity": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["error", "warning", "warn", "info"]
+      }
+    }
+  },
+  "required": ["source"],
+  "additionalProperties": false
+}

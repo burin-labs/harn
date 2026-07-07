@@ -1158,6 +1158,79 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/embed/info.response.json"),
     ),
+    // Extension hostlibs registered through HostlibRegistry.
+    (
+        "rules",
+        "search",
+        SchemaKind::Request,
+        include_str!("../schemas/rules/search.request.json"),
+    ),
+    (
+        "rules",
+        "search",
+        SchemaKind::Response,
+        include_str!("../schemas/rules/search.response.json"),
+    ),
+    (
+        "rules",
+        "report",
+        SchemaKind::Request,
+        include_str!("../schemas/rules/report.request.json"),
+    ),
+    (
+        "rules",
+        "report",
+        SchemaKind::Response,
+        include_str!("../schemas/rules/report.response.json"),
+    ),
+    (
+        "rules",
+        "diagnostics",
+        SchemaKind::Request,
+        include_str!("../schemas/rules/diagnostics.request.json"),
+    ),
+    (
+        "rules",
+        "diagnostics",
+        SchemaKind::Response,
+        include_str!("../schemas/rules/diagnostics.response.json"),
+    ),
+    (
+        "rules",
+        "apply",
+        SchemaKind::Request,
+        include_str!("../schemas/rules/apply.request.json"),
+    ),
+    (
+        "rules",
+        "apply",
+        SchemaKind::Response,
+        include_str!("../schemas/rules/apply.response.json"),
+    ),
+    (
+        "rules",
+        "fold",
+        SchemaKind::Request,
+        include_str!("../schemas/rules/fold.request.json"),
+    ),
+    (
+        "rules",
+        "fold",
+        SchemaKind::Response,
+        include_str!("../schemas/rules/fold.response.json"),
+    ),
+    (
+        "lint",
+        "run",
+        SchemaKind::Request,
+        include_str!("../schemas/lint/run.request.json"),
+    ),
+    (
+        "lint",
+        "run",
+        SchemaKind::Response,
+        include_str!("../schemas/lint/run.response.json"),
+    ),
 ];
 
 /// Look up a single schema as raw JSON text.
@@ -1255,7 +1328,7 @@ fn normalize_request_arg(
         param: "request",
     })?;
     match first {
-        VmValue::Dict(map) => Ok(VmValue::Dict(map.clone())),
+        VmValue::Dict(map) => Ok(prune_nil_dict_fields(&VmValue::Dict(map.clone()))),
         VmValue::String(feature) if (module, method) == ("tools", "enable") => {
             let mut normalized = harn_vm::value::DictMap::new();
             normalized.put_str("feature", feature.to_string());
@@ -1266,5 +1339,81 @@ fn normalize_request_arg(
             param: "request",
             message: format!("expected a dict request body, got {}", other.type_name()),
         }),
+    }
+}
+
+fn prune_nil_dict_fields(value: &VmValue) -> VmValue {
+    match value {
+        VmValue::Dict(map) => {
+            let mut pruned = harn_vm::value::DictMap::new();
+            for (key, child) in map.iter() {
+                if matches!(child, VmValue::Nil) {
+                    continue;
+                }
+                pruned.insert(key.clone(), prune_nil_dict_fields(child));
+            }
+            VmValue::dict_map(pruned)
+        }
+        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
+            items.iter().map(prune_nil_dict_fields).collect(),
+        )),
+        VmValue::Set(items) => VmValue::set(items.items().iter().map(prune_nil_dict_fields)),
+        other => other.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use harn_vm::VmValue;
+
+    use super::*;
+
+    #[test]
+    fn request_validation_prunes_nil_optional_fields() {
+        let request = VmValue::dict([
+            ("session_id", VmValue::string("session-1")),
+            ("scope_id", VmValue::string("scope-1")),
+            ("root", VmValue::Nil),
+        ]);
+
+        let validated = validate_request_args("hostlib_fs_snapshot", "fs", "snapshot", &[request])
+            .expect("nil optional root should be omitted before schema validation");
+        let fields = validated.as_dict().expect("validated request is a dict");
+        assert!(fields.get("root").is_none());
+        assert_eq!(
+            fields.get("session_id").map(VmValue::display),
+            Some("session-1".to_string())
+        );
+    }
+
+    #[test]
+    fn dry_run_request_schema_allows_handler_rejected_plan_ops() {
+        let unknown = VmValue::dict([
+            ("op", VmValue::string("blow_up_the_world")),
+            ("path", VmValue::string("multi.txt")),
+        ]);
+        let request = VmValue::dict([("plan", VmValue::List(Arc::new(vec![unknown])))]);
+
+        validate_request_args("hostlib_ast_dry_run", "ast", "dry_run", &[request])
+            .expect("dry_run unknown ops must reach the handler for structured rejection");
+    }
+
+    #[test]
+    fn extension_hostlib_rules_search_has_request_schema() {
+        let request = VmValue::dict([
+            (
+                "rule",
+                VmValue::string(
+                    "id = \"noop\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$X\"",
+                ),
+            ),
+            ("source", VmValue::string("foo();")),
+            ("language", VmValue::string("typescript")),
+        ]);
+
+        validate_request_args("hostlib_rules_search", "rules", "search", &[request])
+            .expect("rules.search should be covered by the shared hostlib schema catalog");
     }
 }
