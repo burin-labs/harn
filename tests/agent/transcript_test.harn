@@ -3,8 +3,12 @@
 // Canonical transcript normalization tests. These cover the shapes produced by
 // modern provider-native agent loops and by older JSONL scorer fixtures.
 import {
+  agent_transcript_issue_schema,
   agent_transcript_normalize,
+  agent_transcript_normalize_report,
   agent_transcript_read,
+  agent_transcript_report_schema,
+  agent_transcript_row_schema,
   agent_transcript_text,
   agent_transcript_tool_call,
   agent_transcript_tool_events,
@@ -12,6 +16,7 @@ import {
   agent_transcript_tool_results,
 } from "std/agent/transcript"
 import { write_jsonl } from "std/jsonl"
+import { is_type } from "std/schema"
 import { with_temp_dir } from "std/testing"
 
 pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
@@ -54,6 +59,10 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
   assert(rows[2].kind == "tool_result", "tool message becomes tool_result row")
   assert(rows[2].name == "look", "tool result name")
   assert(rows[2].tool_call_id == "call-look", "tool result id")
+  let report = agent_transcript_normalize_report(records)
+  assert(report.ok, "valid transcript report passes")
+  assert(is_type(report.rows[1], agent_transcript_row_schema()), "assistant row satisfies schema")
+  assert(is_type(report, agent_transcript_report_schema()), "report satisfies schema")
 }
 
 pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(_task) {
@@ -178,4 +187,28 @@ pipeline test_agent_transcript_read_jsonl(_task) {
       assert(rows[0].tool_calls[0].args.path == "a", "read JSONL normalizes calls")
     },
   )
+}
+
+pipeline test_agent_transcript_report_surfaces_malformed_records(_task) {
+  let report = agent_transcript_normalize_report(
+    [
+      42,
+      {type: "unknown_envelope", role: "observer", content: "side channel"},
+      {type: "message", role: "assistant", message: {tool_calls: [{arguments: "{\"path\":\"a\"}"}]}},
+      {type: "message", role: "assistant", message: {tool_calls: [{name: "run", arguments: "{bad"}]}},
+      {type: "message", role: "assistant", message: {tool_calls: [{name: "edit", args: ["not", "dict"]}]}},
+    ],
+  )
+  let issue_text = json_stringify(report.issues)
+  assert(!report.ok, "malformed transcript report fails")
+  assert(len(report.rows) == 3, "recognized assistant rows still normalize")
+  assert(contains(issue_text, "record_not_object"), "non-object record is loud")
+  assert(contains(issue_text, "unrecognized_record"), "unknown record shape is loud")
+  assert(contains(issue_text, "tool_call_missing_name"), "nameless tool call is loud")
+  assert(contains(issue_text, "tool_call_args_unparsed"), "bad JSON arguments are loud")
+  assert(contains(issue_text, "tool_call_args_not_object"), "non-object arguments are loud")
+  assert(report.invalid_count == len(report.issues), "invalid count matches issue count")
+  assert(report.invalid_count >= 5, "all malformed inputs are reported")
+  assert(is_type(report.issues[0], agent_transcript_issue_schema()), "issue satisfies schema")
+  assert(is_type(report, agent_transcript_report_schema()), "invalid report still satisfies schema")
 }
