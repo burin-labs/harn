@@ -57,7 +57,7 @@ mod openbsd;
 mod windows;
 
 const HANDLER_SANDBOX_ENV: &str = "HARN_HANDLER_SANDBOX";
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const MAX_SCOPED_PATH_COMPONENTS: usize = 256;
 
 thread_local! {
@@ -625,7 +625,15 @@ fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) ->
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
+    let (parent, file_name) = win_scoped_parent(target, true)?;
+    let full = parent.join(&file_name);
+    win_reject_reparse_leaf(&full)?;
+    atomic_write_unscoped(&full, contents)
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
     let full = target.root.join(&target.relative);
     if let Some(parent) = full.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -650,7 +658,15 @@ fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::R
     file.write_all(contents)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
+    let (parent, file_name) = win_scoped_parent(target, true)?;
+    let full = parent.join(&file_name);
+    win_reject_reparse_leaf(&full)?;
+    append_unscoped(&full, contents)
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn append_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
     let full = target.root.join(&target.relative);
     if let Some(parent) = full.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -681,7 +697,18 @@ fn copy_scoped_target(src: &Path, target: &ScopedMutationTarget) -> io::Result<u
     Ok(copied)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn copy_scoped_target(src: &Path, target: &ScopedMutationTarget) -> io::Result<u64> {
+    // Copy destinations keep the "parent must already exist" contract, so the
+    // walk does not auto-create (create_parents = false), matching the unix
+    // `open_parent_dir_scoped` path.
+    let (parent, file_name) = win_scoped_parent(target, false)?;
+    let full = parent.join(&file_name);
+    win_reject_reparse_leaf(&full)?;
+    std::fs::copy(src, full)
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn copy_scoped_target(src: &Path, target: &ScopedMutationTarget) -> io::Result<u64> {
     std::fs::copy(src, target.root.join(&target.relative))
 }
@@ -702,7 +729,18 @@ fn rename_scoped_targets(src: &ScopedMutationTarget, dst: &ScopedMutationTarget)
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn rename_scoped_targets(src: &ScopedMutationTarget, dst: &ScopedMutationTarget) -> io::Result<()> {
+    // No `win_reject_reparse_leaf` on the leaves here: rename operates on the
+    // directory entry (the name), not by traversing through the target, and may
+    // legitimately move/replace a reparse point. The junction-traversal defense
+    // is the ancestor-chain validation in `win_scoped_parent`.
+    let (src_parent, src_name) = win_scoped_parent(src, false)?;
+    let (dst_parent, dst_name) = win_scoped_parent(dst, false)?;
+    std::fs::rename(src_parent.join(&src_name), dst_parent.join(&dst_name))
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn rename_scoped_targets(src: &ScopedMutationTarget, dst: &ScopedMutationTarget) -> io::Result<()> {
     std::fs::rename(src.root.join(&src.relative), dst.root.join(&dst.relative))
 }
@@ -717,7 +755,19 @@ fn create_dir_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn create_dir_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
+    // Single `mkdir` keeps the "parent must already exist" contract; only the
+    // leaf is created, after verifying no ancestor is a junction/symlink. No
+    // `win_reject_reparse_leaf` on the leaf: `CreateDirectoryW` creates a NEW
+    // name and fails `AlreadyExists` if anything (reparse point or not) already
+    // occupies it — it never writes *through* an existing leaf — so the
+    // ancestor-chain validation is the whole defense.
+    let (parent, file_name) = win_scoped_parent(target, false)?;
+    win_create_dir_raw(&parent.join(&file_name))
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn create_dir_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
     std::fs::create_dir(target.root.join(&target.relative))
 }
@@ -742,7 +792,16 @@ fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()>
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
+    // `mkdir -p`: every component (including the leaf) is created, and each is
+    // verified not to be a reparse point (junction/symlink) as the walk descends.
+    let components = win_clean_relative_components(&target.relative)?;
+    win_walk_components(&target.root, &components, true)?;
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
     std::fs::create_dir_all(target.root.join(&target.relative))
 }
@@ -976,6 +1035,234 @@ fn c_name(name: &str) -> io::Result<std::ffi::CString> {
             format!("path component contains NUL: {name:?}"),
         )
     })
+}
+
+// ---------------------------------------------------------------------------
+// Windows scoped-walk primitives (junction/symlink-safe directory descent).
+//
+// Windows has no `openat`, and `O_NOFOLLOW` has no equivalent that a plain
+// `std::fs` path open honors — worse, a *junction* (mount-point reparse point)
+// IS a directory and is creatable by a non-admin user, so it slips past every
+// "is this a symlink" check that only inspects the leaf. The unix path defends
+// the whole chain by opening each component `O_NOFOLLOW`; the Windows path here
+// mirrors that by opening each walked component with
+// `FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS` (so the reparse
+// point itself is opened, not its target) and refusing the walk the moment any
+// component reports a mount-point or symlink reparse tag. See
+// research/scoped-fs-mkdir-footguns (#12, RedirectionGuard) for the class.
+//
+// Residual, Windows-CI-only: because there is no handle-relative openat here,
+// each component is re-resolved by string as the walk descends, so a
+// concurrent attacker who swaps an *already-validated* ancestor for a junction
+// between our check and the next open is not fully closed (the unix fd-walk is;
+// the true fix is `NtCreateFile` with a `RootDirectory` handle). The
+// intermediate-junction class the acceptance test covers IS closed.
+// ---------------------------------------------------------------------------
+
+/// Reparse tags Windows assigns to the two "traverses out of the tree"
+/// reparse-point kinds the scoped walk must refuse. Defined locally so the
+/// module does not need the `Win32_System_SystemServices` feature just for two
+/// stable ABI constants.
+#[cfg(windows)]
+const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+#[cfg(windows)]
+const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000_000C;
+
+#[cfg(windows)]
+fn win_wide(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// Refuse `path` if it is a mount-point or symlink reparse point. The handle is
+/// opened with `FILE_FLAG_OPEN_REPARSE_POINT` so we inspect the reparse point
+/// itself rather than following it, and `FILE_FLAG_BACKUP_SEMANTICS` so a
+/// directory handle is permitted. A `NotFound` error is propagated unchanged so
+/// callers can distinguish "does not exist yet" (create it) from "exists and is
+/// hostile" (refuse).
+#[cfg(windows)]
+fn win_reject_reparse_point(path: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FileAttributeTagInfo, GetFileInformationByHandleEx,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING,
+    };
+
+    // Query attributes only; no read/write access to the object is needed.
+    const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+
+    let wide = win_wide(path);
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileAttributeTagInfo,
+            std::ptr::from_mut(&mut info).cast(),
+            std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    };
+    let result = if ok == 0 {
+        Err(io::Error::last_os_error())
+    } else if info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        && matches!(
+            info.ReparseTag,
+            IO_REPARSE_TAG_MOUNT_POINT | IO_REPARSE_TAG_SYMLINK
+        )
+    {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "sandbox scoped walk refuses reparse-point (junction/symlink) component: {}",
+                path.display()
+            ),
+        ))
+    } else {
+        Ok(())
+    };
+    unsafe {
+        CloseHandle(handle);
+    }
+    result
+}
+
+/// A reparse point that squats on a *leaf* target name is refused; a leaf that
+/// simply does not exist yet is fine (the caller is about to create it).
+#[cfg(windows)]
+fn win_reject_reparse_leaf(path: &Path) -> io::Result<()> {
+    match win_reject_reparse_point(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+/// Low-level `CreateDirectoryW` used by the scoped walk. Kept raw (rather than
+/// `std::fs::create_dir`) so the recurrence-guard lint can assert the scoped
+/// Windows walk never reaches for a path-based `std::fs` mutation.
+#[cfg(windows)]
+fn win_create_dir_raw(path: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+    let wide = win_wide(path);
+    let ok = unsafe { CreateDirectoryW(wide.as_ptr(), std::ptr::null()) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Windows analogue of [`clean_relative_components`]: reject `..`, absolute, and
+/// drive-prefixed components, cap the depth, and refuse embedded NULs — keeping
+/// the same invariants the unix walk enforces before descending.
+#[cfg(windows)]
+fn win_clean_relative_components(path: &Path) -> io::Result<Vec<std::ffi::OsString>> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let mut out: Vec<std::ffi::OsString> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => {
+                if value.encode_wide().any(|unit| unit == 0) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("path component contains NUL: {}", path.display()),
+                    ));
+                }
+                out.push(value.to_os_string());
+                if out.len() > MAX_SCOPED_PATH_COMPONENTS {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "sandbox scoped path exceeds {MAX_SCOPED_PATH_COMPONENTS} components: {}",
+                            path.display()
+                        ),
+                    ));
+                }
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("sandbox scoped path must stay relative: {}", path.display()),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Descend `root` through `components`, refusing any component that is a
+/// junction/symlink reparse point. When `create` is set, missing directories
+/// are created (`mkdir -p`) and re-validated immediately, so a directory we
+/// just made cannot be a reparse point. Returns the validated deepest path.
+#[cfg(windows)]
+fn win_walk_components(
+    root: &Path,
+    components: &[std::ffi::OsString],
+    create: bool,
+) -> io::Result<PathBuf> {
+    // The configured workspace root is trusted, but verify it resolves to a real
+    // directory and is not itself a reparse point, mirroring the unix
+    // `open_dir_absolute` `O_NOFOLLOW` open of the root.
+    win_reject_reparse_point(root)?;
+    let mut current = root.to_path_buf();
+    for component in components {
+        current.push(component);
+        match win_reject_reparse_point(&current) {
+            Ok(()) => {}
+            Err(err) if create && err.kind() == io::ErrorKind::NotFound => {
+                match win_create_dir_raw(&current) {
+                    Ok(()) => {}
+                    // A concurrent creator won the race; tolerate and re-validate.
+                    Err(mkerr) if mkerr.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(mkerr) => return Err(mkerr),
+                }
+                win_reject_reparse_point(&current)?;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(current)
+}
+
+/// Validate the ancestor chain of a scoped target on Windows and return the
+/// verified `(parent_dir, leaf_name)`. With `create_parents`, missing ancestors
+/// are created; without it, the parent must already exist (structural ops).
+#[cfg(windows)]
+fn win_scoped_parent(
+    target: &ScopedMutationTarget,
+    create_parents: bool,
+) -> io::Result<(PathBuf, std::ffi::OsString)> {
+    let mut components = win_clean_relative_components(&target.relative)?;
+    let file_name = components.pop().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "sandbox scoped open requires a file name: {}",
+                target.relative.display()
+            ),
+        )
+    })?;
+    let parent = win_walk_components(&target.root, &components, create_parents)?;
+    Ok((parent, file_name))
 }
 
 pub fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
@@ -2354,6 +2641,180 @@ mod tests {
         );
     }
 
+    // ----------------------------------------------------------------------
+    // (a) Windows junctions: a junction IS a directory (non-admin creatable),
+    // so it bypasses every leaf-only symlink check. The scoped walk must refuse
+    // it as an intermediate component. Junctions (mount points) need no admin
+    // rights, so `mklink /J` works in CI; NTFS symlinks would need elevation.
+    // ----------------------------------------------------------------------
+    #[cfg(windows)]
+    #[test]
+    fn scoped_walk_refuses_junction_intermediate_component() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(workspace.path().join("a")).unwrap();
+        let link = workspace.path().join("a").join("b");
+        let status = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link)
+            .arg(outside.path())
+            .status()
+            .expect("spawn mklink /J");
+        assert!(status.success(), "mklink /J failed to plant a junction");
+
+        let target = ScopedMutationTarget {
+            root: workspace.path().to_path_buf(),
+            relative: PathBuf::from("a/b/c/plan.json"),
+        };
+        let error = win_scoped_parent(&target, true).unwrap_err();
+
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::PermissionDenied,
+            "junction intermediate must be refused, got {error}"
+        );
+        assert!(
+            !outside.path().join("c").exists(),
+            "walk must not create through a junction; error={error}"
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // (c) Recurrence-guard lint. runc added a linter after this bug class
+    // recurred; we scan this module's own source so a future edit cannot
+    // silently reintroduce a path-based mutation inside the scoped walk, and so
+    // every scoped leaf open keeps `O_NOFOLLOW`. Two invariants are guarded:
+    //   1. The fd-walk helpers AND the content-open fns (write/append/copy/
+    //      rename/mkdir) never round-trip through a path-based `std::fs`/`libc`
+    //      call — they must stay on the *at primitives so the parent fd carried
+    //      out of the walk (#4210's no-re-resolution contract) is the one the
+    //      write uses. A path-re-resolving write in any of those fns trips this.
+    //   2. Every scoped leaf open, and the directory-descent primitives, pass
+    //      `O_NOFOLLOW`; the Windows walk rejects reparse-point components.
+    //
+    // A source scan (not a `clippy.toml` `disallowed-methods` entry) is used
+    // deliberately: those raw APIs are legitimate elsewhere in this module (the
+    // *unscoped* fallbacks used when no sandbox is active, and the non-unix
+    // fallbacks) and across harn-vm, so a crate-wide clippy ban would be all
+    // false positives; the risky call sites are exactly the functions named
+    // below, which a targeted scan pins precisely.
+    //
+    // Coverage limits (deliberate): the scan is lexical, so it (a) only guards
+    // the *first* (unix) definition of each dual-cfg fn — the unix fd-walk is
+    // where the contract lives; the Windows fallbacks legitimately use `std::fs`
+    // after their own reparse-point validation and are checked structurally via
+    // the `win_walk_components` assertion below — and (b) matches call spellings,
+    // not semantics, so a novel escape hatch (e.g. a freshly `use`-aliased fs fn
+    // under a new name) would need its spelling added here.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn scoped_walk_forbids_raw_path_filesystem_calls() {
+        let src = include_str!("mod.rs");
+        // Anchor every scan to the production region (everything before the test
+        // module) so the guard cannot pass by matching its own denylist literals
+        // or the fixture code below.
+        let production = &src[..src.find("mod tests {").expect("test module marker present")];
+
+        // Return the `{ ... }` body of the first function whose signature line
+        // starts with `sig` (the unix definitions precede the fallbacks, so the
+        // fd-walk / fd-carried versions are the ones scanned).
+        fn fn_body<'a>(src: &'a str, sig: &str) -> &'a str {
+            let start = src
+                .find(sig)
+                .unwrap_or_else(|| panic!("scoped-walk fn not found: {sig}"));
+            let open = start
+                + src[start..]
+                    .find('{')
+                    .unwrap_or_else(|| panic!("no body brace for {sig}"));
+            let bytes = src.as_bytes();
+            let mut depth = 0usize;
+            for (offset, byte) in bytes[open..].iter().enumerate() {
+                match byte {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return &src[open..=open + offset];
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            panic!("unbalanced braces scanning {sig}");
+        }
+
+        // Path-based mutations / resolver shortcuts that must never appear in a
+        // scoped fn: each re-resolves a full path string (re-introducing the
+        // TOCTOU the fd-walk closes) or shortcuts symlink resolution. Bare
+        // `create_dir(`/`rename(` catch `use`-imported (unqualified) calls; the
+        // `std::fs::`-qualified spellings catch the fully-pathed forms not
+        // subsumed by a bare match. `file.write(`/`io::copy(` (fd-based) are NOT
+        // forbidden — only the path-taking `std::fs::write(`/`std::fs::copy(`.
+        const FORBIDDEN: [&str; 10] = [
+            "create_dir_all(",
+            "create_dir(",
+            "File::create(",
+            "OpenOptions",
+            "canonicalize(",
+            "rename(",
+            "remove_dir_all(",
+            "std::fs::write(",
+            "std::fs::copy(",
+            "libc::open(", // a full-path open; the walk uses openat/open_dir_at
+        ];
+        for sig in [
+            // fd-walk helpers.
+            "fn ensure_parent_dirs_scoped(",
+            "fn open_parent_dir_scoped(",
+            "fn create_dir_all_scoped_target(",
+            "fn create_dir_scoped_target(",
+            // content-open fns: this is where #4210's "carry the parent fd into
+            // the write, never re-resolve the path" contract must hold.
+            "fn atomic_write_scoped_target(",
+            "fn append_scoped_target(",
+            "fn copy_scoped_target(",
+            "fn rename_scoped_targets(",
+        ] {
+            let body = fn_body(production, sig);
+            for needle in FORBIDDEN {
+                assert!(
+                    !body.contains(needle),
+                    "{sig} must not use raw `{needle}`; stay on the fd-carried *at path"
+                );
+            }
+        }
+
+        // Every scoped *leaf* open must carry O_NOFOLLOW so it cannot follow a
+        // swapped-in leaf symlink. Skip the `openat_file` wrapper definition
+        // (its flags arrive as a parameter); only the call sites carry literals.
+        for (idx, _) in production.match_indices("openat_file(") {
+            if production[..idx].ends_with("fn ") {
+                continue;
+            }
+            let window = &production[idx..(idx + 300).min(production.len())];
+            assert!(
+                window.contains("O_NOFOLLOW"),
+                "openat_file call site near byte {idx} must pass O_NOFOLLOW"
+            );
+        }
+        // The directory-descent primitives must open O_NOFOLLOW too.
+        for sig in ["fn open_dir_at(", "fn open_dir_absolute("] {
+            assert!(
+                fn_body(production, sig).contains("O_NOFOLLOW"),
+                "{sig} must open directories with O_NOFOLLOW"
+            );
+        }
+
+        // The Windows walk is the platform's O_NOFOLLOW substitute: it must
+        // reject reparse-point (junction/symlink) components as it descends.
+        assert!(
+            fn_body(production, "fn win_walk_components(").contains("win_reject_reparse_point"),
+            "the Windows scoped walk must reject reparse-point components"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn scoped_append_creates_missing_parent_dirs() {
@@ -2372,6 +2833,75 @@ mod tests {
         pop_execution_policy();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"line1\nline2\n".to_vec());
+    }
+
+    // ----------------------------------------------------------------------
+    // (d) Two-thread race on the same auto-create (CVE-2024-45310 class). Both
+    // threads ensure the same deep parent chain concurrently; the loser of each
+    // `mkdirat` sees EEXIST and must tolerate it. All calls must succeed, the
+    // chain must exist exactly once inside the root, and nothing may escape.
+    // ----------------------------------------------------------------------
+    #[cfg(unix)]
+    #[test]
+    fn scoped_parent_autocreate_tolerates_concurrent_creators() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().to_path_buf();
+        let target = ScopedMutationTarget {
+            root: root.clone(),
+            relative: PathBuf::from("race/deep/nested/tree/plan.json"),
+        };
+
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let target = target.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..64 {
+                        // Each call re-walks from the root; the EEXIST branch is
+                        // the one under contention.
+                        ensure_parent_dirs_scoped(&target)
+                            .expect("concurrent ensure must tolerate EEXIST");
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("worker thread panicked");
+        }
+
+        assert!(
+            root.join("race/deep/nested/tree").is_dir(),
+            "the raced parent chain must exist inside the root"
+        );
+        // A final ensure resolves cleanly and yields the leaf name.
+        let (_parent, leaf) = ensure_parent_dirs_scoped(&target).unwrap();
+        assert_eq!(leaf, "plan.json");
+    }
+
+    // A *non-directory* planted as an intermediate component must abort the walk
+    // (ENOTDIR from the O_DIRECTORY open), not be silently mkdir'd over — the
+    // walk descends by opening each level as a directory.
+    #[cfg(unix)]
+    #[test]
+    fn scoped_parent_autocreate_refuses_file_as_intermediate_component() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::create_dir(workspace.path().join("a")).unwrap();
+        std::fs::write(workspace.path().join("a/b"), b"i am a file").unwrap();
+        let target = ScopedMutationTarget {
+            root: workspace.path().to_path_buf(),
+            relative: PathBuf::from("a/b/c/plan.json"),
+        };
+
+        let error = ensure_parent_dirs_scoped(&target).unwrap_err();
+
+        assert_eq!(
+            error.raw_os_error(),
+            Some(libc::ENOTDIR),
+            "a regular-file intermediate must fail with ENOTDIR, got {error:?}"
+        );
+        assert!(
+            !workspace.path().join("a/b/c").exists(),
+            "a non-directory intermediate must not be traversed or created through"
+        );
     }
 
     #[test]
