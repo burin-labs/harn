@@ -95,6 +95,54 @@ pipeline test(task) {
             (identifier)))))))
 
 ==================
+Binding Pattern Defaults
+==================
+
+pipeline test() {
+  const {tool_name = "run", kind = "execute", raw_input = {}} = fixture ?? {}
+  let [first = 1, second] = items
+  var y = 0
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (const_binding
+        name: (dict_pattern
+          (dict_pattern_field
+            (identifier)
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))
+          (dict_pattern_field
+            (identifier)
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))
+          (dict_pattern_field
+            (identifier)
+            (dict_literal)))
+        value: (nil_coalescing_expression
+          (identifier)
+          (dict_literal)))
+      (let_binding
+        name: (list_pattern
+          (list_pattern_element
+            (identifier)
+            (integer_literal))
+          (list_pattern_element
+            (identifier)))
+        value: (identifier))
+      (var_binding
+        name: (identifier)
+        value: (integer_literal)))))
+
+==================
 Ternary List Branches
 ==================
 
