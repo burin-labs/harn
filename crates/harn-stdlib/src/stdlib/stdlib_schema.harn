@@ -126,6 +126,32 @@ pub fn schema_openapi(schema) {
   return schema_to_openapi_schema(schema)
 }
 
+/**
+ * Return a reusable validator object for a schema.
+ *
+ * This is the preferred boundary shape when a harness author needs to validate
+ * several values against the same contract without repeating freeform
+ * `schema_*` calls or hand-written `type_of` guards.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_validator(schema, options = nil) {
+  const default_apply_defaults = options?.apply_defaults ?? false
+  return {
+    schema: schema,
+    is: fn(value) { return schema_is(value, schema) },
+    check: fn(value) { return schema_check(value, schema) },
+    parse: fn(value) { return schema_parse(value, schema) },
+    report: fn(value, apply_defaults = default_apply_defaults) { return schema_report(value, schema, apply_defaults) },
+    expect: fn(value, apply_defaults = default_apply_defaults) { return schema_expect(value, schema, apply_defaults) },
+    errors: fn(value, apply_defaults = default_apply_defaults) { return schema_report(value, schema, apply_defaults).errors },
+    issues: fn(value, apply_defaults = default_apply_defaults) { return schema_report(value, schema, apply_defaults).issues },
+    json_schema: fn() { return schema_to_json_schema(schema) },
+    openapi_schema: fn() { return schema_to_openapi_schema(schema) },
+  }
+}
+
 pub fn from_json_schema(schema) {
   return schema_from_json_schema(schema)
 }

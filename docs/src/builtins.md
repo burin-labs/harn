@@ -201,6 +201,7 @@ literal schema).
 
 The lazy `std/schema` module provides ergonomic builders such as
 `schema_string()`, `schema_object(...)`, `schema_union(...)`,
+`schema_validator(...)`,
 `get_typed_result(...)`, `get_typed_report(...)`, `get_typed_issues(...)`,
 `get_typed_value(...)`, `parse_json_typed_report(...)`,
 `parse_json_typed(...)`, and `is_type(...)`.

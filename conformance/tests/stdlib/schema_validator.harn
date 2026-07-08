@@ -1,0 +1,29 @@
+import "std/schema"
+
+type User = {name: string, role?: string}
+
+pipeline test(task) {
+  const user_schema = schema_object(
+    {
+      name: schema_field(schema_string() + {min_length: 2}),
+      role: schema_default(schema_string(), "user"),
+    },
+    {additional_properties: false},
+  )
+  const validator = schema_validator(user_schema, {apply_defaults: true})
+  __io_println(validator.is({name: "Ada"}))
+  __io_println(is_ok(validator.check({name: "Ada"})))
+  __io_println(unwrap(validator.parse({name: "Ada"})).role)
+  __io_println(validator.report({name: "Ada"}).value.role)
+  __io_println(validator.expect({name: "Ada"}).role)
+  const bad_report = validator.report({name: "A"})
+  __io_println(!bad_report.ok)
+  __io_println(len(bad_report.issues))
+  __io_println(contains(join(validator.errors({name: "A"}), "\n"), "expected length >= 2"))
+  __io_println(json_stringify(validator.issues({name: "A"})).contains("\"path\":\"name\""))
+  __io_println(validator.json_schema().type)
+  __io_println(validator.openapi_schema().type)
+  const alias_validator = schema_validator(User)
+  __io_println(alias_validator.is({name: "Kai"}))
+  __io_println(!alias_validator.is({name: 12}))
+}
