@@ -515,16 +515,23 @@ current live submit/status/download implementation: routes without a live
 adapter are still useful for manifest/prepare dry runs, but need a provider
 adapter before Harn will submit them on the network. `harn models batch
 manifest` turns a JSONL request ledger into a durable, grouped manifest with
-stable request ids and row hashes. `harn models batch prepare` then writes
-provider-native request files plus a deterministic receipt. `harn models batch
-submit` consumes that receipt, validates request-file hashes, dry-runs without
-network calls when requested, and submits supported provider jobs using provider
-API credentials. `harn models batch status` reads the submission receipt and
-polls provider lifecycle state behind the same Harn boundary. `harn models
-batch download` consumes status receipts for completed jobs and writes provider
-result files plus a durable results receipt. Provider batch envelopes,
-submission state, and poll/download/rejoin logic stay in Harn instead of host
-products.
+stable request ids and row hashes. Request rows may set `endpoint` when a
+provider supports more than one batchable route; for example OpenAI-compatible
+rows can use `endpoint: "/v1/responses"` instead of the default
+`/v1/chat/completions`, and Harn carries that endpoint into the prepared JSONL
+line and batch create body. Batch rows must be non-streaming. `stream: true` is
+rejected during manifest/prepare before Harn writes provider request files or
+submits anything, because provider batch APIs return results asynchronously via
+output/error files instead of streaming chunks. `harn models batch prepare` then
+writes provider-native request files plus a deterministic receipt. `harn models
+batch submit` consumes that receipt, validates request-file hashes, dry-runs
+without network calls when requested, and submits supported provider jobs using
+provider API credentials. `harn models batch status` reads the submission
+receipt and polls provider lifecycle state behind the same Harn boundary.
+`harn models batch download` consumes status receipts for completed jobs and
+writes provider result files plus a durable results receipt. Provider batch
+envelopes, submission state, and poll/download/rejoin logic stay in Harn instead
+of host products.
 
 Current live batch adapters cover OpenAI, OpenAI-compatible Groq, Together, and
 Parasail, Gemini File API JSONL batches, Anthropic Messages, Mistral, Fireworks
