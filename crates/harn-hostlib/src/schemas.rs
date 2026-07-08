@@ -1328,7 +1328,7 @@ fn normalize_request_arg(
         param: "request",
     })?;
     match first {
-        VmValue::Dict(map) => Ok(prune_nil_dict_fields(&VmValue::Dict(map.clone()))),
+        VmValue::Dict(map) => Ok(prune_top_level_nil_dict_fields(map)),
         VmValue::String(feature) if (module, method) == ("tools", "enable") => {
             let mut normalized = harn_vm::value::DictMap::new();
             normalized.put_str("feature", feature.to_string());
@@ -1342,24 +1342,15 @@ fn normalize_request_arg(
     }
 }
 
-fn prune_nil_dict_fields(value: &VmValue) -> VmValue {
-    match value {
-        VmValue::Dict(map) => {
-            let mut pruned = harn_vm::value::DictMap::new();
-            for (key, child) in map.iter() {
-                if matches!(child, VmValue::Nil) {
-                    continue;
-                }
-                pruned.insert(key.clone(), prune_nil_dict_fields(child));
-            }
-            VmValue::dict_map(pruned)
+fn prune_top_level_nil_dict_fields(map: &harn_vm::value::DictMap) -> VmValue {
+    let mut pruned = harn_vm::value::DictMap::new();
+    for (key, child) in map.iter() {
+        if matches!(child, VmValue::Nil) {
+            continue;
         }
-        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
-            items.iter().map(prune_nil_dict_fields).collect(),
-        )),
-        VmValue::Set(items) => VmValue::set(items.items().iter().map(prune_nil_dict_fields)),
-        other => other.clone(),
+        pruned.insert(key.clone(), child.clone());
     }
+    VmValue::dict_map(pruned)
 }
 
 #[cfg(test)]
@@ -1389,15 +1380,49 @@ mod tests {
     }
 
     #[test]
+    fn request_validation_does_not_prune_nested_nil_fields() {
+        let request = VmValue::dict([
+            (
+                "argv",
+                VmValue::List(Arc::new(vec![VmValue::string("env")])),
+            ),
+            ("env", VmValue::dict([("FOO", VmValue::Nil)])),
+        ]);
+
+        let err = validate_request_args(
+            "hostlib_tools_run_command",
+            "tools",
+            "run_command",
+            &[request],
+        )
+        .expect_err("nested nil map values must remain visible to schema validation");
+        match err {
+            HostlibError::InvalidParameter { message, .. } => {
+                assert!(
+                    message.contains("env") && message.contains("string"),
+                    "nested env nil should fail as a non-string value, got: {message}"
+                );
+            }
+            other => panic!("expected request validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn dry_run_request_schema_allows_handler_rejected_plan_ops() {
         let unknown = VmValue::dict([
             ("op", VmValue::string("blow_up_the_world")),
             ("path", VmValue::string("multi.txt")),
         ]);
-        let request = VmValue::dict([("plan", VmValue::List(Arc::new(vec![unknown])))]);
+        let missing_op = VmValue::dict_map(harn_vm::value::DictMap::new());
+        let non_string_op = VmValue::dict([("op", VmValue::Int(1))]);
+        let request = VmValue::dict([(
+            "plan",
+            VmValue::List(Arc::new(vec![unknown, missing_op, non_string_op])),
+        )]);
 
-        validate_request_args("hostlib_ast_dry_run", "ast", "dry_run", &[request])
-            .expect("dry_run unknown ops must reach the handler for structured rejection");
+        validate_request_args("hostlib_ast_dry_run", "ast", "dry_run", &[request]).expect(
+            "dry_run unknown/missing/non-string ops must reach the handler for structured rejection",
+        );
     }
 
     #[test]
