@@ -203,7 +203,7 @@ pipeline test_explicit_preset_lane_policy_wins_over_pack_default(task) {
   assert_eq(opts.lane_policy, custom)
 }
 
-// --- Per-stage tool-gate (additive; default-off) -------------------------------
+/** --- Per-stage tool-gate (additive; default-off) ------------------------------- */
 pipeline test_stage_gate_parity_lane_policy_unchanged(task) {
   // ANTI-REGRESSION: adding the stage-gate seam must not perturb the existing
   // `lane_policy` decision path. Re-pin the canonical narrowing + no-narrowing
@@ -282,6 +282,33 @@ pipeline test_stage_gate_kind_gate_uses_resolver(task) {
   const denial = stage_gate_denial(gate, "edit", {kind_of: resolver})
   assert(denial.contains("kind=edit"), "denial reports the resolved kind")
   assert(denial.contains("suggestion="), "denial carries a suggestion")
+}
+
+fn _stage_gate_named_kind(name) {
+  const kinds = {edit: "edit", look: "search", search: "search"}
+  return kinds[name] ?? "other"
+}
+
+fn _stage_gate_named_suggest(_gate) {
+  return "switch to a search tool"
+}
+
+pipeline test_stage_gate_accepts_named_function_callbacks(task) {
+  const gate = {allowed_kinds: ["search"], allowed_tools: [], lane: "read_only", stage: "plan"}
+  assert(
+    stage_gate_allows(gate, "look", {kind_of: _stage_gate_named_kind}),
+    "named function kind_of callback passes the kind gate",
+  )
+  const denial = stage_gate_denial(
+    gate,
+    "edit",
+    {kind_of: _stage_gate_named_kind, suggest: _stage_gate_named_suggest},
+  )
+  assert(denial.contains("kind=edit"), "named kind_of callback resolves the attempted kind")
+  assert(
+    denial.contains("suggestion=switch to a search tool"),
+    "named suggest callback overrides the suggestion",
+  )
 }
 
 pipeline test_stage_gate_rejects_bad_callbacks(task) {
