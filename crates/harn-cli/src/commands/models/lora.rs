@@ -22,6 +22,7 @@ const LORA_CONTRACT_SCHEMA_VERSION: u64 = 2;
 const LORA_CONTRACT_HASH_SCHEMA_VERSION: u64 = 2;
 const LORA_TRAINING_CONTRACT_SCHEMA_VERSION: u64 = 2;
 const LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION: u64 = 1;
+const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 2;
 /// Serialises the dispatch path so concurrent in-process callers do not race on
 /// the env vars that carry the Rust-collected adapter/catalog facts.
 static LORA_RENDER_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -2037,9 +2038,10 @@ pub(super) fn lora_evaluation_recipe(
 fn lora_promotion_evidence_contract(
     input: PromotionEvidenceInput<'_>,
 ) -> PromotionEvidenceContract {
-    let promotion_id = lora_promotion_id(&input);
+    let required_probe_cases = lora_required_probe_cases(input.tool_format);
+    let promotion_id = lora_promotion_id(&input, &required_probe_cases);
     PromotionEvidenceContract {
-        schema_version: 1,
+        schema_version: LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION,
         promotion_id,
         lora_contract_id: input.contract_id.to_string(),
         base_route: PromotionRoute {
@@ -2062,9 +2064,11 @@ fn lora_promotion_evidence_contract(
             "lora_adapter_manifest".to_string(),
             "lora_inspect_report".to_string(),
             "tool_probe_receipt".to_string(),
+            "promotion_probe_matrix_receipt".to_string(),
             "base_eval_receipt".to_string(),
             "adapter_eval_receipt".to_string(),
         ],
+        required_probe_cases,
         optional_batch_receipts: vec![
             "harn.model_batch_manifest".to_string(),
             "harn.model_batch_prepare_receipt".to_string(),
@@ -2117,6 +2121,80 @@ fn lora_promotion_evidence_contract(
     }
 }
 
+fn lora_required_probe_cases(tool_format: &str) -> Vec<PromotionProbeCase> {
+    let tool_surface = match tool_format {
+        "native" => "provider-native structured tool call",
+        "json" => "Harn fenced-JSON text tool-call block accepted by the parser",
+        "text" => "Harn heredoc-capable text tool-call block accepted by the parser",
+        _ => "Harn text tool-call block accepted by the catalog-selected parser",
+    };
+    vec![
+        PromotionProbeCase {
+            id: "sequential_tool_call".to_string(),
+            requirement: "always".to_string(),
+            expected: format!(
+                "adapter-loaded route emits exactly one valid {tool_surface} with the requested tool name and arguments"
+            ),
+            receipt: "tool_probe_receipt.sequential_tool_call".to_string(),
+            rationale: "catches the primary one-tool happy path before aggregate eval scores can hide parser drift"
+                .to_string(),
+        },
+        PromotionProbeCase {
+            id: "parallel_tool_calls".to_string(),
+            requirement: "required_when_route_supports_parallel_tool_calls_else_not_applicable_receipt"
+                .to_string(),
+            expected:
+                "adapter-loaded route emits distinct tool calls with stable ids, names, and arguments when the route advertises parallel tools"
+                    .to_string(),
+            receipt: "tool_probe_receipt.parallel_tool_calls".to_string(),
+            rationale:
+                "prevents a LoRA from passing on sequential fixtures while breaking the advertised parallel contract"
+                    .to_string(),
+        },
+        PromotionProbeCase {
+            id: "no_tool_answer".to_string(),
+            requirement: "always".to_string(),
+            expected: "adapter-loaded route answers a non-tool prompt without emitting any tool call"
+                .to_string(),
+            receipt: "tool_probe_receipt.no_tool_answer".to_string(),
+            rationale: "guards against over-triggered tool calls from narrow tool-call fine-tuning"
+                .to_string(),
+        },
+        PromotionProbeCase {
+            id: "unavailable_tool_repair".to_string(),
+            requirement: "always".to_string(),
+            expected:
+                "adapter-loaded route recovers when the requested tool is absent instead of fabricating an unavailable tool call"
+                    .to_string(),
+            receipt: "tool_probe_receipt.unavailable_tool_repair".to_string(),
+            rationale:
+                "keeps tool selection grounded in the served schema rather than the training corpus inventory"
+                    .to_string(),
+        },
+        PromotionProbeCase {
+            id: "multi_turn_tool_result_continuation".to_string(),
+            requirement: "always".to_string(),
+            expected:
+                "adapter-loaded route consumes a tool result and continues the same task without repeating or orphaning the prior call"
+                    .to_string(),
+            receipt: "tool_probe_receipt.multi_turn_tool_result_continuation".to_string(),
+            rationale: "covers transcript lifecycle behavior that single-turn tool probes cannot observe"
+                .to_string(),
+        },
+        PromotionProbeCase {
+            id: "serving_concurrency_probe".to_string(),
+            requirement: "required_for_adapter_loaded_serving_else_not_applicable_receipt"
+                .to_string(),
+            expected:
+                "adapter-loaded serving route preserves adapter binding, parser mode, and request ids across concurrent probe requests"
+                    .to_string(),
+            receipt: "tool_probe_receipt.serving_concurrency_probe".to_string(),
+            rationale: "separates offline adapter quality from serving-path adapter and parser isolation"
+                .to_string(),
+        },
+    ]
+}
+
 struct PromotionEvidenceInput<'a> {
     contract_id: &'a str,
     base_model: &'a str,
@@ -2129,10 +2207,13 @@ struct PromotionEvidenceInput<'a> {
     gates: &'a [String],
 }
 
-fn lora_promotion_id(input: &PromotionEvidenceInput<'_>) -> String {
+fn lora_promotion_id(
+    input: &PromotionEvidenceInput<'_>,
+    required_probe_cases: &[PromotionProbeCase],
+) -> String {
     let mut hasher = Sha256::new();
     for part in [
-        "harn_lora_promotion_v1",
+        "harn_lora_promotion_v2",
         input.contract_id,
         input.base_model,
         input.provider,
@@ -2152,6 +2233,10 @@ fn lora_promotion_id(input: &PromotionEvidenceInput<'_>) -> String {
         hasher.update(gate.as_bytes());
         hasher.update([0]);
     }
+    let probe_case_bytes = serde_json::to_vec(required_probe_cases)
+        .expect("promotion probe cases are JSON-serializable");
+    hasher.update(probe_case_bytes);
+    hasher.update([0]);
     format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
@@ -2609,9 +2694,19 @@ struct PromotionEvidenceContract {
     eval_dataset: String,
     minimum_trials: u64,
     required_receipts: Vec<String>,
+    required_probe_cases: Vec<PromotionProbeCase>,
     optional_batch_receipts: Vec<String>,
     batch_ready: PromotionBatchReady,
     acceptance: PromotionAcceptance,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct PromotionProbeCase {
+    id: String,
+    requirement: String,
+    expected: String,
+    receipt: String,
+    rationale: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -3089,6 +3184,10 @@ mod tests {
             .collect::<Vec<_>>()
         );
         let evidence = &report.evaluation.evidence_contract;
+        assert_eq!(
+            evidence.schema_version,
+            LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION
+        );
         assert!(evidence.promotion_id.starts_with("sha256:"));
         assert_eq!(evidence.base_route.model, report.base.id);
         assert_eq!(evidence.adapter_route.model, "ADAPTER_MODEL");
@@ -3097,6 +3196,32 @@ mod tests {
             .required_receipts
             .iter()
             .any(|receipt| receipt == "lora_adapter_manifest"));
+        assert!(evidence
+            .required_receipts
+            .iter()
+            .any(|receipt| receipt == "promotion_probe_matrix_receipt"));
+        let probe_case_ids = evidence
+            .required_probe_cases
+            .iter()
+            .map(|probe_case| probe_case.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            probe_case_ids,
+            [
+                "sequential_tool_call",
+                "parallel_tool_calls",
+                "no_tool_answer",
+                "unavailable_tool_repair",
+                "multi_turn_tool_result_continuation",
+                "serving_concurrency_probe",
+            ]
+        );
+        assert!(evidence.required_probe_cases.iter().any(|probe_case| {
+            probe_case.id == "parallel_tool_calls"
+                && probe_case
+                    .requirement
+                    .contains("required_when_route_supports_parallel_tool_calls")
+        }));
         assert!(evidence
             .optional_batch_receipts
             .iter()
@@ -3128,13 +3253,44 @@ mod tests {
             required_metrics: &metrics,
             gates: &original_gates,
         };
-        let original_id = lora_promotion_id(&original);
+        let required_probe_cases = lora_required_probe_cases(original.tool_format);
+        let original_id = lora_promotion_id(&original, &required_probe_cases);
         let tightened = PromotionEvidenceInput {
             gates: &tightened_gates,
             ..original
         };
 
-        assert_ne!(original_id, lora_promotion_id(&tightened));
+        assert_ne!(
+            original_id,
+            lora_promotion_id(&tightened, &required_probe_cases)
+        );
+    }
+
+    #[test]
+    fn lora_promotion_id_tracks_probe_matrix_drift() {
+        let metrics = vec!["exact tool-name + argument match rate".to_string()];
+        let gates = vec!["require a positive paired lift".to_string()];
+        let input = PromotionEvidenceInput {
+            contract_id: "sha256:contract",
+            base_model: "base",
+            provider: "vllm",
+            request_model: "adapter",
+            tool_format: "json",
+            eval_dataset: "tool-calls",
+            minimum_trials: 5,
+            required_metrics: &metrics,
+            gates: &gates,
+        };
+        let required_probe_cases = lora_required_probe_cases(input.tool_format);
+        let mut changed_probe_cases = required_probe_cases.clone();
+        changed_probe_cases[0]
+            .expected
+            .push_str(" with stable ordering");
+
+        assert_ne!(
+            lora_promotion_id(&input, &required_probe_cases),
+            lora_promotion_id(&input, &changed_probe_cases)
+        );
     }
 
     #[test]
