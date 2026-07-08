@@ -360,7 +360,14 @@ pub async fn run_command_policy_preflight_with_ctx(
     }
 
     if let Some(matched) = first_deny_pattern(&policy, &context) {
-        let msg = format!("command denied by policy pattern {matched:?}");
+        let msg = if matched.candidate == command_text(&context) {
+            format!("command denied by policy pattern {:?}", matched.pattern)
+        } else {
+            format!(
+                "command segment {:?} denied by policy pattern {:?}",
+                matched.candidate, matched.pattern
+            )
+        };
         let decision = decision("deny", Some(msg.clone()), "deny_patterns", Vec::new(), 1.0);
         decisions.push(decision);
         return Ok(CommandPolicyPreflight::Blocked {
@@ -1254,13 +1261,56 @@ fn hard_deny_decision(
     None
 }
 
-fn first_deny_pattern(policy: &CommandPolicy, ctx: &JsonValue) -> Option<String> {
-    let text = command_text(ctx);
-    policy
-        .deny_patterns
-        .iter()
-        .find(|pattern| glob_or_contains(pattern, &text))
-        .cloned()
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DenyPatternMatch {
+    pattern: String,
+    candidate: String,
+}
+
+fn first_deny_pattern(policy: &CommandPolicy, ctx: &JsonValue) -> Option<DenyPatternMatch> {
+    let candidates = deny_pattern_candidates(ctx);
+    policy.deny_patterns.iter().find_map(|pattern| {
+        candidates
+            .iter()
+            .filter(|candidate| deny_pattern_matches(pattern, candidate))
+            .min_by_key(|candidate| candidate.len())
+            .map(|candidate| DenyPatternMatch {
+                pattern: pattern.clone(),
+                candidate: candidate.clone(),
+            })
+    })
+}
+
+fn deny_pattern_candidates(ctx: &JsonValue) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let command = floor_command_text(ctx);
+    for candidate in catastrophic::command_segments(&command) {
+        push_deny_pattern_candidate(&mut candidates, candidate);
+    }
+    push_deny_pattern_candidate(&mut candidates, command.clone());
+    let legacy_command = command_text(ctx);
+    if legacy_command != command {
+        for candidate in catastrophic::command_segments(&legacy_command) {
+            push_deny_pattern_candidate(&mut candidates, candidate);
+        }
+        push_deny_pattern_candidate(&mut candidates, legacy_command);
+    }
+    candidates
+}
+
+fn push_deny_pattern_candidate(candidates: &mut Vec<String>, candidate: String) {
+    let candidate = candidate.trim();
+    if !candidate.is_empty() && !candidates.iter().any(|existing| existing == candidate) {
+        candidates.push(candidate.to_string());
+    }
+}
+
+fn deny_pattern_matches(pattern: &str, candidate: &str) -> bool {
+    if pattern.contains('*') {
+        super::glob_match(pattern, candidate)
+    } else {
+        candidate.contains(pattern)
+    }
 }
 
 fn command_text(ctx: &JsonValue) -> String {
@@ -2076,25 +2126,6 @@ fn under_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))
 }
 
-fn glob_or_contains(pattern: &str, text: &str) -> bool {
-    if super::glob_match(pattern, text) {
-        return true;
-    }
-    if pattern.contains('*') {
-        let parts = pattern.split('*').filter(|part| !part.is_empty());
-        let mut rest = text;
-        for part in parts {
-            let Some(index) = rest.find(part) else {
-                return false;
-            };
-            rest = &rest[index + part.len()..];
-        }
-        true
-    } else {
-        text.contains(pattern)
-    }
-}
-
 fn redact_json_for_llm(value: &JsonValue) -> JsonValue {
     match value {
         JsonValue::Object(map) => JsonValue::Object(
@@ -2293,6 +2324,49 @@ mod catastrophic {
     /// blocking reason paired with its [`Category`].
     pub(super) fn reason(command: &str, workspace_roots: &[String]) -> Option<(String, Category)> {
         reason_inner(command, workspace_roots, 0)
+    }
+
+    pub(super) fn command_segments(command: &str) -> Vec<String> {
+        command_segments_inner(command, 0)
+    }
+
+    fn command_segments_inner(command: &str, depth: usize) -> Vec<String> {
+        if depth > MAX_DEPTH {
+            return Vec::new();
+        }
+        let mut segments = Vec::new();
+        for segment in split_chained_command(command) {
+            push_unique(&mut segments, segment.trim());
+            let tokens = shell_words(&segment);
+            let mut start = 0;
+            while start < tokens.len() {
+                let end = next_pipeline_boundary(&tokens, start);
+                if start < end {
+                    push_unique(&mut segments, &tokens[start..end].join(" "));
+                    let command_index = unwrapped_command_index(&tokens, start, end);
+                    if command_index < end {
+                        let command = command_basename(&tokens[command_index]);
+                        if matches!(command, "bash" | "sh" | "zsh") {
+                            if let Some(script) = shell_c_script(&tokens[(command_index + 1)..end])
+                            {
+                                for inner in command_segments_inner(script, depth + 1) {
+                                    push_unique(&mut segments, &inner);
+                                }
+                            }
+                        }
+                    }
+                }
+                start = end + 1;
+            }
+        }
+        segments
+    }
+
+    fn push_unique(values: &mut Vec<String>, value: &str) {
+        let value = value.trim();
+        if !value.is_empty() && !values.iter().any(|existing| existing == value) {
+            values.push(value.to_string());
+        }
     }
 
     fn reason_inner(command: &str, roots: &[String], depth: usize) -> Option<(String, Category)> {
@@ -3290,6 +3364,17 @@ mod tests {
         })
     }
 
+    fn shell_ctx(command: &str) -> JsonValue {
+        serde_json::json!({
+            "request": {
+                "mode": "shell",
+                "command": command,
+                "cwd": "/tmp/work",
+            },
+            "workspace_roots": ["/tmp/work"],
+        })
+    }
+
     fn labels(scan: &JsonValue) -> Vec<String> {
         scan["risk_labels"]
             .as_array()
@@ -3387,22 +3472,59 @@ mod tests {
 
     #[test]
     fn deny_patterns_are_glob_or_substring_matches() {
-        let policy = CommandPolicy {
+        let policy = deny_pattern_policy(&["*rm -rf*"]);
+        assert_eq!(
+            first_deny_pattern(&policy, &ctx(&["sh", "-c", "echo ok; rm -rf build"])),
+            Some(DenyPatternMatch {
+                pattern: "*rm -rf*".to_string(),
+                candidate: "rm -rf build".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn deny_patterns_match_top_level_shell_segments() {
+        let policy = deny_pattern_policy(&["echo *", "cat *"]);
+        assert_eq!(
+            first_deny_pattern(&policy, &shell_ctx("dotnet test && echo tests/path")),
+            Some(DenyPatternMatch {
+                pattern: "echo *".to_string(),
+                candidate: "echo tests/path".to_string(),
+            })
+        );
+        assert_eq!(
+            first_deny_pattern(&policy, &shell_ctx("go test ./... | cat result.txt")),
+            Some(DenyPatternMatch {
+                pattern: "cat *".to_string(),
+                candidate: "cat result.txt".to_string(),
+            })
+        );
+        assert_eq!(
+            first_deny_pattern(&policy, &ctx(&["sh", "-c", "dotnet test && echo ok"])),
+            Some(DenyPatternMatch {
+                pattern: "echo *".to_string(),
+                candidate: "echo ok".to_string(),
+            })
+        );
+        assert_eq!(
+            first_deny_pattern(&policy, &shell_ctx("dotnet test && printf 'echo ok'")),
+            None
+        );
+    }
+
+    fn deny_pattern_policy(patterns: &[&str]) -> CommandPolicy {
+        CommandPolicy {
             tools: Vec::new(),
             workspace_roots: vec!["/tmp/work".to_string()],
             default_shell_mode: DEFAULT_SHELL_MODE.to_string(),
-            deny_patterns: vec!["*rm -rf*".to_string()],
+            deny_patterns: patterns.iter().map(|pattern| pattern.to_string()).collect(),
             require_approval: BTreeSet::new(),
             deny_labels: BTreeSet::new(),
             pre: None,
             post: None,
             consent: None,
             allow_recursive: false,
-        };
-        assert_eq!(
-            first_deny_pattern(&policy, &ctx(&["sh", "-c", "echo ok; rm -rf build"])),
-            Some("*rm -rf*".to_string())
-        );
+        }
     }
 
     fn is_destructive(cmd: &str) -> bool {
