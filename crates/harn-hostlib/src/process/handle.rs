@@ -172,11 +172,11 @@ pub trait ProcessHandle: Send {
     fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>>;
 
     /// Wait for the process to exit, optionally with a timeout, while
-    /// polling `interrupt`. On timeout the spawner kills the child
-    /// (SIGKILL, historical semantics) and reports
+    /// polling `interrupt`. On timeout the spawner kills the child process
+    /// tree (SIGKILL, historical semantics) and reports
     /// [`WaitOutcome::TimedOut`]. When `interrupt` returns `true` (scope
     /// cancellation, `deadline` expiry — see `harn_vm::op_interrupt`) the
-    /// spawner gracefully terminates the child's process group (SIGTERM,
+    /// spawner gracefully terminates the child's process tree (SIGTERM,
     /// then SIGKILL after `harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE`)
     /// and reports [`WaitOutcome::Interrupted`].
     fn wait_with_timeout(
@@ -196,17 +196,17 @@ pub trait ProcessHandle: Send {
 pub enum WaitOutcome {
     /// The process exited on its own.
     Exited(ExitStatus),
-    /// The timeout elapsed; the spawner killed the child (group).
+    /// The timeout elapsed; the spawner killed the child process tree.
     TimedOut,
     /// The interrupt callback fired; the spawner gracefully terminated the
-    /// child's process group.
+    /// child's process tree.
     Interrupted,
 }
 
 /// Kill side of a [`ProcessHandle`]. Cloneable via `Arc` so cancellation
 /// works after the waiter thread has taken ownership of the handle itself.
 pub trait ProcessKiller: Send + Sync {
-    /// Send SIGKILL to the process (and its process group, when applicable).
+    /// Send SIGKILL to the process tree/group when applicable.
     fn kill(&self);
 }
 

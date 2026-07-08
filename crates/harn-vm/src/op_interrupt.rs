@@ -15,7 +15,7 @@
 //! host cancel token (`Arc<AtomicBool>`) and the innermost deadline — into
 //! a thread-local via [`install`]. Blocking wait loops poll [`requested`]
 //! (they already poll `try_wait` every ~20ms) and, when it fires,
-//! gracefully terminate their child process group (SIGTERM, then SIGKILL
+//! gracefully terminate their child process tree/group (SIGTERM, then SIGKILL
 //! after [`SUBPROCESS_TERM_GRACE`]) and return. The VM then surfaces the
 //! ordinary cancellation / deadline error at the next op boundary.
 //!
@@ -107,7 +107,7 @@ pub fn requested() -> bool {
 }
 
 /// Put the child in its own process group (`setpgid(0, 0)`) so a later
-/// group signal reaps grandchildren too. No-op on non-Unix targets — group
+/// group signal reaps ordinary grandchildren too. No-op on non-Unix targets — group
 /// semantics are Unix-first; Windows callers fall back to killing the
 /// direct child handle (`TerminateProcess` via `Child::kill`).
 pub fn configure_kill_group(command: &mut std::process::Command) {
@@ -142,13 +142,79 @@ pub fn signal_pid_and_group(pid: u32, signal: i32) {
     }
 }
 
+/// Signal a pid, its process group, and every descendant process visible in
+/// the system process table. Descendants are signalled deepest-first so a
+/// child that escaped into its own process group (for example via `setsid`)
+/// cannot survive a timeout merely because it left the original group.
+pub fn signal_pid_tree_and_group(pid: u32, signal: i32) {
+    #[cfg(unix)]
+    {
+        for child_pid in descendant_pids(pid) {
+            signal_pid_and_group(child_pid, signal);
+        }
+        signal_pid_and_group(pid, signal);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, signal);
+    }
+}
+
+#[cfg(unix)]
+fn descendant_pids(root: u32) -> Vec<u32> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, false, ProcessRefreshKind::nothing());
+    let edges = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| Some((pid.as_u32(), process.parent()?.as_u32())))
+        .collect::<Vec<_>>();
+    descendant_pids_from_parent_edges(root, &edges)
+}
+
+#[cfg(unix)]
+fn descendant_pids_from_parent_edges(root: u32, edges: &[(u32, u32)]) -> Vec<u32> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for &(pid, parent) in edges {
+        children.entry(parent).or_default().push(pid);
+    }
+
+    let mut seen = HashSet::new();
+    let mut stack = vec![(root, 0usize)];
+    let mut descendants = Vec::new();
+    while let Some((pid, depth)) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        if pid != root {
+            descendants.push((pid, depth));
+        }
+        if let Some(kids) = children.get(&pid) {
+            for &child in kids {
+                stack.push((child, depth + 1));
+            }
+        }
+    }
+
+    descendants.sort_by(|(left_pid, left_depth), (right_pid, right_depth)| {
+        right_depth
+            .cmp(left_depth)
+            .then_with(|| left_pid.cmp(right_pid))
+    });
+    descendants.into_iter().map(|(pid, _depth)| pid).collect()
+}
+
 /// How an interruptible child wait ended.
 pub enum ChildWait {
     /// The child exited on its own.
     Exited(std::process::ExitStatus),
-    /// The caller-supplied timeout elapsed; the child (group) was killed.
+    /// The caller-supplied timeout elapsed; the child tree/group was killed.
     TimedOut,
-    /// [`requested`] fired; the child group was SIGTERMed and, after
+    /// [`requested`] fired; the child tree/group was SIGTERMed and, after
     /// [`SUBPROCESS_TERM_GRACE`], SIGKILLed. Carries the reaped status when
     /// the OS reported one.
     Interrupted(Option<std::process::ExitStatus>),
@@ -159,8 +225,9 @@ pub enum ChildWait {
 /// Used by the VM-side `process.*` builtins (`exec`, `shell`, `exec_opts`,
 /// `spawn_captured`). The hostlib `run_command` family implements the same
 /// protocol inside its `ProcessSpawner` abstraction. Callers should have
-/// spawned the child with [`configure_kill_group`] so the group signals
-/// reach grandchildren.
+/// spawned the child with [`configure_kill_group`] so group signals reach
+/// ordinary grandchildren; escaped descendants are reaped by process-tree
+/// scanning on Unix.
 pub fn wait_child_interruptible(
     child: &mut std::process::Child,
     timeout: Option<Duration>,
@@ -177,7 +244,7 @@ pub fn wait_child_interruptible(
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             // Timeout keeps its historical semantics: immediate SIGKILL.
             if let Some(pid) = child_pid(child) {
-                signal_pid_and_group(pid, 9);
+                signal_pid_tree_and_group(pid, 9);
             }
             let _ = child.kill();
             let _ = child.wait();
@@ -187,7 +254,7 @@ pub fn wait_child_interruptible(
     }
 }
 
-/// Gracefully terminate `child` and its process group: SIGTERM, wait up to
+/// Gracefully terminate `child` and its process tree/group: SIGTERM, wait up to
 /// [`SUBPROCESS_TERM_GRACE`], then SIGKILL. Reaps the child and returns its
 /// exit status when available. On non-Unix targets this is a best-effort
 /// direct `Child::kill` (`TerminateProcess`), which does not reach
@@ -197,14 +264,14 @@ pub fn terminate_child_group(child: &mut std::process::Child) -> Option<std::pro
     {
         if let Some(pid) = child_pid(child) {
             const SIGTERM: i32 = 15;
-            signal_pid_and_group(pid, SIGTERM);
+            signal_pid_tree_and_group(pid, SIGTERM);
             let grace_deadline = Instant::now() + SUBPROCESS_TERM_GRACE;
             loop {
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         // The direct child is gone, but SIGTERM-immune
                         // descendants may linger — sweep the group.
-                        signal_pid_and_group(pid, 9);
+                        signal_pid_tree_and_group(pid, 9);
                         return Some(status);
                     }
                     Ok(None) => {
@@ -216,7 +283,7 @@ pub fn terminate_child_group(child: &mut std::process::Child) -> Option<std::pro
                     Err(_) => break,
                 }
             }
-            signal_pid_and_group(pid, 9);
+            signal_pid_tree_and_group(pid, 9);
         }
     }
     let _ = child.kill();
@@ -255,12 +322,12 @@ pub(crate) fn drain_captured_pipe(
             Err(RecvTimeoutError::Timeout) => {
                 if requested() {
                     const SIGTERM: i32 = 15;
-                    signal_pid_and_group(child_pid, SIGTERM);
+                    signal_pid_tree_and_group(child_pid, SIGTERM);
                     if let Ok(buf) = rx.recv_timeout(SUBPROCESS_TERM_GRACE) {
-                        signal_pid_and_group(child_pid, 9);
+                        signal_pid_tree_and_group(child_pid, 9);
                         return buf;
                     }
-                    signal_pid_and_group(child_pid, 9);
+                    signal_pid_tree_and_group(child_pid, 9);
                     return rx
                         .recv_timeout(Duration::from_millis(100))
                         .unwrap_or_default();
@@ -370,6 +437,32 @@ mod tests {
             assert!(!requested());
         }
         assert!(requested());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn descendant_pids_from_parent_edges_returns_deepest_first_tree_only() {
+        let edges = [
+            (20, 10),
+            (30, 20),
+            (40, 20),
+            (50, 30),
+            (60, 99),
+            (70, 60),
+            // A malformed process table cycle should not hang traversal.
+            (80, 90),
+            (90, 80),
+        ];
+
+        assert_eq!(
+            descendant_pids_from_parent_edges(10, &edges),
+            vec![50, 30, 40, 20]
+        );
+        assert_eq!(descendant_pids_from_parent_edges(99, &edges), vec![70, 60]);
+        assert_eq!(
+            descendant_pids_from_parent_edges(123, &edges),
+            Vec::<u32>::new()
+        );
     }
 
     #[cfg(unix)]

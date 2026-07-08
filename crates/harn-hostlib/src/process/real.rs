@@ -229,13 +229,12 @@ impl ProcessHandle for RealProcess {
                         return Ok(WaitOutcome::Interrupted);
                     }
                     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                        // `killer.kill()` kills the whole process group on Unix
-                        // (negative pid) to reap grandchildren. That path is a
-                        // no-op on non-Unix targets, where `kill_pid_or_group`
-                        // cannot signal by bare pid — so also kill the child
-                        // handle directly (TerminateProcess on Windows) to
-                        // guarantee the subsequent `child.wait()` cannot block
-                        // forever on a timed-out process.
+                        // `killer.kill()` kills the process tree/group on
+                        // Unix. That path is a no-op on non-Unix targets, so
+                        // also kill the child handle directly
+                        // (TerminateProcess on Windows) to guarantee the
+                        // subsequent `child.wait()` cannot block forever on a
+                        // timed-out process.
                         killer.kill();
                         let _ = child.kill();
                         let _ = child.wait();
@@ -267,7 +266,7 @@ struct RealKiller {
 
 impl ProcessKiller for RealKiller {
     fn kill(&self) {
-        kill_pid_or_group(self.pid);
+        harn_vm::op_interrupt::signal_pid_tree_and_group(self.pid, 9);
     }
 }
 
@@ -327,27 +326,5 @@ pub(crate) fn configure_background_process_group(command: &mut std::process::Com
     #[cfg(not(unix))]
     {
         let _ = command;
-    }
-}
-
-/// Send SIGKILL to a pid (and its process group). Public so existing
-/// non-trait paths (e.g. session-end cleanup) can keep using it during
-/// the transition.
-pub(crate) fn kill_pid_or_group(pid: u32) {
-    #[cfg(unix)]
-    {
-        // SAFETY: kill(2) takes a pid_t (i32 on all Unix targets) and a
-        // signal number. Calling it with SIGKILL (9) is well-defined.
-        extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        unsafe {
-            kill(-(pid as i32), 9);
-            kill(pid as i32, 9);
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
     }
 }
