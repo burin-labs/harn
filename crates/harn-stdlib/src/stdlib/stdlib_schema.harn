@@ -158,6 +158,45 @@ pub fn get_typed_report(value, schema, apply_defaults = false) {
 }
 
 /**
+ * Parse JSON text and validate the parsed value against a schema in one step.
+ * Returns `{ok, message, errors, issues, value?, stage}` where `stage` is
+ * `json_parse` or `schema`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parse_json_typed_report<T>(text: string, schema: Schema<T>, apply_defaults = false) -> dict {
+  const parsed = try {
+    json_parse(text ?? "")
+  }
+  if !is_ok(parsed) {
+    const message = to_string(unwrap_err(parsed))
+    return {ok: false, message: message, errors: [message], issues: [], stage: "json_parse"}
+  }
+  return get_typed_report(unwrap(parsed), schema, apply_defaults) + {stage: "schema"}
+}
+
+/**
+ * Parse JSON text and return the typed/defaulted value, or `fallback` if either
+ * JSON parsing or schema validation fails.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parse_json_typed<T>(
+  text: string,
+  schema: Schema<T>,
+  fallback: T = nil,
+  apply_defaults = false,
+) -> T {
+  const report = parse_json_typed_report(text, schema, apply_defaults)
+  if report.ok {
+    return report.value
+  }
+  return fallback
+}
+
+/**
  * Return structured validation issues for a value/schema pair.
  *
  * @effects: []

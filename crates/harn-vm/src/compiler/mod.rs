@@ -237,6 +237,10 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::Identifier(name) => {
+                if let Some(schema) = self.schema_value_for_alias(name) {
+                    self.emit_vm_value_literal(&schema);
+                    return Ok(());
+                }
                 self.emit_get_binding(name);
             }
             Node::LetBinding { pattern, value, .. } => {
@@ -612,16 +616,19 @@ impl Compiler {
             Node::StructDecl { name, fields, .. } => {
                 self.compile_struct_decl(name, fields)?;
             }
-            // Metadata-only declarations: resolved entirely at compile time
-            // (enum names, type aliases, struct/interface layouts are
-            // pre-scanned), so they emit no bytecode and leave the operand
-            // stack untouched. `produces_value` classifies them as
-            // non-value-producing to match; contexts that require a block to
-            // yield a value (last statement of a block, match-arm body) emit
-            // their own `Nil` placeholder. Emitting one here instead left an
-            // unpopped `Nil` on the stack in every value-discarding context
-            // (`compile_top_level_declarations` pops nothing) — a latent
-            // imbalance surfaced by the #2622 balance assertion.
+            // Metadata-only declarations: enum names, struct/interface
+            // layouts, and type aliases are pre-scanned, so they emit no
+            // bytecode and leave the operand stack untouched. Type-alias names
+            // in expression position lower directly to schema constants in the
+            // `Identifier` arm above; eagerly binding every alias at top level
+            // bloats large module init chunks past the VM's 64 KiB jump limit.
+            // `produces_value` classifies them as non-value-producing to match;
+            // contexts that require a block to yield a value (last statement of
+            // a block, match-arm body) emit their own `Nil` placeholder.
+            // Emitting one here instead left an unpopped `Nil` on the stack in
+            // every value-discarding context (`compile_top_level_declarations`
+            // pops nothing) — a latent imbalance surfaced by the #2622 balance
+            // assertion.
             Node::Pipeline { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }

@@ -959,6 +959,8 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | `ensure_parent_dir(path)` | Create the parent directory for a file path when needed |
 | `read_json(path, fallback?)` | Read and parse JSON, returning `fallback` for missing or invalid files |
 | `read_json_result(path)` | Read and parse JSON as `{ok, value?, error?}` |
+| `read_json_typed<T>(path, schema: Schema<T>, fallback?: T, apply_defaults?) -> T` | Read, parse, and schema-validate JSON, returning `fallback` on read/parse/schema failure |
+| `read_json_typed_report<T>(path, schema: Schema<T>, apply_defaults?)` | Read, parse, and schema-validate JSON as `{ok, message, errors, issues, value?: T, stage, path}` |
 | `write_json(path, value, options?)` | Write JSON with optional `{pretty, trailing_newline, ensure_parent}` |
 | `read_yaml(path, fallback?)` / `write_yaml(path, value, options?)` | YAML file helpers |
 | `read_toml(path, fallback?)` / `write_toml(path, value, options?)` | TOML file helpers |

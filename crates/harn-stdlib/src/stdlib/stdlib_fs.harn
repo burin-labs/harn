@@ -1,5 +1,6 @@
 // std/fs - file-system convenience helpers built on the host fs primitives.
 import { pretty, safe_parse } from "std/json"
+import { parse_json_typed_report } from "std/schema"
 
 type WriteDataOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
 
@@ -65,6 +66,48 @@ pub fn read_json_result(path: string) -> dict {
     return {ok: true, value: unwrap(parsed)}
   }
   return {ok: false, error: to_string(parsed)}
+}
+
+/**
+ * Read, parse, and validate a JSON file in one step.
+ * Returns `{ok, message, errors, issues, value?, stage, path}`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn read_json_typed_report<T>(path: string, schema: Schema<T>, apply_defaults = false) -> dict {
+  if !harness.fs.exists(path) {
+    const message = "file not found: " + path
+    return {ok: false, message: message, errors: [message], issues: [], stage: "read", path: path}
+  }
+  const raw = try {
+    harness.fs.read_text(path)
+  }
+  if !is_ok(raw) {
+    const message = to_string(unwrap_err(raw))
+    return {ok: false, message: message, errors: [message], issues: [], stage: "read", path: path}
+  }
+  return parse_json_typed_report(unwrap(raw), schema, apply_defaults) + {path: path}
+}
+
+/**
+ * Read, parse, and validate a JSON file, returning `fallback` when missing,
+ * malformed, or schema-invalid.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn read_json_typed<T>(
+  path: string,
+  schema: Schema<T>,
+  fallback: T = nil,
+  apply_defaults = false,
+) -> T {
+  const report = read_json_typed_report(path, schema, apply_defaults)
+  if report.ok {
+    return report.value
+  }
+  return fallback
 }
 
 /**

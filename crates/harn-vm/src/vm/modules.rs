@@ -739,6 +739,42 @@ mod tests {
     }
 
     #[test]
+    fn module_function_can_use_local_type_alias_as_schema_value() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+
+        let result = runtime.block_on(async {
+            let mut vm = Vm::new();
+            crate::stdlib::register_vm_stdlib(&mut vm);
+            let loaded = vm
+                .load_module_from_source(
+                    PathBuf::from("<test>/schema_alias_module.harn"),
+                    r#"
+fn accepts_schema(schema) {
+  return schema_report({name: "Ada"}, schema).ok
+}
+
+type UserShape = {name: string}
+
+pub fn works() {
+  return accepts_schema(UserShape)
+}
+"#,
+                )
+                .await
+                .expect("module loads");
+            let closure = Arc::clone(loaded.functions.get("works").expect("works export exists"));
+            vm.call_closure_pub(&closure, &[])
+                .await
+                .expect("module closure executes")
+        });
+
+        assert!(matches!(result, VmValue::Bool(true)), "{result:?}");
+    }
+
+    #[test]
     fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
         let _guard = cache_test_guard();
         reset_stdlib_module_artifact_cache();
