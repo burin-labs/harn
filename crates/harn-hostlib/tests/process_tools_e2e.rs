@@ -163,6 +163,62 @@ fn real_run_command_strips_secret_env_from_child() {
 }
 
 #[test]
+fn real_run_command_env_remove_strips_named_vars_but_explicit_env_wins() {
+    // `env_remove` lets a harness strip inherited observability vars (e.g.
+    // HARN_EVENT_LOG_DIR / HARN_LLM_TRANSCRIPT_DIR) so a spawned child
+    // harn/burin process doesn't write into the parent's stores. An explicit
+    // `env` entry for the same key must still win over the removal.
+    //
+    // SAFETY: `ENV_LOCK` serializes env-mutating tests; vars are removed
+    // before the guard is released.
+    let _env_guard = lock_env();
+    unsafe {
+        std::env::set_var("HARN_E2E_REMOVE_ME", "inherited-and-unwanted");
+        std::env::set_var("HARN_E2E_OVERRIDE_ME", "inherited-value");
+        std::env::set_var("HARN_E2E_KEEP_ME", "still-here");
+    }
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["env"]));
+    req.insert(
+        "env_remove".into(),
+        vlist_str(&["HARN_E2E_REMOVE_ME", "HARN_E2E_OVERRIDE_ME"]),
+    );
+    let mut env = dict();
+    env.insert("HARN_E2E_OVERRIDE_ME".into(), vstr("explicit-value"));
+    req.insert("env".into(), VmValue::dict(env));
+    // Supplying `env` alone defaults env_mode to `replace`; force `patch` so
+    // the child actually inherits the parent env this test strips from.
+    req.insert("env_mode".into(), vstr("patch"));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    unsafe {
+        std::env::remove_var("HARN_E2E_REMOVE_ME");
+        std::env::remove_var("HARN_E2E_OVERRIDE_ME");
+        std::env::remove_var("HARN_E2E_KEEP_ME");
+    }
+
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    let child_env = require_str(&resp, "stdout");
+    assert!(
+        !child_env.contains("HARN_E2E_REMOVE_ME"),
+        "env_remove'd var still present in child env:\n{child_env}"
+    );
+    assert!(
+        child_env.contains("HARN_E2E_OVERRIDE_ME=explicit-value"),
+        "explicit env override must win over env_remove:\n{child_env}"
+    );
+    assert!(
+        !child_env.contains("inherited-value"),
+        "inherited value survived despite env_remove + explicit override:\n{child_env}"
+    );
+    assert!(
+        child_env.contains("HARN_E2E_KEEP_ME=still-here"),
+        "unrelated var was incorrectly stripped:\n{child_env}"
+    );
+}
+
+#[test]
 fn real_run_command_kills_child_when_timeout_elapses() {
     // Smoke: the real `wait_with_timeout` should fire SIGKILL when the
     // child blocks past the deadline. Use a very short sleep so the test

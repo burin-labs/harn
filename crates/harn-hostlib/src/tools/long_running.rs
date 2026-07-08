@@ -119,6 +119,7 @@ pub struct LongRunningHandleInfo {
 
 pub(crate) struct LongRunningSpawnOptions {
     pub(crate) env_mode: EnvMode,
+    pub(crate) env_remove: Vec<String>,
     pub(crate) capture: CaptureConfig,
     pub(crate) session_id: String,
     pub(crate) progress_interval: Option<Duration>,
@@ -202,6 +203,7 @@ pub fn spawn_long_running(
         env,
         LongRunningSpawnOptions {
             env_mode: EnvMode::InheritClean,
+            env_remove: Vec::new(),
             capture: CaptureConfig::default(),
             session_id,
             progress_interval: None,
@@ -227,6 +229,7 @@ pub(crate) fn spawn_long_running_with_options(
         args: args.clone(),
         cwd,
         env,
+        env_remove: options.env_remove.clone(),
         env_mode: options.env_mode,
         use_stdin: false,
         configure_process_group: true,
