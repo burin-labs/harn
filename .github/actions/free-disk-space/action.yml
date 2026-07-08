@@ -34,7 +34,11 @@ runs:
         fi
 
         # Each path is removed best-effort; a missing one on a future image
-        # revision must not fail the build.
+        # revision must not fail the build. These jobs are Rust-only; keep the
+        # system runtimes but remove hosted SDK/tool caches that are not needed
+        # after checkout. Large harn-vm reverse-dependency test closures can
+        # link harn-serve plus perf crates and need more than the stock image's
+        # free root space even after the high-volume Android/.NET/GHC reclaim.
         pids=""
         for path in \
           /usr/local/lib/android \
@@ -42,8 +46,25 @@ runs:
           /opt/ghc \
           /usr/local/.ghcup \
           /opt/hostedtoolcache/CodeQL \
+          /opt/hostedtoolcache/Go \
+          /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk \
+          /opt/hostedtoolcache/node \
+          /opt/hostedtoolcache/Python \
+          /opt/hostedtoolcache/Ruby \
+          /opt/az \
+          /opt/microsoft \
+          /usr/lib/google-cloud-sdk \
+          /usr/local/aws-cli \
+          /usr/local/graalvm \
+          /usr/local/julia \
+          /usr/local/lib/node_modules \
+          /usr/local/share/boost \
+          /usr/local/share/chromium \
           /usr/local/share/powershell \
-          /usr/local/share/chromium; do
+          /usr/local/share/vcpkg \
+          /usr/share/miniconda \
+          /usr/share/swift; do
+          printf 'Reclaiming %s\n' "$path"
           sudo rm -rf "$path" &
           pids="${pids} $!"
         done
@@ -52,6 +73,7 @@ runs:
           wait "${pid}" || true
         done
         sudo docker image prune --all --force >/dev/null 2>&1 || true
+        sudo apt-get clean >/dev/null 2>&1 || true
 
         echo "Disk after reclaim:"
         df -h /
