@@ -595,7 +595,20 @@ fn pl_make_tool_proposal(id: string, key: string, observations: list, existing: 
 
 fn pl_skill_roots(options = nil) -> list {
   const root = pl_project_root(options)
-  return [path_join(root, ".claude", "skills"), path_join(root, ".burin", "skills")]
+  const namespace = pl_namespace(options)
+  if namespace == PATTERN_NAMESPACE {
+    return [path_join(root, ".claude", "skills"), path_join(root, ".burin", "skills")]
+  }
+  const namespace_dir = pl_skill_namespace_dir(namespace)
+  return [
+    path_join(root, ".claude", "skills", namespace_dir),
+    path_join(root, ".burin", "skills", namespace_dir),
+  ]
+}
+
+fn pl_skill_namespace_dir(namespace: string) -> string {
+  const slug = pl_slugify(namespace)
+  return slug == "" ? "custom" : slug
 }
 
 /**
@@ -606,7 +619,12 @@ fn pl_skill_roots(options = nil) -> list {
  * @api_stability: experimental
  */
 pub fn pattern_learning_skill_root(options = nil) -> string {
-  return path_join(pl_project_root(options), ".claude", "skills")
+  const root = path_join(pl_project_root(options), ".claude", "skills")
+  const namespace = pl_namespace(options)
+  if namespace == PATTERN_NAMESPACE {
+    return root
+  }
+  return path_join(root, pl_skill_namespace_dir(namespace))
 }
 
 fn pl_frontmatter_value(body: string, key: string) -> string {

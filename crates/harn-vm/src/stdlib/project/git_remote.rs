@@ -71,11 +71,15 @@ pub(super) fn detect_git_remote(dir: &Path) -> Option<GitRemoteSignal> {
 }
 
 fn find_git_path(dir: &Path) -> Option<PathBuf> {
+    let temp_root = std::env::temp_dir().canonicalize().ok();
     let mut cursor = Some(dir);
     while let Some(path) = cursor {
         let git_path = path.join(".git");
         if git_path.exists() {
             return Some(git_path);
+        }
+        if temp_root.as_deref().is_some_and(|root| path == root) {
+            return None;
         }
         cursor = path.parent();
     }
