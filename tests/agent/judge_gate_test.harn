@@ -8,11 +8,11 @@
 // PURE — building the bundle runs no LLM and no host.
 import { agent_completion_gate } from "std/agent/judge"
 
-fn __facts(ctx) {
+fn __facts(_ctx) {
   return {source_write_count: 1}
 }
 
-fn __classify(path, diff) {
+fn __classify(_path, _diff) {
   return "source"
 }
 

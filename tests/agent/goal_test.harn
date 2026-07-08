@@ -52,7 +52,7 @@ pipeline test_noncallable_facts_fn_throws(task) {
 pipeline test_callable_facts_fn_is_accepted(task) {
   const g = goal({objective: "ship it"})
   const outcome = try {
-    goal_reloop(g, {facts_fn: { payload -> {} }})
+    goal_reloop(g, {facts_fn: { _payload -> {} }})
   }
   assert(!is_err(outcome), "goal_reloop accepts a callable facts_fn")
 }
@@ -75,7 +75,7 @@ pipeline test_dict_omit_matches_manual_omit(task) {
 
 pipeline test_goal_reloop_strips_control_keys(task) {
   const g = goal({objective: "ship it"})
-  const opts = goal_reloop(g, {facts_fn: { payload -> {} }, max_attempts: 2, provider: "mock"})
+  const opts = goal_reloop(g, {facts_fn: { _payload -> {} }, max_attempts: 2, provider: "mock"})
   assert_eq(opts?.provider, "mock")
   assert_eq(opts?.facts_fn, nil)
   assert_eq(opts?.max_attempts, nil)

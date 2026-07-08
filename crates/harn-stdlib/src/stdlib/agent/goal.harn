@@ -343,12 +343,12 @@ pub fn goal_reloop(g, opts = nil) {
     throw "goal_reloop: `facts_fn` must be a callable or nil; got " + type_of(facts_fn)
   }
   const verify_completion = { payload ->
-    let facts = if __goal_callable(facts_fn) {
+    const facts = if __goal_callable(facts_fn) {
       facts_fn(payload)
     } else {
       {}
     }
-    let check = goal_check(g, facts)
+    const check = goal_check(g, facts)
     if check.done {
       return {confirm: true}
     }
