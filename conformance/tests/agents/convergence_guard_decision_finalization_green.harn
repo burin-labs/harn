@@ -1,0 +1,89 @@
+import { convergence_guard_decision } from "std/agent/governors"
+
+fn summarize(obs: dict) -> string {
+  const decision = convergence_guard_decision({}, obs)
+  return decision.shape + ":" + to_string(decision?.receipt?.reason ?? "") + ":"
+    + to_string(decision?.recovery?.verb ?? "")
+}
+
+pipeline default() {
+  __io_println(
+    summarize(
+      {
+        output_contract_passed: true,
+        post_green_turns: 2,
+        post_green_proof_artifact_writes: 1,
+        post_green_task_diff_count: 0,
+        required_verification_green: true,
+      },
+    ),
+  )
+  __io_println(
+    convergence_guard_decision(
+      {},
+      {
+        output_contract_passed: true,
+        post_green_marker_commands: 1,
+        post_green_policy_denials: 1,
+        post_green_turns: 2,
+        post_green_task_diff_count: 0,
+        required_verification_green: true,
+      },
+    ).recovery.verb,
+  )
+  __io_println(
+    summarize(
+      {
+        output_contract_passed: true,
+        post_green_turns: 4,
+        post_green_proof_artifact_writes: 3,
+        post_green_task_diff_count: 1,
+        required_verification_green: true,
+      },
+    ),
+  )
+  __io_println(
+    summarize(
+      {
+        output_contract_passed: true,
+        post_green_turns: 4,
+        post_green_proof_artifact_writes: 3,
+        post_green_task_diff_count: 0,
+        required_verification_green: false,
+      },
+    ),
+  )
+  __io_println(
+    summarize(
+      {
+        output_contract_passed: false,
+        post_green_turns: 4,
+        post_green_proof_artifact_writes: 3,
+        post_green_task_diff_count: 0,
+        required_verification_green: true,
+      },
+    ),
+  )
+  __io_println(
+    summarize(
+      {
+        output_contract_passed: true,
+        post_green_proof_artifact_writes: 1,
+        post_green_task_diff_count: 0,
+        required_verification_green: true,
+      },
+    ),
+  )
+  __io_println(
+    convergence_guard_decision(
+      {},
+      {
+        output_contract_passed: true,
+        post_green_policy_denials: 1,
+        post_green_task_diff_count: 0,
+        required_verification_green: true,
+      },
+      {stall_warning: true, stall_patterns: ["zero_test_false_green"]},
+    ).shape,
+  )
+}

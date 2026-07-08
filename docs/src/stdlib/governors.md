@@ -18,6 +18,39 @@ post-turn seam can take:
 Governors and detectors are **values you compose into the existing
 `post_turn_callback` seam** — never a new hook on `agent_loop`.
 
+## Convergence guard
+
+`convergence_guard_decision` is the Harn-owned policy core for known spiral
+shapes that hosts can describe with typed facts. The first built-in shape is
+`finalization_runaway_on_green`: required verification is already green, the
+output contract has not failed, no post-green task diff landed, the run has
+post-green churn, and the run starts spending turns on proof-only artifacts,
+marker commands, policy-denied proof attempts, or verify-only retries.
+
+```harn
+import { convergence_guard_decision } from "std/agent/governors"
+
+const decision = convergence_guard_decision(
+  {},
+  {
+    required_verification_green: true,
+    output_contract_passed: true,
+    post_green_task_diff_count: 0,
+    post_green_turns: 2,
+    post_green_proof_artifact_writes: 1,
+  },
+)
+log(decision.recovery.verb) // stop_on_green
+```
+
+The decision output is structured: `{shape, confidence, evidence, recovery,
+receipt}`. Non-matches use `shape: "none"` and `recovery: nil`. `recovery.verb`
+is declarative (`stop_on_green` for the deterministic green case), so hosts do
+not need to concatenate prompt text or inspect English. The guard also consumes
+compact stall facts such as `stall_warning`, `stall_no_net_progress`, and
+`stall_patterns` as evidence of post-green churn; it does not duplicate the
+stall detectors themselves.
+
 ## Pace / budget governor
 
 A `GovernorPolicy` is a data row. It names a monotone consumption `signal`

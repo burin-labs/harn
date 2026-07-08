@@ -107,6 +107,251 @@ pub type GovernorPolicy = {
   pace_check_max?: int,
 }
 
+/**
+ * A convergence guard policy. Hosts provide typed facts; Harn owns the
+ * decision and recovery vocabulary. The guard requires authoritative green
+ * verification, no task diff after green, a small amount of post-green churn,
+ * and at least one proof-only signal before it emits a recovery.
+ */
+pub type ConvergenceGuardPolicy = {
+  enabled?: bool,
+  min_post_green_turns?: int,
+  proof_artifact_writes?: int,
+  marker_commands?: int,
+  policy_denials?: int,
+  verify_only_retries?: int,
+}
+
+/** Host-supplied convergence facts consumed by convergence_guard_decision. */
+pub type ConvergenceFactVector = {
+  output_contract_passed?: bool,
+  post_green_marker_commands?: int,
+  post_green_policy_denials?: int,
+  post_green_proof_artifact_writes?: int,
+  post_green_task_diff_count?: int,
+  post_green_turns?: int,
+  post_green_verify_only_retries?: int,
+  required_verification_green?: bool,
+  stall_no_net_progress?: bool,
+  stall_patterns?: list<string>,
+  stall_warning?: bool,
+  verification_authority?: string,
+}
+
+/** Auditable convergence-guard receipt embedded in each verdict. */
+pub type ConvergenceGuardReceipt = {
+  confidence?: float,
+  evidence?: dict,
+  iteration?: int,
+  kind: string,
+  reason?: string,
+  recovery?: dict,
+  schema: string,
+  session_id?: string,
+  shape: string,
+  status: string,
+}
+
+/** Typed convergence verdict. Recovery verbs are declarative, never prompt text. */
+pub type ConvergenceGuardVerdict = {
+  confidence?: float,
+  evidence?: dict,
+  receipt?: ConvergenceGuardReceipt,
+  recovery?: dict,
+  shape?: string,
+}
+
+const CONVERGENCE_GUARD_SCHEMA = "harn.agent_convergence_guard_receipt.v1"
+
+const CONVERGENCE_GUARD_DEFAULT_THRESHOLD = 1
+
+const CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS = 2
+
+fn __convergence_guard_threshold(value) -> int {
+  const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD) ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD
+  if parsed <= 0 {
+    return CONVERGENCE_GUARD_DEFAULT_THRESHOLD
+  }
+  return parsed
+}
+
+fn __convergence_guard_min_turns(value) -> int {
+  const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS)
+    ?? CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS
+  if parsed <= 0 {
+    return CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS
+  }
+  return parsed
+}
+
+fn __convergence_guard_patterns(facts: dict, recent: dict) -> list<string> {
+  if type_of(recent?.stall_patterns) == "list" {
+    return recent.stall_patterns
+  }
+  if type_of(facts?.stall_patterns) == "list" {
+    return facts.stall_patterns
+  }
+  return []
+}
+
+fn __convergence_guard_evidence(policy: ConvergenceGuardPolicy, facts: dict, recent: dict) -> dict {
+  const proof_artifact_writes = to_int(facts?.post_green_proof_artifact_writes ?? 0) ?? 0
+  const marker_commands = to_int(facts?.post_green_marker_commands ?? 0) ?? 0
+  const policy_denials = to_int(facts?.post_green_policy_denials ?? 0) ?? 0
+  const verify_only_retries = to_int(facts?.post_green_verify_only_retries ?? 0) ?? 0
+  const task_diff_count = to_int(facts?.post_green_task_diff_count ?? 0) ?? 0
+  const post_green_turns = to_int(facts?.post_green_turns ?? 0) ?? 0
+  return {
+    marker_commands: marker_commands,
+    marker_command_threshold: __convergence_guard_threshold(policy.marker_commands),
+    min_post_green_turns: __convergence_guard_min_turns(policy.min_post_green_turns),
+    policy_denials: policy_denials,
+    policy_denial_threshold: __convergence_guard_threshold(policy.policy_denials),
+    post_green_turns: post_green_turns,
+    proof_artifact_writes: proof_artifact_writes,
+    proof_artifact_write_threshold: __convergence_guard_threshold(policy.proof_artifact_writes),
+    required_verification_green: facts?.required_verification_green ?? false,
+    stall_no_net_progress: facts?.stall_no_net_progress ?? recent?.stall_no_net_progress ?? false,
+    stall_patterns: __convergence_guard_patterns(facts, recent),
+    stall_warning: facts?.stall_warning ?? recent?.stall_warning ?? false,
+    task_diff_count: task_diff_count,
+    verification_authority: to_string(facts?.verification_authority ?? ""),
+    verify_only_retries: verify_only_retries,
+    verify_only_retry_threshold: __convergence_guard_threshold(policy.verify_only_retries),
+  }
+}
+
+fn __convergence_guard_has_churn(evidence: dict) -> bool {
+  return evidence.post_green_turns >= evidence.min_post_green_turns
+    || (evidence?.stall_warning ?? false)
+    || (evidence?.stall_no_net_progress ?? false)
+    || len(evidence?.stall_patterns ?? []) > 0
+}
+
+fn __convergence_guard_signal(evidence: dict) -> string {
+  if evidence.proof_artifact_writes >= evidence.proof_artifact_write_threshold {
+    return "post_green_proof_artifact_write"
+  }
+  if evidence.marker_commands >= evidence.marker_command_threshold {
+    return "post_green_marker_command"
+  }
+  if evidence.policy_denials >= evidence.policy_denial_threshold {
+    return "post_green_policy_denial"
+  }
+  if evidence.verify_only_retries >= evidence.verify_only_retry_threshold {
+    return "post_green_verify_only_retry"
+  }
+  return ""
+}
+
+fn __convergence_guard_receipt(
+  shape: string,
+  confidence: float,
+  reason: string,
+  evidence: dict,
+  recovery,
+) -> dict {
+  return {
+    confidence: confidence,
+    evidence: evidence,
+    kind: "convergence_guard",
+    reason: reason,
+    recovery: recovery,
+    schema: CONVERGENCE_GUARD_SCHEMA,
+    shape: shape,
+    status: if shape == "none" {
+      "skipped"
+    } else {
+      "fired"
+    },
+  }
+}
+
+fn __convergence_guard_none(reason: string, evidence: dict) -> dict {
+  const receipt = __convergence_guard_receipt("none", 0.0, reason, evidence, nil)
+  return {shape: "none", confidence: 0.0, evidence: evidence, recovery: nil, receipt: receipt}
+}
+
+fn __convergence_guard_recovery() -> dict {
+  return {verb: "stop_on_green", args: {stop_reason: "convergence_guard:finalization_runaway_on_green"}}
+}
+
+fn __convergence_guard_finalization(reason: string, evidence: dict) -> dict {
+  const recovery = __convergence_guard_recovery()
+  const receipt = __convergence_guard_receipt("finalization_runaway_on_green", 0.95, reason, evidence, recovery)
+  return {
+    shape: "finalization_runaway_on_green",
+    confidence: 0.95,
+    evidence: evidence,
+    recovery: recovery,
+    receipt: receipt,
+  }
+}
+
+/**
+ * convergence_guard_decision is the PURE convergence decision core. It detects
+ * the post-green spiral class where a run has already satisfied authoritative
+ * verification, makes no further task diff, shows post-green churn, and starts
+ * manufacturing verifier artifacts / marker commands / policy-denied proof
+ * attempts instead of finishing. The output is an issue-shaped verdict:
+ * `{shape, confidence, evidence, recovery, receipt}`. A non-match always uses
+ * `shape: "none"` and `recovery: nil`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn convergence_guard_decision(
+  policy: ConvergenceGuardPolicy,
+  facts: ConvergenceFactVector,
+  recent: dict = {},
+) -> dict {
+  const evidence = __convergence_guard_evidence(policy, facts, recent)
+  if !(policy.enabled ?? true) {
+    return __convergence_guard_none("disabled", evidence)
+  }
+  if !(facts.required_verification_green ?? false) {
+    return __convergence_guard_none("verification_not_green", evidence)
+  }
+  if !(facts.output_contract_passed ?? true) {
+    return __convergence_guard_none("output_contract_not_satisfied", evidence)
+  }
+  if evidence.task_diff_count > 0 {
+    return __convergence_guard_none("post_green_task_diff_present", evidence)
+  }
+  if !__convergence_guard_has_churn(evidence) {
+    return __convergence_guard_none("post_green_churn_below_threshold", evidence)
+  }
+  const signal = __convergence_guard_signal(evidence)
+  if signal != "" {
+    return __convergence_guard_finalization(signal, evidence)
+  }
+  return __convergence_guard_none("within_convergence_bounds", evidence)
+}
+
+/**
+ * Build an auditable receipt from a convergence guard decision and run payload.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn convergence_guard_receipt(decision: dict, payload: dict = {}) -> dict {
+  const receipt = decision?.receipt
+    ?? __convergence_guard_receipt(
+    to_string(decision?.shape ?? "none"),
+    to_float(decision?.confidence ?? 0.0),
+    to_string(decision?.reason ?? "external_verdict"),
+    decision?.evidence ?? {},
+    decision?.recovery,
+  )
+  return receipt
+    + {
+    iteration: to_int(payload?.iteration ?? 0) ?? 0,
+    session_id: to_string(payload?.session_id ?? payload?.session?.id ?? ""),
+  }
+}
+
 fn __governor_abort(reason: string, signal: string, fraction: float) -> dict {
   return {action: "abort", fraction: fraction, reason: reason, signal: signal}
 }
