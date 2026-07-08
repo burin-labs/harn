@@ -1782,15 +1782,15 @@ fn __agent_stall_apply_action_signal(
     }
     return observation + {state: observation.state + {action_flail_trips: 0}}
   }
-  // Dedicated accumulator, decoupled from `consecutive_trips` (reset by the core
+  // Dedicated accumulator, decoupled from `consecutive_trips` (which the core resets
   // every non-core-tripping turn): repeated flailing escalates to a hard stop at
-  // `hard_stop_after_trips`. `consecutive_trips` is set to the flail count purely so
-  // the emitted warning reports the accumulation honestly; the core resets it next
-  // turn and only `action_flail_trips` carries the streak forward.
+  // `hard_stop_after_trips`. The flail count rides the warning's `count` field
+  // (passed below); we deliberately do NOT write it into `consecutive_trips`, so the
+  // core escalation axis stays uncontaminated — otherwise a later core trip at a
+  // flail->core-trip boundary would escalate one step early.
   const trips = observation.state.action_flail_trips + 1
   const hard_stop = trips >= config.hard_stop_after_trips
-  const tripped = observation.state
-    + {action_flail_trips: trips, consecutive_trips: trips, hard_stop: hard_stop}
+  const tripped = observation.state + {action_flail_trips: trips, hard_stop: hard_stop}
   return __agent_stall_emit_diagnostic_trip(
     session_id,
     config,
