@@ -193,7 +193,7 @@ module.exports = grammar({
         "pipeline",
         field("name", $.identifier),
         "(",
-        optional($.parameter_list),
+        parameterList($),
         ")",
         optional(seq("->", field("return_type", $.type_annotation))),
         optional(seq("extends", field("parent", $.identifier))),
@@ -254,7 +254,7 @@ module.exports = grammar({
     enum_variant: ($) =>
       seq(
         field("name", $.identifier),
-        optional(seq("(", optional($.parameter_list), ")"))
+        optional(seq("(", parameterList($), ")"))
       ),
 
     struct_declaration: ($) =>
@@ -547,7 +547,7 @@ module.exports = grammar({
         field("name", $.identifier),
         optional($.generic_params),
         "(",
-        optional($.parameter_list),
+        parameterList($),
         ")",
         optional(seq("->", $.type_annotation)),
         optional($.where_clause),
@@ -560,7 +560,7 @@ module.exports = grammar({
         "tool",
         field("name", $.identifier),
         "(",
-        optional($.parameter_list),
+        parameterList($),
         ")",
         optional(seq("->", $.type_annotation)),
         "{",
@@ -673,7 +673,7 @@ module.exports = grammar({
         field("name", $.identifier),
         optional($.generic_params),
         "(",
-        optional($.parameter_list),
+        parameterList($),
         ")",
         optional(seq("->", $.type_annotation))
       ),
@@ -683,7 +683,7 @@ module.exports = grammar({
         "override",
         field("name", $.identifier),
         "(",
-        optional($.parameter_list),
+        parameterList($),
         ")",
         field("body", $.block)
       ),
@@ -1138,7 +1138,7 @@ module.exports = grammar({
       seq(
         "fn",
         "(",
-        optional($.parameter_list),
+        parameterList($),
         ")",
         optional(seq("->", field("return_type", $.type_annotation))),
         field("body", $.block)
@@ -1154,7 +1154,7 @@ module.exports = grammar({
       ),
 
     parameter_list: ($) =>
-      prec.left(seq(
+      prec.right(seq(
         $.typed_parameter,
         repeat(seq(",", repeat(lineBreak($)), $.typed_parameter)),
         optional(seq(",", repeat(lineBreak($))))
@@ -1276,6 +1276,14 @@ function attributeIdentifier($) {
 
 function lineBreak($) {
   return choice($._line_sep, $._block_sep, $._newline);
+}
+
+function parameterList($) {
+  return optional(seq(
+    repeat(lineBreak($)),
+    $.parameter_list,
+    repeat(lineBreak($))
+  ));
 }
 
 function statementSeparator($) {
