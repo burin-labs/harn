@@ -83,8 +83,12 @@ pub fn compile_module_artifact(
     let init_nodes: Vec<harn_parser::SNode> = program
         .iter()
         .filter(|sn| {
+            let inner = match &sn.node {
+                harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => sn,
+            };
             matches!(
-                &sn.node,
+                &inner.node,
                 harn_parser::Node::LetBinding { .. } | harn_parser::Node::ConstBinding { .. }
             )
         })
@@ -129,6 +133,7 @@ pub fn compile_module_artifact(
         };
 
         let mut compiler = crate::Compiler::new();
+        compiler.collect_type_aliases(program);
         let func_chunk = compiler
             .compile_fn_body(type_params, params, body, module_source_file.clone())
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
@@ -175,4 +180,32 @@ pub fn compile_module_artifact_from_source(
         ))
     })?;
     compile_module_artifact(&program, Some(source_path.display().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::compile_module_artifact_from_source;
+
+    #[test]
+    fn type_only_modules_export_schemas_without_init_bytecode() {
+        let source = r"
+pub type UserShape = {name: string, active?: bool}
+pub type UserList = list<UserShape>
+";
+
+        let artifact =
+            compile_module_artifact_from_source(Path::new("<test>/schemas.harn"), source)
+                .expect("module compiles");
+
+        assert!(
+            artifact.init_chunk.is_none(),
+            "erased type aliases must not inflate module init bytecode"
+        );
+        assert!(artifact.public_type_names.contains("UserShape"));
+        assert!(artifact.public_type_names.contains("UserList"));
+        assert!(artifact.public_type_schemas.contains_key("UserShape"));
+        assert!(artifact.public_type_schemas.contains_key("UserList"));
+    }
 }

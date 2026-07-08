@@ -202,7 +202,19 @@ literal schema).
 The lazy `std/schema` module provides ergonomic builders such as
 `schema_string()`, `schema_object(...)`, `schema_union(...)`,
 `get_typed_result(...)`, `get_typed_report(...)`, `get_typed_issues(...)`,
-`get_typed_value(...)`, and `is_type(...)`.
+`get_typed_value(...)`, `parse_json_typed_report(...)`,
+`parse_json_typed(...)`, and `is_type(...)`.
+The JSON helpers accept `Schema<T>` arguments, so aliases passed directly or via
+`schema_of(T)` preserve typed return values:
+
+```harn
+import { parse_json_typed } from "std/schema"
+
+type User = {name: string}
+
+const user: User = parse_json_typed("{\"name\":\"Ada\"}", User, {name: "fallback"})
+log(user.name)
+```
 
 Composition helpers:
 

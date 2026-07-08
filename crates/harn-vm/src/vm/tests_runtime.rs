@@ -109,6 +109,30 @@ fn run_output(source: &str) -> String {
 }
 
 #[test]
+fn local_type_alias_is_runtime_schema_value_for_user_wrappers() {
+    let (out, _) = run_harn(
+        r#"
+fn accepts_schema(schema) {
+  return schema_report({name: "Ada"}, schema).ok
+}
+
+fn uses_later_alias() {
+  return accepts_schema(UserShape)
+}
+
+type UserShape = {name: string}
+
+pipeline t(task) {
+  log(accepts_schema(UserShape))
+  log(uses_later_alias())
+}
+"#,
+    );
+
+    assert_eq!(out, "[harn] true\n[harn] true\n");
+}
+
+#[test]
 fn optimizer_differential_success_programs_match() {
     let programs = [
         r#"pipeline test(task) {

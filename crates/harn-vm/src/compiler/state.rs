@@ -99,14 +99,14 @@ impl Compiler {
     /// Populate `type_aliases` from a program's top-level `type T = ...`
     /// declarations so later lowerings can resolve alias names to their
     /// canonical `TypeExpr`.
-    pub(super) fn collect_type_aliases(&mut self, program: &[SNode]) {
+    pub(crate) fn collect_type_aliases(&mut self, program: &[SNode]) {
         for sn in program {
             if let Node::TypeDecl {
                 name,
                 type_expr,
                 type_params: _,
                 is_pub: _,
-            } = &sn.node
+            } = peel_node(sn)
             {
                 self.type_aliases.insert(name.clone(), type_expr.clone());
             }
@@ -1152,7 +1152,7 @@ impl Compiler {
         &mut self,
         program: &[SNode],
     ) -> Result<(), CompileError> {
-        // Phase 1: execute module-level *statements* first, in source order —
+        // Phase 1: execute module-level *statements* in source order —
         // bindings, assignments, expression statements, control flow. Running
         // bindings before phase 2 ensures function closures compiled there
         // capture these names in their env snapshot via `Op::Closure` —
@@ -1184,11 +1184,11 @@ impl Compiler {
                 self.compile_discarded_stmt(sn)?;
             }
         }
-        // Phase 2: compile type and function declarations. Function closures
-        // created here capture the current env which now includes the
-        // module-level bindings from phase 1. Attributed declarations are
-        // compiled here too — the AttributedDecl arm in compile_node
-        // dispatches to the inner declaration's compile path.
+        // Phase 2: compile function-like declarations. Function closures
+        // created here capture the current env which now includes module-level
+        // bindings from phase 1. Attributed declarations are compiled here too
+        // — the AttributedDecl arm in compile_node dispatches to the inner
+        // declaration's compile path.
         for sn in program {
             let inner_kind = match &sn.node {
                 Node::AttributedDecl { inner, .. } => &inner.node,
@@ -1218,10 +1218,10 @@ impl Compiler {
                 | Node::ImplBlock { .. }
                 | Node::StructDecl { .. }
                 | Node::EnumDecl { .. }
-                | Node::InterfaceDecl { .. }
-                | Node::TypeDecl { .. } => {
+                | Node::InterfaceDecl { .. } => {
                     self.compile_node(sn)?;
                 }
+                Node::TypeDecl { .. } => {}
                 _ => {}
             }
         }
