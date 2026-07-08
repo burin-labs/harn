@@ -750,7 +750,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::event_log::{install_default_for_base_dir, EventLog};
+    use crate::event_log::{install_memory_for_current_thread, EventLog};
     use crate::stdlib::register_vm_stdlib;
     use crate::triggers::dispatcher::RetryPolicy;
     use crate::triggers::TriggerRetryConfig;
@@ -762,6 +762,12 @@ mod tests {
     use crate::vm::Vm;
 
     use super::*;
+
+    fn install_test_event_log() -> Arc<AnyEventLog> {
+        install_memory_for_current_thread(
+            crate::runtime_limits::RuntimeLimits::DEFAULT.default_event_log_queue_depth,
+        )
+    }
 
     async fn read_topic(
         log: Arc<AnyEventLog>,
@@ -778,7 +784,7 @@ mod tests {
         crate::reset_thread_local_state();
         clear_trigger_registry();
         let dir = tempfile::tempdir().expect("tempdir");
-        let log = install_default_for_base_dir(dir.path()).expect("event log");
+        let log = install_test_event_log();
         let lib_path = dir.path().join("lib.harn");
         std::fs::write(&lib_path, source).expect("write harn source");
 
@@ -943,7 +949,7 @@ pub fn local_fn(event: TriggerEvent) -> int {
         local
             .run_until(async {
                 let dir = tempfile::tempdir().unwrap();
-                let log = install_default_for_base_dir(dir.path()).unwrap();
+                let log = install_test_event_log();
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());

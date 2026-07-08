@@ -1884,19 +1884,11 @@ mod tests {
     use super::{
         HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
     };
-    use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
+    use crate::event_log::{
+        install_active_event_log, install_memory_for_current_thread, EventLog, Topic,
+    };
     use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm, VmError};
 
-    /// Serialize tests that exercise the request-approval path. Those tests
-    /// drive the Harn VM through its full HITL state machine and rely on
-    /// thread-local event-log handles that are set up by
-    /// `execute_hitl_script` → `reset_thread_local_state()`. Under heavy
-    /// parallel load the OS thread that a `current_thread` tokio runtime
-    /// runs on can be reused between tests; if the outgoing test's async
-    /// drop runs concurrently with the incoming test's reset the thread-
-    /// local event log is in a transitional state and events can be double-
-    /// counted or missed. Holding this mutex for the duration of each test
-    /// turns the hazard into a hard serialize.
     fn hitl_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -1907,7 +1899,7 @@ mod tests {
         source: &str,
     ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>, Vec<String>), VmError> {
         reset_thread_local_state();
-        let log = install_default_for_base_dir(base_dir).expect("install event log");
+        let log = install_memory_for_current_thread(super::HITL_EVENT_LOG_QUEUE_DEPTH);
         let chunk = compile_source(source).expect("compile source");
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
@@ -2028,11 +2020,12 @@ pipeline test(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn request_approval_emits_canonical_approval_request_payload() {
+        let _guard = hitl_lock().lock().await;
         tokio::task::LocalSet::new()
             .run_until(async {
                 reset_thread_local_state();
                 let dir = tempfile::tempdir().expect("tempdir");
-                let log = install_default_for_base_dir(dir.path()).expect("install event log");
+                let log = install_memory_for_current_thread(super::HITL_EVENT_LOG_QUEUE_DEPTH);
                 let source = r#"
 pipeline test(task) {
   host_mock("hitl", "approval", {approved: true, reviewer: "alice", reason: "ok"})
@@ -2196,8 +2189,10 @@ pipeline test(task) {
                 // store), so any session pushed before it would be
                 // gone by the time `ask_user` runs.
                 crate::reset_thread_local_state();
-                crate::event_log::install_default_for_base_dir(dir.path())
-                    .expect("install event log");
+                let log = std::sync::Arc::new(crate::event_log::AnyEventLog::Memory(
+                    crate::event_log::MemoryEventLog::new(super::HITL_EVENT_LOG_QUEUE_DEPTH),
+                ));
+                install_active_event_log(log);
 
                 crate::agent_events::reset_all_sinks();
                 let sink: std::sync::Arc<dyn crate::agent_events::AgentEventSink> =

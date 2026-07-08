@@ -959,20 +959,34 @@ mod tests {
                 let path = entry.expect("dir entry").path();
                 // Skip test-support trees so test-only thread-locals (mock
                 // clocks, fixtures) never have to enter the production catalog.
-                if path.to_string_lossy().contains("test") {
+                // Match on the component name, not the full absolute path:
+                // worktree names such as `release-test-isolation` must not
+                // make the drift guard skip the entire `src` tree.
+                if path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name == "tests" || name == "test_util" || name.ends_with("_tests")
+                    })
+                {
                     continue;
                 }
                 if path.is_dir() {
                     collect(&path, out);
                 } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
                     let content = std::fs::read_to_string(&path).expect("read src file");
+                    let mut pending_static: Option<String> = None;
                     for line in content.lines() {
                         // Thread-locals are the only `static _: RefCell<_>` decls
                         // (a bare static RefCell is not Sync, so will not compile).
-                        if !line.contains("RefCell") {
-                            continue;
-                        }
                         let Some(idx) = line.find("static ") else {
+                            if line.contains("RefCell") {
+                                if let Some(name) = pending_static.take() {
+                                    if is_ambient_shape(&name) {
+                                        out.insert(name);
+                                    }
+                                }
+                            }
                             continue;
                         };
                         let after = &line[idx + "static ".len()..];
@@ -980,8 +994,15 @@ mod tests {
                             .chars()
                             .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
                             .collect();
-                        if !name.is_empty() && is_ambient_shape(&name) {
-                            out.insert(name);
+                        if name.is_empty() {
+                            continue;
+                        }
+                        if line.contains("RefCell") {
+                            if is_ambient_shape(&name) {
+                                out.insert(name);
+                            }
+                        } else {
+                            pending_static = Some(name);
                         }
                     }
                 }

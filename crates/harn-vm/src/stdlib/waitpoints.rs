@@ -639,16 +639,20 @@ fn value_from_serde<T: Serialize>(value: &T) -> Result<VmValue, VmError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
+    use crate::event_log::{
+        install_active_event_log, install_memory_for_current_thread, AnyEventLog, EventLog, Topic,
+    };
     use crate::waitpoints::WAITPOINT_WAITS_TOPIC;
     use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+    use std::sync::Arc;
 
     async fn execute_waitpoint_script(
         base_dir: &std::path::Path,
+        log: Arc<AnyEventLog>,
         source: &str,
     ) -> Result<(String, Vec<String>), VmError> {
         reset_thread_local_state();
-        let log = install_default_for_base_dir(base_dir).expect("install event log");
+        install_active_event_log(log.clone());
         let chunk = compile_source(source).expect("compile source");
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
@@ -688,9 +692,11 @@ pipeline test(task) {
 }
 "#;
 
-                let (output, wait_events) = execute_waitpoint_script(dir.path(), source)
-                    .await
-                    .expect("live waitpoint script succeeds");
+                let log = install_memory_for_current_thread(32);
+                let (output, wait_events) =
+                    execute_waitpoint_script(dir.path(), log.clone(), source)
+                        .await
+                        .expect("live waitpoint script succeeds");
                 assert_eq!(output, "completed\nsystem");
                 assert_eq!(
                     wait_events,
@@ -701,7 +707,7 @@ pipeline test(task) {
                 );
 
                 let _replay_override = install_test_replay_override(true);
-                let replay = execute_waitpoint_script(dir.path(), source)
+                let replay = execute_waitpoint_script(dir.path(), log, source)
                     .await
                     .expect("replay waitpoint script succeeds");
 

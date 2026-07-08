@@ -438,8 +438,7 @@ fn clarifying_question_eval_requires_matching_hitl_prompt() {
 fn save_run_record_materializes_hitl_questions_from_active_event_log() {
     let temp_dir = tempfile::tempdir().unwrap();
     crate::event_log::reset_active_event_log();
-    let log =
-        crate::event_log::install_default_for_base_dir(temp_dir.path()).expect("install event log");
+    let log = crate::event_log::install_memory_for_current_thread(8);
     let topic = crate::event_log::Topic::new(crate::HITL_QUESTIONS_TOPIC).unwrap();
     futures::executor::block_on(
         log.append(
@@ -933,7 +932,7 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     crate::reset_thread_local_state();
     let temp_dir = tempfile::tempdir().unwrap();
     let run_path = temp_dir.path().join("run.json");
-    crate::event_log::install_default_for_base_dir(temp_dir.path()).expect("install event log");
+    crate::event_log::install_memory_for_current_thread(8);
     let topic = crate::event_log::Topic::new("observability.action_graph").unwrap();
     let log = crate::event_log::active_event_log().expect("active event log");
     let mut stream = log.clone().subscribe(&topic, None).await.unwrap();
@@ -1021,9 +1020,7 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn action_graph_update_redacts_payload_before_append() {
     crate::reset_thread_local_state();
-    let temp_dir = tempfile::tempdir().unwrap();
-    crate::event_log::install_default_for_base_dir(temp_dir.path()).expect("install event log");
-    let log = crate::event_log::active_event_log().expect("active event log");
+    let log = crate::event_log::install_memory_for_current_thread(8);
     let topic = crate::event_log::Topic::new("observability.action_graph").unwrap();
 
     append_action_graph_update(

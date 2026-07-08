@@ -136,7 +136,7 @@ pub(super) async fn dispatcher_fixture_with_budget_strategy(
 ) {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
-    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let log = install_test_event_log();
     let lib_path = dir.path().join("lib.harn");
     std::fs::write(&lib_path, source).expect("write module source");
 
@@ -208,7 +208,7 @@ pub(super) async fn a2a_dispatcher_fixture(
 ) {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
-    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let log = install_test_event_log();
 
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
@@ -262,7 +262,7 @@ pub(super) async fn worker_dispatcher_fixture(
 ) {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
-    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let log = install_test_event_log();
 
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);

@@ -224,8 +224,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
 #[tokio::test(flavor = "current_thread")]
 async fn waitpoint_wait_releases_singleton_flow_control_while_waiting() {
     crate::reset_thread_local_state();
-    let dir = tempfile::tempdir().expect("tempdir");
-    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let log = install_test_event_log();
     let state = Arc::new(super::DispatcherRuntimeState::new(log.clone()));
     let gate = "singleton-demo".to_string();
 
@@ -417,7 +416,7 @@ async fn flow_control_debounce_keeps_latest_event() {
             );
             let _guard = crate::triggers::test_util::clock::install_override(clock.clone());
             let dir = tempfile::tempdir().expect("tempdir");
-            let log = install_default_for_base_dir(dir.path()).expect("install event log");
+            let log = install_test_event_log();
             let lib_path = dir.path().join("lib.harn");
             std::fs::write(
                 &lib_path,
@@ -607,7 +606,7 @@ async fn flow_control_priority_prefers_higher_ranked_waiters() {
         .run_until(async {
             crate::reset_thread_local_state();
             let dir = tempfile::tempdir().expect("tempdir");
-            let log = install_default_for_base_dir(dir.path()).expect("install event log");
+            let log = install_test_event_log();
             let lib_path = dir.path().join("lib.harn");
             std::fs::write(
                 &lib_path,

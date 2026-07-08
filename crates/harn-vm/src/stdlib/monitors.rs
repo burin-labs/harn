@@ -670,15 +670,26 @@ fn dispatch_error(error: impl std::fmt::Display) -> VmError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_log::{install_default_for_base_dir, EventLog};
+    use crate::event_log::{install_active_event_log, install_memory_for_current_thread, EventLog};
     use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
 
     async fn execute_monitor_script(
         base_dir: &std::path::Path,
         source: &str,
     ) -> Result<(String, std::sync::Arc<AnyEventLog>), VmError> {
+        execute_monitor_script_with_log(base_dir, source, None).await
+    }
+
+    async fn execute_monitor_script_with_log(
+        base_dir: &std::path::Path,
+        source: &str,
+        existing_log: Option<std::sync::Arc<AnyEventLog>>,
+    ) -> Result<(String, std::sync::Arc<AnyEventLog>), VmError> {
         reset_thread_local_state();
-        let log = install_default_for_base_dir(base_dir).expect("install event log");
+        let log = match existing_log {
+            Some(log) => install_active_event_log(log),
+            None => install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH),
+        };
         let chunk = compile_source(source).expect("compile source");
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
@@ -749,7 +760,7 @@ pipeline test(task) {
   __io_println(result.state.value)
 }
 "#;
-                let (live_output, _) = execute_monitor_script(dir.path(), live)
+                let (live_output, log) = execute_monitor_script(dir.path(), live)
                     .await
                     .expect("live monitor script succeeds");
 
@@ -768,9 +779,10 @@ pipeline test(task) {
   __io_println(result.state.value)
 }
 "#;
-                let (replay_output, _) = execute_monitor_script(dir.path(), replay)
-                    .await
-                    .expect("replay monitor script succeeds");
+                let (replay_output, _) =
+                    execute_monitor_script_with_log(dir.path(), replay, Some(log))
+                        .await
+                        .expect("replay monitor script succeeds");
                 assert_eq!(replay_output, live_output);
             })
             .await;
@@ -782,7 +794,7 @@ pipeline test(task) {
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
                 reset_thread_local_state();
-                let log = install_default_for_base_dir(dir.path()).expect("install event log");
+                let log = install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH);
                 let push_log = log.clone();
                 tokio::task::spawn_local(async move {
                     tokio::time::sleep(StdDuration::from_millis(20)).await;
