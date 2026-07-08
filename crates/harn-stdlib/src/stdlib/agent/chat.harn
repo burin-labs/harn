@@ -31,6 +31,7 @@ fn __chat_agent_option_keys() {
     "subagent_tools",
     "tool_choice",
     "cache",
+    "prompt_cache_ttl",
     "timeout",
     "structural_experiment",
     "loop_until_done",

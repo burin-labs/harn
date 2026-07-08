@@ -138,6 +138,11 @@ pub struct ProviderDefaults {
     pub batch_security_notes: Option<Vec<String>>,
     #[serde(default)]
     pub batch_operational_notes: Option<Vec<String>>,
+    /// Explicit prompt-cache TTL values this provider can honor on request.
+    /// Empty means the route may cache, but Harn has no explicit TTL knob for
+    /// it. Known values today: `5m`, `1h`.
+    #[serde(default)]
+    pub prompt_cache_ttls: Option<Vec<String>>,
     #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
@@ -211,6 +216,7 @@ macro_rules! merge_provider_defaults {
             &mut $dst.batch_operational_notes,
             &$src.batch_operational_notes,
         );
+        $op(&mut $dst.prompt_cache_ttls, &$src.prompt_cache_ttls);
         $op(&mut $dst.seed_supported, &$src.seed_supported);
         $op(&mut $dst.top_k_supported, &$src.top_k_supported);
         $op(&mut $dst.temperature_supported, &$src.temperature_supported);
@@ -255,6 +261,7 @@ impl ProviderDefaults {
             || self.batch_cancellation.is_some()
             || self.batch_security_notes.is_some()
             || self.batch_operational_notes.is_some()
+            || self.prompt_cache_ttls.is_some()
             || self.seed_supported.is_some()
             || self.top_k_supported.is_some()
             || self.temperature_supported.is_some()
@@ -390,6 +397,7 @@ pub struct Capabilities {
     pub tool_approval_policy: Option<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
+    pub prompt_cache_ttls: Vec<String>,
     pub cache_breakpoint_style: String,
     pub vision: bool,
     pub audio: bool,
@@ -518,6 +526,7 @@ impl Default for Capabilities {
             tool_approval_policy: None,
             max_tools: None,
             prompt_caching: false,
+            prompt_cache_ttls: Vec::new(),
             cache_breakpoint_style: "none".to_string(),
             vision: false,
             audio: false,

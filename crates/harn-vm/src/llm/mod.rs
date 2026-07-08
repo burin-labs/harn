@@ -808,6 +808,7 @@ mod tests {
             tool_choice: None,
             tool_search: None,
             cache: false,
+            prompt_cache_ttl: None,
             stream: true,
             timeout: None,
             idle_timeout: None,

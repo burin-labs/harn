@@ -138,6 +138,11 @@ pub struct ProviderRule {
     pub max_tools: Option<u32>,
     #[serde(default)]
     pub prompt_caching: Option<bool>,
+    /// Explicit prompt-cache TTL values this rule can honor on request.
+    /// Empty means the route may cache, but Harn has no explicit TTL knob for
+    /// it. Known values today: `5m`, `1h`.
+    #[serde(default)]
+    pub prompt_cache_ttls: Option<Vec<String>>,
     /// Request-side cache breakpoint strategy for routes that require
     /// `cache_control` to opt into provider prompt caching. Known values are
     /// `none`, `top_level`, and `last_block`.
@@ -511,6 +516,7 @@ impl ProviderRule {
             tool_approval_policy,
             max_tools,
             prompt_caching,
+            prompt_cache_ttls,
             cache_breakpoint_style,
             vision,
             audio,
@@ -603,6 +609,7 @@ impl ProviderRule {
         fill_opt(&mut self.tool_approval_policy, tool_approval_policy);
         fill_opt(&mut self.max_tools, max_tools);
         fill_opt(&mut self.prompt_caching, prompt_caching);
+        fill_opt(&mut self.prompt_cache_ttls, prompt_cache_ttls);
         fill_opt(&mut self.cache_breakpoint_style, cache_breakpoint_style);
         fill_opt(&mut self.audio, audio);
         fill_opt(&mut self.pdf, pdf);
@@ -970,6 +977,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         batch_operational_notes: None,
         max_tools: None,
         prompt_caching: None,
+        prompt_cache_ttls: None,
         cache_breakpoint_style: None,
         vision: None,
         audio: None,
@@ -1041,6 +1049,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
 fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilities {
     let thinking_modes = rule_thinking_modes(rule);
     let thinking_block_style = rule_thinking_block_style(rule);
+    let prompt_caching = rule.prompt_caching.unwrap_or(false);
     // A route that represents reasoning as inline `<think>` blocks in prompt
     // context is exactly the one that emits inline `<think>` in its responses,
     // so derive the response-splitting quirk from the resolved style rather
@@ -1114,7 +1123,15 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .unwrap_or_default(),
         tool_approval_policy: rule.tool_approval_policy.clone(),
         max_tools: rule.max_tools,
-        prompt_caching: rule.prompt_caching.unwrap_or(false),
+        prompt_caching,
+        prompt_cache_ttls: if prompt_caching {
+            rule.prompt_cache_ttls
+                .clone()
+                .or_else(|| defaults.prompt_cache_ttls.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        },
         cache_breakpoint_style: rule
             .cache_breakpoint_style
             .clone()

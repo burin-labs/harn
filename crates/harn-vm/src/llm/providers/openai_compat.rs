@@ -2510,6 +2510,7 @@ thinking_modes = ["enabled"]
             provider_tools: Vec::new(),
             tool_choice: None,
             cache: false,
+            prompt_cache_ttl: None,
             timeout: None,
             stream: false,
             provider_overrides: None,

@@ -46,6 +46,7 @@ pub fn workflow_options(config) {
     "tools",
     "tool_choice",
     "cache",
+    "prompt_cache_ttl",
     "timeout",
     "structural_experiment",
     "loop_until_done",

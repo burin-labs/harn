@@ -198,6 +198,18 @@ pub(crate) fn extract_llm_options(
         Some(value) => value.is_truthy(),
         None => caps.prompt_caching,
     };
+    let prompt_cache_ttl = parse_prompt_cache_ttl_option(options.as_ref())?;
+    if prompt_cache_ttl.is_some()
+        && matches!(
+            options.as_ref().and_then(|o| o.get("cache")),
+            Some(VmValue::Bool(false))
+        )
+    {
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "llm_call: `prompt_cache_ttl` requires provider prompt caching; remove \
+             `cache: false` or omit `prompt_cache_ttl`.",
+        ))));
+    }
     let stream = options
         .as_ref()
         .and_then(|o| o.get("stream"))
@@ -387,6 +399,9 @@ pub(crate) fn extract_llm_options(
     }
     if enforce_capability_gates && cache && !caps.prompt_caching {
         return Err(unsupported_option_error("cache", &provider, &model));
+    }
+    if enforce_capability_gates {
+        validate_prompt_cache_ttl_supported(prompt_cache_ttl, &provider, &model, &caps)?;
     }
     if vision
         && !crate::llm::provider::provider_supports_image_urls(&provider, &model)
@@ -758,6 +773,7 @@ pub(crate) fn extract_llm_options(
         tool_choice,
         tool_search,
         cache,
+        prompt_cache_ttl,
         timeout,
         idle_timeout,
         stream,
@@ -794,6 +810,70 @@ pub(crate) fn extract_llm_options(
 /// `model:`/`provider:` that conflicts with a `models:`/`ladder:` option.
 fn option_is_explicitly_set(options: &crate::value::DictMap, key: &str) -> bool {
     matches!(options.get(key), Some(value) if !matches!(value, VmValue::Nil))
+}
+
+fn parse_prompt_cache_ttl_option(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Option<crate::llm::api::PromptCacheTtl>, VmError> {
+    let Some(value) = options.and_then(|o| o.get("prompt_cache_ttl")) else {
+        return Ok(None);
+    };
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::String(raw) => {
+            let normalized = raw.trim().to_ascii_lowercase();
+            crate::llm::api::PromptCacheTtl::parse(&normalized)
+                .map(Some)
+                .ok_or_else(|| {
+                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "llm_call: `prompt_cache_ttl` must be \"5m\" or \"1h\"",
+                    )))
+                })
+        }
+        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            format!(
+                "llm_call: `prompt_cache_ttl` must be a string, got {}",
+                other.type_name()
+            ),
+        )))),
+    }
+}
+
+fn validate_prompt_cache_ttl_supported(
+    ttl: Option<crate::llm::api::PromptCacheTtl>,
+    provider: &str,
+    model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Result<(), VmError> {
+    let Some(ttl) = ttl else {
+        return Ok(());
+    };
+    if !caps.prompt_caching {
+        return Err(unsupported_option_error(
+            "prompt_cache_ttl",
+            provider,
+            model,
+        ));
+    }
+    if caps
+        .prompt_cache_ttls
+        .iter()
+        .any(|supported| supported == ttl.as_str())
+    {
+        return Ok(());
+    }
+    let supported = if caps.prompt_cache_ttls.is_empty() {
+        "no explicit TTL values".to_string()
+    } else {
+        caps.prompt_cache_ttls.join(", ")
+    };
+    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        format!(
+            "llm_call: provider \"{provider}\" model \"{model}\" does not support \
+         prompt_cache_ttl \"{}\"; supported: {supported}",
+            ttl.as_str()
+        ),
+    ))))
 }
 
 pub(crate) fn opt_str_list(
@@ -869,12 +949,23 @@ pub(super) fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
     if opts.cache && !caps.prompt_caching {
         warn("cache");
     }
+    if let Some(ttl) = opts.prompt_cache_ttl {
+        if !caps.prompt_caching
+            || !caps
+                .prompt_cache_ttls
+                .iter()
+                .any(|supported| supported == ttl.as_str())
+        {
+            warn("prompt_cache_ttl");
+        }
+    }
 }
 
 #[cfg(test)]
 mod cache_default_tests {
     use super::extract_llm_options;
-    use crate::value::{DictMap, VmDictExt, VmValue};
+    use crate::llm::api::PromptCacheTtl;
+    use crate::value::{DictMap, VmDictExt, VmError, VmValue};
 
     fn opts_with(options: DictMap) -> crate::llm::api::LlmCallOptions {
         extract_llm_options(&[
@@ -885,12 +976,19 @@ mod cache_default_tests {
         .expect("options")
     }
 
-    fn try_opts_with(options: DictMap) -> Result<crate::llm::api::LlmCallOptions, super::VmError> {
+    fn try_opts_with(options: DictMap) -> Result<crate::llm::api::LlmCallOptions, VmError> {
         extract_llm_options(&[
             VmValue::String(arcstr::ArcStr::from("hello")),
             VmValue::Nil,
             VmValue::dict(options),
         ])
+    }
+
+    fn thrown_message(err: VmError) -> String {
+        match err {
+            VmError::Thrown(VmValue::String(message)) => message.to_string(),
+            other => format!("{other:?}"),
+        }
     }
 
     // The `mock` provider needs no API key and resolves its capability row by
@@ -1002,6 +1100,49 @@ mod cache_default_tests {
             try_opts_with(options).is_err(),
             "explicit `cache: true` on a non-supporting route must error"
         );
+    }
+
+    #[test]
+    fn prompt_cache_ttl_one_hour_parses_for_anthropic_route() {
+        let mut options = caching_route();
+        options.put_str("prompt_cache_ttl", "1h");
+        let opts = opts_with(options);
+        assert_eq!(opts.prompt_cache_ttl, Some(PromptCacheTtl::OneHour));
+        assert!(opts.cache, "TTL requests keep provider prompt caching on");
+    }
+
+    #[test]
+    fn prompt_cache_ttl_rejects_invalid_values() {
+        let mut options = caching_route();
+        options.put_str("prompt_cache_ttl", "24h");
+        let err = match try_opts_with(options) {
+            Ok(_) => panic!("invalid TTL must error"),
+            Err(err) => err,
+        };
+        assert!(thrown_message(err).contains("must be \"5m\" or \"1h\""));
+    }
+
+    #[test]
+    fn prompt_cache_ttl_conflicts_with_cache_false() {
+        let mut options = caching_route();
+        options.put("cache", VmValue::Bool(false));
+        options.put_str("prompt_cache_ttl", "1h");
+        let err = match try_opts_with(options) {
+            Ok(_) => panic!("cache false + TTL must error"),
+            Err(err) => err,
+        };
+        assert!(thrown_message(err).contains("requires provider prompt caching"));
+    }
+
+    #[test]
+    fn prompt_cache_ttl_errors_on_non_supporting_route() {
+        let mut options = non_caching_route();
+        options.put_str("prompt_cache_ttl", "1h");
+        let err = match try_opts_with(options) {
+            Ok(_) => panic!("unsupported TTL must error"),
+            Err(err) => err,
+        };
+        assert!(thrown_message(err).contains("prompt_cache_ttl"));
     }
 }
 

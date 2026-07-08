@@ -170,7 +170,8 @@ call sites toward it.
 | `include` | list | nil | OpenAI Responses metadata expansions to request. |
 | `max_tool_calls` | int | nil | OpenAI Responses provider-executed tool-call limit. |
 | `budget` | dict | nil | Pre-flight LLM budget envelope. Supports `max_cost_usd`, `max_input_tokens`, `max_output_tokens`, and `total_budget_usd` |
-| `cache` | bool | `false` | Enable prompt caching (Anthropic) |
+| `cache` | bool | provider capability default | Enable provider-side prompt caching for routes that support it. Defaults on for cache-capable routes and off otherwise. |
+| `prompt_cache_ttl` | `"5m"` or `"1h"` | provider default | Optional provider-side prompt-cache TTL. Anthropic uses `5m` by default; `1h` requests the extended cache when the route advertises that TTL in `prompt_cache_ttls`. |
 | `fast` | bool | `false` | Opt into the model's accelerated-serving serving tier. Maps to the `fast` entry in the catalog's `serving_tiers` array (`speed` for Anthropic, `service_tier` for OpenAI) and injects the Anthropic beta header when required. Rejected for models with no usable `fast` serving tier. Billed at the tier's premium pricing only when the provider confirms it served fast (`result.served_fast`). `speed: "fast"` is accepted as an alias. |
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
 | `timeout` | int | `120` | Request timeout in seconds. `timeout_ms` accepted as an alias and rounded up to whole seconds (HTTP transports take `Duration::from_secs`); sub-second budgets must be enforced at the caller. |

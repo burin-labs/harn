@@ -47,8 +47,8 @@ pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmApiMode, LlmCallOptions, LlmRequestPayload,
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, OutputFormat,
-    ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, ToolSearchConfig, ToolSearchMode,
-    ToolSearchVariant,
+    PromptCacheTtl, ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, ToolSearchConfig,
+    ToolSearchMode, ToolSearchVariant,
 };
 pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use response::parse_openai_responses_response;

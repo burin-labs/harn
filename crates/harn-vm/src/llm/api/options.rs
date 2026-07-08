@@ -128,6 +128,48 @@ pub(crate) enum ToolSearchMode {
     Client,
 }
 
+/// Provider-side prompt-cache TTL requested by `llm_call` / `agent_loop`.
+/// Harn keeps this typed so provider adapters can decide whether a value is an
+/// explicit wire field or the provider's default behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PromptCacheTtl {
+    FiveMinutes,
+    OneHour,
+}
+
+impl PromptCacheTtl {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "5m" => Some(Self::FiveMinutes),
+            "1h" => Some(Self::OneHour),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::FiveMinutes => "5m",
+            Self::OneHour => "1h",
+        }
+    }
+
+    pub(crate) fn anthropic_ttl_field(self) -> Option<&'static str> {
+        match self {
+            Self::FiveMinutes => None,
+            Self::OneHour => Some("1h"),
+        }
+    }
+}
+
+impl serde::Serialize for PromptCacheTtl {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 /// Provider API surface for a call. OpenAI-compatible providers default to
 /// chat completions; the native OpenAI Responses path is explicit because it
 /// has different request, tool, and transcript semantics.
@@ -413,6 +455,7 @@ pub(crate) struct LlmCallOptions {
 
     // --- Caching ---
     pub cache: bool,
+    pub prompt_cache_ttl: Option<PromptCacheTtl>,
 
     // --- Transport ---
     pub timeout: Option<u64>,
@@ -612,6 +655,7 @@ pub(crate) struct LlmRequestPayload {
     pub provider_tools: Vec<serde_json::Value>,
     pub tool_choice: Option<serde_json::Value>,
     pub cache: bool,
+    pub prompt_cache_ttl: Option<PromptCacheTtl>,
     pub timeout: Option<u64>,
     pub stream: bool,
     pub provider_overrides: Option<serde_json::Value>,
@@ -687,6 +731,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             provider_tools: opts.provider_tools.clone(),
             tool_choice: opts.tool_choice.clone(),
             cache: opts.cache,
+            prompt_cache_ttl: opts.prompt_cache_ttl,
             timeout: opts.timeout,
             stream: opts.stream,
             provider_overrides: opts.provider_overrides.clone(),
@@ -802,6 +847,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         })),
         tool_search: None,
         cache: true,
+        prompt_cache_ttl: None,
         stream: true,
         timeout: Some(5),
         idle_timeout: None,
