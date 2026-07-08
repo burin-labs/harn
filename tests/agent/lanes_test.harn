@@ -330,3 +330,56 @@ pipeline test_stage_gate_label_rejects_delimiter_components(task) {
   }
   assert(is_err(bad_kind_eq), "an `=` in an allowed_kinds token is rejected")
 }
+
+pipeline test_stage_gate_default_prefix_byte_identical(task) {
+  // Omitting the prefix option renders the SAME marker as passing the explicit
+  // default — the adoption seam adds no drift for callers that never set a prefix.
+  const gate = {allowed_tools: ["edit"], lane: "repair_local", stage: "repair"}
+  const implicit = stage_gate_label("Patch it.", gate)
+  const explicit = stage_gate_label("Patch it.", gate, {prefix: "[lane_gate "})
+  assert_eq(implicit, explicit)
+  assert(implicit.contains("[lane_gate lane=repair_local"), "default marker prefix rendered")
+}
+
+pipeline test_stage_gate_custom_prefix_roundtrips(task) {
+  // A host prefix (burin-code's existing "[burin_gate ") round-trips through
+  // label -> parse when the SAME prefix is supplied to both.
+  const opts = {prefix: "[burin_gate "}
+  const gate = {allowed_kinds: ["edit"], allowed_tools: ["edit", "look"], lane: "repair_local", stage: "repair"}
+  const label = stage_gate_label("Patch the bug.", gate, opts)
+  assert(label.contains("[burin_gate lane=repair_local stage=repair"), "custom prefix rendered")
+  assert(!label.contains("[lane_gate "), "default prefix not present under a custom prefix")
+  const recovered = stage_gate_parse(label, opts)
+  assert_eq(recovered.lane, "repair_local")
+  assert_eq(recovered.stage, "repair")
+  assert_eq(recovered.allowed_tools, ["edit", "look"])
+  assert_eq(recovered.allowed_kinds, ["edit"])
+  // A marker under one prefix is NOT recovered under a different (default) prefix.
+  assert_eq(stage_gate_parse(label), {})
+}
+
+pipeline test_stage_gate_prefix_validated_loudly(task) {
+  // A custom prefix must be a well-formed marker opener: start with "[", end with a
+  // space, and carry none of the "=", ",", "]" structural delimiters.
+  const gate = {lane: "l", stage: "s"}
+  const no_open = try {
+    stage_gate_label("t", gate, {prefix: "burin_gate "})
+  }
+  assert(is_err(no_open), "a prefix missing the leading `[` is rejected")
+  const no_space = try {
+    stage_gate_label("t", gate, {prefix: "[burin_gate"})
+  }
+  assert(is_err(no_space), "a prefix missing the trailing space is rejected")
+  const has_eq = try {
+    stage_gate_label("t", gate, {prefix: "[bur=in "})
+  }
+  assert(is_err(has_eq), "a prefix containing `=` is rejected")
+  const has_bracket = try {
+    stage_gate_label("t", gate, {prefix: "[bur]in "})
+  }
+  assert(is_err(has_bracket), "a prefix containing `]` is rejected")
+  const has_comma = try {
+    stage_gate_parse("anything", {prefix: "[bur,in "})
+  }
+  assert(is_err(has_comma), "parse validates the prefix too (comma rejected)")
+}

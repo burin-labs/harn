@@ -448,12 +448,60 @@ fn __completion_gate_veto_key(session_id) {
   return "harn.completion_gate." + session_id + ".veto_count"
 }
 
+/**
+ * Session-store key for the per-CLASS veto counter, keyed by the ladder rule id
+ * that vetoed (the verdict `reason`). Shares the `harn.completion_gate.<session>`
+ * namespace with the flat counter so both persist through the same mechanism.
+ */
+fn __completion_gate_veto_class_key(session_id, reason) {
+  return "harn.completion_gate." + session_id + ".veto_count." + reason
+}
+
+/**
+ * The ladder rule ids (`reason`s) that a CHARGED veto can carry — the classes a
+ * host may read a per-class count for. Only the vetoing rules that actually reach
+ * the budget-charge path are counted; the abstain/allow reasons never charge.
+ */
+const __COMPLETION_GATE_VETO_CLASSES = ["missing_verification", "no_source_write", "verification_after_write_red"]
+
 /** Per-session vetoes charged so far (0 without a session id). */
 fn __completion_gate_vetoes_used(session_id) {
   if session_id == "" {
     return 0
   }
   return to_int(store_get(__completion_gate_veto_key(session_id)) ?? 0) ?? 0
+}
+
+/** Per-class vetoes charged so far for one ladder rule id (0 without a session id). */
+fn __completion_gate_class_vetoes_used(session_id, reason) {
+  if session_id == "" {
+    return 0
+  }
+  return to_int(store_get(__completion_gate_veto_class_key(session_id, reason)) ?? 0) ?? 0
+}
+
+/**
+ * agent_completion_gate_veto_counts.
+ *
+ * Read the completion-gate veto counters for a session: the flat `total` plus a
+ * per-class `by_class` map keyed by the ladder rule id that vetoed. A host adopts
+ * this to replace a locally-maintained class-specific counter — the counts are
+ * persisted by the gate itself in the session store, so a caller need only read
+ * them here. `by_class` names every chargeable class (0 when a class has never
+ * vetoed this session), so the shape is stable regardless of what fired.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_completion_gate_veto_counts(session_id).by_class.no_source_write
+ */
+pub fn agent_completion_gate_veto_counts(session_id) {
+  const sid = to_string(session_id ?? "")
+  let by_class = {}
+  for reason in __COMPLETION_GATE_VETO_CLASSES {
+    by_class = by_class + {[reason]: __completion_gate_class_vetoes_used(sid, reason)}
+  }
+  return {by_class: by_class, total: __completion_gate_vetoes_used(sid)}
 }
 
 /**
@@ -540,6 +588,14 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
   const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
   if budgeted.charge && session_id != "" {
     store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
+    // Per-class counter (keyed by the vetoing ladder rule id) alongside the flat
+    // count, persisted in the same session-store namespace. A charged veto's
+    // verdict is the un-converted ladder verdict, so `reason` is the rule id.
+    const reason = to_string(verdict?.reason ?? "")
+    if reason != "" {
+      const class_used = __completion_gate_class_vetoes_used(session_id, reason)
+      store_set(__completion_gate_veto_class_key(session_id, reason), class_used + 1)
+    }
   }
   const resolved = budgeted.verdict
   if resolved?.ok ?? false {
