@@ -650,6 +650,7 @@ State snapshot fields:
 | `budget.remaining` | `current_limit - iteration`; `0` means the next iteration would exceed the cap |
 | `budget.extension_count` | Number of prior extensions applied |
 | `turn.tool_call_count` | Tool calls executed this turn |
+| `turn.tool_names` | Attempted tool names from this turn's dispatch |
 | `turn.successful_tool_names` / `turn.rejected_tool_names` | Names from this turn's dispatch |
 | `turn.text_chars` | Visible-text length this turn |
 | `turn.native_fallback_used` | True when `native_tool_fallback` accepted text-mode tool calls this turn |
@@ -1158,6 +1159,7 @@ The callback receives:
   dispatch: list | dict | nil,
   tool_results: list,
   tool_count: int,
+  tool_names: list,
   successful_tool_names: list,
   rejected_tool_names: list,
   session_successful_tools: list,
