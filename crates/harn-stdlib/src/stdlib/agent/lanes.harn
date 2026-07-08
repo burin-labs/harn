@@ -412,6 +412,22 @@ pub fn lane_scope_classifier(rows, options = nil) {
 
 const __STAGE_GATE_PREFIX = "[lane_gate "
 
+// The marker is space-delimited (`lane=… stage=… kinds=… tools=…`), token lists
+// are comma-joined, `=` separates key from value, and `]` terminates the marker.
+// A component carrying any of these four bytes would silently truncate or split
+// on `stage_gate_parse`, so `stage_gate_label` rejects it loudly instead.
+const __STAGE_GATE_DELIMITERS = [" ", "=", ",", "]"]
+
+fn __stage_gate_reject_delimiters(field, value) {
+  for delimiter in __STAGE_GATE_DELIMITERS {
+    if value.index_of(delimiter) >= 0 {
+      throw "stage_gate_label: " + field + " may not contain the marker delimiter '"
+        + delimiter + "' (it would corrupt the stage_gate_parse round-trip); got: \""
+        + value + "\""
+    }
+  }
+}
+
 fn __stage_gate_token_list(values) {
   let out = []
   for value in values ?? [] {
@@ -470,10 +486,12 @@ fn __stage_gate_kind_of(options, tool_name) {
  * workflow scope from the prompt itself. `gate` is `{lane, stage,
  * allowed_kinds?, allowed_tools?}`. Returns `base_label` UNCHANGED when either
  * `lane` or `stage` is blank — so an ungated node's label is byte-identical to
- * what it would be without this seam.
+ * what it would be without this seam. Throws when any component (`lane`,
+ * `stage`, or an `allowed_kinds`/`allowed_tools` token) contains a marker
+ * delimiter (space, `=`, `,`, `]`) that `stage_gate_parse` could not recover.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: stable
  * @example: stage_gate_label(task, {lane: "repair_local", stage: "repair", allowed_tools: ["edit", "look"]})
  */
@@ -489,9 +507,19 @@ pub fn stage_gate_label(base_label, gate) {
   if lane == "" || stage == "" {
     return base
   }
+  __stage_gate_reject_delimiters("lane", lane)
+  __stage_gate_reject_delimiters("stage", stage)
+  const kinds = __stage_gate_token_list(spec?.allowed_kinds ?? [])
+  const tools = __stage_gate_token_list(spec?.allowed_tools ?? [])
+  for kind_token in kinds {
+    __stage_gate_reject_delimiters("allowed_kinds token", kind_token)
+  }
+  for tool_token in tools {
+    __stage_gate_reject_delimiters("allowed_tools token", tool_token)
+  }
   const marker = __STAGE_GATE_PREFIX + "lane=" + lane + " stage=" + stage + " kinds="
-    + __stage_gate_token_string(spec?.allowed_kinds ?? []) + " tools="
-    + __stage_gate_token_string(spec?.allowed_tools ?? []) + "]"
+    + __stage_gate_token_string(kinds) + " tools="
+    + __stage_gate_token_string(tools) + "]"
   if base == "" {
     return marker
   }

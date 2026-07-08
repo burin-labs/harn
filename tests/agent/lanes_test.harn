@@ -284,3 +284,24 @@ pipeline test_stage_gate_rejects_bad_callbacks(task) {
   }
   assert(is_err(bad_suggest), "non-string/non-callable suggest throws loudly")
 }
+
+pipeline test_stage_gate_label_rejects_delimiter_components(task) {
+  // A well-formed gate round-trips through label -> parse byte-for-byte.
+  const label = stage_gate_label("do it", {allowed_kinds: ["search", "edit"], allowed_tools: ["look", "edit_file"], lane: "repair_local", stage: "repair"})
+  const back = stage_gate_parse(label)
+  assert_eq(back.lane, "repair_local")
+  assert_eq(back.stage, "repair")
+  assert_eq(join(back.allowed_kinds, ","), "search,edit")
+  assert_eq(join(back.allowed_tools, ","), "look,edit_file")
+
+  // Each marker delimiter (space, `=`, `,`, `]`) in any component is rejected
+  // LOUDLY at label time instead of silently truncating on the parse round-trip.
+  const bad_lane_space = try { stage_gate_label("t", {lane: "repair local", stage: "repair"}) }
+  assert(is_err(bad_lane_space), "a space in lane is rejected")
+  const bad_stage_bracket = try { stage_gate_label("t", {lane: "l", stage: "re]pair"}) }
+  assert(is_err(bad_stage_bracket), "a `]` in stage is rejected")
+  const bad_tool_comma = try { stage_gate_label("t", {allowed_tools: ["ed,it"], lane: "l", stage: "s"}) }
+  assert(is_err(bad_tool_comma), "a comma in an allowed_tools token is rejected")
+  const bad_kind_eq = try { stage_gate_label("t", {allowed_kinds: ["a=b"], lane: "l", stage: "s"}) }
+  assert(is_err(bad_kind_eq), "an `=` in an allowed_kinds token is rejected")
+}
