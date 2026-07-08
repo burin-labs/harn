@@ -390,6 +390,7 @@ pub fn lane_scope_classifier(rows, options = nil) {
 }
 
 // -------------------------------------------------------------------------------------------------
+
 // Per-stage tool-gate (ADDITIVE, default-off). Absorbs the generic core of
 // burin-code's `tool-gating.harn`. Where `lane_policy` above is a per-TASK
 // one-shot ceiling that HIDES tools silently at loop start (#2506) and never
@@ -408,6 +409,7 @@ pub fn lane_scope_classifier(rows, options = nil) {
 // denial-with-suggestion UX text (`stage_gate_denial`). Kind resolution is
 // injected via an `options.kind_of` callback so the seam never hardwires a
 // particular tool registry.
+
 // -------------------------------------------------------------------------------------------------
 
 const __STAGE_GATE_PREFIX = "[lane_gate "
@@ -422,8 +424,10 @@ fn __stage_gate_reject_delimiters(field, value) {
   for delimiter in __STAGE_GATE_DELIMITERS {
     if value.index_of(delimiter) >= 0 {
       throw "stage_gate_label: " + field + " may not contain the marker delimiter '"
-        + delimiter + "' (it would corrupt the stage_gate_parse round-trip); got: \""
-        + value + "\""
+        + delimiter
+        + "' (it would corrupt the stage_gate_parse round-trip); got: \""
+        + value
+        + "\""
     }
   }
 }
@@ -518,8 +522,10 @@ pub fn stage_gate_label(base_label, gate) {
     __stage_gate_reject_delimiters("allowed_tools token", tool_token)
   }
   const marker = __STAGE_GATE_PREFIX + "lane=" + lane + " stage=" + stage + " kinds="
-    + __stage_gate_token_string(kinds) + " tools="
-    + __stage_gate_token_string(tools) + "]"
+    + __stage_gate_token_string(kinds)
+    + " tools="
+    + __stage_gate_token_string(tools)
+    + "]"
   if base == "" {
     return marker
   }
@@ -748,5 +754,9 @@ pub fn stage_gate_denial(gate, tool_name, options = nil) {
   const allowed = __stage_gate_render_allowed(spec)
   const suggestion = __stage_gate_suggestion_text(spec, opts)
   return "tool_not_available_in_stage lane=" + lane + " stage=" + stage + " tool=" + name + " kind="
-    + kind + " allowed=" + allowed + " suggestion=" + suggestion
+    + kind
+    + " allowed="
+    + allowed
+    + " suggestion="
+    + suggestion
 }

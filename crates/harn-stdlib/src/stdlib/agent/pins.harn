@@ -262,8 +262,11 @@ pub fn pin_compaction_policy(pins, opts = nil) {
   let pin_preserve = []
   for p in pins ?? [] {
     if type_of(p?.content) == "string" && p.content != "" {
-      pin_preserve = pin_preserve.push("Preserve the pinned " + to_string(p?.kind ?? "note") + ": "
-        + p.content)
+      pin_preserve = pin_preserve
+        .push(
+        "Preserve the pinned " + to_string(p?.kind ?? "note") + ": "
+          + p.content,
+      )
     }
   }
   const merge_with = if type_of(raw?.merge) == "dict" {
@@ -276,7 +279,11 @@ pub fn pin_compaction_policy(pins, opts = nil) {
     return compaction_policy(
       base?.instructions,
       base
-        + {author: base?.author ?? "pins", mode: base?.mode ?? "pins", preserve: base?.preserve ?? pin_preserve},
+        + {
+        author: base?.author ?? "pins",
+        mode: base?.mode ?? "pins",
+        preserve: base?.preserve ?? pin_preserve,
+      },
     )
   }
   // Merge-with-existing (+ optional label-preserve).
