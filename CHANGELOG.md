@@ -9,6 +9,177 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.1
+
+### Added
+
+- Added `harn provider tool-scorecard` to aggregate saved tool-probe
+  reports into deterministic provider/model tool-call quality scorecards.
+- Add `harn mcp call` for one-shot stdio MCP tool probes and use it to replace
+  Python conformance MCP driver helpers.
+- **`std/agent/stall` gains two additive, default-off enrichment seams for the
+  burin stuck-detector subsumption (#4228).** A per-turn `action_signal` fact
+  callback lets the host report a boolean "this turn performed a flailing action"
+  verdict (e.g. a desperation shell write, a truncated read, or an edit-oscillation
+  result) that trips the stall on a SINGLE occurrence — no streak needed — with the
+  distinct `flailing_action` warning pattern; consecutive flailing turns accumulate
+  a dedicated counter (independent of the core consecutive-trip escalation, which
+  resets every non-tripping turn) and escalate to a hard stop at
+  `hard_stop_after_trips`. A `turns_since_clean_verify` int knob adds an
+  elapsed-turns hard floor — a truly independent axis, active whether or not the
+  repair-aware/post-edit-reverify modes are on — that counts every folded turn since
+  the last clean verification (edit/read storms included, unlike the failing-verify
+  `no_net_progress_hard_cap_after`) and forces a terminal stuck stop once the
+  caller-set floor is crossed. Both knobs default to nil/off; when neither is
+  configured the detector's decisions are byte-identical to before, so the live
+  eval fleet's measurements are unchanged.
+- **`std/agent/lanes` gains a per-stage tool-gate and `std/agent/pins` gains
+  taxonomy/policy seams (#4230).** `stage_gate_label`/`stage_gate_parse`/
+  `stage_gate_from_session`/`stage_gate_allows`/`stage_gate_denial` encode a
+  lane/stage tool-gate into a task label so a downstream PreToolUse seam can
+  recover the active workflow scope from the prompt itself; the gate fails OPEN
+  (no kind resolver ⇒ never blocks) and an ungated node's label is byte-identical
+  to before. `stage_gate_label` rejects any component containing a marker
+  delimiter (space, `=`, `,`, `]`) loudly rather than silently truncating on the
+  parse round-trip. `pin_register_kinds`, the extended `pin_reminder` options, and
+  `pin_compaction_policy` merge/preserve-labels behavior extend the pin taxonomy;
+  every new option collapses to its pre-seam expression when unset. These unblock
+  the burin-code tool-gating and structural-compaction subsumptions.
+- Added `harn models lora train` to render deterministic LoRA trainer receipts,
+  optional backend launch argv, structural dataset audit counters, and
+  post-training manifest commands.
+- Added Harn-owned `std/coordination` schema/report helpers for coordination
+  messages, receipts, inboxes, and wait-reply envelopes, plus `std/agent/events`
+  schemas for captured events, tool lifecycle events, tool audit events, and
+  typed checkpoints.
+- Added `mcp_client_roots()` / `harn.mcp.client_roots()` for Harn-served MCP handlers to issue
+  client `roots/list` requests without fixture-specific protocol code.
+- Added a pure Harn remote eval fanout dry-run planner for stable shard,
+  concurrency, artifact, and ledger-ingest receipts.
+- Added `path_status(path, access?)` and `harness.fs.status(path, access?)` for
+  structured filesystem visibility probes that distinguish missing paths from
+  sandbox scope denial, read-only denial, and stat errors.
+- Seam adoption enablers so hosts can adopt the rearch agent seams without adapters: a configurable
+  stage-gate marker `prefix` on `stage_gate_label`/`stage_gate_parse`/`stage_gate_from_session`,
+  independently-armable no-net-progress predicates (`stall_diagnostics.no_net_progress_predicates`), a
+  cumulative-count return form for the `remediation_delivered` callback, and per-class completion-gate
+  veto counters read via `agent_completion_gate_veto_counts`. All new options are byte-identical to prior
+  behavior when unset.
+- Added a pure `std/agent/governors` convergence guard contract for post-green
+  finalization runaway detection, with typed fact vectors, issue-shaped
+  verdicts, and auditable receipts.
+- Added Harn-owned remote eval fanout trial receipts, artifact path rewrite
+  manifests, and fail-closed rejoin receipts for missing, duplicate, unknown, or
+  failed shards.
+- Added a typed `prompt_cache_ttl` LLM/agent option so Anthropic routes can
+  request the 1-hour prompt-cache TTL while preserving the default 5-minute cache behavior.
+- Added `std/schema::schema_validator`, a reusable validator object for
+  schema-backed `is`, `check`, `parse`, `report`, `expect`, error, issue, and
+  JSON/OpenAPI schema operations.
+- Added Harn stdlib helpers for one-step JSON parse plus schema validation.
+
+### Changed
+
+- Delete unused provider Python mock servers and classify remaining helper Python as Harn cutover debt.
+- Model catalog provider metadata now distinguishes asynchronous Batch APIs from synchronous
+  discounted or premium serving tiers such as Flex, Priority, and fast mode.
+- Replaced the HTTP MCP echo conformance helper with a Harn-served MCP fixture.
+- Replaced the HTTP MCP elicitation conformance helper with a Harn-served MCP fixture.
+- `harn models lora` receipts now record PEFT `modules_to_save` and embedding/head
+  save policy as part of the hashed LoRA contract.
+
+### Fixed
+
+- Command policy deny patterns now evaluate quote-aware shell command segments, including `sh -c`
+  payloads and pipelines, so prefix-style denied commands cannot hide behind allowed compound
+  commands.
+- **Agent-loop hard-stop recovery receipts.** Thrash hard stops that have no
+  matching recovery rung now emit a skipped `harn.agent_loop_recovery_receipt.v1`
+  receipt with the uncovered stall pattern, so mechanism-liveness can
+  distinguish an intentionally skipped ladder from an inert one (#4222).
+- Normalize provider-facing tool and structured-output JSON schemas before strict provider request validation.
+- **Git hooks now validate rebased PR branches against the base branch (#4246).**
+  Workflow-only branches no longer inherit unrelated Rust or Harn changes from
+  stale upstream ranges after a rebase, avoiding unnecessary broad Cargo and
+  registry checks during pre-push.
+- Fix stdlib metadata stripping for Harn v0.10 const-bound generated examples,
+  add an audit guard for syntax-sensitive Harn keyword scans/examples, and keep
+  highlight keyword hooks on the branch-source Harn binary.
+- The `prefer-const` autofix (`mutable-never-reassigned`) no longer proposes
+  tightening a destructuring `let` to `const` when only some of its bound
+  names are never reassigned, which could have frozen a reassigned sibling.
+  It now applies only to simple `let x = …` bindings. Two migration-stale
+  messages that still said `var` (the shadow-variable lint suggestion and the
+  redeclare-immutable runtime error) now say `let`.
+- Reject streaming request rows in `harn models batch` manifest and prepare flows, and document OpenAI
+  `/v1/responses` endpoint overrides for batch requests.
+- Agent-orchestration seams now validate their config LOUDLY at config time
+  instead of failing deep inside a run (or silently doing nothing).
+  `agent_completion_gate` rejects a non-callable `facts` / `classify_write` /
+  `verify_command` / `veto_combine`, a `classify_write` set without `facts`, and
+  a `judge_seam` other than `"verify_completion_judge"` / `"done_judge"`. `goal`
+  rejects a criterion `check` that is set but not callable, and `goal_reloop`
+  rejects a non-callable `facts_fn` (both were silently dropped). A governor
+  `policy.signal` outside `iterations` / `tokens` / `cost` now throws instead of
+  silently metering iterations. Added `pace_action_of` to map
+  `governor_pace_decision`'s native `proceed`/`extend`/`pace_check`/`cut`
+  vocabulary onto the shared `proceed`/`warn`/`abort` governance vocabulary.
+  `agent_completion_gate` also accepts a `feedback_templates` dict to override the
+  coding-domain veto feedback prose per ladder rule (validated at config time;
+  defaults unchanged).
+- Local Makefile and package/measurement scripts now pair isolated Cargo target
+  directories with isolated Cargo build directories, avoiding shared build-script
+  output races during parallel validation.
+- **Merge-queue Rust tests now use a lower build parallelism cap (#4302).**
+  The queue lane halves `CARGO_BUILD_JOBS` after capped hosted runners still
+  OOMed during Rust compile, improving release queue reliability on the
+  standard 16 GB runner.
+- Added a hook-wide no-local-build mode so eval-window commits and pushes can keep cheap guards
+  without spawning local Cargo or Harn builds.
+- Hardened the Linux Rust CI disk reclaim step so large affected-crate test closures have more room to link.
+- **Hostlib command floor.** Scoped build-directory cleanups wrapped in
+  `sh -c` are no longer mistaken for project-root deletes when a later command
+  in the same shell script references `.`.
+- Allow annotated mutating tools to declare dependency key arguments so same-file
+  edit batches skip only genuinely dependent siblings after an applied failure.
+- Added a reusable `agent_done_contract` helper so Harn agents can require a completion claim and
+  receive judge `specific_gaps` repair feedback before yielding.
+- The coding-agent eval harness and stdlib file writers now avoid redundant `mkdir` calls on an
+  already-mounted sandbox workspace root, restoring mock-matrix release audit coverage under strict
+  workspace-root write enforcement.
+- Agent feedback-injection events now report the injected feedback text as `content` and carry no-progress streak counts separately.
+- Validate hostlib request payloads against Harn-owned JSON Schemas before dispatching registered VM builtins.
+- Ad hoc Makefile Harn CLI fallbacks now isolate Cargo's intermediate build
+  directory under the active target directory, avoiding stale shared build
+  artifacts when generated-artifact checks source-build the CLI.
+- Added `tool_names` to the live agent post-turn payload so attempted tool use
+  has a canonical Harn-owned contract instead of being inferred downstream.
+- Reap escaped subprocess descendants on command timeout/cancel instead of only signalling the original process group.
+- Fixed release/package audit hermeticity when temporary directories are
+  redirected inside the checkout, and prevented project-profile Git/GitHub
+  detection from inheriting parent scratch-checkout metadata.
+- Release audit now runs Harn/script lanes through a stable copied `harn` binary
+  instead of Cargo's relinked target path, avoiding `(deleted)` self-spawn
+  failures while Rust audit lanes rebuild in parallel.
+- Made Harn VM event-log and serving-tier unit tests independent of ambient release harness state.
+- Fixed local type aliases used as runtime schema values in user-defined wrapper calls, matching
+  imported public aliases and schema-aware builtins.
+- Accept named function callbacks in agent stage-gate `kind_of` and `suggest` options.
+- Fixed tree-sitter Harn parsing for multiline function and tool parameter lists with default values and trailing commas.
+
+### Security
+
+- Harden scoped filesystem writes on Windows: the parent-directory walk now
+  opens each component with `FILE_FLAG_OPEN_REPARSE_POINT` and refuses any
+  junction or symlink reparse point mid-walk, substantially narrowing the
+  junction-traversal bypass that `O_NOFOLLOW` cannot cover on Windows. (A
+  concurrent-swap TOCTOU window remains on Windows pending a handle-relative
+  walk; the unix fd-walk is not affected.)
+- Add a recurrence-guard test that forbids raw path-based `create_dir_all` /
+  `File::create` / `OpenOptions` (and other path-resolving `std::fs`/`libc`
+  calls) inside the scoped-walk and content-open helpers, and asserts every
+  scoped leaf open keeps `O_NOFOLLOW`.
+
 ## v0.10.0
 
 ### Breaking
