@@ -28,7 +28,10 @@ fn __fs_with_newline(text, trailing_newline) {
 pub fn ensure_parent_dir(path: string) {
   const parent = __fs_parent(path)
   if parent != "" && parent != "." {
-    harness.fs.mkdir(parent)
+    const status = harness.fs.path_status(parent, "write")
+    if !(status?.exists ?? false) {
+      harness.fs.mkdir(parent)
+    }
   }
 }
 
