@@ -359,7 +359,7 @@ jobs:
           # queue refs have a cold sccache key for the speculative commit, and
           # uncapped compilation can exceed ubuntu-latest memory before tests
           # start (harn#4293). Keep this lane stable before optimizing higher.
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: "2"
           NEXTEST_PROFILE: ci
           # Route the (event-derived) base ref through env vars rather than
           # expanding `${{ }}` inside the run: script — inline expansion in a
@@ -378,7 +378,7 @@ jobs:
         env:
           # See the PR fast-feedback test step above. This is the queue-critical
           # path where cold-cache speculative merge commits have been OOM-killed.
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: "2"
           NEXTEST_PROFILE: ci
         run: scripts/ci/run_rust_test_lane.sh make test
       # These checks use the harn CLI and generated artifacts, but they do not

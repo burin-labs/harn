@@ -6,7 +6,7 @@ if [[ $# -eq 0 ]]; then
   exit 2
 fi
 
-: "${CARGO_BUILD_JOBS:=4}"
+: "${CARGO_BUILD_JOBS:=2}"
 export CARGO_BUILD_JOBS
 
 report_resources() {
