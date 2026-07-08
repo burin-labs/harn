@@ -696,13 +696,13 @@ fn __stage_gate_default_suggestion(gate) {
 }
 
 fn __stage_gate_suggestion_text(gate, options) {
-  const override = options?.suggest
-  if type_of(override) == "string" && override != "" {
-    return override
+  const suggest_override = options?.suggest
+  if type_of(suggest_override) == "string" && suggest_override != "" {
+    return suggest_override
   }
-  if type_of(override) == "closure" {
+  if type_of(suggest_override) == "closure" {
     const custom = try {
-      override(gate)
+      suggest_override(gate)
     } catch (e) {
       nil
     }
