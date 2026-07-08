@@ -8,6 +8,9 @@
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
+use crate::llm::providers::schema_compat::{
+    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
+};
 use crate::llm::providers::GeminiProvider;
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
@@ -84,7 +87,16 @@ impl VertexProvider {
                 serde_json::json!("application/json"),
             );
             if let Some(schema) = request.json_schema.as_ref() {
-                config.insert("responseSchema".to_string(), schema.clone());
+                config.insert(
+                    "responseSchema".to_string(),
+                    sanitize_schema_for_provider(
+                        &request.provider,
+                        &request.model,
+                        SchemaCompatProfile::Google,
+                        SchemaSurface::StructuredOutput,
+                        schema,
+                    ),
+                );
             }
         }
         body

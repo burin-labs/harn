@@ -20,6 +20,7 @@ mod mock;
 mod ollama;
 pub(crate) mod openai_compat;
 pub(crate) mod openai_responses;
+mod schema_compat;
 pub(crate) mod vertex;
 
 pub(crate) use acp::AcpProvider;

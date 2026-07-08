@@ -8,6 +8,9 @@ use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
 };
+use crate::llm::providers::schema_compat::{
+    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
+};
 use crate::value::{VmError, VmValue};
 
 pub(crate) struct GeminiProvider;
@@ -179,13 +182,26 @@ impl GeminiProvider {
                     "responseMimeType".to_string(),
                     serde_json::json!("application/json"),
                 );
-                generation_config.insert("responseJsonSchema".to_string(), schema.clone());
+                generation_config.insert(
+                    "responseJsonSchema".to_string(),
+                    sanitize_schema_for_provider(
+                        &opts.provider,
+                        &opts.model,
+                        SchemaCompatProfile::Google,
+                        SchemaSurface::StructuredOutput,
+                        schema,
+                    ),
+                );
             }
         }
         if !generation_config.is_empty() {
             body["generationConfig"] = serde_json::Value::Object(generation_config);
         }
-        if let Some(tools) = google_function_declaration_tools(opts.native_tools.as_deref()) {
+        if let Some(tools) = google_function_declaration_tools(
+            &opts.provider,
+            &opts.model,
+            opts.native_tools.as_deref(),
+        ) {
             body["tools"] = tools;
         }
         if let Some(tool_config) = gemini_tool_config(opts.tool_choice.as_ref()) {
@@ -881,7 +897,15 @@ mod tests {
                     "description": "Lookup records",
                     "parameters": {
                         "type": "object",
-                        "properties": {"query": {"type": "string"}},
+                        "additionalProperties": true,
+                        "properties": {
+                            "pattern": {"type": "string"},
+                            "query": {
+                                "type": "string",
+                                "pattern": "^harn",
+                                "default": "harn"
+                            }
+                        },
                         "required": ["query"]
                     }
                 }
@@ -901,7 +925,8 @@ mod tests {
         payload.output_format = OutputFormat::JsonSchema {
             schema: json!({
                 "type": "object",
-                "properties": {"answer": {"type": "string"}},
+                "additionalProperties": true,
+                "properties": {"answer": {"type": "string", "default": "ok"}},
                 "required": ["answer"]
             }),
             strict: true,
@@ -914,10 +939,23 @@ mod tests {
             .expect("function declarations");
         assert_eq!(declarations.len(), 2);
         assert_eq!(declarations[0]["name"], "lookup");
+        assert!(declarations[0]["parameters"]
+            .get("additionalProperties")
+            .is_none());
+        assert_eq!(
+            declarations[0]["parameters"]["properties"]["pattern"]["type"],
+            "string"
+        );
         assert_eq!(
             declarations[0]["parameters"]["properties"]["query"]["type"],
             "string"
         );
+        assert!(declarations[0]["parameters"]["properties"]["query"]
+            .get("pattern")
+            .is_none());
+        assert!(declarations[0]["parameters"]["properties"]["query"]
+            .get("default")
+            .is_none());
         assert_eq!(
             body["toolConfig"]["functionCallingConfig"],
             json!({"mode": "ANY", "allowedFunctionNames": ["lookup"]})
@@ -929,6 +967,14 @@ mod tests {
         assert_eq!(
             body["generationConfig"]["responseJsonSchema"]["properties"]["answer"]["type"],
             "string"
+        );
+        assert!(body["generationConfig"]["responseJsonSchema"]
+            .get("additionalProperties")
+            .is_none());
+        assert!(
+            body["generationConfig"]["responseJsonSchema"]["properties"]["answer"]
+                .get("default")
+                .is_none()
         );
     }
 
