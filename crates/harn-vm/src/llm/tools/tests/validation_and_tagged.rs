@@ -686,18 +686,80 @@ fn tagged_parser_executes_single_bare_tool_call_without_protocol_violation() {
 #[test]
 fn tagged_parser_counts_multi_call_top_level_stray_recovery() {
     let tools = sample_tool_registry();
-    let text = "<|assistant|>\n\
-                edit({ action: \"create\", path: \"a.rs\", content: \"a\" })\n\
+    let text = "edit({ action: \"create\", path: \"a.rs\", content: \"a\" })\n\
                 edit({ action: \"create\", path: \"b.rs\", content: \"b\" })";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 2, "calls: {:?}", result.calls);
+    assert_eq!(
+        result.calls.len(),
+        2,
+        "calls: {:?}, errors: {:?}, violations: {:?}, canonical: {}",
+        result.calls,
+        result.errors,
+        result.violations,
+        result.canonical
+    );
     assert_eq!(result.recovered_from_stray_count, 2);
     assert!(
-        result
-            .violations
-            .iter()
-            .any(|v| v.contains("bare multi-call batch")),
+        result.violations.is_empty(),
         "violations: {:?}",
+        result.violations
+    );
+}
+
+#[test]
+fn tagged_parser_ignores_harmony_frames_around_text_tool_calls() {
+    let tools = sample_tool_registry();
+    let text = "<|start|>assistant<|channel|>analysis<|message|>\
+                I need to inspect the files first.<|end|>\
+                <|start|>assistant<|channel|>commentary<|message|>\
+                <tool_call>\n\
+                edit({ action: \"create\", path: \"a.rs\", content: \"a\" })\n\
+                </tool_call><|end|>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "calls: {:?}", result.calls);
+    assert_eq!(result.calls[0]["name"], "edit");
+    assert_eq!(result.calls[0]["arguments"]["path"], "a.rs");
+    assert!(
+        result.violations.is_empty(),
+        "harmony framing must not trigger parse guidance: {:?}",
+        result.violations
+    );
+    assert!(
+        result.canonical.contains("<assistant_prose>"),
+        "analysis content should be canonicalized as assistant prose: {}",
+        result.canonical
+    );
+    assert!(
+        !result.canonical.contains("<|channel|>") && !result.canonical.contains("<|message|>"),
+        "harmony frame tokens must not be replayed: {}",
+        result.canonical
+    );
+}
+
+#[test]
+fn tagged_parser_dispatches_harmony_multicall_batch_without_drop_violation() {
+    let tools = sample_tool_registry();
+    let text = "We need to inspect first.<tool_call>\n\
+                edit({ \"action\": \"create\", \"path\": \"a.rs\", \"content\": \"a\" })\n\
+                </tool_call<|message|><|start|>assistant<|channel|>analysis<|message|>\
+                Run the focused verifier.<tool_call>\n\
+                run({ \"command\": \"cargo test\" })\n\
+                </tool_call<|message|>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        2,
+        "calls: {:?}, errors: {:?}, violations: {:?}, canonical: {}",
+        result.calls,
+        result.errors,
+        result.violations,
+        result.canonical
+    );
+    assert_eq!(result.calls[0]["name"], "edit");
+    assert_eq!(result.calls[1]["name"], "run");
+    assert!(
+        result.violations.is_empty(),
+        "recovered Harmony text batches must dispatch instead of forcing parse guidance: {:?}",
         result.violations
     );
 }

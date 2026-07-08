@@ -377,7 +377,7 @@ fn recovers_fireworks_harmony_tool_call_to_message() {
 }
 
 #[test]
-fn tagged_parser_salvages_harmony_leak_as_soft_wrapper_violation() {
+fn tagged_parser_salvages_harmony_leak_without_stray_text_violation() {
     let tools = sample_tool_registry();
     let text =
         r#"<|message|>tool_call to=run code<|message|>{"command":"zig test src/schema.zig"}"#;
