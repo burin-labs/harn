@@ -27,6 +27,19 @@ hook_paths_match() {
   [ -s "$file_list" ] && grep -Eq "$pattern" "$file_list"
 }
 
+hook_no_local_build_mode() {
+  [ "${HARN_HOOKS_NO_LOCAL_BUILD:-0}" = "1" ] || [ "${HARN_HOOKS_FAST_ONLY:-0}" = "1" ]
+}
+
+hook_skip_no_local_build() {
+  label=$1
+  if hook_no_local_build_mode; then
+    echo "=== Hook: skipping $label (HARN_HOOKS_NO_LOCAL_BUILD/HARN_HOOKS_FAST_ONLY; remote CI remains required) ==="
+    return 0
+  fi
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Hook duration instrument. Appends one NDJSON line per hook invocation to
 # ~/.burin/hook-timings.ndjson: {ts, repo, hook, duration_ms, exit_code,

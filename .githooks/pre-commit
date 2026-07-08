@@ -17,9 +17,11 @@ changed_packages=$(mktemp)
 # re-exit with the captured code.
 trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"; hook_timing_finish "$hook_timing_exit_code"' EXIT
 hook_write_staged_files "$changed"
-hook_export_cargo_target_dir
-hook_disable_cargo_incremental_if_release_bump staged
-hook_export_existing_harn_bin_for_non_rust_changes "$changed"
+if ! hook_no_local_build_mode; then
+  hook_export_cargo_target_dir
+  hook_disable_cargo_incremental_if_release_bump staged
+  hook_export_existing_harn_bin_for_non_rust_changes "$changed"
+fi
 
 # ── Guard: block accidental commits of throwaway / temporary code ──────────────
 # Mark scratch code so it can never be committed by accident:
@@ -73,14 +75,18 @@ prompt_prose_done=0
 # ---------------------------------------------------------------------------
 
 if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
-  echo "=== Pre-commit: checking CI ratchets ==="
-  if [ "$prompt_prose_done" -eq 0 ]; then
-    hook_export_harn_bin
-    make lint-no-rust-prompt-prose
-    prompt_prose_done=1
+  if hook_skip_no_local_build "pre-commit CI ratchets"; then
+    :
+  else
+    echo "=== Pre-commit: checking CI ratchets ==="
+    if [ "$prompt_prose_done" -eq 0 ]; then
+      hook_export_harn_bin
+      make lint-no-rust-prompt-prose
+      prompt_prose_done=1
+    fi
+    make lint-no-xfail-regression
+    echo "    CI ratchets OK."
   fi
-  make lint-no-xfail-regression
-  echo "    CI ratchets OK."
 else
   echo "=== Pre-commit: skipping CI ratchets (no protected paths changed) ==="
 fi
@@ -91,17 +97,25 @@ fi
 # check rather than auto-regenerate so the hand-curated grouping/comments
 # in keywords.js survive; the hint points at `make gen-tree-sitter-keywords`.
 if hook_paths_match "$changed" "$HOOK_TREESITTER_PATTERN"; then
-  echo "=== Pre-commit: checking tree-sitter keyword mirror ==="
-  make -s check-tree-sitter-keywords
-  echo "    Tree-sitter keywords OK."
+  if hook_skip_no_local_build "pre-commit tree-sitter keyword mirror check"; then
+    :
+  else
+    echo "=== Pre-commit: checking tree-sitter keyword mirror ==="
+    make -s check-tree-sitter-keywords
+    echo "    Tree-sitter keywords OK."
+  fi
 else
   echo "=== Pre-commit: skipping tree-sitter keyword check (no lexer/grammar changes) ==="
 fi
 
 if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
-  echo "=== Pre-commit: checking generated-artifact registry ==="
-  make -s check-generated-registry
-  echo "    Generated-artifact registry OK."
+  if hook_skip_no_local_build "pre-commit generated-artifact registry check"; then
+    :
+  else
+    echo "=== Pre-commit: checking generated-artifact registry ==="
+    make -s check-generated-registry
+    echo "    Generated-artifact registry OK."
+  fi
 else
   echo "=== Pre-commit: skipping generated-artifact registry check (no registry/Makefile/workflow/hook changes) ==="
 fi
@@ -139,6 +153,10 @@ fi
 # Phase 2 — formatters, clippy, and generated-file sync (the expensive,
 # tree-mutating steps). Reached only once the fast validators above pass.
 # ---------------------------------------------------------------------------
+
+if hook_skip_no_local_build "pre-commit local build/format/lint phases"; then
+  exit 0
+fi
 
 if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   echo "=== Pre-commit: formatting Rust ==="
