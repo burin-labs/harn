@@ -10,9 +10,9 @@ summary="$tmpdir/summary.md"
 log="$tmpdir/output.log"
 
 # shellcheck disable=SC2016 # child bash expands CARGO_BUILD_JOBS
-GITHUB_STEP_SUMMARY="$summary" "$script" bash -c 'test "$CARGO_BUILD_JOBS" = "4"' \
+GITHUB_STEP_SUMMARY="$summary" "$script" bash -c 'test "$CARGO_BUILD_JOBS" = "2"' \
   >"$log" 2>&1
-grep -q 'CARGO_BUILD_JOBS=4' "$summary"
+grep -q 'CARGO_BUILD_JOBS=2' "$summary"
 grep -q 'Rust test resources before' "$summary"
 grep -q 'Rust test resources after' "$summary"
 grep -q '::group::Rust test resources before' "$log"
@@ -20,9 +20,9 @@ grep -q '::group::Rust test resources before' "$log"
 custom_summary="$tmpdir/custom-summary.md"
 custom_log="$tmpdir/custom-output.log"
 # shellcheck disable=SC2016 # child bash expands CARGO_BUILD_JOBS
-CARGO_BUILD_JOBS=2 GITHUB_STEP_SUMMARY="$custom_summary" "$script" \
-  bash -c 'test "$CARGO_BUILD_JOBS" = "2"' >"$custom_log" 2>&1
-grep -q 'CARGO_BUILD_JOBS=2' "$custom_summary"
+CARGO_BUILD_JOBS=3 GITHUB_STEP_SUMMARY="$custom_summary" "$script" \
+  bash -c 'test "$CARGO_BUILD_JOBS" = "3"' >"$custom_log" 2>&1
+grep -q 'CARGO_BUILD_JOBS=3' "$custom_summary"
 
 set +e
 "$script" bash -c 'exit 23' >/dev/null 2>&1
