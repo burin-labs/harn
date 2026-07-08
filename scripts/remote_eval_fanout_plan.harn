@@ -233,6 +233,151 @@ pub fn remote_eval_fanout_plan(options, catalog) {
   }
 }
 
+fn __plan_shard_by_id(plan) {
+  let out = {}
+  for shard in plan?.shards ?? [] {
+    out = out + {[to_string(shard.id)]: shard}
+  }
+  return out
+}
+
+fn __receipt_shard_id(receipt) -> string {
+  return to_string(receipt?.shard_id ?? receipt?.shard?.id ?? receipt?.id ?? "")
+}
+
+fn __receipt_status(receipt) -> string {
+  return lowercase(to_string(receipt?.status ?? receipt?.result?.status ?? "unknown"))
+}
+
+fn __receipt_ingest_ok(receipt) -> bool {
+  if receipt?.ok != nil && !receipt.ok {
+    return false
+  }
+  if receipt?.result?.passed != nil && !receipt.result.passed {
+    return false
+  }
+  return ["ok", "pass", "passed", "success", "complete", "completed"].contains(__receipt_status(receipt))
+}
+
+fn __slash_join(base: string, tail: string) -> string {
+  const b = base.trim_end("/")
+  const t = tail.trim_start("/")
+  if b == "" {
+    return t
+  }
+  if t == "" {
+    return b
+  }
+  return b + "/" + t
+}
+
+pub fn remote_eval_fanout_trial_receipt(plan, shard_id: string, result, artifacts = {}) {
+  const shards = __plan_shard_by_id(plan)
+  const shard = shards[shard_id]
+  if shard == nil {
+    throw "unknown shard id: " + shard_id
+  }
+  const status = lowercase(to_string(result?.status ?? "unknown"))
+  const ok = __receipt_ingest_ok({status: status, result: result})
+  return {
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_trial_receipt_v1",
+    plan_producer: plan?.producer ?? "",
+    shard_id: shard_id,
+    cell: shard.cell,
+    trial_index: shard.trial_index,
+    seed: shard.seed,
+    status: status,
+    ok: ok,
+    result: result,
+    artifacts: artifacts,
+  }
+}
+
+pub fn remote_eval_fanout_artifact_manifest(plan, options = nil) {
+  const opts = options ?? {}
+  const local_root = to_string(opts?.local_root ?? ".harn/remote-eval")
+  const remote_root = to_string(opts?.remote_root ?? "remote-eval")
+  let rewrites = []
+  for shard in plan?.shards ?? [] {
+    const id = to_string(shard.id)
+    rewrites = rewrites
+      + [
+      {
+        shard_id: id,
+        remote_prefix: __slash_join(remote_root, id),
+        local_prefix: __slash_join(local_root, id),
+      },
+    ]
+  }
+  return {
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_artifact_manifest_v1",
+    plan_producer: plan?.producer ?? "",
+    shard_count: len(plan?.shards ?? []),
+    path_rewrite_map: rewrites,
+  }
+}
+
+pub fn remote_eval_fanout_rejoin_receipt(plan, receipts) {
+  const expected = __plan_shard_by_id(plan)
+  let seen = {}
+  let accepted = []
+  let duplicate_ids = []
+  let unknown_ids = []
+  let failed = []
+  for receipt in receipts ?? [] {
+    const shard_id = __receipt_shard_id(receipt)
+    if shard_id == "" || expected[shard_id] == nil {
+      unknown_ids = append_unique(unknown_ids, shard_id)
+      continue
+    }
+    if seen[shard_id] != nil {
+      duplicate_ids = append_unique(duplicate_ids, shard_id)
+      continue
+    }
+    seen = seen + {[shard_id]: true}
+    if __receipt_ingest_ok(receipt) {
+      accepted = accepted.push(receipt)
+    } else {
+      failed = failed
+        .push({shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt})
+    }
+  }
+  let missing = []
+  for shard in plan?.shards ?? [] {
+    const id = to_string(shard.id)
+    if seen[id] == nil {
+      missing = missing.push(id)
+    }
+  }
+  const ingest_ready = len(missing) == 0
+    && len(duplicate_ids) == 0
+    && len(unknown_ids) == 0
+    && len(failed) == 0
+    && len(accepted) == len(plan?.shards ?? [])
+  return {
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_rejoin_receipt_v1",
+    plan_producer: plan?.producer ?? "",
+    status: ingest_ready ? "complete" : "blocked",
+    shard_count_expected: len(plan?.shards ?? []),
+    shard_count_received: len(receipts ?? []),
+    accepted_shard_count: len(accepted),
+    accepted_shards: accepted,
+    missing_shard_ids: missing,
+    duplicate_shard_ids: duplicate_ids,
+    unknown_shard_ids: unknown_ids,
+    failed_shards: failed,
+    ledger: {
+      serialized_ingest: true,
+      ingest_ready: ingest_ready,
+      ingest_source: "harn_remote_eval_fanout_rejoin_receipt",
+      never_ingest_invalid_or_partial_shards: true,
+    },
+  }
+}
+
 fn render_human(plan) -> string {
   return join(
     [
