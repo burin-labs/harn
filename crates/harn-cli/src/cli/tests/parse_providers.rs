@@ -426,6 +426,8 @@ fn test_parses_models_lora_export_args() {
         "Apache-2.0",
         "--target-metadata",
         "lane=structured",
+        "--modules-to-save",
+        "embed_tokens,lm_head",
         "--json",
     ]);
 
@@ -461,6 +463,7 @@ fn test_parses_models_lora_export_args() {
     assert_eq!(args.default_split, "tune");
     assert_eq!(args.default_license, "Apache-2.0");
     assert_eq!(args.target_metadata, vec!["lane=structured"]);
+    assert_eq!(args.modules_to_save, vec!["embed_tokens", "lm_head"]);
     assert!(args.json);
 }
 
@@ -511,6 +514,10 @@ fn test_parses_models_lora_manifest_args() {
         "dashscope/qwen3-coder-next",
         "--target-metadata",
         "lane=structured",
+        "--modules-to-save",
+        "embed_tokens",
+        "--modules-to-save",
+        "lm_head",
         "--json",
     ]);
 
@@ -570,6 +577,7 @@ fn test_parses_models_lora_manifest_args() {
     assert_eq!(args.training_run_id.as_deref(), Some("run-123"));
     assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
     assert_eq!(args.target_metadata, vec!["lane=structured"]);
+    assert_eq!(args.modules_to_save, vec!["embed_tokens", "lm_head"]);
     assert!(args.json);
 }
 
@@ -620,6 +628,8 @@ fn test_parses_models_lora_train_args() {
         "dashscope/qwen3-coder-next",
         "--target-metadata",
         "lane=structured",
+        "--modules-to-save",
+        "embed_tokens,lm_head",
         "--backend-cwd",
         "./scripts/train-lora-gemma4",
         "--execute",
@@ -688,6 +698,7 @@ fn test_parses_models_lora_train_args() {
     assert_eq!(args.max_seq_length, Some(8192));
     assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
     assert_eq!(args.target_metadata, vec!["lane=structured"]);
+    assert_eq!(args.modules_to_save, vec!["embed_tokens", "lm_head"]);
     assert_eq!(
         args.backend_cwd
             .as_ref()
@@ -728,6 +739,7 @@ fn test_models_lora_train_defaults_to_external_trainer_contract() {
         panic!("expected models lora train command");
     };
     assert_eq!(args.trainer, "external_sft_trainer");
+    assert!(args.modules_to_save.is_empty());
 }
 
 #[test]
@@ -759,6 +771,8 @@ fn test_parses_models_lora_plan_args() {
         "64",
         "--dropout",
         "0.1",
+        "--modules-to-save",
+        "embed_tokens,lm_head",
         "--json",
     ]);
 
@@ -782,6 +796,7 @@ fn test_parses_models_lora_plan_args() {
     assert_eq!(args.rank, 32);
     assert_eq!(args.alpha, Some(64));
     assert_eq!(args.dropout, 0.1);
+    assert_eq!(args.modules_to_save, vec!["embed_tokens", "lm_head"]);
     assert!(args.json);
 }
 
@@ -806,6 +821,7 @@ fn test_models_lora_plan_defaults_to_external_trainer_contract() {
         panic!("expected models lora plan command");
     };
     assert_eq!(args.trainer, "external_sft_trainer");
+    assert!(args.modules_to_save.is_empty());
 }
 
 #[test]

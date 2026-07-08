@@ -13,8 +13,9 @@ use crate::cli::ModelsLoraExportArgs;
 use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
-    normalize_plan_tool_format, parse_target_metadata, render_embedded_lora_report, sha256_file,
-    BaseModelReport, EvaluationRecipe, LoraContractReport, ToolCallingReport,
+    normalize_modules_to_save, normalize_plan_tool_format, parse_target_metadata,
+    render_embedded_lora_report, sha256_file, BaseModelReport, EvaluationRecipe,
+    LoraContractReport, ToolCallingReport,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -81,6 +82,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         )
     };
     let dataset_format = dataset_format_for_tool_format(&decision.effective).to_string();
+    let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let corpus_path = resolve_corpus_path(&args.corpus)?;
     let contract_id = lora_contract_id(
         &resolved.id,
@@ -88,6 +90,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &decision.effective,
         &dataset_format,
         args.chat_template.as_deref(),
+        &modules_to_save,
     )?;
     let target = ExportTarget {
         base_model: resolved.id.clone(),
@@ -107,6 +110,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &target.harn_tool_format,
         &dataset_format,
         target.chat_template.clone(),
+        &modules_to_save,
     );
     let mut writer = if args.check {
         None

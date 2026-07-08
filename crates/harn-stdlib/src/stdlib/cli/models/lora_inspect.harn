@@ -78,6 +78,15 @@ fn __render_human(harness: Harness, report: dict) {
   if module_format != "" {
     harness.stdio.println("  LoRA module format: " + module_format)
   }
+  const modules_to_save = safe_list(adapter["modules_to_save"])
+  if len(modules_to_save) > 0 {
+    harness.stdio
+      .println(
+      "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
+    )
+  } else {
+    harness.stdio.println("  modules to save: none")
+  }
   const rank_supported = if safe_bool(compatibility["provider_supports_lora_max_rank"], false) {
     "yes"
   } else {
@@ -117,6 +126,14 @@ fn __render_human(harness: Harness, report: dict) {
     } else {
       "mismatch"
     }
+    const save_policy_match_value = contract["modules_to_save_matches"]
+    const save_policy_match = if save_policy_match_value == nil {
+      "not_checked"
+    } else if safe_bool(save_policy_match_value, false) {
+      "match"
+    } else {
+      "mismatch"
+    }
     harness.stdio
       .println(
       "  contract route: base="
@@ -126,7 +143,9 @@ fn __render_human(harness: Harness, report: dict) {
         + " tool_format="
         + tool_format_match
         + " adapter="
-        + adapter_match,
+        + adapter_match
+        + " modules_to_save="
+        + save_policy_match,
     )
   }
   for warning in warnings {

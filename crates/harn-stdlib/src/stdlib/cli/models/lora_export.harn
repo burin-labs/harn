@@ -1,3 +1,4 @@
+import { render_peft_save_policy } from "std/cli/models/lora_render"
 /**
  * `harn models lora export` renderer.
  *
@@ -60,6 +61,8 @@ fn __render_human(harness: Harness, report: dict) {
     "  contract split policy: "
       + safe_string(training_contract["dataset_split_policy"], ""),
   )
+  const peft_save_policy = safe_dict(training_contract["peft_save_policy"])
+  render_peft_save_policy(harness, peft_save_policy)
   harness.stdio
     .println(
     "  provenance defaults: split="

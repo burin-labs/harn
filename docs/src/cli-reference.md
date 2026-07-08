@@ -1521,7 +1521,7 @@ Export a tool-calling corpus into a trainer-ready LoRA dataset:
 harn models lora export --base local-gemma4-e4b --provider vllm --tool-format auto \
   --corpus ./lora-corpus --out ./train.jsonl --manifest ./train.manifest.json
 harn models lora export --base local-gemma4-e4b --provider vllm --tool-format native \
-  --corpus ./lora-corpus --check --json
+  --corpus ./lora-corpus --modules-to-save embed_tokens,lm_head --check --json
 ```
 
 The export resolves the same provider capability matrix as model calls and
@@ -1531,8 +1531,12 @@ base model, provider, effective Harn tool format, dataset format, and chat
 template. Use that id to keep training, adapter inspection, eval, and serving
 on the same wire contract even when adapter paths or request-model names change.
 The manifest's `contract.training_contract` block also records the assistant
-mask policy, packing policy, parser owner, and split policy so trainers can
-verify the SFT setup without scraping human-readable notes.
+mask policy, packing policy, parser owner, split policy, and PEFT
+`modules_to_save` / embedding-head save policy so trainers can verify the SFT
+setup without scraping human-readable notes. The default policy is adapter-only;
+declare `--modules-to-save embed_tokens,lm_head` only when tokenizer resize or
+output-head training requires it, and keep the weight-tying evidence in target
+metadata before merging adapters.
 `--check` validates conversion without writing JSONL rows.
 
 ## harn models lora manifest
@@ -1542,7 +1546,8 @@ Write a canonical LoRA training-run manifest without invoking a trainer:
 ```bash
 harn models lora manifest --base local-gemma4-e4b --provider vllm \
   --tool-format json --dataset ./train.jsonl --export-manifest ./train.manifest.json \
-  --adapter-name burin-tools --adapter-path ./adapter --out ./adapter.manifest.json
+  --adapter-name burin-tools --adapter-path ./adapter --out ./adapter.manifest.json \
+  --modules-to-save embed_tokens,lm_head
 harn models lora manifest --base local-gemma4-e4b --provider vllm \
   --trainer unsloth_sft --method qlora --rank 24 --training-run-id run-123 --json
 ```
@@ -1565,7 +1570,8 @@ Render or execute a named LoRA trainer backend and write a training receipt:
 harn models lora train --base local-gemma4-e4b --provider vllm \
   --tool-format json --dataset ./train.jsonl --export-manifest ./train.manifest.json \
   --output-dir ./adapter --receipt-out ./adapter/train.receipt.json \
-  --adapter-name burin-tools --request-model burin-tools --trainer unsloth_sft --json
+  --adapter-name burin-tools --request-model burin-tools --trainer unsloth_sft \
+  --modules-to-save embed_tokens,lm_head --json
 harn models lora train --base local-gemma4-e4b --provider vllm \
   --dataset ./train.jsonl --output-dir ./adapter --execute -- \
   uv run python train.py config/e4b.yaml
@@ -1583,6 +1589,9 @@ shape. Python, Unsloth, TRL, MLX, Modal, or cloud trainers remain backend shims;
 Harn owns config normalization, route metadata, serving requirements, manifest
 shaping, and promotion receipts. Dry-runs with no backend argv set
 `backend.argv_required` instead of inventing a trainer command.
+`--modules-to-save` is part of the hashed LoRA contract and is forwarded to the
+post-training manifest command, so PEFT embedding/head saves cannot silently
+drift between export, train, manifest, inspect, and promotion.
 
 ## harn models lora preflight
 
@@ -1632,7 +1641,8 @@ Plan a portable LoRA or QLoRA fine-tune for a Harn model route:
 ```bash
 harn models lora plan --base local-gemma4-e4b --provider vllm --tool-format auto --corpus ./lora-corpus
 harn models lora plan --base local-gemma4-e4b --provider vllm --trainer unsloth_sft \
-  --teacher dashscope/qwen3-coder-next --corpus ./lora-corpus
+  --teacher dashscope/qwen3-coder-next --corpus ./lora-corpus \
+  --modules-to-save embed_tokens,lm_head
 harn models lora plan --base google/gemma-4-E4B-it --provider google --tool-format native --json
 ```
 
@@ -1657,6 +1667,11 @@ backend-specific contract explicitly; Harn still owns export, manifests, eval,
 and serving promotion, while trainer-specific runtimes only fit the adapter
 weights. QLoRA plans use PEFT's `all-linear` target module shorthand; full LoRA
 plans keep explicit attention projection modules in `training.target_modules`.
+Plans default to no PEFT `modules_to_save`, which keeps tool-calling adapters
+small and avoids accidental embedding/LM-head divergence. When embedding or
+head modules must be saved, `training.contract.peft_save_policy` records the
+declared modules, embedding save policy, and whether a weight-tying check is
+required before adapter merge.
 The `corpus_refresh.model_aware_selection` block records base-model failure
 buckets, parser/schema difficulty signals, sampling policy, refinement loops,
 and stop conditions so corpus refresh jobs prioritize failures the target model
