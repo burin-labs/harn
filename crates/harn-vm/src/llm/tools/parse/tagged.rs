@@ -12,6 +12,14 @@ use super::TextToolParseResult;
 use crate::llm::tools::collect_tool_schemas;
 use crate::value::VmValue;
 
+const HARMONY_MESSAGE: &str = "<|message|>";
+const HARMONY_FRAME_PREFIX: &str = "<|";
+const HARMONY_FRAME_SUFFIX: &str = "|>";
+const HARMONY_TOOL_CALL_PREFIX: &str = "tool_call to=";
+const HARMONY_MALFORMED_TOOL_CALL_CLOSE_PREFIX: &str = "</tool_call<|";
+const HARMONY_HEADER_MARKERS: &[&str] = &["start", "channel", "constrain"];
+const HARMONY_STANDALONE_MARKERS: &[&str] = &["message", "end", "call"];
+
 /// Parse a model response under the strict tagged response protocol.
 ///
 /// The grammar accepts a sequence of top-level blocks separated by
@@ -24,9 +32,8 @@ use crate::value::VmValue;
 ///   <done>##DONE##</done>
 /// ```
 ///
-/// Harmless top-level narration is canonicalized into prose blocks, and one
-/// recovered bare call is canonicalized into a tool-call block. Ambiguous
-/// recovered call batches, unknown tags, and unclosed tags are reported as
+/// Harmless top-level narration and recovered bare calls are canonicalized into
+/// protocol blocks. Unknown tags and unclosed tags are reported as
 /// `violations`; malformed call bodies are reported as `errors` (per-call
 /// diagnostics). The function always runs to completion so every actionable
 /// violation can be surfaced to the model on the next turn.
@@ -94,6 +101,12 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                         continue;
                     }
                 }
+                if src[cursor..].starts_with(HARMONY_MESSAGE)
+                    && src[start..cursor].contains(HARMONY_TOOL_CALL_PREFIX)
+                {
+                    cursor += HARMONY_MESSAGE.len();
+                    continue;
+                }
                 break;
             }
             let mut stray = StrayReportContext {
@@ -110,13 +123,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        if (!adjacent_to_block && !is_top_level_tag_position(src, cursor))
-            || inside_markdown_fence(src, cursor)
-        {
-            let start = cursor;
-            while cursor < bytes.len() && bytes[cursor] != b'\n' {
-                cursor += 1;
-            }
+        if let Some(after) = consume_harmony_tool_call_line(src, cursor) {
             let mut stray = StrayReportContext {
                 errors: &mut errors,
                 violations: &mut violations,
@@ -127,11 +134,27 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 done_marker: &mut done_marker,
                 recovered_from_stray_count: &mut recovered_from_stray_count,
             };
-            report_stray(&src[start..cursor], tools_val, &mut stray);
+            report_stray(&src[cursor..after], tools_val, &mut stray);
+            cursor = after;
+            last_block_end = cursor;
             continue;
         }
 
-        if src[cursor..].starts_with("<|") {
+        if let Some(after) = consume_harmony_corrupted_tool_call_close(src, cursor) {
+            cursor = after;
+            last_block_end = cursor;
+            continue;
+        }
+
+        if let Some(after) = consume_harmony_frame_marker(src, cursor) {
+            cursor = after;
+            last_block_end = cursor;
+            continue;
+        }
+
+        if (!adjacent_to_block && !is_top_level_tag_position(src, cursor))
+            || inside_markdown_fence(src, cursor)
+        {
             let start = cursor;
             while cursor < bytes.len() && bytes[cursor] != b'\n' {
                 cursor += 1;
@@ -1107,6 +1130,84 @@ fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
         .all(|ch| matches!(ch, ' ' | '\t' | '\r'))
 }
 
+/// Consume OpenAI Harmony frame markers that some OpenAI-compatible gpt-oss
+/// routes leak into the visible text channel. The parser treats these as wire
+/// framing, not assistant prose. Header-bearing markers skip through the next
+/// `<|message|>` delimiter so role/channel labels such as `assistant` and
+/// `analysis` do not become replayed prose.
+fn consume_harmony_frame_marker(src: &str, cursor: usize) -> Option<usize> {
+    let rest = src.get(cursor..)?;
+    if !rest.starts_with(HARMONY_FRAME_PREFIX) {
+        return None;
+    }
+    let marker_end_rel = rest.find(HARMONY_FRAME_SUFFIX)?;
+    let marker = &rest[HARMONY_FRAME_PREFIX.len()..marker_end_rel];
+    let after_marker = cursor + marker_end_rel + HARMONY_FRAME_SUFFIX.len();
+
+    if HARMONY_HEADER_MARKERS.contains(&marker) {
+        if let Some(message_rel) = src[after_marker..].find(HARMONY_MESSAGE) {
+            Some(after_marker + message_rel + HARMONY_MESSAGE.len())
+        } else {
+            Some(consume_harmony_header_tail_without_message(
+                src,
+                after_marker,
+            ))
+        }
+    } else if HARMONY_STANDALONE_MARKERS.contains(&marker) {
+        Some(after_marker)
+    } else {
+        None
+    }
+}
+
+fn consume_harmony_header_tail_without_message(src: &str, after_marker: usize) -> usize {
+    let header_tail = &src[after_marker..];
+    let next_marker = header_tail.find(HARMONY_FRAME_PREFIX);
+    let next_newline = header_tail.find('\n');
+    match (next_marker, next_newline) {
+        (Some(marker), Some(newline)) => after_marker + marker.min(newline),
+        (Some(marker), None) => after_marker + marker,
+        (None, Some(newline)) => after_marker + newline,
+        (None, None) => after_marker,
+    }
+}
+
+/// Consume Harmony-native text-call headers before routing them through the
+/// existing bare-call parser. Fireworks gpt-oss can leak native-ish calls as
+/// `<|message|>tool_call to=<name> code<|message|>{...}` inside a text-tool
+/// response; treating the frame delimiter as structure keeps the actual call
+/// body recoverable without replaying Harmony wire tokens as assistant prose.
+fn consume_harmony_tool_call_line(src: &str, cursor: usize) -> Option<usize> {
+    let rest = src.get(cursor..)?;
+    if !rest.starts_with(HARMONY_MESSAGE) {
+        return None;
+    }
+    let after_message = cursor + HARMONY_MESSAGE.len();
+    if !src[after_message..]
+        .trim_start()
+        .starts_with(HARMONY_TOOL_CALL_PREFIX)
+    {
+        return None;
+    }
+    let rel_end = src[after_message..]
+        .find('\n')
+        .unwrap_or(src.len() - after_message);
+    Some(after_message + rel_end)
+}
+
+/// Consume malformed text-tool close tags split by Harmony frame tokens, e.g.
+/// `</tool_call<|message|>`. This is the corrupted close shape observed in
+/// frozen Fireworks transcripts; it is structural wrapper debris, not an
+/// unknown assistant-authored XML tag that should spend another model turn.
+fn consume_harmony_corrupted_tool_call_close(src: &str, cursor: usize) -> Option<usize> {
+    let rest = src.get(cursor..)?;
+    if !rest.starts_with(HARMONY_MALFORMED_TOOL_CALL_CLOSE_PREFIX) {
+        return None;
+    }
+    let marker_end = rest.find(HARMONY_FRAME_SUFFIX)?;
+    Some(cursor + marker_end + HARMONY_FRAME_SUFFIX.len())
+}
+
 /// Is `cursor` enclosed by a *closed* markdown code fence?
 ///
 /// A top-level tag inside a ```` ```lang … ``` ```` block is narration, not a
@@ -1142,12 +1243,10 @@ fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
 }
 
 /// Report stray text that sits outside any recognized top-level tag.
-/// When the stray content contains parseable tool calls, execute them
-/// (route them through the canonical-call path) and add a soft violation
-/// so the model still gets the signal to wrap calls properly. Pre-v0.5.82
-/// the parser flagged-and-dropped these calls, which was correct in
-/// principle but stranded weaker locally-hosted models in loops where
-/// they kept re-emitting the same right-shape-wrong-wrapper response.
+/// When the stray content contains parseable tool calls, execute them by
+/// routing them through the canonical-call path. Canonical replay carries the
+/// wrapper signal; a separate soft violation would burn a paid turn even though
+/// useful calls were already dispatched.
 struct StrayReportContext<'a> {
     errors: &'a mut Vec<String>,
     violations: &'a mut Vec<String>,
@@ -1164,17 +1263,11 @@ fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayRepo
     if trimmed.is_empty() {
         return;
     }
+    if is_orphaned_tool_call_wrapper_fragment(trimmed) {
+        return;
+    }
     let sniff = parse_bare_calls_in_body(trimmed, tools_val);
     if !sniff.calls.is_empty() {
-        let names: Vec<_> = sniff
-            .calls
-            .iter()
-            .filter_map(|call| {
-                call.get("name")
-                    .and_then(|name| name.as_str())
-                    .map(|name| name.to_string())
-            })
-            .collect();
         for call in &sniff.calls {
             let name = call
                 .get("name")
@@ -1193,14 +1286,6 @@ fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayRepo
         let prose = sniff.prose.trim();
         if !prose.is_empty() && should_salvage_stray_prose(prose) {
             push_assistant_prose(prose, ctx.assistant_prose_parts, ctx.canonical_parts);
-        }
-        if sniff.calls.len() > 1 {
-            ctx.violations.push(format!(
-                "Tool call(s) ({}) were emitted as a bare multi-call batch outside \
-                 `<tool_call>` tags. The batch is ambiguous; retry with one \
-                 well-formed `<tool_call>...</tool_call>` block.",
-                names.join(", ")
-            ));
         }
     } else if !sniff.errors.is_empty() {
         ctx.errors.extend(sniff.errors);
@@ -1221,6 +1306,12 @@ fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayRepo
             ));
         }
     }
+}
+
+fn is_orphaned_tool_call_wrapper_fragment(trimmed: &str) -> bool {
+    trimmed == "<tool_call>"
+        || trimmed == "</tool_call>"
+        || trimmed.starts_with(HARMONY_MALFORMED_TOOL_CALL_CLOSE_PREFIX)
 }
 
 fn push_assistant_prose(
