@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/lint/run.response.json",
+  "title": "lint.run response",
+  "type": "object",
+  "properties": {
+    "result": { "type": "string", "enum": ["ok"] },
+    "diagnostic_count": { "type": "integer", "minimum": 0 },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
+  },
+  "required": ["result", "diagnostic_count", "diagnostics"],
+  "additionalProperties": false,
+  "$defs": {
+    "Diagnostic": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "rule": { "type": "string" },
+        "message": { "type": "string" },
+        "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 },
+        "line": { "type": "integer", "minimum": 0 },
+        "column": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "code",
+        "rule",
+        "message",
+        "severity",
+        "start_byte",
+        "end_byte",
+        "line",
+        "column"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

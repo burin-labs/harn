@@ -35,6 +35,52 @@ pub fn elicitation_validate(
     schema_expect_value(data, schema, false)
 }
 
+/// Canonicalize a JSON-Schema-shaped value for repeated validation.
+///
+/// This is the Rust-side sibling of `schema_from_json_schema(...)` in the
+/// Harn stdlib. Embedders use it when a stable boundary schema should be
+/// compiled once and applied to many VM values.
+pub fn canonicalize_json_schema(schema: &VmValue) -> Result<VmValue, String> {
+    canonicalize::canonicalize_schema_value(schema)
+}
+
+/// Validate `data` against a canonical Harn schema or JSON Schema value.
+///
+/// When `apply_defaults` is true, returned values include defaults declared by
+/// the schema. The error string is the same human-readable issue list surfaced
+/// by `schema_expect`, which keeps Rust boundary validators aligned with Harn
+/// script behavior.
+pub fn validate_value_against_schema(
+    data: &VmValue,
+    schema: &VmValue,
+    apply_defaults: bool,
+) -> Result<VmValue, String> {
+    let normalized = canonicalize_json_schema(schema)?;
+    validate_value_against_canonical_schema(data, &normalized, apply_defaults)
+}
+
+/// Validate `data` against a schema that was already canonicalized with
+/// [`canonicalize_json_schema`].
+pub fn validate_value_against_canonical_schema(
+    data: &VmValue,
+    schema: &VmValue,
+    apply_defaults: bool,
+) -> Result<VmValue, String> {
+    let result = validate::validate_schema_value(
+        data,
+        schema,
+        validate::ValidationOptions {
+            apply_defaults,
+            numeric_compat: false,
+        },
+    );
+    if result.errors.is_empty() {
+        Ok(result.value)
+    } else {
+        Err(result::issue_messages(&result.errors).join("; "))
+    }
+}
+
 pub(crate) const BYTES_B64_TAG: &str = "$bytes_b64";
 
 pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {

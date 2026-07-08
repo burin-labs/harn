@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/rules/search.request.json",
+  "title": "rules.search request",
+  "description": "Run a declarative harn-rules matcher over inline source or file paths.",
+  "type": "object",
+  "properties": {
+    "rule": { "type": "string", "minLength": 1 },
+    "source": { "type": "string" },
+    "language": { "type": "string" },
+    "path": { "type": "string" },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "required": ["rule"],
+  "additionalProperties": false
+}

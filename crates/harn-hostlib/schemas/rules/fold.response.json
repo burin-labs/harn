@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/rules/fold.response.json",
+  "title": "rules.fold response",
+  "type": "object",
+  "properties": {
+    "result": { "type": "string", "enum": ["ok"] },
+    "dry_run": { "type": "boolean" },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/FileResult" }
+    }
+  },
+  "required": ["result", "dry_run", "files"],
+  "additionalProperties": false,
+  "$defs": {
+    "FileResult": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "changed": { "type": "boolean" },
+        "applied": { "type": "boolean" },
+        "idempotent": { "type": "boolean" },
+        "formatted": { "type": "boolean" },
+        "safety": { "type": "string" },
+        "before": { "type": "string" },
+        "preview": { "type": "string" }
+      },
+      "required": [
+        "path",
+        "changed",
+        "applied",
+        "idempotent",
+        "formatted",
+        "safety",
+        "before",
+        "preview"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

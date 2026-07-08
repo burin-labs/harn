@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/rules/diagnostics.response.json",
+  "title": "rules.diagnostics response",
+  "type": "object",
+  "properties": {
+    "result": { "type": "string", "enum": ["ok"] },
+    "diagnostic_count": { "type": "integer", "minimum": 0 },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
+  },
+  "required": ["result", "diagnostic_count", "diagnostics"],
+  "additionalProperties": false,
+  "$defs": {
+    "Diagnostic": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "rule_id": { "type": "string" },
+        "message": { "type": "string" },
+        "severity": { "type": "string" },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 },
+        "applicability": { "type": "string" },
+        "fix": { "type": ["string", "null"] }
+      },
+      "required": [
+        "path",
+        "rule_id",
+        "message",
+        "severity",
+        "start_row",
+        "start_col",
+        "end_row",
+        "end_col",
+        "applicability",
+        "fix"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
