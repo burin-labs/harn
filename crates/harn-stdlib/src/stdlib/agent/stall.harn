@@ -153,7 +153,6 @@ const STALL_DELIVERED_FIX_AFTER = 2
 // clean non-edit verification pass. Distinct from the failing-verify hard cap: this
 // is the total-elapsed axis (burin's 60-turn slow-drain floor), shipped as a
 // caller-set knob with NO default (nil = off) so today's behavior is unchanged.
-
 // Tools that report progress without changing task state. A turn whose only
 // tool call is one of these is "narrating progress without making it": it is
 // counted as a no-progress turn for stall accounting, so a run of them (e.g. a

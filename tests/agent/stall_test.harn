@@ -729,9 +729,11 @@ pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(task) {
 }
 
 // -------------------------------------------------------------------------------------------------
+
 // #burin-cutover seam 4: per-turn action-signal intake (single-occurrence flailing trip).
 // #burin-cutover seam 5: turns_since_clean_verify elapsed-turns hard floor.
 // Both are strictly additive and default-off; the parity test below is the anti-regression gate.
+
 // -------------------------------------------------------------------------------------------------
 
 fn _observe_signal(state, cfg, payload) {
@@ -867,7 +869,12 @@ pipeline test_action_signal_unset_is_inert(task) {
 pipeline test_action_signal_does_not_double_fire_when_core_tripped(task) {
   // One warning per turn: when the core no-progress detector already tripped this
   // turn, a truthy action_signal is skipped (the core warning wins, no double-nudge).
-  const cfg = {enabled: true, action_signal: { p -> p?.flail == true }, no_progress_messages: 3, post_edit_reverify: false}
+  const cfg = {
+    enabled: true,
+    action_signal: { p -> p?.flail == true },
+    no_progress_messages: 3,
+    post_edit_reverify: false,
+  }
   const o1 = _observe_noprog_signal(agent_stall_initial_state(), cfg, "thinking", {flail: false})
   assert(o1.warning == nil)
   const o2 = _observe_noprog_signal(o1.state, cfg, "thinking", {flail: false})
@@ -996,11 +1003,21 @@ pipeline test_turns_since_clean_verify_floor_unset_is_inert(task) {
 pipeline test_turns_since_clean_verify_floor_validated_loudly(task) {
   // A non-positive / mistyped floor fails loudly at config time.
   assert_throws(
-    { -> return _fold_floor(agent_stall_initial_state(), FLOOR_CONFIG + {turns_since_clean_verify: 0}, _fail_dispatch("boom"), false) },
+    { -> return _fold_floor(
+      agent_stall_initial_state(),
+      FLOOR_CONFIG + {turns_since_clean_verify: 0},
+      _fail_dispatch("boom"),
+      false,
+    ) },
     "non-positive turns_since_clean_verify must throw",
   )
   assert_throws(
-    { -> return _fold_floor(agent_stall_initial_state(), FLOOR_CONFIG + {turns_since_clean_verify: "many"}, _fail_dispatch("boom"), false) },
+    { -> return _fold_floor(
+      agent_stall_initial_state(),
+      FLOOR_CONFIG + {turns_since_clean_verify: "many"},
+      _fail_dispatch("boom"),
+      false,
+    ) },
     "non-int turns_since_clean_verify must throw",
   )
 }
@@ -1020,12 +1037,15 @@ fn _parity_drive(cfg) {
   for step in seq {
     const o = agent_stall_observe_tool_calls("parity", _run_call(), 1, cfg, s, true, step[0], "", false, step[1])
     s = o.state
-    out = out.push({
-      pattern: o.warning?.pattern,
-      hard_stop: o.hard_stop,
-      streak: o.state.same_diagnostic_streak,
-      failing: o.state.failing_verify_turns,
-    })
+    out = out
+      .push(
+      {
+        pattern: o.warning?.pattern,
+        hard_stop: o.hard_stop,
+        streak: o.state.same_diagnostic_streak,
+        failing: o.state.failing_verify_turns,
+      },
+    )
   }
   return {steps: out, final: s}
 }
