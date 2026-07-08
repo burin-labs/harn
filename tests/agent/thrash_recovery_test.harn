@@ -104,6 +104,53 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
   )
 }
 
+pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(task) {
+  with_llm_script(
+    [
+      llm_text("I should edit the target file, but I am only describing the intended change."),
+      llm_text("I still need to edit the target file, but I am still only narrating."),
+    ],
+    { ->
+      const session = "thrash-no-rung-" + uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 4,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          no_progress_messages: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 1,
+        },
+      }
+      const captured = agent_capture_events(session, fn() { return agent_loop("Edit the target file.", nil, opts) })
+      assert_eq(captured.result.status, "stuck")
+      const decisions = events_of(captured.events, "loop_control_decision")
+        .filter({ event -> event.reason == "thrash_hard_stop" })
+      assert_eq(len(decisions), 1)
+      const receipts = events_of(captured.events, "typed_checkpoint")
+        .filter({ event -> event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1" })
+      assert_eq(len(receipts), 1)
+      const receipt = receipts[0].checkpoint
+      assert_eq(receipt.receipt_kind, "thrash_hard_stop_recovery")
+      assert_eq(receipt.status, "skipped")
+      assert_eq(receipt.action, "stop")
+      assert_eq(receipt.reason, "no_rung_for_pattern")
+      assert_eq(receipt.outcome, "no_rung_for_pattern")
+      assert_eq(receipt.tool_count, 0)
+      assert_eq(len(receipt.tool_names), 0)
+      assert_eq(receipt.warning.pattern, "no_progress_monologue")
+    },
+  )
+}
+
 pipeline test_final_wrapup_tool_call_skip_is_observable(task) {
   let session = "wrapup-tool-skip-" + uuid()
   let wrapup_counter = shared_cell({scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0})
