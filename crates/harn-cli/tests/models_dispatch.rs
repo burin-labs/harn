@@ -12,6 +12,8 @@
 use std::fs;
 use std::process::{Command, Output};
 
+const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 2;
+
 fn harn_binary() -> &'static str {
     env!("CARGO_BIN_EXE_harn")
 }
@@ -2688,6 +2690,11 @@ fn models_lora_plan_human_text_includes_recipe() {
         "comparison baseline: same base model, provider, tool format, prompt template, and tool schemas without the adapter",
         "required metrics:",
         "Harn text parser acceptance rate",
+        "required probe cases:",
+        "sequential_tool_call [always]",
+        "parallel_tool_calls [required_when_route_supports_parallel_tool_calls_else_not_applicable_receipt]",
+        "multi_turn_tool_result_continuation [always]",
+        "serving_concurrency_probe [required_for_adapter_loaded_serving_else_not_applicable_receipt]",
         "require a positive paired lift before promotion; inconclusive movement stays experimental",
         "require zero contract-id drift between export manifest, adapter metadata, and served route",
         "adapter binding: runtime_lora_adapter",
@@ -3020,6 +3027,49 @@ fn models_lora_plan_json_shape_is_stable() {
             .as_str()
             .is_some_and(|text| text.contains("contract-id drift"))),
         "eval gates={eval_gates:?}"
+    );
+    let evidence = &report["evaluation"]["evidence_contract"];
+    assert_eq!(
+        evidence["schema_version"],
+        LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION
+    );
+    let required_receipts = evidence["required_receipts"]
+        .as_array()
+        .expect("required receipts");
+    assert!(
+        required_receipts
+            .iter()
+            .any(|receipt| receipt == "promotion_probe_matrix_receipt"),
+        "required receipts={required_receipts:?}"
+    );
+    let required_probe_cases = evidence["required_probe_cases"]
+        .as_array()
+        .expect("required probe cases");
+    let probe_case_ids = required_probe_cases
+        .iter()
+        .filter_map(|probe_case| probe_case["id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        probe_case_ids,
+        vec![
+            "sequential_tool_call",
+            "parallel_tool_calls",
+            "no_tool_answer",
+            "unavailable_tool_repair",
+            "multi_turn_tool_result_continuation",
+            "serving_concurrency_probe",
+        ]
+    );
+    assert!(
+        required_probe_cases.iter().any(|probe_case| {
+            probe_case["id"] == "parallel_tool_calls"
+                && probe_case["requirement"]
+                    .as_str()
+                    .is_some_and(|requirement| {
+                        requirement.contains("required_when_route_supports_parallel_tool_calls")
+                    })
+        }),
+        "required probe cases={required_probe_cases:?}"
     );
     assert!(
         eval.windows(2)
@@ -3620,6 +3670,21 @@ fn models_lora_manifest_json_writes_training_manifest() {
         "serving requirements={serving_requirements:?}"
     );
     assert_eq!(report["promotion"]["minimum_trials"], 5);
+    assert_eq!(
+        report["promotion"]["evidence_contract"]["schema_version"],
+        LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION
+    );
+    let manifest_probe_cases = report["promotion"]["evidence_contract"]["required_probe_cases"]
+        .as_array()
+        .expect("manifest required probe cases");
+    assert!(
+        manifest_probe_cases.iter().any(|probe_case| {
+            probe_case["id"] == "serving_concurrency_probe"
+                && probe_case["requirement"]
+                    == "required_for_adapter_loaded_serving_else_not_applicable_receipt"
+        }),
+        "manifest required probe cases={manifest_probe_cases:?}"
+    );
     assert!(out.is_file(), "manifest file missing");
     assert_eq!(report["contract"]["schema_version"], 2);
     assert_eq!(report["contract"]["training_contract"]["schema_version"], 2);
@@ -3834,6 +3899,19 @@ fn models_lora_train_json_writes_dry_run_receipt() {
         "post_training={:?}",
         report["post_training"]
     );
+    assert_eq!(
+        report["promotion"]["evidence_contract"]["schema_version"],
+        LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION
+    );
+    let train_probe_cases = report["promotion"]["evidence_contract"]["required_probe_cases"]
+        .as_array()
+        .expect("train required probe cases");
+    assert!(
+        train_probe_cases
+            .iter()
+            .any(|probe_case| probe_case["id"] == "unavailable_tool_repair"),
+        "train required probe cases={train_probe_cases:?}"
+    );
 
     let receipt_value = parse_json(
         &fs::read_to_string(&receipt).expect("read receipt"),
@@ -3841,6 +3919,15 @@ fn models_lora_train_json_writes_dry_run_receipt() {
     );
     assert_eq!(receipt_value["producer"], "harn_models_lora_train_v1");
     assert_eq!(receipt_value["backend"]["status"], "dry_run");
+    assert!(
+        receipt_value["promotion"]["evidence_contract"]["required_probe_cases"]
+            .as_array()
+            .expect("receipt required probe cases")
+            .iter()
+            .any(|probe_case| probe_case["id"] == "multi_turn_tool_result_continuation"),
+        "receipt promotion={:?}",
+        receipt_value["promotion"]
+    );
 }
 
 #[test]
@@ -3885,6 +3972,9 @@ fn models_lora_manifest_human_text_reports_contract() {
         "adapter binding: runtime_lora_adapter",
         "LoRA module format: json_with_base_model",
         "promotion minimum trials: 5",
+        "required probe cases:",
+        "unavailable_tool_repair [always]",
+        "serving_concurrency_probe [required_for_adapter_loaded_serving_else_not_applicable_receipt]",
         "harn eval tool-calls --planner burin-tools --tool-format json",
         "warnings:",
         "- no --out supplied; manifest report was not written to disk",

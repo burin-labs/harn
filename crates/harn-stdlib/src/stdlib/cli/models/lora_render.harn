@@ -1,5 +1,5 @@
 /** Shared render helpers for `harn models lora *` commands. */
-import { print_list, safe_list, safe_string } from "std/cli/render"
+import { print_list, safe_dict, safe_list, safe_string } from "std/cli/render"
 
 /**
  * Render the PEFT save policy carried by a LoRA training contract.
@@ -22,4 +22,50 @@ pub fn render_peft_save_policy(harness: Harness, policy: dict) {
   harness.stdio
     .println("  weight tying policy: " + safe_string(policy["tied_embedding_policy"], ""))
   print_list(harness, "PEFT save notes", safe_list(policy["notes"]))
+}
+
+fn __probe_case_line(value: unknown) -> string {
+  const probe = safe_dict(value)
+  const id = safe_string(probe["id"], "")
+  if id == "" {
+    return ""
+  }
+  const requirement = safe_string(probe["requirement"], "")
+  const expected = safe_string(probe["expected"], "")
+  const receipt = safe_string(probe["receipt"], "")
+  const rationale = safe_string(probe["rationale"], "")
+  let line = id
+  if requirement != "" {
+    line = line + " [" + requirement + "]"
+  }
+  if expected != "" {
+    line = line + ": " + expected
+  }
+  if receipt != "" {
+    line = line + " (receipt " + receipt + ")"
+  }
+  if rationale != "" {
+    line = line + " - " + rationale
+  }
+  return line
+}
+
+/**
+ * Render the behavioral probe matrix required before a LoRA promotion.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_required_probe_cases(harness: Harness, value: unknown) {
+  const probe_cases = safe_list(value)
+  if len(probe_cases) == 0 {
+    return
+  }
+  harness.stdio.println("  required probe cases:")
+  for item in probe_cases {
+    const line = __probe_case_line(item)
+    if line != "" {
+      harness.stdio.println("    - " + line)
+    }
+  }
 }

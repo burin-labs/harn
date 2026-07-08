@@ -1,4 +1,4 @@
-import { render_peft_save_policy } from "std/cli/models/lora_render"
+import { render_peft_save_policy, render_required_probe_cases } from "std/cli/models/lora_render"
 /**
  * `harn models lora export` renderer.
  *
@@ -99,6 +99,7 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "promotion metrics", safe_list(promotion["required_metrics"]))
   print_list(harness, "promotion gates", safe_list(promotion["gates"]))
   print_list(harness, "promotion receipts", safe_list(evidence["required_receipts"]))
+  render_required_probe_cases(harness, evidence["required_probe_cases"])
   print_list(harness, "batch receipts", safe_list(evidence["optional_batch_receipts"]))
   render_command(harness, "batch eval manifest", safe_list(batch_ready["manifest_command"]))
   const path = safe_string(output["path"], "")
