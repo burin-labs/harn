@@ -210,6 +210,7 @@ type AgentStallConfig = {
   remediation_delivered?: any,
   action_signal?: any,
   turns_since_clean_verify?: int,
+  no_net_progress_predicates: dict,
 }
 
 type AgentStallWarning = {
@@ -252,6 +253,12 @@ type AgentStallWarning = {
  *     Resets to 0 only on a clean non-edit pass; drives the elapsed-turns hard floor
  *     (#burin-cutover seam 5). Always maintained; consulted only when the
  *     `turns_since_clean_verify` knob is set.
+ *   - remediation_delivered_signature / remediation_delivered_count: baseline for
+ *     the cumulative-count `remediation_delivered` intake (#burin-cutover seam 3).
+ *     When the host callback returns an int cumulative count (rather than a bool),
+ *     harn diffs it against the last count SEEN for the active failure signature to
+ *     derive the per-turn delivered event, resetting the baseline on a signature
+ *     change. Internal-only tracking; never entered into any output projection.
  */
 type AgentStallState = {
   last_signature: string,
@@ -289,6 +296,8 @@ type AgentStallState = {
   verify_turns_since_advance: int,
   verify_wrote_since_advance: bool,
   verify_signature_counts: dict,
+  remediation_delivered_signature: string,
+  remediation_delivered_count: int,
 }
 
 /**
@@ -361,6 +370,39 @@ fn __agent_stall_closure(value, field: string) {
 }
 
 /**
+ * Independently-armable no-net-progress predicates (#burin-cutover). The
+ * verify-state no-net-progress trip (`agent_stall_no_net_progress`, active only
+ * under a `progress_signal` callback) is an OR of three predicates —
+ * `long_stall`, `hard_recurrence`, `write_axis`. A host may disarm any of them so
+ * it can adopt the seam directly instead of clamping the fed streak to route
+ * around one branch (burin's "capped_streak" workaround, which existed solely to
+ * make the hard-recurrence branch unreachable). Unset / absent keys = armed, so
+ * the default is byte-identical to the fixed OR. Unknown predicate keys throw
+ * loudly at config time.
+ */
+const __NO_NET_PROGRESS_PREDICATE_KEYS = ["hard_recurrence", "long_stall", "write_axis"]
+
+fn __agent_stall_predicates(value, field: string) -> dict {
+  const defaults = {hard_recurrence: true, long_stall: true, write_axis: true}
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: stall_diagnostics." + field + " must be a dict or nil; got " + type_of(value)
+  }
+  let out = defaults
+  for key in keys(value) {
+    if !contains(__NO_NET_PROGRESS_PREDICATE_KEYS, key) {
+      throw "agent_loop: stall_diagnostics." + field + " has unknown predicate key \"" + key
+        + "\"; known keys: "
+        + join(__NO_NET_PROGRESS_PREDICATE_KEYS, ", ")
+    }
+    out = out + {[key]: __agent_stall_bool(value[key], true, field + "." + key)}
+  }
+  return out
+}
+
+/**
  * Optional positive-int knob (#burin-cutover): `turns_since_clean_verify` is an
  * off-by-default caller-set floor. nil = off; any set value must be a positive int
  * and fails loudly at config time, matching the `__agent_stall_closure` contract.
@@ -405,6 +447,7 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     remediation_delivered: nil,
     action_signal: nil,
     turns_since_clean_verify: nil,
+    no_net_progress_predicates: {hard_recurrence: true, long_stall: true, write_axis: true},
   }
 }
 
@@ -537,6 +580,10 @@ fn __agent_stall_config(value) -> AgentStallConfig {
       __agent_stall_repair_value(value, repair_diagnostics, "turns_since_clean_verify"),
       "turns_since_clean_verify",
     ),
+    no_net_progress_predicates: __agent_stall_predicates(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_predicates"),
+      "no_net_progress_predicates",
+    ),
   }
 }
 
@@ -584,6 +631,8 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     verify_turns_since_advance: 0,
     verify_wrote_since_advance: false,
     verify_signature_counts: {},
+    remediation_delivered_signature: "",
+    remediation_delivered_count: 0,
   }
 }
 
@@ -1608,6 +1657,48 @@ fn __agent_stall_observe_core(
  * When the core observation already produced a warning this turn we keep it
  * and only fold the model (we do not stack two warnings in one turn).
  */
+/**
+ * Delivered-fix intake (#burin-cutover seam 3). The `remediation_delivered`
+ * callback may return either a bool (the ORIGINAL per-turn form, unchanged) or an
+ * int CUMULATIVE count of remediations delivered for the active failure signature
+ * (burin's `injections_now` fact — cumulative "since this signature became
+ * active"). For the int form harn derives the per-turn "a fix was delivered"
+ * event by diffing the returned count against the count last SEEN for that
+ * signature (`state.remediation_delivered_*`), resetting the baseline to 0 on a
+ * signature change. Returns `{delivered, signature, count}`; the caller folds
+ * `signature`/`count` back into state so the next turn's diff has the right
+ * baseline. A nil return means "no fix this turn" (delivered false, tracking
+ * unchanged), matching the pre-seam falsy-return behavior. Any other return type
+ * throws loudly.
+ */
+fn __agent_stall_eval_remediation(state: AgentStallState, signature: string, raw) -> dict {
+  if type_of(raw) == "int" {
+    const same_sig = state.remediation_delivered_signature == signature
+    const baseline = if same_sig {
+      state.remediation_delivered_count
+    } else {
+      0
+    }
+    return {count: raw, delivered: raw > baseline, signature: signature}
+  }
+  if raw == nil {
+    return {
+      count: state.remediation_delivered_count,
+      delivered: false,
+      signature: state.remediation_delivered_signature,
+    }
+  }
+  if type_of(raw) == "bool" {
+    return {
+      count: state.remediation_delivered_count,
+      delivered: raw,
+      signature: state.remediation_delivered_signature,
+    }
+  }
+  throw "agent_loop: stall_diagnostics.remediation_delivered callback must return a bool, an int cumulative count, or nil; got "
+    + type_of(raw)
+}
+
 fn __agent_stall_apply_repair(
   session_id: string,
   config: AgentStallConfig,
@@ -1689,13 +1780,21 @@ fn __agent_stall_apply_repair(
     && folded.same_diagnostic_streak >= STALL_DELIVERED_FIX_AFTER
     && delivered_streak_advanced
     && observation.warning == nil
+  // `current` carries the cumulative-count baseline forward from the delivered
+  // intake below (byte-identical to `folded` on the bool/absent path, since the
+  // tracking fields are then unchanged). Every downstream branch folds `current`
+  // so a non-tripping evaluation still records the new per-signature count.
+  let current = folded
   if delivered_candidate {
-    const delivered = config
+    const raw_delivered = config
       .remediation_delivered(
       {prev_dispatch: prev_dispatch, session_id: session_id, signature: folded.last_diagnostic_signature},
     )
-    if delivered {
-      const tripped = __agent_stall_register_trip(folded, config)
+    const evaluated = __agent_stall_eval_remediation(folded, folded.last_diagnostic_signature, raw_delivered)
+    current = folded
+      + {remediation_delivered_count: evaluated.count, remediation_delivered_signature: evaluated.signature}
+    if evaluated.delivered {
+      const tripped = __agent_stall_register_trip(current, config)
       return __agent_stall_emit_diagnostic_trip(
         session_id,
         config,
@@ -1710,7 +1809,7 @@ fn __agent_stall_apply_repair(
     }
   }
   if !config.repair_aware {
-    return observation + {state: folded}
+    return observation + {state: current}
   }
   // Trip ONCE when the streak first crosses the threshold, so the strategy-shift
   // nudge fires a single time per stuck episode rather than on every subsequent
@@ -1720,14 +1819,14 @@ fn __agent_stall_apply_repair(
   // streak reset (a different/passing signature) re-arms the trip for the next
   // genuinely-stuck episode. Also require that no other stall pattern already
   // fired this turn (avoid double-nudging).
-  const streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
-  const should_trip = folded.same_diagnostic_streak == config.stuck_same_diagnostic_after
+  const streak_advanced = current.same_diagnostic_streak > observation.state.same_diagnostic_streak
+  const should_trip = current.same_diagnostic_streak == config.stuck_same_diagnostic_after
     && streak_advanced
     && observation.warning == nil
   if !should_trip {
-    return observation + {state: folded}
+    return observation + {state: current}
   }
-  const tripped = __agent_stall_register_trip(folded, config)
+  const tripped = __agent_stall_register_trip(current, config)
   return __agent_stall_emit_diagnostic_trip(
     session_id,
     config,
@@ -1993,8 +2092,13 @@ fn __agent_stall_fold_verify_state(
 pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> bool {
   const config = __agent_stall_config(raw_config)
   if config.progress_signal != nil {
+    // Each predicate is independently armable (#burin-cutover): a disarmed
+    // predicate contributes false to the OR regardless of its evidence, so a host
+    // can turn a single branch off (default: all armed = the fixed OR, byte-identical).
+    const predicates = config.no_net_progress_predicates
     const streak = stall_state.same_diagnostic_streak
-    const long_stall = streak >= config.verify_state_streak
+    const long_stall = predicates.long_stall
+      && streak >= config.verify_state_streak
       && stall_state.verify_turns_since_advance >= config.verify_state_stall_turns
     // Hard-recurrence trips on EITHER a consecutive same-diagnostic streak OR the
     // TOTAL (non-consecutive) occurrences of the CURRENT failure signature across
@@ -2004,9 +2108,11 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     // share `verify_state_recurrence_hard`.
     const sig_total = to_int((stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0)
       ?? 0
-    const hard_recurrence = streak >= config.verify_state_recurrence_hard
-      || sig_total >= config.verify_state_recurrence_hard
-    const write_axis = stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
+    const hard_recurrence = predicates.hard_recurrence
+      && (streak >= config.verify_state_recurrence_hard
+      || sig_total >= config.verify_state_recurrence_hard)
+    const write_axis = predicates.write_axis
+      && stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
       && stall_state.verify_wrote_since_advance
     return long_stall || hard_recurrence || write_axis
   }

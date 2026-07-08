@@ -1094,4 +1094,213 @@ pipeline test_new_seams_unset_are_byte_identical(task) {
   const applied = agent_stall_apply_result({status: "stuck"}, true, a.final)
   assert(!contains(json_stringify(applied), "turns_since_clean_verify"))
   assert(!contains(json_stringify(applied), "action_flail_trips"))
+  assert(!contains(json_stringify(applied), "remediation_delivered_count"))
+  assert(!contains(json_stringify(applied), "remediation_delivered_signature"))
+  // ALLOWLIST leak-guard: the projection's TOP-LEVEL keys must be a subset of the
+  // known set, so any FUTURE internal state field added to the projection fails
+  // here by default (the denylist above only catches fields named ahead of time).
+  const known_projection_keys = ["current_failure", "repeated_tool_calls", "stall_warnings", "status", "suspected_loop"]
+  for key in keys(applied) {
+    assert(contains(known_projection_keys, key), "unexpected projection key leaked: " + key)
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// #burin-cutover: independently-armable no-net-progress predicates. The verify-state
+// no-net-progress trip is an OR of three predicates (long_stall / hard_recurrence /
+// write_axis). A host may disarm any of them (default: all armed = byte-identical to
+// the fixed OR). Below, three consecutive same-signature failures with a flat verifier
+// arm ONLY the hard_recurrence branch (recurrence_hard lowered to 3), so disarming it
+// flips the verdict while the others stay quiet.
+
+// -------------------------------------------------------------------------------------------------
+
+const PRED_CONFIG = {
+  enabled: true,
+  repair_aware: true,
+  stuck_same_diagnostic_after: 99,
+  post_edit_reverify: true,
+  progress_signal: { _p -> 0 },
+  verify_state_streak: 99,
+  verify_state_stall_turns: 99,
+  verify_state_recurrence_hard: 3,
+  no_verifier_progress_limit: 99,
+  repeat_same_error: 99,
+  repeat_same_observation: 99,
+  no_progress_messages: 99,
+  ping_pong_cycles: 99,
+}
+
+fn _fold_pred(state, cfg, made_edit) {
+  // A substantive "run" call folding a failing verification, with the full post-turn
+  // payload passed through to the progress_signal callback.
+  return agent_stall_observe_tool_calls(
+    "unit-pred",
+    _run_call(),
+    1,
+    cfg,
+    state,
+    true,
+    _fail_dispatch("boom"),
+    "",
+    false,
+    made_edit,
+    "",
+    {},
+  )
+}
+
+fn _drive_three_recurrences(cfg) {
+  const o1 = _fold_pred(agent_stall_initial_state(), cfg, false)
+  const o2 = _fold_pred(o1.state, cfg, false)
+  const o3 = _fold_pred(o2.state, cfg, false)
+  return o3.state
+}
+
+pipeline test_no_net_progress_predicates_default_all_armed(task) {
+  // Default (no predicate overrides): the hard-recurrence branch trips at streak 3.
+  const s = _drive_three_recurrences(PRED_CONFIG)
+  assert(agent_stall_no_net_progress(PRED_CONFIG, s), "all-armed hard-recurrence trips")
+}
+
+pipeline test_no_net_progress_hard_recurrence_disarmable(task) {
+  // The burin adoption case: disarming hard_recurrence makes the SAME evidence not
+  // trip, without clamping the fed streak. The other two predicates stay quiet here.
+  const cfg = PRED_CONFIG + {no_net_progress_predicates: {hard_recurrence: false}}
+  const s = _drive_three_recurrences(cfg)
+  assert(!agent_stall_no_net_progress(cfg, s), "disarmed hard-recurrence does not trip")
+}
+
+pipeline test_no_net_progress_disarming_other_predicates_keeps_trip(task) {
+  // Predicates are INDEPENDENT: disarming long_stall + write_axis (neither of which
+  // is armed by this evidence anyway) leaves the hard-recurrence trip intact.
+  const cfg = PRED_CONFIG + {no_net_progress_predicates: {long_stall: false, write_axis: false}}
+  const s = _drive_three_recurrences(cfg)
+  assert(agent_stall_no_net_progress(cfg, s), "hard-recurrence still trips with the others disarmed")
+}
+
+pipeline test_no_net_progress_predicates_unknown_key_throws(task) {
+  // An unknown predicate key fails loudly at config parse time.
+  assert_throws(
+    { -> return agent_stall_no_net_progress(
+      PRED_CONFIG + {no_net_progress_predicates: {bogus_predicate: true}},
+      agent_stall_initial_state(),
+    ) },
+    "unknown predicate key must throw",
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// #burin-cutover seam 3: remediation_delivered cumulative-count intake. The callback
+// may return a bool (per-turn, unchanged) OR an int cumulative count; for the int form
+// harn derives the per-turn delivered event by diffing against the previously-seen
+// count for the active signature, resetting the baseline on a signature change. The
+// count-tracking state must never enter an output projection.
+
+// -------------------------------------------------------------------------------------------------
+
+const REMEDIATION_CONFIG = {
+  enabled: true,
+  repair_aware: true,
+  stuck_same_diagnostic_after: 99,
+  post_edit_reverify: true,
+  repeat_same_error: 99,
+  repeat_same_observation: 99,
+  no_progress_messages: 99,
+  ping_pong_cycles: 99,
+}
+
+fn _fold_remediation(state, cb, prev_dispatch) {
+  return agent_stall_observe_tool_calls(
+    "unit-rem",
+    _run_call(),
+    1,
+    REMEDIATION_CONFIG + {remediation_delivered: cb},
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    false,
+  )
+}
+
+pipeline test_remediation_bool_true_trips_each_qualifying_turn(task) {
+  // Bool path (unchanged): a truthy per-turn fact trips delivered_fix_not_landing on
+  // EVERY qualifying turn (streak >= 2, advanced) — turns 2 and 3 both fire.
+  const cb = { _ctx -> true }
+  const o1 = _fold_remediation(agent_stall_initial_state(), cb, _fail_dispatch("boom"))
+  assert(o1.warning == nil, "streak 1 does not yet qualify")
+  const o2 = _fold_remediation(o1.state, cb, _fail_dispatch("boom"))
+  assert(o2.warning != nil)
+  assert(o2.warning.pattern == "delivered_fix_not_landing")
+  assert(o2.warning.remediation_delivered)
+  const o3 = _fold_remediation(o2.state, cb, _fail_dispatch("boom"))
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "delivered_fix_not_landing")
+}
+
+pipeline test_remediation_count_trips_once_per_increase(task) {
+  // Count path: a CONSTANT cumulative count of 1 means one fix was delivered (when the
+  // signature first went active) and none since. It parity-trips at turn 2 (0 -> 1
+  // crossing) exactly like the bool true, but does NOT re-fire at turn 3 (1 -> 1 is no
+  // new delivery) — the per-signature diff, not a raw truthiness, drives the event.
+  const cb = { _ctx -> 1 }
+  const o1 = _fold_remediation(agent_stall_initial_state(), cb, _fail_dispatch("boom"))
+  assert(o1.warning == nil)
+  const o2 = _fold_remediation(o1.state, cb, _fail_dispatch("boom"))
+  assert(o2.warning != nil)
+  assert(o2.warning.pattern == "delivered_fix_not_landing")
+  assert_eq(o2.state.remediation_delivered_count, 1)
+  const o3 = _fold_remediation(o2.state, cb, _fail_dispatch("boom"))
+  assert(o3.warning == nil, "a flat cumulative count does not re-deliver")
+}
+
+pipeline test_remediation_count_zero_never_trips(task) {
+  // A cumulative count that never leaves 0 means no fix was delivered — no trip, even
+  // though the streak qualifies. Distinguishes count intake from bool (0 is a real
+  // count, not a falsy sentinel that a bool would otherwise treat identically).
+  const cb = { _ctx -> 0 }
+  const o1 = _fold_remediation(agent_stall_initial_state(), cb, _fail_dispatch("boom"))
+  const o2 = _fold_remediation(o1.state, cb, _fail_dispatch("boom"))
+  assert(o2.warning == nil)
+  const o3 = _fold_remediation(o2.state, cb, _fail_dispatch("boom"))
+  assert(o3.warning == nil)
+  // Internal count-tracking never leaks into the terminal projection.
+  const applied = agent_stall_apply_result({status: "stuck"}, true, o3.state)
+  assert(!contains(json_stringify(applied), "remediation_delivered_count"))
+  assert(!contains(json_stringify(applied), "remediation_delivered_signature"))
+}
+
+pipeline test_remediation_count_baseline_resets_on_signature_change(task) {
+  // Reset-on-signature-change: the same cumulative count of 1 trips again for a NEW
+  // failure signature, because the diff baseline resets when the active signature
+  // changes (the count is "since this signature became active").
+  const cb = { _ctx -> 1 }
+  const a1 = _fold_remediation(agent_stall_initial_state(), cb, _fail_dispatch("boom A"))
+  const a2 = _fold_remediation(a1.state, cb, _fail_dispatch("boom A"))
+  assert(a2.warning != nil, "first signature trips at streak 2")
+  // Switch to a different failure signature: streak resets to 1 (no trip yet).
+  const b1 = _fold_remediation(a2.state, cb, _fail_dispatch("totally different B"))
+  assert(b1.warning == nil)
+  assert_eq(b1.state.same_diagnostic_streak, 1)
+  // Same cumulative-1 count trips again for signature B: its baseline reset to 0.
+  const b2 = _fold_remediation(b1.state, cb, _fail_dispatch("totally different B"))
+  assert(b2.warning != nil)
+  assert(b2.warning.pattern == "delivered_fix_not_landing")
+}
+
+pipeline test_remediation_bad_return_throws(task) {
+  // A callback returning neither bool, int, nor nil fails loudly.
+  const cb = { _ctx -> "not-a-count" }
+  assert_throws(
+    { -> return _fold_remediation(
+      _fold_remediation(agent_stall_initial_state(), cb, _fail_dispatch("boom")).state,
+      cb,
+      _fail_dispatch("boom"),
+    ) },
+    "non-bool/int/nil remediation return must throw",
+  )
 }

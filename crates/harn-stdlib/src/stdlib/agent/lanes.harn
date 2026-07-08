@@ -58,6 +58,14 @@ pub type LaneRow = {
  * poll_command/wait_command/kill_command/read_command_output) when the task
  * names 1-4 explicit file targets, `general` (unrestricted) otherwise.
  *
+ * NOTE: the `explicit_patch` `tool_names` here are a REFERENCE/example set drawn
+ * from burin-code's product tool surface (`poll_command`/`wait_command`/
+ * `kill_command`/`read_command_output` are burin tool names, not stdlib
+ * primitives). A host with a different tool registry should NOT rely on these
+ * exact names — supply your own rows to `lane_policy` (see `LaneRow`) naming the
+ * tools your registry actually exposes. These defaults are retained as a
+ * released, working out-of-the-box example.
+ *
  * @effects: []
  * @errors: []
  * @api_stability: stable
@@ -456,7 +464,45 @@ fn __stage_gate_parse_token_list(raw) {
   if normalized == "" || normalized == "-" {
     return []
   }
-  return __stage_gate_token_list(normalized.split(","))
+  // Split on the shared comma delimiter (__STAGE_GATE_DELIMITERS[2]) rather than a
+  // re-hardcoded literal, so the parser can never drift from the delimiter set the
+  // encoder rejects components against.
+  return __stage_gate_token_list(normalized.split(__STAGE_GATE_DELIMITERS[2]))
+}
+
+/**
+ * Resolve and validate the marker prefix for a stage-gate op. Defaults to the
+ * built-in `__STAGE_GATE_PREFIX`. A host may inject its own (e.g. burin-code's
+ * `"[burin_gate "`) via the `prefix` option so its existing markers round-trip
+ * without an adapter. A custom prefix must be a well-formed marker opener: it must
+ * start with `"["` and end with a space, and must not contain any of the structural
+ * delimiters the parser splits on (`"="`, `","`, `"]"`), which would corrupt the
+ * stage_gate_parse round-trip. Validated loudly at call time so a mistyped prefix
+ * fails here rather than silently producing an unparseable marker. The trailing
+ * space is deliberately NOT rejected even though it is a marker delimiter — it is
+ * the required separator between the prefix and the first `key=value` token.
+ */
+fn __stage_gate_prefix(options) -> string {
+  const raw = options?.prefix
+  if raw == nil {
+    return __STAGE_GATE_PREFIX
+  }
+  const prefix = to_string(raw)
+  if !starts_with(prefix, "[") {
+    throw "stage_gate: `prefix` must start with '[' (got: \"" + prefix + "\")"
+  }
+  if !ends_with(prefix, " ") {
+    throw "stage_gate: `prefix` must end with a space (got: \"" + prefix + "\")"
+  }
+  for delimiter in [__STAGE_GATE_DELIMITERS[1], __STAGE_GATE_DELIMITERS[2], __STAGE_GATE_DELIMITERS[3]] {
+    if prefix.index_of(delimiter) >= 0 {
+      throw "stage_gate: `prefix` may not contain the marker delimiter '" + delimiter
+        + "' (it would corrupt the stage_gate_parse round-trip); got: \""
+        + prefix
+        + "\""
+    }
+  }
+  return prefix
 }
 
 fn __stage_gate_callable(value) {
@@ -490,21 +536,25 @@ fn __stage_gate_kind_of(options, tool_name) {
 }
 
 /**
- * stage_gate_label(base_label, gate) — encode a lane/stage gate into a task
- * label so a downstream PreToolUse enforcement seam can recover the active
+ * stage_gate_label(base_label, gate, options?) — encode a lane/stage gate into a
+ * task label so a downstream PreToolUse enforcement seam can recover the active
  * workflow scope from the prompt itself. `gate` is `{lane, stage,
  * allowed_kinds?, allowed_tools?}`. Returns `base_label` UNCHANGED when either
  * `lane` or `stage` is blank — so an ungated node's label is byte-identical to
  * what it would be without this seam. Throws when any component (`lane`,
  * `stage`, or an `allowed_kinds`/`allowed_tools` token) contains a marker
  * delimiter (space, `=`, `,`, `]`) that `stage_gate_parse` could not recover.
+ * `options.prefix` overrides the default `"[lane_gate "` marker prefix (a host
+ * must pass the SAME prefix to `stage_gate_parse`/`stage_gate_from_session`);
+ * omitting it renders the byte-identical default marker.
  *
  * @effects: []
  * @errors: [runtime]
  * @api_stability: stable
  * @example: stage_gate_label(task, {lane: "repair_local", stage: "repair", allowed_tools: ["edit", "look"]})
  */
-pub fn stage_gate_label(base_label, gate) {
+pub fn stage_gate_label(base_label, gate, options = nil) {
+  const prefix = __stage_gate_prefix(options ?? {})
   const base = to_string(base_label ?? "").trim()
   const spec = if type_of(gate) == "dict" {
     gate
@@ -526,7 +576,7 @@ pub fn stage_gate_label(base_label, gate) {
   for tool_token in tools {
     __stage_gate_reject_delimiters("allowed_tools token", tool_token)
   }
-  const marker = __STAGE_GATE_PREFIX + "lane=" + lane + " stage=" + stage + " kinds="
+  const marker = prefix + "lane=" + lane + " stage=" + stage + " kinds="
     + __stage_gate_token_string(kinds)
     + " tools="
     + __stage_gate_token_string(tools)
@@ -538,25 +588,34 @@ pub fn stage_gate_label(base_label, gate) {
 }
 
 /**
- * stage_gate_parse(text) — recover a gate from any text carrying a marker
- * rendered by `stage_gate_label`. Returns `{lane, stage, allowed_kinds,
+ * stage_gate_parse(text, options?) — recover a gate from any text carrying a
+ * marker rendered by `stage_gate_label`. Returns `{lane, stage, allowed_kinds,
  * allowed_tools}`, or an EMPTY dict `{}` when no well-formed marker is present.
  * An empty gate never denies anything (see `stage_gate_allows`), so text
- * without a marker is inert.
+ * without a marker is inert. `options.prefix` must match the prefix passed to
+ * `stage_gate_label` (default `"[lane_gate "`); a marker under a different prefix
+ * is not recognized.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn stage_gate_parse(text) {
+pub fn stage_gate_parse(text, options = nil) {
+  const prefix = __stage_gate_prefix(options ?? {})
+  // Scan with the SAME structural delimiter set the encoder rejects components
+  // against (__STAGE_GATE_DELIMITERS = [space, "=", ",", "]"]), referenced by
+  // index rather than re-hardcoded, so encoder and parser can never drift.
+  const delim_space = __STAGE_GATE_DELIMITERS[0]
+  const delim_eq = __STAGE_GATE_DELIMITERS[1]
+  const delim_close = __STAGE_GATE_DELIMITERS[3]
   const body = to_string(text ?? "")
-  const start = body.index_of(__STAGE_GATE_PREFIX)
+  const start = body.index_of(prefix)
   if start < 0 {
     return {}
   }
-  const body_start = start + len(__STAGE_GATE_PREFIX)
+  const body_start = start + len(prefix)
   const tail = body.substring(body_start, len(body))
-  const end = tail.index_of("]")
+  const end = tail.index_of(delim_close)
   if end < 0 {
     return {}
   }
@@ -565,9 +624,9 @@ pub fn stage_gate_parse(text) {
   let stage = ""
   let kinds = []
   let tools = []
-  for token in marker.split(" ") {
+  for token in marker.split(delim_space) {
     const piece = token.trim()
-    const eq = piece.index_of("=")
+    const eq = piece.index_of(delim_eq)
     if eq <= 0 {
       continue
     }
@@ -607,17 +666,19 @@ fn __stage_gate_latest_user_prompt(messages) {
 }
 
 /**
- * stage_gate_from_session(session_id) — recover the active gate MID-TRANSCRIPT
- * by inspecting the latest user prompt in a live session's transcript (the
- * marker-recovery half of the PreToolUse enforcement seam). Reads the existing
- * `agent_session_snapshot`/`transcript_messages` seam — no new host surface.
- * Returns an empty dict `{}` when the session is unknown or carries no marker.
+ * stage_gate_from_session(session_id, options?) — recover the active gate
+ * MID-TRANSCRIPT by inspecting the latest user prompt in a live session's
+ * transcript (the marker-recovery half of the PreToolUse enforcement seam). Reads
+ * the existing `agent_session_snapshot`/`transcript_messages` seam — no new host
+ * surface. Returns an empty dict `{}` when the session is unknown or carries no
+ * marker. `options.prefix` is forwarded to `stage_gate_parse` and must match the
+ * prefix the label was rendered with (default `"[lane_gate "`).
  *
  * @effects: [host]
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn stage_gate_from_session(session_id) {
+pub fn stage_gate_from_session(session_id, options = nil) {
   const sid = to_string(session_id ?? "").trim()
   if sid == "" {
     return {}
@@ -635,7 +696,7 @@ pub fn stage_gate_from_session(session_id) {
   if prompt == "" {
     return {}
   }
-  return stage_gate_parse(prompt)
+  return stage_gate_parse(prompt, options)
 }
 
 /**
