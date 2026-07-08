@@ -10,7 +10,6 @@
 import { pin, pin_compaction_policy, pin_kinds, pin_reminder } from "std/agent/pins"
 
 // --- Taxonomy registration (additive; default-off) -----------------------------
-
 pipeline test_pin_default_taxonomy_unchanged(task) {
   // Byte-identical: the fixed 5 kinds still validate, an unknown kind still
   // throws, and the built-in discovery surface is untouched.
@@ -50,7 +49,6 @@ pipeline test_pin_register_kinds_validated(task) {
 }
 
 // --- pin_reminder opts (additive; default-off) ---------------------------------
-
 pipeline test_pin_reminder_default_shape_unchanged(task) {
   const p = pin("goal", "Ship it", {dedupe_key: "pin/goal"})
   const r = pin_reminder(p)
@@ -65,10 +63,7 @@ pipeline test_pin_reminder_default_shape_unchanged(task) {
 
 pipeline test_pin_reminder_opts_apply(task) {
   const p = pin("goal", "0123456789ABCDEF", {dedupe_key: "pin/goal"})
-  const r = pin_reminder(
-    p,
-    {max_body: 8, propagate: "session", tag_namespace: "burin_structural_working_set"},
-  )
+  const r = pin_reminder(p, {max_body: 8, propagate: "session", tag_namespace: "burin_structural_working_set"})
   assert_eq(r.propagate, "session")
   assert_eq(r.tags, ["burin_structural_working_set", "pin", "goal"])
   assert(r.body.contains("[pin reminder truncated]"), "over-long body clamped with marker")
@@ -87,14 +82,16 @@ pipeline test_pin_reminder_opts_validated(task) {
 }
 
 // --- pin_compaction_policy merge / label-preserve (additive; default-off) ------
-
 pipeline test_pin_compaction_policy_default_unchanged(task) {
   const pins = [pin("goal", "Ship the migration"), pin("constraint", "No new deps")]
   const policy = pin_compaction_policy(pins)
   assert_eq(policy.mode, "pins")
   assert_eq(policy.author, "pins")
   assert(contains(policy.preserve, "Preserve the pinned goal: Ship the migration"), "goal preserved")
-  assert(contains(policy.preserve, "Preserve the pinned constraint: No new deps"), "constraint preserved")
+  assert(
+    contains(policy.preserve, "Preserve the pinned constraint: No new deps"),
+    "constraint preserved",
+  )
 }
 
 pipeline test_pin_compaction_policy_merges_existing(task) {
@@ -112,7 +109,10 @@ pipeline test_pin_compaction_policy_merges_existing(task) {
   assert_eq(merged.author, "burin")
   // Preserve unions the existing directives with the pins' directives.
   assert(contains(merged.preserve, "active session goal"), "existing preserve kept")
-  assert(contains(merged.preserve, "Preserve the pinned goal: Ship the migration"), "pin preserve merged in")
+  assert(
+    contains(merged.preserve, "Preserve the pinned goal: Ship the migration"),
+    "pin preserve merged in",
+  )
   assert(contains(merged.drop, "stale tool output"), "existing drop kept")
   // Control keys never leak into the emitted policy.
   assert_eq(merged?.merge, nil)
