@@ -72,3 +72,82 @@ pipeline test_remote_eval_fanout_plan_rejects_bad_concurrency(task) {
   }
   assert_eq(result, "--max-escalating cannot exceed --max-concurrency")
 }
+
+fn small_plan() {
+  return remote_eval_fanout_plan(
+    {
+      cells: "meter-mini",
+      trials: 1,
+      max_concurrency: 2,
+      max_escalating: 1,
+      model: "fw-gpt-oss-120b",
+      split: "meter-holdout",
+    },
+    catalog(),
+  )
+}
+
+@test
+pipeline test_remote_eval_fanout_trial_receipt_pins_shard_contract(task) {
+  const receipt = remote_eval_fanout_trial_receipt(
+    small_plan(),
+    "cpp-test-t1",
+    {status: "passed", passed: true, artifact_dir: "remote/cpp-test-t1"},
+    {bundle_manifest_path: "remote/cpp-test-t1/manifest.json"},
+  )
+  assert_eq(receipt.producer, "harn_remote_eval_fanout_trial_receipt_v1")
+  assert_eq(receipt.shard_id, "cpp-test-t1")
+  assert_eq(receipt.cell, "cpp-test")
+  assert_eq(receipt.trial_index, 1)
+  assert_eq(receipt.ok, true)
+  assert_eq(receipt.artifacts.bundle_manifest_path, "remote/cpp-test-t1/manifest.json")
+}
+
+@test
+pipeline test_remote_eval_fanout_artifact_manifest_rewrites_paths(task) {
+  const manifest = remote_eval_fanout_artifact_manifest(
+    small_plan(),
+    {remote_root: "modal/run-1", local_root: ".harn/evals/run-1"},
+  )
+  assert_eq(manifest.producer, "harn_remote_eval_fanout_artifact_manifest_v1")
+  assert_eq(manifest.shard_count, 2)
+  assert_eq(manifest.path_rewrite_map[0].shard_id, "cpp-test-t1")
+  assert_eq(manifest.path_rewrite_map[0].remote_prefix, "modal/run-1/cpp-test-t1")
+  assert_eq(manifest.path_rewrite_map[0].local_prefix, ".harn/evals/run-1/cpp-test-t1")
+}
+
+@test
+pipeline test_remote_eval_fanout_rejoin_blocks_missing_duplicate_failed_and_unknown(task) {
+  const plan = small_plan()
+  const good = remote_eval_fanout_trial_receipt(plan, "cpp-test-t1", {status: "passed", passed: true})
+  const duplicate = remote_eval_fanout_trial_receipt(plan, "cpp-test-t1", {status: "passed", passed: true})
+  const failed = remote_eval_fanout_trial_receipt(plan, "zig-test-t1", {status: "failed", passed: false})
+  const receipt = remote_eval_fanout_rejoin_receipt(
+    plan,
+    [good, duplicate, failed, {shard_id: "swift-feat-t1", status: "passed", ok: true}],
+  )
+  assert_eq(receipt.status, "blocked")
+  assert_eq(receipt.ledger.ingest_ready, false)
+  assert_eq(receipt.duplicate_shard_ids, ["cpp-test-t1"])
+  assert_eq(receipt.unknown_shard_ids, ["swift-feat-t1"])
+  assert_eq(receipt.failed_shards[0].shard_id, "zig-test-t1")
+  assert_eq(receipt.missing_shard_ids, [])
+}
+
+@test
+pipeline test_remote_eval_fanout_rejoin_allows_complete_success(task) {
+  const plan = small_plan()
+  const receipt = remote_eval_fanout_rejoin_receipt(
+    plan,
+    [
+      remote_eval_fanout_trial_receipt(plan, "cpp-test-t1", {status: "passed", passed: true}),
+      remote_eval_fanout_trial_receipt(plan, "zig-test-t1", {status: "passed", passed: true}),
+    ],
+  )
+  assert_eq(receipt.status, "complete")
+  assert_eq(receipt.ledger.ingest_ready, true)
+  assert_eq(receipt.accepted_shard_count, 2)
+  assert_eq(receipt.missing_shard_ids, [])
+  assert_eq(receipt.duplicate_shard_ids, [])
+  assert_eq(receipt.failed_shards, [])
+}
