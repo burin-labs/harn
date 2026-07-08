@@ -334,9 +334,36 @@ fn __command_stream_timeout_result(start, elapsed_ms: int, options) -> dict {
 
 fn __command_stream_cancel_timeout(start, options) {
   const opts = __command_options(options)
-  const wait_ms = __command_positive_int(opts?.cancel_wait_ms ?? opts?.wait_result_ms, 1000)
+  const wait_ms = __command_positive_int(opts?.cancel_wait_ms ?? opts?.wait_result_ms, 5000)
   const cancelled = command_cancel(start, {wait_result_ms: wait_ms, timed_out: true})
   return cancelled?.result
+}
+
+fn __command_stream_run_options(options) {
+  const opts = __command_options(options)
+  let out = {}
+  for key in [
+    "cwd",
+    "env",
+    "env_mode",
+    "stdin",
+    "capture",
+    "max_inline_bytes",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+    "shell",
+    "shell_id",
+    "login",
+    "interactive",
+  ] {
+    if opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  return out
 }
 
 /**
@@ -351,38 +378,42 @@ pub fn command_run_streaming(spec, options = nil) -> dict {
   const poll_interval_ms = __command_positive_int(opts?.poll_interval_ms, 100)
   const read_bytes = __command_positive_int(opts?.read_bytes ?? opts?.read_length, 65536)
   const timeout_ms = to_int(opts?.timeout_ms) ?? 0
-  const start = command_run(spec, __command_run_options(opts) + {background: true})
+  const start = command_run(spec, __command_stream_run_options(opts) + {background: true})
   let stdout_offset = 0
   let stderr_offset = 0
-  const started_ms = harness.clock.monotonic_ms()
+  let elapsed_wait_ms = 0
   while true {
     stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
     stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
-    const elapsed_before_wait = harness.clock.monotonic_ms() - started_ms
-    if timeout_ms > 0 && elapsed_before_wait >= timeout_ms {
+    if timeout_ms > 0 && elapsed_wait_ms >= timeout_ms {
       const timed_result = __command_stream_cancel_timeout(start, opts)
       stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
       stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
       if timed_result != nil {
         return __command_normalize_result(timed_result)
       }
-      return __command_stream_timeout_result(start, elapsed_before_wait, opts)
+      return __command_stream_timeout_result(start, elapsed_wait_ms, opts)
     }
-    const result = command_wait(start, {timeout_ms: poll_interval_ms})
+    const wait_ms = if timeout_ms > 0 && timeout_ms - elapsed_wait_ms < poll_interval_ms {
+      timeout_ms - elapsed_wait_ms
+    } else {
+      poll_interval_ms
+    }
+    const result = command_wait(start, {timeout_ms: wait_ms})
+    elapsed_wait_ms = elapsed_wait_ms + wait_ms
     stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
     stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
     if result.status != "running" {
       return result
     }
-    const elapsed_after_wait = harness.clock.monotonic_ms() - started_ms
-    if timeout_ms > 0 && elapsed_after_wait >= timeout_ms {
+    if timeout_ms > 0 && elapsed_wait_ms >= timeout_ms {
       const timed_result = __command_stream_cancel_timeout(start, opts)
       stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
       stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
       if timed_result != nil {
         return __command_normalize_result(timed_result)
       }
-      return __command_stream_timeout_result(start, elapsed_after_wait, opts)
+      return __command_stream_timeout_result(start, elapsed_wait_ms, opts)
     }
   }
 }

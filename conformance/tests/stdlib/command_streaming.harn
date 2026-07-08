@@ -7,9 +7,22 @@ fn mixed_command() {
   return ["sh", "-c", "printf out; printf err >&2"]
 }
 
+fn timeout_command() {
+  if platform() == "windows" {
+    return ["cmd", "/C", "echo before & ping -n 30 127.0.0.1 >NUL"]
+  }
+  return ["sh", "-c", "printf before; sleep 30 & wait"]
+}
+
 fn expect_eq(actual, expected, label: string) {
   if actual != expected {
     throw label + ": expected " + to_string(expected) + ", got " + to_string(actual)
+  }
+}
+
+fn expect_true(actual, label: string) {
+  if !actual {
+    throw label + ": expected true"
   }
 }
 
@@ -28,5 +41,19 @@ pipeline default() {
   expect_eq(streamed.exit_code, 0, "streamed.exit_code")
   expect_eq(streamed.stdout, "out", "streamed.stdout")
   expect_eq(streamed.stderr, "err", "streamed.stderr")
+  const timed = command_run_streaming(
+    timeout_command(),
+    {tee: false, timeout_ms: 200, poll_interval_ms: 50, capture: {max_inline_bytes: 100}},
+  )
+  expect_eq(timed.status, "timed_out", "timed.status")
+  expect_eq(timed.timed_out, true, "timed.timed_out")
+  expect_true(len(timed.stdout) > 0, "timed.stdout")
+  if platform() != "windows" && timed?.process_group_id != nil {
+    const probe = command_run(
+      ["sh", "-c", "kill -0 -" + to_string(timed.process_group_id) + " 2>/dev/null"],
+      {capture: {max_inline_bytes: 100}},
+    )
+    expect_eq(probe.success, false, "timeout process group alive")
+  }
   __io_println("ok")
 }
