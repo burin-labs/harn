@@ -66,18 +66,28 @@ impl ProcessSpawner for RealSpawner {
         for (key, value) in &spec.env {
             command.env(key, value);
         }
+        for key in &spec.env_remove {
+            command.env_remove(key);
+        }
+
+        let caller_env_keys: std::collections::BTreeSet<&str> = spec
+            .env
+            .keys()
+            .map(String::as_str)
+            .chain(spec.env_remove.iter().map(String::as_str))
+            .collect();
 
         // Point the child's temp dir at a sandbox-writable, workspace-local
         // location so compiler linkers (rustc/cc/ld, Go, Swift, …) and other
         // toolchains that honor TMPDIR/TMP/TEMP don't false-fail trying to write
         // intermediates to the unwritable system /tmp under a restricted
-        // sandbox profile. Applied after the caller's `spec.env` so an explicit
-        // caller-set TMPDIR wins; only keys the caller did not set receive the
-        // overlay. No-op when the active profile is unrestricted or no writable
-        // workspace root is available. TMPDIR/TMP/TEMP are workspace paths, not
-        // secrets, so this does not widen the env-secret-scrub surface above.
+        // sandbox profile. Respect explicit caller env/env_remove for the same
+        // key; only untouched keys receive the overlay. No-op when the active
+        // profile is unrestricted or no writable workspace root is available.
+        // TMPDIR/TMP/TEMP are workspace paths, not secrets, so this does not
+        // widen the env-secret-scrub surface above.
         for (key, value) in process_sandbox::active_workspace_tmpdir_env() {
-            if spec.env.contains_key(&key) {
+            if caller_env_keys.contains(key.as_str()) {
                 continue;
             }
             command.env(key, value);
@@ -90,14 +100,11 @@ impl ProcessSpawner for RealSpawner {
         // output. A user-inherited `LC_ALL` overrides `LC_MESSAGES`, so strip it
         // first — unless the caller pinned it. Then apply the overlay with the
         // same caller-wins rule as the TMPDIR overlay above.
-        if !spec
-            .env
-            .contains_key(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV)
-        {
+        if !caller_env_keys.contains(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV) {
             command.env_remove(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV);
         }
         for (key, value) in process_sandbox::deterministic_message_locale_env() {
-            if spec.env.contains_key(&key) {
+            if caller_env_keys.contains(key.as_str()) {
                 continue;
             }
             command.env(key, value);

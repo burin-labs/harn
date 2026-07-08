@@ -68,6 +68,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             BTreeMap::new(),
             super::long_running::LongRunningSpawnOptions {
                 env_mode: EnvMode::InheritClean,
+                env_remove: Vec::new(),
                 capture: CaptureConfig::default(),
                 session_id,
                 progress_interval: None,
@@ -84,6 +85,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         args: args_tail,
         cwd: cwd_path,
         env: BTreeMap::new(),
+        env_remove: Vec::new(),
         env_mode: EnvMode::InheritClean,
         stdin: None,
         timeout,

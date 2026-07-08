@@ -516,6 +516,9 @@ fn __agent_host_command_request_common(base_request, args, options) {
   if args?.env != nil {
     req = req + {env: args.env}
   }
+  if args?.env_remove != nil {
+    req = req + {env_remove: args.env_remove}
+  }
   if args?.env_mode != nil {
     req = req + {env_mode: args.env_mode}
   }
@@ -866,6 +869,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             timeout_ms: {type: "integer", required: false},
             stdin: {type: "string", required: false},
             env: {type: "object", required: false},
+            env_remove: {type: "array", items: {type: "string"}, required: false},
             env_mode: {type: "string", enum: ["inherit_clean", "replace", "patch"], required: false},
             shell_id: {type: "string", required: false},
             login: {type: "boolean", required: false},

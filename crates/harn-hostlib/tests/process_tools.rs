@@ -611,6 +611,30 @@ fn run_command_passes_env_when_supplied() {
 }
 
 #[test]
+fn run_command_passes_env_remove_when_supplied() {
+    let (spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(0, "ok\n"));
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["env"]));
+    req.insert(
+        "env_remove".into(),
+        VmValue::List(Arc::new(vec![
+            vstr("GIT_DIR"),
+            vstr("HARN_LLM_TRANSCRIPT_DIR"),
+        ])),
+    );
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+
+    let captured = spawner.captured();
+    assert_eq!(
+        captured[0].env_remove,
+        vec!["GIT_DIR".to_string(), "HARN_LLM_TRANSCRIPT_DIR".to_string()]
+    );
+}
+
+#[test]
 fn run_command_missing_argv_returns_missing_parameter() {
     // No mock needed — fails before reaching the spawner.
     let err = call("hostlib_tools_run_command", dict()).unwrap_err();

@@ -37,6 +37,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let cwd_raw = optional_string(NAME, &map, "cwd")?;
     let cwd = proc::parse_cwd(NAME, cwd_raw.as_deref())?;
     let env = optional_string_map(NAME, &map, "env")?.unwrap_or_default();
+    let env_remove = optional_string_list(NAME, &map, "env_remove")?.unwrap_or_default();
     let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let capture = parse_capture(&map)?;
@@ -65,6 +66,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             env,
             super::long_running::LongRunningSpawnOptions {
                 env_mode,
+                env_remove,
                 capture,
                 session_id: session_id.clone(),
                 progress_interval: progress_interval_ms.map(Duration::from_millis),
@@ -93,6 +95,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         args: args_tail,
         cwd,
         env,
+        env_remove,
         env_mode,
         stdin,
         timeout,

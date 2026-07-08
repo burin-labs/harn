@@ -51,6 +51,7 @@ pub(crate) struct SpawnRequest {
     pub(crate) args: Vec<String>,
     pub(crate) cwd: Option<PathBuf>,
     pub(crate) env: BTreeMap<String, String>,
+    pub(crate) env_remove: Vec<String>,
     pub(crate) env_mode: EnvMode,
     pub(crate) stdin: Option<String>,
     pub(crate) timeout: Option<Duration>,
@@ -138,6 +139,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         args: req.args.clone(),
         cwd: req.cwd.clone(),
         env,
+        env_remove: req.env_remove.clone(),
         env_mode: req.env_mode,
         use_stdin: req.stdin.is_some(),
         // Foreground children get their own process group too, so the

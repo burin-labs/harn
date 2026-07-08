@@ -1,0 +1,24 @@
+import { command_run } from "std/command"
+
+fn env_remove_probe_command() {
+  if platform() == "windows" {
+    return "if \"%HARN_REMOVE_ME%\"==\"\" "
+      + "(if \"%HARN_KEEP_ME%\"==\"kept\" (echo ok) else (echo bad& exit /B 9)) "
+      + "else (echo bad& exit /B 9)"
+  }
+  return "if [ -z \"$HARN_REMOVE_ME\" ] && [ \"$HARN_KEEP_ME\" = \"kept\" ]; then printf ok; else printf bad; exit 9; fi"
+}
+
+pipeline default() {
+  const result = command_run(
+    {mode: "shell", command: env_remove_probe_command()},
+    {
+      env: {HARN_REMOVE_ME: "gone", HARN_KEEP_ME: "kept"},
+      env_remove: ["HARN_REMOVE_ME"],
+      capture: {max_inline_bytes: 64},
+    },
+  )
+  require result.success, "env_remove probe should succeed"
+  require trim(result.stdout) == "ok", "env_remove probe should strip only the requested variable"
+  __io_println("ok")
+}

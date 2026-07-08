@@ -133,6 +133,8 @@ pub struct SpawnSpec {
     pub cwd: Option<PathBuf>,
     /// Environment overrides to apply (interpretation depends on `env_mode`).
     pub env: BTreeMap<String, String>,
+    /// Environment variable names to strip after env overrides are applied.
+    pub env_remove: Vec<String>,
     /// How to treat the parent's environment.
     pub env_mode: EnvMode,
     /// Whether stdin will be written to (`true`) or piped to /dev/null (`false`).

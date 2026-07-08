@@ -163,6 +163,39 @@ fn real_run_command_strips_secret_env_from_child() {
 }
 
 #[test]
+fn real_run_command_env_remove_strips_caller_selected_vars() {
+    let _env_guard = lock_env();
+    unsafe {
+        std::env::set_var("HARN_E2E_REMOVE_ME", "gone");
+        std::env::set_var("HARN_E2E_KEEP_ME", "kept");
+    }
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["env"]));
+    req.insert(
+        "env_remove".into(),
+        VmValue::List(Arc::new(vec![vstr("HARN_E2E_REMOVE_ME")])),
+    );
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    unsafe {
+        std::env::remove_var("HARN_E2E_REMOVE_ME");
+        std::env::remove_var("HARN_E2E_KEEP_ME");
+    }
+
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    let child_env = require_str(&resp, "stdout");
+    assert!(
+        !child_env.contains("HARN_E2E_REMOVE_ME="),
+        "env_remove variable leaked into child env:\n{child_env}"
+    );
+    assert!(
+        child_env.contains("HARN_E2E_KEEP_ME=kept"),
+        "unrelated inherited var should survive env_remove:\n{child_env}"
+    );
+}
+
+#[test]
 fn real_run_command_kills_child_when_timeout_elapses() {
     // Smoke: the real `wait_with_timeout` should fire SIGKILL when the
     // child blocks past the deadline. Use a very short sleep so the test
