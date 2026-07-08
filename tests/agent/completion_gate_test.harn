@@ -230,3 +230,66 @@ pipeline test_budget_disabled_never_converts(task) {
   assert_eq(out.verdict.reason, "no_source_write")
   assert_eq(out.charge, true)
 }
+
+pipeline test_ladder_feedback_defaults_byte_identical(task) {
+  // feedback_templates (#4296 fix 8): with no templates the rendered feedback must
+  // be byte-identical to the strings the eval fleet pins today.
+  const cosmetic = __completion_gate_ladder(
+    {cosmetic_write_count: 1, requires_write: true, source_known: true, source_write_count: 0},
+  )
+  assert_eq(
+    cosmetic.feedback,
+    "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing.",
+  )
+  const absent = __completion_gate_ladder(
+    {cosmetic_write_count: 0, requires_write: true, source_known: true, source_write_count: 0},
+  )
+  assert_eq(
+    absent.feedback,
+    "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing.",
+  )
+  const red = __completion_gate_ladder(
+    {
+      oracle_expected: true,
+      requires_write: true,
+      source_known: true,
+      source_write_count: 1,
+      verify: {findings: "E0308", ok: false},
+    },
+  )
+  assert_eq(
+    red.feedback,
+    "Verification is still failing after your change. Findings: E0308. Fix the specific failure and re-run the verifier before finishing.",
+  )
+  const missing = __completion_gate_ladder(
+    {oracle_expected: true, requires_write: true, source_known: true, source_write_count: 1},
+  )
+  assert_eq(
+    missing.feedback,
+    "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
+  )
+}
+
+pipeline test_ladder_feedback_override_replaces(task) {
+  const v = __completion_gate_ladder(
+    {cosmetic_write_count: 1, requires_write: true, source_known: true, source_write_count: 0},
+    {no_source_write_cosmetic: "Custom cosmetic guidance."},
+  )
+  assert_eq(v.reason, "no_source_write")
+  assert_eq(v.feedback, "Custom cosmetic guidance.")
+}
+
+pipeline test_ladder_feedback_override_keeps_findings_token(task) {
+  // An override may keep the dynamic findings via the {findings} token.
+  const v = __completion_gate_ladder(
+    {
+      oracle_expected: true,
+      requires_write: true,
+      source_known: true,
+      source_write_count: 1,
+      verify: {findings: "E0308", ok: false},
+    },
+    {verification_after_write_red: "Red.{findings} Retry."},
+  )
+  assert_eq(v.feedback, "Red. Findings: E0308. Retry.")
+}

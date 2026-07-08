@@ -2,6 +2,7 @@ import {
   __completion_gate_apply_budget,
   __completion_gate_classify_writes,
   __completion_gate_combine_verify,
+  __completion_gate_feedback_keys,
   __completion_gate_ladder,
   __judge_classify_verdict,
   __judge_run_checkpoint,
@@ -363,6 +364,12 @@ pub type CompletionFacts = {
  *   JudgeConfig-shaped dict); defaults its cap to burin's 5.
  * - `judge_seam` (default `"verify_completion_judge"`) — which capped LLM seam
  *   the judge rides (`"verify_completion_judge"` or `"done_judge"`).
+ * - `feedback_templates` (optional) — a dict overriding the rendered veto feedback
+ *   strings per ladder rule (the coding-domain prose is host content, not
+ *   mechanism). Keys are the recognized rules (`__completion_gate_feedback_keys`):
+ *   `no_source_write_cosmetic`, `no_source_write_absent`,
+ *   `verification_after_write_red` (supports a `{findings}` token), and
+ *   `missing_verification`. Values must be strings. Absent keys keep the defaults.
  */
 pub type CompletionGateOptions = {
   facts?: any,
@@ -374,6 +381,66 @@ pub type CompletionGateOptions = {
   veto_combine?: any,
   judge?: any,
   judge_seam?: string,
+  feedback_templates?: dict,
+}
+
+/**
+ * A host-fact callback may be an anonymous closure or a named `fn`; the runtime
+ * reports these as "closure", "function", or "fn" (mirrors std/agent/goal's
+ * `__goal_callable`). Gating on "closure" alone would reject named-fn callbacks.
+ */
+fn __completion_gate_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+/**
+ * Validate a CompletionGateOptions at config time so a mistyped seam fails LOUDLY
+ * here — mirroring `__agent_stall_closure` in std/agent/stall — rather than blowing
+ * up deep inside an agent_loop run when the gate closure first invokes the callback
+ * at done-time, or silently ignoring a typo'd knob. Throws on:
+ *   - any host-fact callback (`facts` / `classify_write` / `verify_command` /
+ *     `veto_combine`) that is set but not callable;
+ *   - a `classify_write` set without `facts` — `classify_write` only classifies the
+ *     writes `facts` returns, so alone it is a silently-dead config that also never
+ *     lets the deterministic gate assert anything (`facts_available` would be true
+ *     but every evaluation abstains with `source_known: false`);
+ *   - a `judge_seam` that is neither `"verify_completion_judge"` nor `"done_judge"`
+ *     (any other string is a key `agent_loop` ignores — a silently dead judge).
+ */
+fn __completion_gate_validate_options(opts) {
+  for field in ["facts", "classify_write", "verify_command", "veto_combine"] {
+    const value = opts[field]
+    if value != nil && !__completion_gate_callable(value) {
+      throw "agent_completion_gate: `" + field + "` must be a callable or nil; got " + type_of(value)
+    }
+  }
+  if opts?.classify_write != nil && opts?.facts == nil {
+    throw "agent_completion_gate: `classify_write` only classifies the writes `facts` returns, so it does nothing without `facts` — set `facts` too or remove `classify_write`."
+  }
+  if opts?.judge_seam != nil
+    && opts.judge_seam != "verify_completion_judge"
+    && opts.judge_seam != "done_judge" {
+    throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
+      + to_string(opts.judge_seam)
+  }
+  const templates = opts?.feedback_templates
+  if templates != nil {
+    if type_of(templates) != "dict" {
+      throw "agent_completion_gate: `feedback_templates` must be a dict; got " + type_of(templates)
+    }
+    const known = __completion_gate_feedback_keys()
+    for key in keys(templates) {
+      if !contains(known, key) {
+        throw "agent_completion_gate: unknown `feedback_templates` key `" + key + "`; expected one of "
+          + join(known, ", ")
+      }
+      if type_of(templates[key]) != "string" {
+        throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
+          + type_of(templates[key])
+      }
+    }
+  }
 }
 
 /** Session-store key for the completion-gate per-session veto counter. */
@@ -468,7 +535,7 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
     verify: verify,
     oracle_expected: verify_command != nil || raw?.verify != nil,
   }
-  const verdict = __completion_gate_ladder(derived)
+  const verdict = __completion_gate_ladder(derived, opts?.feedback_templates)
   const vetoes_used = __completion_gate_vetoes_used(session_id)
   const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
   if budgeted.charge && session_id != "" {
@@ -502,13 +569,18 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
  * false`) rather than fabricating a pass.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: experimental
  * @example: agent_completion_gate({facts: host_facts, verify_command: host_verify})
  */
 pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
   const opts = options ?? {}
-  const facts_available = opts.facts != nil || opts.verify_command != nil || opts.classify_write != nil
+  __completion_gate_validate_options(opts)
+  // `classify_write` only refines the write counts `facts` returns, so it never
+  // makes facts available on its own (a `classify_write`-without-`facts` config is
+  // rejected in __completion_gate_validate_options). Facts are available only when
+  // the host wired `facts` or a `verify_command` oracle.
+  const facts_available = opts.facts != nil || opts.verify_command != nil
   const gate = fn(payload) { return __completion_gate_evaluate(payload, opts, facts_available) }
   let out = {
     verify_completion: gate,
