@@ -3547,6 +3547,20 @@ fn __agent_loop_thrash_recovery_allowed(warning, tool_calls) {
   return to_string(warning?.pattern ?? "") == "repeated_same_observation"
 }
 
+fn __agent_loop_thrash_recovery_skip_outcome(warning, tool_calls, stall_hard_stop_rescues) {
+  const pattern = to_string(warning?.pattern ?? "")
+  if pattern != "repeated_same_observation" {
+    return "no_rung_for_pattern"
+  }
+  if len(tool_calls ?? []) == 0 {
+    return "no_tool_calls"
+  }
+  if stall_hard_stop_rescues > 0 {
+    return "rung_limit_exhausted"
+  }
+  return "recovery_not_allowed"
+}
+
 fn __agent_loop_stall_warning_receipt(warning) {
   return {
     pattern: to_string(warning?.pattern ?? ""),
@@ -3568,25 +3582,29 @@ fn __agent_loop_emit_thrash_recovery_checkpoint(
   warning,
   old_limit,
   new_limit,
+  status = "fired",
+  action = "extend",
+  reason = "thrash_recovery_continue",
+  outcome = nil,
 ) {
-  agent_emit_event(
-    session_id,
-    "typed_checkpoint",
-    {
-      schema: "harn.agent_loop_recovery_receipt.v1",
-      kind: "thrash_hard_stop_recovery",
-      receipt_kind: "thrash_hard_stop_recovery",
-      status: "fired",
-      action: "extend",
-      reason: "thrash_recovery_continue",
-      iteration: iteration,
-      old_limit: old_limit,
-      new_limit: new_limit,
-      tool_count: len(tool_calls ?? []),
-      tool_names: __agent_loop_tool_call_names(tool_calls),
-      warning: __agent_loop_stall_warning_receipt(warning),
-    },
-  )
+  let checkpoint = {
+    schema: "harn.agent_loop_recovery_receipt.v1",
+    kind: "thrash_hard_stop_recovery",
+    receipt_kind: "thrash_hard_stop_recovery",
+    status: status,
+    action: action,
+    reason: reason,
+    iteration: iteration,
+    old_limit: old_limit,
+    new_limit: new_limit,
+    tool_count: len(tool_calls ?? []),
+    tool_names: __agent_loop_tool_call_names(tool_calls),
+    warning: __agent_loop_stall_warning_receipt(warning),
+  }
+  if outcome != nil {
+    checkpoint = checkpoint + {outcome: outcome}
+  }
+  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
 }
 
 /**
@@ -4419,6 +4437,19 @@ fn __agent_loop_run(message, session, initial_opts) {
             )
             continue
           }
+          const recovery_skip_outcome = __agent_loop_thrash_recovery_skip_outcome(stall_warning, tool_calls, stall_hard_stop_rescues)
+          __agent_loop_emit_thrash_recovery_checkpoint(
+            session.session_id,
+            iteration_index + 1,
+            tool_calls,
+            stall_warning,
+            current_max,
+            current_max,
+            "skipped",
+            "stop",
+            recovery_skip_outcome,
+            recovery_skip_outcome,
+          )
           agent_emit_event(
             session.session_id,
             "loop_control_decision",
