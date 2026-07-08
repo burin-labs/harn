@@ -71,12 +71,40 @@ fn __pin_role_hint(kind) {
   return __PIN_ROLE_HINTS[kind] ?? "system"
 }
 
+// Taxonomy-registration seam (ADDITIVE, default-off). The fixed 5 kinds are the
+// generic taxonomy; a caller (e.g. burin's structural working-set with
+// guardrails/task_contract/file_view/remaining_failures/verification_hud) may
+// widen the accepted set for a single `pin(...)` call via `opts.register_kinds`
+// instead of `pin()` throwing on its domain kinds. When `register_kinds` is
+// unset the accepted set is EXACTLY `__PIN_KINDS`, so validation — and its
+// throw message — is byte-identical to the pre-seam behavior.
+fn __pin_allowed_kinds(options) {
+  const extra = options?.register_kinds ?? []
+  if type_of(extra) != "list" {
+    throw "pin: `register_kinds` must be a list of kind strings"
+  }
+  if len(extra) == 0 {
+    return __PIN_KINDS
+  }
+  let out = __PIN_KINDS
+  for raw in extra {
+    const k = to_string(raw ?? "")
+    if k != "" && !contains(out, k) {
+      out = out.push(k)
+    }
+  }
+  return out
+}
+
 /**
  * pin(kind, content, opts?) builds a normalized PinSpec. `kind` must be one of
- * `pin_kinds()`; `content` must be a non-empty string. `opts` may carry
- * `id`, `dedupe_key`, `role_hint`, and `meta`. `dedupe_key` defaults to a
- * per-pin key; pass a stable value (e.g. `"pin/goal"`) for a self-replacing
- * singleton pin.
+ * `pin_kinds()` (or, additively, of the caller taxonomy named in
+ * `opts.register_kinds`); `content` must be a non-empty string. `opts` may
+ * carry `id`, `dedupe_key`, `role_hint`, `meta`, and `register_kinds`.
+ * `dedupe_key` defaults to a per-pin key; pass a stable value (e.g.
+ * `"pin/goal"`) for a self-replacing singleton pin. A caller-registered kind
+ * with no entry in the role map defaults to the "system" role unless
+ * `role_hint` is supplied.
  *
  * @effects: []
  * @errors: [runtime]
@@ -84,17 +112,18 @@ fn __pin_role_hint(kind) {
  * @example: pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
  */
 pub fn pin(kind, content, opts = nil) {
-  if type_of(kind) != "string" || !contains(__PIN_KINDS, kind) {
-    throw "pin(kind, content, opts?): kind must be one of " + join(__PIN_KINDS, ", ") + "; got "
-      + to_string(kind)
-  }
-  if type_of(content) != "string" || content == "" {
-    throw "pin(\"" + kind + "\", content): content must be a non-empty string"
-  }
   const options = if type_of(opts) == "dict" {
     opts
   } else {
     {}
+  }
+  const allowed = __pin_allowed_kinds(options)
+  if type_of(kind) != "string" || !contains(allowed, kind) {
+    throw "pin(kind, content, opts?): kind must be one of " + join(allowed, ", ") + "; got "
+      + to_string(kind)
+  }
+  if type_of(content) != "string" || content == "" {
+    throw "pin(\"" + kind + "\", content): content must be a non-empty string"
   }
   const id = options?.id ?? ("pin_" + uuid_v7())
   return {
@@ -171,54 +200,192 @@ pub fn with_pin_roots(project_options, pins) {
   return opts + {roots: existing + pin_reachability_roots(pins)}
 }
 
+fn __pin_policy_merge_lists(existing, additions) {
+  let out = []
+  for v in existing ?? [] {
+    const s = to_string(v ?? "")
+    if s != "" && !contains(out, s) {
+      out = out.push(s)
+    }
+  }
+  for v in additions ?? [] {
+    const s = to_string(v ?? "")
+    if s != "" && !contains(out, s) {
+      out = out.push(s)
+    }
+  }
+  return out
+}
+
+fn __pin_policy_join_instructions(existing, own) {
+  const a = to_string(existing ?? "").trim()
+  const b = to_string(own ?? "").trim()
+  if a == "" {
+    return if b == "" {
+      nil
+    } else {
+      own
+    }
+  }
+  if b == "" {
+    return existing
+  }
+  return a + "\n" + b
+}
+
 /**
  * pin_compaction_policy(pins, opts?) builds a `compaction_policy` whose
  * `preserve` directives instruct the summarizer to keep every pinned block
  * verbatim — so pins survive LLM-summarizing compaction by construction. Wires
  * the pins into the existing `CompactionPolicy.preserve` seam.
  *
- * @effects: []
- * @errors: []
- * @api_stability: stable
- */
-pub fn pin_compaction_policy(pins, opts = nil) {
-  const base = if type_of(opts) == "dict" {
-    opts
-  } else {
-    {}
-  }
-  let preserve = []
-  for p in pins ?? [] {
-    if type_of(p?.content) == "string" && p.content != "" {
-      preserve = preserve.push("Preserve the pinned " + to_string(p?.kind ?? "note") + ": " + p.content)
-    }
-  }
-  return compaction_policy(
-    base?.instructions,
-    base
-      + {author: base?.author ?? "pins", mode: base?.mode ?? "pins", preserve: base?.preserve ?? preserve},
-  )
-}
-
-/**
- * pin_reminder(pin) lowers a PinSpec to a system-reminder options dict with
- * `preserve_on_compact: true`, `tags: ["pin", <kind>]`, the pin's `dedupe_key`,
- * and its `role_hint`. Spread it into `transcript.inject_reminder(...)` or
- * `agent_session_inject_reminder(...)` — this is the "survives compaction by
- * construction" mechanism (the structured-metadata twin of `[no-compact]`).
+ * ADDITIVE opts (default-off — with neither key set the result is
+ * byte-identical to the pre-seam behavior): `merge` (an existing policy dict)
+ * UNIONS the pins' `preserve` with that policy's `preserve`/`drop` and
+ * concatenates its `instructions`, so a caller can fold pins into a policy it
+ * already assembled instead of replacing it; `preserve_labels: true` (only
+ * meaningful with `merge`) keeps the existing policy's `mode`/`author` labels
+ * rather than stamping the pins defaults. The `merge`/`preserve_labels` control
+ * keys are stripped and never leak into the emitted policy dict.
  *
  * @effects: []
  * @errors: []
  * @api_stability: stable
  */
-pub fn pin_reminder(pin) {
-  return {
-    body: pin.content,
-    dedupe_key: pin?.dedupe_key ?? ("pin/" + to_string(pin?.kind ?? "note")),
-    preserve_on_compact: true,
-    role_hint: pin?.role_hint ?? __pin_role_hint(to_string(pin?.kind ?? "note")),
-    tags: ["pin", to_string(pin?.kind ?? "note")],
+pub fn pin_compaction_policy(pins, opts = nil) {
+  const raw = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
   }
+  const base = __dict_omit(raw, ["merge", "preserve_labels"])
+  let pin_preserve = []
+  for p in pins ?? [] {
+    if type_of(p?.content) == "string" && p.content != "" {
+      pin_preserve = pin_preserve
+        .push(
+        "Preserve the pinned " + to_string(p?.kind ?? "note") + ": "
+          + p.content,
+      )
+    }
+  }
+  const merge_with = if type_of(raw?.merge) == "dict" {
+    raw.merge
+  } else {
+    nil
+  }
+  if merge_with == nil {
+    // Default path — byte-identical to the pre-seam behavior.
+    return compaction_policy(
+      base?.instructions,
+      base
+        + {
+        author: base?.author ?? "pins",
+        mode: base?.mode ?? "pins",
+        preserve: base?.preserve ?? pin_preserve,
+      },
+    )
+  }
+  // Merge-with-existing (+ optional label-preserve).
+  const preserve_labels = raw?.preserve_labels ?? false
+  const preserve = __pin_policy_merge_lists(merge_with?.preserve, base?.preserve ?? pin_preserve)
+  const drop = __pin_policy_merge_lists(merge_with?.drop, base?.drop)
+  const author = if preserve_labels && to_string(merge_with?.author ?? "") != "" {
+    merge_with.author
+  } else {
+    base?.author ?? "pins"
+  }
+  const mode = if preserve_labels && to_string(merge_with?.mode ?? "") != "" {
+    merge_with.mode
+  } else {
+    base?.mode ?? "pins"
+  }
+  const instructions = __pin_policy_join_instructions(merge_with?.instructions, base?.instructions)
+  let merged = base + {author: author, mode: mode, preserve: preserve}
+  if len(drop) > 0 {
+    merged = merged + {drop: drop}
+  }
+  return compaction_policy(instructions, merged)
+}
+
+fn __pin_reminder_validate(options) {
+  const propagate = options?.propagate
+  if propagate != nil && type_of(propagate) != "string" {
+    throw "pin_reminder: `propagate` must be a string (e.g. \"session\")"
+  }
+  const ns = options?.tag_namespace
+  if ns != nil && type_of(ns) != "string" {
+    throw "pin_reminder: `tag_namespace` must be a string"
+  }
+  const limit = options?.max_body
+  if limit != nil && type_of(limit) != "int" {
+    throw "pin_reminder: `max_body` must be an int char budget"
+  }
+  return options
+}
+
+fn __pin_reminder_body(content, options) {
+  const limit = options?.max_body
+  const text = to_string(content ?? "")
+  if type_of(limit) != "int" || limit <= 0 || len(text) <= limit {
+    return content
+  }
+  return text.substring(0, limit) + "\n[pin reminder truncated]"
+}
+
+fn __pin_reminder_tags(base_tags, options) {
+  const ns = options?.tag_namespace
+  if type_of(ns) != "string" || ns == "" {
+    return base_tags
+  }
+  let out = [ns]
+  for t in base_tags {
+    if !contains(out, t) {
+      out = out.push(t)
+    }
+  }
+  return out
+}
+
+/**
+ * pin_reminder(pin, opts?) lowers a PinSpec to a system-reminder options dict
+ * with `preserve_on_compact: true`, `tags: ["pin", <kind>]`, the pin's
+ * `dedupe_key`, and its `role_hint`. Spread it into
+ * `transcript.inject_reminder(...)` or `agent_session_inject_reminder(...)` —
+ * this is the "survives compaction by construction" mechanism (the
+ * structured-metadata twin of `[no-compact]`).
+ *
+ * ADDITIVE opts (all default-off — with `opts` unset the returned dict is
+ * byte-identical to the pre-seam shape): `propagate` (e.g. `"session"`) adds a
+ * `propagate` key so the reminder re-injects across a whole session;
+ * `max_body` clamps an over-long body to a char budget with a truncation
+ * marker; `tag_namespace` leads the `tags` list with a caller namespace tag
+ * (e.g. `"burin_structural_working_set"`) ahead of `["pin", <kind>]`.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ */
+pub fn pin_reminder(pin, opts = nil) {
+  const raw = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  const options = __pin_reminder_validate(raw)
+  const kind = to_string(pin?.kind ?? "note")
+  let reminder = {
+    body: __pin_reminder_body(pin.content, options),
+    dedupe_key: pin?.dedupe_key ?? ("pin/" + kind),
+    preserve_on_compact: true,
+    role_hint: pin?.role_hint ?? __pin_role_hint(kind),
+    tags: __pin_reminder_tags(["pin", kind], options),
+  }
+  const propagate = options?.propagate
+  if type_of(propagate) == "string" && propagate != "" {
+    reminder = reminder + {propagate: propagate}
+  }
+  return reminder
 }
 
 /**

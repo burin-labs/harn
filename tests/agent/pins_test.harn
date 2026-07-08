@@ -1,0 +1,131 @@
+// Run: harn test tests/agent/pins_test.harn
+//
+// Additive-seam + anti-regression fixtures for `std/agent/pins`. The three new
+// seams (taxonomy registration, `pin_reminder` opts, `pin_compaction_policy`
+// merge/label-preserve) are ALL default-off: with the new fields unset, `pin`,
+// `pin_reminder`, and `pin_compaction_policy` must produce output BYTE-IDENTICAL
+// to the pre-seam behavior. Everything here is PURE (no LLM, no host). The live
+// compaction/reachability behavior is proven separately by
+// `conformance/tests/agents/agent_pins.harn`.
+import { pin, pin_compaction_policy, pin_kinds, pin_reminder } from "std/agent/pins"
+
+// --- Taxonomy registration (additive; default-off) -----------------------------
+pipeline test_pin_default_taxonomy_unchanged(task) {
+  // Byte-identical: the fixed 5 kinds still validate, an unknown kind still
+  // throws, and the built-in discovery surface is untouched.
+  const p = pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
+  assert_eq(p.kind, "goal")
+  assert_eq(p.role_hint, "system")
+  assert_eq(p.dedupe_key, "pin/goal")
+  assert(contains(pin_kinds(), "no_compact"), "built-in taxonomy unchanged")
+  const rejected = try {
+    pin("bogus", "x")
+  }
+  assert(is_err(rejected), "unregistered kind still rejected by default")
+}
+
+pipeline test_pin_accepts_registered_kinds(task) {
+  // A caller taxonomy (burin's structural working-set kinds) is accepted for a
+  // pin() call via register_kinds instead of throwing.
+  const kinds = ["guardrails", "task_contract", "file_view", "remaining_failures", "verification_hud"]
+  const p = pin("guardrails", "Never delete AGENTS.md.", {register_kinds: kinds, role_hint: "system"})
+  assert_eq(p.kind, "guardrails")
+  assert_eq(p.role_hint, "system")
+  // An unregistered kind is still rejected even when a taxonomy is supplied.
+  const rejected = try {
+    pin("not_in_taxonomy", "x", {register_kinds: kinds})
+  }
+  assert(is_err(rejected), "kinds outside the registered taxonomy still rejected")
+  // A caller-registered kind with no role-map entry defaults to "system".
+  const defaulted = pin("verification_hud", "0 failing", {register_kinds: kinds})
+  assert_eq(defaulted.role_hint, "system")
+}
+
+pipeline test_pin_register_kinds_validated(task) {
+  const bad = try {
+    pin("goal", "x", {register_kinds: "not-a-list"})
+  }
+  assert(is_err(bad), "non-list register_kinds throws loudly")
+}
+
+// --- pin_reminder opts (additive; default-off) ---------------------------------
+pipeline test_pin_reminder_default_shape_unchanged(task) {
+  const p = pin("goal", "Ship it", {dedupe_key: "pin/goal"})
+  const r = pin_reminder(p)
+  assert_eq(r.body, "Ship it")
+  assert_eq(r.dedupe_key, "pin/goal")
+  assert_eq(r.preserve_on_compact, true)
+  assert_eq(r.role_hint, "system")
+  assert_eq(r.tags, ["pin", "goal"])
+  // Default-off: no propagate key is introduced.
+  assert_eq(r?.propagate, nil)
+}
+
+pipeline test_pin_reminder_opts_apply(task) {
+  const p = pin("goal", "0123456789ABCDEF", {dedupe_key: "pin/goal"})
+  const r = pin_reminder(p, {max_body: 8, propagate: "session", tag_namespace: "burin_structural_working_set"})
+  assert_eq(r.propagate, "session")
+  assert_eq(r.tags, ["burin_structural_working_set", "pin", "goal"])
+  assert(r.body.contains("[pin reminder truncated]"), "over-long body clamped with marker")
+  assert(r.body.contains("01234567"), "clamped body keeps the leading budget")
+}
+
+pipeline test_pin_reminder_opts_validated(task) {
+  const bad_propagate = try {
+    pin_reminder(pin("goal", "x"), {propagate: 3})
+  }
+  assert(is_err(bad_propagate), "non-string propagate throws loudly")
+  const bad_limit = try {
+    pin_reminder(pin("goal", "x"), {max_body: "big"})
+  }
+  assert(is_err(bad_limit), "non-int max_body throws loudly")
+}
+
+// --- pin_compaction_policy merge / label-preserve (additive; default-off) ------
+pipeline test_pin_compaction_policy_default_unchanged(task) {
+  const pins = [pin("goal", "Ship the migration"), pin("constraint", "No new deps")]
+  const policy = pin_compaction_policy(pins)
+  assert_eq(policy.mode, "pins")
+  assert_eq(policy.author, "pins")
+  assert(contains(policy.preserve, "Preserve the pinned goal: Ship the migration"), "goal preserved")
+  assert(
+    contains(policy.preserve, "Preserve the pinned constraint: No new deps"),
+    "constraint preserved",
+  )
+}
+
+pipeline test_pin_compaction_policy_merges_existing(task) {
+  const pins = [pin("goal", "Ship the migration")]
+  const existing = {
+    author: "burin",
+    drop: ["stale tool output"],
+    instructions: "Keep the goal.",
+    mode: "structural_working_set",
+    preserve: ["active session goal"],
+  }
+  const merged = pin_compaction_policy(pins, {merge: existing, preserve_labels: true})
+  // Label-preserve keeps the existing policy's mode/author.
+  assert_eq(merged.mode, "structural_working_set")
+  assert_eq(merged.author, "burin")
+  // Preserve unions the existing directives with the pins' directives.
+  assert(contains(merged.preserve, "active session goal"), "existing preserve kept")
+  assert(
+    contains(merged.preserve, "Preserve the pinned goal: Ship the migration"),
+    "pin preserve merged in",
+  )
+  assert(contains(merged.drop, "stale tool output"), "existing drop kept")
+  // Control keys never leak into the emitted policy.
+  assert_eq(merged?.merge, nil)
+  assert_eq(merged?.preserve_labels, nil)
+}
+
+pipeline test_pin_compaction_policy_merge_default_labels(task) {
+  // Without preserve_labels the pins default labels win even when merging.
+  const merged = pin_compaction_policy(
+    [pin("goal", "Ship it")],
+    {merge: {mode: "structural_working_set", preserve: ["active session goal"]}},
+  )
+  assert_eq(merged.mode, "pins")
+  assert(contains(merged.preserve, "active session goal"), "existing preserve still merged")
+  assert(contains(merged.preserve, "Preserve the pinned goal: Ship it"), "pin preserve merged")
+}
