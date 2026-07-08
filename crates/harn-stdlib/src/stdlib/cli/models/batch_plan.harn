@@ -743,6 +743,35 @@ fn __body_from_row(row: dict, model: string, include_model: bool) -> dict {
   return body
 }
 
+fn __include_model_for_batch_wire(wire: string) -> bool {
+  return wire != "gemini" && wire != "fireworks"
+}
+
+fn __body_from_row_for_batch_wire(row: dict, model: string, wire: string) -> dict {
+  return __body_from_row(row, model, __include_model_for_batch_wire(wire))
+}
+
+fn __batch_request_location(prefix: string, custom_id: string, line_no: int) -> string {
+  let out = prefix
+  if line_no > 0 {
+    out = out + " line " + to_string(line_no)
+  }
+  if custom_id != "" {
+    out = out + " custom_id=" + custom_id
+  }
+  return trim(out)
+}
+
+fn __non_streaming_batch_errors(location: string, row: dict, body: dict) -> list {
+  if safe_bool(row["stream"], false) || safe_bool(body["stream"], false) {
+    return [
+      location
+        + ": batch request bodies must not set stream: true; batch APIs return results asynchronously through provider result files",
+    ]
+  }
+  return []
+}
+
 fn __batch_endpoint(group: dict) -> string {
   const endpoint = trim(safe_string(group["endpoint"], ""))
   if starts_with(endpoint, "/") {
@@ -770,21 +799,19 @@ fn __prepare_file_stem(group: dict) -> string {
   return "batch_group_" + substring(sha256(seed), 0, 16)
 }
 
-fn __provider_request_record(group: dict, request: dict, endpoint: string) -> dict {
+fn __provider_request_record(group: dict, request: dict, endpoint: string, body: dict) -> dict {
   const wire = safe_string(safe_dict(group["batch"])["wire_format"], "")
-  const raw_row = safe_dict(request["request"])
-  const model = safe_string(group["model"], "")
   const custom_id = safe_string(request["custom_id"], "")
   if wire == "anthropic_messages" {
-    return {custom_id: custom_id, params: __body_from_row(raw_row, model, true)}
+    return {custom_id: custom_id, params: body}
   }
   if wire == "gemini" {
-    return {key: custom_id, request: __body_from_row(raw_row, model, false)}
+    return {key: custom_id, request: body}
   }
   if wire == "fireworks" {
-    return {custom_id: custom_id, body: __body_from_row(raw_row, model, false)}
+    return {custom_id: custom_id, body: body}
   }
-  return {custom_id: custom_id, method: "POST", url: endpoint, body: __body_from_row(raw_row, model, true)}
+  return {custom_id: custom_id, method: "POST", url: endpoint, body: body}
 }
 
 fn __supported_prepare_wire(wire: string) -> bool {
@@ -894,7 +921,23 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
   const endpoint = __batch_endpoint(group)
   let records = []
   for request in requests {
-    records = records.push(__provider_request_record(group, safe_dict(request), endpoint))
+    const req = safe_dict(request)
+    const raw_row = safe_dict(req["request"])
+    const body = __body_from_row_for_batch_wire(raw_row, safe_string(group["model"], ""), wire)
+    errors = errors
+      + __non_streaming_batch_errors(
+      __batch_request_location(
+        "group " + safe_string(group["id"], ""),
+        safe_string(req["custom_id"], ""),
+        __safe_int(req["source_line"]) ?? 0,
+      ),
+      raw_row,
+      body,
+    )
+    records = records.push(__provider_request_record(group, req, endpoint, body))
+  }
+  if len(errors) > 0 {
+    return {ok: false, errors: errors}
   }
   const ext = if wire == "anthropic_messages" {
     ".json"
@@ -997,6 +1040,18 @@ fn __build_manifest(
     }
     const tool_format = __row_string(row, "tool_format", default_tool_format)
     const endpoint = __row_string(row, "endpoint", safe_string(batch["wire_format"], "provider_default"))
+    const request = __request_entry(row, line_no, id_prefix)
+    const wire = safe_string(batch["wire_format"], "")
+    const body = __body_from_row_for_batch_wire(row, safe_string(candidate["id"], ""), wire)
+    const body_errors = __non_streaming_batch_errors(
+      __batch_request_location("", safe_string(request["custom_id"], ""), line_no),
+      row,
+      body,
+    )
+    if len(body_errors) > 0 {
+      errors = errors + body_errors
+      continue
+    }
     const key = __group_key(
       safe_string(candidate["provider"], ""),
       safe_string(candidate["id"], ""),
@@ -1004,7 +1059,6 @@ fn __build_manifest(
       tool_format,
       endpoint,
     )
-    const request = __request_entry(row, line_no, id_prefix)
     const current = safe_dict(groups[key])
     if current == {} {
       const group_id = "batch_group_" + sha256(key).substring(0, 16)
@@ -3798,7 +3852,7 @@ fn __download_fireworks_results(
   const account_id = if dry_run {
     __fireworks_account_id_or_placeholder(harness)
   } else {
-    let account = __fireworks_account_id(harness)
+    const account = __fireworks_account_id(harness)
     if !safe_bool(account["ok"], false) {
       return {ok: false, artifacts: [], errors: [safe_string(account["error"], "")]}
     }

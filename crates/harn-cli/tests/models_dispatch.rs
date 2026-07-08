@@ -929,6 +929,208 @@ fn models_batch_prepare_xai_jsonl_and_dry_run_lifecycle() {
 }
 
 #[test]
+fn models_batch_manifest_and_prepare_openai_responses_endpoint_override() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let requests_path = tmp.path().join("requests.jsonl");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &requests_path,
+        r#"{"custom_id":"responses-case-1","endpoint":"/v1/responses","input":"grade this","max_output_tokens":64}
+"#,
+    )
+    .expect("write requests");
+
+    let manifest = run(
+        &[
+            "models",
+            "batch",
+            "manifest",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o-mini",
+            "--requests",
+            requests_path.to_str().expect("utf8 requests path"),
+            "--out",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(manifest.exit_code, 0, "harn stderr={}", manifest.stderr);
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "responses batch prepare");
+    let report = success_data(&prepared_value);
+    let job = &report["jobs"].as_array().expect("jobs")[0];
+    assert_eq!(job["provider"], "openai");
+    assert_eq!(job["endpoint"], "/v1/responses");
+    assert_eq!(job["submit"]["create_batch"]["endpoint"], "/v1/responses");
+
+    let request_file = job["request_file"].as_str().expect("request_file");
+    let request_text = fs::read_to_string(request_file).expect("read request file");
+    let request = parse_json(
+        request_text.lines().next().expect("responses line"),
+        "responses batch line",
+    );
+    assert_eq!(request["custom_id"], "responses-case-1");
+    assert_eq!(request["method"], "POST");
+    assert_eq!(request["url"], "/v1/responses");
+    assert_eq!(request["body"]["model"], "gpt-4o-mini");
+    assert_eq!(request["body"]["input"], "grade this");
+    assert_eq!(request["body"]["max_output_tokens"], 64);
+}
+
+#[test]
+fn models_batch_manifest_rejects_streaming_request_rows() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let requests_path = tmp.path().join("requests.jsonl");
+    let manifest_path = tmp.path().join("manifest.json");
+    fs::write(
+        &requests_path,
+        r#"{"custom_id":"stream-case-1","body":{"messages":[{"role":"user","content":"grade this"}]},"stream":true}
+"#,
+    )
+    .expect("write requests");
+
+    let manifest = run(
+        &[
+            "models",
+            "batch",
+            "manifest",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o-mini",
+            "--requests",
+            requests_path.to_str().expect("utf8 requests path"),
+            "--out",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(manifest.exit_code, 1, "harn stdout={}", manifest.stdout);
+    assert!(
+        !manifest_path.exists(),
+        "failed manifest should not be written"
+    );
+    let value = parse_json(&manifest.stdout, "streaming manifest failure");
+    assert_eq!(value["ok"], false);
+    assert_eq!(value["error"]["code"], "batch_manifest_failed");
+    let errors = value["error"]["details"]["errors"]
+        .as_array()
+        .expect("failure errors")
+        .iter()
+        .map(|entry| entry.as_str().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(errors.contains("line 1"), "errors={errors}");
+    assert!(
+        errors.contains("custom_id=stream-case-1"),
+        "errors={errors}"
+    );
+    assert!(errors.contains("stream: true"), "errors={errors}");
+}
+
+#[test]
+fn models_batch_prepare_rejects_streaming_manifest_requests() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &manifest_path,
+        r#"{
+  "schemaVersion": 1,
+  "kind": "harn.model_batch_manifest",
+  "producer": "test",
+  "workload": "eval",
+  "source": {"path": "fixture.jsonl", "sha256": "fixture", "row_count": 1},
+  "requestCount": 1,
+  "groupCount": 1,
+  "groups": [
+    {
+      "id": "openai-streaming-fixture",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "workload": "eval",
+      "endpoint": "/v1/chat/completions",
+      "tool_format": "native",
+      "batch": {"api": true, "wire_format": "openai", "input_mode": "jsonl_file"},
+      "requests": [
+        {
+          "custom_id": "stream-case-1",
+          "source_line": 7,
+          "source_sha256": "fixture",
+          "metadata": {},
+          "request": {
+            "messages": [{"role": "user", "content": "grade this"}],
+            "stream": true
+          }
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+"#,
+    )
+    .expect("write manifest");
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 1, "harn stdout={}", prepared.stdout);
+    assert!(
+        !out_dir.exists(),
+        "prepare should reject before writing provider artifacts"
+    );
+    let value = parse_json(&prepared.stdout, "streaming prepare failure");
+    assert_eq!(value["ok"], false);
+    assert_eq!(value["error"]["code"], "batch_prepare_failed");
+    let errors = value["error"]["details"]["errors"]
+        .as_array()
+        .expect("failure errors")
+        .iter()
+        .map(|entry| entry.as_str().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        errors.contains("group openai-streaming-fixture line 7"),
+        "errors={errors}"
+    );
+    assert!(
+        errors.contains("custom_id=stream-case-1"),
+        "errors={errors}"
+    );
+    assert!(errors.contains("stream: true"), "errors={errors}");
+}
+
+#[test]
 fn models_batch_manifest_and_prepare_openai_jsonl() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let requests_path = tmp.path().join("requests.jsonl");
