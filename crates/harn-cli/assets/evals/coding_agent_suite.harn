@@ -971,7 +971,6 @@ fn main(harness: Harness) {
     throw join(args._errors, "\n")
   }
   const output_dir = args.output_dir
-  harness.fs.mkdir(output_dir)
   const root = args.workspace_root ?? path_join(output_dir, "workspace")
   __seed_workspace(harness, root, args.fixture)
   if args.seed_mock {
