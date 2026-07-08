@@ -85,3 +85,24 @@ pipeline test_empty_config_degrades_not_throws(task) {
   const bundle = agent_completion_gate({})
   assert_eq(bundle._completion_gate.facts_available, false)
 }
+
+pipeline test_feedback_templates_unknown_key_throws(task) {
+  const outcome = try {
+    agent_completion_gate({facts: __facts, feedback_templates: {bogus_key: "x"}})
+  }
+  assert(is_err(outcome), "gate rejects an unknown feedback_templates key")
+}
+
+pipeline test_feedback_templates_nonstring_throws(task) {
+  const outcome = try {
+    agent_completion_gate({facts: __facts, feedback_templates: {missing_verification: 7}})
+  }
+  assert(is_err(outcome), "gate rejects a non-string feedback_templates value")
+}
+
+pipeline test_feedback_templates_valid_accepted(task) {
+  const outcome = try {
+    agent_completion_gate({facts: __facts, feedback_templates: {missing_verification: "Custom."}})
+  }
+  assert(!is_err(outcome), "gate accepts a valid feedback_templates override")
+}

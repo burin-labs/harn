@@ -2,6 +2,7 @@ import {
   __completion_gate_apply_budget,
   __completion_gate_classify_writes,
   __completion_gate_combine_verify,
+  __completion_gate_feedback_keys,
   __completion_gate_ladder,
   __judge_classify_verdict,
   __judge_run_checkpoint,
@@ -363,6 +364,12 @@ pub type CompletionFacts = {
  *   JudgeConfig-shaped dict); defaults its cap to burin's 5.
  * - `judge_seam` (default `"verify_completion_judge"`) — which capped LLM seam
  *   the judge rides (`"verify_completion_judge"` or `"done_judge"`).
+ * - `feedback_templates` (optional) — a dict overriding the rendered veto feedback
+ *   strings per ladder rule (the coding-domain prose is host content, not
+ *   mechanism). Keys are the recognized rules (`__completion_gate_feedback_keys`):
+ *   `no_source_write_cosmetic`, `no_source_write_absent`,
+ *   `verification_after_write_red` (supports a `{findings}` token), and
+ *   `missing_verification`. Values must be strings. Absent keys keep the defaults.
  */
 pub type CompletionGateOptions = {
   facts?: any,
@@ -374,6 +381,7 @@ pub type CompletionGateOptions = {
   veto_combine?: any,
   judge?: any,
   judge_seam?: string,
+  feedback_templates?: dict,
 }
 
 /**
@@ -415,6 +423,23 @@ fn __completion_gate_validate_options(opts) {
     && opts.judge_seam != "done_judge" {
     throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
       + to_string(opts.judge_seam)
+  }
+  const templates = opts?.feedback_templates
+  if templates != nil {
+    if type_of(templates) != "dict" {
+      throw "agent_completion_gate: `feedback_templates` must be a dict; got " + type_of(templates)
+    }
+    const known = __completion_gate_feedback_keys()
+    for key in keys(templates) {
+      if !contains(known, key) {
+        throw "agent_completion_gate: unknown `feedback_templates` key `" + key + "`; expected one of "
+          + join(known, ", ")
+      }
+      if type_of(templates[key]) != "string" {
+        throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
+          + type_of(templates[key])
+      }
+    }
   }
 }
 
@@ -510,7 +535,7 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
     verify: verify,
     oracle_expected: verify_command != nil || raw?.verify != nil,
   }
-  const verdict = __completion_gate_ladder(derived)
+  const verdict = __completion_gate_ladder(derived, opts?.feedback_templates)
   const vetoes_used = __completion_gate_vetoes_used(session_id)
   const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
   if budgeted.charge && session_id != "" {

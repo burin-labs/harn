@@ -273,6 +273,48 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
 }
 
 /**
+ * Default rendered feedback strings for each vetoing ladder rule. The MECHANISM
+ * (evidence gate + post-write-verify gate) is generic; these strings are host
+ * DOMAIN content (burin-editorial coding prose), so `completion_gate`'s
+ * `feedback_templates` option lets a host override any of them by key. Keys:
+ *   - `no_source_write_cosmetic` — evidence gate tripped, only cosmetic writes seen.
+ *   - `no_source_write_absent`   — evidence gate tripped, no writes seen.
+ *   - `verification_after_write_red` — a red verifier after a write. The `{findings}`
+ *     token is substituted with the rendered findings detail (` Findings: <x>.` or
+ *     empty), so an override keeps the dynamic findings unless it drops the token.
+ *   - `missing_verification`     — a source write with a configured-but-unrun verifier.
+ */
+const __COMPLETION_GATE_FEEDBACK_DEFAULTS = {
+  missing_verification: "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
+  no_source_write_absent: "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing.",
+  no_source_write_cosmetic: "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing.",
+  verification_after_write_red: "Verification is still failing after your change.{findings} Fix the specific failure and re-run the verifier before finishing.",
+}
+
+/**
+ * The recognized `completion_gate` `feedback_templates` keys (the vetoing ladder
+ * rules a host may override). Exposed so `std/agent/judge` can validate an override
+ * dict loudly at config time.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_feedback_keys() {
+  return keys(__COMPLETION_GATE_FEEDBACK_DEFAULTS)
+}
+
+/**
+ * Resolve one ladder feedback string: the host override (if any) else the default,
+ * with the `{findings}` token substituted. Only the red-verifier rule passes a
+ * non-empty `findings` detail; for the other rules the default carries no token, so
+ * the substitution is a no-op.
+ */
+fn __completion_gate_render_feedback(templates, key, findings) {
+  return replace(to_string(templates[key] ?? ""), "{findings}", findings)
+}
+
+/**
  * The default completion-gate veto arithmetic: an ordered precedence ladder over
  * derived facts, ported from burin-code `completion_gate_uncapped_status`. First
  * matching rule wins.
@@ -289,11 +331,16 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
  * release the whole `saw_write && !verification_after_last_write` set, because a source
  * write always needs a fresh green verifier before completion.
  *
+ * `feedback_templates` (optional) overrides the rendered feedback string per rule
+ * (see `__COMPLETION_GATE_FEEDBACK_DEFAULTS`); nil/absent keeps the byte-identical
+ * defaults.
+ *
  * @effects: []
  * @errors: []
  * @api_stability: internal
  */
-pub fn __completion_gate_ladder(derived) {
+pub fn __completion_gate_ladder(derived, feedback_templates = nil) {
+  const templates = __COMPLETION_GATE_FEEDBACK_DEFAULTS + (feedback_templates ?? {})
   const source_known = derived?.source_known ?? false
   const source_writes = to_int(derived?.source_write_count ?? 0) ?? 0
   const cosmetic_writes = to_int(derived?.cosmetic_write_count ?? 0) ?? 0
@@ -307,11 +354,12 @@ pub fn __completion_gate_ladder(derived) {
   // 1. Evidence requirement (ledger ⛔#5): a task that must change source may not
   // finish with zero SOURCE writes. Cosmetic/test-scaffold writes are not progress.
   if source_known && requires_write && !saw_source {
-    const message = if cosmetic_writes > 0 {
-      "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing."
+    const key = if cosmetic_writes > 0 {
+      "no_source_write_cosmetic"
     } else {
-      "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing."
+      "no_source_write_absent"
     }
+    const message = __completion_gate_render_feedback(templates, key, "")
     return {ok: false, reason: "no_source_write", strict: false, feedback: message}
   }
   // 2. Post-write verification: a source write (or an unclassified write set) with
@@ -327,8 +375,7 @@ pub fn __completion_gate_ladder(derived) {
       ok: false,
       reason: "verification_after_write_red",
       strict: true,
-      feedback: "Verification is still failing after your change." + detail
-        + " Fix the specific failure and re-run the verifier before finishing.",
+      feedback: __completion_gate_render_feedback(templates, "verification_after_write_red", detail),
     }
   }
   // 3. Green verifier -> completion is honorable.
@@ -351,7 +398,7 @@ pub fn __completion_gate_ladder(derived) {
       ok: false,
       reason: "missing_verification",
       strict: true,
-      feedback: "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
+      feedback: __completion_gate_render_feedback(templates, "missing_verification", ""),
     }
   }
   // 5. Nothing left to gate.
