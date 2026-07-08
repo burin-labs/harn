@@ -783,9 +783,11 @@ pipeline test_action_signal_trips_on_single_flailing_action(task) {
   assert(o.warning != nil)
   assert(o.warning.pattern == "flailing_action")
   assert_eq(o.warning.count, 1)
-  // First trip is a warning, not yet a hard stop (standard consecutive-trip escalation).
+  // First trip is a warning, not yet a hard stop; it rides the dedicated flail
+  // accumulator and leaves the core consecutive-trip axis untouched.
   assert(!o.hard_stop)
-  assert_eq(o.state.consecutive_trips, 1)
+  assert_eq(o.state.action_flail_trips, 1)
+  assert_eq(o.state.consecutive_trips, 0)
 }
 
 pipeline test_action_signal_receives_payload_and_gates_on_return(task) {
