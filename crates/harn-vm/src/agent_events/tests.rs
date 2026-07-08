@@ -158,6 +158,8 @@ fn judge_decision_round_trips_through_jsonl_sink() {
         reason: Some("missing_verification".into()),
         confirm: Some(false),
         converted_from: None,
+        specific_gaps: vec!["rerun the verifier".into(), "cite the changed file".into()],
+        accepted_evidence: Vec::new(),
     });
     sink.flush().unwrap();
 
@@ -176,6 +178,8 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             reason,
             confirm,
             converted_from,
+            specific_gaps,
+            accepted_evidence,
         } => {
             assert_eq!(session_id, "s");
             assert_eq!(iteration, 2);
@@ -187,11 +191,23 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             assert_eq!(reason.as_deref(), Some("missing_verification"));
             assert_eq!(confirm, Some(false));
             assert_eq!(converted_from, None);
+            assert_eq!(
+                specific_gaps,
+                vec![
+                    "rerun the verifier".to_string(),
+                    "cite the changed file".to_string()
+                ]
+            );
+            assert!(accepted_evidence.is_empty());
         }
         other => panic!("expected JudgeDecision, got {other:?}"),
     }
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(value["type"], "judge_decision");
+    assert_eq!(
+        value["specific_gaps"],
+        serde_json::json!(["rerun the verifier", "cite the changed file"])
+    );
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
 }
@@ -223,6 +239,8 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
         reason: Some("verified_after_write".into()),
         confirm: Some(true),
         converted_from: None,
+        specific_gaps: Vec::new(),
+        accepted_evidence: vec!["targeted verifier passed".into()],
     });
 
     let text = std::fs::read_to_string(&path).unwrap();
