@@ -21,9 +21,11 @@ validation_base=$(hook_validation_base)
 # Expensive changed-file gates should validate the PR delta against the base
 # branch, not the stale upstream range used below to inspect pushed commits.
 hook_write_push_files "$changed" "$validation_base"
-hook_export_cargo_target_dir
-hook_disable_cargo_incremental_if_release_bump "push $validation_base"
-hook_export_existing_harn_bin_for_non_rust_changes "$changed"
+if ! hook_no_local_build_mode; then
+  hook_export_cargo_target_dir
+  hook_disable_cargo_incremental_if_release_bump "push $validation_base"
+  hook_export_existing_harn_bin_for_non_rust_changes "$changed"
+fi
 
 # Signature guard (cheapest gate — local, no network). main enforces the
 # required_signatures ruleset server-side; an unsigned commit is rejected at
@@ -124,9 +126,13 @@ else
 fi
 
 if hook_paths_match "$changed" "$HOOK_TREESITTER_PATTERN"; then
-  echo "=== Pre-push: checking tree-sitter keyword mirror ==="
-  make -s check-tree-sitter-keywords
-  echo "    Tree-sitter keywords OK."
+  if hook_skip_no_local_build "pre-push tree-sitter keyword mirror check"; then
+    :
+  else
+    echo "=== Pre-push: checking tree-sitter keyword mirror ==="
+    make -s check-tree-sitter-keywords
+    echo "    Tree-sitter keywords OK."
+  fi
 else
   echo "=== Pre-push: skipping tree-sitter keyword check (no lexer/grammar changes) ==="
 fi
@@ -135,9 +141,13 @@ fi
 # Makefile `all:` recipe and the CI workflows, so a new gen/check pair
 # can't silently skip CI. Pure-Python; no harn build.
 if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
-  echo "=== Pre-push: checking generated-artifact registry ==="
-  make -s check-generated-registry
-  echo "    Generated-artifact registry OK."
+  if hook_skip_no_local_build "pre-push generated-artifact registry check"; then
+    :
+  else
+    echo "=== Pre-push: checking generated-artifact registry ==="
+    make -s check-generated-registry
+    echo "    Generated-artifact registry OK."
+  fi
 else
   echo "=== Pre-push: skipping generated-artifact registry check (no registry/Makefile/workflow/hook changes) ==="
 fi
@@ -146,13 +156,17 @@ fi
 # belong under `## Unreleased` (or the in-progress next-version heading
 # in a release PR), not under a section that already shipped under a tag.
 if hook_paths_match "$changed" '^CHANGELOG\.md$'; then
-  echo "=== Pre-push: checking CHANGELOG for retroactive edits ==="
-  hook_export_harn_bin
-  if ! "$HARN_BIN" run scripts/check_changelog_no_retroactive_edits.harn; then
-    echo "" >&2
-    echo "  Bypass for genuine fix-ups (typos, broken links):" >&2
-    echo "    ALLOW_CHANGELOG_RETROACTIVE_EDIT=1 git push" >&2
-    exit 1
+  if hook_skip_no_local_build "pre-push CHANGELOG retroactive-edit check"; then
+    :
+  else
+    echo "=== Pre-push: checking CHANGELOG for retroactive edits ==="
+    hook_export_harn_bin
+    if ! "$HARN_BIN" run scripts/check_changelog_no_retroactive_edits.harn; then
+      echo "" >&2
+      echo "  Bypass for genuine fix-ups (typos, broken links):" >&2
+      echo "    ALLOW_CHANGELOG_RETROACTIVE_EDIT=1 git push" >&2
+      exit 1
+    fi
   fi
 else
   echo "=== Pre-push: skipping CHANGELOG retroactive-edit check (no CHANGELOG.md changes) ==="
@@ -163,8 +177,8 @@ fi
 # expensive steps). Reached only once the fast validators above pass.
 # ---------------------------------------------------------------------------
 
-if [ "${HARN_PREPUSH_FAST_ONLY:-0}" = "1" ]; then
-  echo "=== Pre-push: skipping expensive local checks (HARN_PREPUSH_FAST_ONLY=1) ==="
+if hook_no_local_build_mode || [ "${HARN_PREPUSH_FAST_ONLY:-0}" = "1" ]; then
+  echo "=== Pre-push: skipping expensive local checks (HARN_HOOKS_NO_LOCAL_BUILD/HARN_HOOKS_FAST_ONLY/HARN_PREPUSH_FAST_ONLY) ==="
   echo "    Signature, merge-queue, and fast drift guards passed; remote CI remains required."
   exit 0
 fi
