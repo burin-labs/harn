@@ -308,18 +308,31 @@ cmd_audit() {
   fi
   prebuild_elapsed=$(( $(date +%s) - prebuild_started ))
   printf 'ok: %-15s (%ss)\n' "warm-prebuild" "$prebuild_elapsed"
-  if [[ -z "${HARN_BIN:-}" ]]; then
-    HARN_BIN="$(debug_harn_binary)"
+  local cargo_harn_bin="${HARN_BIN:-}"
+  if [[ -z "$cargo_harn_bin" ]]; then
+    cargo_harn_bin="$(debug_harn_binary)"
   fi
-  if [[ ! -x "$HARN_BIN" ]]; then
-    echo "error: warm prebuild completed but HARN_BIN is not executable: $HARN_BIN"
+  if [[ ! -x "$cargo_harn_bin" ]]; then
+    echo "error: warm prebuild completed but HARN_BIN is not executable: $cargo_harn_bin"
     exit 1
   fi
-  export HARN_BIN
-  printf 'ok: %-15s (%s)\n' "harn-bin" "$HARN_BIN"
 
   local tmp
   tmp="$(mktemp -d)"
+  local stable_bin_dir stable_harn_bin stable_suffix
+  stable_bin_dir="$tmp/harn-bin"
+  mkdir -p "$stable_bin_dir"
+  stable_suffix=""
+  case "$cargo_harn_bin" in
+    *.exe) stable_suffix=".exe" ;;
+  esac
+  stable_harn_bin="$stable_bin_dir/harn$stable_suffix"
+  cp "$cargo_harn_bin" "$stable_harn_bin"
+  chmod +x "$stable_harn_bin"
+  HARN_BIN="$stable_harn_bin"
+  HARN_CONFORMANCE_HARN_BIN="$stable_harn_bin"
+  export HARN_BIN HARN_CONFORMANCE_HARN_BIN
+  printf 'ok: %-15s (%s)\n' "harn-bin" "$HARN_BIN"
   echo "audit lane log dir: $tmp"
   local -a steps=()
   local -a pids=()

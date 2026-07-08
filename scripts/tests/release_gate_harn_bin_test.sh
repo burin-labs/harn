@@ -133,4 +133,156 @@ fi
 
 "$repo_root/scripts/tests/hook_harn_build_env_test.sh"
 
+audit_root="$tmp_root/audit-root"
+mkdir -p \
+  "$audit_root/scripts" \
+  "$audit_root/docs/src" \
+  "$audit_root/crates/harn-vm" \
+  "$audit_root/crates/harn-cli" \
+  "$audit_root/.github" \
+  "$audit_root/tree-sitter-harn" \
+  "$audit_root/spec"
+cat > "$audit_root/Cargo.toml" <<'EOF'
+[workspace]
+version = "1.2.3"
+members = []
+EOF
+printf 'OAuth MCP trust boundary mutation session worker_update\n' > "$audit_root/README.md"
+printf 'spec\n' > "$audit_root/spec/HARN_SPEC.md"
+cat > "$audit_root/scripts/verify_crate_packages.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'package-audit HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+if [[ "${HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "package audit received cargo target HARN_BIN" >&2
+  exit 1
+fi
+if [[ "${HARN_CONFORMANCE_HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "package audit received cargo target HARN_CONFORMANCE_HARN_BIN" >&2
+  exit 1
+fi
+SH
+chmod +x "$audit_root/scripts/verify_crate_packages.sh"
+cat > "$audit_root/scripts/build_docs_site.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'docs-build HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+if [[ "${HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "docs build received cargo target HARN_BIN" >&2
+  exit 1
+fi
+if [[ "${HARN_CONFORMANCE_HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "docs build received cargo target HARN_CONFORMANCE_HARN_BIN" >&2
+  exit 1
+fi
+SH
+chmod +x "$audit_root/scripts/build_docs_site.sh"
+
+fake_tools="$tmp_root/fake-tools"
+mkdir -p "$fake_tools"
+cat > "$fake_tools/cargo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "build" ]]; then
+  mkdir -p "$CARGO_TARGET_DIR/debug"
+  cat > "$CARGO_TARGET_DIR/debug/harn" <<'HARN'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'harn argv=%s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s self=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" "$0" >> "$FAKE_AUDIT_RECORD"
+if [[ "${HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "harn command received cargo target HARN_BIN" >&2
+  exit 1
+fi
+if [[ "${HARN_CONFORMANCE_HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "harn command received cargo target HARN_CONFORMANCE_HARN_BIN" >&2
+  exit 1
+fi
+exit 0
+HARN
+  chmod +x "$CARGO_TARGET_DIR/debug/harn"
+  exit 0
+fi
+if [[ "${1:-}" == "clippy" ]]; then
+  printf 'cargo %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+  exit 0
+fi
+echo "unexpected fake cargo invocation: $*" >&2
+exit 2
+SH
+chmod +x "$fake_tools/cargo"
+
+cat > "$fake_tools/make" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'make %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+if [[ "${HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "make received cargo target HARN_BIN" >&2
+  exit 1
+fi
+if [[ "${HARN_CONFORMANCE_HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
+  echo "make received cargo target HARN_CONFORMANCE_HARN_BIN" >&2
+  exit 1
+fi
+if [[ -n "${CARGO_TARGET_DIR-}" ]]; then
+  rm -f "$CARGO_TARGET_DIR/debug/harn"
+fi
+exit 0
+SH
+chmod +x "$fake_tools/make"
+
+cat > "$fake_tools/npx" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'npx %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+exit 0
+SH
+chmod +x "$fake_tools/npx"
+
+cat > "$fake_tools/npm" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'npm %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+exit 0
+SH
+chmod +x "$fake_tools/npm"
+
+cat > "$fake_tools/rg" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'rg %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+exit 0
+SH
+chmod +x "$fake_tools/rg"
+
+audit_record="$tmp_root/audit-record.txt"
+PATH="$fake_tools:$PATH" \
+  HARN_RELEASE_ROOT="$audit_root" \
+  TMPDIR="$tmp_root" \
+  FAKE_AUDIT_RECORD="$audit_record" \
+  "$repo_root/scripts/release_gate.sh" audit > "$tmp_root/audit.txt" 2>&1 || {
+    cat "$tmp_root/audit.txt" >&2
+    exit 1
+  }
+
+if grep -Fq "HARN_BIN=$tmp_root/harn-release-gate-target-audit-root/debug/harn" "$audit_record"; then
+  echo "release_gate audit exposed the cargo target harn binary to an audit lane" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if grep -Fq "HARN_CONFORMANCE_HARN_BIN=$tmp_root/harn-release-gate-target-audit-root/debug/harn" "$audit_record"; then
+  echo "release_gate audit exposed the cargo target conformance harn binary to an audit lane" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if ! grep -Fq "/harn-bin/harn" "$audit_record"; then
+  echo "release_gate audit did not use the stable harn-bin copy" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if ! grep -Eq "HARN_CONFORMANCE_HARN_BIN=.*/harn-bin/harn" "$audit_record"; then
+  echo "release_gate audit did not expose the stable harn-bin copy to conformance fixtures" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+
 echo "release_gate_harn_bin_test: ok"
