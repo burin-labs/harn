@@ -42,8 +42,25 @@ runs:
           /opt/ghc \
           /usr/local/.ghcup \
           /opt/hostedtoolcache/CodeQL \
+          /opt/hostedtoolcache/go \
+          /opt/hostedtoolcache/Python \
+          /opt/hostedtoolcache/PyPy \
+          /opt/hostedtoolcache/Ruby \
+          /opt/hostedtoolcache/node \
+          /usr/local/share/boost \
           /usr/local/share/powershell \
-          /usr/local/share/chromium; do
+          /usr/local/share/chromium \
+          /usr/local/share/vcpkg \
+          /usr/local/lib/node_modules \
+          /opt/az \
+          /opt/google/chrome \
+          /opt/microsoft; do
+          sudo rm -rf "$path" &
+          pids="${pids} $!"
+        done
+
+        for path in /opt/hostedtoolcache/Java_*; do
+          [ -e "$path" ] || continue
           sudo rm -rf "$path" &
           pids="${pids} $!"
         done
