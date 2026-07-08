@@ -72,6 +72,14 @@ fn is_claude_model_id(model: &str) -> bool {
 /// is permitted at the message level for prompt caching.
 const ANTHROPIC_MESSAGE_KEYS: &[&str] = &["role", "content", "cache_control"];
 
+fn anthropic_cache_control(ttl: Option<crate::llm::api::PromptCacheTtl>) -> serde_json::Value {
+    let mut cache_control = serde_json::json!({"type": "ephemeral"});
+    if let Some(ttl) = ttl.and_then(crate::llm::api::PromptCacheTtl::anthropic_ttl_field) {
+        cache_control["ttl"] = serde_json::json!(ttl);
+    }
+    cache_control
+}
+
 /// True for Claude 4.6 and later — the generation where Anthropic
 /// deprecated the assistant-prefill feature. Opus 4.7, Sonnet 4.6/4.7,
 /// any future -4.8+ model all return 400 when the last message has
@@ -462,7 +470,7 @@ impl AnthropicProvider {
             // Anthropic automatic prompt caching now applies at the
             // top-level request and caches the stable prefix across
             // tools, system, and messages for multi-turn conversations.
-            body["cache_control"] = serde_json::json!({"type": "ephemeral"});
+            body["cache_control"] = anthropic_cache_control(opts.prompt_cache_ttl);
         }
         if let Some(ref sys) = opts.system {
             body["system"] = serde_json::json!(sys);
@@ -1068,6 +1076,7 @@ mod tests {
             provider_tools: Vec::new(),
             tool_choice: None,
             cache: false,
+            prompt_cache_ttl: None,
             timeout: None,
             stream: true,
             provider_overrides: None,
@@ -2482,6 +2491,19 @@ mod tests {
             body["tools"].as_array().map(Vec::len),
             Some(1),
             "tool definitions remain in the top-level cached prefix"
+        );
+    }
+
+    #[test]
+    fn cache_one_hour_ttl_uses_anthropic_extended_cache_field() {
+        let mut payload = base_payload();
+        payload.cache = true;
+        payload.prompt_cache_ttl = Some(crate::llm::api::PromptCacheTtl::OneHour);
+
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["cache_control"],
+            serde_json::json!({"type": "ephemeral", "ttl": "1h"})
         );
     }
 }

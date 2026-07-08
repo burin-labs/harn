@@ -92,6 +92,10 @@
 #   max_tools       : cap on tool-definition count the provider will accept.
 #                     Used by harn-lint to warn about oversized registries.
 #   prompt_caching  : whether provider-side prompt caching is available.
+#   prompt_cache_ttls:
+#                     explicit prompt-cache TTL values Harn can request for
+#                     this route. Known values: 5m, 1h. Empty means the route
+#                     may cache, but Harn has no explicit TTL request knob.
 #   cache_breakpoint_style:
 #                     explicit cache_control strategy: none, top_level, or last_block.
 #   vision          : whether Harn can send visual input blocks on this route.
@@ -288,6 +292,7 @@ batch_operational_notes = [
 seed_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
+prompt_cache_ttls = ["5m", "1h"]
 
 [provider_defaults.openai]
 batch_wire_format = "openai"

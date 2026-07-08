@@ -27,6 +27,7 @@ batch_operational_notes = [
 seed_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
+prompt_cache_ttls = ["5m", "1h"]
 
 [provider_defaults.openai]
 batch_wire_format = "openai"

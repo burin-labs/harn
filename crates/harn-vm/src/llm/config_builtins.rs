@@ -1390,6 +1390,10 @@ pub(crate) fn capabilities_to_vm_value(
             .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
+    cache_control.insert(
+        crate::value::intern_key("supported_ttls"),
+        string_list_to_vm_value(cache_profile.supported_ttls),
+    );
     cache_control.put_str(
         "cache_read_usage_field",
         &cache_profile.cache_read_usage_field,

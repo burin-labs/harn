@@ -223,6 +223,7 @@ pub type AgentLoopOptions = {
     total_budget_usd?: float,
   },
   cache?: bool,
+  prompt_cache_ttl?: "5m" | "1h",
   fast?: bool,
   speed?: string,
   stream?: bool,
@@ -1591,7 +1592,7 @@ fn __normalize_iteration_budget(opts) {
   }
   const max_cap = __positive_int_budget_field(user_budget?.max, max_default, "iteration_budget.max")
   const initial_default = if mode == "adaptive" {
-    let candidate = max_cap / 4
+    const candidate = max_cap / 4
     if candidate < 1 {
       1
     } else {
@@ -2009,7 +2010,11 @@ fn __stack_sanitize_result(options, policy = nil) {
     stripped = stripped + ["thinking"]
   }
   if !(caps?.prompt_caching ?? false) {
-    const cache = __stack_strip_option_keys(out, stripped, ["prompt_cache", "prompt_caching", "cache_control"])
+    const cache = __stack_strip_option_keys(
+      out,
+      stripped,
+      ["prompt_cache", "prompt_caching", "prompt_cache_ttl", "cache_control"],
+    )
     out = cache.options
     stripped = cache.stripped
   }

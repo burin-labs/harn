@@ -53,6 +53,10 @@ pub struct CacheControlProfile {
     /// Human-readable cache time-to-live / eviction notes for the route. `None`
     /// when the route reports no cache accounting.
     pub ttl_notes: Option<String>,
+    /// Explicit prompt-cache TTL values Harn knows how to request for this
+    /// route. Empty means the route may cache, but Harn has no explicit TTL
+    /// knob for it.
+    pub supported_ttls: Vec<String>,
     /// Provider response usage field that carries cache-read (served-from-cache)
     /// prompt tokens, in dotted path form. Empty when the route reports none.
     pub cache_read_usage_field: String,
@@ -74,6 +78,7 @@ impl CacheControlProfile {
                 cache_breakpoint_style: caps.cache_breakpoint_style.clone(),
                 min_useful_prefix_tokens: None,
                 ttl_notes: None,
+                supported_ttls: Vec::new(),
                 cache_read_usage_field: String::new(),
                 cache_write_usage_field: String::new(),
             };
@@ -117,6 +122,7 @@ impl CacheControlProfile {
             } else {
                 Some(ttl.to_string())
             },
+            supported_ttls: caps.prompt_cache_ttls.clone(),
             cache_read_usage_field: read_field.to_string(),
             cache_write_usage_field: write_field.to_string(),
         }
@@ -184,6 +190,7 @@ pub fn prompt_cache_support(provider: &str, model: &str) -> PromptCacheSupport {
                 cache_breakpoint_style: "none".to_string(),
                 min_useful_prefix_tokens: None,
                 ttl_notes: None,
+                supported_ttls: Vec::new(),
                 cache_read_usage_field: String::new(),
                 cache_write_usage_field: String::new(),
             },
@@ -726,6 +733,7 @@ mod tests {
                 cache_breakpoint_style: "last_block".to_string(),
                 min_useful_prefix_tokens: Some(1024),
                 ttl_notes: Some("5m".to_string()),
+                supported_ttls: Vec::new(),
                 cache_read_usage_field: "usage.cache_read_input_tokens".to_string(),
                 cache_write_usage_field: "usage.cache_creation_input_tokens".to_string(),
             },
@@ -745,6 +753,7 @@ mod tests {
                 cache_breakpoint_style: "none".to_string(),
                 min_useful_prefix_tokens: None,
                 ttl_notes: None,
+                supported_ttls: Vec::new(),
                 cache_read_usage_field: String::new(),
                 cache_write_usage_field: String::new(),
             },

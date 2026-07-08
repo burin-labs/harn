@@ -113,6 +113,7 @@ pub async fn run_model_smoke_test(
         tool_choice: None,
         tool_search: None,
         cache: false,
+        prompt_cache_ttl: None,
         timeout: None,
         idle_timeout: None,
         stream: true,

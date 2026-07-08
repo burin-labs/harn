@@ -665,6 +665,7 @@ fn probe_request_payload(
         provider_tools: Vec::new(),
         tool_choice,
         cache: false,
+        prompt_cache_ttl: None,
         timeout: None,
         stream: mode == ToolProbeMode::Streaming,
         provider_overrides: None,
