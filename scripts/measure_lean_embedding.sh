@@ -86,9 +86,12 @@ if [[ "${1:-}" == "--build" ]]; then
     echo
     echo "Cold build wall time (cargo build, fresh target dir each):"
     for cfg in "--no-default-features" "--features full"; do
+        read -r -a cargo_cfg <<< "$cfg"
         tmp="$(mktemp -d)"
         start=$(date +%s)
-        CARGO_TARGET_DIR="$tmp" cargo build -p "$PKG" $cfg >/dev/null 2>&1 || true
+        CARGO_TARGET_DIR="$tmp" \
+            CARGO_BUILD_BUILD_DIR="$tmp/build" \
+            cargo build -p "$PKG" "${cargo_cfg[@]}" >/dev/null 2>&1 || true
         end=$(date +%s)
         printf '  %-22s %4ds\n' "$cfg" "$((end - start))"
         rm -rf "$tmp"

@@ -35,11 +35,11 @@ configure-merge-drivers:
 # skips the "Verifying harn..." dialog on first run. Single source of
 # truth: scripts/sign_local_macos.sh.
 build:
-	cargo build
+	$(HARN_CARGO_CMD) build
 	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
 
 build-release:
-	cargo build --release
+	$(HARN_CARGO_CMD) build --release
 	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
 
 # Re-sign already-built harn binaries without rebuilding. Useful after
@@ -50,11 +50,11 @@ sign-local:
 
 # Format all code
 fmt:
-	cargo fmt --all
+	$(HARN_CARGO_CMD) fmt --all
 
 # Run clippy lints (deny warnings in CI)
 lint: lint-no-rust-prompt-prose lint-no-xfail-regression
-	cargo clippy --workspace --all-targets -- -D warnings
+	$(HARN_CARGO_CMD) clippy --workspace --all-targets -- -D warnings
 
 # Detect unused workspace dependencies. cargo-machete is fast and good enough
 # for CI; false positives can be silenced via [package.metadata.cargo-machete]
@@ -86,11 +86,11 @@ check-crate-sibling-versions:
 # (cargo test has no profile support, so it will run all tests).
 test:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
-		HARN_LLM_CALLS_DISABLED=1 cargo nextest run --workspace; \
+		HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace; \
 	else \
 		echo "cargo-nextest not installed; falling back to cargo test --workspace"; \
 		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
-		HARN_LLM_CALLS_DISABLED=1 cargo test --workspace; \
+		HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test --workspace; \
 	fi
 
 # Run only the tests in crates affected by the changes vs AFFECTED_BASE
@@ -109,18 +109,18 @@ test-affected:
 		exit 0; \
 	fi; \
 	echo "make test-affected: cargo nextest run $$args"; \
-	HARN_LLM_CALLS_DISABLED=1 cargo nextest run $$args
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run $$args
 
 # Run the slow E2E / smoke suite: subprocess-spawning CLI surface tests,
 # signal handling, MCP server launch, real ProcessHandle smoke tests, etc.
 # Runs on schedule (nightly), manually, and on PRs with the `e2e` label.
 # Requires cargo-nextest (no plain `cargo test` fallback for profile support).
 test-e2e:
-	HARN_LLM_CALLS_DISABLED=1 cargo nextest run --workspace --profile e2e
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace --profile e2e
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:
-	HARN_LLM_CALLS_DISABLED=1 cargo test --workspace
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test --workspace
 
 # Compatibility alias for the smarter default `make test`.
 test-fast:
@@ -165,9 +165,9 @@ protocol-conformance:
 # already covers.
 mcp-rc-conformance:
 	@echo "=== MCP RC harness: harn-mcp-rc-compat suite (client / generic_server / legacy_compat / artifacts) ==="
-	HARN_LLM_CALLS_DISABLED=1 cargo test -p harn-mcp-rc-compat --tests
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test -p harn-mcp-rc-compat --tests
 	@echo "=== MCP RC harness: orchestrator server (harn-cli mcp_rc_compat_tests) ==="
-	HARN_LLM_CALLS_DISABLED=1 cargo test -p harn-cli --lib mcp_rc_compat_tests
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_rc_compat_tests
 
 replay-oracle:
 	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) orchestrator replay-oracle
@@ -227,7 +227,7 @@ lint-actions:
 # error tests whose diagnostics are validated by the conformance runner.
 lint-harn:
 	@echo "=== Linting Harn conformance tests ==="
-	@if [ -z "$(strip $(HARN_BIN))" ]; then cargo build --quiet --bin harn; fi
+	@if [ -z "$(strip $(HARN_BIN))" ]; then $(HARN_CARGO_CMD) build --quiet --bin harn; fi
 	@harn_bin="$(HARN_BIN)"; \
 	if [ -z "$$harn_bin" ]; then \
 		harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
@@ -342,13 +342,14 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
+	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/release_prepare_env_test.sh
 	./scripts/tests/publish_script_test.sh
 
 # Format check (no changes, for CI)
 fmt-check:
-	cargo fmt --all -- --check
+	$(HARN_CARGO_CMD) fmt --all -- --check
 
 release-gate:
 	./scripts/release_gate.sh audit
@@ -359,7 +360,7 @@ release-gate:
 # you only get the host platform, but the driver still exercises every
 # user-visible capability and prints a per-step status summary.
 release-smoke:
-	CARGO_PROFILE_RELEASE_LTO=thin cargo build --release -p harn-cli --bin harn
+	CARGO_PROFILE_RELEASE_LTO=thin $(HARN_CARGO_CMD) build --release -p harn-cli --bin harn
 	./scripts/release_smoke.sh
 
 # Faster `release-smoke` variant that reuses the debug `harn` binary.
@@ -377,7 +378,7 @@ smoke-audit:
 			echo "HARN_BIN is not executable: $$harn_binary" >&2; \
 			exit 1; \
 		fi; \
-		CARGO_PROFILE_DEV_DEBUG=0 cargo build -p harn-cli --bin harn; \
+		CARGO_PROFILE_DEV_DEBUG=0 $(HARN_CARGO_CMD) build -p harn-cli --bin harn; \
 	fi && \
 	HARN_BINARY="$$harn_binary" ./scripts/release_smoke.sh
 
@@ -457,11 +458,11 @@ check-session-bundle-schema:
 	@echo "    Session bundle schema OK."
 
 gen-run-view-fixtures:
-	HARN_REGENERATE_RUN_VIEW_FIXTURES=1 cargo test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact
+	HARN_REGENERATE_RUN_VIEW_FIXTURES=1 $(HARN_CARGO_CMD) test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact
 
 check-run-view-fixtures:
 	@echo "=== Checking run/session view fixture snapshots ==="
-	@cargo test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact
+	@$(HARN_CARGO_CMD) test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact
 	@echo "    Run/session view fixtures OK."
 
 # Regenerate docs/src/language-spec.md from spec/HARN_SPEC.md (the
