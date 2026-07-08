@@ -13,10 +13,6 @@ const SKIP_SEGMENTS = [
   "/target/",
 ]
 
-const HARN_MCP_HELPER_DEBT_REASON = "Tracked by harn#4219: Harn owns MCP fixture serving; Python remains only as a cutover shim."
-
-const HARN_PROXY_HELPER_DEBT_REASON = "Tracked by harn#4219: Harn owns deterministic proxy fixture serving and capture; Python remains only as a cutover shim."
-
 const PYTHON_ALLOWLIST = [
   {
     kind: "exact",
@@ -26,39 +22,9 @@ const PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
-    pattern: "conformance/helpers/mcp_stdio_tool.py",
-    category: "harn-cutover-debt",
-    reason: HARN_MCP_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
-    pattern: "conformance/helpers/mcp_stdio_progress.py",
-    category: "harn-cutover-debt",
-    reason: HARN_MCP_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
-    pattern: "conformance/helpers/mcp_http_echo_server.py",
-    category: "harn-cutover-debt",
-    reason: HARN_MCP_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
-    pattern: "conformance/helpers/mcp_http_elicit_server.py",
-    category: "harn-cutover-debt",
-    reason: HARN_MCP_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
-    pattern: "conformance/helpers/mcp_roots_server.py",
-    category: "harn-cutover-debt",
-    reason: HARN_MCP_HELPER_DEBT_REASON,
-  },
-  {
-    kind: "exact",
     pattern: "conformance/helpers/http_proxy_server.py",
-    category: "harn-cutover-debt",
-    reason: HARN_PROXY_HELPER_DEBT_REASON,
+    category: "test-harness-adapter",
+    reason: "Proxy passthrough conformance needs a real TCP HTTP proxy listener; Harn's http_server is currently an in-process test surface.",
   },
   {
     kind: "prefix",
