@@ -409,7 +409,7 @@ fn log_error(error: impl std::fmt::Display) -> VmError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_log::{install_default_for_base_dir, EventLog};
+    use crate::event_log::{install_memory_for_current_thread, EventLog};
     use crate::stdlib::register_vm_stdlib;
     use crate::{compile_source, reset_thread_local_state, Vm};
     use serde_json::json;
@@ -459,8 +459,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn hitl_pending_reads_filters_limits_and_hides_terminal_rows() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        reset_thread_local_state();
+        let log = install_memory_for_current_thread(DEFAULT_LIMIT);
         append_hitl_request(
             &log,
             HITL_QUESTIONS_TOPIC,

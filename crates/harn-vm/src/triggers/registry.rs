@@ -1826,9 +1826,11 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
     use crate::event_log::{
-        install_default_for_base_dir, pin_test_occurred_at_ms, reset_active_event_log,
+        install_active_event_log, install_memory_for_current_thread, open_event_log,
+        pin_test_occurred_at_ms, reset_active_event_log, EventLogBackendKind, EventLogConfig,
     };
     use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
+    use std::path::Path;
     use std::rc::Rc;
 
     /// Build the `OffsetDateTime` that corresponds to a pinned event-log
@@ -1870,6 +1872,21 @@ mod tests {
             package_name: Some("workspace".to_string()),
             definition_fingerprint: fingerprint.to_string(),
         }
+    }
+
+    fn install_test_memory_event_log() -> Arc<AnyEventLog> {
+        install_memory_for_current_thread(512)
+    }
+
+    fn install_test_sqlite_event_log(base_dir: &Path) -> Arc<AnyEventLog> {
+        let config = EventLogConfig {
+            backend: EventLogBackendKind::Sqlite,
+            file_dir: base_dir.join("events"),
+            sqlite_path: base_dir.join("events.sqlite"),
+            queue_depth: 512,
+        };
+        let log = open_event_log(&config).expect("open isolated sqlite event log");
+        install_active_event_log(log)
     }
 
     fn dynamic_spec(id: &str) -> TriggerBindingSpec {
@@ -2055,8 +2072,7 @@ mod tests {
     async fn lifecycle_transitions_append_to_event_log() {
         clear_trigger_registry();
         reset_active_event_log();
-        let tempdir = tempfile::tempdir().expect("tempdir");
-        let log = install_default_for_base_dir(tempdir.path()).expect("install event log");
+        let log = install_test_memory_event_log();
 
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
             .await
@@ -2101,7 +2117,7 @@ mod tests {
         clear_trigger_registry();
         reset_active_event_log();
         let tempdir = tempfile::tempdir().expect("tempdir");
-        install_default_for_base_dir(tempdir.path()).expect("install event log");
+        install_test_sqlite_event_log(tempdir.path());
 
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
             .await
@@ -2112,7 +2128,7 @@ mod tests {
 
         clear_trigger_registry();
         reset_active_event_log();
-        install_default_for_base_dir(tempdir.path()).expect("reopen event log");
+        install_test_sqlite_event_log(tempdir.path());
 
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
             .await
@@ -2132,8 +2148,7 @@ mod tests {
     async fn binding_version_as_of_reports_historical_active_version() {
         clear_trigger_registry();
         reset_active_event_log();
-        let tempdir = tempfile::tempdir().expect("tempdir");
-        install_default_for_base_dir(tempdir.path()).expect("install event log");
+        install_test_memory_event_log();
 
         // Pin the event-log timestamp instead of sleeping between captures:
         // v1's lifecycle events stamp at T1, v2's at T2 > T1, with zero
@@ -2177,8 +2192,7 @@ mod tests {
         let sink = Rc::new(CollectorSink::new());
         clear_event_sinks();
         add_event_sink(sink.clone());
-        let tempdir = tempfile::tempdir().expect("tempdir");
-        install_default_for_base_dir(tempdir.path()).expect("install event log");
+        install_test_memory_event_log();
 
         // Pin the event-log timestamps: v1..v3 land at T1, v4 at T2 > T1, with
         // `received_at` at T1 so the gc fallback resolves to v3 (the latest

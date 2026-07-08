@@ -513,7 +513,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
 async fn autonomy_budget_routes_act_auto_to_approval() {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
-    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let log = install_test_event_log();
     let lib_path = dir.path().join("lib.harn");
     std::fs::write(
         &lib_path,
@@ -621,7 +621,7 @@ pub fn local_fn(event: TriggerEvent) -> dict {
 async fn handler_tier_is_enforced_through_capability_policy() {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
-    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let log = install_test_event_log();
     let lib_path = dir.path().join("lib.harn");
     std::fs::write(
         &lib_path,

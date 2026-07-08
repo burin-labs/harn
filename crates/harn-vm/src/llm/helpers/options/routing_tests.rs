@@ -424,41 +424,30 @@ fn fast_options(model: &str) -> crate::value::DictMap {
 fn fast_opts_into_tier_for_supported_model_and_guards_others() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
-    std::env::set_var("ANTHROPIC_API_KEY", "test-key");
-    std::env::set_var("OPENAI_API_KEY", "test-key");
-    super::super::reset_provider_key_cache();
-
-    match extract_with_options(fast_options("claude-opus-4-8")) {
-        Ok(opus) => assert!(opus.fast, "fast must be set for a model with a usable tier"),
-        Err(e) => panic!("opus fast should succeed: {e:?}"),
-    }
-
-    // No fast tier -> rejected with a clear diagnostic.
-    match extract_with_options(fast_options("gpt-4o")) {
-        Err(VmError::Thrown(VmValue::String(message))) => {
-            assert!(message.contains("no accelerated-serving tier"), "{message}");
-        }
-        other => panic!("expected thrown error for gpt-4o, got {:?}", other.is_ok()),
-    }
-
-    // Opus 4.6's fast tier has been removed from the catalog after
-    // Anthropic's June 29, 2026 removal date.
-    match extract_with_options(fast_options("claude-opus-4-6")) {
-        Err(VmError::Thrown(VmValue::String(message))) => {
-            assert!(message.contains("no accelerated-serving tier"), "{message}");
-        }
-        other => panic!(
-            "expected thrown error for opus 4.6, got {:?}",
-            other.is_ok()
-        ),
-    }
-
-    // Deprecated tier -> rejected. Keep this covered with a synthetic catalog
-    // row now that no built-in model has a deprecated fast tier.
     let overlay = crate::llm_config::parse_config_toml(concat!(
+        "[providers.test_fast_gate]\n",
+        "display_name = \"Test Fast Gate\"\n",
+        "base_url = \"https://example.test/v1\"\n",
+        "auth_style = \"none\"\n",
+        "chat_endpoint = \"/chat/completions\"\n",
+        "\n",
+        "[models.\"test-fast-supported\"]\n",
+        "name = \"Supported Fast Test\"\n",
+        "provider = \"test_fast_gate\"\n",
+        "context_window = 128000\n",
+        "serving_tiers = [\n",
+        "  { id = \"fast\", mode = \"synchronous\", economics = \"premium\", ",
+        "request = { param = \"speed\", value = \"fast\" } },\n",
+        "]\n",
+        "\n",
+        "[models.\"test-fast-unsupported\"]\n",
+        "name = \"Unsupported Fast Test\"\n",
+        "provider = \"test_fast_gate\"\n",
+        "context_window = 128000\n",
+        "\n",
         "[models.\"test-deprecated-fast\"]\n",
         "name = \"Deprecated Fast Test\"\n",
-        "provider = \"anthropic\"\n",
+        "provider = \"test_fast_gate\"\n",
         "context_window = 128000\n",
         "serving_tiers = [\n",
         "  { id = \"fast\", mode = \"synchronous\", economics = \"premium\", ",
@@ -469,6 +458,25 @@ fn fast_opts_into_tier_for_supported_model_and_guards_others() {
     .expect("test catalog overlay");
     crate::llm_config::set_user_overrides(Some(overlay));
     super::super::reset_provider_key_cache();
+
+    match extract_with_options(fast_options("test-fast-supported")) {
+        Ok(opts) => assert!(opts.fast, "fast must be set for a model with a usable tier"),
+        Err(e) => panic!("supported fast model should succeed: {e:?}"),
+    }
+
+    // No fast tier -> rejected with a clear diagnostic.
+    match extract_with_options(fast_options("test-fast-unsupported")) {
+        Err(VmError::Thrown(VmValue::String(message))) => {
+            assert!(message.contains("no accelerated-serving tier"), "{message}");
+        }
+        other => panic!(
+            "expected thrown error for unsupported fast tier, got {:?}",
+            other.is_ok()
+        ),
+    }
+
+    // Deprecated tier -> rejected. Keep this covered with a synthetic catalog
+    // row now that no built-in model has a deprecated fast tier.
     match extract_with_options(fast_options("test-deprecated-fast")) {
         Err(VmError::Thrown(VmValue::String(message))) => {
             assert!(message.contains("deprecated"), "{message}");
@@ -479,8 +487,6 @@ fn fast_opts_into_tier_for_supported_model_and_guards_others() {
         ),
     }
 
-    std::env::remove_var("ANTHROPIC_API_KEY");
-    std::env::remove_var("OPENAI_API_KEY");
     crate::llm_config::clear_user_overrides();
     super::super::reset_provider_key_cache();
 }

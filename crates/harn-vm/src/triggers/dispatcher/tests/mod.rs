@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tokio::sync::oneshot;
 
-use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
+use crate::event_log::{install_memory_for_current_thread, EventLog, Topic};
 use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
 use crate::llm::mock::{get_llm_mock_calls, push_llm_mock, LlmMock};
 use crate::register_vm_stdlib;
@@ -20,6 +20,12 @@ use crate::triggers::test_util::timing::TEST_DEFAULT_TIMEOUT;
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TraceId, TriggerEvent};
 use crate::TriggerPredicateBudget;
 use crate::Vm;
+
+fn install_test_event_log() -> Arc<crate::event_log::AnyEventLog> {
+    install_memory_for_current_thread(
+        crate::runtime_limits::RuntimeLimits::DEFAULT.default_event_log_queue_depth,
+    )
+}
 
 use super::retry::TriggerRetryConfig;
 use super::uri::{DispatchUri, DispatchUriError};

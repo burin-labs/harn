@@ -200,7 +200,7 @@ async fn eval_pack_handler_runs_from_cron_tick_and_sheds_after_budget() {
         .run_until(async {
             crate::reset_thread_local_state();
             let dir = tempfile::tempdir().expect("tempdir");
-            let log = install_default_for_base_dir(dir.path()).expect("install event log");
+            let log = install_test_event_log();
             let manifest = crate::triggers::test_util::scheduled_eval_manifest(dir.path())
                 .expect("scheduled eval manifest normalizes");
 
