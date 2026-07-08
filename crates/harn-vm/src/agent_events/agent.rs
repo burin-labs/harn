@@ -240,6 +240,10 @@ pub enum AgentEvent {
         confirm: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         converted_from: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        specific_gaps: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        accepted_evidence: Vec<String>,
     },
     /// Per-step critique decision emitted by `agent_step_judge`.
     /// Sibling of [`JudgeDecision`] but fired BEFORE tool dispatch on

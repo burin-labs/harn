@@ -480,6 +480,11 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             reason: Some("no_source_write".to_string()),
             confirm: Some(false),
             converted_from: Some("cosmetic_only".to_string()),
+            specific_gaps: vec![
+                "rerun the verifier".to_string(),
+                "cite the changed source file".to_string(),
+            ],
+            accepted_evidence: Vec::new(),
         },
         AgentEvent::StructuralValidatorDecision {
             session_id: "session-1".to_string(),
@@ -580,6 +585,16 @@ async fn agent_event_ext_notification_fixtures_are_pinned() {
     ))
     .expect("fixture json");
     assert_eq!(serde_json::Value::Array(actual.clone()), expected);
+
+    let judge = actual
+        .iter()
+        .find(|notification| notification["params"]["kind"] == "judge_decision")
+        .expect("judge_decision fixture");
+    assert_eq!(
+        judge["params"]["specificGaps"],
+        serde_json::json!(["rerun the verifier", "cite the changed source file"])
+    );
+    assert_eq!(judge["params"]["acceptedEvidence"], serde_json::json!([]));
 
     for notification in actual {
         assert_eq!(

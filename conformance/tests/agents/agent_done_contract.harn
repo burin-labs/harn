@@ -1,0 +1,55 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_done_contract } from "std/agent/judge"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      llm_text(
+        "Implemented two page-cache tests.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: fetch and cached-fetch tests pass\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
+      ),
+      llm_text(
+        "{\"verdict\":\"continue\",\"reasoning\":\"the claim omits visible required cases\",\"next_step\":\"keep working until all requested tests exist\",\"specific_gaps\":[\"add an LRU eviction test\",\"add a dirty flush test\",\"add a pinned-page prevention test\"]}",
+      ),
+      llm_text(
+        "Added the LRU eviction, dirty flush, and pinned-page prevention cases.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: all five page-cache test cases pass in the target suite\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
+      ),
+      llm_text(
+        "{\"verdict\":\"done\",\"reasoning\":\"the claim covers all visible cases and cites passing evidence\",\"accepted_evidence\":[\"all five requested cases are named\",\"target suite passes\"]}",
+      ),
+    ],
+    { ->
+      const session_id = "done-contract-" + uuid()
+      const captured = agent_capture_events(
+        session_id,
+        fn() { return agent_loop(
+          "Add page-cache tests for fetch, cached fetch, LRU eviction, dirty flush, and pinned-page prevention.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session_id,
+            max_iterations: 4,
+            max_nudges: 4,
+            done_sentinel: "##DONE##",
+          }
+            + agent_done_contract(),
+        ) },
+      )
+      const result = captured.result
+      const judges = events_of(captured.events, "judge_decision")
+      __io_println(result.status)
+      __io_println(result.llm.iterations)
+      __io_println(len(llm_mock_calls()))
+      __io_println(len(judges))
+      __io_println(join(judges[0].specific_gaps, " | "))
+      __io_println(join(judges[1].accepted_evidence, " | "))
+      __io_println(result.visible_text.contains("Added the LRU eviction"))
+      __io_println(to_string(llm_mock_calls()[0].system).contains("Done claim"))
+      __io_println(json_stringify(llm_mock_calls()[2].messages).contains("add a dirty flush test"))
+    },
+  )
+}
