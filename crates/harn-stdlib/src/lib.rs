@@ -270,6 +270,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/cli/render.harn"),
     },
     StdlibSource {
+        module: "cli/models/lora_render",
+        source: include_str!("stdlib/cli/models/lora_render.harn"),
+    },
+    StdlibSource {
         module: "cli/paths",
         source: include_str!("stdlib/cli/paths.harn"),
     },
@@ -1477,6 +1481,7 @@ mod tests {
             "agent/user",
             "agent/governors",
             "agent/guardrails",
+            "cli/models/lora_render",
             "llm/optimize",
             "llm/judge",
             "llm/refine",

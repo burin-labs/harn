@@ -1,3 +1,4 @@
+import { render_peft_save_policy } from "std/cli/models/lora_render"
 /**
  * `harn models lora manifest` renderer.
  *
@@ -60,6 +61,7 @@ fn __render_human(harness: Harness, report: dict) {
   const contract = safe_dict(report["contract"])
   const training = safe_dict(report["training"])
   const training_contract = safe_dict(training["contract"])
+  const peft_save_policy = safe_dict(training_contract["peft_save_policy"])
   const precision = safe_dict(training["precision"])
   const template = safe_dict(training["template"])
   const inputs = safe_dict(report["inputs"])
@@ -125,6 +127,7 @@ fn __render_human(harness: Harness, report: dict) {
   }
   harness.stdio
     .println("  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""))
+  render_peft_save_policy(harness, peft_save_policy)
   harness.stdio
     .println("  parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
   harness.stdio

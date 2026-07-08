@@ -246,6 +246,9 @@ pub(crate) struct ModelsLoraExportArgs {
     /// Extra target provenance copied into row metadata, as KEY=VALUE.
     #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
     pub target_metadata: Vec<String>,
+    /// PEFT modules_to_save entries to include in the LoRA contract.
+    #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
+    pub modules_to_save: Vec<String>,
     /// Emit structured JSON report.
     #[arg(long)]
     pub json: bool,
@@ -337,6 +340,9 @@ pub(crate) struct ModelsLoraManifestArgs {
     /// Extra target provenance copied into the manifest, as KEY=VALUE.
     #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
     pub target_metadata: Vec<String>,
+    /// PEFT modules_to_save entries used by the trainer.
+    #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
+    pub modules_to_save: Vec<String>,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
@@ -377,6 +383,9 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// LoRA dropout probability.
     #[arg(long, default_value_t = 0.05)]
     pub dropout: f64,
+    /// PEFT modules_to_save entries to plan for.
+    #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
+    pub modules_to_save: Vec<String>,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
@@ -444,6 +453,9 @@ pub(crate) struct ModelsLoraTrainArgs {
     /// Extra target provenance copied into the receipt and manifest command, as KEY=VALUE.
     #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
     pub target_metadata: Vec<String>,
+    /// PEFT modules_to_save entries used by the backend trainer.
+    #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
+    pub modules_to_save: Vec<String>,
     /// Execute the backend argv after rendering the receipt plan. Omit for deterministic dry-run.
     #[arg(long)]
     pub execute: bool,

@@ -8,11 +8,11 @@ use super::{
     adapter_name_from_input, dataset_format_for_tool_format, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
-    normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_plan_tool_format,
-    parse_target_metadata, render_embedded_lora_report, serving_recipe, sha256_file,
-    target_modules_for_route, teacher_report, template_recipe_for_route, BaseModelReport,
-    EvaluationRecipe, LoraContractReport, LoraTrainingContract, PrecisionContract, ServingRecipe,
-    TeacherReport, TemplateRecipe, ToolCallingReport,
+    normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_modules_to_save,
+    normalize_plan_tool_format, parse_target_metadata, render_embedded_lora_report, serving_recipe,
+    sha256_file, target_modules_for_route, teacher_report, template_recipe_for_route,
+    BaseModelReport, EvaluationRecipe, LoraContractReport, LoraTrainingContract, PrecisionContract,
+    ServingRecipe, TeacherReport, TemplateRecipe, ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -49,6 +49,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
+    let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let provider = args
         .provider
@@ -105,6 +106,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         &decision.effective,
         dataset_format,
         Some(&chat_template),
+        &modules_to_save,
     )?;
     let contract = lora_contract_report(
         contract_id.clone(),
@@ -113,6 +115,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         &decision.effective,
         dataset_format,
         Some(chat_template.clone()),
+        &modules_to_save,
     );
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
@@ -246,7 +249,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
             target_modules,
             precision,
             template,
-            contract: lora_training_contract(dataset_format, &decision.effective),
+            contract: lora_training_contract(dataset_format, &decision.effective, &modules_to_save),
         },
         inputs: ManifestInputs {
             dataset: args.dataset.as_deref().map(path_ref).transpose()?,

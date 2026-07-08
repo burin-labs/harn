@@ -2575,6 +2575,7 @@ fn models_lora_plan_json_shape_is_stable() {
             .is_some_and(|text| text.contains("compute dtype"))),
         "precision gates={precision_gates:?}"
     );
+    assert_eq!(report["training"]["contract"]["schema_version"], 2);
     assert_eq!(
         report["training"]["contract"]["assistant_mask_policy"],
         "require_chat_template_generation_masks"
@@ -2590,6 +2591,14 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(
         report["training"]["contract"]["dataset_split_policy"],
         "train_tune_holdout_disjoint_no_eval_holdout_training"
+    );
+    assert_eq!(
+        report["training"]["contract"]["peft_save_policy"]["schema_version"],
+        1
+    );
+    assert_eq!(
+        report["training"]["contract"]["peft_save_policy"]["modules_to_save"],
+        serde_json::json!([])
     );
     let trainer_contract = report["training"]["trainer_contract"]
         .as_array()
@@ -2609,7 +2618,13 @@ fn models_lora_plan_json_shape_is_stable() {
     assert!(
         trainer_contract.iter().any(|note| note
             .as_str()
-            .is_some_and(|text| text.contains("stock TRL/PEFT backend"))),
+            .is_some_and(|text| text.contains("modules_to_save=[]"))),
+        "trainer contract={trainer_contract:?}"
+    );
+    assert!(
+        trainer_contract.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("external trainers must reproduce"))),
         "trainer contract={trainer_contract:?}"
     );
     assert_eq!(report["data"]["dataset_format"], "messages_with_tool_calls");
@@ -3314,6 +3329,8 @@ fn models_lora_manifest_json_writes_training_manifest() {
             "dashscope/qwen3-coder-next",
             "--target-metadata",
             "lane=structured",
+            "--modules-to-save",
+            "embed_tokens,lm_head",
             "--json",
         ],
         &[],
@@ -3402,12 +3419,27 @@ fn models_lora_manifest_json_writes_training_manifest() {
     );
     assert_eq!(report["promotion"]["minimum_trials"], 5);
     assert!(out.is_file(), "manifest file missing");
+    assert_eq!(report["contract"]["schema_version"], 2);
+    assert_eq!(report["contract"]["training_contract"]["schema_version"], 2);
+    assert_eq!(
+        report["contract"]["training_contract"]["peft_save_policy"]["schema_version"],
+        1
+    );
 
     let manifest_value = parse_json(
         &fs::read_to_string(&out).expect("read manifest"),
         "training manifest",
     );
     let contract_id = report["contract"]["id"].as_str().expect("contract id");
+    assert_eq!(manifest_value["contract"]["schema_version"], 2);
+    assert_eq!(
+        manifest_value["contract"]["training_contract"]["schema_version"],
+        2
+    );
+    assert_eq!(
+        manifest_value["contract"]["training_contract"]["peft_save_policy"]["schema_version"],
+        1
+    );
     assert_eq!(manifest_value["contract"]["id"], contract_id);
     assert_eq!(manifest_value["target"]["contract_id"], contract_id);
     assert_eq!(manifest_value["serving"]["request_model"], "burin-tools");
@@ -3422,7 +3454,10 @@ fn models_lora_manifest_json_writes_training_manifest() {
         manifest_value["serving"]
     );
 
-    let adapter_with_contract = write_lora_adapter_fixture_with_contract(Some(contract_id));
+    let adapter_with_contract = write_lora_adapter_fixture_with_contract_and_modules(
+        Some(contract_id),
+        &["lm_head", "embed_tokens"],
+    );
     let inspect = run(
         &[
             "models",
@@ -3449,6 +3484,10 @@ fn models_lora_manifest_json_writes_training_manifest() {
     let inspect_report = success_data(&inspect_value);
     assert_eq!(inspect_report["contract"]["status"], "pass");
     assert_eq!(inspect_report["contract"]["contract_id"], contract_id);
+    assert_eq!(
+        inspect_report["adapter"]["modules_to_save"],
+        serde_json::json!(["embed_tokens", "lm_head"])
+    );
 }
 
 #[test]
@@ -3497,6 +3536,8 @@ fn models_lora_train_json_writes_dry_run_receipt() {
             "8192",
             "--target-metadata",
             "lane=structured",
+            "--modules-to-save",
+            "embed_tokens,lm_head",
             "--json",
             "--",
             "uv",
@@ -3535,6 +3576,14 @@ fn models_lora_train_json_writes_dry_run_receipt() {
     assert_eq!(report["training"]["rank"], 24);
     assert_eq!(report["training"]["alpha"], 48);
     assert_eq!(report["training"]["max_seq_length"], 8192);
+    assert_eq!(
+        report["training"]["contract"]["peft_save_policy"]["modules_to_save"],
+        serde_json::json!(["embed_tokens", "lm_head"])
+    );
+    assert_eq!(
+        report["training"]["contract"]["peft_save_policy"]["requires_weight_tying_check"],
+        true
+    );
     assert_eq!(report["inputs"]["dataset"]["exists"], true);
     assert_eq!(report["inputs"]["dataset"]["kind"], "file");
     assert!(
@@ -3571,6 +3620,15 @@ fn models_lora_train_json_writes_dry_run_receipt() {
             .expect("manifest command")
             .windows(2)
             .any(|pair| pair[0] == "--trainer-version" && pair[1] == "unsloth-2026.7"),
+        "post_training={:?}",
+        report["post_training"]
+    );
+    assert!(
+        report["post_training"]["manifest_command"]
+            .as_array()
+            .expect("manifest command")
+            .windows(2)
+            .any(|pair| pair[0] == "--modules-to-save" && pair[1] == "embed_tokens"),
         "post_training={:?}",
         report["post_training"]
     );
@@ -3693,6 +3751,13 @@ fn write_lora_adapter_fixture() -> tempfile::TempDir {
 }
 
 fn write_lora_adapter_fixture_with_contract(contract_id: Option<&str>) -> tempfile::TempDir {
+    write_lora_adapter_fixture_with_contract_and_modules(contract_id, &[])
+}
+
+fn write_lora_adapter_fixture_with_contract_and_modules(
+    contract_id: Option<&str>,
+    modules_to_save: &[&str],
+) -> tempfile::TempDir {
     let tmp = tempfile::tempdir().expect("tempdir");
     fs::write(tmp.path().join("adapter_model.safetensors"), b"stub").expect("adapter weights");
     let mut config = serde_json::json!({
@@ -3705,6 +3770,9 @@ fn write_lora_adapter_fixture_with_contract(contract_id: Option<&str>) -> tempfi
     });
     if let Some(contract_id) = contract_id {
         config["harn_lora_contract_id"] = serde_json::Value::String(contract_id.to_string());
+    }
+    if !modules_to_save.is_empty() {
+        config["modules_to_save"] = serde_json::json!(modules_to_save);
     }
     fs::write(
         tmp.path().join("adapter_config.json"),
@@ -3727,7 +3795,7 @@ fn write_lora_manifest_fixture(root: &std::path::Path, contract_id: &str) -> std
             "contract_id": contract_id
         },
         "contract": {
-            "schema_version": 1,
+            "schema_version": 2,
             "id": contract_id,
             "base_model": "gemma-4-e4b-it",
             "provider": "vllm",
@@ -3735,13 +3803,21 @@ fn write_lora_manifest_fixture(root: &std::path::Path, contract_id: &str) -> std
             "dataset_format": "harn_text_tool_calls_json_fences",
             "chat_template": "harn_text_tool_calls_json_fences",
             "training_contract": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "loss_scope": "assistant_tool_calls",
                 "assistant_mask_policy": "require_chat_template_generation_masks",
                 "packing_policy": "disabled_unless_boundary_aware_tool_pack_pairs",
                 "tool_parser_owner": "harn_text_tool_parser",
                 "dataset_format": "harn_text_tool_calls_json_fences",
                 "dataset_split_policy": "train_tune_holdout_disjoint_no_eval_holdout_training",
+                "peft_save_policy": {
+                    "schema_version": 1,
+                    "modules_to_save": [],
+                    "save_embedding_layers": "disabled_unless_tokenizer_vocab_changed",
+                    "tied_embedding_policy": "no_embedding_or_lm_head_adapter_weights_expected",
+                    "requires_weight_tying_check": false,
+                    "notes": []
+                },
                 "required_example_metadata": []
             }
         },

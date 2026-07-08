@@ -1,0 +1,25 @@
+/** Shared render helpers for `harn models lora *` commands. */
+import { print_list, safe_list, safe_string } from "std/cli/render"
+
+/**
+ * Render the PEFT save policy carried by a LoRA training contract.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_peft_save_policy(harness: Harness, policy: dict) {
+  const modules_to_save = safe_list(policy["modules_to_save"])
+  if len(modules_to_save) > 0 {
+    harness.stdio
+      .println(
+      "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
+    )
+  } else {
+    harness.stdio.println("  modules to save: none")
+  }
+  harness.stdio
+    .println("  embedding save policy: " + safe_string(policy["save_embedding_layers"], ""))
+  harness.stdio
+    .println("  weight tying policy: " + safe_string(policy["tied_embedding_policy"], ""))
+  print_list(harness, "PEFT save notes", safe_list(policy["notes"]))
+}

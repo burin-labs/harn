@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -18,6 +18,10 @@ const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
 const LORA_PLAN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_JSON";
 const LORA_PLAN_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY";
+const LORA_CONTRACT_SCHEMA_VERSION: u64 = 2;
+const LORA_CONTRACT_HASH_SCHEMA_VERSION: u64 = 2;
+const LORA_TRAINING_CONTRACT_SCHEMA_VERSION: u64 = 2;
+const LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION: u64 = 1;
 /// Serialises the dispatch path so concurrent in-process callers do not race on
 /// the env vars that carry the Rust-collected adapter/catalog facts.
 static LORA_RENDER_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -293,6 +297,7 @@ fn inspect_contract_report(
     let manifest_tool_format = manifest_string_from_object(contract, "harn_tool_format");
     let manifest_dataset_format = manifest_string_from_object(contract, "dataset_format");
     let manifest_chat_template = manifest_string_from_object(contract, "chat_template");
+    let manifest_modules_to_save = manifest_modules_to_save_from_contract(contract);
     let target_adapter_name = manifest
         .get("target")
         .and_then(serde_json::Value::as_object)
@@ -327,6 +332,10 @@ fn inspect_contract_report(
         (Some(adapter_id), Some(manifest_id)) => Some(adapter_id == manifest_id),
         _ => None,
     };
+    let adapter_modules_to_save = normalize_modules_to_save_lossy(adapter.modules_to_save.clone());
+    let modules_to_save_matches = manifest_modules_to_save
+        .as_ref()
+        .map(|manifest_modules| manifest_modules == &adapter_modules_to_save);
 
     let mut warnings = Vec::new();
     if matches!(
@@ -369,6 +378,15 @@ fn inspect_contract_report(
             contract_id.as_deref().unwrap_or("<missing>")
         ));
     }
+    if manifest_modules_to_save.is_none() {
+        warnings.push("LoRA contract mismatch: manifest PEFT save policy is missing".to_string());
+    } else if modules_to_save_matches == Some(false) {
+        warnings.push(format!(
+            "LoRA contract mismatch: adapter modules_to_save {:?} does not match manifest modules_to_save {:?}",
+            adapter_modules_to_save,
+            manifest_modules_to_save.as_deref().unwrap_or(&[])
+        ));
+    }
     if adapter.contract_id.is_none() {
         let prefix = if require_adapter_contract_id {
             "LoRA contract missing"
@@ -400,6 +418,7 @@ fn inspect_contract_report(
         provider_matches,
         tool_format_matches,
         adapter_name_matches,
+        modules_to_save_matches,
         require_adapter_contract_id,
         manifest: InspectContractManifest {
             base_model: manifest_base_model,
@@ -407,11 +426,22 @@ fn inspect_contract_report(
             harn_tool_format: manifest_tool_format,
             dataset_format: manifest_dataset_format,
             chat_template: manifest_chat_template,
+            modules_to_save: manifest_modules_to_save,
             adapter_name: target_adapter_name,
             request_model: serving_request_model,
         },
         warnings,
     }))
+}
+
+fn manifest_modules_to_save_from_contract(
+    contract: &serde_json::Map<String, serde_json::Value>,
+) -> Option<Vec<String>> {
+    let modules = contract
+        .get("training_contract")?
+        .get("peft_save_policy")?
+        .get("modules_to_save")?;
+    Some(normalize_modules_to_save_lossy(value_string_list(modules)))
 }
 
 fn manifest_string_from_object(
@@ -436,6 +466,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let requested_corpus_strategy = normalize_corpus_strategy(&args.corpus_strategy)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
+    let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let target_modules =
         target_modules_for_route(&method, &resolved.id, &resolved.family, &resolved.lineage);
     let provider = args
@@ -494,6 +525,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         &decision.effective,
         dataset_format,
         Some(&template.name),
+        &modules_to_save,
     )?;
     let inspect_command = vec![
         "harn".to_string(),
@@ -604,6 +636,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         template.name.clone(),
     ];
     export_command.extend(precision_target_metadata(&precision));
+    export_command.extend(modules_to_save_args(&modules_to_save));
     let mut train_command = vec![
         "harn".to_string(),
         "models".to_string(),
@@ -644,6 +677,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         train_command.extend(["--teacher".to_string(), teacher.selector.clone()]);
     }
     train_command.extend(precision_target_metadata(&precision));
+    train_command.extend(modules_to_save_args(&modules_to_save));
     train_command.extend(target_metadata_args_from_map(&serving_target_metadata(
         &serving,
     )));
@@ -687,6 +721,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         manifest_command.extend(["--teacher".to_string(), teacher.selector.clone()]);
     }
     manifest_command.extend(precision_target_metadata(&precision));
+    manifest_command.extend(modules_to_save_args(&modules_to_save));
     manifest_command.extend(target_metadata_args_from_map(&serving_target_metadata(
         &serving,
     )));
@@ -763,11 +798,12 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             loss_scope: "assistant_tool_calls".to_string(),
             packing: "off_by_default_for_tool_boundaries".to_string(),
             target_modules,
-            contract: lora_training_contract(dataset_format, &decision.effective),
+            contract: lora_training_contract(dataset_format, &decision.effective, &modules_to_save),
             trainer_contract: trainer_contract_for_dataset(
                 dataset_format,
                 &decision.effective,
                 &trainer,
+                &modules_to_save,
             ),
             notes: training_notes(&decision.effective),
         },
@@ -859,6 +895,10 @@ fn inspect_adapter(input: &str, explicit_name: Option<&str>) -> Result<AdapterRe
         rank: config_u64(&config, "r"),
         lora_alpha: config_f64(&config, "lora_alpha"),
         target_modules: config_string_list(&config, "target_modules"),
+        modules_to_save: normalize_modules_to_save_lossy(config_string_list(
+            &config,
+            "modules_to_save",
+        )),
         contract_id: config_contract_id(&config),
     })
 }
@@ -890,6 +930,10 @@ fn config_string_list(config: &Option<serde_json::Value>, key: &str) -> Vec<Stri
     let Some(value) = config.as_ref().and_then(|value| value.get(key)) else {
         return Vec::new();
     };
+    value_string_list(value)
+}
+
+fn value_string_list(value: &serde_json::Value) -> Vec<String> {
     if let Some(text) = value.as_str() {
         return vec![text.to_string()];
     }
@@ -1028,6 +1072,31 @@ fn target_modules_for_route(
             "o_proj".to_string(),
         ],
     }
+}
+
+pub(super) fn normalize_modules_to_save(raw: &[String]) -> Result<Vec<String>, String> {
+    let mut seen = BTreeSet::new();
+    for item in raw {
+        for piece in item.split(',') {
+            let module = piece.trim();
+            if module.is_empty() {
+                return Err("--modules-to-save entries must not be empty".to_string());
+            }
+            seen.insert(module.to_string());
+        }
+    }
+    Ok(seen.into_iter().collect())
+}
+
+fn normalize_modules_to_save_lossy(raw: Vec<String>) -> Vec<String> {
+    normalize_modules_to_save(&raw).unwrap_or(raw)
+}
+
+fn modules_to_save_args(modules: &[String]) -> Vec<String> {
+    modules
+        .iter()
+        .flat_map(|module| ["--modules-to-save".to_string(), module.clone()])
+        .collect()
 }
 
 fn normalize_plan_tool_format(raw: &str) -> Result<String, String> {
@@ -1307,13 +1376,24 @@ fn trainer_contract_for_dataset(
     dataset_format: &str,
     tool_format: &str,
     trainer: &str,
+    modules_to_save: &[String],
 ) -> Vec<String> {
-    let machine_contract = lora_training_contract(dataset_format, tool_format);
+    let machine_contract = lora_training_contract(dataset_format, tool_format, modules_to_save);
+    let peft_policy = &machine_contract.peft_save_policy;
     let mut contract = vec![
         "use TRL SFTTrainer with PEFT LoRA/QLoRA; keep the base weights frozen and save only adapter artifacts".to_string(),
         "set assistant_only_loss=true so prompts, tool schemas, and tool observations are context rather than targets".to_string(),
         "verify the tokenizer chat template emits assistant generation masks before trusting assistant_only_loss".to_string(),
         "keep packing=false unless a boundary-aware packer preserves complete tool-call/tool-result pairs".to_string(),
+        format!(
+            "set PEFT modules_to_save={}; keep embedding/lm_head saves explicit in the manifest",
+            if peft_policy.modules_to_save.is_empty() {
+                "[]".to_string()
+            } else {
+                format!("{:?}", peft_policy.modules_to_save)
+            }
+        ),
+        "if embed_tokens or lm_head are saved for a tied-output base, verify PEFT weight tying before merge or keep the adapter unmerged".to_string(),
     ];
     match dataset_format {
         "messages_with_tool_calls" => {
@@ -1368,15 +1448,17 @@ fn trainer_contract_for_dataset(
 pub(super) fn lora_training_contract(
     dataset_format: &str,
     tool_format: &str,
+    modules_to_save: &[String],
 ) -> LoraTrainingContract {
     LoraTrainingContract {
-        schema_version: 1,
+        schema_version: LORA_TRAINING_CONTRACT_SCHEMA_VERSION,
         loss_scope: "assistant_tool_calls".to_string(),
         assistant_mask_policy: "require_chat_template_generation_masks".to_string(),
         packing_policy: "disabled_unless_boundary_aware_tool_pack_pairs".to_string(),
         tool_parser_owner: tool_parser_owner_for_format(tool_format).to_string(),
         dataset_format: dataset_format.to_string(),
         dataset_split_policy: "train_tune_holdout_disjoint_no_eval_holdout_training".to_string(),
+        peft_save_policy: peft_save_policy(modules_to_save),
         required_example_metadata: vec![
             "dataset_format".to_string(),
             "source_tool_format".to_string(),
@@ -1396,20 +1478,49 @@ pub(super) fn lora_training_contract(
     }
 }
 
+fn peft_save_policy(modules_to_save: &[String]) -> PeftSavePolicy {
+    let saves_embeddings = modules_to_save
+        .iter()
+        .any(|module| matches!(module.as_str(), "embed_tokens" | "lm_head"));
+    PeftSavePolicy {
+        schema_version: LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION,
+        modules_to_save: modules_to_save.to_vec(),
+        save_embedding_layers: if saves_embeddings {
+            "explicit_modules_to_save_declared".to_string()
+        } else {
+            "disabled_unless_tokenizer_vocab_changed".to_string()
+        },
+        tied_embedding_policy: if saves_embeddings {
+            "verify_tied_embed_tokens_lm_head_remain_tied_before_merge_or_keep_adapter_unmerged"
+                .to_string()
+        } else {
+            "no_embedding_or_lm_head_adapter_weights_expected".to_string()
+        },
+        requires_weight_tying_check: saves_embeddings,
+        notes: vec![
+            "default tool-calling LoRA/QLoRA adapters save only adapter weights".to_string(),
+            "declare embed_tokens or lm_head only when tokenizer vocabulary or output-head training requires it".to_string(),
+            "record tokenizer resize and weight-tying evidence in target metadata when saving embedding/head modules".to_string(),
+        ],
+    }
+}
+
 fn lora_contract_id(
     base_model: &str,
     provider: &str,
     harn_tool_format: &str,
     dataset_format: &str,
     chat_template: Option<&str>,
+    modules_to_save: &[String],
 ) -> Result<String, String> {
     let input = LoraContractHashInput {
-        schema_version: 1,
+        schema_version: LORA_CONTRACT_HASH_SCHEMA_VERSION,
         base_model,
         provider,
         harn_tool_format,
         dataset_format,
         chat_template,
+        modules_to_save,
     };
     let bytes = serde_json::to_vec(&input)
         .map_err(|error| format!("failed to render LoRA contract hash input: {error}"))?;
@@ -1423,16 +1534,21 @@ fn lora_contract_report(
     harn_tool_format: &str,
     dataset_format: &str,
     chat_template: Option<String>,
+    modules_to_save: &[String],
 ) -> LoraContractReport {
     LoraContractReport {
-        schema_version: 1,
+        schema_version: LORA_CONTRACT_SCHEMA_VERSION,
         id: contract_id,
         base_model: base_model.to_string(),
         provider: provider.to_string(),
         harn_tool_format: harn_tool_format.to_string(),
         dataset_format: dataset_format.to_string(),
         chat_template,
-        training_contract: lora_training_contract(dataset_format, harn_tool_format),
+        training_contract: lora_training_contract(
+            dataset_format,
+            harn_tool_format,
+            modules_to_save,
+        ),
     }
 }
 
@@ -2246,6 +2362,7 @@ struct AdapterReport {
     rank: Option<u64>,
     lora_alpha: Option<f64>,
     target_modules: Vec<String>,
+    modules_to_save: Vec<String>,
     contract_id: Option<String>,
 }
 
@@ -2259,6 +2376,7 @@ struct InspectContractReport {
     provider_matches: bool,
     tool_format_matches: bool,
     adapter_name_matches: Option<bool>,
+    modules_to_save_matches: Option<bool>,
     require_adapter_contract_id: bool,
     manifest: InspectContractManifest,
     warnings: Vec<String>,
@@ -2271,6 +2389,7 @@ struct InspectContractManifest {
     harn_tool_format: Option<String>,
     dataset_format: Option<String>,
     chat_template: Option<String>,
+    modules_to_save: Option<Vec<String>>,
     adapter_name: Option<String>,
     request_model: Option<String>,
 }
@@ -2383,7 +2502,18 @@ pub(super) struct LoraTrainingContract {
     tool_parser_owner: String,
     dataset_format: String,
     dataset_split_policy: String,
+    peft_save_policy: PeftSavePolicy,
     required_example_metadata: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(super) struct PeftSavePolicy {
+    schema_version: u64,
+    modules_to_save: Vec<String>,
+    save_embedding_layers: String,
+    tied_embedding_policy: String,
+    requires_weight_tying_check: bool,
+    notes: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2406,6 +2536,7 @@ struct LoraContractHashInput<'a> {
     harn_tool_format: &'a str,
     dataset_format: &'a str,
     chat_template: Option<&'a str>,
+    modules_to_save: &'a [String],
 }
 
 #[derive(Debug, Serialize)]
@@ -2569,7 +2700,8 @@ mod tests {
                 "task_type": "CAUSAL_LM",
                 "r": 16,
                 "lora_alpha": 32,
-                "target_modules": ["q_proj", "v_proj"]
+                "target_modules": ["q_proj", "v_proj"],
+                "modules_to_save": ["embed_tokens"]
             }"#,
         )
         .expect("adapter config");
@@ -2587,6 +2719,10 @@ mod tests {
         assert!(report.ok, "{:?}", report.warnings);
         assert_eq!(report.adapter.peft_type.as_deref(), Some("LORA"));
         assert_eq!(report.adapter.rank, Some(16));
+        assert_eq!(
+            report.adapter.modules_to_save,
+            vec!["embed_tokens".to_string()]
+        );
         assert_eq!(report.base.tool_format, "json");
         assert!(!report.tool_calling.native_tools);
         assert_eq!(
@@ -2697,8 +2833,12 @@ mod tests {
 
     #[test]
     fn lora_trainer_contract_keeps_loss_masks_and_tool_columns_explicit() {
-        let native =
-            trainer_contract_for_dataset("messages_with_tool_calls", "native", "trl_sft_trainer");
+        let native = trainer_contract_for_dataset(
+            "messages_with_tool_calls",
+            "native",
+            "trl_sft_trainer",
+            &[],
+        );
         assert!(native
             .iter()
             .any(|item| item.contains("assistant_only_loss=true")));
@@ -2711,13 +2851,18 @@ mod tests {
             "harn_text_tool_calls_json_fences",
             "json",
             "trl_sft_trainer",
+            &[],
         );
         assert!(text.iter().any(|item| item.contains("assistant_tool_text")));
         assert!(text
             .iter()
             .any(|item| item.contains("Harn remains the parser")));
 
-        let native_contract = lora_training_contract("messages_with_tool_calls", "native");
+        let native_contract = lora_training_contract("messages_with_tool_calls", "native", &[]);
+        assert_eq!(
+            native_contract.schema_version,
+            LORA_TRAINING_CONTRACT_SCHEMA_VERSION
+        );
         assert_eq!(
             native_contract.assistant_mask_policy,
             "require_chat_template_generation_masks"
@@ -2731,13 +2876,41 @@ mod tests {
             "train_tune_holdout_disjoint_no_eval_holdout_training"
         );
 
-        let text_contract = lora_training_contract("harn_text_tool_calls_json_fences", "json");
+        let text_contract = lora_training_contract("harn_text_tool_calls_json_fences", "json", &[]);
+        assert_eq!(
+            text_contract.peft_save_policy.schema_version,
+            LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION
+        );
         assert_eq!(text_contract.tool_parser_owner, "harn_text_tool_parser");
+        assert!(text_contract.peft_save_policy.modules_to_save.is_empty());
+        assert!(!text_contract.peft_save_policy.requires_weight_tying_check);
 
-        let unsloth =
-            trainer_contract_for_dataset("harn_text_tool_calls_json_fences", "json", "unsloth_sft");
+        let embedding_contract = lora_training_contract(
+            "harn_text_tool_calls_json_fences",
+            "json",
+            &["embed_tokens".to_string(), "lm_head".to_string()],
+        );
+        assert_eq!(
+            embedding_contract.peft_save_policy.modules_to_save,
+            vec!["embed_tokens".to_string(), "lm_head".to_string()]
+        );
+        assert!(
+            embedding_contract
+                .peft_save_policy
+                .requires_weight_tying_check
+        );
+
+        let unsloth = trainer_contract_for_dataset(
+            "harn_text_tool_calls_json_fences",
+            "json",
+            "unsloth_sft",
+            &[],
+        );
         assert!(unsloth.iter().any(|item| item.contains("Unsloth")));
         assert!(unsloth.iter().any(|item| item.contains("torch/CUDA")));
+        assert!(unsloth
+            .iter()
+            .any(|item| item.contains("modules_to_save=[]")));
     }
 
     #[test]
@@ -2754,6 +2927,7 @@ mod tests {
             rank: 24,
             alpha: None,
             dropout: 0.1,
+            modules_to_save: Vec::new(),
             json: true,
         };
         let report = plan_report(&default_args).expect("report");
@@ -2788,6 +2962,7 @@ mod tests {
             rank: 24,
             alpha: None,
             dropout: 0.1,
+            modules_to_save: Vec::new(),
             json: true,
         };
         let report = plan_report(&args).expect("report");
@@ -2825,9 +3000,35 @@ mod tests {
             rank: 24,
             alpha: Some(48),
             dropout: 0.1,
+            modules_to_save: vec!["embed_tokens".to_string(), "lm_head".to_string()],
             json: true,
         };
         let report = plan_report(&args).expect("report");
+        assert_eq!(
+            report.training.contract.schema_version,
+            LORA_TRAINING_CONTRACT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            report.training.contract.peft_save_policy.modules_to_save,
+            vec!["embed_tokens".to_string(), "lm_head".to_string()]
+        );
+        assert!(
+            report
+                .training
+                .contract
+                .peft_save_policy
+                .requires_weight_tying_check
+        );
+        assert!(report
+            .launch
+            .train_command
+            .windows(2)
+            .any(|pair| pair == ["--modules-to-save", "embed_tokens"]));
+        assert!(report
+            .launch
+            .train_command
+            .windows(2)
+            .any(|pair| pair == ["--modules-to-save", "lm_head"]));
         assert!(report
             .launch
             .manifest_command

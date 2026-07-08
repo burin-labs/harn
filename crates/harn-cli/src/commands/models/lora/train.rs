@@ -13,11 +13,12 @@ use super::{
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
-    normalize_plan_tool_format, parse_target_metadata, precision_contract_for_method,
-    render_embedded_lora_report, serving_recipe, sha256_file, target_modules_for_route,
-    teacher_report, template_recipe_for_route, trainer_contract_for_dataset, BaseModelReport,
-    EvaluationRecipe, LoraContractReport, LoraTrainingContract, PrecisionContract, ServingRecipe,
-    TeacherReport, TemplateRecipe, ToolCallingReport,
+    normalize_modules_to_save, normalize_plan_tool_format, parse_target_metadata,
+    precision_contract_for_method, render_embedded_lora_report, serving_recipe, sha256_file,
+    target_modules_for_route, teacher_report, template_recipe_for_route,
+    trainer_contract_for_dataset, BaseModelReport, EvaluationRecipe, LoraContractReport,
+    LoraTrainingContract, PrecisionContract, ServingRecipe, TeacherReport, TemplateRecipe,
+    ToolCallingReport,
 };
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
@@ -61,6 +62,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
+    let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let provider = args
         .provider
@@ -111,6 +113,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         &decision.effective,
         dataset_format,
         Some(&chat_template),
+        &modules_to_save,
     )?;
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
@@ -153,6 +156,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         alpha,
         dropout,
         metadata: &metadata,
+        modules_to_save: &modules_to_save,
     });
     let eval_dataset = args.dataset.display().to_string();
     let promotion = lora_evaluation_recipe(
@@ -262,6 +266,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             &decision.effective,
             dataset_format,
             Some(chat_template.clone()),
+            &modules_to_save,
         ),
         training: TrainTraining {
             trainer: trainer.clone(),
@@ -274,11 +279,12 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             target_modules,
             precision,
             template,
-            contract: lora_training_contract(dataset_format, &decision.effective),
+            contract: lora_training_contract(dataset_format, &decision.effective, &modules_to_save),
             trainer_contract: trainer_contract_for_dataset(
                 dataset_format,
                 &decision.effective,
                 &trainer,
+                &modules_to_save,
             ),
             max_seq_length: args.max_seq_length,
         },
@@ -377,6 +383,7 @@ struct PostTrainingManifestCommand<'a> {
     alpha: u32,
     dropout: f64,
     metadata: &'a BTreeMap<String, String>,
+    modules_to_save: &'a [String],
 }
 
 fn post_training_manifest_command(ctx: PostTrainingManifestCommand<'_>) -> Vec<String> {
@@ -428,6 +435,9 @@ fn post_training_manifest_command(ctx: PostTrainingManifestCommand<'_>) -> Vec<S
     }
     if let Some(teacher) = &ctx.args.teacher {
         command.extend(["--teacher".to_string(), teacher.clone()]);
+    }
+    for module in ctx.modules_to_save {
+        command.extend(["--modules-to-save".to_string(), module.clone()]);
     }
     for (key, value) in ctx.metadata {
         command.extend(["--target-metadata".to_string(), format!("{key}={value}")]);
@@ -755,6 +765,7 @@ mod tests {
             max_seq_length: Some(8192),
             teacher: None,
             target_metadata: vec!["lane=tool-calls".to_string()],
+            modules_to_save: vec!["embed_tokens".to_string()],
             execute: false,
             backend_cwd: None,
             json: true,
@@ -774,6 +785,17 @@ mod tests {
             Some("unsloth-2026.7")
         );
         assert_eq!(report.training.alpha, 48);
+        assert_eq!(
+            report.training.contract.peft_save_policy.modules_to_save,
+            vec!["embed_tokens".to_string()]
+        );
+        assert!(
+            report
+                .training
+                .contract
+                .peft_save_policy
+                .requires_weight_tying_check
+        );
         assert_eq!(report.backend.status, "dry_run");
         assert!(!report.backend.execute);
         assert_eq!(report.inputs.dataset.kind, "file");
@@ -791,6 +813,11 @@ mod tests {
             .manifest_command
             .windows(2)
             .any(|pair| pair == ["--trainer-version", "unsloth-2026.7"]));
+        assert!(report
+            .post_training
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--modules-to-save", "embed_tokens"]));
         assert_eq!(
             report
                 .target
@@ -827,6 +854,7 @@ mod tests {
             max_seq_length: None,
             teacher: None,
             target_metadata: Vec::new(),
+            modules_to_save: Vec::new(),
             execute: false,
             backend_cwd: None,
             json: true,

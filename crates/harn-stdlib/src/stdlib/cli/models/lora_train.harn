@@ -1,3 +1,4 @@
+import { render_peft_save_policy } from "std/cli/models/lora_render"
 /**
  * `harn models lora train` renderer.
  *
@@ -58,6 +59,8 @@ fn __render_human(harness: Harness, report: dict) {
   const base = safe_dict(report["base"])
   const request = safe_dict(report["request"])
   const training = safe_dict(report["training"])
+  const training_contract = safe_dict(training["contract"])
+  const peft_save_policy = safe_dict(training_contract["peft_save_policy"])
   const precision = safe_dict(training["precision"])
   const template = safe_dict(training["template"])
   const contract = safe_dict(report["contract"])
@@ -117,6 +120,7 @@ fn __render_human(harness: Harness, report: dict) {
     harness.stdio.println("  max_seq_length: " + max_seq_length)
   }
   harness.stdio.println("  template: " + safe_string(template["name"], ""))
+  render_peft_save_policy(harness, peft_save_policy)
   harness.stdio
     .println("  training base precision: " + safe_string(precision["training_base_precision"], ""))
   harness.stdio
