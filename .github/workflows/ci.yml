@@ -355,6 +355,11 @@ jobs:
       - name: Run affected-crate tests (PR fast feedback)
         if: matrix.kind == 'test' && github.event_name == 'pull_request'
         env:
+          # Cap cold hosted-runner rustc fan-out for the Rust test lane. Merge
+          # queue refs have a cold sccache key for the speculative commit, and
+          # uncapped compilation can exceed ubuntu-latest memory before tests
+          # start (harn#4293). Keep this lane stable before optimizing higher.
+          CARGO_BUILD_JOBS: "4"
           NEXTEST_PROFILE: ci
           # Route the (event-derived) base ref through env vars rather than
           # expanding `${{ }}` inside the run: script — inline expansion in a
@@ -367,12 +372,15 @@ jobs:
           # as a remote-tracking ref so `origin/<base>...HEAD` resolves its
           # merge-base for the diff.
           git fetch --no-tags origin "$BASE_REF"
-          make test-affected
+          scripts/ci/run_rust_test_lane.sh make test-affected
       - name: Run full test suite (merge queue + non-metadata push backstop)
         if: matrix.kind == 'test' && github.event_name != 'pull_request'
         env:
+          # See the PR fast-feedback test step above. This is the queue-critical
+          # path where cold-cache speculative merge commits have been OOM-killed.
+          CARGO_BUILD_JOBS: "4"
           NEXTEST_PROFILE: ci
-        run: make test
+        run: scripts/ci/run_rust_test_lane.sh make test
       # These checks use the harn CLI and generated artifacts, but they do not
       # need to serialize behind clippy and nextest.
       #
