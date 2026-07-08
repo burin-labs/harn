@@ -377,8 +377,8 @@ pub fn lane_scope_classifier(rows, options = nil) {
   const validated = __lane_validate_rows(rows)
   const extra = options ?? {}
   const classifier = { payload ->
-    let observed_task = to_string(payload?.user_message ?? payload?.task ?? "")
-    let verdict = agent_lane_classify(validated, observed_task, extra)
+    const observed_task = to_string(payload?.user_message ?? payload?.task ?? "")
+    const verdict = agent_lane_classify(validated, observed_task, extra)
     return {
       confidence: 1.0,
       evidence: "lane=" + verdict.lane + " reason=" + verdict.reason,
@@ -459,13 +459,18 @@ fn __stage_gate_parse_token_list(raw) {
   return __stage_gate_token_list(normalized.split(","))
 }
 
+fn __stage_gate_callable(value) {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
 fn __stage_gate_validate_options(options) {
   const kind_of = options?.kind_of
-  if kind_of != nil && type_of(kind_of) != "closure" {
+  if kind_of != nil && !__stage_gate_callable(kind_of) {
     throw "stage_gate: `kind_of` must be a callable (tool_name) -> kind string"
   }
   const suggest = options?.suggest
-  if suggest != nil && type_of(suggest) != "closure" && type_of(suggest) != "string" {
+  if suggest != nil && !__stage_gate_callable(suggest) && type_of(suggest) != "string" {
     throw "stage_gate: `suggest` must be a string or a callable (gate) -> string"
   }
   return options
@@ -706,7 +711,7 @@ fn __stage_gate_suggestion_text(gate, options) {
   if type_of(suggest_override) == "string" && suggest_override != "" {
     return suggest_override
   }
-  if type_of(suggest_override) == "closure" {
+  if __stage_gate_callable(suggest_override) {
     const custom = try {
       suggest_override(gate)
     } catch (e) {
