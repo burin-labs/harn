@@ -162,6 +162,37 @@ pub fn agent_typed_checkpoint_event_schema() {
 }
 
 /**
+ * Schema for convergence-guard receipts emitted by std/agent/governors.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_convergence_guard_receipt_schema() {
+  const nullable_recovery = schema_nullable(
+    schema_object(
+      {args: schema_field(schema_dict(schema_any()), false), verb: schema_string() + {min_length: 1}},
+      {additional_properties: schema_any()},
+    ),
+  )
+  return schema_object(
+    {
+      confidence: schema_field(__agent_event_number_schema(), false),
+      evidence: schema_field(schema_dict(schema_any()), false),
+      iteration: schema_field(__agent_event_nonnegative_int_schema(), false),
+      kind: schema_literal("convergence_guard"),
+      reason: schema_field(schema_string(), false),
+      recovery: schema_field(nullable_recovery, false),
+      schema: schema_literal("harn.agent_convergence_guard_receipt.v1"),
+      session_id: schema_field(schema_string(), false),
+      shape: schema_field(schema_string(), false),
+      status: schema_enum(["fired", "skipped"]),
+    },
+    {additional_properties: false},
+  )
+}
+
+/**
  * Validate one captured agent event and return a structured schema report.
  *
  * @effects: []

@@ -1,0 +1,8 @@
+harn.agent_convergence_guard_receipt.v1
+fired
+finalization_runaway_on_green
+stop_on_green
+2
+true
+true
+true
