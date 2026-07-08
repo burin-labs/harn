@@ -8,11 +8,33 @@
 import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn edit_tools(metadata_key = "annotations") {
+fn edit_dependency_key_params() {
+  return ["anchor", "old_string", "function_name", "symbol_name", "name"]
+}
+
+fn edit_dependency_range_params() {
+  return [{start: "range_start", end: "range_end"}]
+}
+
+fn edit_tools(
+  metadata_key = "annotations",
+  dependency_key_params = [],
+  dependency_range_params = [],
+  arg_aliases = {},
+) {
   let tools = tool_registry()
-  const metadata = {kind: "edit", side_effect_level: "workspace_write", arg_schema: {path_params: ["path"]}}
+  const arg_schema = {
+    path_params: ["path"],
+    dependency_key_params: dependency_key_params,
+    dependency_range_params: dependency_range_params,
+    arg_aliases: arg_aliases,
+  }
+  const metadata = {kind: "edit", side_effect_level: "workspace_write", arg_schema: arg_schema}
   const burin_policy = {
     path_params: ["path"],
+    dependency_key_params: dependency_key_params,
+    dependency_range_params: dependency_range_params,
+    arg_aliases: arg_aliases,
     side_effect_level: "workspace_write",
     mutation_classification: "workspace_write",
   }
@@ -59,6 +81,14 @@ fn edit_tools(metadata_key = "annotations") {
       parameters: {
         path: {type: "string", description: "Workspace-relative path"},
         marker: {type: "string", description: "Probe marker"},
+        action: {type: "string", description: "Logical edit action", required: false},
+        range_start: {type: "integer", description: "Start offset for range-based edits", required: false},
+        range_end: {type: "integer", description: "End offset for range-based edits", required: false},
+        anchor: {type: "string", description: "Anchor text for anchored edits", required: false},
+        old_string: {type: "string", description: "Old text for replacement edits", required: false},
+        function_name: {type: "string", description: "Target function name", required: false},
+        symbol_name: {type: "string", description: "Target symbol name", required: false},
+        name: {type: "string", description: "Generic target name", required: false},
         fail: {type: "boolean", description: "Whether this call rejects", required: false},
         fail_return: {type: "boolean", description: "Whether this call returns a product-level error", required: false},
         fail_noop: {
@@ -177,6 +207,212 @@ fn same_file_applied_failure_batch() {
       id: "a2",
       name: "edit",
       arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_different_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "second-target",
+        action: "replace_range",
+        range_start: 40,
+        range_end: 42,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "same-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_overlapping_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 20,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "overlap-target",
+        action: "replace_range",
+        range_start: 15,
+        range_end: 25,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_range_different_action_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "different-action-same-range",
+        action: "insert_after",
+        range_start: 11,
+        range_end: 11,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_alias_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "canonical-old",
+        action: "exact_patch",
+        old_string: "let value = 1",
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "alias-old",
+        action: "exact_patch",
+        old: "let value = 1",
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_different_alias_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "canonical-old",
+        action: "exact_patch",
+        old_string: "let value = 1",
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "alias-old-different",
+        action: "exact_patch",
+        old: "let other = 2",
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_range_alias_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "canonical-range",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "alias-range",
+        action: "replace_range",
+        start: 10,
+        end: 12,
+        fail: false,
+        fail_return: false,
+      },
     },
   ]
 }
@@ -330,5 +566,155 @@ pipeline main() {
   assert(
     !contains(applied_failure.transcript, "applied src/a.zig second"),
     "the later same-file edit must not run after a mutating failure (stale-anchor hazard)",
+  )
+  const dependency_params = edit_dependency_key_params()
+  const range_params = edit_dependency_range_params()
+  const arg_aliases = {old: "old_string", start: "range_start", end: "range_end"}
+  const different_target = run_scripted(
+    same_file_different_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(different_target.transcript, "applied src/a.zig second-target"),
+    "declared dependency ranges should let independent same-file edit targets run after an applied failure",
+  )
+  assert(
+    !contains(different_target.transcript, "skipped dependent `edit` call"),
+    "independent same-file edit targets must not emit a dependency skip",
+  )
+  const same_target = run_scripted(
+    same_file_same_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(same_target.transcript, "skipped dependent `edit` call"),
+    "the same declared edit target must still be skipped after an applied failure",
+  )
+  assert(
+    !contains(same_target.transcript, "applied src/a.zig same-target"),
+    "the later same-file same-target edit must not run after a mutating failure",
+  )
+  const overlapping_target = run_scripted(
+    same_file_overlapping_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(overlapping_target.transcript, "skipped dependent `edit` call"),
+    "overlapping declared edit ranges must still be skipped after an applied failure",
+  )
+  assert(
+    !contains(overlapping_target.transcript, "applied src/a.zig overlap-target"),
+    "the later same-file overlapping edit must not run after a mutating failure",
+  )
+  const same_range_different_action = run_scripted(
+    same_file_same_range_different_action_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(same_range_different_action.transcript, "skipped dependent `edit` call"),
+    "same-range edits must not become independent just because the edit action differs",
+  )
+  assert(
+    !contains(same_range_different_action.transcript, "applied src/a.zig different-action-same-range"),
+    "the later same-file same-range/different-action edit must not run after a mutating failure",
+  )
+  const same_alias_target = run_scripted(
+    same_file_same_alias_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(same_alias_target.transcript, "skipped dependent `edit` call"),
+    "dependency key aliases must fold to the canonical target before hashing",
+  )
+  assert(
+    !contains(same_alias_target.transcript, "applied src/a.zig alias-old"),
+    "the later same-file alias-spelled same-target edit must not run after a mutating failure",
+  )
+  const different_alias_target = run_scripted(
+    same_file_different_alias_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(different_alias_target.transcript, "applied src/a.zig alias-old-different"),
+    "dependency key aliases must preserve different canonical target values",
+  )
+  const same_range_alias = run_scripted(
+    same_file_same_range_alias_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(same_range_alias.transcript, "skipped dependent `edit` call"),
+    "dependency range aliases must fold to the canonical interval before overlap checks",
+  )
+  assert(
+    !contains(same_range_alias.transcript, "applied src/a.zig alias-range"),
+    "the later same-file alias-spelled overlapping range edit must not run after a mutating failure",
+  )
+  const burin_direct_target = run_scripted(
+    same_file_different_target_applied_failure_batch(),
+    {tools: edit_tools("burin_policy", dependency_params, range_params)},
+  )
+  assert(
+    contains(burin_direct_target.transcript, "applied src/a.zig second-target"),
+    "Burin direct runtime policy dependency_key_params should refine same-file resource skips",
+  )
+  const burin_direct_alias_target = run_scripted(
+    same_file_same_alias_target_applied_failure_batch(),
+    {tools: edit_tools("burin_policy", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(burin_direct_alias_target.transcript, "skipped dependent `edit` call"),
+    "Burin direct runtime policy arg_aliases must fold dependency keys before hashing",
+  )
+  assert(
+    !contains(burin_direct_alias_target.transcript, "applied src/a.zig alias-old"),
+    "Burin direct runtime policy must skip same-resource edits even when the later call uses an alias",
+  )
+  const turn_policy_target = run_scripted(
+    same_file_different_target_applied_failure_batch(),
+    {
+      tools: edit_tools("none"),
+      policy: {
+        tool_annotations: {
+          edit: {
+            kind: "edit",
+            side_effect_level: "workspace_write",
+            path_params: ["path"],
+            dependency_key_params: dependency_params,
+            dependency_range_params: range_params,
+          },
+        },
+      },
+    },
+  )
+  assert(
+    contains(turn_policy_target.transcript, "applied src/a.zig second-target"),
+    "turn policy dependency_key_params should refine same-file resource skips",
+  )
+  const turn_policy_alias_target = run_scripted(
+    same_file_same_alias_target_applied_failure_batch(),
+    {
+      tools: edit_tools("none"),
+      policy: {
+        tool_annotations: {
+          edit: {
+            kind: "edit",
+            side_effect_level: "workspace_write",
+            path_params: ["path"],
+            dependency_key_params: dependency_params,
+            dependency_range_params: range_params,
+            arg_aliases: arg_aliases,
+          },
+        },
+      },
+    },
+  )
+  assert(
+    contains(turn_policy_alias_target.transcript, "skipped dependent `edit` call"),
+    "turn policy arg_aliases must fold dependency keys before hashing",
+  )
+  assert(
+    !contains(turn_policy_alias_target.transcript, "applied src/a.zig alias-old"),
+    "turn policy must skip same-resource edits even when the later call uses an alias",
   )
 }

@@ -1689,6 +1689,81 @@ fn __intra_turn_annotation_path_params(annotations) {
   return []
 }
 
+fn __intra_turn_annotation_dependency_key_params(annotations) {
+  if type_of(annotations) != "dict" {
+    return []
+  }
+  let direct = annotations?.dependency_key_params ?? annotations?.dependencyKeyParams
+    ?? annotations?.resource_dependency_params
+    ?? annotations?.resourceDependencyParams
+    ?? annotations?.resource_key_params
+    ?? annotations?.resourceKeyParams
+  if type_of(direct) == "list" {
+    return direct
+  }
+  if type_of(direct) == "string" {
+    return [direct]
+  }
+  let schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  let params = schema?.dependency_key_params ?? schema?.dependencyKeyParams
+    ?? schema?.resource_dependency_params
+    ?? schema?.resourceDependencyParams
+    ?? schema?.resource_key_params
+    ?? schema?.resourceKeyParams
+    ?? []
+  if type_of(params) == "list" {
+    return params
+  }
+  if type_of(params) == "string" {
+    return [params]
+  }
+  return []
+}
+
+fn __intra_turn_annotation_dependency_range_params(annotations) {
+  if type_of(annotations) != "dict" {
+    return []
+  }
+  let direct = annotations?.dependency_range_params ?? annotations?.dependencyRangeParams
+    ?? annotations?.resource_dependency_ranges
+    ?? annotations?.resourceDependencyRanges
+    ?? annotations?.resource_range_params
+    ?? annotations?.resourceRangeParams
+  if type_of(direct) == "list" {
+    return direct
+  }
+  if type_of(direct) == "dict" {
+    return [direct]
+  }
+  let schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  let params = schema?.dependency_range_params ?? schema?.dependencyRangeParams
+    ?? schema?.resource_dependency_ranges
+    ?? schema?.resourceDependencyRanges
+    ?? schema?.resource_range_params
+    ?? schema?.resourceRangeParams
+    ?? []
+  if type_of(params) == "list" {
+    return params
+  }
+  if type_of(params) == "dict" {
+    return [params]
+  }
+  return []
+}
+
+fn __intra_turn_annotation_arg_aliases(annotations) {
+  if type_of(annotations) != "dict" {
+    return {}
+  }
+  let schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  let aliases = schema?.arg_aliases ?? schema?.argAliases ?? annotations?.arg_aliases ?? annotations?.argAliases
+    ?? {}
+  if type_of(aliases) == "dict" {
+    return aliases
+  }
+  return {}
+}
+
 fn __intra_turn_normalize_resource_path(raw) -> string {
   let path = trim(to_string(raw ?? ""))
   while starts_with(path, "./") {
@@ -1737,9 +1812,124 @@ const __INTRA_TURN_FALLBACK_PATH_ARGS = [
 fn __intra_turn_fallback_resource_keys(args) {
   let keys = []
   for name in __INTRA_TURN_FALLBACK_PATH_ARGS {
-    if args?.[name] != nil {
+    if args[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
     }
+  }
+  return keys
+}
+
+fn __intra_turn_dependency_range_param_names(spec) {
+  if type_of(spec) != "dict" {
+    return nil
+  }
+  const start_name = trim(
+    to_string(spec?.start ?? spec?.start_param ?? spec?.startParam ?? spec?.from ?? spec?.begin ?? ""),
+  )
+  const end_name = trim(
+    to_string(spec?.end ?? spec?.end_param ?? spec?.endParam ?? spec?.to ?? spec?.stop ?? start_name),
+  )
+  if start_name == "" {
+    return nil
+  }
+  return {
+    start: start_name,
+    end: if end_name == "" {
+      start_name
+    } else {
+      end_name
+    },
+  }
+}
+
+fn __intra_turn_arg_value(args, aliases, name) {
+  const raw_name = to_string(name ?? "")
+  if raw_name == "" {
+    return nil
+  }
+  if args[raw_name] != nil {
+    return args[raw_name]
+  }
+  if type_of(aliases) == "dict" {
+    for alias in aliases.keys().sort() {
+      if to_string(aliases[alias]) == raw_name && args[alias] != nil {
+        return args[alias]
+      }
+    }
+  }
+  return nil
+}
+
+fn __intra_turn_dependency_range_from_args(args, aliases, spec) {
+  const names = __intra_turn_dependency_range_param_names(spec)
+  if names == nil {
+    return nil
+  }
+  const start_raw = __intra_turn_arg_value(args, aliases, names.start)
+  const end_raw = __intra_turn_arg_value(args, aliases, names.end)
+  const end_source = if end_raw == nil {
+    start_raw
+  } else {
+    end_raw
+  }
+  const start = to_int(start_raw)
+  const end = to_int(end_source)
+  if start == nil || end == nil {
+    return nil
+  }
+  let lo = start
+  let hi = end
+  if hi < lo {
+    const tmp = lo
+    lo = hi
+    hi = tmp
+  }
+  return {start: lo, end: hi}
+}
+
+fn __intra_turn_dependency_target_ranges(resource_keys, args, annotations) {
+  if len(resource_keys) == 0 {
+    return []
+  }
+  const aliases = __intra_turn_annotation_arg_aliases(annotations)
+  let ranges = []
+  for spec in __intra_turn_annotation_dependency_range_params(annotations) {
+    const range = __intra_turn_dependency_range_from_args(args, aliases, spec)
+    if range == nil {
+      continue
+    }
+    for key in resource_keys {
+      ranges = ranges.push({resource_key: key, start: range.start, end: range.end})
+    }
+  }
+  return ranges
+}
+
+fn __intra_turn_dependency_key_components(args, annotations) {
+  const aliases = __intra_turn_annotation_arg_aliases(annotations)
+  let components = []
+  for param in __intra_turn_annotation_dependency_key_params(annotations) {
+    let name = to_string(param)
+    const value = __intra_turn_arg_value(args, aliases, name)
+    if name != "" && value != nil {
+      if type_of(value) == "string" && trim(value) == "" {
+        continue
+      }
+      components = components.push({name: name, value: value})
+    }
+  }
+  return components
+}
+
+fn __intra_turn_dependency_target_keys(resource_keys, args, annotations) {
+  let components = __intra_turn_dependency_key_components(args, annotations)
+  if len(resource_keys) == 0 || len(components) == 0 {
+    return []
+  }
+  let digest = substring(sha256(json_stringify(components)), 0, 24)
+  let keys = []
+  for key in resource_keys {
+    keys = keys.push(key + "#target:" + digest)
   }
   return keys
 }
@@ -1755,7 +1945,7 @@ fn __intra_turn_resource_keys(call, tools, options = {}) {
   let keys = []
   for param in __intra_turn_annotation_path_params(annotations) {
     let name = to_string(param)
-    if name != "" && args?.[name] != nil {
+    if name != "" && args[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
     }
   }
@@ -1763,6 +1953,34 @@ fn __intra_turn_resource_keys(call, tools, options = {}) {
     keys = __intra_turn_fallback_resource_keys(args)
   }
   return keys
+}
+
+fn __intra_turn_resource_guard(call, tools, options = {}) {
+  let tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  let entry = __tool_registry_entry(tools, tool_name)
+  let annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  if !__intra_turn_annotations_mutate_resource(annotations) {
+    return nil
+  }
+  let args = __intra_turn_call_args(call)
+  let resource_keys = []
+  for param in __intra_turn_annotation_path_params(annotations) {
+    let name = to_string(param)
+    if name != "" && args[name] != nil {
+      resource_keys = __intra_turn_push_resource_value(resource_keys, args[name])
+    }
+  }
+  if len(resource_keys) == 0 {
+    resource_keys = __intra_turn_fallback_resource_keys(args)
+  }
+  if len(resource_keys) == 0 {
+    return nil
+  }
+  return {
+    resource_keys: resource_keys,
+    target_keys: __intra_turn_dependency_target_keys(resource_keys, args, annotations),
+    target_ranges: __intra_turn_dependency_target_ranges(resource_keys, args, annotations),
+  }
 }
 
 fn __intra_turn_intersects(keys, failed_keys) -> bool {
@@ -1774,14 +1992,58 @@ fn __intra_turn_intersects(keys, failed_keys) -> bool {
   return false
 }
 
-fn __intra_turn_add_failed_keys(failed_keys, keys) {
-  let out = failed_keys
-  for key in keys {
-    if !contains(out, key) {
-      out = out.push(key)
+fn __intra_turn_ranges_overlap(current, failed) -> bool {
+  return to_string(current?.resource_key ?? "") == to_string(failed?.resource_key ?? "")
+    && (to_int(current?.start) ?? 0) <= (to_int(failed?.end) ?? -1)
+    && (to_int(failed?.start) ?? 0) <= (to_int(current?.end) ?? -1)
+}
+
+fn __intra_turn_range_intersects(current_ranges, failed_ranges) -> bool {
+  for current in current_ranges {
+    for failed in failed_ranges {
+      if __intra_turn_ranges_overlap(current, failed) {
+        return true
+      }
     }
   }
-  return out
+  return false
+}
+
+fn __intra_turn_guard_intersects(current_guard, failed_guard) -> bool {
+  if !__intra_turn_intersects(current_guard?.resource_keys ?? [], failed_guard?.resource_keys ?? []) {
+    return false
+  }
+  let target_ranges = current_guard?.target_ranges ?? []
+  let failed_target_ranges = failed_guard?.target_ranges ?? []
+  if len(target_ranges) > 0 && len(failed_target_ranges) > 0 {
+    return __intra_turn_range_intersects(target_ranges, failed_target_ranges)
+  }
+  let target_keys = current_guard?.target_keys ?? []
+  let failed_target_keys = failed_guard?.target_keys ?? []
+  if len(target_keys) > 0 && len(failed_target_keys) > 0 {
+    return __intra_turn_intersects(target_keys, failed_target_keys)
+  }
+  return true
+}
+
+fn __intra_turn_first_blocking_guard(current_guard, failed_guards) {
+  if current_guard == nil {
+    return nil
+  }
+  for failed_guard in failed_guards {
+    if __intra_turn_guard_intersects(current_guard, failed_guard) {
+      return failed_guard
+    }
+  }
+  return nil
+}
+
+fn __intra_turn_guard_render_keys(resource_guard) {
+  let resource_keys = resource_guard?.resource_keys ?? []
+  if len(resource_keys) > 0 {
+    return resource_keys
+  }
+  return resource_guard?.target_keys ?? []
 }
 
 /**
@@ -2097,15 +2359,16 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     let capped_call_signature = nil
     let capped_sample = nil
     let collapsed_emitted = false
-    let failed_resource_keys = []
+    let failed_resource_guards = []
     for (index, call) in iter(tool_calls).enumerate() {
-      let resource_keys = if resource_fail_fast {
-        __intra_turn_resource_keys(call, tools, options)
+      let resource_guard = if resource_fail_fast {
+        __intra_turn_resource_guard(call, tools, options)
       } else {
-        []
+        nil
       }
-      if len(resource_keys) > 0 && __intra_turn_intersects(resource_keys, failed_resource_keys) {
-        let blocked = __intra_turn_resource_blocked_result(call, resource_keys)
+      let blocking_guard = __intra_turn_first_blocking_guard(resource_guard, failed_resource_guards)
+      if blocking_guard != nil {
+        let blocked = __intra_turn_resource_blocked_result(call, __intra_turn_guard_render_keys(resource_guard))
         __emit_synthetic_tool_lifecycle_finish(call, blocked, tools, options)
         results = results.push(blocked)
         continue
@@ -2128,9 +2391,9 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       // (rejected anchor / "old_string not found") leaves the view byte-identical,
       // so an independent later edit to the same file is NOT stale and may run.
       // Unknown (no structured signal) still poisons, preserving today's behavior.
-      if len(resource_keys) > 0 && !__tool_result_ok(result)
+      if resource_guard != nil && !__tool_result_ok(result)
         && __intra_turn_failure_poisons_resource(result) {
-        failed_resource_keys = __intra_turn_add_failed_keys(failed_resource_keys, resource_keys)
+        failed_resource_guards = failed_resource_guards.push(resource_guard)
       }
       if fanout_cap > 0 {
         let signature = __intra_turn_failure_signature(result)

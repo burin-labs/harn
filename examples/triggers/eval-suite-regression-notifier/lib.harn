@@ -1,6 +1,6 @@
+import { connector_http_json } from "std/connectors/shared"
 import "std/eval/stats"
 import "std/triggers"
-import { post_eval_verdict } from "harn-slack-connector/default"
 
 const DEFAULT_NAMESPACE = "eval-suite-regression-notifier"
 
@@ -9,6 +9,8 @@ const DEFAULT_SUITE = "eval-suite-regression"
 const DEFAULT_MODEL = "mock-model"
 
 const DEFAULT_SLACK_CHANNEL = "C0123456789"
+
+const DEFAULT_SLACK_API_BASE_URL = "https://slack.com/api"
 
 /**
  * Run the scheduled eval, gate it against the prior ledger commit, and notify only on a gate flip.
@@ -129,6 +131,125 @@ fn slack_options(config) -> dict {
       api_base_url: config.api_base_url,
     },
   )
+}
+
+fn post_eval_verdict(verdict, options) {
+  const opts = options ?? {}
+  const token = trim(to_string(opts?.bot_token ?? ""))
+  if token == "" {
+    return Err(
+      "Slack bot_token is required; resolve "
+        + to_string(opts?.bot_token_secret ?? "slack/bot-token")
+        + " before invoking the handler",
+    )
+  }
+  const api_base_url = trim(to_string(opts?.api_base_url ?? DEFAULT_SLACK_API_BASE_URL))
+  const response = connector_http_json(
+    "POST",
+    api_base_url + "/chat.postMessage",
+    {
+      headers: {
+        Authorization: "Bearer " + token,
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: json_stringify(slack_verdict_payload(verdict, opts)),
+      provider: "slack",
+      operation: "chat.postMessage",
+      redact_error_body: true,
+    },
+  )
+  if !(response?.ok ?? false) {
+    return Err(
+      "Slack chat.postMessage failed: "
+        + to_string(response?.error?.message ?? response?.error?.category ?? response?.status ?? "unknown"),
+    )
+  }
+  const body = response?.json ?? {}
+  if body?.ok == false {
+    return Err("Slack chat.postMessage rejected: " + to_string(body?.error ?? "unknown"))
+  }
+  return body + {status: response.status}
+}
+
+fn slack_verdict_payload(verdict, options) -> dict {
+  const title = slack_verdict_title(verdict)
+  const summary = slack_verdict_summary(verdict)
+  return compact(
+    {
+      channel: options?.channel,
+      thread_ts: options?.thread_ts,
+      text: title + " - " + summary,
+      blocks: [
+        {type: "section", text: {type: "mrkdwn", text: "*" + title + "*"}},
+        {type: "section", fields: slack_verdict_fields(verdict)},
+        {type: "section", text: {type: "mrkdwn", text: slack_regressed_cases_text(verdict)}},
+      ],
+    },
+  )
+}
+
+fn slack_verdict_title(verdict) -> string {
+  if verdict?.decision == "regression" {
+    return "Eval regression detected"
+  }
+  if verdict?.decision == "improved" {
+    return "Eval improvement detected"
+  }
+  return "Eval result inconclusive"
+}
+
+fn slack_verdict_summary(verdict) -> string {
+  return to_string(verdict?.suite ?? "eval suite") + " / " + to_string(verdict?.model ?? "model") + " / "
+    + to_string(verdict?.split ?? "all")
+}
+
+fn slack_verdict_fields(verdict) -> list {
+  return [
+    {type: "mrkdwn", text: "*Suite*\n" + to_string(verdict?.suite ?? "unknown")},
+    {type: "mrkdwn", text: "*Model*\n" + to_string(verdict?.model ?? "unknown")},
+    {type: "mrkdwn", text: "*Split*\n" + to_string(verdict?.split ?? "all")},
+    {type: "mrkdwn", text: "*Current macro pass@1*\n" + slack_rate(verdict?.macro_pass_at_1)},
+    {type: "mrkdwn", text: "*Baseline macro pass@1*\n" + slack_rate(verdict?.baseline_macro_pass_at_1)},
+    {type: "mrkdwn", text: "*Paired delta*\n" + to_string(verdict?.paired_delta?.status ?? "unknown")},
+  ]
+}
+
+fn slack_regressed_cases_text(verdict) -> string {
+  const cases = verdict?.top_regressed_cases ?? []
+  if len(cases) == 0 {
+    return "*Top regressed cases*\nNone"
+  }
+  let lines = []
+  let count = 0
+  for item in cases {
+    if count < 5 {
+      lines = lines
+        + [
+        "- " + to_string(item?.name ?? "unknown") + " (" + slack_signed_rate_delta(item?.delta)
+          + " pp)",
+      ]
+      count = count + 1
+    }
+  }
+  return "*Top regressed cases*\n" + join(lines, "\n")
+}
+
+fn slack_rate(value) -> string {
+  if value == nil {
+    return "unknown"
+  }
+  return to_string(round((to_float(value) ?? 0.0) * 1000.0) / 10.0) + "%"
+}
+
+fn slack_signed_rate_delta(value) -> string {
+  const delta = (to_float(value) ?? 0.0) * 100.0
+  const prefix = if delta > 0.0 {
+    "+"
+  } else {
+    ""
+  }
+  return prefix + to_string(round(delta * 10.0) / 10.0)
 }
 
 fn rows_for_split(rows, split) -> list {

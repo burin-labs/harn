@@ -1161,11 +1161,15 @@ public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
 
 public struct HarnToolArgSchema: Codable, Sendable, Equatable {
     public var pathParams: [String]
+    public var dependencyKeyParams: [String]
+    public var dependencyRangeParams: [[String: String]]
     public var argAliases: [String: String]
     public var required: [String]
 
     enum CodingKeys: String, CodingKey {
         case pathParams = "path_params"
+        case dependencyKeyParams = "dependency_key_params"
+        case dependencyRangeParams = "dependency_range_params"
         case argAliases = "arg_aliases"
         case required
     }
