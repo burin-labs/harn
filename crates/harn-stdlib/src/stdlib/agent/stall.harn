@@ -132,6 +132,27 @@ const STALL_NO_VERIFIER_PROGRESS_LIMIT = 3
 // signal than an untouched same-failure repeat, so it fires one turn sooner.
 const STALL_DELIVERED_FIX_AFTER = 2
 
+// Per-turn action-signal intake (#burin-cutover seam 4, default OFF — active only
+// when an `action_signal` callback is supplied): the host reports a boolean "this
+// turn performed a flailing action" fact (e.g. burin's desperation_shell_write /
+// truncated_read / edit_oscillation verdicts) that is stuck on a SINGLE occurrence
+// with no streak. harn owns only the TRIGGER (the distinct `flailing_action`
+// pattern on the existing `agent_loop_stall_warning` event + the standard
+// consecutive-trip escalation); the host owns the coding-specific verdict. The
+// callback is invoked ONLY when configured, so an absent callback leaves behavior
+// byte-identical.
+//
+// Hard no-progress floor by ELAPSED TURNS (#burin-cutover seam 5, default OFF —
+// active only when `turns_since_clean_verify` is set): a slow-draining run can
+// dodge both the consecutive `same_diagnostic_streak` AND the failing-verify
+// `no_net_progress_hard_cap_after` (16) counter by rarely producing a FAILING
+// verification (long edit/read storms with only sporadic checks) while never
+// producing a CLEAN one. `turns_since_clean_verify` counts EVERY folded turn since
+// the last clean passing verification (not just failing-verify turns) and forces a
+// terminal stuck stop once it crosses the caller-set floor. It resets ONLY on a
+// clean non-edit verification pass. Distinct from the failing-verify hard cap: this
+// is the total-elapsed axis (burin's 60-turn slow-drain floor), shipped as a
+// caller-set knob with NO default (nil = off) so today's behavior is unchanged.
 // Tools that report progress without changing task state. A turn whose only
 // tool call is one of these is "narrating progress without making it": it is
 // counted as a no-progress turn for stall accounting, so a run of them (e.g. a
@@ -187,6 +208,8 @@ type AgentStallConfig = {
   no_verifier_progress_limit: int,
   progress_signal?: any,
   remediation_delivered?: any,
+  action_signal?: any,
+  turns_since_clean_verify?: int,
 }
 
 type AgentStallWarning = {
@@ -224,6 +247,11 @@ type AgentStallWarning = {
  *   - verify_signature_counts: per-signature TOTAL (non-consecutive) failure
  *     recurrence across the run — the interleaved-churn axis that the consecutive
  *     `same_diagnostic_streak` misses; drives the hard-recurrence cut.
+ *   - turns_since_clean_verify: total folded turns since the last CLEAN passing
+ *     verification (edit/read turns included, unlike `failing_verify_turns`).
+ *     Resets to 0 only on a clean non-edit pass; drives the elapsed-turns hard floor
+ *     (#burin-cutover seam 5). Always maintained; consulted only when the
+ *     `turns_since_clean_verify` knob is set.
  */
 type AgentStallState = {
   last_signature: string,
@@ -241,6 +269,7 @@ type AgentStallState = {
   ping_pong_b: string,
   ping_pong_alternations: int,
   consecutive_trips: int,
+  action_flail_trips: int,
   hard_stop: bool,
   last_diagnostic_class: string,
   last_diagnostic_signature: string,
@@ -251,6 +280,7 @@ type AgentStallState = {
   write_epoch: int,
   same_diagnostic_streak: int,
   failing_verify_turns: int,
+  turns_since_clean_verify: int,
   edit_since_failure: bool,
   reverify_owed: bool,
   verified_write_epoch: int,
@@ -315,8 +345,8 @@ fn __agent_stall_repair_value(flat, nested, key: string) {
 
 /**
  * Fact-intake seams (#burin-cutover): `progress_signal` / `remediation_delivered`
- * are host-supplied CALLBACKS the mechanism invokes — the host owns the
- * coding-specific fact, harn owns the loop/escalation decision. Both are
+ * / `action_signal` are host-supplied CALLBACKS the mechanism invokes — the host
+ * owns the coding-specific fact, harn owns the loop/escalation decision. All are
  * optional and validated here so a mistyped value fails loudly at config time
  * rather than blowing up mid-run when the callback is first invoked.
  */
@@ -328,6 +358,21 @@ fn __agent_stall_closure(value, field: string) {
     return value
   }
   throw "agent_loop: stall_diagnostics." + field + " must be a closure or nil; got " + type_of(value)
+}
+
+/**
+ * Optional positive-int knob (#burin-cutover): `turns_since_clean_verify` is an
+ * off-by-default caller-set floor. nil = off; any set value must be a positive int
+ * and fails loudly at config time, matching the `__agent_stall_closure` contract.
+ */
+fn __agent_stall_opt_int(value, field: string) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "int" && value >= 1 {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a positive int or nil; got " + type_of(value)
 }
 
 fn __agent_stall_default_config() -> AgentStallConfig {
@@ -358,6 +403,8 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     no_verifier_progress_limit: STALL_NO_VERIFIER_PROGRESS_LIMIT,
     progress_signal: nil,
     remediation_delivered: nil,
+    action_signal: nil,
+    turns_since_clean_verify: nil,
   }
 }
 
@@ -482,6 +529,14 @@ fn __agent_stall_config(value) -> AgentStallConfig {
       __agent_stall_repair_value(value, repair_diagnostics, "remediation_delivered"),
       "remediation_delivered",
     ),
+    action_signal: __agent_stall_closure(
+      __agent_stall_repair_value(value, repair_diagnostics, "action_signal"),
+      "action_signal",
+    ),
+    turns_since_clean_verify: __agent_stall_opt_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "turns_since_clean_verify"),
+      "turns_since_clean_verify",
+    ),
   }
 }
 
@@ -509,6 +564,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     ping_pong_b: "",
     ping_pong_alternations: 0,
     consecutive_trips: 0,
+    action_flail_trips: 0,
     hard_stop: false,
     last_diagnostic_class: "",
     last_diagnostic_signature: "",
@@ -519,6 +575,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     write_epoch: 0,
     same_diagnostic_streak: 0,
     failing_verify_turns: 0,
+    turns_since_clean_verify: 0,
     edit_since_failure: false,
     reverify_owed: false,
     verified_write_epoch: 0,
@@ -779,6 +836,13 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
   } else {
     state.write_epoch
   }
+  // Elapsed-turns floor (#burin-cutover seam 5): count EVERY folded turn since the
+  // last clean verification. Every branch below carries this +1 forward EXCEPT the
+  // clean-pass branch, which resets it to 0. Always maintained (cheap, and never
+  // surfaced in any warning/result projection); the floor is consulted only when a
+  // `turns_since_clean_verify` knob is set, so this leaves default decisions
+  // byte-identical.
+  const new_turns_since_clean_verify = state.turns_since_clean_verify + 1
   const result = __agent_stall_turn_result(prev_dispatch)
   const result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
   const gate = if result_is_non_ok {
@@ -798,20 +862,30 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
     if result_is_non_ok && (delta == nil || delta.status != "cleared") {
       if turn_made_edit && state.last_diagnostic_class == "fail" {
         return state
-          + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
+          + {
+          write_epoch: new_write_epoch,
+          edit_since_failure: true,
+          reverify_owed: true,
+          turns_since_clean_verify: new_turns_since_clean_verify,
+        }
       }
-      return state + {write_epoch: new_write_epoch}
+      return state + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
     if turn_made_edit {
       if state.last_diagnostic_class == "fail" {
         return state
-          + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
+          + {
+          write_epoch: new_write_epoch,
+          edit_since_failure: true,
+          reverify_owed: true,
+          turns_since_clean_verify: new_turns_since_clean_verify,
+        }
       }
-      return state + {write_epoch: new_write_epoch}
+      return state + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
     if result == nil {
       // No verification evidence and no edit-on-failure: leave the model alone.
-      return state + {write_epoch: new_write_epoch}
+      return state + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
     // A passing verification clears the current-failure model.
     const pass_signature = if delta != nil {
@@ -835,6 +909,7 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       write_epoch: new_write_epoch,
       same_diagnostic_streak: 0,
       failing_verify_turns: 0,
+      turns_since_clean_verify: 0,
       edit_since_failure: false,
       reverify_owed: false,
       verified_write_epoch: verified_epoch,
@@ -876,6 +951,7 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
     write_epoch: new_write_epoch,
     same_diagnostic_streak: new_streak,
     failing_verify_turns: failing_turns,
+    turns_since_clean_verify: new_turns_since_clean_verify,
     edit_since_failure: false,
     reverify_owed: false,
     verify_signature_counts: sig_counts + {[signature]: sig_total},
@@ -944,6 +1020,16 @@ fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
       + " root cause from scratch, form a materially different hypothesis, or report this"
       + " specific blocker instead of repeating."
   }
+  // Per-turn action-signal intake (#burin-cutover seam 4): the host flagged THIS
+  // turn as a flailing action (desperation write / truncated read / oscillating
+  // edit) — a strong single-turn stuck signal, so the nudge is direct.
+  if pattern == "flailing_action" {
+    return "Loop detector: this turn performed a flailing action (a desperation write, a"
+      + " truncated/partial read, or an oscillating edit) — a strong single-turn signal that"
+      + " the run is stuck. Stop repeating the current approach. Re-read the relevant code,"
+      + " form a NEW hypothesis about the root cause, or report the specific blocker instead"
+      + " of acting reflexively."
+  }
   const core = if pattern == "repeated_same_observation" {
     "the action `" + warning.tool_name + "` produced the same observation " + count
       + " times in a row"
@@ -958,6 +1044,9 @@ fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
   } else if pattern == "no_net_progress_hard_cap" {
     count
       + " failing verification turns occurred without a clean passing verify"
+  } else if pattern == "turns_since_clean_verify_floor" {
+    count
+      + " turns elapsed since the last clean verification without a passing verify"
   } else if pattern == "ping_pong" {
     "the loop is ping-ponging between two actions (" + count + " cycles)"
   } else if pattern == "repeated_context_window_error" {
@@ -1529,7 +1618,16 @@ fn __agent_stall_apply_repair(
   defer_feedback: bool,
 ) -> AgentStallObservation {
   const should_fold_current_failure = config.post_edit_reverify || config.repair_aware
-  if !should_fold_current_failure {
+  // The elapsed-turns clean-verify floor (#burin-cutover seam 5) is an INDEPENDENT
+  // axis: its counter is maintained inside `fold_diagnostic`, so the fold must run
+  // whenever the `turns_since_clean_verify` knob is set — even with neither repair
+  // mode on. Without this the knob validates at config time but the floor never
+  // trips (the counter stays 0), silently dead unless post_edit_reverify or
+  // repair_aware happens to also be set. Every downstream trip below is already
+  // independently gated on its own config, so folding here changes nothing when only
+  // the knob is set beyond maintaining the counter and arming its floor.
+  const clean_verify_floor_active = config.turns_since_clean_verify != nil
+  if !should_fold_current_failure && !clean_verify_floor_active {
     return observation
   }
   const folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
@@ -1547,6 +1645,29 @@ fn __agent_stall_apply_repair(
       "no_net_progress_hard_cap",
       tripped.failing_verify_turns,
       config.no_net_progress_hard_cap_after,
+      defer_feedback,
+    )
+  }
+  // Elapsed-turns hard floor (#burin-cutover seam 5, default OFF). Distinct from the
+  // failing-verify `no_net_progress_hard_cap_after` above: this counts EVERY folded
+  // turn since the last clean verify (edit/read storms included), so a slow-draining
+  // run that rarely produces a FAILING verification — never building the failing-verify
+  // counter — still stops. Fires ONCE on the crossing edge, forcing a terminal stuck
+  // stop. Inert unless the caller sets `turns_since_clean_verify` (nil = off), so today's
+  // behavior is byte-identical.
+  const clean_floor_due = config.turns_since_clean_verify != nil
+    && folded.turns_since_clean_verify >= config.turns_since_clean_verify
+    && observation.state.turns_since_clean_verify < config.turns_since_clean_verify
+  if clean_floor_due {
+    const tripped = __agent_stall_register_immediate_hard_stop(folded)
+    return __agent_stall_emit_diagnostic_trip(
+      session_id,
+      config,
+      tripped,
+      iteration,
+      "turns_since_clean_verify_floor",
+      tripped.turns_since_clean_verify,
+      config.turns_since_clean_verify,
       defer_feedback,
     )
   }
@@ -1620,6 +1741,69 @@ fn __agent_stall_apply_repair(
 }
 
 /**
+ * Per-turn action-signal intake (#burin-cutover seam 4, default OFF). When the
+ * host supplies an `action_signal` fact callback and it returns truthy for THIS
+ * turn's payload, a single flailing action (a desperation shell write / truncated
+ * read / edit-oscillation verdict) trips IMMEDIATELY — no streak needed — riding
+ * the EXISTING `agent_loop_stall_warning` event with the distinct `flailing_action`
+ * pattern. Consecutive flailing turns accumulate a DEDICATED `action_flail_trips`
+ * counter, escalating to a hard stop once it reaches `hard_stop_after_trips`. That
+ * counter is kept SEPARATE from `consecutive_trips` on purpose: the core resets
+ * `consecutive_trips` to 0 on every non-core-tripping substantive turn (an
+ * action_signal-only flailing stream never trips a core detector), so reusing it
+ * would cap the flail escalation at 1 and the hard stop would be unreachable. A
+ * non-flailing turn resets the flail streak to 0. Only ONE warning is emitted per
+ * turn: if the core/repair path already tripped, the action signal is skipped (no
+ * double-nudge) and the streak is left untouched. The callback is invoked ONLY when
+ * configured, and this returns the observation UNCHANGED when the callback is nil,
+ * so the default (callback unset) is byte-identical.
+ */
+fn __agent_stall_apply_action_signal(
+  session_id: string,
+  config: AgentStallConfig,
+  observation: AgentStallObservation,
+  iteration: int,
+  payload,
+  defer_feedback: bool,
+) -> AgentStallObservation {
+  if config.action_signal == nil {
+    return observation
+  }
+  if observation.warning != nil {
+    // A core/repair detector already owns this turn's single warning; the
+    // action-flail streak is a distinct axis and is left untouched.
+    return observation
+  }
+  const flailing = config.action_signal(payload)
+  if !flailing {
+    // A non-flailing substantive turn breaks the consecutive-flail streak.
+    if observation.state.action_flail_trips == 0 {
+      return observation
+    }
+    return observation + {state: observation.state + {action_flail_trips: 0}}
+  }
+  // Dedicated accumulator, decoupled from `consecutive_trips` (which the core resets
+  // every non-core-tripping turn): repeated flailing escalates to a hard stop at
+  // `hard_stop_after_trips`. The flail count rides the warning's `count` field
+  // (passed below); we deliberately do NOT write it into `consecutive_trips`, so the
+  // core escalation axis stays uncontaminated — otherwise a later core trip at a
+  // flail->core-trip boundary would escalate one step early.
+  const trips = observation.state.action_flail_trips + 1
+  const hard_stop = trips >= config.hard_stop_after_trips
+  const tripped = observation.state + {action_flail_trips: trips, hard_stop: hard_stop}
+  return __agent_stall_emit_diagnostic_trip(
+    session_id,
+    config,
+    tripped,
+    iteration,
+    "flailing_action",
+    trips,
+    config.hard_stop_after_trips,
+    defer_feedback,
+  )
+}
+
+/**
  * agent_stall_observe_tool_calls detects degenerate agent loops, folds the
  * current-failure model when post-edit verification is enabled, and when the
  * evidence-aware repair nudge is enabled (`stall_diagnostics.repair_aware`)
@@ -1675,12 +1859,24 @@ pub fn agent_stall_observe_tool_calls(
     turn_made_edit,
     defer_feedback,
   )
+  // Per-turn action-signal intake (#burin-cutover seam 4). Inert (returns `repaired`
+  // unchanged) unless an `action_signal` callback is configured, so the default is
+  // byte-identical. Applied after the repair overlay so it respects the one-warning-
+  // per-turn discipline.
+  const signaled = __agent_stall_apply_action_signal(
+    session_id,
+    observation.config,
+    repaired,
+    iteration,
+    payload,
+    defer_feedback,
+  )
   if observation.config.progress_signal == nil {
-    return repaired
+    return signaled
   }
-  return repaired
+  return signaled
     + {
-    state: __agent_stall_fold_verify_state(repaired.state, observation.config, payload, turn_made_edit),
+    state: __agent_stall_fold_verify_state(signaled.state, observation.config, payload, turn_made_edit),
   }
 }
 

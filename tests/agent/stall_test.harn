@@ -7,6 +7,7 @@
 // rather than masquerade as activity. A turn that also makes a real tool call
 // is unaffected.
 import {
+  agent_stall_apply_result,
   agent_stall_clear_current_failure,
   agent_stall_current_failure,
   agent_stall_initial_state,
@@ -14,6 +15,7 @@ import {
   agent_stall_observe_tool_calls,
   agent_stall_repair_config,
 } from "std/agent/stall"
+import { assert_throws } from "std/testing"
 
 const CONFIG = {enabled: true, no_progress_messages: 3}
 
@@ -724,4 +726,372 @@ pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(task) {
   const o2 = _fold_hard_cap(edit_ok.state, _fail_dispatch("error B"), false)
   assert(o2.state.failing_verify_turns == 2)
   assert(o2.warning == nil)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// #burin-cutover seam 4: per-turn action-signal intake (single-occurrence flailing trip).
+// #burin-cutover seam 5: turns_since_clean_verify elapsed-turns hard floor.
+// Both are strictly additive and default-off; the parity test below is the anti-regression gate.
+
+// -------------------------------------------------------------------------------------------------
+
+fn _observe_signal(state, cfg, payload) {
+  // Substantive "run" call with no prior dispatch: the core/repair paths never
+  // trip on this turn, so any warning comes purely from the action_signal seam.
+  return agent_stall_observe_tool_calls(
+    "unit-signal",
+    _run_call(),
+    1,
+    cfg,
+    state,
+    true,
+    nil,
+    "",
+    false,
+    false,
+    "",
+    payload,
+  )
+}
+
+fn _observe_noprog_signal(state, cfg, text, payload) {
+  // No substantive tool call + narration text = a no-progress-monologue candidate,
+  // used to prove the action_signal seam does not double-fire when the core already
+  // tripped this turn.
+  return agent_stall_observe_tool_calls(
+    "unit-signal-noprog",
+    [],
+    1,
+    cfg,
+    state,
+    true,
+    nil,
+    text,
+    false,
+    false,
+    "",
+    payload,
+  )
+}
+
+pipeline test_action_signal_trips_on_single_flailing_action(task) {
+  // A truthy action_signal callback trips IMMEDIATELY on a single turn (no streak)
+  // with the distinct `flailing_action` pattern, riding the existing warning event.
+  const cfg = {enabled: true, action_signal: { _p -> true }, post_edit_reverify: false, repair_aware: false}
+  const o = _observe_signal(agent_stall_initial_state(), cfg, {any: "payload"})
+  assert(o.warning != nil)
+  assert(o.warning.pattern == "flailing_action")
+  assert_eq(o.warning.count, 1)
+  // First trip is a warning, not yet a hard stop; it rides the dedicated flail
+  // accumulator and leaves the core consecutive-trip axis untouched.
+  assert(!o.hard_stop)
+  assert_eq(o.state.action_flail_trips, 1)
+  assert_eq(o.state.consecutive_trips, 0)
+}
+
+pipeline test_action_signal_receives_payload_and_gates_on_return(task) {
+  // The callback receives the full post-turn payload; only a truthy return trips.
+  const cfg = {enabled: true, action_signal: { p -> p?.flail == true }, post_edit_reverify: false}
+  const trips = _observe_signal(agent_stall_initial_state(), cfg, {flail: true})
+  assert(trips.warning != nil)
+  assert(trips.warning.pattern == "flailing_action")
+  const quiet = _observe_signal(agent_stall_initial_state(), cfg, {flail: false})
+  assert(quiet.warning == nil)
+}
+
+pipeline test_action_signal_repeated_flailing_escalates_to_hard_stop(task) {
+  // Repeated flailing accumulates the DEDICATED action-flail counter — independent of
+  // the core `consecutive_trips`, which the core resets to 0 every non-tripping turn,
+  // so an action_signal-only stream could otherwise never escalate — and reaches a
+  // hard stop at `hard_stop_after_trips` (default 3). Regression guard for the bug
+  // where the flail trip rode `consecutive_trips` and the hard stop was unreachable.
+  // Core detector thresholds are raised out of the way so the repeated identical
+  // `run` call cannot itself trip a core same-observation warning and mask the axis.
+  const cfg = {
+    enabled: true,
+    action_signal: { _p -> true },
+    post_edit_reverify: false,
+    repair_aware: false,
+    threshold: 99,
+    repeat_same_observation: 99,
+    repeat_same_error: 99,
+    no_progress_messages: 99,
+    ping_pong_cycles: 99,
+  }
+  const o1 = _observe_signal(agent_stall_initial_state(), cfg, {})
+  assert(!o1.hard_stop)
+  assert_eq(o1.state.action_flail_trips, 1)
+  const o2 = _observe_signal(o1.state, cfg, {})
+  assert(!o2.hard_stop)
+  assert_eq(o2.state.action_flail_trips, 2)
+  const o3 = _observe_signal(o2.state, cfg, {})
+  assert(o3.warning.pattern == "flailing_action")
+  assert_eq(o3.warning.count, 3)
+  assert(o3.hard_stop)
+}
+
+pipeline test_action_signal_non_flailing_turn_resets_streak(task) {
+  // A non-flailing turn breaks the consecutive-flail streak, so the hard stop fires
+  // only on uninterrupted flailing. Core thresholds raised so the repeated `run`
+  // call never trips a core warning.
+  const cfg = {
+    enabled: true,
+    action_signal: { p -> p?.flail == true },
+    post_edit_reverify: false,
+    repair_aware: false,
+    threshold: 99,
+    repeat_same_observation: 99,
+    repeat_same_error: 99,
+    no_progress_messages: 99,
+    ping_pong_cycles: 99,
+  }
+  const o1 = _observe_signal(agent_stall_initial_state(), cfg, {flail: true})
+  assert(o1.warning.pattern == "flailing_action")
+  assert_eq(o1.state.action_flail_trips, 1)
+  const o2 = _observe_signal(o1.state, cfg, {flail: false})
+  assert(o2.warning == nil)
+  assert_eq(o2.state.action_flail_trips, 0)
+  // After the reset it takes a fresh uninterrupted run to reach the floor again.
+  const o3 = _observe_signal(o2.state, cfg, {flail: true})
+  assert(!o3.hard_stop)
+  const o4 = _observe_signal(o3.state, cfg, {flail: true})
+  assert(!o4.hard_stop)
+  assert_eq(o4.state.action_flail_trips, 2)
+}
+
+pipeline test_action_flail_does_not_contaminate_core_trip_axis(task) {
+  // The flail accumulator must NOT write `consecutive_trips` (the core escalation
+  // axis), or a later core trip at a flail->core-trip boundary would escalate one
+  // step early. Regression guard: after a flail trip, the core counter stays 0.
+  const cfg = {
+    enabled: true,
+    action_signal: { _p -> true },
+    post_edit_reverify: false,
+    repair_aware: false,
+    threshold: 99,
+  }
+  const o1 = _observe_signal(agent_stall_initial_state(), cfg, {})
+  assert(o1.warning.pattern == "flailing_action")
+  assert_eq(o1.warning.count, 1)
+  assert_eq(o1.state.action_flail_trips, 1)
+  assert_eq(o1.state.consecutive_trips, 0)
+}
+
+pipeline test_action_signal_unset_is_inert(task) {
+  // No action_signal callback: even a payload that WOULD flail produces no trip —
+  // the seam is invisible by default.
+  const cfg = {enabled: true, post_edit_reverify: false, repair_aware: false}
+  const o = _observe_signal(agent_stall_initial_state(), cfg, {flail: true})
+  assert(o.warning == nil)
+}
+
+pipeline test_action_signal_does_not_double_fire_when_core_tripped(task) {
+  // One warning per turn: when the core no-progress detector already tripped this
+  // turn, a truthy action_signal is skipped (the core warning wins, no double-nudge).
+  const cfg = {
+    enabled: true,
+    action_signal: { p -> p?.flail == true },
+    no_progress_messages: 3,
+    post_edit_reverify: false,
+  }
+  const o1 = _observe_noprog_signal(agent_stall_initial_state(), cfg, "thinking", {flail: false})
+  assert(o1.warning == nil)
+  const o2 = _observe_noprog_signal(o1.state, cfg, "thinking", {flail: false})
+  assert(o2.warning == nil)
+  // Turn 3 trips no_progress in the core AND the action_signal would fire — the core
+  // warning must win.
+  const o3 = _observe_noprog_signal(o2.state, cfg, "thinking", {flail: true})
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "no_progress_monologue")
+}
+
+pipeline test_action_signal_validated_loudly_at_config_time(task) {
+  // A mistyped action_signal fails loudly at config parse time, like the sibling seams.
+  assert_throws(
+    { -> return _observe_signal(agent_stall_initial_state(), {enabled: true, action_signal: "not-a-closure"}, {}) },
+    "non-closure action_signal must throw",
+  )
+}
+
+const FLOOR_CONFIG = {
+  enabled: true,
+  repair_aware: false,
+  post_edit_reverify: true,
+  turns_since_clean_verify: 4,
+  repeat_same_error: 99,
+  repeat_same_observation: 99,
+  no_progress_messages: 99,
+  ping_pong_cycles: 99,
+}
+
+fn _fold_floor(state, cfg, prev_dispatch, prior_made_edit) {
+  return agent_stall_observe_tool_calls(
+    "unit-floor",
+    _run_call(),
+    1,
+    cfg,
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    prior_made_edit,
+  )
+}
+
+pipeline test_turns_since_clean_verify_floor_trips_on_elapsed_turns(task) {
+  // The elapsed-turns floor counts EVERY folded turn since the last clean verify and
+  // trips at the caller-set floor (4) — even mixing edits and reads that never build
+  // the failing-verify counter. Here all four turns fail, so tscv climbs 1..4 and
+  // trips a terminal hard stop at turn 4.
+  const o1 = _fold_floor(agent_stall_initial_state(), FLOOR_CONFIG, _fail_dispatch("boom A"), false)
+  assert_eq(o1.state.turns_since_clean_verify, 1)
+  assert(o1.warning == nil)
+  const o2 = _fold_floor(o1.state, FLOOR_CONFIG, _fail_dispatch("boom B"), false)
+  assert_eq(o2.state.turns_since_clean_verify, 2)
+  assert(o2.warning == nil)
+  const o3 = _fold_floor(o2.state, FLOOR_CONFIG, _fail_dispatch("boom C"), false)
+  assert_eq(o3.state.turns_since_clean_verify, 3)
+  assert(o3.warning == nil)
+  const o4 = _fold_floor(o3.state, FLOOR_CONFIG, _fail_dispatch("boom D"), false)
+  assert(o4.warning != nil)
+  assert(o4.warning.pattern == "turns_since_clean_verify_floor")
+  assert_eq(o4.warning.count, 4)
+  assert(o4.warning.hard_stop)
+  assert(o4.hard_stop)
+}
+
+pipeline test_turns_since_clean_verify_floor_independent_of_repair(task) {
+  // The floor is a TRULY INDEPENDENT axis: it trips even when neither
+  // post_edit_reverify nor repair_aware is set. Regression guard for the bug where
+  // the counter + floor lived behind the repair gate (`apply_repair` early-returned
+  // unless a repair mode was on), so the `turns_since_clean_verify` knob validated at
+  // config time but was silently dead on its own.
+  const cfg = {
+    enabled: true,
+    repair_aware: false,
+    post_edit_reverify: false,
+    turns_since_clean_verify: 3,
+    repeat_same_error: 99,
+    repeat_same_observation: 99,
+    no_progress_messages: 99,
+    ping_pong_cycles: 99,
+  }
+  const o1 = _fold_floor(agent_stall_initial_state(), cfg, _fail_dispatch("boom A"), false)
+  assert_eq(o1.state.turns_since_clean_verify, 1)
+  assert(o1.warning == nil)
+  const o2 = _fold_floor(o1.state, cfg, _fail_dispatch("boom B"), false)
+  assert_eq(o2.state.turns_since_clean_verify, 2)
+  assert(o2.warning == nil)
+  const o3 = _fold_floor(o2.state, cfg, _fail_dispatch("boom C"), false)
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "turns_since_clean_verify_floor")
+  assert_eq(o3.warning.count, 3)
+  assert(o3.hard_stop)
+}
+
+pipeline test_turns_since_clean_verify_floor_resets_on_clean_pass(task) {
+  // A clean passing verification resets the elapsed-turns counter, so the floor keys
+  // on "turns since the LAST clean verify", not total run length.
+  const o1 = _fold_floor(agent_stall_initial_state(), FLOOR_CONFIG, _fail_dispatch("boom A"), false)
+  const o2 = _fold_floor(o1.state, FLOOR_CONFIG, _fail_dispatch("boom B"), false)
+  assert_eq(o2.state.turns_since_clean_verify, 2)
+  const pass = _fold_floor(o2.state, FLOOR_CONFIG, _ok_dispatch(), false)
+  assert_eq(pass.state.turns_since_clean_verify, 0)
+  assert(pass.warning == nil)
+  const after = _fold_floor(pass.state, FLOOR_CONFIG, _fail_dispatch("boom C"), false)
+  assert_eq(after.state.turns_since_clean_verify, 1)
+  assert(after.warning == nil)
+}
+
+pipeline test_turns_since_clean_verify_floor_unset_is_inert(task) {
+  // With no floor knob the counter is still maintained (cheap) but NEVER trips — even
+  // across many more turns than any set floor would allow.
+  const cfg = FLOOR_CONFIG + {turns_since_clean_verify: nil}
+  let s = agent_stall_initial_state()
+  let i = 0
+  while i < 8 {
+    const o = _fold_floor(s, cfg, _fail_dispatch("boom X"), false)
+    assert(o.warning == nil)
+    s = o.state
+    i = i + 1
+  }
+  assert_eq(s.turns_since_clean_verify, 8)
+}
+
+pipeline test_turns_since_clean_verify_floor_validated_loudly(task) {
+  // A non-positive / mistyped floor fails loudly at config time.
+  assert_throws(
+    { -> return _fold_floor(
+      agent_stall_initial_state(),
+      FLOOR_CONFIG + {turns_since_clean_verify: 0},
+      _fail_dispatch("boom"),
+      false,
+    ) },
+    "non-positive turns_since_clean_verify must throw",
+  )
+  assert_throws(
+    { -> return _fold_floor(
+      agent_stall_initial_state(),
+      FLOOR_CONFIG + {turns_since_clean_verify: "many"},
+      _fail_dispatch("boom"),
+      false,
+    ) },
+    "non-int turns_since_clean_verify must throw",
+  )
+}
+
+fn _parity_drive(cfg) {
+  // Canonical edit-retest thrash: fail(boom), edit, fail(boom), edit, fail(boom).
+  // Pre-seam behavior trips stuck_same_diagnostic exactly once, at streak 3.
+  let s = agent_stall_initial_state()
+  let out = []
+  const seq = [
+    [_fail_dispatch("boom"), false],
+    [_ok_dispatch(), true],
+    [_fail_dispatch("boom"), false],
+    [_ok_dispatch(), true],
+    [_fail_dispatch("boom"), false],
+  ]
+  for step in seq {
+    const o = agent_stall_observe_tool_calls("parity", _run_call(), 1, cfg, s, true, step[0], "", false, step[1])
+    s = o.state
+    out = out
+      .push(
+      {
+        pattern: o.warning?.pattern,
+        hard_stop: o.hard_stop,
+        streak: o.state.same_diagnostic_streak,
+        failing: o.state.failing_verify_turns,
+      },
+    )
+  }
+  return {steps: out, final: s}
+}
+
+pipeline test_new_seams_unset_are_byte_identical(task) {
+  // ANTI-REGRESSION GATE. With the two new knobs UNSET, every decision must be
+  // byte-identical to pre-seam behavior. Drive the canonical thrash sequence under
+  // two configs — one that never mentions the new fields, one that sets them to their
+  // OFF value (nil) — and assert the decision stream is byte-for-byte equal AND matches
+  // the known pre-seam outcome (a single stuck_same_diagnostic trip at streak 3). If a
+  // future edit perturbs default behavior, this equality/known-outcome pair breaks.
+  const base = {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 3, post_edit_reverify: true}
+  const with_off = base + {action_signal: nil, turns_since_clean_verify: nil}
+  const a = _parity_drive(base)
+  const b = _parity_drive(with_off)
+  // Byte-identical decision stream: unset == absent.
+  assert_eq(json_stringify(a.steps), json_stringify(b.steps))
+  // Known pre-seam decisions preserved: no trip until streak 3, then stuck_same_diagnostic.
+  assert(a.steps[0].pattern == nil)
+  assert(a.steps[2].pattern == nil)
+  assert(a.steps[4].pattern == "stuck_same_diagnostic")
+  assert_eq(a.steps[4].streak, 3)
+  // The internal turns_since_clean_verify counter must NEVER surface in any
+  // eval-fleet-consumed output projection (warnings / current_failure / apply_result),
+  // so the live eval measurements are unchanged.
+  const applied = agent_stall_apply_result({status: "stuck"}, true, a.final)
+  assert(!contains(json_stringify(applied), "turns_since_clean_verify"))
+  assert(!contains(json_stringify(applied), "action_flail_trips"))
 }
