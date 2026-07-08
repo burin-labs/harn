@@ -610,6 +610,8 @@ export interface ACPClientCapabilities {
 
 export interface HarnToolArgSchema {
   path_params: string[]
+  dependency_key_params: string[]
+  dependency_range_params: Array<Record<string, string>>
   arg_aliases: Record<string, string>
   required: string[]
 }

@@ -5,9 +5,6 @@ evals = ["harn.eval.toml"]
 [exports]
 handlers = "lib.harn"
 
-[dependencies]
-harn-slack-connector = { git = "https://github.com/burin-labs/harn-slack-connector", branch = "main" }
-
 [[triggers]]
 id = "nightly-eval-regression-notifier"
 kind = "cron"

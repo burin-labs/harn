@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::tools::text_tool_call_tag_pairs;
 use crate::orchestration::{CapabilityPolicy, ToolApprovalPolicy};
-use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
+use crate::tool_annotations::{
+    SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolDependencyRangeParams, ToolKind,
+};
 use crate::value::VmValue;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -168,6 +170,22 @@ fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> T
                         .iter()
                         .filter_map(|item| item.as_str().map(ToOwned::to_owned))
                         .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            dependency_key_params: policy
+                .get("dependency_key_params")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            dependency_range_params: policy
+                .get("dependency_range_params")
+                .and_then(|value| {
+                    serde_json::from_value::<Vec<ToolDependencyRangeParams>>(value.clone()).ok()
                 })
                 .unwrap_or_default(),
             arg_aliases: policy
@@ -1277,6 +1295,72 @@ mod tests {
             .capabilities
             .get("workspace")
             .is_some_and(|ops| ops.contains(&"read_text".to_string())));
+    }
+
+    #[test]
+    fn tool_policy_preserves_dependency_key_params() {
+        let policy = tool_capability_policy_from_spec(&serde_json::json!({
+            "_type": "tool_registry",
+            "tools": [
+                {
+                    "name": "edit",
+                    "parameters": {"type": "object"},
+                    "policy": {
+                        "kind": "edit",
+                        "side_effect_level": "workspace_write",
+                        "arg_schema": {
+                            "path_params": ["path"],
+                            "dependency_key_params": ["anchor"],
+                            "dependency_range_params": [{"start": "range_start", "end": "range_end"}]
+                        }
+                    }
+                },
+                {
+                    "name": "edit_direct",
+                    "parameters": {"type": "object"},
+                    "policy": {
+                        "kind": "edit",
+                        "side_effect_level": "workspace_write",
+                        "path_params": ["path"],
+                        "dependency_key_params": ["old_string"],
+                        "dependency_range_params": [{"start": "line"}]
+                    }
+                }
+            ]
+        }));
+
+        let annotations = policy.tool_annotations.get("edit").unwrap();
+        assert_eq!(annotations.arg_schema.path_params, vec!["path".to_string()]);
+        assert_eq!(
+            annotations.arg_schema.dependency_key_params,
+            vec!["anchor".to_string()]
+        );
+        assert_eq!(annotations.arg_schema.dependency_range_params.len(), 1);
+        assert_eq!(
+            annotations.arg_schema.dependency_range_params[0].start,
+            "range_start"
+        );
+        assert_eq!(
+            annotations.arg_schema.dependency_range_params[0].end,
+            "range_end"
+        );
+        let direct_annotations = policy.tool_annotations.get("edit_direct").unwrap();
+        assert_eq!(
+            direct_annotations.arg_schema.dependency_key_params,
+            vec!["old_string".to_string()]
+        );
+        assert_eq!(
+            direct_annotations.arg_schema.dependency_range_params.len(),
+            1
+        );
+        assert_eq!(
+            direct_annotations.arg_schema.dependency_range_params[0].start,
+            "line"
+        );
+        assert_eq!(
+            direct_annotations.arg_schema.dependency_range_params[0].end,
+            ""
+        );
     }
 
     #[test]

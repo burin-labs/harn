@@ -409,6 +409,8 @@ class HarnAgentEventNotification(_HarnDataclass):
 @dataclass
 class HarnToolArgSchema(_HarnDataclass):
     path_params: List[str] = field(default_factory=list)
+    dependency_key_params: List[str] = field(default_factory=list)
+    dependency_range_params: List[Dict[str, str]] = field(default_factory=list)
     arg_aliases: Dict[str, str] = field(default_factory=dict)
     required: List[str] = field(default_factory=list)
 

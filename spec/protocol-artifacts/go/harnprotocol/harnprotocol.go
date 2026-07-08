@@ -667,9 +667,11 @@ type HarnAgentEventNotification struct {
 
 // HarnToolArgSchema describes the static slice of a Harn tool's argument shape.
 type HarnToolArgSchema struct {
-	PathParams []string          `json:"path_params"`
-	ArgAliases map[string]string `json:"arg_aliases"`
-	Required   []string          `json:"required"`
+	PathParams            []string            `json:"path_params"`
+	DependencyKeyParams   []string            `json:"dependency_key_params"`
+	DependencyRangeParams []map[string]string `json:"dependency_range_params"`
+	ArgAliases            map[string]string   `json:"arg_aliases"`
+	Required              []string            `json:"required"`
 }
 
 // HarnToolAnnotations describes Harn-side metadata for a tool.

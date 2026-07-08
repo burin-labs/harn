@@ -49,6 +49,8 @@
       "annotations": {
         "arg_schema": {
           "arg_aliases": {},
+          "dependency_key_params": [],
+          "dependency_range_params": [],
           "path_params": [],
           "required": []
         },
@@ -147,6 +149,8 @@
       "annotations": {
         "arg_schema": {
           "arg_aliases": {},
+          "dependency_key_params": [],
+          "dependency_range_params": [],
           "path_params": [],
           "required": []
         },

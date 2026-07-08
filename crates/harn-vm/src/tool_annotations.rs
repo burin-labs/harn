@@ -179,10 +179,23 @@ impl SideEffectLevel {
     }
 }
 
+/// Argument-key pair describing one inclusive numeric dependency range inside a
+/// path-scoped mutating tool call.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolDependencyRangeParams {
+    /// Argument key whose value is the inclusive start of a dependency range.
+    pub start: String,
+    /// Argument key whose value is the inclusive end of a dependency range.
+    pub end: String,
+}
+
 /// Declarative description of a tool's argument shape. The VM uses
 /// this to:
 ///
 /// - resolve `ToolArgConstraint` lookups (`path_params`),
+/// - identify independent mutation targets inside the same resource
+///   (`dependency_key_params`, `dependency_range_params`),
 /// - rewrite high-level aliases to canonical keys without any
 ///   per-tool hardcoded branches (`arg_aliases`),
 /// - validate presence of required arguments at the dispatch boundary
@@ -193,6 +206,14 @@ pub struct ToolArgSchema {
     /// Argument keys whose values are workspace-relative paths.
     /// First matching key whose value is a string wins.
     pub path_params: Vec<String>,
+    /// Argument keys that refine a mutating call's dependency target inside
+    /// the declared path. Schedulers use these keys to distinguish independent
+    /// same-resource writes without hardcoding tool-specific argument names.
+    pub dependency_key_params: Vec<String>,
+    /// Argument key pairs that declare an inclusive numeric dependency range
+    /// inside the declared path. Schedulers use these to detect overlapping
+    /// same-resource writes instead of relying on exact component equality.
+    pub dependency_range_params: Vec<ToolDependencyRangeParams>,
     /// Alias → canonical key. When a tool call arrives with an alias
     /// in its argument object, the VM rewrites the key to the canonical
     /// form before dispatch (generic; no tool-name branches).
@@ -371,6 +392,8 @@ mod tests {
     fn arg_schema_defaults_empty() {
         let schema = ToolArgSchema::default();
         assert!(schema.path_params.is_empty());
+        assert!(schema.dependency_key_params.is_empty());
+        assert!(schema.dependency_range_params.is_empty());
         assert!(schema.arg_aliases.is_empty());
         assert!(schema.required.is_empty());
     }

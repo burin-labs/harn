@@ -4,11 +4,13 @@ const DEFAULT_SUITE = "eval-suite-regression"
 
 const DEFAULT_MODEL = "mock-model"
 
+const SLACK_API_BASE_URL = "https://slack.com/api"
+
 @test
 pipeline test_regression_notification_posts(task) {
-  egress_policy({allow: ["api.slack.com"], default: "deny"})
+  egress_policy({allow: ["slack.com"], default: "deny"})
   http_mock_clear()
-  const base = "https://api.slack.com"
+  const base = SLACK_API_BASE_URL
   http_mock(
     "POST",
     base + "/chat.postMessage",
@@ -50,9 +52,9 @@ pipeline test_regression_notification_posts(task) {
 
 @test
 pipeline test_no_prior_baseline_skips_notification(task) {
-  egress_policy({allow: ["api.slack.com"], default: "deny"})
+  egress_policy({allow: ["slack.com"], default: "deny"})
   http_mock_clear()
-  const base = "https://api.slack.com"
+  const base = SLACK_API_BASE_URL
   const namespace = "eval-notifier-test-" + uuid()
   const config = {
     namespace: namespace,
