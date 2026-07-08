@@ -1,0 +1,75 @@
+import { with_llm_script } from "std/testing"
+
+fn tools() {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup",
+    "Lookup evidence",
+    {
+      annotations: {kind: "read"},
+      handler: { _args -> "evidence" },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  registry = tool_define(
+    registry,
+    "blocked",
+    "Tool denied by policy",
+    {
+      annotations: {kind: "read"},
+      handler: { _args -> "should not run" },
+      parameters: {},
+      returns: {type: "string"},
+    },
+  )
+  return registry
+}
+
+pipeline default() {
+  register_tool_hook({pattern: "blocked", deny: "blocked by policy"})
+  with_llm_script(
+    [
+      {
+        text: "",
+        tool_calls: [
+          {id: "lookup_1", name: "lookup", arguments: {query: "x"}},
+          {id: "blocked_1", name: "blocked", arguments: {}},
+        ],
+      },
+    ],
+    { ->
+      const result = agent_loop(
+        "Try both tools.",
+        nil,
+        {
+          loop_until_done: true,
+          max_iterations: 1,
+          post_turn_callback: { info -> return {
+            message: "tool_names="
+              + join(info.tool_names, ",")
+              + " successful="
+              + join(info.successful_tool_names, ",")
+              + " rejected="
+              + join(info.rejected_tool_names, ",")
+              + " count="
+              + to_string(info.tool_count),
+            stop: true,
+            stop_reason: "captured",
+          } },
+          provider: "mock",
+          tool_format: "native",
+          tools: tools(),
+        },
+      )
+      __io_println(result.stop_reason)
+      const transcript = json_stringify(transcript_messages(result.transcript))
+      __io_println(transcript.contains("tool_names=lookup,blocked"))
+      __io_println(transcript.contains("successful=lookup"))
+      __io_println(transcript.contains("rejected=blocked"))
+      __io_println(transcript.contains("count=2"))
+    },
+  )
+  clear_tool_hooks()
+}
