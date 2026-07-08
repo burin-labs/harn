@@ -731,6 +731,10 @@ fn rename_scoped_targets(src: &ScopedMutationTarget, dst: &ScopedMutationTarget)
 
 #[cfg(windows)]
 fn rename_scoped_targets(src: &ScopedMutationTarget, dst: &ScopedMutationTarget) -> io::Result<()> {
+    // No `win_reject_reparse_leaf` on the leaves here: rename operates on the
+    // directory entry (the name), not by traversing through the target, and may
+    // legitimately move/replace a reparse point. The junction-traversal defense
+    // is the ancestor-chain validation in `win_scoped_parent`.
     let (src_parent, src_name) = win_scoped_parent(src, false)?;
     let (dst_parent, dst_name) = win_scoped_parent(dst, false)?;
     std::fs::rename(src_parent.join(&src_name), dst_parent.join(&dst_name))
@@ -754,7 +758,11 @@ fn create_dir_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
 #[cfg(windows)]
 fn create_dir_scoped_target(target: &ScopedMutationTarget) -> io::Result<()> {
     // Single `mkdir` keeps the "parent must already exist" contract; only the
-    // leaf is created, after verifying no ancestor is a junction/symlink.
+    // leaf is created, after verifying no ancestor is a junction/symlink. No
+    // `win_reject_reparse_leaf` on the leaf: `CreateDirectoryW` creates a NEW
+    // name and fails `AlreadyExists` if anything (reparse point or not) already
+    // occupies it — it never writes *through* an existing leaf — so the
+    // ancestor-chain validation is the whole defense.
     let (parent, file_name) = win_scoped_parent(target, false)?;
     win_create_dir_raw(&parent.join(&file_name))
 }
@@ -2676,22 +2684,42 @@ mod tests {
     // ----------------------------------------------------------------------
     // (c) Recurrence-guard lint. runc added a linter after this bug class
     // recurred; we scan this module's own source so a future edit cannot
-    // silently reintroduce a path-based `create_dir_all`/`File::create`/
-    // `OpenOptions`/`canonicalize` inside the scoped walk, and so every scoped
-    // leaf open keeps `O_NOFOLLOW`. A source scan (not a `clippy.toml`
-    // `disallowed-methods` entry) is used deliberately: those raw APIs are
-    // legitimate elsewhere in this module (the *unscoped* fallbacks used when no
-    // sandbox is active) and across harn-vm, so a crate-wide clippy ban would be
-    // all false positives; the risky call sites are exactly the scoped-walk
-    // functions named below, which a targeted scan can pin precisely.
+    // silently reintroduce a path-based mutation inside the scoped walk, and so
+    // every scoped leaf open keeps `O_NOFOLLOW`. Two invariants are guarded:
+    //   1. The fd-walk helpers AND the content-open fns (write/append/copy/
+    //      rename/mkdir) never round-trip through a path-based `std::fs`/`libc`
+    //      call — they must stay on the *at primitives so the parent fd carried
+    //      out of the walk (#4210's no-re-resolution contract) is the one the
+    //      write uses. A path-re-resolving write in any of those fns trips this.
+    //   2. Every scoped leaf open, and the directory-descent primitives, pass
+    //      `O_NOFOLLOW`; the Windows walk rejects reparse-point components.
+    //
+    // A source scan (not a `clippy.toml` `disallowed-methods` entry) is used
+    // deliberately: those raw APIs are legitimate elsewhere in this module (the
+    // *unscoped* fallbacks used when no sandbox is active, and the non-unix
+    // fallbacks) and across harn-vm, so a crate-wide clippy ban would be all
+    // false positives; the risky call sites are exactly the functions named
+    // below, which a targeted scan pins precisely.
+    //
+    // Coverage limits (deliberate): the scan is lexical, so it (a) only guards
+    // the *first* (unix) definition of each dual-cfg fn — the unix fd-walk is
+    // where the contract lives; the Windows fallbacks legitimately use `std::fs`
+    // after their own reparse-point validation and are checked structurally via
+    // the `win_walk_components` assertion below — and (b) matches call spellings,
+    // not semantics, so a novel escape hatch (e.g. a freshly `use`-aliased fs fn
+    // under a new name) would need its spelling added here.
     // ----------------------------------------------------------------------
     #[test]
     fn scoped_walk_forbids_raw_path_filesystem_calls() {
         let src = include_str!("mod.rs");
+        // Anchor every scan to the production region (everything before the test
+        // module) so the guard cannot pass by matching its own denylist literals
+        // or the fixture code below.
+        let production = &src[..src.find("mod tests {").expect("test module marker present")];
 
         // Return the `{ ... }` body of the first function whose signature line
         // starts with `sig` (the unix definitions precede the fallbacks, so the
-        // fd-walk versions are the ones scanned).
+        // fd-walk / fd-carried versions are the ones scanned).
         fn fn_body<'a>(src: &'a str, sig: &str) -> &'a str {
             let start = src
                 .find(sig)
@@ -2717,27 +2745,43 @@ mod tests {
             panic!("unbalanced braces scanning {sig}");
         }
 
-        // The fd-walk helpers must never round-trip through a path-based
-        // `std::fs` mutation or a resolver shortcut — only the *at primitives.
-        const FORBIDDEN: [&str; 6] = [
+        // Path-based mutations / resolver shortcuts that must never appear in a
+        // scoped fn: each re-resolves a full path string (re-introducing the
+        // TOCTOU the fd-walk closes) or shortcuts symlink resolution. Bare
+        // `create_dir(`/`rename(` catch `use`-imported (unqualified) calls; the
+        // `std::fs::`-qualified spellings catch the fully-pathed forms not
+        // subsumed by a bare match. `file.write(`/`io::copy(` (fd-based) are NOT
+        // forbidden — only the path-taking `std::fs::write(`/`std::fs::copy(`.
+        const FORBIDDEN: [&str; 10] = [
             "create_dir_all(",
+            "create_dir(",
             "File::create(",
             "OpenOptions",
             "canonicalize(",
-            "std::fs::create_dir(",
-            "std::fs::rename(",
+            "rename(",
+            "remove_dir_all(",
+            "std::fs::write(",
+            "std::fs::copy(",
+            "libc::open(", // a full-path open; the walk uses openat/open_dir_at
         ];
         for sig in [
+            // fd-walk helpers.
             "fn ensure_parent_dirs_scoped(",
             "fn open_parent_dir_scoped(",
             "fn create_dir_all_scoped_target(",
             "fn create_dir_scoped_target(",
+            // content-open fns: this is where #4210's "carry the parent fd into
+            // the write, never re-resolve the path" contract must hold.
+            "fn atomic_write_scoped_target(",
+            "fn append_scoped_target(",
+            "fn copy_scoped_target(",
+            "fn rename_scoped_targets(",
         ] {
-            let body = fn_body(src, sig);
+            let body = fn_body(production, sig);
             for needle in FORBIDDEN {
                 assert!(
                     !body.contains(needle),
-                    "{sig} must not use raw `{needle}`; stay on the scoped *at walk"
+                    "{sig} must not use raw `{needle}`; stay on the fd-carried *at path"
                 );
             }
         }
@@ -2745,11 +2789,11 @@ mod tests {
         // Every scoped *leaf* open must carry O_NOFOLLOW so it cannot follow a
         // swapped-in leaf symlink. Skip the `openat_file` wrapper definition
         // (its flags arrive as a parameter); only the call sites carry literals.
-        for (idx, _) in src.match_indices("openat_file(") {
-            if src[..idx].ends_with("fn ") {
+        for (idx, _) in production.match_indices("openat_file(") {
+            if production[..idx].ends_with("fn ") {
                 continue;
             }
-            let window = &src[idx..(idx + 300).min(src.len())];
+            let window = &production[idx..(idx + 300).min(production.len())];
             assert!(
                 window.contains("O_NOFOLLOW"),
                 "openat_file call site near byte {idx} must pass O_NOFOLLOW"
@@ -2758,7 +2802,7 @@ mod tests {
         // The directory-descent primitives must open O_NOFOLLOW too.
         for sig in ["fn open_dir_at(", "fn open_dir_absolute("] {
             assert!(
-                fn_body(src, sig).contains("O_NOFOLLOW"),
+                fn_body(production, sig).contains("O_NOFOLLOW"),
                 "{sig} must open directories with O_NOFOLLOW"
             );
         }
@@ -2766,7 +2810,7 @@ mod tests {
         // The Windows walk is the platform's O_NOFOLLOW substitute: it must
         // reject reparse-point (junction/symlink) components as it descends.
         assert!(
-            fn_body(src, "fn win_walk_components(").contains("win_reject_reparse_point"),
+            fn_body(production, "fn win_walk_components(").contains("win_reject_reparse_point"),
             "the Windows scoped walk must reject reparse-point components"
         );
     }
