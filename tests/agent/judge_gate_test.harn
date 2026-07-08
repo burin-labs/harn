@@ -1,0 +1,87 @@
+// Run: harn test tests/agent/judge_gate_test.harn
+//
+// Config-time validation fixtures for `agent_completion_gate` (std/agent/judge).
+// Pins the LOUD guards that keep a mistyped seam from blowing up deep inside an
+// agent_loop run (a non-callable host-fact callback), a silently-dead knob (a
+// `classify_write` without `facts`, or a typo'd `judge_seam`), while preserving
+// the graceful judge-only degradation for a facts-free config. Everything here is
+// PURE — building the bundle runs no LLM and no host.
+import { agent_completion_gate } from "std/agent/judge"
+
+fn __facts(ctx) {
+  return {source_write_count: 1}
+}
+
+fn __classify(path, diff) {
+  return "source"
+}
+
+fn __verify() {
+  return {ok: true}
+}
+
+pipeline test_noncallable_facts_throws(task) {
+  const outcome = try {
+    agent_completion_gate({facts: "nope"})
+  }
+  assert(is_err(outcome), "gate rejects a non-callable facts")
+}
+
+pipeline test_noncallable_classify_write_throws(task) {
+  const outcome = try {
+    agent_completion_gate({classify_write: 7, facts: __facts})
+  }
+  assert(is_err(outcome), "gate rejects a non-callable classify_write")
+}
+
+pipeline test_noncallable_verify_command_throws(task) {
+  const outcome = try {
+    agent_completion_gate({verify_command: "x"})
+  }
+  assert(is_err(outcome), "gate rejects a non-callable verify_command")
+}
+
+pipeline test_noncallable_veto_combine_throws(task) {
+  const outcome = try {
+    agent_completion_gate({facts: __facts, veto_combine: 3})
+  }
+  assert(is_err(outcome), "gate rejects a non-callable veto_combine")
+}
+
+pipeline test_classify_write_without_facts_throws(task) {
+  const outcome = try {
+    agent_completion_gate({classify_write: __classify})
+  }
+  assert(is_err(outcome), "gate rejects classify_write set without facts")
+}
+
+pipeline test_classify_write_with_facts_ok(task) {
+  const bundle = agent_completion_gate({classify_write: __classify, facts: __facts})
+  assert_eq(bundle._completion_gate.facts_available, true)
+}
+
+pipeline test_bad_judge_seam_throws(task) {
+  const outcome = try {
+    agent_completion_gate({facts: __facts, judge: true, judge_seam: "typo_seam"})
+  }
+  assert(is_err(outcome), "gate rejects an unknown judge_seam")
+}
+
+pipeline test_done_judge_seam_routes(task) {
+  const bundle = agent_completion_gate({facts: __facts, judge: true, judge_seam: "done_judge"})
+  assert(bundle?.done_judge != nil, "judge rides the done_judge seam")
+  assert_eq(bundle?.verify_completion_judge, nil)
+}
+
+pipeline test_valid_config_builds(task) {
+  const bundle = agent_completion_gate({facts: __facts, verify_command: __verify})
+  assert_eq(bundle._completion_gate.facts_available, true)
+  assert(bundle?.verify_completion != nil, "gate wires the verify_completion seam")
+}
+
+pipeline test_empty_config_degrades_not_throws(task) {
+  // A facts-free config is legal — it degrades to judge-only mode and surfaces
+  // the degraded state on the bundle rather than throwing.
+  const bundle = agent_completion_gate({})
+  assert_eq(bundle._completion_gate.facts_available, false)
+}

@@ -376,6 +376,48 @@ pub type CompletionGateOptions = {
   judge_seam?: string,
 }
 
+/**
+ * A host-fact callback may be an anonymous closure or a named `fn`; the runtime
+ * reports these as "closure", "function", or "fn" (mirrors std/agent/goal's
+ * `__goal_callable`). Gating on "closure" alone would reject named-fn callbacks.
+ */
+fn __completion_gate_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+/**
+ * Validate a CompletionGateOptions at config time so a mistyped seam fails LOUDLY
+ * here — mirroring `__agent_stall_closure` in std/agent/stall — rather than blowing
+ * up deep inside an agent_loop run when the gate closure first invokes the callback
+ * at done-time, or silently ignoring a typo'd knob. Throws on:
+ *   - any host-fact callback (`facts` / `classify_write` / `verify_command` /
+ *     `veto_combine`) that is set but not callable;
+ *   - a `classify_write` set without `facts` — `classify_write` only classifies the
+ *     writes `facts` returns, so alone it is a silently-dead config that also never
+ *     lets the deterministic gate assert anything (`facts_available` would be true
+ *     but every evaluation abstains with `source_known: false`);
+ *   - a `judge_seam` that is neither `"verify_completion_judge"` nor `"done_judge"`
+ *     (any other string is a key `agent_loop` ignores — a silently dead judge).
+ */
+fn __completion_gate_validate_options(opts) {
+  for field in ["facts", "classify_write", "verify_command", "veto_combine"] {
+    const value = opts[field]
+    if value != nil && !__completion_gate_callable(value) {
+      throw "agent_completion_gate: `" + field + "` must be a callable or nil; got " + type_of(value)
+    }
+  }
+  if opts?.classify_write != nil && opts?.facts == nil {
+    throw "agent_completion_gate: `classify_write` only classifies the writes `facts` returns, so it does nothing without `facts` — set `facts` too or remove `classify_write`."
+  }
+  if opts?.judge_seam != nil
+    && opts.judge_seam != "verify_completion_judge"
+    && opts.judge_seam != "done_judge" {
+    throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
+      + to_string(opts.judge_seam)
+  }
+}
+
 /** Session-store key for the completion-gate per-session veto counter. */
 fn __completion_gate_veto_key(session_id) {
   return "harn.completion_gate." + session_id + ".veto_count"
@@ -502,13 +544,18 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
  * false`) rather than fabricating a pass.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: experimental
  * @example: agent_completion_gate({facts: host_facts, verify_command: host_verify})
  */
 pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
   const opts = options ?? {}
-  const facts_available = opts.facts != nil || opts.verify_command != nil || opts.classify_write != nil
+  __completion_gate_validate_options(opts)
+  // `classify_write` only refines the write counts `facts` returns, so it never
+  // makes facts available on its own (a `classify_write`-without-`facts` config is
+  // rejected in __completion_gate_validate_options). Facts are available only when
+  // the host wired `facts` or a `verify_command` oracle.
+  const facts_available = opts.facts != nil || opts.verify_command != nil
   const gate = fn(payload) { return __completion_gate_evaluate(payload, opts, facts_available) }
   let out = {
     verify_completion: gate,

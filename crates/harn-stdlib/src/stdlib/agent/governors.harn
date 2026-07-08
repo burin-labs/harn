@@ -23,6 +23,11 @@ import { agent_session_totals } from "std/agent/state"
 // (`{message, stop, stop_reason}`) that `agent_compute_post_turn` already
 // interprets: `message` is injected as feedback, `stop:true` breaks the loop.
 //
+// CAVEAT: `governor_pace_decision` is the ONE exception to this vocabulary — it
+// keeps burin's native wall-clock ACTUATION verbs (proceed/extend/pace_check/cut)
+// because `extend` (re-stamp the wall budget) has no proceed/warn/abort analog. Map
+// it onto the shared vocabulary with `pace_action_of` when you need one switch.
+//
 // GENERALIZATION over burin: burin's pace governor is wall-clock + write
 // progress with injection-count caps (PACE_CHECK_MAX_INJECTIONS=2,
 // PACE_EXTEND_MAX=6). The post-turn seam cannot extend the loop's iteration
@@ -292,6 +297,35 @@ pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
   return {action: "pace_check", reason: "over_estimate_while_progressing"}
 }
 
+/**
+ * pace_action_of(decision) maps a `governor_pace_decision` verdict onto the shared
+ * proceed/warn/abort governance vocabulary (the same one `detector_action_of` and
+ * `governor_decision` speak), so a host can route pace decisions and detector trips
+ * through ONE switch: `cut` -> "abort", `pace_check` -> "warn", `extend`/`proceed`
+ * -> "proceed".
+ *
+ * NOTE this mapping is intentionally LOSSY. Pace's native vocabulary
+ * (proceed/extend/pace_check/cut) is wall-clock ACTUATION, not steering severity:
+ * `extend` re-stamps the wall budget and has no analog in the coarse
+ * proceed/warn/abort surface, so it folds to "proceed" (it neither injects feedback
+ * nor stops). Use `governor_pace_decision`'s raw `action` (and `new_budget_ms`) when
+ * you need the actuation distinction.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pace_action_of(decision) -> string {
+  const action = to_string(decision?.action ?? "proceed")
+  if action == "cut" {
+    return "abort"
+  }
+  if action == "pace_check" {
+    return "warn"
+  }
+  return "proceed"
+}
+
 fn __any_in(values: list, allowlist: list) -> bool {
   for value in values {
     if contains(allowlist, value) {
@@ -301,6 +335,12 @@ fn __any_in(values: list, allowlist: list) -> bool {
   return false
 }
 
+// The consumption signals `__governor_observe` knows how to read. An unrecognized
+// `policy.signal` (a typo like "iteration" / "usd") would otherwise fall through to
+// the iterations branch and silently meter the WRONG signal, so it is rejected
+// loudly at observe entry rather than quietly gating on turn count.
+const GOVERNOR_RECOGNIZED_SIGNALS = ["iterations", "tokens", "cost"]
+
 /**
  * Read the live post-turn payload into a governor observation. For the
  * "iterations" signal this reads ONLY `payload.iteration` (the live
@@ -309,6 +349,11 @@ fn __any_in(values: list, allowlist: list) -> bool {
  */
 fn __governor_observe(policy: GovernorPolicy, payload: dict) -> dict {
   const signal = to_string(policy.signal ?? "iterations")
+  if !contains(GOVERNOR_RECOGNIZED_SIGNALS, signal) {
+    throw "agent_loop: governor `policy.signal` must be one of " + join(GOVERNOR_RECOGNIZED_SIGNALS, ", ")
+      + "; got "
+      + json_stringify(signal)
+  }
   const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
   const consumed = if signal == "tokens" {
     to_float(agent_session_totals(session_id)?.tokens_used ?? 0)

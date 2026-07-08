@@ -73,6 +73,14 @@ fn __normalize_criteria(value) {
     if description == "" {
       throw "goal: each success criterion needs a non-empty description"
     }
+    // A `check` that is set but not callable is silently ignored by `goal_check`
+    // (it gates on `__goal_callable`), quietly dropping the deterministic floor for
+    // that criterion. Fail loudly at config time instead.
+    if entry?.check != nil && !__goal_callable(entry.check) {
+      throw "goal: success criterion `" + description
+        + "` has a `check` that must be a callable or nil; got "
+        + type_of(entry.check)
+    }
     out = out
       .push(
       {check: entry?.check, description: description, id: entry?.id ?? ("sc_" + to_string(index))},
@@ -294,16 +302,6 @@ fn __goal_unmet_feedback(g, unmet_ids) {
 // Reloop-only control keys that must NOT leak into the agent_loop options.
 const __GOAL_RELOOP_CONTROL_KEYS = ["done_sentinel", "facts_fn", "judge", "max_attempts"]
 
-fn __goal_without_control_keys(o) {
-  let out = {}
-  for key in o.keys() {
-    if !contains(__GOAL_RELOOP_CONTROL_KEYS, key) {
-      out = out + {[key]: o[key]}
-    }
-  }
-  return out
-}
-
 /**
  * goal_reloop(goal, opts?) returns agent_loop options that drive a BOUNDED
  * re-loop over the goal using agent_loop's OWN completion loop — NOT a
@@ -325,7 +323,7 @@ fn __goal_without_control_keys(o) {
  * existing context-profile fragment channel.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: stable
  * @example: agent_loop(task, nil, goal_reloop(g, {facts_fn: read_facts, max_attempts: 3}))
  */
@@ -337,6 +335,13 @@ pub fn goal_reloop(g, opts = nil) {
   }
   const max_attempts = o?.max_attempts ?? __GOAL_MAX_RELOOPS
   const facts_fn = o?.facts_fn
+  // A `facts_fn` that is set but not callable is silently ignored below (the
+  // `__goal_callable` gate falls back to empty facts), so the machine-checkable
+  // convergence quietly evaporates. Fail loudly at config time instead — mirroring
+  // the criterion `check` validation in `__normalize_criteria`.
+  if facts_fn != nil && !__goal_callable(facts_fn) {
+    throw "goal_reloop: `facts_fn` must be a callable or nil; got " + type_of(facts_fn)
+  }
   const verify_completion = { payload ->
     let facts = if __goal_callable(facts_fn) {
       facts_fn(payload)
@@ -358,5 +363,5 @@ pub fn goal_reloop(g, opts = nil) {
   if o?.judge == true {
     base = base + {done_judge: goal_judge(g, o)}
   }
-  return with_goal(base + __goal_without_control_keys(o), g)
+  return with_goal(base + __dict_omit(o, __GOAL_RELOOP_CONTROL_KEYS), g)
 }

@@ -1,0 +1,83 @@
+// Run: harn test tests/agent/goal_test.harn
+//
+// Config-time validation fixtures for `std/agent/goal`. These pin the LOUD
+// config-time guards that keep a mistyped host-fact callback from silently
+// dropping the deterministic floor: a criterion `check` that is set but not
+// callable, and a `goal_reloop` `facts_fn` that is set but not callable. Also
+// pins the behavior-identical swap of `__goal_without_control_keys` onto the
+// `__dict_omit` builtin. Everything here is PURE — no LLM, no host.
+import { goal, goal_check, goal_reloop } from "std/agent/goal"
+
+fn __manual_omit(o, drop) {
+  let out = {}
+  for key in o.keys() {
+    if !contains(drop, key) {
+      out = out + {[key]: o[key]}
+    }
+  }
+  return out
+}
+
+pipeline test_callable_check_is_kept(task) {
+  const g = goal(
+    {objective: "ship it", success_criteria: [{check: { f -> f?.ok ?? false }, description: "green"}]},
+  )
+  assert_eq(goal_check(g, {ok: true}).done, true)
+  assert_eq(goal_check(g, {ok: false}).done, false)
+}
+
+pipeline test_noncallable_check_throws(task) {
+  const outcome = try {
+    goal({objective: "ship it", success_criteria: [{check: "not-callable", description: "green"}]})
+  }
+  assert(is_err(outcome), "goal rejects a non-callable criterion check")
+}
+
+pipeline test_missing_check_is_llm_judged_not_rejected(task) {
+  // A criterion WITHOUT a `check` is LLM-judged, not machine-checked — it must
+  // still normalize cleanly (only a set-but-non-callable check is rejected).
+  const g = goal({objective: "ship it", success_criteria: ["works end to end"]})
+  assert_eq(len(g.success_criteria), 1)
+  assert_eq(goal_check(g, {}).checkable, 0)
+}
+
+pipeline test_noncallable_facts_fn_throws(task) {
+  const g = goal({objective: "ship it"})
+  const outcome = try {
+    goal_reloop(g, {facts_fn: 42})
+  }
+  assert(is_err(outcome), "goal_reloop rejects a non-callable facts_fn")
+}
+
+pipeline test_callable_facts_fn_is_accepted(task) {
+  const g = goal({objective: "ship it"})
+  const outcome = try {
+    goal_reloop(g, {facts_fn: { payload -> {} }})
+  }
+  assert(!is_err(outcome), "goal_reloop accepts a callable facts_fn")
+}
+
+pipeline test_dict_omit_matches_manual_omit(task) {
+  // Behavior-identical proof for the __goal_without_control_keys -> __dict_omit
+  // swap: top-level key exclusion, missing keys are no-ops, order-insensitive.
+  const drop = ["done_sentinel", "facts_fn", "judge", "max_attempts"]
+  const samples = [
+    {},
+    {a: 1},
+    {done_sentinel: "x", provider: "mock"},
+    {extra: "keep", facts_fn: 1, judge: true, max_attempts: 3, provider: "mock"},
+    {a: 1, b: 2, c: 3},
+  ]
+  for s in samples {
+    assert_eq(__dict_omit(s, drop), __manual_omit(s, drop))
+  }
+}
+
+pipeline test_goal_reloop_strips_control_keys(task) {
+  const g = goal({objective: "ship it"})
+  const opts = goal_reloop(g, {facts_fn: { payload -> {} }, max_attempts: 2, provider: "mock"})
+  assert_eq(opts?.provider, "mock")
+  assert_eq(opts?.facts_fn, nil)
+  assert_eq(opts?.max_attempts, nil)
+  assert_eq(opts?.max_iterations, 2)
+}

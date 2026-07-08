@@ -1,0 +1,53 @@
+// Run: harn test tests/agent/governors_test.harn
+//
+// Config-time validation + vocabulary fixtures for `std/agent/governors`. Pins
+// the LOUD guard that rejects an unrecognized `policy.signal` (a typo would
+// otherwise silently meter turn count), and the `pace_action_of` mapper that
+// folds pace's native wall-clock vocabulary onto the shared proceed/warn/abort
+// governance vocabulary. Everything here is PURE — no LLM, no host.
+import { governor_pace_decision, governor_post_turn, pace_action_of } from "std/agent/governors"
+
+fn __live_payload() {
+  return {iteration: 2, session_id: "gov-test", successful_tool_names: ["edit"]}
+}
+
+pipeline test_unrecognized_signal_throws(task) {
+  const cb = governor_post_turn({budget: 5.0, signal: "iteration"})
+  const outcome = try {
+    cb(__live_payload())
+  }
+  assert(is_err(outcome), "governor rejects an unrecognized policy.signal")
+}
+
+pipeline test_recognized_signal_ok(task) {
+  const cb = governor_post_turn({budget: 100.0, signal: "iterations"})
+  const outcome = try {
+    cb(__live_payload())
+  }
+  assert(!is_err(outcome), "governor accepts a recognized policy.signal")
+}
+
+pipeline test_default_signal_ok(task) {
+  // Absent signal defaults to "iterations" and must not trip the guard.
+  const cb = governor_post_turn({budget: 100.0})
+  const outcome = try {
+    cb(__live_payload())
+  }
+  assert(!is_err(outcome), "governor accepts an absent (defaulted) policy.signal")
+}
+
+pipeline test_pace_action_of_maps_vocabulary(task) {
+  assert_eq(pace_action_of({action: "cut"}), "abort")
+  assert_eq(pace_action_of({action: "pace_check"}), "warn")
+  assert_eq(pace_action_of({action: "extend", new_budget_ms: 10}), "proceed")
+  assert_eq(pace_action_of({action: "proceed"}), "proceed")
+  assert_eq(pace_action_of({}), "proceed")
+  assert_eq(pace_action_of(nil), "proceed")
+}
+
+pipeline test_pace_action_of_over_real_decision(task) {
+  // Armed budget, past the checkpoint, no progress -> native `cut` -> "abort".
+  const decision = governor_pace_decision({}, {armed_budget_ms: 100, elapsed_ms: 200, made_progress: false})
+  assert_eq(decision.action, "cut")
+  assert_eq(pace_action_of(decision), "abort")
+}
