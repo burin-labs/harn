@@ -114,6 +114,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         args: args_tail,
         cwd: cwd_path,
         env: BTreeMap::new(),
+        env_remove: Vec::new(),
         env_mode: EnvMode::InheritClean,
         stdin: None,
         timeout: None,

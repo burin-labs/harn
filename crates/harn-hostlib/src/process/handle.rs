@@ -133,6 +133,11 @@ pub struct SpawnSpec {
     pub cwd: Option<PathBuf>,
     /// Environment overrides to apply (interpretation depends on `env_mode`).
     pub env: BTreeMap<String, String>,
+    /// Variable names to strip from the inherited environment before `env`
+    /// overrides apply. A key present in both `env_remove` and `env` ends up
+    /// set (explicit overrides win). No effect under `EnvMode::Replace`,
+    /// which already starts from an empty environment.
+    pub env_remove: Vec<String>,
     /// How to treat the parent's environment.
     pub env_mode: EnvMode,
     /// Whether stdin will be written to (`true`) or piped to /dev/null (`false`).

@@ -63,6 +63,13 @@ impl ProcessSpawner for RealSpawner {
                 }
             }
         }
+        // Caller-requested inherited-env strips (e.g. a harness spawning a
+        // child harn/burin process that must not write into the parent's
+        // event-log or transcript dirs). Applied before `spec.env`, so an
+        // explicitly supplied override still wins.
+        for key in &spec.env_remove {
+            command.env_remove(key);
+        }
         for (key, value) in &spec.env {
             command.env(key, value);
         }

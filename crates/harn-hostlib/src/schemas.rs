@@ -1380,6 +1380,33 @@ mod tests {
     }
 
     #[test]
+    fn run_command_request_schema_accepts_env_remove() {
+        // Regression pin: `env_remove` is part of the run_command request
+        // surface (used by embedders to strip inherited observability vars
+        // like HARN_EVENT_LOG_DIR from child processes). The v0.10.1 schema
+        // rollout briefly rejected it as an unknown key, which made every
+        // downstream shelled command spawn-fail.
+        let request = VmValue::dict([
+            (
+                "argv",
+                VmValue::List(Arc::new(vec![VmValue::string("env")])),
+            ),
+            (
+                "env_remove",
+                VmValue::List(Arc::new(vec![VmValue::string("HARN_EVENT_LOG_DIR")])),
+            ),
+        ]);
+
+        validate_request_args(
+            "hostlib_tools_run_command",
+            "tools",
+            "run_command",
+            &[request],
+        )
+        .expect("env_remove must be a valid run_command request field");
+    }
+
+    #[test]
     fn request_validation_does_not_prune_nested_nil_fields() {
         let request = VmValue::dict([
             (

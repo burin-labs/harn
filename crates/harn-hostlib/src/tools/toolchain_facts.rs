@@ -194,6 +194,7 @@ fn run_probe(probe: Probe) -> VmValue {
         args: probe.args.clone(),
         cwd: probe.cwd.clone(),
         env: probe.env.clone(),
+        env_remove: Vec::new(),
         env_mode: probe.env_mode,
         stdin: None,
         timeout: probe.timeout,
