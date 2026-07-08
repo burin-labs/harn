@@ -1,4 +1,38 @@
 ==================
+Multiline Function Parameters
+==================
+
+fn edit_tools(
+  metadata_key = "annotations",
+  dependency_key_params = [],
+  dependency_range_params = [],
+) {
+  return metadata_key
+}
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        default: (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter)))
+      (typed_parameter
+        name: (identifier)
+        default: (list_literal))
+      (typed_parameter
+        name: (identifier)
+        default: (list_literal)))
+    body: (block
+      (return_statement
+        (identifier)))))
+
+==================
 Multiline Call Arguments
 ==================
 
