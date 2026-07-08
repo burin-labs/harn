@@ -1448,12 +1448,15 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 kind,
                 content,
+                streak,
             } => {
-                self.emit_agent_event_ext(
-                    "feedback_injected",
-                    session_id,
-                    serde_json::json!({"feedbackKind": kind, "content": content}),
-                );
+                let mut payload = serde_json::json!({"feedbackKind": kind, "content": content});
+                if let Some(streak) = streak {
+                    if let Some(object) = payload.as_object_mut() {
+                        object.insert("streak".to_string(), serde_json::json!(streak));
+                    }
+                }
+                self.emit_agent_event_ext("feedback_injected", session_id, payload);
             }
             AgentEvent::BudgetExhausted {
                 session_id,

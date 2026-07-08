@@ -100,6 +100,17 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         session_id: sid(),
         kind: kind.to_string(),
         content,
+        streak: None,
+    };
+    let feedback_with_streak =
+        |kind: &str, content: String, streak: Option<usize>| AgentEvent::FeedbackInjected {
+            session_id: sid(),
+            kind: kind.to_string(),
+            content,
+            streak,
+        };
+    let feedback_content = |fallback: String| {
+        first_non_empty_string(payload, &["content", "message", "text"]).unwrap_or(fallback)
     };
     let event = match event_type {
         "typed_checkpoint" => AgentEvent::TypedCheckpoint {
@@ -180,48 +191,66 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         // stream with a synthesized `kind` and a derived `content`.
         "completion_confirmation_nudge" => feedback(
             "completion_confirmation_nudge",
-            obj_string(payload, "visible_text_prefix"),
+            feedback_content(obj_string(payload, "visible_text_prefix")),
         ),
-        "fenced_call_attempt_nudge" => {
-            feedback("fenced_call_attempt_nudge", obj_string(payload, "fence"))
-        }
-        "missing_tool_call_nudge" => {
-            feedback("missing_tool_call_nudge", obj_string(payload, "tool"))
-        }
-        "no_progress_streak_nudge" => feedback(
+        "fenced_call_attempt_nudge" => feedback(
+            "fenced_call_attempt_nudge",
+            feedback_content(obj_string(payload, "fence")),
+        ),
+        "missing_tool_call_nudge" => feedback(
+            "missing_tool_call_nudge",
+            feedback_content(obj_string(payload, "tool")),
+        ),
+        "no_progress_streak_nudge" => feedback_with_streak(
             "no_progress_streak_nudge",
-            obj_usize(payload, "turns_since_progress").to_string(),
+            feedback_content(obj_usize(payload, "turns_since_progress").to_string()),
+            feedback_streak(payload),
         ),
         "tool_parse_error_feedback" => feedback(
             "tool_parse_error_feedback",
-            obj_string(payload, "error_summary"),
+            feedback_content(obj_string(payload, "error_summary")),
         ),
         "tool_call_blank_name_dropped" => feedback(
             "tool_call_blank_name_dropped",
-            obj_usize(payload, "dropped_count").to_string(),
+            feedback_content(obj_usize(payload, "dropped_count").to_string()),
         ),
         "llm_auto_continue" => feedback(
             "llm_auto_continue",
-            format!(
+            feedback_content(format!(
                 "{}->{} (attempt {}/{})",
                 obj_usize(payload, "previous_max_tokens"),
                 obj_usize(payload, "raised_max_tokens"),
                 obj_usize(payload, "attempt"),
                 obj_usize(payload, "max_continuations"),
-            ),
+            )),
         ),
         "context_overflow_recovery" => feedback(
             "context_overflow_recovery",
-            format!(
+            feedback_content(format!(
                 "attempt {}/{} archived {} messages",
                 obj_usize(payload, "attempt"),
                 obj_usize(payload, "max_recoveries"),
                 obj_usize(payload, "archived_messages"),
-            ),
+            )),
         ),
         _ => return None,
     };
     Some(event)
+}
+
+fn first_non_empty_string(payload: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        payload
+            .get(*key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn feedback_streak(payload: &Value) -> Option<usize> {
+    let streak = obj_usize(payload, "streak").max(obj_usize(payload, "turns_since_progress"));
+    (streak > 0).then_some(streak)
 }
 
 /// Generic path: allowlist-check, normalize the payload to match the

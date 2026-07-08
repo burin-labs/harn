@@ -1557,6 +1557,39 @@ fn from_host_nudge_maps_to_feedback_injected() {
 }
 
 #[test]
+fn from_host_no_progress_nudge_preserves_injected_text_and_streak() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "no_progress_streak_nudge",
+        &json!({
+            "iteration": 4,
+            "content": "No progress last turn. Emit exactly one well-formed <tool_call> now.",
+            "streak": 2,
+            "turns_since_progress": 2,
+            "has_tools": true,
+            "made_tool_calls": false,
+        }),
+    )
+    .expect("no_progress_streak_nudge");
+    match event {
+        AgentEvent::FeedbackInjected {
+            kind,
+            content,
+            streak,
+            ..
+        } => {
+            assert_eq!(kind, "no_progress_streak_nudge");
+            assert_eq!(
+                content,
+                "No progress last turn. Emit exactly one well-formed <tool_call> now."
+            );
+            assert_eq!(streak, Some(2));
+        }
+        other => panic!("expected FeedbackInjected, got {other:?}"),
+    }
+}
+
+#[test]
 fn from_host_stance_events_map_to_stance_transition() {
     let event = AgentEvent::from_host_payload(
         "s1",

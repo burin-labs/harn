@@ -351,6 +351,8 @@ pub enum AgentEvent {
         session_id: String,
         kind: String,
         content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        streak: Option<usize>,
     },
     /// Emitted when the agent loop exhausts `max_iterations` without any
     /// explicit break condition firing. Distinct from a natural "done" or
