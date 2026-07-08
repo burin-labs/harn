@@ -121,6 +121,32 @@ if ! grep -Fq './scripts/cargo_with_worktree_build_dir.sh run --quiet -p harn-cl
   exit 1
 fi
 
+make_targets="$tmp_root/make-cargo-targets.txt"
+make -C "$repo_root" -n \
+  build build-release fmt fmt-check lint test-cargo test-e2e release-smoke \
+  mcp-rc-conformance lint-harn gen-run-view-fixtures check-run-view-fixtures > "$make_targets"
+
+for expected in \
+  './scripts/cargo_with_worktree_build_dir.sh build' \
+  './scripts/cargo_with_worktree_build_dir.sh build --release' \
+  './scripts/cargo_with_worktree_build_dir.sh fmt --all' \
+  './scripts/cargo_with_worktree_build_dir.sh fmt --all -- --check' \
+  './scripts/cargo_with_worktree_build_dir.sh clippy --workspace --all-targets -- -D warnings' \
+  './scripts/cargo_with_worktree_build_dir.sh test --workspace' \
+  './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace --profile e2e' \
+  './scripts/cargo_with_worktree_build_dir.sh build --release -p harn-cli --bin harn' \
+  './scripts/cargo_with_worktree_build_dir.sh test -p harn-mcp-rc-compat --tests' \
+  './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_rc_compat_tests' \
+  './scripts/cargo_with_worktree_build_dir.sh build --quiet --bin harn' \
+  './scripts/cargo_with_worktree_build_dir.sh test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact'
+do
+  if ! grep -Fq "$expected" "$make_targets"; then
+    echo "Makefile target did not use the Cargo env wrapper: $expected" >&2
+    cat "$make_targets" >&2
+    exit 1
+  fi
+done
+
 fake_harn="$tmp_root/fake harn"
 touch "$fake_harn"
 chmod +x "$fake_harn"
