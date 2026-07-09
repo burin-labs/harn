@@ -14,8 +14,8 @@ path = "src/lib.rs"
 
 [dependencies]
 axum = "0.8"
-harn-serve = { path = "../harn-serve", version = "=0.10.1" }
-harn-vm = { path = "../harn-vm", version = "=0.10.1" }
+harn-serve = { path = "../harn-serve", version = "=0.10.2" }
+harn-vm = { path = "../harn-vm", version = "=0.10.2" }
 jsonschema = { version = "0.46.4", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1"
