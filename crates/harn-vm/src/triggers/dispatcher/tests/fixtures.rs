@@ -8,20 +8,21 @@ pub(super) fn trigger_event(kind: &str, dedupe_key: &str) -> TriggerEvent {
         dedupe_key,
         None,
         BTreeMap::new(),
-        ProviderPayload::Known(KnownProviderPayload::GitHub(GitHubEventPayload::Issues(
-            crate::triggers::event::GitHubIssuesEventPayload {
+        ProviderPayload::Known(KnownProviderPayload::GitHub(Box::new(
+            GitHubEventPayload::Issues(crate::triggers::event::GitHubIssuesEventPayload {
                 common: crate::triggers::event::GitHubEventCommon {
                     event: "issues".to_string(),
                     action: Some("opened".to_string()),
                     delivery_id: Some(dedupe_key.to_string()),
                     installation_id: Some(42),
                     topic: None,
+                    reaction_topics: Vec::new(),
                     repository: None,
                     repo: None,
                     raw: serde_json::json!({"action":"opened"}),
                 },
                 issue: serde_json::json!({}),
-            },
+            }),
         ))),
         SignatureStatus::Verified,
     )

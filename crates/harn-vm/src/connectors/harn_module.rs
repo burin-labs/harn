@@ -1979,8 +1979,11 @@ pub fn normalize_inbound(raw) {
         assert_eq!(github_event.signature_status, SignatureStatus::Verified);
         match &github_event.provider_payload {
             ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::GitHub(
-                crate::triggers::GitHubEventPayload::Issues(payload),
+                payload,
             )) => {
+                let crate::triggers::GitHubEventPayload::Issues(payload) = payload.as_ref() else {
+                    panic!("unexpected github payload: {payload:?}");
+                };
                 assert_eq!(payload.common.event, "issues");
                 assert_eq!(payload.common.action.as_deref(), Some("opened"));
                 assert_eq!(payload.common.delivery_id.as_deref(), Some("delivery-gh-1"));

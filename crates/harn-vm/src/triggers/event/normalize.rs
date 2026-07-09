@@ -45,6 +45,10 @@ pub(super) fn github_payload(
             .get("topic")
             .and_then(JsonValue::as_str)
             .map(ToString::to_string),
+        reaction_topics: raw
+            .get("reaction_topics")
+            .map(parse_string_array)
+            .unwrap_or_default(),
         repository: raw.get("repository").cloned(),
         repo: raw.get("repo").cloned(),
         raw: original_raw,
@@ -219,7 +223,7 @@ pub(super) fn github_payload(
         ),
         _ => GitHubEventPayload::Other(common),
     };
-    ProviderPayload::Known(KnownProviderPayload::GitHub(payload))
+    ProviderPayload::Known(KnownProviderPayload::GitHub(Box::new(payload)))
 }
 
 fn github_promoted_string(raw: &JsonValue, field: &str) -> Option<String> {

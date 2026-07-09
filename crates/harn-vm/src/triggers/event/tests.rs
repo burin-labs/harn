@@ -229,7 +229,7 @@ fn github_headers(event: &str, delivery: &str) -> BTreeMap<String, String> {
 
 fn unwrap_github(payload: ProviderPayload) -> GitHubEventPayload {
     match payload {
-        ProviderPayload::Known(KnownProviderPayload::GitHub(p)) => p,
+        ProviderPayload::Known(KnownProviderPayload::GitHub(p)) => *p,
         other => panic!("expected GitHub payload, got {other:?}"),
     }
 }
@@ -252,6 +252,7 @@ fn connector_normalized(
             Some(a) => format!("github.{event}.{a}"),
             None => format!("github.{event}"),
         },
+        "reaction_topics": [],
         "delivery_id": delivery,
         "installation_id": installation_id,
         "repository": original.get("repository").cloned().unwrap_or(JsonValue::Null),
@@ -320,6 +321,7 @@ fn github_check_suite_event_promotes_typed_fields() {
         check_suite.common.topic.as_deref(),
         Some("github.check_suite.requested")
     );
+    assert_eq!(check_suite.common.reaction_topics, Vec::<String>::new());
     assert!(check_suite.common.repository.is_some());
     assert!(check_suite.common.repo.is_some());
     assert_eq!(check_suite.check_suite_id, Some(8101));
@@ -572,6 +574,7 @@ fn github_legacy_direct_webhook_still_normalizes() {
         Some("delivery-legacy")
     );
     assert!(issues.common.topic.is_none());
+    assert_eq!(issues.common.reaction_topics, Vec::<String>::new());
     assert!(issues.common.repo.is_none());
     assert_eq!(issues.issue.get("number").and_then(|v| v.as_i64()), Some(7));
 }
@@ -722,6 +725,7 @@ mod schemas_generated_parity {
                 "delivery_id": "delivery-1",
                 "installation_id": 4242,
                 "topic": format!("github.{event}.opened"),
+                "reaction_topics": ["github.reaction.ci_failure"],
                 "repository": {"full_name": "octo-org/octo-repo"},
                 "repo": {"owner": "octo-org", "name": "octo-repo"},
                 "raw": {"event": event},

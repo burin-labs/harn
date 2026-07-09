@@ -771,7 +771,7 @@ fn target_uri(binding: &harn_vm::triggers::registry::TriggerBinding) -> String {
 fn normalized_event_payload(payload: &ProviderPayload) -> JsonValue {
     match payload {
         ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::GitHub(payload)) => {
-            match payload {
+            match payload.as_ref() {
                 harn_vm::triggers::event::GitHubEventPayload::Issues(value) => {
                     value.common.raw.clone()
                 }

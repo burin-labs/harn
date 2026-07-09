@@ -80,6 +80,7 @@ type GitHubEventCommon = {
   delivery_id?: string,
   installation_id?: int,
   topic?: string,
+  reaction_topics: list<string>,
   repository?: any,
   repo?: any,
   raw: any,

@@ -60,7 +60,7 @@ v0.2.0 webhook contract — `issues`, `pull_request`, `issue_comment`,
 and `installation_repositories` — with event-specific top-level fields
 such as `issue`, `pull_request`, `comment`, `review`, `commits`,
 `workflow_run`, `check_suite_id`, `merge_group_id`,
-`repositories_removed`, plus the connector-promoted `topic`,
+`repositories_removed`, plus the connector-promoted `topic`, `reaction_topics`,
 `repository`, and `repo` shared across every variant. Slack's
 payload is narrowed into `Message` (`message.*`), `AppMention`,
 `ReactionAdded`, `AppHomeOpened`, and `AssistantThreadStarted`. Notion's

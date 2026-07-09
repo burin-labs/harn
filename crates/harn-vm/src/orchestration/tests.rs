@@ -879,7 +879,7 @@ fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
         headers: BTreeMap::new(),
         raw_body: None,
         provider_payload: crate::triggers::ProviderPayload::Known(
-            crate::triggers::event::KnownProviderPayload::GitHub(
+            crate::triggers::event::KnownProviderPayload::GitHub(Box::new(
                 crate::triggers::GitHubEventPayload::Issues(
                     crate::triggers::event::GitHubIssuesEventPayload {
                         common: crate::triggers::event::GitHubEventCommon {
@@ -888,6 +888,7 @@ fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
                             delivery_id: Some("delivery-replay".to_string()),
                             installation_id: Some(7),
                             topic: None,
+                            reaction_topics: Vec::new(),
                             repository: None,
                             repo: None,
                             raw: serde_json::json!({"action":"opened"}),
@@ -895,7 +896,7 @@ fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
                         issue: serde_json::json!({}),
                     },
                 ),
-            ),
+            )),
         ),
         signature_status: crate::triggers::SignatureStatus::Verified,
         dedupe_claimed: false,
