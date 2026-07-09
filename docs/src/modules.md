@@ -1467,7 +1467,18 @@ Agent progress events for hosts that render live agent status:
 | Function | Description |
 |---|---|
 | `agent_progress(input)` | Emit a `progress_reported` event for the current agent session; `input` requires `message` or `entries`, with optional `replace` and `metadata` |
+| `agent_progress_entry_schema()` | Return the schema for one normalized progress entry |
+| `agent_progress_event_report(value, apply_defaults?)` | Validate a captured `progress_reported` event and return a structured schema report |
+| `agent_progress_event_schema()` | Return the schema for captured `progress_reported` events |
+| `agent_progress_event_value(value, apply_defaults?)` | Validate a captured progress event and return it, throwing on failure |
+| `agent_progress_payload_report(value, apply_defaults?)` | Validate a normalized progress payload and return a structured schema report |
+| `agent_progress_payload_schema()` | Return the schema for normalized progress payloads |
+| `agent_progress_payload_value(value, apply_defaults?)` | Validate a normalized progress payload and return it, throwing on failure |
 | `agent_progress_tool(registry?, options?)` | Add a handler-backed progress tool to a registry; options may set `name`, `description`, and `system_prompt_nudge` |
+| `agent_progress_tool_config_normalize(config?)` | Validate progress-tool config and apply the default name and description |
+| `agent_progress_tool_config_report(value, apply_defaults?)` | Validate progress-tool config and return a structured schema report |
+| `agent_progress_tool_config_schema()` | Return the schema for progress-tool config dictionaries |
+| `agent_progress_tool_config_value(value, apply_defaults?)` | Validate progress-tool config and return it, throwing on failure |
 
 ### std/agent/scratchpad
 

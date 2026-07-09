@@ -1,0 +1,67 @@
+import { agent_capture_events } from "std/agent/events"
+import {
+  agent_progress,
+  agent_progress_event_report,
+  agent_progress_payload_report,
+  agent_progress_tool_config_normalize,
+  agent_progress_tool_config_report,
+  agent_progress_tool_config_value,
+} from "std/agent/progress"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
+
+pipeline default() {
+  const session_id = "agent-progress-schema-" + uuid()
+  const captured = agent_capture_events(
+    session_id,
+    fn() {
+      const session = agent_session_init("progress schema", nil, {session_id: session_id})
+      agent_progress(
+        {
+          message: "normalizing",
+          entries: [
+            {content: "Ship patch", status: "done", priority: "p1"},
+            {content: "Keep working", status: 17, priority: false},
+            {content: "Wait for queue", status: "pending", priority: "later"},
+            {content: "", status: "completed"},
+            "not an entry",
+          ],
+          replace: nil,
+          metadata: nil,
+        },
+      )
+      agent_session_finalize(session.session_id, "done")
+      return nil
+    },
+  )
+  const events = captured.events.filter({ event -> event.type == "progress_reported" })
+  require len(events) == 1, "schema progress fixture emits one event"
+  const event = events[0]
+  const payload = {message: event.message, entries: event.entries, replace: event.replace, metadata: event.metadata}
+  const event_report = agent_progress_event_report(event)
+  const payload_report = agent_progress_payload_report(payload)
+  const bad_payload = agent_progress_payload_report(
+    {message: nil, entries: [{content: "Bad", status: "doing"}], replace: true, metadata: {}},
+  )
+  const bad_config = agent_progress_tool_config_report({name: 7})
+  const config = agent_progress_tool_config_value(
+    {name: "report_progress", description: "Report status.", system_prompt_nudge: nil},
+  )
+  const default_config = agent_progress_tool_config_normalize(nil)
+  __io_println("event_schema_ok=" + to_string(event_report.ok))
+  __io_println("payload_schema_ok=" + to_string(payload_report.ok))
+  __io_println("entry_count=" + to_string(len(event.entries)))
+  __io_println("first=" + event.entries[0].status + ":" + event.entries[0].priority)
+  __io_println(
+    "second=" + event.entries[1].status + ":" + to_string(event.entries[1]?.priority ?? "none"),
+  )
+  __io_println(
+    "third=" + event.entries[2].status + ":" + to_string(event.entries[2]?.priority ?? "none"),
+  )
+  __io_println("replace=" + to_string(event.replace))
+  __io_println("metadata_empty=" + to_string(len(event.metadata.keys()) == 0))
+  __io_println("bad_payload_ok=" + to_string(bad_payload.ok))
+  __io_println("bad_config_ok=" + to_string(bad_config.ok))
+  __io_println("config_name=" + config.name)
+  __io_println("config_nudge_nil=" + to_string(config.system_prompt_nudge == nil))
+  __io_println("default_config_name=" + default_config.name)
+}
