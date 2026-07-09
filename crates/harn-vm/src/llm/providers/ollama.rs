@@ -337,7 +337,7 @@ fn render_content_text(content: &serde_json::Value) -> String {
                     Some("tool_result") => {
                         let content = block
                             .get("content")
-                            .and_then(|value| value.as_str())
+                            .map(render_content_text)
                             .unwrap_or_default();
                         format!("[tool result]\n{content}")
                     }
@@ -779,6 +779,35 @@ mod tests {
         assert!(!prompt.contains("hidden summary"));
         assert!(!prompt.contains("hidden private"));
         assert!(prompt.contains("visible answer"));
+    }
+
+    #[test]
+    fn qwen_raw_generate_prompt_renders_nested_tool_result_content() {
+        let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
+        payload.response_format = None;
+        payload.json_schema = None;
+        payload.native_tools = None;
+        payload.messages = vec![serde_json::json!({
+            "role": "tool",
+            "tool_name": "read_file",
+            "content": [{
+                "type": "tool_result",
+                "content": [
+                    {"type": "text", "text": "visible tool output"},
+                    {"type": "thinking", "text": "hidden nested thought"},
+                    {"type": "output_text", "text": "hidden nested private", "visibility": "private"}
+                ]
+            }]
+        })];
+
+        let body = OllamaProvider::build_raw_generate_body(&payload);
+        let prompt = body["prompt"].as_str().expect("raw prompt");
+
+        assert!(prompt.contains("[tool result: read_file]"));
+        assert!(prompt.contains("[tool result]\nvisible tool output"));
+        assert!(!prompt.contains("hidden nested thought"));
+        assert!(!prompt.contains("hidden nested private"));
     }
 
     #[test]
