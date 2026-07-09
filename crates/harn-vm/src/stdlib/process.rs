@@ -559,15 +559,16 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
     let CapturedRun {
         output,
         timed_out,
+        interrupted,
         duration_ms,
     } = run_captured_spawn(spawn)?;
 
-    let exit_code = if timed_out {
+    let exit_code = if timed_out || interrupted {
         -1
     } else {
         output.status.code().unwrap_or(-1) as i64
     };
-    let success = if timed_out {
+    let success = if timed_out || interrupted {
         false
     } else {
         output.status.success()
@@ -601,6 +602,7 @@ struct CapturedSpawn<'a> {
 struct CapturedRun {
     output: std::process::Output,
     timed_out: bool,
+    interrupted: bool,
     duration_ms: i64,
 }
 
@@ -634,6 +636,11 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         command.stdin(Stdio::null());
     }
     crate::op_interrupt::configure_kill_group(&mut command);
+    let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
+    command.env(
+        crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
+        &cleanup_token,
+    );
 
     let started = Instant::now();
     let cmd = spec.cmd;
@@ -661,22 +668,26 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         .map(crate::op_interrupt::spawn_pipe_drain);
 
     let child_pid = child.id();
-    let wait_end = crate::op_interrupt::wait_child_interruptible(&mut child, spec.timeout)
-        .map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "{label}: wait failed: {error}"
-            ))))
-        })?;
-    let (status, timed_out, killed) = match wait_end {
-        crate::op_interrupt::ChildWait::Exited(status) => (status, false, false),
+    let wait_end = crate::op_interrupt::wait_child_interruptible_with_cleanup_token(
+        &mut child,
+        spec.timeout,
+        Some(&cleanup_token),
+    )
+    .map_err(|error| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "{label}: wait failed: {error}"
+        ))))
+    })?;
+    let (status, timed_out, interrupted, killed) = match wait_end {
+        crate::op_interrupt::ChildWait::Exited(status) => (status, false, false, false),
         crate::op_interrupt::ChildWait::TimedOut(_) => {
-            (std::process::ExitStatus::default(), true, true)
+            (std::process::ExitStatus::default(), true, false, true)
         }
         // Interrupted: the reaped status (or a synthetic fallback) is
         // returned so the builtin completes; the VM raises the pending
         // cancellation / deadline error at the next op boundary.
         crate::op_interrupt::ChildWait::Interrupted(status, _) => {
-            (status.unwrap_or_default(), false, true)
+            (status.unwrap_or_default(), false, true, true)
         }
     };
 
@@ -694,6 +705,7 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
             stderr,
         },
         timed_out,
+        interrupted,
         duration_ms: started.elapsed().as_millis() as i64,
     })
 }
@@ -774,12 +786,12 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
 /// and additionally surface `timed_out` so options-form callers can detect a
 /// timeout kill without inspecting the exit status.
 fn captured_run_to_value(run: &CapturedRun) -> VmValue {
-    let status = if run.timed_out {
+    let status = if run.timed_out || run.interrupted {
         -1
     } else {
         run.output.status.code().unwrap_or(-1) as i64
     };
-    let success = !run.timed_out && run.output.status.success();
+    let success = !run.timed_out && !run.interrupted && run.output.status.success();
     let mut result = BTreeMap::new();
     result.put_str(
         "stdout",

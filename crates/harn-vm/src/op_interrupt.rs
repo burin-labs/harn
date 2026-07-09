@@ -34,11 +34,22 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Private environment marker inherited by subprocess descendants. Cleanup uses
+/// this token to rediscover escaped descendants that have reparented or moved to
+/// a different process group before the parent-edge scan runs.
+pub const PROCESS_CLEANUP_TOKEN_ENV: &str = "HARN_PROCESS_CLEANUP_TOKEN";
+
 /// How long a subprocess gets to exit after SIGTERM before the whole
 /// process group is SIGKILLed. Deliberately longer than the interpreter's
 /// 250ms async-op cancel grace (`CANCEL_GRACE_ASYNC_OP`): child processes
 /// often need to flush buffers / remove lock files on SIGTERM.
 pub const SUBPROCESS_TERM_GRACE: Duration = Duration::from_secs(2);
+#[cfg(unix)]
+const SUBPROCESS_KILL_SETTLE: Duration = Duration::from_millis(250);
+
+pub fn new_process_cleanup_token() -> String {
+    format!("harn-cleanup-{}", uuid::Uuid::now_v7().simple())
+}
 
 /// Structural evidence collected when Harn kills a child process tree.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -255,6 +266,19 @@ pub fn signal_pid_tree_and_group(pid: u32, signal: i32) {
 /// Signal a pid, its process group, and visible descendants, returning the
 /// structural targets observed before signaling.
 pub fn signal_pid_tree_and_group_with_report(pid: u32, signal: i32) -> ProcessCleanupReport {
+    signal_pid_tree_group_and_token_with_report(pid, None, signal)
+}
+
+/// Signal a pid, its process group, visible descendants, and any same-token
+/// process that inherited Harn's cleanup marker. The token path closes the
+/// reparented-descendant hole in pure parent-edge scanning: a child can `setsid`
+/// and outlive its direct parent, but it keeps the inherited environment unless
+/// it deliberately scrubs it.
+pub fn signal_pid_tree_group_and_token_with_report(
+    pid: u32,
+    cleanup_token: Option<&str>,
+    signal: i32,
+) -> ProcessCleanupReport {
     #[cfg(unix)]
     {
         let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
@@ -262,12 +286,25 @@ pub fn signal_pid_tree_and_group_with_report(pid: u32, signal: i32) -> ProcessCl
             signal_pid_and_group(child.pid, signal);
             report.merge_child(child.with_signal(signal));
         }
+        if let Some(cleanup_token) = cleanup_token.filter(|token| !token.is_empty()) {
+            for child in cleanup_token_processes(cleanup_token) {
+                if child.pid == pid {
+                    continue;
+                }
+                signal_pid_and_group(child.pid, signal);
+                report.merge_child(child.with_signal(signal));
+            }
+        }
         signal_pid_and_group(pid, signal);
+        if signal == 9 {
+            wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
+        }
         report.refresh_survivor_status();
         report
     }
     #[cfg(not(unix))]
     {
+        let _ = cleanup_token;
         ProcessCleanupReport::for_signal(Some(pid), signal)
     }
 }
@@ -294,6 +331,43 @@ fn descendant_processes(root: u32) -> Vec<ProcessCleanupChild> {
         })
         .collect::<Vec<_>>();
     descendant_processes_from_parent_edges(root, &rows)
+}
+
+#[cfg(unix)]
+fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        false,
+        ProcessRefreshKind::nothing()
+            .with_environ(UpdateKind::Always)
+            .with_cmd(UpdateKind::Always),
+    );
+    let mut children = sys
+        .processes()
+        .iter()
+        .filter(|(_, process)| process_has_cleanup_token(process.environ(), token))
+        .map(|(pid, process)| {
+            ProcessCleanupChild::new(
+                pid.as_u32(),
+                process.parent().map(|parent| parent.as_u32()),
+                1,
+                command_name(process.cmd()),
+            )
+        })
+        .collect::<Vec<_>>();
+    children.sort_by_key(|child| child.pid);
+    children
+}
+
+#[cfg(unix)]
+fn process_has_cleanup_token(environ: &[std::ffi::OsString], token: &str) -> bool {
+    let expected = format!("{PROCESS_CLEANUP_TOKEN_ENV}={token}");
+    environ
+        .iter()
+        .any(|entry| entry.to_string_lossy() == expected)
 }
 
 #[cfg(all(unix, test))]
@@ -372,6 +446,21 @@ fn process_exists(pid: u32) -> bool {
     unsafe { kill(pid as i32, 0) == 0 }
 }
 
+#[cfg(unix)]
+fn wait_for_report_children_to_exit(report: &ProcessCleanupReport, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if report
+            .children
+            .iter()
+            .all(|child| !process_exists(child.pid))
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// How an interruptible child wait ended.
 pub enum ChildWait {
     /// The child exited on its own.
@@ -396,19 +485,28 @@ pub fn wait_child_interruptible(
     child: &mut std::process::Child,
     timeout: Option<Duration>,
 ) -> std::io::Result<ChildWait> {
+    wait_child_interruptible_with_cleanup_token(child, timeout, None)
+}
+
+pub fn wait_child_interruptible_with_cleanup_token(
+    child: &mut std::process::Child,
+    timeout: Option<Duration>,
+    cleanup_token: Option<&str>,
+) -> std::io::Result<ChildWait> {
     let deadline = timeout.map(|limit| Instant::now() + limit);
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(ChildWait::Exited(status));
         }
         if requested() {
-            let (status, report) = terminate_child_group_with_report(child);
+            let (status, report) =
+                terminate_child_group_with_cleanup_token_report(child, cleanup_token);
             return Ok(ChildWait::Interrupted(status, report));
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             // Timeout keeps its historical semantics: immediate SIGKILL.
             let mut report = child_pid(child)
-                .map(|pid| signal_pid_tree_and_group_with_report(pid, 9))
+                .map(|pid| signal_pid_tree_group_and_token_with_report(pid, cleanup_token, 9))
                 .unwrap_or_default();
             let _ = child.kill();
             let _ = child.wait();
@@ -433,21 +531,34 @@ pub fn terminate_child_group(child: &mut std::process::Child) -> Option<std::pro
 pub fn terminate_child_group_with_report(
     child: &mut std::process::Child,
 ) -> (Option<std::process::ExitStatus>, ProcessCleanupReport) {
+    terminate_child_group_with_cleanup_token_report(child, None)
+}
+
+pub fn terminate_child_group_with_cleanup_token_report(
+    child: &mut std::process::Child,
+    cleanup_token: Option<&str>,
+) -> (Option<std::process::ExitStatus>, ProcessCleanupReport) {
     let mut report = child_pid(child)
         .map(|pid| ProcessCleanupReport::for_signal(Some(pid), 15))
         .unwrap_or_default();
+    #[cfg(not(unix))]
+    let _ = cleanup_token;
     #[cfg(unix)]
     {
         if let Some(pid) = child_pid(child) {
             const SIGTERM: i32 = 15;
-            report = signal_pid_tree_and_group_with_report(pid, SIGTERM);
+            report = signal_pid_tree_group_and_token_with_report(pid, cleanup_token, SIGTERM);
             let grace_deadline = Instant::now() + SUBPROCESS_TERM_GRACE;
             loop {
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         // The direct child is gone, but SIGTERM-immune
                         // descendants may linger — sweep the group.
-                        report.merge(signal_pid_tree_and_group_with_report(pid, 9));
+                        report.merge(signal_pid_tree_group_and_token_with_report(
+                            pid,
+                            cleanup_token,
+                            9,
+                        ));
                         report.refresh_survivor_status();
                         return (Some(status), report);
                     }
@@ -460,7 +571,11 @@ pub fn terminate_child_group_with_report(
                     Err(_) => break,
                 }
             }
-            report.merge(signal_pid_tree_and_group_with_report(pid, 9));
+            report.merge(signal_pid_tree_group_and_token_with_report(
+                pid,
+                cleanup_token,
+                9,
+            ));
         }
     }
     let _ = child.kill();
@@ -544,12 +659,18 @@ pub fn capture_output_interruptible(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
     configure_kill_group(command);
+    let cleanup_token = new_process_cleanup_token();
+    command.env(PROCESS_CLEANUP_TOKEN_ENV, &cleanup_token);
     let mut child = command.spawn()?;
     let pid = child.id();
     let rx_out = child.stdout.take().map(spawn_pipe_drain);
     let rx_err = child.stderr.take().map(spawn_pipe_drain);
 
-    let (status, killed) = match wait_child_interruptible(&mut child, None)? {
+    let (status, killed) = match wait_child_interruptible_with_cleanup_token(
+        &mut child,
+        None,
+        Some(&cleanup_token),
+    )? {
         ChildWait::Exited(status) => (status, false),
         // No timeout is armed here, but keep the arm total.
         ChildWait::TimedOut(_) => (std::process::ExitStatus::default(), true),
@@ -689,6 +810,22 @@ mod tests {
 
         assert_eq!(command_name(&command).as_deref(), Some("tool"));
         assert_eq!(command_name(&[]).as_deref(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_has_cleanup_token_requires_exact_marker_entry() {
+        let token = "tok-123";
+        let env = vec![
+            std::ffi::OsString::from("PATH=/usr/bin"),
+            std::ffi::OsString::from(format!("{PROCESS_CLEANUP_TOKEN_ENV}={token}")),
+        ];
+        assert!(process_has_cleanup_token(&env, token));
+        assert!(!process_has_cleanup_token(&env, "tok"));
+        assert!(!process_has_cleanup_token(
+            &[std::ffi::OsString::from("OTHER=tok-123")],
+            token
+        ));
     }
 
     #[cfg(unix)]

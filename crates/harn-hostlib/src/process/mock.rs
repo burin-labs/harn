@@ -44,6 +44,12 @@ pub struct MockProcessConfig {
     pub wait_error: Option<String>,
     /// Cleanup report returned when timeout/cancel paths kill this process.
     pub cleanup_report: Option<ProcessCleanupReport>,
+    /// Keep stdout open after the direct child exits until the cleanup killer
+    /// runs. This models an escaped descendant that inherited fd 1.
+    pub stdout_hangs_after_exit_until_kill: bool,
+    /// Keep stderr open after the direct child exits until the cleanup killer
+    /// runs. This models an escaped descendant that inherited fd 2.
+    pub stderr_hangs_after_exit_until_kill: bool,
 }
 
 impl Default for MockProcessConfig {
@@ -58,6 +64,8 @@ impl Default for MockProcessConfig {
             spawn_error: None,
             wait_error: None,
             cleanup_report: None,
+            stdout_hangs_after_exit_until_kill: false,
+            stderr_hangs_after_exit_until_kill: false,
         }
     }
 }
@@ -259,6 +267,9 @@ struct MockState {
     force_timeout: bool,
     wait_error: Option<String>,
     cleanup_report: Option<ProcessCleanupReport>,
+    stdout_hangs_after_exit_until_kill: bool,
+    stderr_hangs_after_exit_until_kill: bool,
+    pipes_released_by_cleanup: Mutex<bool>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -284,6 +295,9 @@ impl MockState {
             force_timeout: config.force_timeout,
             wait_error: config.wait_error.clone(),
             cleanup_report: config.cleanup_report.clone(),
+            stdout_hangs_after_exit_until_kill: config.stdout_hangs_after_exit_until_kill,
+            stderr_hangs_after_exit_until_kill: config.stderr_hangs_after_exit_until_kill,
+            pipes_released_by_cleanup: Mutex::new(false),
         }
     }
 
@@ -320,7 +334,19 @@ impl MockState {
             outcome.killed = true;
         }
         drop(exit);
+        *self.pipes_released_by_cleanup.lock().unwrap() = true;
         self.notify_exit_and_pipes();
+    }
+
+    fn pipe_has_reached_eof(&self, kind: PipeKind) -> bool {
+        if !self.is_exited() {
+            return false;
+        }
+        let hangs_until_cleanup = match kind {
+            PipeKind::Stdout => self.stdout_hangs_after_exit_until_kill,
+            PipeKind::Stderr => self.stderr_hangs_after_exit_until_kill,
+        };
+        !hangs_until_cleanup || *self.pipes_released_by_cleanup.lock().unwrap()
     }
 
     fn notify_exit_and_pipes(&self) {
@@ -512,7 +538,7 @@ impl Read for MockStdoutReader {
             }
             // Empty buffer: if the process is exited, signal EOF;
             // otherwise wait for either more bytes or exit.
-            if self.state.is_exited() {
+            if self.state.pipe_has_reached_eof(self.kind) {
                 return Ok(0);
             }
             data = cv.wait(data).unwrap();
