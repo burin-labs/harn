@@ -976,7 +976,6 @@ fn sanitize_openai_message_for_request(message: &mut serde_json::Value, remap_to
 fn openai_message_key_allowed(role: Option<&str>, key: &str) -> bool {
     matches!(key, "role" | "content" | "name")
         || (key == "tool_calls" && role == Some("assistant"))
-        || (key == "reasoning_content" && role == Some("assistant"))
         || (key == "tool_call_id" && role == Some("tool"))
 }
 
@@ -2720,13 +2719,16 @@ thinking_modes = ["enabled"]
             }),
             json!({
                 "role": "assistant",
-                "content": "",
+                "content": [
+                    {"type": "reasoning", "text": "hidden chain", "visibility": "private"},
+                    {"type": "output_text", "text": "visible answer", "visibility": "public"}
+                ],
                 "reasoning": "let me inspect the file before editing",
                 "private_reasoning": "storage only",
                 "thinking": {"signature": "provider-private"},
                 "cache_control": {"type": "ephemeral"},
                 "tool_call_id": "wrong_role",
-                "reasoning_content": "fireworks echoes this allowed field",
+                "reasoning_content": "provider-private trace",
                 "tool_calls": [{
                     "id": "call_001",
                     "type": "function",
@@ -2769,6 +2771,7 @@ thinking_modes = ["enabled"]
                 "private_reasoning",
                 "thinking",
                 "cache_control",
+                "reasoning_content",
             ] {
                 assert!(
                     message.get(key).is_none(),
@@ -2784,9 +2787,10 @@ thinking_modes = ["enabled"]
         let assistant = &messages[1];
         assert_eq!(assistant["role"], "assistant");
         assert!(assistant.get("tool_call_id").is_none());
-        assert_eq!(
-            assistant["reasoning_content"],
-            "fireworks echoes this allowed field"
+        assert_eq!(assistant["content"][0]["text"], "visible answer");
+        assert!(
+            !assistant["content"].to_string().contains("hidden chain"),
+            "private reasoning content block rode into OpenAI-compatible request: {assistant}"
         );
         let first_call = &assistant["tool_calls"][0];
         assert_eq!(first_call["id"], "call_001");

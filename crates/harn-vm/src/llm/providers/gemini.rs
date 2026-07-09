@@ -355,9 +355,10 @@ fn gemini_function_response_part(message: &serde_json::Value) -> Option<serde_js
 }
 
 fn gemini_function_response_payload(content: &serde_json::Value) -> serde_json::Value {
-    match content {
-        serde_json::Value::Object(_) => content.clone(),
-        serde_json::Value::String(text) => match serde_json::from_str::<serde_json::Value>(text) {
+    let visible = crate::llm::content::provider_visible_content(content);
+    match visible {
+        serde_json::Value::Object(_) => visible,
+        serde_json::Value::String(text) => match serde_json::from_str::<serde_json::Value>(&text) {
             Ok(serde_json::Value::Object(object)) => serde_json::Value::Object(object),
             Ok(value) => serde_json::json!({ "result": value }),
             Err(_) => serde_json::json!({ "result": text }),
@@ -1019,6 +1020,36 @@ mod tests {
             body["contents"][1]["parts"][0]["functionResponse"],
             json!({"id": "call_1", "name": "lookup", "response": {"result": "ok"}})
         );
+    }
+
+    #[test]
+    fn gemini_tool_response_filters_private_reasoning_blocks() {
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.messages = vec![json!({
+            "role": "tool",
+            "name": "lookup",
+            "tool_call_id": "call_1",
+            "content": [
+                {"type": "thinking", "text": "hidden direct", "visibility": "private"},
+                {"type": "text", "text": "visible direct", "visibility": "public"},
+                {
+                    "type": "tool_result",
+                    "visibility": "internal",
+                    "content": [
+                        {"type": "reasoning", "text": "hidden nested", "visibility": "private"},
+                        {"type": "text", "text": "visible nested", "visibility": "public"}
+                    ]
+                }
+            ]
+        })];
+
+        let body = GeminiProvider::build_request_body(&payload);
+        let request_text = body.to_string();
+
+        assert!(request_text.contains("visible direct"));
+        assert!(request_text.contains("visible nested"));
+        assert!(!request_text.contains("hidden direct"));
+        assert!(!request_text.contains("hidden nested"));
     }
 
     #[test]

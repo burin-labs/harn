@@ -347,7 +347,10 @@ fn append_responses_message_items(
         // cannot carry an image. A tool that returns a screenshot rides it back
         // on its result, so split: text -> `output`, images -> a following user
         // message as `input_image` items (where the Responses API accepts them).
-        let content = message.get("content");
+        let content = message
+            .get("content")
+            .map(crate::llm::content::provider_visible_content);
+        let content = content.as_ref();
         let images: Vec<serde_json::Value> = content
             .and_then(serde_json::Value::as_array)
             .map(|parts| {
@@ -423,7 +426,8 @@ fn append_responses_message_items(
 }
 
 fn responses_message_content(role: &str, content: &serde_json::Value) -> serde_json::Value {
-    match content {
+    let visible = crate::llm::content::provider_visible_content(content);
+    match &visible {
         serde_json::Value::Array(items) => serde_json::Value::Array(
             items
                 .iter()
@@ -565,6 +569,36 @@ mod tests {
             .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("input_image"))
             .expect("input_image present");
         assert_eq!(img["image_url"], "data:image/png;base64,AAAB");
+    }
+
+    #[test]
+    fn responses_input_items_drop_private_reasoning_blocks() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "reasoning", "text": "private plan", "visibility": "private"},
+                    {"type": "output_text", "text": "visible answer", "visibility": "public"}
+                ],
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": [
+                    {"type": "thinking", "text": "hidden tool trace"},
+                    {"type": "text", "text": "tool output"}
+                ],
+            }),
+        ];
+        let payload = LlmRequestPayload::from(&opts);
+        let items = responses_input_items(&payload);
+        let serialized = serde_json::to_string(&items).expect("serialize");
+
+        assert!(!serialized.contains("private plan"));
+        assert!(!serialized.contains("hidden tool trace"));
+        assert!(serialized.contains("visible answer"));
+        assert!(serialized.contains("tool output"));
     }
 
     #[test]

@@ -525,7 +525,45 @@ fn copy_cache_control(original: &serde_json::Value, normalized: &mut serde_json:
     }
 }
 
+fn is_private_or_reasoning_block(block: &serde_json::Value) -> bool {
+    if block.get("visibility").and_then(serde_json::Value::as_str) == Some("private") {
+        return true;
+    }
+    matches!(
+        block.get("type").and_then(serde_json::Value::as_str),
+        Some("reasoning" | "thinking" | "reasoning_summary")
+    )
+}
+
+fn provider_visible_block(block: &serde_json::Value) -> Option<serde_json::Value> {
+    if is_private_or_reasoning_block(block) {
+        return None;
+    }
+    let mut normalized = block.clone();
+    if let Some(inner) = block.get("content") {
+        normalized["content"] = provider_visible_content(inner);
+    }
+    Some(normalized)
+}
+
+pub(crate) fn provider_visible_content(content: &serde_json::Value) -> serde_json::Value {
+    match content {
+        serde_json::Value::Array(blocks) => {
+            serde_json::Value::Array(blocks.iter().filter_map(provider_visible_block).collect())
+        }
+        serde_json::Value::Object(_) if is_private_or_reasoning_block(content) => {
+            serde_json::Value::Array(Vec::new())
+        }
+        serde_json::Value::Object(_) => {
+            provider_visible_block(content).unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+        }
+        _ => content.clone(),
+    }
+}
+
 pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Value {
+    let visible = provider_visible_content(content);
+    let content = &visible;
     match content {
         serde_json::Value::Array(blocks) => {
             let mut out = Vec::new();
@@ -591,6 +629,8 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
 }
 
 pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
+    let visible = provider_visible_content(content);
+    let content = &visible;
     match content {
         serde_json::Value::Array(blocks) => {
             let mut out = Vec::new();
@@ -667,6 +707,8 @@ pub(crate) fn ollama_message(mut message: serde_json::Value) -> serde_json::Valu
     let Some(content) = object.get("content").cloned() else {
         return message;
     };
+    let content = provider_visible_content(&content);
+    object.insert("content".to_string(), content.clone());
     let serde_json::Value::Array(blocks) = content else {
         return message;
     };
@@ -706,6 +748,8 @@ pub(crate) fn ollama_message(mut message: serde_json::Value) -> serde_json::Valu
 }
 
 pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value> {
+    let visible = provider_visible_content(content);
+    let content = &visible;
     match content {
         serde_json::Value::String(text) => vec![serde_json::json!({"text": text})],
         serde_json::Value::Array(blocks) => blocks
@@ -895,7 +939,10 @@ fn image_to_neutral_json(image: &ImageContent) -> serde_json::Value {
 
 #[cfg(test)]
 mod computer_use_tests {
-    use super::{anthropic_content, openai_content, screenshot_image_block};
+    use super::{
+        anthropic_content, ollama_message, openai_content, provider_visible_content,
+        screenshot_image_block,
+    };
 
     #[test]
     fn hostlib_screenimage_becomes_neutral_image_block() {
@@ -1005,5 +1052,53 @@ mod computer_use_tests {
         assert_eq!(inner[1]["type"], "image");
         assert_eq!(inner[1]["source"]["type"], "base64");
         assert_eq!(inner[1]["source"]["data"], "AAAA");
+    }
+
+    #[test]
+    fn provider_visible_content_drops_private_reasoning_but_keeps_internal_tools() {
+        let content = serde_json::json!([
+            {"type": "reasoning", "text": "private plan", "visibility": "private"},
+            {"type": "reasoning_summary", "text": "private summary"},
+            {"type": "output_text", "text": "public answer", "visibility": "public"},
+            {"type": "tool_call", "id": "call_1", "name": "read", "visibility": "internal"},
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "visibility": "internal",
+                "content": [
+                    {"type": "thinking", "text": "hidden nested"},
+                    {"type": "text", "text": "tool output"}
+                ]
+            }
+        ]);
+
+        let visible = provider_visible_content(&content);
+        let blocks = visible.as_array().expect("content blocks");
+
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0]["type"], "output_text");
+        assert_eq!(blocks[1]["type"], "tool_call");
+        assert_eq!(blocks[2]["type"], "tool_result");
+        let nested = blocks[2]["content"].as_array().expect("nested content");
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0]["text"], "tool output");
+    }
+
+    #[test]
+    fn ollama_message_does_not_leave_original_private_blocks_when_filtered_empty() {
+        let message = serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "reasoning", "text": "private plan", "visibility": "private"}
+            ],
+        });
+
+        let mapped = ollama_message(message);
+
+        assert!(
+            !mapped.to_string().contains("private plan"),
+            "private block survived Ollama request projection: {mapped}"
+        );
+        assert_eq!(mapped["content"], serde_json::json!([]));
     }
 }

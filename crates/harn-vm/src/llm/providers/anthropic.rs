@@ -1244,7 +1244,10 @@ mod tests {
             serde_json::json!({"role": "user", "content": "do the task"}),
             serde_json::json!({
                 "role": "assistant",
-                "content": [{"type": "text", "text": "Let me start by understanding..."}],
+                "content": [
+                    {"type": "reasoning", "text": "hidden chain", "visibility": "private"},
+                    {"type": "text", "text": "Let me start by understanding..."}
+                ],
                 "reasoning": "Let me start by understanding the task.",
                 // OpenAI-shape leakage and other storage-only metadata must also
                 // be stripped at the Anthropic egress boundary.
@@ -1273,6 +1276,10 @@ mod tests {
         assert!(
             assistant.get("content").is_some(),
             "content must be preserved (replay/answer continuity)"
+        );
+        assert!(
+            !assistant["content"].to_string().contains("hidden chain"),
+            "private reasoning content block rode into the Anthropic request: {assistant:?}"
         );
 
         // Replay-preservation: the SOURCE transcript shape is untouched —

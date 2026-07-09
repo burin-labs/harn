@@ -23,9 +23,8 @@
         "anthropic-version": "2023-06-01"
       },
       "healthcheck": {
-        "method": "POST",
-        "path": "/messages/count_tokens",
-        "body": "{\"model\":\"claude-sonnet-4-6\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}"
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "anthropic_messages"

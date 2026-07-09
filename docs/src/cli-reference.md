@@ -1205,18 +1205,20 @@ Secrets never appear in any output. Credential checks list the env var
 
 ## harn provider ready
 
-Probe a configured provider's `/models` endpoint and optionally require a
-specific model alias or provider-native model id.
+Probe a configured provider's model inventory endpoint and optionally require a
+specific model alias or provider-native model id. Harn uses a catalogued
+model-list healthcheck such as `/models` or Ollama's `/api/tags`, or derives
+the inventory URL from an OpenAI-compatible `/chat/completions` endpoint.
 
 ```bash
 harn provider ready mlx --model mlx-qwen3.6
 harn provider ready mlx --base-url http://127.0.0.1:8002 --json
 ```
 
-The command exits non-zero for unreachable servers, bad HTTP status,
-unparsable model listings, and missing models. It does not run local launcher
-scripts; host applications that auto-start local servers should report launch
-failures themselves and then call this probe again.
+The command exits non-zero for unsupported providers, unreachable servers, bad
+HTTP status, unparsable model listings, and missing models. It does not run
+local launcher scripts; host applications that auto-start local servers should
+report launch failures themselves and then call this probe again.
 
 ## harn provider capabilities audit
 

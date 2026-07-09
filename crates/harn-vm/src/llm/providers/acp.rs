@@ -449,7 +449,7 @@ fn request_prompt_text(request: &LlmRequestPayload) -> String {
     if request.system.as_deref().is_none_or(str::is_empty) && request.messages.len() == 1 {
         let message = &request.messages[0];
         if message.get("role").and_then(JsonValue::as_str) == Some("user") {
-            let text = content_text(&message["content"]);
+            let text = request_content_text(&message["content"]);
             if !text.is_empty() {
                 return text;
             }
@@ -460,13 +460,18 @@ fn request_prompt_text(request: &LlmRequestPayload) -> String {
             .get("role")
             .and_then(JsonValue::as_str)
             .unwrap_or("message");
-        let text = content_text(&message["content"]);
+        let text = request_content_text(&message["content"]);
         if text.is_empty() {
             continue;
         }
         parts.push(format!("{role}:\n{text}"));
     }
     parts.join("\n\n")
+}
+
+fn request_content_text(value: &JsonValue) -> String {
+    let visible = crate::llm::content::provider_visible_content(value);
+    content_text(&visible)
 }
 
 fn content_text(value: &JsonValue) -> String {
@@ -594,6 +599,36 @@ mod tests {
             .expect("write json");
         writer.write_all(b"\n").await.expect("write newline");
         writer.flush().await.expect("flush");
+    }
+
+    #[test]
+    fn acp_prompt_projection_drops_private_reasoning_blocks() {
+        let mut request = crate::llm::api::options::base_opts("codex-acp");
+        request.model = "default".to_string();
+        request.messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "reasoning", "text": "hidden plan", "visibility": "private"},
+                {"type": "text", "text": "visible question", "visibility": "public"},
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_1",
+                    "visibility": "internal",
+                    "content": [
+                        {"type": "thinking", "text": "nested hidden"},
+                        {"type": "text", "text": "visible tool result", "visibility": "public"}
+                    ]
+                }
+            ],
+        })];
+        let payload = LlmRequestPayload::from(&request);
+
+        let prompt = request_prompt_text(&payload);
+
+        assert!(prompt.contains("visible question"));
+        assert!(prompt.contains("visible tool result"));
+        assert!(!prompt.contains("hidden plan"));
+        assert!(!prompt.contains("nested hidden"));
     }
 
     #[tokio::test]

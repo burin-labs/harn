@@ -17,7 +17,7 @@ pub(super) fn maybe_emit_delta(delta_tx: Option<DeltaSender>, text: &str) {
 }
 
 pub(super) fn request_text_content(message: &serde_json::Value) -> String {
-    let content = &message["content"];
+    let content = crate::llm::content::provider_visible_content(&message["content"]);
     if let Some(text) = content.as_str() {
         return text.to_string();
     }
