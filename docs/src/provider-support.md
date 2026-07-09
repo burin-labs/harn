@@ -17,16 +17,21 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Baseten` | OpenAI-compatible chat completions | `baseten:baseten/openai/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-*` | `native` | yes | yes | `none` / `xml_tagged` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
+| `Cloudflare Ai Gateway` | OpenAI-compatible chat completions | `cloudflare_ai_gateway` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | No | none | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:dashscope/qwen3-coder-next` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | yes | No | none | `high` | `not_recorded` |
-| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/deepseek-ai/DeepSeek-V4-Flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
+| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507` | `native` | yes | yes | `native` / `native_json` | none | no | No | none | `high` | `not_recorded` |
 | `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
+| `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
+| `Github Models` | OpenAI-compatible chat completions | `github_models` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Groq` | OpenAI-compatible chat completions | `groq:llama-3.1-8b-instant` | `native` | yes | yes | `native` / `native_json` | none | no | Yes (50%) | none | `high` | `not_recorded` |
 | `Huggingface` | OpenAI-compatible chat completions | `huggingface:qwen/qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `provider_default` | `not_recorded` |
+| `Hunyuan` | OpenAI-compatible chat completions | `hunyuan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Hyperbolic` | OpenAI-compatible chat completions | `hyperbolic` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
+| `Inception` | OpenAI-compatible chat completions | `inception:mercury-2` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | yes | yes | `native` / `native_json` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
 | `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | yes | yes | `native` / `delimited` | `enabled` | no | No | none | `low` | `not_recorded` |
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | No | none | `high` | `not_recorded` |
@@ -39,12 +44,15 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `mid` | `native` | yes | yes | `native` / `native_json` | none | no | Yes (50%) | `fast:premium`, `priority:premium`, `flex:discounted` | `high` | `not_recorded` |
 | `Openrouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled` | yes | No | none | `high` | `not_recorded` |
 | `Parasail` | OpenAI-compatible chat completions | `parasail` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
+| `Qianfan` | OpenAI-compatible chat completions | `qianfan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `Siliconflow` | OpenAI-compatible chat completions | `siliconflow` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
-| `Together` | OpenAI-compatible chat completions | `together:Qwen/Qwen3-Coder-Next-FP8` | `native` | yes | yes | `native` / `delimited` | none | no | Yes (50%) | none | `high` | `not_recorded` |
+| `Together` | OpenAI-compatible chat completions | `together:openai/gpt-oss-20b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
+| `Vercel Ai Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
+| `Volcengine Ark` | OpenAI-compatible chat completions | `volcengine_ark` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Xai` | OpenAI-compatible chat completions | `xai:grok-build-0.1` | `native` | yes | yes | `native` / `native_json` | `adaptive` | yes | Yes | none | `high` | `not_recorded` |
 | `Zai` | OpenAI-compatible chat completions | `zai:glm-4.6` | `text` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 
@@ -130,6 +138,24 @@ Caveats:
 MCP notes:
 
 - MCP tools are regular Harn runtime tools before they become Gemini function declarations.
+
+### Inception
+
+- catalog provider: `inception`
+- recommended route: `inception:mercury-2` (`mercury-2`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "inception"
+model = "mercury-2"
+tool_format = "native"
+structured_output_mode = "native_json"
+```
+
+Caveats:
+
+- Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet.
 
 ### llama.cpp server
 
