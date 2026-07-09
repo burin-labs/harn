@@ -9,6 +9,19 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.5
+
+### Added
+
+- Added per-case LoRA promotion probe command templates to the Harn-owned evidence contract.
+
+### Fixed
+
+- Process tool cleanup receipts now report structural child-process evidence.
+  Timeout, interrupt, and long-running cancellation paths carry a bounded
+  `process_cleanup` receipt with observed descendants, reaped children,
+  survivor counts, and basename-only child command names.
+
 ## v0.10.4
 
 ### Added
