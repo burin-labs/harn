@@ -15,9 +15,9 @@ include = [
 [dependencies]
 blake3 = "1"
 croner = "3.0.1"
-harn-lexer = { path = "../harn-lexer", version = "=0.10.2" }
-harn-parser = { path = "../harn-parser", version = "=0.10.2" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.2" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.3" }
+harn-parser = { path = "../harn-parser", version = "=0.10.3" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.3" }
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"
 
