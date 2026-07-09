@@ -1,5 +1,5 @@
 /**
- * `harn provider tool-scorecard` render layer — see harn#4192.
+ * `harn provider tool-scorecard` render layer.
  *
  * The scorecard aggregator stays in Rust because it consumes typed
  * `ToolConformanceReport` fixtures and will later compare those observations
@@ -40,6 +40,13 @@ fn __safe_int(value, fallback: int) -> int {
   return fallback
 }
 
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
 fn __join_strings(values: list, fallback: string) -> string {
   let out = ""
   let first = true
@@ -51,6 +58,29 @@ fn __join_strings(values: list, fallback: string) -> string {
       out = out + ","
     }
     out = out + value
+    first = false
+  }
+  if out == "" {
+    return fallback
+  }
+  return out
+}
+
+fn __join_case_ids(values: list, fallback: string) -> string {
+  let out = ""
+  let first = true
+  for value in values {
+    if type_of(value) != "dict" {
+      continue
+    }
+    const id = __safe_string(value["id"], "")
+    if id == "" {
+      continue
+    }
+    if !first {
+      out = out + ","
+    }
+    out = out + id
     first = false
   }
   if out == "" {
@@ -115,6 +145,52 @@ fn __render_human(report: dict) -> string {
   return out
 }
 
+fn __render_plan_human(report: dict) -> string {
+  const catalog = __safe_dict(report["catalog"])
+  let out = "provider tool-call scorecard plan: routes="
+    + to_string(__safe_int(report["route_count"], 0))
+    + " cases="
+    + to_string(__safe_int(report["case_count"], 0))
+    + " required="
+    + to_string(__safe_int(report["required_case_count"], 0))
+    + " batch_manifest_requests="
+    + to_string(__safe_int(report["batch_manifest_request_count"], 0))
+    + "\n"
+  out = out + "catalog="
+    + __safe_string(catalog["hash_blake3"], "-")
+    + " schema="
+    + to_string(__safe_int(catalog["schema_version"], 0))
+    + "\n"
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const claim = __safe_dict(route["catalog_claim"])
+    const cases = __safe_list(route["cases"])
+    out = out + "  "
+      + __safe_string(route["provider"], "")
+      + " "
+      + __safe_string(route["model"], "")
+      + " preferred="
+      + __safe_string(claim["preferred_tool_format"], "-")
+      + " parity="
+      + __safe_string(claim["tool_mode_parity"], "-")
+      + " native="
+      + to_string(__safe_bool(claim["native_tools"], false))
+      + " text="
+      + to_string(__safe_bool(claim["text_tools"], false))
+      + " parallel="
+      + to_string(__safe_bool(claim["supports_parallel_tool_calls"], false))
+      + " batch="
+      + to_string(__safe_bool(claim["batch_api"], false))
+      + " cases="
+      + __join_case_ids(cases, "-")
+      + "\n"
+  }
+  return out
+}
+
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON", "")
   if raw == "" {
@@ -138,7 +214,12 @@ fn main(harness: Harness) -> int {
       )
       return 70
     }
-    const text = __render_human(report)
+    const kind = __safe_string(report["kind"], "report")
+    const text = if kind == "plan" {
+      __render_plan_human(report)
+    } else {
+      __render_human(report)
+    }
     const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
       text[0:len(text) - 1]
     } else {
