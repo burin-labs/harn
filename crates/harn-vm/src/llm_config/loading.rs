@@ -247,7 +247,6 @@ fn model_patch_schema() -> &'static PatchSchema {
             ("performance", performance_patch_schema()),
             ("architecture", architecture_patch_schema()),
             ("local_memory", local_memory_patch_schema()),
-            ("batch", batch_patch_schema()),
         ],
     };
     &MODEL_PATCH_SCHEMA
@@ -341,23 +340,6 @@ const fn local_memory_patch_schema() -> PatchSchema {
             "notes",
         ],
         freeform: &["cache_type_multipliers"],
-        nested: &[],
-    }
-}
-
-const fn batch_patch_schema() -> PatchSchema {
-    PatchSchema {
-        fields: &[
-            "supported",
-            "max_batch_size",
-            "max_file_size_mb",
-            "completion_window",
-            "endpoint",
-            "source_url",
-            "last_verified",
-            "notes",
-        ],
-        freeform: &[],
         nested: &[],
     }
 }

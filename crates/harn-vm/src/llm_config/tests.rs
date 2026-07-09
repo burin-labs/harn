@@ -73,6 +73,24 @@ fast_mode = true
 }
 
 #[test]
+fn parse_config_warns_on_patch_model_batch_table() {
+    let diagnostics = diagnostic_texts(
+        r#"
+[patch.models."demo/model".batch]
+supported = true
+endpoint = "/v1/batches"
+"#,
+    );
+    assert!(
+        diagnostics.iter().any(
+            |diagnostic| diagnostic.contains("patch.models.demo/model.batch")
+                && diagnostic.contains("unknown providers.toml field")
+        ),
+        "expected patch model batch diagnostic, got {diagnostics:?}"
+    );
+}
+
+#[test]
 fn parse_config_accepts_current_vllm_lora_runtime_fields() {
     let diagnostics = diagnostic_texts(
         r#"
