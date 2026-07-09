@@ -296,7 +296,11 @@ fn push_qwen_message(out: &mut String, role: &str, content: &str, close: bool) {
 }
 
 fn render_message_text(message: &serde_json::Value) -> String {
-    let mut text = render_content_text(message.get("content").unwrap_or(&serde_json::Value::Null));
+    let visible_content = message
+        .get("content")
+        .map(crate::llm::content::provider_visible_content)
+        .unwrap_or(serde_json::Value::Null);
+    let mut text = render_content_text(&visible_content);
     if let Some(tool_name) = message.get("tool_name").and_then(|value| value.as_str()) {
         text = format!("[tool result: {tool_name}]\n{text}");
     } else if let Some(tool_call_id) = message.get("tool_call_id").and_then(|value| value.as_str())
@@ -751,6 +755,30 @@ mod tests {
         })]);
 
         assert!(!OllamaProvider::should_route_via_raw_generate(&payload));
+    }
+
+    #[test]
+    fn qwen_raw_generate_prompt_filters_private_content_blocks() {
+        let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
+        payload.response_format = None;
+        payload.json_schema = None;
+        payload.native_tools = None;
+        payload.messages = vec![serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "reasoning_summary", "text": "hidden summary"},
+                {"type": "output_text", "text": "hidden private", "visibility": "private"},
+                {"type": "output_text", "text": "visible answer", "visibility": "public"}
+            ]
+        })];
+
+        let body = OllamaProvider::build_raw_generate_body(&payload);
+        let prompt = body["prompt"].as_str().expect("raw prompt");
+
+        assert!(!prompt.contains("hidden summary"));
+        assert!(!prompt.contains("hidden private"));
+        assert!(prompt.contains("visible answer"));
     }
 
     #[test]
