@@ -1,5 +1,5 @@
 /** Shared render helpers for `harn models lora *` commands. */
-import { print_list, safe_dict, safe_list, safe_string } from "std/cli/render"
+import { print_list, render_command, safe_dict, safe_list, safe_string } from "std/cli/render"
 
 /**
  * Render the PEFT save policy carried by a LoRA training contract.
@@ -67,5 +67,38 @@ pub fn render_required_probe_cases(harness: Harness, value: unknown) {
     if line != "" {
       harness.stdio.println("    - " + line)
     }
+  }
+}
+
+/**
+ * Render the per-case promotion probe commands and expected output receipts.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_probe_command_templates(harness: Harness, value: unknown) {
+  const command_templates = safe_list(value)
+  if len(command_templates) == 0 {
+    return
+  }
+  harness.stdio.println("  probe command templates:")
+  for item in command_templates {
+    const template = safe_dict(item)
+    const case_id = safe_string(template["case_id"], "")
+    if case_id == "" {
+      continue
+    }
+    const receipt = safe_string(template["receipt"], "")
+    const summary_path = safe_string(template["summary_path"], "")
+    let line = case_id
+    if receipt != "" {
+      line = line + " -> " + receipt
+    }
+    if summary_path != "" {
+      line = line + " (" + summary_path + ")"
+    }
+    harness.stdio.println("    - " + line)
+    render_command(harness, "probe " + case_id, safe_list(template["command"]))
+    print_list(harness, "probe " + case_id + " notes", safe_list(template["notes"]))
   }
 }

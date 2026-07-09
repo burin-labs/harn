@@ -23,7 +23,7 @@ const LORA_CONTRACT_SCHEMA_VERSION: u64 = 2;
 const LORA_CONTRACT_HASH_SCHEMA_VERSION: u64 = 2;
 const LORA_TRAINING_CONTRACT_SCHEMA_VERSION: u64 = 2;
 const LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION: u64 = 1;
-const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 2;
+const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 3;
 /// Serialises the dispatch path so concurrent in-process callers do not race on
 /// the env vars that carry the Rust-collected adapter/catalog facts.
 static LORA_RENDER_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -2036,7 +2036,9 @@ fn lora_promotion_evidence_contract(
     input: PromotionEvidenceInput<'_>,
 ) -> PromotionEvidenceContract {
     let required_probe_cases = lora_required_probe_cases(input.tool_format);
-    let promotion_id = lora_promotion_id(&input, &required_probe_cases);
+    let probe_command_templates =
+        lora_promotion_probe_command_templates(&input, &required_probe_cases);
+    let promotion_id = lora_promotion_id(&input, &required_probe_cases, &probe_command_templates);
     PromotionEvidenceContract {
         schema_version: LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION,
         promotion_id,
@@ -2066,6 +2068,7 @@ fn lora_promotion_evidence_contract(
             "adapter_eval_receipt".to_string(),
         ],
         required_probe_cases,
+        probe_command_templates,
         optional_batch_receipts: vec![
             "harn.model_batch_manifest".to_string(),
             "harn.model_batch_prepare_receipt".to_string(),
@@ -2192,6 +2195,51 @@ fn lora_required_probe_cases(tool_format: &str) -> Vec<PromotionProbeCase> {
     ]
 }
 
+fn lora_promotion_probe_command_templates(
+    input: &PromotionEvidenceInput<'_>,
+    required_probe_cases: &[PromotionProbeCase],
+) -> Vec<PromotionProbeCommandTemplate> {
+    let planner = format!("provider={},model={}", input.provider, input.request_model);
+    required_probe_cases
+        .iter()
+        .map(|probe_case| {
+            let output_dir = format!("PROMOTION_PROBES/{}", probe_case.id);
+            let mut notes = Vec::new();
+            if probe_case.id == "serving_concurrency_probe" {
+                notes.push(
+                    "the selected dataset/evaluator must exercise concurrent adapter-loaded requests; a sequential filtered run is not enough evidence"
+                        .to_string(),
+                );
+            }
+            PromotionProbeCommandTemplate {
+                case_id: probe_case.id.clone(),
+                route_role: "adapter".to_string(),
+                executor: "harn_eval_tool_calls_filter".to_string(),
+                command: vec![
+                    "harn".to_string(),
+                    "eval".to_string(),
+                    "tool-calls".to_string(),
+                    "--dataset".to_string(),
+                    input.eval_dataset.to_string(),
+                    "--planner".to_string(),
+                    planner.clone(),
+                    "--tool-format".to_string(),
+                    input.tool_format.to_string(),
+                    "--filter".to_string(),
+                    probe_case.id.clone(),
+                    "--output".to_string(),
+                    output_dir.clone(),
+                ],
+                output_dir: output_dir.clone(),
+                summary_path: format!("{output_dir}/summary.json"),
+                per_case_path: format!("{output_dir}/per_case.jsonl"),
+                receipt: probe_case.receipt.clone(),
+                notes,
+            }
+        })
+        .collect()
+}
+
 struct PromotionEvidenceInput<'a> {
     contract_id: &'a str,
     base_model: &'a str,
@@ -2207,10 +2255,11 @@ struct PromotionEvidenceInput<'a> {
 fn lora_promotion_id(
     input: &PromotionEvidenceInput<'_>,
     required_probe_cases: &[PromotionProbeCase],
+    probe_command_templates: &[PromotionProbeCommandTemplate],
 ) -> String {
     let mut hasher = Sha256::new();
     for part in [
-        "harn_lora_promotion_v2",
+        "harn_lora_promotion_v3",
         input.contract_id,
         input.base_model,
         input.provider,
@@ -2233,6 +2282,10 @@ fn lora_promotion_id(
     let probe_case_bytes = serde_json::to_vec(required_probe_cases)
         .expect("promotion probe cases are JSON-serializable");
     hasher.update(probe_case_bytes);
+    hasher.update([0]);
+    let probe_command_bytes = serde_json::to_vec(probe_command_templates)
+        .expect("promotion probe command templates are JSON-serializable");
+    hasher.update(probe_command_bytes);
     hasher.update([0]);
     format!("sha256:{}", hex::encode(hasher.finalize()))
 }
@@ -2692,6 +2745,7 @@ struct PromotionEvidenceContract {
     minimum_trials: u64,
     required_receipts: Vec<String>,
     required_probe_cases: Vec<PromotionProbeCase>,
+    probe_command_templates: Vec<PromotionProbeCommandTemplate>,
     optional_batch_receipts: Vec<String>,
     batch_ready: PromotionBatchReady,
     acceptance: PromotionAcceptance,
@@ -2704,6 +2758,20 @@ struct PromotionProbeCase {
     expected: String,
     receipt: String,
     rationale: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct PromotionProbeCommandTemplate {
+    case_id: String,
+    route_role: String,
+    executor: String,
+    command: Vec<String>,
+    output_dir: String,
+    summary_path: String,
+    per_case_path: String,
+    receipt: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -3293,6 +3361,49 @@ mod tests {
                     .requirement
                     .contains("required_when_route_supports_parallel_tool_calls")
         }));
+        assert_eq!(
+            evidence.probe_command_templates.len(),
+            evidence.required_probe_cases.len()
+        );
+        let sequential_probe_command = evidence
+            .probe_command_templates
+            .iter()
+            .find(|template| template.case_id == "sequential_tool_call")
+            .expect("sequential probe command template");
+        assert_eq!(
+            sequential_probe_command.command,
+            [
+                "harn",
+                "eval",
+                "tool-calls",
+                "--dataset",
+                "lora-corpus",
+                "--planner",
+                "provider=vllm,model=ADAPTER_MODEL",
+                "--tool-format",
+                "json",
+                "--filter",
+                "sequential_tool_call",
+                "--output",
+                "PROMOTION_PROBES/sequential_tool_call",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            sequential_probe_command.summary_path,
+            "PROMOTION_PROBES/sequential_tool_call/summary.json"
+        );
+        let concurrency_probe_command = evidence
+            .probe_command_templates
+            .iter()
+            .find(|template| template.case_id == "serving_concurrency_probe")
+            .expect("serving concurrency probe command template");
+        assert!(concurrency_probe_command
+            .notes
+            .iter()
+            .any(|note| note.contains("concurrent adapter-loaded requests")));
         assert!(evidence
             .optional_batch_receipts
             .iter()
@@ -3325,15 +3436,24 @@ mod tests {
             gates: &original_gates,
         };
         let required_probe_cases = lora_required_probe_cases(original.tool_format);
-        let original_id = lora_promotion_id(&original, &required_probe_cases);
+        let probe_command_templates =
+            lora_promotion_probe_command_templates(&original, &required_probe_cases);
+        let original_id =
+            lora_promotion_id(&original, &required_probe_cases, &probe_command_templates);
         let tightened = PromotionEvidenceInput {
             gates: &tightened_gates,
             ..original
         };
+        let tightened_probe_command_templates =
+            lora_promotion_probe_command_templates(&tightened, &required_probe_cases);
 
         assert_ne!(
             original_id,
-            lora_promotion_id(&tightened, &required_probe_cases)
+            lora_promotion_id(
+                &tightened,
+                &required_probe_cases,
+                &tightened_probe_command_templates,
+            )
         );
     }
 
@@ -3353,14 +3473,22 @@ mod tests {
             gates: &gates,
         };
         let required_probe_cases = lora_required_probe_cases(input.tool_format);
+        let probe_command_templates =
+            lora_promotion_probe_command_templates(&input, &required_probe_cases);
         let mut changed_probe_cases = required_probe_cases.clone();
         changed_probe_cases[0]
             .expected
             .push_str(" with stable ordering");
+        let changed_probe_command_templates =
+            lora_promotion_probe_command_templates(&input, &changed_probe_cases);
 
         assert_ne!(
-            lora_promotion_id(&input, &required_probe_cases),
-            lora_promotion_id(&input, &changed_probe_cases)
+            lora_promotion_id(&input, &required_probe_cases, &probe_command_templates),
+            lora_promotion_id(
+                &input,
+                &changed_probe_cases,
+                &changed_probe_command_templates,
+            )
         );
     }
 

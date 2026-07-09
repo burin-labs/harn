@@ -12,7 +12,7 @@
 use std::fs;
 use std::process::{Command, Output};
 
-const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 2;
+const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 3;
 
 fn harn_binary() -> &'static str {
     env!("CARGO_BIN_EXE_harn")
@@ -3107,6 +3107,51 @@ fn models_lora_plan_json_shape_is_stable() {
                     })
         }),
         "required probe cases={required_probe_cases:?}"
+    );
+    let probe_command_templates = evidence["probe_command_templates"]
+        .as_array()
+        .expect("probe command templates");
+    assert_eq!(
+        probe_command_templates.len(),
+        required_probe_cases.len(),
+        "probe command templates={probe_command_templates:?}"
+    );
+    let sequential_probe = probe_command_templates
+        .iter()
+        .find(|template| template["case_id"] == "sequential_tool_call")
+        .expect("sequential probe command template");
+    assert_eq!(
+        sequential_probe["summary_path"],
+        "PROMOTION_PROBES/sequential_tool_call/summary.json"
+    );
+    let sequential_command = sequential_probe["command"]
+        .as_array()
+        .expect("sequential probe argv");
+    assert!(
+        sequential_command
+            .windows(2)
+            .any(|pair| pair[0] == "--planner" && pair[1] == "provider=vllm,model=ADAPTER_MODEL"),
+        "sequential probe argv={sequential_command:?}"
+    );
+    assert!(
+        sequential_command
+            .windows(2)
+            .any(|pair| pair[0] == "--filter" && pair[1] == "sequential_tool_call"),
+        "sequential probe argv={sequential_command:?}"
+    );
+    let concurrency_probe = probe_command_templates
+        .iter()
+        .find(|template| template["case_id"] == "serving_concurrency_probe")
+        .expect("serving concurrency probe command template");
+    assert!(
+        concurrency_probe["notes"]
+            .as_array()
+            .expect("concurrency notes")
+            .iter()
+            .any(|note| note
+                .as_str()
+                .is_some_and(|text| text.contains("concurrent adapter-loaded requests"))),
+        "serving concurrency probe={concurrency_probe:?}"
     );
     assert!(
         eval.windows(2)

@@ -1,4 +1,8 @@
-import { render_peft_save_policy, render_required_probe_cases } from "std/cli/models/lora_render"
+import {
+  render_peft_save_policy,
+  render_probe_command_templates,
+  render_required_probe_cases,
+} from "std/cli/models/lora_render"
 /**
  * `harn models lora train` renderer.
  *
@@ -184,6 +188,7 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "precision gates", safe_list(precision["promotion_gates"]))
   print_list(harness, "promotion receipts", safe_list(evidence["required_receipts"]))
   render_required_probe_cases(harness, evidence["required_probe_cases"])
+  render_probe_command_templates(harness, evidence["probe_command_templates"])
   print_list(harness, "warnings", warnings)
   if len(backend_argv) > 0 {
     render_command(harness, "backend", backend_argv)
