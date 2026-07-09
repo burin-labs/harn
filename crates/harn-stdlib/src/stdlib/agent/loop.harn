@@ -3880,7 +3880,7 @@ fn __agent_loop_tool_call_names(tool_calls) {
   return names
 }
 
-fn __agent_loop_thrash_recovery_feedback(warning) {
+fn __agent_loop_repeated_observation_recovery_feedback(warning) {
   let tool_name = to_string(warning?.tool_name ?? "")
   let action = if tool_name != "" {
     "`" + tool_name + "`"
@@ -3900,26 +3900,71 @@ fn __agent_loop_thrash_recovery_feedback(warning) {
     + signature_line
 }
 
-fn __agent_loop_thrash_recovery_allowed(warning, tool_calls) {
-  if len(tool_calls ?? []) == 0 {
-    return false
+fn __agent_loop_monologue_recovery_feedback(visible_text) {
+  let intent = trim(to_string(visible_text ?? ""))
+  if len(intent) > 900 {
+    intent = intent[0:900] + "..."
   }
+  const intent_block = if intent != "" {
+    "\nYour stated intent was:\n" + intent
+  } else {
+    ""
+  }
+  return "You are describing the next action instead of taking it. On the next turn, "
+    + "emit exactly one concrete tool call as the first action; do not continue in prose. "
+    + "Use the available tool that matches your stated intent, with explicit arguments."
+    + intent_block
+}
+
+fn __agent_loop_thrash_recovery_allowed(warning, tool_calls) {
   if !(warning?.hard_stop ?? false) {
     return false
   }
-  // Recovery is for a repeated action that returned the same observation, such
-  // as a broad listing loop. Diagnostic hard stops already carry the specific
-  // blocker and must remain terminal instead of turning into a false finish.
-  return to_string(warning?.pattern ?? "") == "repeated_same_observation"
+  const pattern = to_string(warning?.pattern ?? "")
+  if pattern == "repeated_same_observation" {
+    return len(tool_calls ?? []) > 0
+  }
+  return pattern == "no_progress_monologue" && len(tool_calls ?? []) == 0
+}
+
+fn __agent_loop_thrash_recovery_reason(warning) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return "monologue_recovery_continue"
+  }
+  return "thrash_recovery_continue"
+}
+
+fn __agent_loop_thrash_recovery_feedback(warning, visible_text) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return __agent_loop_monologue_recovery_feedback(visible_text)
+  }
+  return __agent_loop_repeated_observation_recovery_feedback(warning)
+}
+
+fn __agent_loop_thrash_recovery_key(warning) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return "monologue_recovery"
+  }
+  return "thrash_recovery"
+}
+
+fn __agent_loop_thrash_recovery_skip_reason(warning) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return "monologue_recovery"
+  }
+  return "thrash_recovery"
 }
 
 fn __agent_loop_thrash_recovery_skip_outcome(warning, tool_calls, stall_hard_stop_rescues) {
   const pattern = to_string(warning?.pattern ?? "")
-  if pattern != "repeated_same_observation" {
+  if pattern != "repeated_same_observation" && pattern != "no_progress_monologue" {
     return "no_rung_for_pattern"
   }
-  if len(tool_calls ?? []) == 0 {
+  if pattern == "repeated_same_observation" && len(tool_calls ?? []) == 0 {
     return "no_tool_calls"
+  }
+  if pattern == "no_progress_monologue" && len(tool_calls ?? []) > 0 {
+    return "unexpected_tool_calls"
   }
   if stall_hard_stop_rescues > 0 {
     return "rung_limit_exhausted"
@@ -4753,16 +4798,18 @@ fn __agent_loop_run(message, session, initial_opts) {
             stall_hard_stop_rescues = stall_hard_stop_rescues + 1
             let old_limit = current_max
             current_max = max(current_max, iteration + 1)
-            agent_session_record_undispatched_tool_results(
-              session.session_id,
-              tool_calls,
-              "skipped",
-              "not dispatched: repeated identical tool call entered bounded thrash recovery",
-            )
+            if len(tool_calls) > 0 {
+              agent_session_record_undispatched_tool_results(
+                session.session_id,
+                tool_calls,
+                "skipped",
+                "not dispatched: repeated identical tool call entered bounded thrash recovery",
+              )
+            }
             __inject_feedback_with_tool_repair(
               session.session_id,
-              "thrash_recovery",
-              __agent_loop_thrash_recovery_feedback(stall_warning),
+              __agent_loop_thrash_recovery_key(stall_warning),
+              __agent_loop_thrash_recovery_feedback(stall_warning, visible_text),
             )
             let thrash_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
             agent_emit_event(
@@ -4778,9 +4825,10 @@ fn __agent_loop_run(message, session, initial_opts) {
                   thrash_totals,
                   loop_start_ms,
                 )
-                  + {dispatch_skipped: true, skip_reason: "thrash_recovery"},
+                  + {dispatch_skipped: true, skip_reason: __agent_loop_thrash_recovery_skip_reason(stall_warning)},
               },
             )
+            const recovery_reason = __agent_loop_thrash_recovery_reason(stall_warning)
             agent_emit_event(
               session.session_id,
               "loop_control_decision",
@@ -4789,7 +4837,7 @@ fn __agent_loop_run(message, session, initial_opts) {
                 action: "extend",
                 old_limit: old_limit,
                 new_limit: current_max,
-                reason: "thrash_recovery_continue",
+                reason: recovery_reason,
                 status: "recovering",
               },
             )
@@ -4800,6 +4848,9 @@ fn __agent_loop_run(message, session, initial_opts) {
               stall_warning,
               old_limit,
               current_max,
+              "fired",
+              "extend",
+              recovery_reason,
             )
             continue
           }
