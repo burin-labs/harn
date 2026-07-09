@@ -100,6 +100,26 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Groq Compound systems route through the chat-completions endpoint but reject
+# OpenAI `tools` outright (`tool calling is not supported with this model`,
+# 2026-07-09 live Harn tool-probe). A text-tool smoke with the runtime contract
+# returned a pseudo call in provider reasoning text, not an executable visible
+# tool call, so treat them as fast agentic chat systems rather than Harn
+# tool-calling executors.
+[[provider.groq]]
+model_match = "groq/compound*"
+native_tools = false
+preferred_tool_format = "none"
+text_tool_wire_format_supported = false
+structured_output = "none"
+structured_output_mode = "none"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
 # gpt-oss on Groq uses NATIVE tool calls. The prior `json`/text pin was a
 # defensive workaround for an "empty native streaming payload" defect that no
 # longer reproduces: 2026-06-12 live probes (raw curl + Harn's streaming path)

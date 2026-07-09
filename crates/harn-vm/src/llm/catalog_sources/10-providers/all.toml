@@ -238,6 +238,7 @@ path = "/models"
 [providers.dashscope]
 base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 base_url_env = "DASHSCOPE_BASE_URL"
+region_env = "DASHSCOPE_REGION"
 auth_style = "bearer"
 auth_env = "DASHSCOPE_API_KEY"
 chat_endpoint = "/chat/completions"
@@ -245,6 +246,18 @@ completion_endpoint = "/completions"
 cost_per_1k_in = 0.0003
 cost_per_1k_out = 0.0012
 latency_p50_ms = 1600
+
+[providers.dashscope.regions.intl]
+base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+label = "International"
+source_url = "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope"
+last_verified = "2026-07-09"
+
+[providers.dashscope.regions.cn]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+label = "China"
+source_url = "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope"
+last_verified = "2026-07-09"
 
 [providers.dashscope.healthcheck]
 method = "GET"
@@ -273,6 +286,7 @@ path = "/models"
 [providers.zai]
 base_url = "https://api.z.ai/api/paas/v4"
 base_url_env = "ZAI_BASE_URL"
+region_env = "ZAI_REGION"
 auth_style = "bearer"
 auth_env = ["ZAI_API_KEY", "ZHIPU_API_KEY"]
 chat_endpoint = "/chat/completions"
@@ -281,17 +295,29 @@ cost_per_1k_in = 0.0004
 cost_per_1k_out = 0.0017
 latency_p50_ms = 1900
 
+[providers.zai.regions.global]
+base_url = "https://api.z.ai/api/paas/v4"
+label = "Global"
+source_url = "https://docs.z.ai/guides/start/quickstart"
+last_verified = "2026-07-09"
+
+[providers.zai.regions.cn]
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+label = "China"
+source_url = "https://bigmodel.cn/dev/api/normal-model/glm-4"
+last_verified = "2026-07-09"
+
 [providers.zai.healthcheck]
 method = "GET"
 path = "/models"
 
 # Moonshot AI — first-party host of the Kimi K2 family. Harn dials the
 # OpenAI-compatible `/v1/chat/completions` endpoint so the shared
-# openai_chat_completions wire format Just Works. Use the `.cn` base via
-# MOONSHOT_BASE_URL for the China region.
+# openai_chat_completions wire format Just Works.
 [providers.moonshot]
 base_url = "https://api.moonshot.ai/v1"
 base_url_env = "MOONSHOT_BASE_URL"
+region_env = "MOONSHOT_REGION"
 auth_style = "bearer"
 auth_env = ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"]
 chat_endpoint = "/chat/completions"
@@ -300,6 +326,18 @@ cost_per_1k_in = 0.0006
 cost_per_1k_out = 0.0025
 latency_p50_ms = 1900
 features = ["native_tools", "reasoning", "prompt_caching"]
+
+[providers.moonshot.regions.global]
+base_url = "https://api.moonshot.ai/v1"
+label = "Global"
+source_url = "https://platform.moonshot.ai/docs/intro"
+last_verified = "2026-07-09"
+
+[providers.moonshot.regions.cn]
+base_url = "https://api.moonshot.cn/v1"
+label = "China"
+source_url = "https://platform.moonshot.cn/docs"
+last_verified = "2026-07-09"
 
 [providers.moonshot.healthcheck]
 method = "GET"
@@ -437,16 +475,28 @@ method = "GET"
 path = "/models"
 
 # SiliconFlow — OpenAI-compatible hosted inference for inexpensive DeepSeek,
-# Qwen, GLM, and other open-weight routes. Set SILICONFLOW_BASE_URL to the
-# regional `.cn` endpoint when needed.
+# Qwen, GLM, and other open-weight routes.
 [providers.siliconflow]
 base_url = "https://api.siliconflow.com/v1"
 base_url_env = "SILICONFLOW_BASE_URL"
+region_env = "SILICONFLOW_REGION"
 auth_style = "bearer"
 auth_env = "SILICONFLOW_API_KEY"
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
 features = ["native_tools", "reasoning"]
+
+[providers.siliconflow.regions.global]
+base_url = "https://api.siliconflow.com/v1"
+label = "Global"
+source_url = "https://docs.siliconflow.com/api-reference/chat-completions/chat-completions"
+last_verified = "2026-07-09"
+
+[providers.siliconflow.regions.cn]
+base_url = "https://api.siliconflow.cn/v1"
+label = "China"
+source_url = "https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions"
+last_verified = "2026-07-09"
 
 [providers.siliconflow.healthcheck]
 method = "GET"
@@ -480,6 +530,116 @@ completion_endpoint = "/completions"
 features = ["native_tools", "reasoning"]
 
 [providers.atlas.healthcheck]
+method = "GET"
+path = "/models"
+
+# GitHub Models — OpenAI-compatible inference over GitHub's model catalog.
+[providers.github_models]
+base_url = "https://models.github.ai/inference"
+base_url_env = "GITHUB_MODELS_BASE_URL"
+auth_style = "bearer"
+auth_env = "GITHUB_MODELS_TOKEN"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.github_models.healthcheck]
+method = "GET"
+url = "https://models.github.ai/catalog/models"
+
+# Vercel AI Gateway — one OpenAI-compatible endpoint for providers routed
+# through a Vercel project.
+[providers.vercel_ai_gateway]
+base_url = "https://ai-gateway.vercel.sh/v1"
+base_url_env = "VERCEL_AI_GATEWAY_BASE_URL"
+auth_style = "bearer"
+auth_env = ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning", "prompt_caching"]
+
+[providers.vercel_ai_gateway.healthcheck]
+method = "GET"
+path = "/models"
+
+# Cloudflare Workers AI / AI Gateway — OpenAI-compatible path is scoped by
+# account id. Set CLOUDFLARE_AI_BASE_URL to the concrete account/gateway URL.
+[providers.cloudflare_ai_gateway]
+base_url = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
+base_url_env = "CLOUDFLARE_AI_BASE_URL"
+auth_style = "bearer"
+auth_env = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["responses_api", "native_tools", "reasoning"]
+
+# Inception Labs — diffusion LLM APIs exposed through OpenAI-compatible chat.
+[providers.inception]
+base_url = "https://api.inceptionlabs.ai/v1"
+base_url_env = "INCEPTION_BASE_URL"
+auth_style = "bearer"
+auth_env = "INCEPTION_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.inception.healthcheck]
+method = "GET"
+path = "/models"
+
+# Friendli Serverless Endpoints — OpenAI-compatible chat/completions.
+[providers.friendli]
+base_url = "https://api.friendli.ai/serverless/v1"
+base_url_env = "FRIENDLI_BASE_URL"
+auth_style = "bearer"
+auth_env = ["FRIENDLI_API_KEY", "FRIENDLI_TOKEN"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.friendli.healthcheck]
+method = "GET"
+path = "/models"
+
+# Volcengine Ark — OpenAI-compatible ByteDance model serving endpoint.
+[providers.volcengine_ark]
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+base_url_env = "VOLCENGINE_ARK_BASE_URL"
+auth_style = "bearer"
+auth_env = ["ARK_API_KEY", "VOLCENGINE_ARK_API_KEY", "VOLCENGINE_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["responses_api", "native_tools"]
+
+[providers.volcengine_ark.healthcheck]
+method = "GET"
+path = "/models"
+
+# Tencent Hunyuan — OpenAI-compatible `/v1/chat/completions` endpoint.
+[providers.hunyuan]
+base_url = "https://api.hunyuan.cloud.tencent.com/v1"
+base_url_env = "HUNYUAN_BASE_URL"
+auth_style = "bearer"
+auth_env = ["HUNYUAN_API_KEY", "TENCENT_HUNYUAN_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.hunyuan.healthcheck]
+method = "GET"
+path = "/models"
+
+# Baidu Qianfan v2 — OpenAI-compatible endpoint with tool-calling support.
+[providers.qianfan]
+base_url = "https://qianfan.baidubce.com/v2"
+base_url_env = "QIANFAN_BASE_URL"
+auth_style = "bearer"
+auth_env = ["QIANFAN_API_KEY", "BAIDU_QIANFAN_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.qianfan.healthcheck]
 method = "GET"
 path = "/models"
 

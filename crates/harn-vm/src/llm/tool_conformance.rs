@@ -618,6 +618,11 @@ fn probe_request_payload(
     mode: ToolProbeMode,
     marker: &str,
 ) -> LlmRequestPayload {
+    let model_defaults = probe_model_defaults(provider, model);
+    let default_float =
+        |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };
+    let default_int =
+        |key: &str| -> Option<i64> { model_defaults.get(key).and_then(|v| v.as_integer()) };
     let prompt = format!(
         "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. Do not answer in prose."
     );
@@ -642,10 +647,10 @@ fn probe_request_payload(
         route_fallbacks: Vec::new(),
         messages: vec![json!({"role": "user", "content": prompt})],
         system: None,
-        max_tokens: 256,
-        temperature: Some(0.0),
-        top_p: None,
-        top_k: None,
+        max_tokens: default_int("max_tokens").unwrap_or(256),
+        temperature: Some(default_float("temperature").unwrap_or(0.0)),
+        top_p: default_float("top_p"),
+        top_k: default_int("top_k"),
         logprobs: false,
         top_logprobs: None,
         stop: None,
@@ -681,6 +686,15 @@ fn probe_request_payload(
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
     }
+}
+
+fn probe_model_defaults(provider: &str, model: &str) -> BTreeMap<String, toml::Value> {
+    let mut defaults = llm_config::model_params(model);
+    let qualified = format!("{provider}/{model}");
+    if qualified != model {
+        defaults.extend(llm_config::model_params(&qualified));
+    }
+    defaults
 }
 
 fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value {
@@ -817,12 +831,18 @@ fn extract_content(response: &Value) -> String {
 fn visit_content(value: &Value, parts: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
+            if object_is_private_reasoning_content(map) {
+                return;
+            }
             for key in ["content", "response", "text"] {
                 if let Some(text) = map.get(key).and_then(Value::as_str) {
                     parts.push(text.to_string());
                 }
             }
-            for child in map.values() {
+            for (key, child) in map {
+                if field_is_private_reasoning(key) {
+                    continue;
+                }
                 visit_content(child, parts);
             }
         }
@@ -833,6 +853,30 @@ fn visit_content(value: &Value, parts: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+fn object_is_private_reasoning_content(map: &serde_json::Map<String, Value>) -> bool {
+    let block_type = map.get("type").and_then(Value::as_str).unwrap_or("");
+    if matches!(block_type, "reasoning" | "thinking" | "reasoning_summary") {
+        return true;
+    }
+    matches!(
+        map.get("visibility").and_then(Value::as_str),
+        Some("private" | "internal")
+    )
+}
+
+fn field_is_private_reasoning(field: &str) -> bool {
+    matches!(
+        field,
+        "analysis"
+            | "reasoning"
+            | "reasoning_content"
+            | "reasoning_details"
+            | "reasoning_summary"
+            | "thinking"
+            | "thinking_summary"
+    )
 }
 
 fn aggregate_stream_text(text: &str, _provider: &str) -> Value {
@@ -1084,6 +1128,36 @@ mod tests {
     }
 
     #[test]
+    fn probe_payload_applies_provider_qualified_model_defaults() {
+        let _guard = crate::llm::env_guard();
+        let mut overlay = llm_config::ProvidersConfig::default();
+        overlay.model_defaults.insert(
+            "probe-provider/wire-model".to_string(),
+            BTreeMap::from_iter([
+                ("max_tokens".to_string(), toml::Value::Integer(321)),
+                ("temperature".to_string(), toml::Value::Float(1.0)),
+                ("top_p".to_string(), toml::Value::Float(0.9)),
+                ("top_k".to_string(), toml::Value::Integer(40)),
+            ]),
+        );
+        llm_config::set_user_overrides(Some(overlay));
+
+        let payload = probe_request_payload(
+            "probe-provider",
+            "wire-model",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+        );
+
+        assert_eq!(payload.max_tokens, 321);
+        assert_eq!(payload.temperature, Some(1.0));
+        assert_eq!(payload.top_p, Some(0.9));
+        assert_eq!(payload.top_k, Some(40));
+
+        llm_config::clear_user_overrides();
+    }
+
+    #[test]
     fn probe_request_body_uses_anthropic_tool_dialect() {
         let body = probe_request_body(
             "anthropic",
@@ -1261,6 +1335,42 @@ mod tests {
             report.tool_calling.fallback_mode,
             ToolProbeFallbackMode::Text
         );
+    }
+
+    #[test]
+    fn structured_reasoning_tool_text_does_not_satisfy_probe() {
+        let report = classify_tool_conformance_fixture(
+            "local",
+            "model",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+            r#"{"choices":[{"message":{"content":[{"type":"reasoning","text":"<tool_call>{\"name\":\"echo_marker\",\"arguments\":{\"value\":\"harn_tool_probe_marker\"}}</tool_call>"}]}}]}"#,
+        );
+
+        assert_ne!(report.tool_calling.text, ToolProbeStatus::Pass);
+        assert_eq!(
+            report.tool_calling.fallback_mode,
+            ToolProbeFallbackMode::Disabled
+        );
+        assert!(!report_satisfies_required_probe(&report, "tool_probe"));
+    }
+
+    #[test]
+    fn reasoning_field_tool_text_does_not_satisfy_probe() {
+        let report = classify_tool_conformance_fixture(
+            "local",
+            "model",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+            r#"{"choices":[{"message":{"content":"","reasoning":{"content":"call:echo_marker{ value: \"harn_tool_probe_marker\" }"}}}]}"#,
+        );
+
+        assert_ne!(report.tool_calling.text, ToolProbeStatus::Pass);
+        assert_eq!(
+            report.tool_calling.fallback_mode,
+            ToolProbeFallbackMode::Disabled
+        );
+        assert!(!report_satisfies_required_probe(&report, "tool_probe"));
     }
 
     #[test]

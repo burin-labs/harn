@@ -478,6 +478,30 @@ top_k_supported = false
 [provider_defaults.atlas]
 top_k_supported = false
 
+[provider_defaults.github_models]
+top_k_supported = false
+
+[provider_defaults.vercel_ai_gateway]
+top_k_supported = false
+
+[provider_defaults.cloudflare_ai_gateway]
+top_k_supported = false
+
+[provider_defaults.inception]
+top_k_supported = false
+
+[provider_defaults.friendli]
+top_k_supported = false
+
+[provider_defaults.volcengine_ark]
+top_k_supported = false
+
+[provider_defaults.hunyuan]
+top_k_supported = false
+
+[provider_defaults.qianfan]
+top_k_supported = false
+
 # --- source: 10-defaults/provider-limits.toml ---
 # Adaptive rate/concurrency governor limits (Layer 1 of the LLM rate governor).
 #
@@ -2928,6 +2952,7 @@ vision = true
 vision_supported = true
 prompt_caching = true
 requires_tool_result_adjacency = true
+allowed_tool_choice_modes = ["auto", "none"]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -3950,6 +3975,101 @@ text_tool_wire_format_supported = true
 tool_mode_parity = "unknown"
 tool_mode_parity_notes = "Atlas is a coding-plan OpenAI-compatible route; Harn has no route-specific tool parity probes yet."
 
+[[provider.github_models]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "GitHub Models publishes capability flags per catalog model; Harn needs route-specific probes before assuming native/text tool parity."
+
+[[provider.vercel_ai_gateway]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Vercel AI Gateway forwards to many upstreams; model-specific provider quirks should override this transport-level default."
+
+[[provider.cloudflare_ai_gateway]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Cloudflare exposes OpenAI-compatible Workers AI and AI Gateway routes, but capabilities depend on the routed model."
+
+[[provider.inception]]
+model_match = "mercury-2"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_block_style = "reasoning_summary"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet."
+
+[[provider.inception]]
+model_match = "mercury-coder-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+structured_output_mode = "delimited"
+thinking_block_style = "none"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass."
+
+[[provider.friendli]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Friendli serverless endpoints are OpenAI-compatible; model-specific capability probes should narrow this wildcard."
+
+[[provider.volcengine_ark]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Volcengine Ark exposes OpenAI-compatible chat completions; routed model families still need native-vs-text tool probes."
+
+[[provider.hunyuan]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Tencent Hunyuan documents OpenAI-compatible function calling; Harn has not yet probed every Hunyuan model family."
+
+[[provider.qianfan]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Baidu Qianfan v2 documents OpenAI-compatible tool calls; model-specific parity remains unprobed."
+
 # --- source: 20-providers/50-gemini-gemma.toml ---
 # ---------- Google Gemini + Gemma 4 (via OpenRouter) -------------------------
 #
@@ -4461,6 +4581,21 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.together]]
+model_match = "together/nvidia/nemotron-3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
 model_match = "moonshotai/*"
 native_tools = true
 preferred_tool_format = "native"
@@ -4575,6 +4710,26 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+
+# Groq Compound systems route through the chat-completions endpoint but reject
+# OpenAI `tools` outright (`tool calling is not supported with this model`,
+# 2026-07-09 live Harn tool-probe). A text-tool smoke with the runtime contract
+# returned a pseudo call in provider reasoning text, not an executable visible
+# tool call, so treat them as fast agentic chat systems rather than Harn
+# tool-calling executors.
+[[provider.groq]]
+model_match = "groq/compound*"
+native_tools = false
+preferred_tool_format = "none"
+text_tool_wire_format_supported = false
+structured_output = "none"
+structured_output_mode = "none"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # gpt-oss on Groq uses NATIVE tool calls. The prior `json`/text pin was a
 # defensive workaround for an "empty native streaming payload" defect that no
@@ -5346,6 +5501,91 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# July 2026 OpenRouter catalog deltas whose slugs do not inherit useful
+# family-specific capability rows through the OpenAI-compatible transport
+# fallback. Keep them explicit so the catalog audit can catch future rows that
+# need a real tool contract decision.
+[[provider.openrouter]]
+model_match = "x-ai/grok-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["adaptive"]
+prompt_caching = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.openrouter]]
+model_match = "bytedance-seed/*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision_supported = true
+video_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "cohere/north-mini-code:free"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "nvidia/nemotron-3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "openrouter/free"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # --- source: 90-families/provider-family.toml ---
 [provider_family]
 openrouter = "openai"
@@ -5374,3 +5614,11 @@ hyperbolic = "openai"
 siliconflow = "openai"
 parasail = "openai"
 atlas = "openai"
+github_models = "openai"
+vercel_ai_gateway = "openai"
+cloudflare_ai_gateway = "openai"
+inception = "openai"
+friendli = "openai"
+volcengine_ark = "openai"
+hunyuan = "openai"
+qianfan = "openai"

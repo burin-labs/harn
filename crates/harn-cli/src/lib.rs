@@ -1660,6 +1660,8 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
                     "icon": def.icon,
                     "base_url": harn_vm::llm_config::resolve_base_url(&def),
                     "base_url_env": def.base_url_env,
+                    "region_env": def.region_env,
+                    "regions": def.regions,
                     "auth_style": def.auth_style,
                     "auth_envs": harn_vm::llm_config::auth_env_names(&def.auth_env),
                     "auth_available": harn_vm::llm_config::provider_key_available(&name),

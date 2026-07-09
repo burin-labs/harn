@@ -428,8 +428,9 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
 
 #[cfg(test)]
 mod cache_supported_serde_tests {
-    use super::mock_completion_response;
-    use super::LlmResult;
+    use crate::value::VmValue;
+
+    use super::{mock_completion_response, vm_build_llm_result, LlmResult};
 
     #[test]
     fn cache_supported_true_is_omitted_from_serialization() {
@@ -464,5 +465,36 @@ mod cache_supported_serde_tests {
         );
         let back: LlmResult = serde_json::from_value(json).expect("deserialize");
         assert!(!back.cache_supported);
+    }
+
+    #[test]
+    fn provider_reasoning_text_is_not_parsed_as_executable_tool_calls() {
+        let mut result = mock_completion_response("hi", None);
+        result.text = "<user_response>Done.</user_response>".to_string();
+        result.thinking = Some(
+            "<tool_call>\nrun({ command: \"echo should-not-run\" })\n</tool_call>".to_string(),
+        );
+
+        let value = vm_build_llm_result(&result, None, None, None);
+        let dict = value.as_dict().expect("result dict");
+
+        assert!(
+            dict.get("tool_calls").is_none(),
+            "provider reasoning must not become executable tool calls"
+        );
+        assert_eq!(
+            dict.get("prose").map(VmValue::display).as_deref(),
+            Some("Done.")
+        );
+        assert_eq!(
+            dict.get("thinking").map(VmValue::display).as_deref(),
+            result.thinking.as_deref()
+        );
+        assert_eq!(
+            dict.get("private_reasoning")
+                .map(VmValue::display)
+                .as_deref(),
+            result.thinking.as_deref()
+        );
     }
 }

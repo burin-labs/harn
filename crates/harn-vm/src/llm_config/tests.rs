@@ -1,6 +1,7 @@
 use super::*;
 use harn_glob::match_name as glob_match;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 fn reset_overrides() {
     clear_user_overrides();
@@ -1067,6 +1068,43 @@ fn test_resolve_base_url_no_env() {
         ..Default::default()
     };
     assert_eq!(resolve_base_url(&pdef), "https://example.com");
+}
+
+#[test]
+fn test_resolve_base_url_region_env() {
+    let _guard = crate::llm::env_guard();
+    unsafe {
+        std::env::remove_var("HARN_TEST_BASE_URL");
+        std::env::set_var("HARN_TEST_REGION", "CN");
+    }
+    let pdef = ProviderDef {
+        base_url: "https://global.example/v1".to_string(),
+        base_url_env: Some("HARN_TEST_BASE_URL".to_string()),
+        region_env: Some("HARN_TEST_REGION".to_string()),
+        regions: BTreeMap::from([
+            (
+                "global".to_string(),
+                ProviderRegionDef {
+                    base_url: "https://global.example/v1".to_string(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "cn".to_string(),
+                ProviderRegionDef {
+                    base_url: "https://cn.example/v1".to_string(),
+                    ..Default::default()
+                },
+            ),
+        ]),
+        ..Default::default()
+    };
+    assert_eq!(resolve_base_url(&pdef), "https://cn.example/v1");
+
+    unsafe {
+        std::env::set_var("HARN_TEST_BASE_URL", " 'https://override.example/v1' ");
+    }
+    assert_eq!(resolve_base_url(&pdef), "https://override.example/v1");
 }
 
 #[test]

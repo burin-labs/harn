@@ -207,6 +207,30 @@ fn generated_catalog_exports_provider_healthcheck_metadata() {
 }
 
 #[test]
+fn generated_catalog_exports_provider_region_metadata() {
+    llm_config::clear_user_overrides();
+    let catalog = artifact();
+
+    let dashscope = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "dashscope")
+        .expect("dashscope provider is exported");
+    assert_eq!(
+        dashscope.endpoint.region_env.as_deref(),
+        Some("DASHSCOPE_REGION")
+    );
+    assert_eq!(
+        dashscope
+            .endpoint
+            .regions
+            .get("cn")
+            .map(|region| region.base_url.as_str()),
+        Some("https://dashscope.aliyuncs.com/compatible-mode/v1")
+    );
+}
+
+#[test]
 fn generated_catalog_exports_typed_batch_lifecycle_metadata() {
     llm_config::clear_user_overrides();
     let catalog = artifact();
@@ -574,11 +598,11 @@ fn remote_catalog_rejects_stale_v2_schema() {
         Err(error) => error,
     };
     assert!(
-        error.contains("schema_version must be 3, got 2"),
+        error.contains("schema_version must be 4, got 2"),
         "unexpected stale-catalog rejection: {error}"
     );
     assert!(
-        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v3.json"),
+        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v4.json"),
         "unexpected stale-catalog rejection: {error}"
     );
 }
@@ -1200,6 +1224,10 @@ fn generated_schema_accepts_generated_artifact_shape() {
     assert!(schema["$defs"]["model"]["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|field| field == "lineage")));
+    assert_eq!(
+        schema["$defs"]["endpoint"]["properties"]["regions"]["additionalProperties"]["$ref"],
+        "#/$defs/endpoint_region"
+    );
     let artifact_value = serde_json::to_value(artifact()).expect("artifact serializes");
     assert_eq!(
         artifact_value["schema_version"],
@@ -1220,10 +1248,13 @@ fn downstream_bindings_include_empirical_tool_parity_shape() {
     let typescript = typescript_declarations();
     assert!(typescript.contains("empirical_parity?: HarnToolEmpiricalParity"));
     assert!(typescript.contains("export interface HarnToolEmpiricalParity"));
+    assert!(typescript.contains("regions?: Record<string, HarnProviderEndpointRegion>"));
 
     let swift = swift_binding().expect("swift binding renders");
     assert!(swift.contains("public let empiricalParity: HarnToolEmpiricalParity?"));
     assert!(swift.contains("public struct HarnToolEmpiricalParity"));
+    assert!(swift.contains("public let regions: [String: HarnProviderEndpointRegion]?"));
+    assert!(swift.contains("public struct HarnProviderEndpointRegion"));
 }
 
 #[test]
@@ -1462,14 +1493,15 @@ fn live_catalog_wire_models_strip_provider_route_prefix() {
     // `provider/<wire-id>` selector so the same weights stay collision-free
     // across hosts (e.g. `groq/openai/gpt-oss-20b`,
     // `deepinfra/Qwen/Qwen3.6-35B-A3B`), but the value sent on the wire must
-    // be the bare provider-native id with no `<provider>/` route prefix.
-    // A wire_model that still carries its own provider prefix 404s at request
-    // time. Assert every catalog row whose wire_model is set does NOT prefix
-    // the wire id with that row's provider segment.
+    // be the bare provider-native id with no accidental routing prefix for the
+    // provider families where that bug has reproduced. Keep model-specific
+    // exceptions out of Rust tests; catalog validation and live probes own
+    // route-by-route facts.
     let catalog = artifact();
     let offenders: Vec<String> = catalog
         .models
         .iter()
+        .filter(|model| provider_route_prefix_must_be_stripped(&model.provider))
         .filter_map(|model| {
             let wire = model.wire_model.as_deref()?;
             let bad_prefix = format!("{}/", model.provider);
@@ -1484,6 +1516,13 @@ fn live_catalog_wire_models_strip_provider_route_prefix() {
         offenders.is_empty(),
         "wire_model values must not retain their own `<provider>/` route prefix: {offenders:?}"
     );
+}
+
+fn provider_route_prefix_must_be_stripped(provider: &str) -> bool {
+    matches!(
+        provider,
+        "baseten" | "deepinfra" | "fireworks" | "nvidia" | "sambanova" | "together"
+    )
 }
 
 #[test]

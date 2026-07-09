@@ -14,9 +14,9 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 3;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 4;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v3.json";
+    "https://harnlang.com/schemas/provider-catalog.v4.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog export";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -92,6 +92,24 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
         icon: provider.icon.clone(),
         base_url: provider.endpoint.base_url.clone(),
         base_url_env: provider.endpoint.base_url_env.clone(),
+        region_env: provider.endpoint.region_env.clone(),
+        regions: provider
+            .endpoint
+            .regions
+            .iter()
+            .map(|(id, region)| {
+                (
+                    id.clone(),
+                    llm_config::ProviderRegionDef {
+                        base_url: region.base_url.clone(),
+                        label: region.label.clone(),
+                        source_url: region.source_url.clone(),
+                        last_verified: region.last_verified.clone(),
+                        notes: region.notes.clone(),
+                    },
+                )
+            })
+            .collect(),
         auth_style: provider.auth.style.clone(),
         auth_style_explicit: true,
         auth_header: provider.auth.header.clone(),
@@ -318,6 +336,23 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
         endpoint: ProviderEndpoint {
             base_url: provider.base_url.clone(),
             base_url_env: provider.base_url_env.clone(),
+            region_env: provider.region_env.clone(),
+            regions: provider
+                .regions
+                .iter()
+                .map(|(id, region)| {
+                    (
+                        id.clone(),
+                        ProviderEndpointRegion {
+                            base_url: region.base_url.clone(),
+                            label: region.label.clone(),
+                            source_url: region.source_url.clone(),
+                            last_verified: region.last_verified.clone(),
+                            notes: region.notes.clone(),
+                        },
+                    )
+                })
+                .collect(),
             chat_endpoint: provider.chat_endpoint.clone(),
             completion_endpoint: provider.completion_endpoint.clone(),
         },

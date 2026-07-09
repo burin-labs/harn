@@ -171,7 +171,7 @@ pub fn pick_complementary_reviewer(
         if id == &author_identity.id && model.provider == author_identity.provider {
             continue;
         }
-        if model.deprecated || model.availability != ModelAvailability::Serverless {
+        if !eligible_reviewer_model(model) {
             continue;
         }
         let family = model_family_with_config(&config, &model.provider, id);
@@ -330,6 +330,12 @@ fn reviewer_score(
         }
     }
     score
+}
+
+fn eligible_reviewer_model(model: &ModelDef) -> bool {
+    !model.deprecated
+        && model.availability == ModelAvailability::Serverless
+        && !model.quality_tags.iter().any(|tag| tag == "avoid_reviewer")
 }
 
 fn intent_strengths(intent: ComplementaryReviewerIntent) -> &'static [&'static str] {

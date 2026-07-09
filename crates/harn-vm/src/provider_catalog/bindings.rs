@@ -32,7 +32,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 3
+  schema_version: 4
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -93,8 +93,18 @@ export interface HarnLocalRuntime {
 export interface HarnProviderEndpoint {
   base_url: string
   base_url_env?: string
+  region_env?: string
+  regions?: Record<string, HarnProviderEndpointRegion>
   chat_endpoint: string
   completion_endpoint?: string
+}
+
+export interface HarnProviderEndpointRegion {
+  base_url: string
+  label?: string
+  source_url?: string
+  last_verified?: string
+  notes?: string
 }
 
 export interface HarnProviderAuth {
@@ -454,14 +464,34 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
 public struct HarnProviderEndpoint: Codable, Sendable, Equatable {
     public let baseURL: String
     public let baseURLEnv: String?
+    public let regionEnv: String?
+    public let regions: [String: HarnProviderEndpointRegion]?
     public let chatEndpoint: String
     public let completionEndpoint: String?
 
     enum CodingKeys: String, CodingKey {
         case baseURL = "base_url"
         case baseURLEnv = "base_url_env"
+        case regionEnv = "region_env"
+        case regions
         case chatEndpoint = "chat_endpoint"
         case completionEndpoint = "completion_endpoint"
+    }
+}
+
+public struct HarnProviderEndpointRegion: Codable, Sendable, Equatable {
+    public let baseURL: String
+    public let label: String?
+    public let sourceURL: String?
+    public let lastVerified: String?
+    public let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case baseURL = "base_url"
+        case label
+        case sourceURL = "source_url"
+        case lastVerified = "last_verified"
+        case notes
     }
 }
 

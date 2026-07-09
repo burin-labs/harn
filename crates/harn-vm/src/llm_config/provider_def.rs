@@ -3,7 +3,7 @@
 //! resolution.
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::*;
 
@@ -17,6 +17,10 @@ pub struct ProviderDef {
     pub protocol: Option<String>,
     pub base_url: String,
     pub base_url_env: Option<String>,
+    /// Optional env var that selects one of this provider's named regional
+    /// endpoints. `base_url_env` remains the absolute override when set.
+    pub region_env: Option<String>,
+    pub regions: BTreeMap<String, ProviderRegionDef>,
     pub auth_style: String,
     pub auth_header: Option<String>,
     pub auth_env: AuthEnv,
@@ -68,6 +72,19 @@ pub struct ProviderDef {
     pub auth_style_explicit: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ProviderRegionDef {
+    pub base_url: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub last_verified: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct ProviderDefWire {
     #[serde(default)]
@@ -80,6 +97,10 @@ struct ProviderDefWire {
     base_url: String,
     #[serde(default)]
     base_url_env: Option<String>,
+    #[serde(default)]
+    region_env: Option<String>,
+    #[serde(default)]
+    regions: BTreeMap<String, ProviderRegionDef>,
     #[serde(default)]
     auth_style: Option<String>,
     #[serde(default)]
@@ -143,6 +164,8 @@ impl<'de> Deserialize<'de> for ProviderDef {
             protocol: wire.protocol,
             base_url: wire.base_url,
             base_url_env: wire.base_url_env,
+            region_env: wire.region_env,
+            regions: wire.regions,
             auth_style: wire.auth_style.unwrap_or_else(default_bearer),
             auth_header: wire.auth_header,
             auth_env: wire.auth_env,
@@ -182,6 +205,8 @@ impl Default for ProviderDef {
             protocol: None,
             base_url: String::new(),
             base_url_env: None,
+            region_env: None,
+            regions: BTreeMap::new(),
             auth_style: default_bearer(),
             auth_header: None,
             auth_env: AuthEnv::None,
@@ -218,6 +243,8 @@ impl ProviderDef {
         merge_option(&mut self.protocol, &overlay.protocol);
         merge_string(&mut self.base_url, &overlay.base_url);
         merge_option(&mut self.base_url_env, &overlay.base_url_env);
+        merge_option(&mut self.region_env, &overlay.region_env);
+        self.regions.extend(overlay.regions.clone());
         let overlay_uses_default_auth_style = overlay.auth_style == default_bearer();
         if overlay.auth_style_explicit
             || !overlay_uses_default_auth_style
@@ -313,7 +340,8 @@ impl AuthEnv {
 }
 
 /// Resolve the effective base URL for a provider, checking the `base_url_env`
-/// override first, then falling back to the configured `base_url`.
+/// override first, then any named region selected by `region_env`, then the
+/// configured `base_url`.
 pub fn resolve_base_url(pdef: &ProviderDef) -> String {
     if let Some(env_name) = &pdef.base_url_env {
         if let Ok(val) = std::env::var(env_name) {
@@ -321,6 +349,23 @@ pub fn resolve_base_url(pdef: &ProviderDef) -> String {
             let trimmed = val.trim().trim_matches('"').trim_matches('\'');
             if !trimmed.is_empty() {
                 return trimmed.to_string();
+            }
+        }
+    }
+    if let Some(env_name) = &pdef.region_env {
+        if let Ok(val) = std::env::var(env_name) {
+            let region = val.trim().trim_matches('"').trim_matches('\'');
+            if !region.is_empty() {
+                let endpoint = pdef
+                    .regions
+                    .get(region)
+                    .or_else(|| pdef.regions.get(&region.to_ascii_lowercase()));
+                if let Some(endpoint) = endpoint {
+                    let base_url = endpoint.base_url.trim();
+                    if !base_url.is_empty() {
+                        return base_url.to_string();
+                    }
+                }
             }
         }
     }
