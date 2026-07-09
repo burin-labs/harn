@@ -994,8 +994,9 @@ fn apply_command_rewrite(
 ) -> Result<(), VmError> {
     for (key, value) in rewrite {
         match key.as_str() {
-            "mode" | "argv" | "command" | "shell" | "cwd" | "env" | "env_mode" | "stdin"
-            | "timeout" | "timeout_ms" | "capture" | "capture_stderr" | "max_inline_bytes" => {
+            "mode" | "argv" | "command" | "shell" | "cwd" | "env" | "env_remove" | "env_mode"
+            | "stdin" | "timeout" | "timeout_ms" | "capture" | "capture_stderr"
+            | "max_inline_bytes" => {
                 params.insert(key.clone(), value.clone());
             }
             other => {

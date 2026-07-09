@@ -112,7 +112,7 @@ fn __probe_truncate(value, limit) -> string {
 
 fn __probe_command_options(opts) -> dict {
   let out = {}
-  for key in ["cwd", "env", "env_mode", "timeout_ms", "stdin", "max_inline_bytes"] {
+  for key in ["cwd", "env", "env_remove", "env_mode", "timeout_ms", "stdin", "max_inline_bytes"] {
     if opts?.[key] != nil {
       out = out + {[key]: opts[key]}
     }
@@ -137,10 +137,10 @@ fn __probe_eval(body, opts) -> dict {
   const cmd_opts = __probe_command_options(opts)
   const started = harness.clock.monotonic_ms()
   const result = if lang == "harn" {
-    let path = __probe_temp_path(".harn")
+    const path = __probe_temp_path(".harn")
     harness.fs.write_text(path, body)
-    let argv = [__probe_harn_binary(opts), "run", path]
-    let res = command_run(argv, cmd_opts)
+    const argv = [__probe_harn_binary(opts), "run", path]
+    const res = command_run(argv, cmd_opts)
     harness.fs.delete(path)
     res
   } else {
