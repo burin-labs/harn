@@ -1,0 +1,63 @@
+import { command_run } from "std/command"
+import "../_common"
+
+fn env_remove_probe_command() {
+  if platform() == "windows" {
+    return "if \"%HARN_REMOVE_ME%\"==\"\" "
+      + "(if \"%HARN_KEEP_ME%\"==\"kept\" (echo ok) else (echo bad& exit /B 9)) "
+      + "else (echo bad& exit /B 9)"
+  }
+  return "if [ -z \"$HARN_REMOVE_ME\" ] && [ \"$HARN_KEEP_ME\" = \"kept\" ]; then printf ok; else printf bad; exit 9; fi"
+}
+
+pipeline default() {
+  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const root = path_join(harness.fs.temp_dir(), "harn-command-env-remove-" + uuid_v7())
+  const script = path_join(root, "child.harn")
+  harness.fs.mkdir(root)
+  harness.fs
+    .write_text(
+    script,
+    "import { command_run } from \"std/command\"\n\n"
+      + "fn env_remove_probe_command() {\n"
+      + "  if platform() == \"windows\" {\n"
+      + "    return \"if \\\"%HARN_REMOVE_ME%\\\"==\\\"\\\" \"\n"
+      + "      + \"(if \\\"%HARN_KEEP_ME%\\\"==\\\"kept\\\" (echo ok) else (echo bad& exit /B 9)) \"\n"
+      + "      + \"else (echo bad& exit /B 9)\"\n"
+      + "  }\n"
+      + "  return \"if [ -z \\\"$HARN_REMOVE_ME\\\" ] && [ \\\"$HARN_KEEP_ME\\\" = \\\"kept\\\" ]; then printf ok; else printf bad; exit 9; fi\"\n"
+      + "}\n\n"
+      + "fn explicit_env_wins_command() {\n"
+      + "  if platform() == \"windows\" {\n"
+      + "    return \"if \\\"%HARN_REMOVE_ME%\\\"==\\\"explicit\\\" (echo explicit-ok) else (echo bad& exit /B 9)\"\n"
+      + "  }\n"
+      + "  return \"if [ \\\"$HARN_REMOVE_ME\\\" = \\\"explicit\\\" ]; then printf explicit-ok; else printf bad; exit 9; fi\"\n"
+      + "}\n\n"
+      + "pipeline default() {\n"
+      + "  const inherited = command_run(\n"
+      + "    {mode: \"shell\", command: env_remove_probe_command()},\n"
+      + "    {env: {HARN_KEEP_ME: \"kept\"}, env_remove: [\"HARN_REMOVE_ME\"], capture: {max_inline_bytes: 64}},\n"
+      + "  )\n"
+      + "  require inherited.success, \"env_remove should strip inherited variables\"\n"
+      + "  require trim(inherited.stdout) == \"ok\", \"env_remove should preserve unrelated env overrides\"\n"
+      + "  const explicit = command_run(\n"
+      + "    {mode: \"shell\", command: explicit_env_wins_command()},\n"
+      + "    {env: {HARN_REMOVE_ME: \"explicit\"}, env_remove: [\"HARN_REMOVE_ME\"], capture: {max_inline_bytes: 64}},\n"
+      + "  )\n"
+      + "  require explicit.success, \"explicit env should win over env_remove\"\n"
+      + "  require trim(explicit.stdout) == \"explicit-ok\", \"explicit env should remain visible\"\n"
+      + "  __io_println(\"ok\")\n"
+      + "}\n",
+  )
+  const result = exec_at(root, "env", "HARN_REMOVE_ME=ambient", harn_bin, "run", script)
+  require result.success, result.stderr
+  require trim(result.stdout) == "ok", "nested env_remove probe should pass"
+  const direct = command_run(
+    {mode: "shell", command: env_remove_probe_command()},
+    {env: {HARN_KEEP_ME: "kept"}, env_remove: ["HARN_REMOVE_ME"], capture: {max_inline_bytes: 64}},
+  )
+  require direct.success, "env_remove should be accepted by stdlib command wrappers"
+  require trim(direct.stdout) == "ok", "direct probe should pass when the variable is already absent"
+  __io_println("ok")
+}

@@ -31,6 +31,7 @@ fn __command_copy_common(req, source) {
   for key in [
     "cwd",
     "env",
+    "env_remove",
     "env_mode",
     "stdin",
     "timeout_ms",
@@ -61,6 +62,7 @@ fn __command_apply_option_defaults(req, options) {
   for key in [
     "cwd",
     "env",
+    "env_remove",
     "env_mode",
     "stdin",
     "timeout_ms",
@@ -345,6 +347,7 @@ fn __command_stream_run_options(options) {
   for key in [
     "cwd",
     "env",
+    "env_remove",
     "env_mode",
     "stdin",
     "capture",
@@ -646,6 +649,7 @@ fn __command_run_options(options) {
   for key in [
     "cwd",
     "env",
+    "env_remove",
     "env_mode",
     "stdin",
     "timeout_ms",
