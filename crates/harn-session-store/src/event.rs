@@ -9,7 +9,7 @@
 //!
 //! The on-the-wire shape is intentionally JSON-first: the storage
 //! backend keeps events as canonical UTF-8 bytes, which lets the
-//! Ed25519 receipt chain (see [`crate::sessions::signing`]) hash the
+//! Ed25519 receipt chain (see [`crate::signing`]) hash the
 //! exact bytes that were appended, independent of any structural
 //! re-ordering a future Rust struct refactor might introduce.
 
@@ -144,7 +144,7 @@ pub struct StoredEvent {
     /// genesis event.
     pub prev_hash: Option<String>,
     /// Detached signature over `record_hash`. `None` until the session
-    /// is closed and the [`crate::sessions::signing::SessionSigner`]
+    /// is closed and the [`crate::signing::SessionSigner`]
     /// finalises the chain receipt.
     pub signed_by: Option<EventSignature>,
 }

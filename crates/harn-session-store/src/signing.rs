@@ -209,7 +209,7 @@ pub fn chain_root_hash(events: &[StoredEvent]) -> String {
 /// `session_id` field is rewritten on each event and `prev_hash` +
 /// `record_hash` are recomputed sequentially, so the resulting chain
 /// is bytewise-verifiable as a standalone session. Used by
-/// [`crate::sessions::SessionStore::fork`] to give the child session
+/// [`crate::SessionStore::fork`] to give the child session
 /// a chain that `verify` can attest without the parent.
 pub fn re_anchor_events(events: &[StoredEvent], new_session_id: &str) -> Vec<StoredEvent> {
     let mut rewritten = Vec::with_capacity(events.len());

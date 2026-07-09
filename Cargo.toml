@@ -13,6 +13,7 @@ members = [
     "crates/harn-ir",
     "crates/harn-codegen",
     "crates/harn-cli",
+    "crates/harn-session-store",
     "crates/harn-serve",
     "crates/harn-skills",
     "crates/harn-lsp",

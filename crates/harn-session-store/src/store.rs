@@ -35,8 +35,7 @@ pub enum SessionStatus {
     Open,
     Closed,
     /// Soft-deleted; will become `HardDeleted` once the grace window
-    /// elapses (enforced by retention sweeps; see
-    /// [`crate::sessions::retention`]).
+    /// elapses (enforced by retention sweeps; see [`crate::retention`]).
     SoftDeleted,
     HardDeleted,
 }
@@ -188,8 +187,8 @@ pub type StoreResult<T> = Result<T, StoreError>;
 pub const MAX_READ_BATCH: usize = 1_000;
 
 /// Optional processors a host can plug in. They run inline on append
-/// and finalisation; see [`crate::sessions::Sessions`] for the
-/// orchestration entry points.
+/// and finalisation; backends call these hooks from the `SessionStore`
+/// mutation points.
 #[derive(Default, Clone)]
 pub struct StoreHooks {
     /// Applied to event payloads, headers, and tags before persistence.

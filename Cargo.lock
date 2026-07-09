@@ -3522,7 +3522,6 @@ dependencies = [
  "axum-server",
  "base64 0.22.1",
  "bytes",
- "ed25519-dalek",
  "filetime",
  "futures",
  "futures-util",
@@ -3530,6 +3529,7 @@ dependencies = [
  "harn-clock",
  "harn-hostlib",
  "harn-parser",
+ "harn-session-store",
  "harn-vm",
  "hex",
  "hmac",
@@ -3537,7 +3537,6 @@ dependencies = [
  "jsonwebtoken",
  "rcgen",
  "reqwest 0.12.28",
- "rusqlite",
  "rustls",
  "serde",
  "serde_json",
@@ -3553,6 +3552,26 @@ dependencies = [
  "tower-http 0.7.0",
  "tracing",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "harn-session-store"
+version = "0.10.2"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "harn-vm",
+ "hex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 

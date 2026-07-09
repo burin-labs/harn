@@ -1,0 +1,30 @@
+[package]
+name = "harn-session-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Durable Harn session event store primitives"
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.2", default-features = false }
+hex = "0.4"
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+time = { version = "0.3", features = ["formatting"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "v7"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[lints]
+workspace = true

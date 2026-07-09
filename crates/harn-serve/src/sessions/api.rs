@@ -14,10 +14,10 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::event::{AppendEvent, EventId, EventSignature, SessionEventKind};
-use super::store::{
-    CreateSession, ListFilter, ReadRange, SessionId, SessionMeta, SessionStatus, SessionStore,
-    SharedSessionStore, SnapshotId, StoreError,
+use harn_session_store::{
+    AppendEvent, CreateSession, EventId, EventSignature, ListFilter, ReadRange, SessionEventKind,
+    SessionId, SessionMeta, SessionStatus, SessionStore, SharedSessionStore, SnapshotId,
+    StoreError,
 };
 
 /// Build an unprefixed router. Callers nest it under whichever prefix

@@ -1,7 +1,7 @@
 //! Per-tenant retention policy: lifecycle windows + archive sink hooks.
 //!
 //! The policy is declarative — a sweep job calls
-//! [`crate::sessions::store::SessionStore::sweep_retention`] periodically and
+//! [`crate::store::SessionStore::sweep_retention`] periodically and
 //! the predicates here decide which sessions to archive, soft-delete,
 //! or hard-delete. The sweep wires an optional [`ArchiveSink`] from
 //! `StoreHooks` into the lifecycle so closed sessions land in
@@ -116,7 +116,7 @@ pub struct Tombstone {
 #[async_trait::async_trait]
 pub trait ArchiveSink: Send + Sync {
     /// Persist a session and its event chain to durable storage.
-    /// Called by [`crate::sessions::store::SessionStore::sweep_retention`]
+    /// Called by [`crate::store::SessionStore::sweep_retention`]
     /// when [`RetentionPolicy::should_archive`] is true, before the
     /// session transitions to `SoftDeleted`.
     async fn archive(
