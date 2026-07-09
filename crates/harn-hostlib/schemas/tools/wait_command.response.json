@@ -32,8 +32,63 @@
       "description": "Opaque verification snapshot binding carried from the background run_command request.",
       "additionalProperties": true
     },
+    "process_cleanup": { "$ref": "#/$defs/process_cleanup" },
     "command_or_op_descriptor": { "type": "string" }
   },
   "required": ["handle_id", "status", "timed_out"],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "process_cleanup": {
+      "type": "object",
+      "properties": {
+        "root_pid": { "type": ["integer", "null"] },
+        "attempted_signals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "observed_child_count": { "type": "integer", "minimum": 0 },
+        "reaped_child_count": { "type": "integer", "minimum": 0 },
+        "survivor_count": { "type": "integer", "minimum": 0 },
+        "observed_children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/process_cleanup_child" }
+        },
+        "reaped_children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/process_cleanup_child" }
+        },
+        "surviving_children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/process_cleanup_child" }
+        }
+      },
+      "required": [
+        "root_pid",
+        "attempted_signals",
+        "observed_child_count",
+        "reaped_child_count",
+        "survivor_count",
+        "observed_children",
+        "reaped_children",
+        "surviving_children"
+      ],
+      "additionalProperties": false
+    },
+    "process_cleanup_child": {
+      "type": "object",
+      "properties": {
+        "pid": { "type": "integer" },
+        "parent_pid": { "type": ["integer", "null"] },
+        "depth": { "type": "integer", "minimum": 1 },
+        "command_name": { "type": ["string", "null"] },
+        "signals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "alive_after_cleanup": { "type": ["boolean", "null"] }
+      },
+      "required": ["pid", "parent_pid", "depth", "command_name", "signals", "alive_after_cleanup"],
+      "additionalProperties": false
+    }
+  }
 }

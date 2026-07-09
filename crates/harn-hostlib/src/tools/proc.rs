@@ -20,6 +20,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -79,6 +80,7 @@ pub(crate) struct SpawnOutcome {
     pub(crate) output_sha256: String,
     pub(crate) duration: Duration,
     pub(crate) timed_out: bool,
+    pub(crate) process_cleanup: Option<process_handle::ProcessCleanupReport>,
 }
 
 pub(crate) use crate::process::EnvMode;
@@ -190,7 +192,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     // fire-and-forget escape hatch.
     let wait_result = handle.wait_with_timeout(req.timeout, &harn_vm::op_interrupt::requested);
     if wait_result.is_err() {
-        handle.killer().kill();
+        let _ = handle.killer().kill();
     }
 
     if let Some(t) = stdout_thread {
@@ -209,22 +211,24 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     let ended_at = Some(now_rfc3339());
 
-    let (command_status, exit_code, signal, timed_out) = match outcome {
+    let (command_status, exit_code, signal, timed_out, process_cleanup) = match outcome {
         process_handle::WaitOutcome::Exited(status) => {
             let (exit_code, signal) = decode_status(status);
-            (CommandStatus::Completed, exit_code, signal, false)
+            (CommandStatus::Completed, exit_code, signal, false, None)
         }
-        process_handle::WaitOutcome::TimedOut => (
+        process_handle::WaitOutcome::TimedOut(report) => (
             CommandStatus::TimedOut,
             -1,
             Some("SIGKILL".to_string()),
             true,
+            Some(report),
         ),
-        process_handle::WaitOutcome::Interrupted => (
+        process_handle::WaitOutcome::Interrupted(report) => (
             CommandStatus::Killed,
             -1,
             Some("SIGTERM".to_string()),
             false,
+            Some(report),
         ),
     };
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
@@ -249,6 +253,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         output_sha256: artifacts.output_sha256,
         duration: started.elapsed(),
         timed_out,
+        process_cleanup,
     })
 }
 
@@ -337,6 +342,9 @@ pub(crate) fn build_response(
         Some(pgid) => builder.int("process_group_id", pgid as i64),
         None => builder.nil("process_group_id"),
     };
+    if let Some(process_cleanup) = outcome.process_cleanup.as_ref() {
+        builder = builder.dict("process_cleanup", process_cleanup_to_dict(process_cleanup));
+    }
     builder = match handle_id {
         Some(handle_id) => builder.str("handle_id", handle_id),
         None => builder.nil("handle_id"),
@@ -352,6 +360,108 @@ pub(crate) fn build_response(
         builder = builder.dict("policy_context", policy_context);
     }
     builder.build()
+}
+
+pub(crate) fn process_cleanup_to_dict(
+    report: &process_handle::ProcessCleanupReport,
+) -> harn_vm::value::DictMap {
+    let reaped_children = report
+        .children
+        .iter()
+        .filter(|child| child.alive_after_cleanup == Some(false))
+        .map(process_cleanup_child_to_value)
+        .collect::<Vec<_>>();
+    let surviving_children = report
+        .children
+        .iter()
+        .filter(|child| child.alive_after_cleanup == Some(true))
+        .map(process_cleanup_child_to_value)
+        .collect::<Vec<_>>();
+    let observed_children = report
+        .children
+        .iter()
+        .map(process_cleanup_child_to_value)
+        .collect::<Vec<_>>();
+
+    let mut dict = harn_vm::value::DictMap::new();
+    match report.root_pid {
+        Some(pid) => dict.put_int("root_pid", pid as i64),
+        None => {
+            dict.insert(harn_vm::value::intern_key("root_pid"), VmValue::Nil);
+        }
+    }
+    dict.insert(
+        harn_vm::value::intern_key("attempted_signals"),
+        VmValue::List(Arc::new(
+            report
+                .attempted_signals
+                .iter()
+                .map(|signal| VmValue::String(arcstr::ArcStr::from(format_signal(*signal))))
+                .collect(),
+        )),
+    );
+    dict.put_int("observed_child_count", report.children.len() as i64);
+    dict.put_int("reaped_child_count", reaped_children.len() as i64);
+    dict.put_int("survivor_count", surviving_children.len() as i64);
+    dict.insert(
+        harn_vm::value::intern_key("observed_children"),
+        VmValue::List(Arc::new(observed_children)),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("reaped_children"),
+        VmValue::List(Arc::new(reaped_children)),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("surviving_children"),
+        VmValue::List(Arc::new(surviving_children)),
+    );
+    dict
+}
+
+pub(crate) fn process_cleanup_to_json(
+    report: &process_handle::ProcessCleanupReport,
+) -> serde_json::Value {
+    let dict = process_cleanup_to_dict(report);
+    crate::json::vm_dict_to_json(&dict)
+}
+
+fn process_cleanup_child_to_value(child: &process_handle::ProcessCleanupChild) -> VmValue {
+    let mut dict = harn_vm::value::DictMap::new();
+    dict.put_int("pid", child.pid as i64);
+    match child.parent_pid {
+        Some(parent_pid) => dict.put_int("parent_pid", parent_pid as i64),
+        None => {
+            dict.insert(harn_vm::value::intern_key("parent_pid"), VmValue::Nil);
+        }
+    }
+    dict.put_int("depth", child.depth as i64);
+    match child.command_name.as_ref() {
+        Some(command_name) => dict.put_str("command_name", command_name),
+        None => {
+            dict.insert(harn_vm::value::intern_key("command_name"), VmValue::Nil);
+        }
+    }
+    dict.insert(
+        harn_vm::value::intern_key("signals"),
+        VmValue::List(Arc::new(
+            child
+                .signals
+                .iter()
+                .map(|signal| VmValue::String(arcstr::ArcStr::from(format_signal(*signal))))
+                .collect(),
+        )),
+    );
+    match child.alive_after_cleanup {
+        Some(alive) => dict.insert(
+            harn_vm::value::intern_key("alive_after_cleanup"),
+            VmValue::Bool(alive),
+        ),
+        None => dict.insert(
+            harn_vm::value::intern_key("alive_after_cleanup"),
+            VmValue::Nil,
+        ),
+    };
+    VmValue::dict(dict)
 }
 
 pub(crate) fn running_response(

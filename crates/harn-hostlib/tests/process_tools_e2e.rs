@@ -91,6 +91,13 @@ fn require_bool(map: &harn_vm::value::DictMap, key: &str) -> bool {
     }
 }
 
+fn require_nested_dict(map: &harn_vm::value::DictMap, key: &str) -> harn_vm::value::DictMap {
+    match map.get(key) {
+        Some(VmValue::Dict(value)) => (**value).clone(),
+        other => panic!("expected dict at {key}, got {other:?}"),
+    }
+}
+
 #[test]
 fn real_run_command_echoes_stdout_and_reports_exit_zero() {
     let mut req = dict();
@@ -463,6 +470,11 @@ fn real_run_command_interrupt_kills_the_whole_process_group() {
 
     let pgid = require_int(&resp, "process_group_id");
     assert!(pgid > 0, "foreground spawn should report its process group");
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    assert!(
+        require_int(&cleanup, "observed_child_count") >= 1,
+        "cleanup receipt should record the background sleep descendant"
+    );
     assert!(
         wait_for_group_death(pgid, std::time::Duration::from_secs(5)),
         "process group {pgid} (incl. the sleep grandchild) must be gone"
@@ -532,8 +544,13 @@ fn real_run_command_background_child_survives_interrupt() {
     // Clean up so the sleep doesn't outlive the test binary.
     let mut cancel_req = dict();
     cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    cancel_req.insert("wait_result_ms".into(), VmValue::Int(5_000));
     let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
+    let result = require_nested_dict(&cancel_resp, "result");
+    assert_eq!(require_str(&result, "status"), "killed");
+    let cleanup = require_nested_dict(&result, "process_cleanup");
+    assert_eq!(require_int(&cleanup, "root_pid"), pid);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while unix_process_exists(pid) && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(50));

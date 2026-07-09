@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use harn_vm::op_interrupt::{ProcessCleanupChild, ProcessCleanupReport};
+
 /// Resolved exit information for a finished process. Mirrors the subset of
 /// `std::process::ExitStatus` that the process-tool builtins surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,22 +199,22 @@ pub trait ProcessHandle: Send {
 }
 
 /// How a [`ProcessHandle::wait_with_timeout`] ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WaitOutcome {
     /// The process exited on its own.
     Exited(ExitStatus),
     /// The timeout elapsed; the spawner killed the child process tree.
-    TimedOut,
+    TimedOut(ProcessCleanupReport),
     /// The interrupt callback fired; the spawner gracefully terminated the
     /// child's process tree.
-    Interrupted,
+    Interrupted(ProcessCleanupReport),
 }
 
 /// Kill side of a [`ProcessHandle`]. Cloneable via `Arc` so cancellation
 /// works after the waiter thread has taken ownership of the handle itself.
 pub trait ProcessKiller: Send + Sync {
     /// Send SIGKILL to the process tree/group when applicable.
-    fn kill(&self);
+    fn kill(&self) -> ProcessCleanupReport;
 }
 
 /// Spawner abstraction: produces [`ProcessHandle`] instances.

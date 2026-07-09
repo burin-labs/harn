@@ -12,7 +12,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::handle::{
-    ExitStatus, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec, WaitOutcome,
+    ExitStatus, ProcessCleanupReport, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner,
+    SpawnSpec, WaitOutcome,
 };
 
 /// Behaviour to script for a single mocked spawn.
@@ -41,6 +42,8 @@ pub struct MockProcessConfig {
     pub spawn_error: Option<ProcessError>,
     /// If non-`None`, force waits to fail with this I/O error.
     pub wait_error: Option<String>,
+    /// Cleanup report returned when timeout/cancel paths kill this process.
+    pub cleanup_report: Option<ProcessCleanupReport>,
 }
 
 impl Default for MockProcessConfig {
@@ -54,6 +57,7 @@ impl Default for MockProcessConfig {
             force_timeout: false,
             spawn_error: None,
             wait_error: None,
+            cleanup_report: None,
         }
     }
 }
@@ -168,6 +172,7 @@ impl ProcessSpawner for MockSpawner {
         }
 
         let killer: Arc<dyn ProcessKiller> = Arc::new(MockKiller {
+            pid: config.pid,
             state: Arc::clone(&state),
         });
 
@@ -253,6 +258,7 @@ struct MockState {
     /// Force-timeout config copied from MockProcessConfig.
     force_timeout: bool,
     wait_error: Option<String>,
+    cleanup_report: Option<ProcessCleanupReport>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -277,6 +283,7 @@ impl MockState {
             stderr_cv: Condvar::new(),
             force_timeout: config.force_timeout,
             wait_error: config.wait_error.clone(),
+            cleanup_report: config.cleanup_report.clone(),
         }
     }
 
@@ -330,6 +337,12 @@ impl MockState {
             let _stderr = self.stderr.lock().unwrap();
             self.stderr_cv.notify_all();
         }
+    }
+
+    fn cleanup_report(&self, root_pid: u32, signal: i32) -> ProcessCleanupReport {
+        self.cleanup_report
+            .clone()
+            .unwrap_or_else(|| ProcessCleanupReport::for_signal(Some(root_pid), signal))
     }
 }
 
@@ -399,7 +412,9 @@ impl ProcessHandle for MockProcess {
         }
         if self.state.force_timeout {
             self.state.record_kill();
-            return Ok(WaitOutcome::TimedOut);
+            return Ok(WaitOutcome::TimedOut(
+                self.state.cleanup_report(self.pid, 9),
+            ));
         }
         // Wait in short condvar slices so the interrupt callback is observed
         // (mirrors the real spawner's ~20ms `try_wait` poll loop) while
@@ -412,11 +427,15 @@ impl ProcessHandle for MockProcess {
             }
             if interrupt() {
                 self.state.record_kill();
-                return Ok(WaitOutcome::Interrupted);
+                return Ok(WaitOutcome::Interrupted(
+                    self.state.cleanup_report(self.pid, 15),
+                ));
             }
             if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
                 self.state.record_kill();
-                return Ok(WaitOutcome::TimedOut);
+                return Ok(WaitOutcome::TimedOut(
+                    self.state.cleanup_report(self.pid, 9),
+                ));
             }
         }
     }
@@ -502,11 +521,13 @@ impl Read for MockStdoutReader {
 }
 
 struct MockKiller {
+    pid: u32,
     state: Arc<MockState>,
 }
 
 impl ProcessKiller for MockKiller {
-    fn kill(&self) {
+    fn kill(&self) -> ProcessCleanupReport {
         self.state.record_kill();
+        self.state.cleanup_report(self.pid, 9)
     }
 }

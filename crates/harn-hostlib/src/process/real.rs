@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use harn_vm::process_sandbox;
 
 use super::handle::{
-    EnvMode, ExitStatus, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec,
-    WaitOutcome,
+    EnvMode, ExitStatus, ProcessCleanupReport, ProcessError, ProcessHandle, ProcessKiller,
+    ProcessSpawner, SpawnSpec, WaitOutcome,
 };
 
 /// Spawner that produces real OS processes via `std::process::Command`.
@@ -232,8 +232,9 @@ impl ProcessHandle for RealProcess {
                         // Scope cancellation / deadline expiry: graceful
                         // group termination (SIGTERM, grace, SIGKILL) shared
                         // with the VM-side `process.*` builtins.
-                        harn_vm::op_interrupt::terminate_child_group(child);
-                        return Ok(WaitOutcome::Interrupted);
+                        let (_, report) =
+                            harn_vm::op_interrupt::terminate_child_group_with_report(child);
+                        return Ok(WaitOutcome::Interrupted(report));
                     }
                     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         // `killer.kill()` kills the process tree/group on
@@ -242,10 +243,11 @@ impl ProcessHandle for RealProcess {
                         // (TerminateProcess on Windows) to guarantee the
                         // subsequent `child.wait()` cannot block forever on a
                         // timed-out process.
-                        killer.kill();
+                        let mut report = killer.kill();
                         let _ = child.kill();
                         let _ = child.wait();
-                        return Ok(WaitOutcome::TimedOut);
+                        report.refresh_survivor_status();
+                        return Ok(WaitOutcome::TimedOut(report));
                     }
                     let sleep = deadline
                         .map(|deadline| deadline.saturating_duration_since(Instant::now()))
@@ -272,8 +274,8 @@ struct RealKiller {
 }
 
 impl ProcessKiller for RealKiller {
-    fn kill(&self) {
-        harn_vm::op_interrupt::signal_pid_tree_and_group(self.pid, 9);
+    fn kill(&self) -> ProcessCleanupReport {
+        harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(self.pid, 9)
     }
 }
 
