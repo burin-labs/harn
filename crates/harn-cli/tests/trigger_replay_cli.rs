@@ -107,20 +107,21 @@ fn build_issue_event(delivery_id: &str, tenant_field: Option<&str>) -> TriggerEv
         delivery_id.to_string(),
         None,
         BTreeMap::new(),
-        ProviderPayload::Known(KnownProviderPayload::GitHub(GitHubEventPayload::Issues(
-            GitHubIssuesEventPayload {
+        ProviderPayload::Known(KnownProviderPayload::GitHub(Box::new(
+            GitHubEventPayload::Issues(GitHubIssuesEventPayload {
                 common: GitHubEventCommon {
                     event: "issues".to_string(),
                     action: Some("opened".to_string()),
                     delivery_id: Some(delivery_id.to_string()),
                     installation_id: Some(42),
                     topic: None,
+                    reaction_topics: Vec::new(),
                     repository: None,
                     repo: None,
                     raw: Value::Object(raw),
                 },
                 issue: serde_json::json!({}),
-            },
+            }),
         ))),
         SignatureStatus::Verified,
     )

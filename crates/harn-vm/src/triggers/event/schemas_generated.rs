@@ -95,6 +95,8 @@ pub struct GitHubEventCommon {
     pub installation_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
+    #[serde(default)]
+    pub reaction_topics: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<JsonValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
