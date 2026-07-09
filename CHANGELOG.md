@@ -9,6 +9,24 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.4
+
+### Added
+
+- Added reusable `std/agent/progress` schema helpers and routed progress payload/config validation through `std/schema`.
+- **Provider catalog expansion (#4343).** The built-in catalog now includes additional
+  OpenAI-compatible gateways and regional endpoint metadata, exports provider
+  endpoint regions in schema v4, and carries empirical quirks for newly probed
+  routes so tool probing and LLM calls stay aligned.
+
+### Fixed
+
+- Text-format tool-call ids are now generated per agent session, preventing collisions across turns.
+- Kept Ollama thinking traces private across native chat and raw-generate
+  parsing instead of promoting them into visible text or stream deltas.
+- Made OpenAI-compatible reasoning-only text promotion an explicit capability
+  opt-in so incomplete provider rows default to keeping reasoning private.
+
 ## v0.10.3
 
 ### Changed
