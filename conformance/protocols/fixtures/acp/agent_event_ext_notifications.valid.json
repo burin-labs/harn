@@ -266,6 +266,7 @@
         "reason": "no_source_write",
         "reasoning": "needs one more concrete action",
         "sessionId": "session-1",
+        "source": "deterministic",
         "specificGaps": [
           "rerun the verifier",
           "cite the changed source file"

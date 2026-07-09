@@ -476,6 +476,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             reasoning: "needs one more concrete action".to_string(),
             next_step: Some("run the verifier".to_string()),
             judge_duration_ms: 42,
+            source: Some("deterministic".to_string()),
             trigger: Some("stalled".to_string()),
             reason: Some("no_source_write".to_string()),
             confirm: Some(false),
@@ -593,6 +594,10 @@ async fn agent_event_ext_notification_fixtures_are_pinned() {
     assert_eq!(
         judge["params"]["specificGaps"],
         serde_json::json!(["rerun the verifier", "cite the changed source file"])
+    );
+    assert_eq!(
+        judge["params"]["source"],
+        serde_json::json!("deterministic")
     );
     assert_eq!(judge["params"]["acceptedEvidence"], serde_json::json!([]));
 

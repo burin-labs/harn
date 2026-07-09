@@ -15,6 +15,7 @@ pipeline default() {
       __io_println(result.visible_text)
       __io_println(len(result.judge_decisions))
       __io_println(result.judge_decisions[0].verdict)
+      __io_println(result.judge_decisions[0].source)
       __io_println(result.llm.iterations)
       __io_println(len(result.iterations) >= 1)
       const calls = llm_mock_calls()

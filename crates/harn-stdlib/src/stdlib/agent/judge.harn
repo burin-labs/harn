@@ -108,13 +108,19 @@ fn __judge_payload(session, opts, stop_reason, text, iteration) {
 fn __judge_invoke_closure(verify_completion, payload) {
   const result = verify_completion(payload)
   if result == nil || result == "" {
-    return {vetoed: false, confirm: true, trigger: "verify_completion"}
+    return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
   }
   if type_of(result) == "bool" {
-    return {vetoed: !result, confirm: result, trigger: "verify_completion"}
+    return {vetoed: !result, confirm: result, source: "deterministic", trigger: "verify_completion"}
   }
   if type_of(result) == "string" {
-    return {vetoed: true, feedback: result, confirm: false, trigger: "verify_completion"}
+    return {
+      vetoed: true,
+      feedback: result,
+      confirm: false,
+      source: "deterministic",
+      trigger: "verify_completion",
+    }
   }
   if type_of(result) == "dict" {
     const confirm = result?.confirm ?? false
@@ -123,12 +129,13 @@ fn __judge_invoke_closure(verify_completion, payload) {
       vetoed: !confirm,
       feedback: message,
       confirm: confirm,
+      source: "deterministic",
       reason: result?.reason,
       converted_from: result?.converted_from,
       trigger: result?.trigger ?? "verify_completion",
     }
   }
-  return {vetoed: false, confirm: true, trigger: "verify_completion"}
+  return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
 }
 
 fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
@@ -170,6 +177,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
         reasoning: checkpoint.error,
         next_step: "",
         judge_duration_ms: duration_ms,
+        source: "llm",
         typed_checkpoint: checkpoint,
       }
     }
@@ -180,6 +188,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
       reasoning: checkpoint.error,
       next_step: checkpoint.error,
       judge_duration_ms: duration_ms,
+      source: "llm",
       typed_checkpoint: checkpoint,
     }
   }
@@ -215,6 +224,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     reasoning: reasoning,
     next_step: next_step,
     judge_duration_ms: duration_ms,
+    source: "llm",
     specific_gaps: specific_gaps,
     typed_checkpoint: checkpoint,
   }
@@ -300,6 +310,7 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
       reasoning: verdict?.reasoning ?? "",
       next_step: verdict?.next_step ?? "",
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
+      source: verdict?.source ?? "unknown",
       trigger: verdict?.trigger ?? nil,
       reason: verdict?.reason ?? nil,
       confirm: verdict?.confirm ?? !verdict.vetoed,
