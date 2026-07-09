@@ -2141,6 +2141,13 @@ For model-facing loops, set `progress_tool: true` or pass a dict to customize
 the tool name, description, or system-prompt nudge. Call it after observable
 progress, not on a timer.
 
+`std/agent/progress` also exports schema-first helpers for harnesses and hosts
+that need to validate progress data at a boundary: use
+`agent_progress_payload_schema()`, `agent_progress_event_schema()`, and
+`agent_progress_tool_config_schema()` with `std/schema`, or the paired
+`*_report` / `*_value` helpers. `agent_progress_tool_config_normalize(config?)`
+validates config dictionaries and applies the default tool name and description.
+
 `agent_input_guardrail(classifier?, options?)` from `std/agent/guardrails`
 builds the input-side bookend to `agent_completion_gate`. Spread the returned
 bundle into `agent_loop` options to run a cheap classifier before the first main

@@ -1,4 +1,176 @@
 import { agent_emit_event } from "std/agent/state"
+import "std/schema"
+
+const __AGENT_PROGRESS_DEFAULT_TOOL_NAME = "agent_progress"
+
+const __AGENT_PROGRESS_DEFAULT_TOOL_DESCRIPTION = "Report concise task progress to the host without ending the turn."
+
+/**
+ * Schema for one normalized task-list entry in a progress report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_progress_entry_schema() {
+  return schema_object(
+    {
+      content: schema_string() + {min_length: 1},
+      status: schema_enum(["pending", "in_progress", "completed"]),
+      priority: schema_field(schema_enum(["high", "medium", "low"]), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for the normalized progress payload emitted on `progress_reported`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_progress_payload_schema() {
+  return schema_object(
+    {
+      message: schema_field(schema_nullable(schema_string()), false),
+      entries: schema_list(agent_progress_entry_schema()),
+      replace: schema_bool(),
+      metadata: schema_dict(schema_any()),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for captured `progress_reported` events.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_progress_event_schema() {
+  return schema_object(
+    {
+      type: schema_literal("progress_reported"),
+      message: schema_field(schema_nullable(schema_string()), false),
+      entries: schema_list(agent_progress_entry_schema()),
+      replace: schema_bool(),
+      metadata: schema_dict(schema_any()),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for `agent_loop` progress-tool configuration dictionaries.
+ *
+ * The outer `progress_tool` option may still be `true`, `false`, or `nil`; this
+ * schema covers the dictionary shape after that mode switch is resolved.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_progress_tool_config_schema() {
+  return schema_object(
+    {
+      name: schema_field(schema_string(), false),
+      description: schema_field(schema_string(), false),
+      system_prompt_nudge: schema_field(schema_nullable(schema_string()), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Validate a normalized progress payload and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_progress_payload_report(value, apply_defaults = false) {
+  return get_typed_report(value, agent_progress_payload_schema(), apply_defaults)
+}
+
+/**
+ * Validate a normalized progress payload and return it, throwing on failure.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_progress_payload_value(value, apply_defaults = false) {
+  return get_typed_value(value, agent_progress_payload_schema(), apply_defaults)
+}
+
+/**
+ * Validate a captured progress event and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_progress_event_report(value, apply_defaults = false) {
+  return get_typed_report(value, agent_progress_event_schema(), apply_defaults)
+}
+
+/**
+ * Validate a captured progress event and return it, throwing on failure.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_progress_event_value(value, apply_defaults = false) {
+  return get_typed_value(value, agent_progress_event_schema(), apply_defaults)
+}
+
+/**
+ * Validate an `agent_progress_tool` config dictionary and return a report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_progress_tool_config_report(value, apply_defaults = false) {
+  return get_typed_report(value, agent_progress_tool_config_schema(), apply_defaults)
+}
+
+/**
+ * Validate an `agent_progress_tool` config dictionary and return it.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_progress_tool_config_value(value, apply_defaults = false) {
+  return get_typed_value(value, agent_progress_tool_config_schema(), apply_defaults)
+}
+
+/**
+ * Validate an `agent_progress_tool` config dictionary and apply Harn defaults.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_progress_tool_config_normalize(config = nil) {
+  return __agent_progress_normalize_tool_config_with_prefix(config, "agent_progress_tool_config")
+}
+
+fn __agent_progress_input_schema() {
+  return schema_object(
+    {
+      message: schema_field(schema_nullable(schema_string()), false),
+      entries: schema_field(schema_any(), false),
+      replace: schema_field(schema_nullable(schema_bool()), false),
+      metadata: schema_field(schema_nullable(schema_dict(schema_any())), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
 
 /**
  * `agent_progress` is a cosmetic progress-report surface — it emits a task-list
@@ -84,25 +256,18 @@ fn __agent_progress_entries(value) {
 }
 
 fn __agent_progress_payload(input) {
-  if type_of(input) != "dict" {
-    throw "agent_progress: argument must be a dict"
+  const report = get_typed_report(input, __agent_progress_input_schema())
+  if !report.ok {
+    throw "agent_progress: " + report.message
   }
-  const message = input?.message
-  if message != nil && type_of(message) != "string" {
-    throw "agent_progress: message must be a string or nil"
-  }
-  const entries = __agent_progress_entries(input?.entries)
+  const typed = report.value
+  const message = typed?.message
+  const entries = __agent_progress_entries(typed?.entries)
   if (message == nil || trim(message) == "") && len(entries) == 0 {
     throw "agent_progress: message or entries is required"
   }
-  const replace = input?.replace ?? true
-  if type_of(replace) != "bool" {
-    throw "agent_progress: replace must be a bool"
-  }
-  const metadata = input?.metadata ?? {}
-  if type_of(metadata) != "dict" {
-    throw "agent_progress: metadata must be a dict"
-  }
+  const replace = typed?.replace ?? true
+  const metadata = typed?.metadata ?? {}
   return {
     message: if message == nil {
       nil
@@ -115,34 +280,34 @@ fn __agent_progress_payload(input) {
   }
 }
 
-fn __agent_progress_tool_name(config) {
-  const name = config?.name ?? "agent_progress"
-  if type_of(name) != "string" || trim(name) == "" {
-    throw "agent_loop: progress_tool.name must be a non-empty string"
+fn __agent_progress_normalize_tool_config_with_prefix(config, error_prefix) {
+  const report = agent_progress_tool_config_report(config ?? {})
+  if !report.ok {
+    throw error_prefix + " " + report.message
   }
-  return name
+  const typed = report.value
+  const name = typed?.name ?? __AGENT_PROGRESS_DEFAULT_TOOL_NAME
+  if trim(name) == "" {
+    throw error_prefix + ".name must be a non-empty string"
+  }
+  const description = typed?.description ?? __AGENT_PROGRESS_DEFAULT_TOOL_DESCRIPTION
+  if trim(description) == "" {
+    throw error_prefix + ".description must be a non-empty string"
+  }
+  return typed + {name: name, description: description}
 }
 
-fn __agent_progress_tool_description(config) {
-  const description = config?.description
-    ?? "Report concise task progress to the host without ending the turn."
-  if type_of(description) != "string" || trim(description) == "" {
-    throw "agent_loop: progress_tool.description must be a non-empty string"
-  }
-  return description
+fn __agent_progress_normalize_tool_config(config) {
+  return __agent_progress_normalize_tool_config_with_prefix(config, "agent_loop: progress_tool")
 }
 
 fn __agent_progress_tool_nudge(config) {
-  const tool_name = __agent_progress_tool_name(config)
   const nudge = (config?.system_prompt_nudge
     ?? "When useful, call ")
-    + tool_name
+    + config.name
     + " to report concise progress. Use message for narration, entries for task-list state, and replace=true unless the update should append."
   if nudge == nil {
     return nil
-  }
-  if type_of(nudge) != "string" {
-    throw "agent_loop: progress_tool.system_prompt_nudge must be a string or nil"
   }
   const trimmed = trim(nudge)
   if trimmed == "" {
@@ -158,14 +323,14 @@ fn __agent_progress_tool_config(value) {
   const kind = type_of(value)
   if kind == "bool" {
     if value {
-      return {}
+      return __agent_progress_normalize_tool_config({})
     }
     return nil
   }
   if kind != "dict" {
     throw "agent_loop: progress_tool must be true, false, a dict, or nil"
   }
-  return value
+  return __agent_progress_normalize_tool_config(value)
 }
 
 /**
@@ -193,11 +358,11 @@ pub fn agent_progress(input) {
  * @api_stability: experimental
  */
 pub fn agent_progress_tool(registry = nil, options = nil) {
-  const config = options ?? {}
+  const config = __agent_progress_normalize_tool_config(options ?? {})
   return tool_define(
     registry ?? tool_registry(),
-    __agent_progress_tool_name(config),
-    __agent_progress_tool_description(config),
+    config.name,
+    config.description,
     {
       parameters: {
         message: {type: "string", description: "Short progress narration", required: false},

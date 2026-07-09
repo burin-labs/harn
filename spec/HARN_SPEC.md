@@ -2976,6 +2976,12 @@ tool; dict form may override `name`, `description`, and
 `system_prompt_nudge`. Progress reports are intended for meaningful sub-step
 completion or plan changes, not fixed timer ticks.
 
+For hosts and reusable harness code, `std/agent/progress` exposes matching
+schemas and validators for the normalized payload/event/config shapes:
+`agent_progress_payload_schema`, `agent_progress_event_schema`,
+`agent_progress_tool_config_schema`, their paired `*_report` / `*_value`
+helpers, and `agent_progress_tool_config_normalize` for defaulted config.
+
 #### Agent scratchpad
 
 `agent_loop(..., {scratchpad: true})` initializes a session-local

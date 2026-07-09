@@ -1,0 +1,13 @@
+event_schema_ok=true
+payload_schema_ok=true
+entry_count=3
+first=completed:high
+second=in_progress:none
+third=pending:none
+replace=true
+metadata_empty=true
+bad_payload_ok=false
+bad_config_ok=false
+config_name=report_progress
+config_nudge_nil=true
+default_config_name=agent_progress
