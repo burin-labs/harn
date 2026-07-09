@@ -171,6 +171,21 @@ mod tests {
         clear_user_overrides();
     }
 
+    #[test]
+    fn reasoning_text_promotion_is_explicit_opt_in() {
+        reset();
+        assert!(!lookup("openai", "synthetic-default").reasoning_text_promotable);
+
+        set_user_overrides_toml(concat!(
+            "[[provider.openai]]\n",
+            "model_match = \"synthetic-promotable\"\n",
+            "reasoning_text_promotable = true\n",
+        ))
+        .expect("capability override");
+        assert!(lookup("openai", "synthetic-promotable").reasoning_text_promotable);
+        reset();
+    }
+
     fn assert_cerebras_effort_reasoning(model: &str, thinking_block_style: &str) {
         let caps = lookup("cerebras", model);
         assert_eq!(caps.thinking_modes, vec!["effort"]);

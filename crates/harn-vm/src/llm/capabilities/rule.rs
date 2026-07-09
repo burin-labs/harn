@@ -1183,7 +1183,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         max_thinking_budget: rule.max_thinking_budget,
         reasoning_disable_supported: rule.reasoning_disable_supported.unwrap_or(true),
         reasoning_required_for_tools: rule.reasoning_required_for_tools.unwrap_or(false),
-        reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(true),
+        reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(false),
         reasoning_wire_format: rule
             .reasoning_wire_format
             .clone()

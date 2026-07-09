@@ -373,14 +373,18 @@ async fn parse_raw_generate_response(
             format!("ollama raw generate API error: {error}"),
         ))));
     }
+    parse_raw_generate_json(json, request)
+}
+
+fn parse_raw_generate_json(
+    json: serde_json::Value,
+    request: &LlmRequestPayload,
+) -> Result<LlmResult, VmError> {
     let raw = json
         .get("response")
         .and_then(|value| value.as_str())
         .unwrap_or_default();
-    let (mut text, thinking) = crate::llm::api::split_openai_thinking_blocks(raw);
-    if text.is_empty() && !thinking.is_empty() {
-        text = thinking.clone();
-    }
+    let (text, thinking) = crate::llm::api::split_openai_thinking_blocks(raw);
     let input_tokens = json
         .get("prompt_eval_count")
         .and_then(|value| value.as_i64())
@@ -391,7 +395,7 @@ async fn parse_raw_generate_response(
         .unwrap_or(0);
     if text.is_empty() && output_tokens > 0 {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "ollama raw-generate model {} reported eval_count={output_tokens} but delivered no content or thinking",
+            "ollama raw-generate model {} reported eval_count={output_tokens} but delivered no visible content",
             request.model
         )))));
     }
@@ -495,12 +499,9 @@ async fn parse_raw_generate_stream(
         let _ = delta_tx.send(tail);
     }
     let thinking = splitter.thinking.trim().to_string();
-    if text.is_empty() && !thinking.is_empty() {
-        text = thinking.clone();
-    }
     if text.is_empty() && output_tokens > 0 {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "ollama raw-generate model {model} reported eval_count={output_tokens} but delivered no content or thinking"
+            "ollama raw-generate model {model} reported eval_count={output_tokens} but delivered no visible content"
         )))));
     }
     Ok(LlmResult {
@@ -750,6 +751,71 @@ mod tests {
         })]);
 
         assert!(!OllamaProvider::should_route_via_raw_generate(&payload));
+    }
+
+    #[test]
+    fn raw_generate_inline_thinking_stays_private() {
+        let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
+        payload.response_format = None;
+        payload.json_schema = None;
+
+        let result = parse_raw_generate_json(
+            serde_json::json!({
+                "response": "<think>private plan</think>visible answer",
+                "prompt_eval_count": 4,
+                "eval_count": 6,
+                "done_reason": "stop",
+            }),
+            &payload,
+        )
+        .expect("raw generate response parses");
+
+        assert_eq!(result.text, "visible answer");
+        assert_eq!(result.thinking.as_deref(), Some("private plan"));
+        assert!(
+            !result.text.contains("private plan"),
+            "private thinking leaked into visible text"
+        );
+        assert!(result.blocks.iter().any(|block| {
+            block["type"] == "reasoning"
+                && block["visibility"] == "private"
+                && block["text"] == "private plan"
+        }));
+        assert!(result.blocks.iter().any(|block| {
+            block["type"] == "output_text"
+                && block["visibility"] == "public"
+                && block["text"] == "visible answer"
+        }));
+    }
+
+    #[test]
+    fn raw_generate_thinking_only_is_not_promoted_to_text() {
+        let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
+        payload.response_format = None;
+        payload.json_schema = None;
+
+        let result = parse_raw_generate_json(
+            serde_json::json!({
+                "response": "<think>private trace</think>",
+                "prompt_eval_count": 4,
+                "eval_count": 0,
+                "done_reason": "stop",
+            }),
+            &payload,
+        )
+        .expect("raw generate response parses");
+
+        assert_eq!(result.text, "");
+        assert_eq!(result.thinking.as_deref(), Some("private trace"));
+        assert!(
+            result
+                .blocks
+                .iter()
+                .all(|block| block["type"] != "output_text"),
+            "thinking-only response must not synthesize public output"
+        );
     }
 
     #[test]

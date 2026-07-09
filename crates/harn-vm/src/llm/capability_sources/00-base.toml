@@ -164,7 +164,9 @@
 #                     verify); it floors to the lowest supported effort.
 #   reasoning_text_promotable:
 #                     whether a reasoning-only clean stop may be promoted into
-#                     visible text when the provider omits content.
+#                     visible text when the provider omits content. Defaults to
+#                     false; routes must opt in explicitly because most
+#                     reasoning fields are private trace, not committed answer.
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
 #                     openrouter, enabled, minimax, or zai.

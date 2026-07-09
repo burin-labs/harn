@@ -1556,7 +1556,9 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     // assistant message AND the transcript the eval grader mines. Keep `.text`
     // empty and surface the reasoning only via `thinking`, mirroring
     // `openai_normalize::normalize_openai_message_text`.
-    if !truncated
+    let caps = crate::llm::capabilities::lookup(provider, model);
+    if caps.reasoning_text_promotable
+        && !truncated
         && !tools_offered
         && tool_calls.is_empty()
         && text.is_empty()
@@ -1794,7 +1796,6 @@ where
             }
         } else if !thinking.is_empty() {
             thinking_text.push_str(thinking);
-            let _ = delta_tx.send(thinking.to_string());
             blocks.push(
                 serde_json::json!({"type": "reasoning", "text": thinking, "visibility": "private"}),
             );
@@ -1838,9 +1839,6 @@ where
     } else {
         Some(thinking_text.clone())
     };
-    if text.is_empty() && !thinking_text.is_empty() {
-        text = thinking_text;
-    }
 
     // Guard against upstream parser bugs reporting generated tokens with
     // no visible content. Observed with `gemma4:26b` + ollama's
@@ -1861,7 +1859,7 @@ where
         && done_reason.as_deref() != Some("length")
     {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking [ollama_empty_content_parser_bug]"
+            "ollama model {model} reported eval_count={output_tokens} but delivered no visible content or tool calls [ollama_empty_content_parser_bug]"
         )))));
     }
 
@@ -2178,6 +2176,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ollama_ndjson_thinking_is_private_not_visible_delta() {
+        let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"thinking\":\"private plan\"},\"done\":false}\n\
+            {\"message\":{\"role\":\"assistant\",\"content\":\"visible answer\"},\"done\":false}\n\
+            {\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\
+            \"done_reason\":\"stop\",\"prompt_eval_count\":5,\"eval_count\":4}\n";
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let result = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "stub-model",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+            None,
+        )
+        .await
+        .expect("ollama stream parses");
+
+        let mut deltas = Vec::new();
+        while let Ok(delta) = rx.try_recv() {
+            deltas.push(delta);
+        }
+
+        assert_eq!(deltas, vec!["visible answer".to_string()]);
+        assert_eq!(result.text, "visible answer");
+        assert_eq!(result.thinking.as_deref(), Some("private plan"));
+        assert!(
+            !result.text.contains("private plan"),
+            "private thinking leaked into visible text"
+        );
+        assert!(result.blocks.iter().any(|block| {
+            block["type"] == "reasoning"
+                && block["visibility"] == "private"
+                && block["text"] == "private plan"
+        }));
+        assert!(result.blocks.iter().any(|block| {
+            block["type"] == "output_text"
+                && block["visibility"] == "public"
+                && block["text"] == "visible answer"
+        }));
+    }
+
+    #[tokio::test]
     async fn ollama_ndjson_done_reason_length_surfaces_truncation_not_parser_bug() {
         // Fix 1 + Fix 2: a length-capped frame with empty content must NOT
         // raise the retryable parser-bug error; instead it returns Ok carrying
@@ -2200,6 +2242,30 @@ mod tests {
         assert_eq!(result.stop_reason.as_deref(), Some("length"));
         assert!(result.text.is_empty());
         assert!(result.tool_calls.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ollama_ndjson_thinking_only_length_stays_private() {
+        let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"thinking\":\"partial private trace\"},\"done\":true,\
+            \"done_reason\":\"length\",\"prompt_eval_count\":5,\"eval_count\":4}\n";
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let result = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "stub-model",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+            None,
+        )
+        .await
+        .expect("length truncation should return Ok, not promote thinking");
+
+        assert!(rx.try_recv().is_err());
+        assert_eq!(result.stop_reason.as_deref(), Some("length"));
+        assert_eq!(result.text, "");
+        assert_eq!(result.thinking.as_deref(), Some("partial private trace"));
     }
 
     #[tokio::test]
@@ -2525,10 +2591,10 @@ mod streaming_tool_call_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn openai_stream_reasoning_promotes_to_text_on_clean_stop() {
-        // Control: the same reasoning-only stream on a clean finish
-        // (finish_reason != "length") still promotes the trace into `.text`,
-        // preserving behaviour for models that answer in the reasoning channel.
+    async fn openai_stream_reasoning_stays_private_by_default_on_clean_stop() {
+        // A reasoning-only clean stop is private by default. Routes that really
+        // answer in the reasoning channel can opt in through the capability
+        // matrix, but a missing row must not leak private trace as visible text.
         let body = concat!(
             "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"the answer\"}}]}\n",
             "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" is 42\"}}]}\n",
@@ -2539,9 +2605,32 @@ mod streaming_tool_call_tests {
         let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
 
         assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+        assert_eq!(result.text, "");
+        assert_eq!(result.thinking.as_deref(), Some("the answer is 42"));
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_reasoning_promotes_to_text_when_capability_opts_in() {
+        crate::llm::capabilities::set_user_overrides_toml(concat!(
+            "[[provider.openai]]\n",
+            "model_match = \"test-model\"\n",
+            "reasoning_text_promotable = true\n",
+        ))
+        .expect("capability override");
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"the answer\"}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" is 42\"}}]}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-clean-promote");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
         assert_eq!(result.text, "the answer is 42");
         assert_eq!(result.thinking.as_deref(), Some("the answer is 42"));
 
+        crate::llm::capabilities::clear_user_overrides();
         clear_session_sinks(&session_id);
     }
 
