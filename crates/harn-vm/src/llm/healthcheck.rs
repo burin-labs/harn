@@ -192,10 +192,14 @@ pub fn build_healthcheck_url(def: &ProviderDef, healthcheck: &HealthcheckDef) ->
 
     let base = llm_config::resolve_base_url(def);
     let path = healthcheck.path.as_deref().unwrap_or("");
+    join_base_and_path(&base, path)
+}
+
+pub(crate) fn join_base_and_path(base: &str, path: &str) -> String {
     if path.starts_with('/') {
         format!("{}{}", base.trim_end_matches('/'), path)
     } else if path.is_empty() {
-        base
+        base.to_string()
     } else {
         format!("{}/{}", base.trim_end_matches('/'), path)
     }

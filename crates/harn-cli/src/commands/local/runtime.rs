@@ -217,6 +217,7 @@ fn readiness_status_label(status: ReadinessStatus) -> String {
     match status {
         ReadinessStatus::Ok => "ok",
         ReadinessStatus::UnknownProvider => "unknown_provider",
+        ReadinessStatus::Unsupported => "unsupported",
         ReadinessStatus::InvalidUrl => "invalid_url",
         ReadinessStatus::Unreachable => "unreachable",
         ReadinessStatus::BadStatus => "bad_status",

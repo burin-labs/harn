@@ -17,9 +17,8 @@ latency_p50_ms = 2500
 extra_headers = { "anthropic-version" = "2023-06-01" }
 
 [providers.anthropic.healthcheck]
-method = "POST"
-path = "/messages/count_tokens"
-body = '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"x"}]}'
+method = "GET"
+path = "/models"
 
 [providers.openai]
 base_url = "https://api.openai.com/v1"

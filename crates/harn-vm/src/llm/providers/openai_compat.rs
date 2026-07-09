@@ -2720,7 +2720,10 @@ thinking_modes = ["enabled"]
             }),
             json!({
                 "role": "assistant",
-                "content": "",
+                "content": [
+                    {"type": "reasoning", "text": "hidden chain", "visibility": "private"},
+                    {"type": "output_text", "text": "visible answer", "visibility": "public"}
+                ],
                 "reasoning": "let me inspect the file before editing",
                 "private_reasoning": "storage only",
                 "thinking": {"signature": "provider-private"},
@@ -2787,6 +2790,11 @@ thinking_modes = ["enabled"]
         assert_eq!(
             assistant["reasoning_content"],
             "fireworks echoes this allowed field"
+        );
+        assert_eq!(assistant["content"][0]["text"], "visible answer");
+        assert!(
+            !assistant["content"].to_string().contains("hidden chain"),
+            "private reasoning content block rode into OpenAI-compatible request: {assistant}"
         );
         let first_call = &assistant["tool_calls"][0];
         assert_eq!(first_call["id"], "call_001");

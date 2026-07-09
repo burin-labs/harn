@@ -9,6 +9,7 @@ use crate::llm_config::{self, ProviderDef};
 pub enum ReadinessStatus {
     Ok,
     UnknownProvider,
+    Unsupported,
     InvalidUrl,
     Unreachable,
     BadStatus,
@@ -64,15 +65,13 @@ pub struct ProviderReadinessOptions<'a> {
 }
 
 pub fn supports_model_readiness_probe(def: &ProviderDef) -> bool {
-    let healthcheck_uses_models = def.healthcheck.as_ref().is_some_and(|hc| {
+    let healthcheck_lists_models = def.healthcheck.as_ref().is_some_and(|hc| {
         hc.method.eq_ignore_ascii_case("GET") && {
-            hc.path
-                .as_deref()
-                .is_some_and(|path| path.contains("models"))
-                || hc.url.as_deref().is_some_and(|url| url.contains("models"))
+            hc.path.as_deref().is_some_and(is_model_inventory_endpoint)
+                || hc.url.as_deref().is_some_and(is_model_inventory_endpoint)
         }
     });
-    healthcheck_uses_models || def.chat_endpoint.ends_with("/chat/completions")
+    healthcheck_lists_models || openai_compatible_models_path(&def.chat_endpoint).is_some()
 }
 
 pub fn selected_model_for_provider(provider: &str) -> Option<String> {
@@ -130,9 +129,14 @@ pub async fn probe_provider_readiness_with_options(
         Ok(url) => url,
         Err(message) => {
             let message = crate::egress::redact_diagnostic_text(&message);
+            let status = if supports_model_readiness_probe(&def) {
+                ReadinessStatus::InvalidUrl
+            } else {
+                ReadinessStatus::Unsupported
+            };
             return ProviderReadiness::fail(
                 provider,
-                ReadinessStatus::InvalidUrl,
+                status,
                 message,
                 Some(diagnostic_base_url),
                 None,
@@ -340,9 +344,12 @@ fn collect_model_ids(entries: &[serde_json::Value], models: &mut Vec<String>) {
 }
 
 pub fn model_is_served(model: &str, served_models: &[String]) -> bool {
-    served_models
-        .iter()
-        .any(|served| served == model || served.starts_with(model))
+    served_models.iter().any(|served| {
+        served == model
+            || served
+                .strip_prefix(model)
+                .is_some_and(|suffix| suffix.starts_with(':'))
+    })
 }
 
 pub fn configured_model_for_provider(provider: &str) -> Option<String> {
@@ -379,7 +386,7 @@ fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
             healthcheck
                 .url
                 .as_deref()
-                .filter(|url| url.contains("models"))
+                .filter(|url| is_model_inventory_endpoint(url))
         } else {
             None
         }
@@ -397,40 +404,42 @@ fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
                 healthcheck
                     .path
                     .as_deref()
-                    .filter(|path| path.contains("models"))
+                    .filter(|path| is_model_inventory_endpoint(path))
             } else {
                 None
             }
         })
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| model_path_from_chat_endpoint(&def.chat_endpoint));
-    let url = join_base_and_path(base_url, &path);
+        .map(ToOwned::to_owned);
+    let path = match path.or_else(|| openai_compatible_models_path(&def.chat_endpoint)) {
+        Some(path) => path,
+        None => {
+            return Err(
+                "Provider does not expose a model readiness endpoint; configure a GET healthcheck path/url that lists models or use an OpenAI-compatible /chat/completions endpoint".to_string(),
+            );
+        }
+    };
+    let url = super::healthcheck::join_base_and_path(base_url, &path);
     reqwest::Url::parse(&url)
         .map(|_| normalize_loopback(&url))
         .map_err(|error| format!("Invalid provider models URL '{url}': {error}"))
 }
 
-fn model_path_from_chat_endpoint(chat_endpoint: &str) -> String {
-    if let Some(prefix) = chat_endpoint.strip_suffix("/chat/completions") {
-        if prefix.is_empty() {
-            "/models".to_string()
-        } else {
-            format!("{prefix}/models")
-        }
-    } else {
-        "/v1/models".to_string()
-    }
+fn is_model_inventory_endpoint(endpoint: &str) -> bool {
+    let path = reqwest::Url::parse(endpoint)
+        .ok()
+        .map(|url| url.path().to_string())
+        .unwrap_or_else(|| endpoint.split('?').next().unwrap_or(endpoint).to_string());
+    let path = path.trim_end_matches('/');
+    path == "models" || path.ends_with("/models") || path.ends_with("/api/tags")
 }
 
-fn join_base_and_path(base: &str, path: &str) -> String {
-    let base = base.trim_end_matches('/');
-    if path.is_empty() {
-        base.to_string()
-    } else if path.starts_with('/') {
-        format!("{base}{path}")
+fn openai_compatible_models_path(chat_endpoint: &str) -> Option<String> {
+    let prefix = chat_endpoint.strip_suffix("/chat/completions")?;
+    Some(if prefix.is_empty() {
+        "/models".to_string()
     } else {
-        format!("{base}/{path}")
-    }
+        format!("{prefix}/models")
+    })
 }
 
 fn normalize_loopback(url: &str) -> String {
@@ -485,7 +494,18 @@ mod tests {
     }
 
     #[test]
-    fn models_url_keeps_openai_compatible_fallback_for_native_chat_endpoint() {
+    fn anthropic_models_url_uses_catalog_healthcheck_path() {
+        let def = llm_config::provider_config("anthropic").expect("anthropic provider");
+
+        assert!(supports_model_readiness_probe(&def));
+        assert_eq!(
+            models_url(&def, &def.base_url).expect("models url"),
+            "https://api.anthropic.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn models_url_uses_catalogued_inventory_path_for_native_endpoint() {
         let def = ProviderDef {
             base_url: "http://localhost:11434".to_string(),
             chat_endpoint: "/api/chat".to_string(),
@@ -498,21 +518,42 @@ mod tests {
             ..Default::default()
         };
 
+        assert!(supports_model_readiness_probe(&def));
         assert_eq!(
             models_url(&def, &def.base_url).expect("models url"),
-            "http://127.0.0.1:11434/v1/models"
+            "http://127.0.0.1:11434/api/tags"
         );
     }
 
     #[test]
-    fn model_is_served_accepts_exact_or_prefix() {
-        let models = vec!["unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()];
+    fn models_url_rejects_native_endpoint_without_model_inventory() {
+        let def = ProviderDef {
+            base_url: "https://api.example.com/v1".to_string(),
+            chat_endpoint: "/messages".to_string(),
+            healthcheck: None,
+            ..Default::default()
+        };
+
+        assert!(!supports_model_readiness_probe(&def));
+        assert!(models_url(&def, &def.base_url)
+            .expect_err("unsupported native endpoint")
+            .contains("model readiness endpoint"));
+    }
+
+    #[test]
+    fn model_is_served_accepts_exact_ids_or_tag_boundaries() {
+        let models = vec![
+            "qwen3:8b".to_string(),
+            "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string(),
+            "gpt-4o".to_string(),
+        ];
+        assert!(model_is_served("qwen3", &models));
         assert!(model_is_served(
             "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
             &models
         ));
-        assert!(model_is_served("unsloth/Qwen3.6", &models));
-        assert!(!model_is_served("Qwen/Qwen3.6-35B", &models));
+        assert!(!model_is_served("unsloth/Qwen3.6", &models));
+        assert!(!model_is_served("gpt-4", &models));
     }
 
     #[tokio::test]
@@ -606,6 +647,7 @@ mod tests {
             assert!(
                 request.starts_with("GET /v1/models HTTP/1.1\r\n")
                     || request.starts_with("GET /models HTTP/1.1\r\n")
+                    || request.starts_with("GET /api/tags HTTP/1.1\r\n")
             );
             if let Some(header) = expected_header {
                 assert!(
