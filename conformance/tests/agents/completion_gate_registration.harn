@@ -62,6 +62,7 @@ pipeline default() {
       const decisions = events_of(captured.events, "judge_decision")
       __io_println("A.status=" + captured.result.status)
       __io_println("A.gate_calls=" + to_string(store_get(calls_key)))
+      __io_println("A.sources=" + event_field_values(decisions, "source"))
       __io_println("A.reasons=" + event_field_values(decisions, "reason"))
       __io_println("A.confirms=" + event_field_values(decisions, "confirm"))
     },
@@ -95,6 +96,7 @@ pipeline default() {
       __io_println("B.session_matches=" + to_string(store_get(probe + ".session_matches")))
       __io_println("B.has_task=" + to_string(store_get(probe + ".has_task")))
       __io_println("B.messages_is_list=" + to_string(store_get(probe + ".messages_is_list")))
+      __io_println("B.sources=" + event_field_values(decisions, "source"))
       __io_println("B.reasons=" + event_field_values(decisions, "reason"))
       __io_println("B.confirms=" + event_field_values(decisions, "confirm"))
     },
@@ -121,6 +123,9 @@ pipeline default() {
       __io_println("C.status=" + captured.result.status)
       __io_println("C.is_done=" + to_string(captured.result.status == "done"))
       __io_println(
+        "C.sources=" + event_field_values(events_of(captured.events, "judge_decision"), "source"),
+      )
+      __io_println(
         "C.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
       )
     },
@@ -142,6 +147,9 @@ pipeline default() {
         ) },
       )
       __io_println("D.status=" + captured.result.status)
+      __io_println(
+        "D.sources=" + event_field_values(events_of(captured.events, "judge_decision"), "source"),
+      )
       __io_println(
         "D.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
       )

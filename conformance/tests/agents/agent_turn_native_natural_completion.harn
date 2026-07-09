@@ -36,6 +36,7 @@ pipeline main() {
       __io_println(!contains(calls[0].system, "##DONE##"))
       __io_println(!contains(calls[1].system, "##DONE##"))
       __io_println(result.judge_decisions[0].verdict)
+      __io_println(result.judge_decisions[0].source)
     },
   )
 }

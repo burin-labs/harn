@@ -42,6 +42,8 @@ use crate::value::VmError;
 use super::AgentEvent;
 
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
+const NO_PROGRESS_STREAK_NUDGE_FALLBACK: &str =
+    "No progress was detected. Use the next turn to make concrete task progress or explain the remaining blocker.";
 
 /// `event_type` strings that deserialize directly into an [`AgentEvent`]
 /// variant once normalized. Kept as an explicit allowlist so this host
@@ -203,7 +205,7 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         ),
         "no_progress_streak_nudge" => feedback_with_streak(
             "no_progress_streak_nudge",
-            feedback_content(obj_usize(payload, "turns_since_progress").to_string()),
+            feedback_content(NO_PROGRESS_STREAK_NUDGE_FALLBACK.to_string()),
             feedback_streak(payload),
         ),
         "tool_parse_error_feedback" => feedback(

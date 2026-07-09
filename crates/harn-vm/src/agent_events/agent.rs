@@ -233,6 +233,8 @@ pub enum AgentEvent {
         next_step: Option<String>,
         judge_duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         trigger: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,

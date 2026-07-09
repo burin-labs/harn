@@ -154,6 +154,7 @@ fn judge_decision_round_trips_through_jsonl_sink() {
         reasoning: "needs a concrete next step".into(),
         next_step: Some("run the verifier".into()),
         judge_duration_ms: 17,
+        source: Some("llm".into()),
         trigger: Some("stalled".into()),
         reason: Some("missing_verification".into()),
         confirm: Some(false),
@@ -174,6 +175,7 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             reasoning,
             next_step,
             judge_duration_ms,
+            source,
             trigger,
             reason,
             confirm,
@@ -187,6 +189,7 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             assert_eq!(reasoning, "needs a concrete next step");
             assert_eq!(next_step.as_deref(), Some("run the verifier"));
             assert_eq!(judge_duration_ms, 17);
+            assert_eq!(source.as_deref(), Some("llm"));
             assert_eq!(trigger.as_deref(), Some("stalled"));
             assert_eq!(reason.as_deref(), Some("missing_verification"));
             assert_eq!(confirm, Some(false));
@@ -204,6 +207,7 @@ fn judge_decision_round_trips_through_jsonl_sink() {
     }
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(value["type"], "judge_decision");
+    assert_eq!(value["source"], "llm");
     assert_eq!(
         value["specific_gaps"],
         serde_json::json!(["rerun the verifier", "cite the changed file"])
@@ -235,6 +239,7 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
         reasoning: "verification passed".into(),
         next_step: None,
         judge_duration_ms: 11,
+        source: Some("deterministic".into()),
         trigger: Some("completion_check".into()),
         reason: Some("verified_after_write".into()),
         confirm: Some(true),
@@ -1604,6 +1609,65 @@ fn from_host_no_progress_nudge_preserves_injected_text_and_streak() {
             assert_eq!(streak, Some(2));
         }
         other => panic!("expected FeedbackInjected, got {other:?}"),
+    }
+}
+
+#[test]
+fn from_host_no_progress_nudge_without_text_uses_explanatory_fallback() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "no_progress_streak_nudge",
+        &json!({
+            "iteration": 4,
+            "streak": 2,
+            "turns_since_progress": 2,
+            "has_tools": true,
+            "made_tool_calls": false,
+        }),
+    )
+    .expect("no_progress_streak_nudge");
+    match event {
+        AgentEvent::FeedbackInjected {
+            kind,
+            content,
+            streak,
+            ..
+        } => {
+            assert_eq!(kind, "no_progress_streak_nudge");
+            assert_ne!(content, "2");
+            assert!(content.contains("No progress was detected"));
+            assert_eq!(streak, Some(2));
+        }
+        other => panic!("expected FeedbackInjected, got {other:?}"),
+    }
+}
+
+#[test]
+fn from_host_judge_decision_preserves_source() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "judge_decision",
+        &json!({
+            "iteration": 3,
+            "verdict": "continue",
+            "reasoning": "need verifier output",
+            "next_step": "run tests",
+            "judge_duration_ms": 0,
+            "source": "deterministic",
+            "trigger": "verify_completion",
+            "specific_gaps": [],
+            "accepted_evidence": [],
+        }),
+    )
+    .expect("judge_decision");
+    match event {
+        AgentEvent::JudgeDecision {
+            source, trigger, ..
+        } => {
+            assert_eq!(source.as_deref(), Some("deterministic"));
+            assert_eq!(trigger.as_deref(), Some("verify_completion"));
+        }
+        other => panic!("expected JudgeDecision, got {other:?}"),
     }
 }
 
