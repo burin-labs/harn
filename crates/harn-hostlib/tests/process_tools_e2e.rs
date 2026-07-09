@@ -63,6 +63,20 @@ fn vlist_str(values: &[&str]) -> VmValue {
     VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
 }
 
+fn vlist(values: Vec<VmValue>) -> VmValue {
+    VmValue::List(Arc::new(values))
+}
+
+fn python3() -> Option<String> {
+    let candidate = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_string());
+    let status = std::process::Command::new(&candidate)
+        .arg("-c")
+        .arg("import os, sys")
+        .status()
+        .ok()?;
+    status.success().then_some(candidate)
+}
+
 fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (*map).clone(),
@@ -95,6 +109,20 @@ fn require_nested_dict(map: &harn_vm::value::DictMap, key: &str) -> harn_vm::val
     match map.get(key) {
         Some(VmValue::Dict(value)) => (**value).clone(),
         other => panic!("expected dict at {key}, got {other:?}"),
+    }
+}
+
+fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
+    match map.get(key) {
+        Some(VmValue::List(value)) => value.as_ref().clone(),
+        other => panic!("expected list at {key}, got {other:?}"),
+    }
+}
+
+fn as_dict(value: &VmValue) -> harn_vm::value::DictMap {
+    match value {
+        VmValue::Dict(map) => (**map).clone(),
+        other => panic!("expected dict value, got {other:?}"),
     }
 }
 
@@ -223,6 +251,41 @@ fn real_run_command_env_remove_strips_named_vars_but_explicit_env_wins() {
         child_env.contains("HARN_E2E_KEEP_ME=still-here"),
         "unrelated var was incorrectly stripped:\n{child_env}"
     );
+}
+
+#[test]
+fn real_run_command_cleanup_token_survives_replace_env_and_env_remove() {
+    let Some(python) = python3() else {
+        return;
+    };
+
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist(vec![
+            vstr(&python),
+            vstr("-c"),
+            vstr("import os; print(os.environ.get('HARN_PROCESS_CLEANUP_TOKEN', '<missing>'))"),
+        ]),
+    );
+    req.insert("env_mode".into(), vstr("replace"));
+    req.insert(
+        "env_remove".into(),
+        vlist_str(&["HARN_PROCESS_CLEANUP_TOKEN"]),
+    );
+    let mut env = dict();
+    env.insert("HARN_PROCESS_CLEANUP_TOKEN".into(), vstr("caller-token"));
+    req.insert("env".into(), VmValue::dict(env));
+
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "status"), "completed");
+    let stdout = require_str(&resp, "stdout");
+    assert!(
+        stdout.trim().starts_with("harn-cleanup-"),
+        "private cleanup token should be injected after env_clear/env_remove/env overrides, got: {stdout:?}"
+    );
+    assert_ne!(stdout.trim(), "caller-token");
 }
 
 #[test]
@@ -416,6 +479,15 @@ fn unix_process_exists(pid: i64) -> bool {
     unsafe { kill(pid as i32, 0) == 0 }
 }
 
+fn unix_kill_process(pid: i64) {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    unsafe {
+        let _ = kill(pid as i32, 9);
+    }
+}
+
 fn wait_for_group_death(pgid: i64, timeout: std::time::Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
@@ -556,4 +628,125 @@ fn real_run_command_background_child_survives_interrupt() {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     assert!(!unix_process_exists(pid), "cancel_handle must reap {pid}");
+}
+
+struct PidFileCleanup {
+    path: std::path::PathBuf,
+}
+
+impl Drop for PidFileCleanup {
+    fn drop(&mut self) {
+        let Ok(raw) = std::fs::read_to_string(&self.path) else {
+            return;
+        };
+        let Ok(pid) = raw.trim().parse::<i64>() else {
+            return;
+        };
+        if pid > 1 && unix_process_exists(pid) {
+            unix_kill_process(pid);
+        }
+    }
+}
+
+#[test]
+fn real_run_command_token_cleanup_reaps_reparented_pipe_holder() {
+    let Some(python) = python3() else {
+        return;
+    };
+    let temp = tempfile::tempdir().expect("pid tempdir");
+    let pid_path = temp.path().join("descendant.pid");
+    let _cleanup_guard = PidFileCleanup {
+        path: pid_path.clone(),
+    };
+    let pid_path_arg = pid_path.to_string_lossy().to_string();
+    let parent = r#"
+import pathlib
+import subprocess
+import sys
+import time
+
+pid_path = sys.argv[1]
+child = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); print('descendant-ready', flush=True); time.sleep(30)"
+subprocess.Popen([sys.executable, "-c", child, pid_path], start_new_session=True)
+for _ in range(100):
+    if pathlib.Path(pid_path).exists():
+        break
+    time.sleep(0.01)
+print("parent-exit", flush=True)
+"#;
+
+    let started = std::time::Instant::now();
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist(vec![
+            vstr(&python),
+            vstr("-c"),
+            vstr(parent),
+            vstr(&pid_path_arg),
+        ]),
+    );
+    req.insert("timeout_ms".into(), VmValue::Int(500));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(8),
+        "cleanup should preempt the 30s escaped descendant, took {:?}",
+        started.elapsed()
+    );
+    assert!(require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "status"), "timed_out");
+    let stdout = require_str(&resp, "stdout");
+    assert!(
+        stdout.contains("descendant-ready"),
+        "stdout should preserve the escaped pipe-holder marker before cleanup: {stdout:?}"
+    );
+    let raw_descendant_pid =
+        std::fs::read_to_string(&pid_path).expect("descendant pid should be recorded");
+    let descendant_pid = raw_descendant_pid
+        .trim()
+        .parse::<i64>()
+        .expect("descendant pid");
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    assert!(
+        require_int(&cleanup, "observed_child_count") >= 1,
+        "cleanup receipt should include the reparented same-token descendant: {cleanup:?}"
+    );
+    assert!(
+        require_int(&cleanup, "reaped_child_count") >= 1,
+        "same-token descendant should be reaped: {cleanup:?}"
+    );
+    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    let observed_children = require_list(&cleanup, "observed_children");
+    let observed_descendant = observed_children
+        .iter()
+        .map(as_dict)
+        .find(|child| require_int(child, "pid") == descendant_pid)
+        .unwrap_or_else(|| {
+            panic!(
+                "cleanup receipt should observe exact escaped descendant pid {descendant_pid}: {cleanup:?}"
+            )
+        });
+    assert!(
+        observed_descendant.get("command").is_none(),
+        "cleanup receipt must not include raw child command text: {observed_descendant:?}"
+    );
+    let reaped_children = require_list(&cleanup, "reaped_children");
+    let reaped_descendant = reaped_children
+        .iter()
+        .map(as_dict)
+        .find(|child| require_int(child, "pid") == descendant_pid)
+        .unwrap_or_else(|| {
+            panic!(
+                "cleanup receipt should reap exact escaped descendant pid {descendant_pid}: {cleanup:?}"
+            )
+        });
+    assert!(
+        reaped_descendant.get("command").is_none(),
+        "cleanup receipt must not include raw reaped child command text: {reaped_descendant:?}"
+    );
+    assert!(
+        !unix_process_exists(descendant_pid),
+        "reparented descendant {descendant_pid} must be gone after token cleanup"
+    );
 }

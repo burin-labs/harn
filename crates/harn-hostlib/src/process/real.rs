@@ -113,6 +113,11 @@ impl ProcessSpawner for RealSpawner {
         if spec.configure_process_group {
             configure_background_process_group(&mut command);
         }
+        let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
+        command.env(
+            harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
+            &cleanup_token,
+        );
 
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
@@ -131,11 +136,15 @@ impl ProcessSpawner for RealSpawner {
 
         let pid = child.id();
         let pgid = child_process_group_id(pid);
-        let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller { pid });
+        let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
+            pid,
+            cleanup_token: cleanup_token.clone(),
+        });
 
         Ok(Box::new(RealProcess {
             pid,
             pgid,
+            cleanup_token,
             killer,
             child: Some(child),
             stdin: None,
@@ -151,6 +160,7 @@ impl ProcessSpawner for RealSpawner {
 struct RealProcess {
     pid: u32,
     pgid: Option<u32>,
+    cleanup_token: String,
     killer: Arc<dyn ProcessKiller>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -233,7 +243,10 @@ impl ProcessHandle for RealProcess {
                         // group termination (SIGTERM, grace, SIGKILL) shared
                         // with the VM-side `process.*` builtins.
                         let (_, report) =
-                            harn_vm::op_interrupt::terminate_child_group_with_report(child);
+                            harn_vm::op_interrupt::terminate_child_group_with_cleanup_token_report(
+                                child,
+                                Some(&self.cleanup_token),
+                            );
                         return Ok(WaitOutcome::Interrupted(report));
                     }
                     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -271,11 +284,16 @@ impl ProcessHandle for RealProcess {
 
 struct RealKiller {
     pid: u32,
+    cleanup_token: String,
 }
 
 impl ProcessKiller for RealKiller {
     fn kill(&self) -> ProcessCleanupReport {
-        harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(self.pid, 9)
+        harn_vm::op_interrupt::signal_pid_tree_group_and_token_with_report(
+            self.pid,
+            Some(&self.cleanup_token),
+            9,
+        )
     }
 }
 

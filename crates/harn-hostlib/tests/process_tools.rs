@@ -464,6 +464,40 @@ fn run_command_kills_child_when_timeout_elapses() {
 }
 
 #[test]
+fn run_command_times_out_when_descendant_keeps_stdout_pipe_open() {
+    let config = MockProcessConfig {
+        stdout: b"direct-child-output\n".to_vec(),
+        exit_status: Some(ExitStatus::from_code(0)),
+        cleanup_report: Some(cleanup_report_fixture(9)),
+        stdout_hangs_after_exit_until_kill: true,
+        ..MockProcessConfig::default()
+    };
+    let (_spawner, controller, _guard) = install_mock_with(config);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["python3", "build-daemon.py"]));
+    req.insert("timeout_ms".into(), VmValue::Int(1));
+    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    assert_response_matches_schema("run_command", &resp_value);
+    let resp = require_dict(resp_value);
+
+    assert!(controller.was_killed());
+    assert!(require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "status"), "timed_out");
+    assert_eq!(require_int(&resp, "exit_code"), -1);
+    assert_eq!(require_str(&resp, "signal"), "SIGKILL");
+    assert_eq!(require_str(&resp, "stdout"), "direct-child-output\n");
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    assert_eq!(require_int(&cleanup, "root_pid"), 99_999);
+    assert_eq!(require_int(&cleanup, "reaped_child_count"), 1);
+    let reaped = require_list(&cleanup, "reaped_children");
+    let child = as_dict(&reaped[0]);
+    assert_eq!(require_int(&child, "pid"), 100_001);
+    assert_eq!(require_str(&child, "command_name"), "sleep");
+    assert!(child.get("command").is_none());
+}
+
+#[test]
 fn run_command_spawns_foreground_children_in_their_own_process_group() {
     // The interrupt path (scope cancel / deadline / VM drop) signals the
     // child's process group so grandchildren are reaped too — the spawn

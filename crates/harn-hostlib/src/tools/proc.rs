@@ -28,7 +28,7 @@ use harn_vm::VmValue;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::error::HostlibError;
-use crate::process::{self as process_handle, ProcessError, SpawnSpec};
+use crate::process::{self as process_handle, ProcessError, ProcessKiller, SpawnSpec};
 use crate::tools::args::to_agent_path;
 use crate::tools::response::ResponseBuilder;
 
@@ -154,6 +154,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     let pid = handle.pid();
     let process_group_id = handle.process_group_id();
+    let killer = handle.killer();
 
     if let Some(stdin_data) = req.stdin.as_ref() {
         if let Some(mut stdin) = handle.take_stdin() {
@@ -190,47 +191,88 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     // child's process group instead of orphaning it. `background: true`
     // spawns bypass this path (see `tools/long_running.rs`) and remain the
     // fire-and-forget escape hatch.
+    let deadline = req.timeout.map(|timeout| started + timeout);
     let wait_result = handle.wait_with_timeout(req.timeout, &harn_vm::op_interrupt::requested);
     if wait_result.is_err() {
-        let _ = handle.killer().kill();
+        let _ = killer.kill();
     }
 
-    if let Some(t) = stdout_thread {
-        let _ = t.join();
-    }
-    if let Some(t) = stderr_thread {
-        let _ = t.join();
-    }
-
-    let stdout_bytes: Vec<u8> = out_rx.try_iter().flatten().collect();
-    let stderr_bytes: Vec<u8> = err_rx.try_iter().flatten().collect();
     let outcome = wait_result.map_err(|error| HostlibError::Backend {
         builtin: req.builtin,
         message: format!("wait failed: {error}"),
     })?;
+    let wait_killed = matches!(
+        outcome,
+        process_handle::WaitOutcome::TimedOut(_) | process_handle::WaitOutcome::Interrupted(_)
+    );
+    let stdout_drain = drain_output(out_rx, deadline, wait_killed, &killer);
+    let stderr_drain = drain_output(
+        err_rx,
+        deadline,
+        wait_killed || stdout_drain.process_cleanup.is_some(),
+        &killer,
+    );
+    // Do not join unconditionally: a descendant that inherited stdout/stderr can
+    // keep the pipe open after the direct child exits. The drain helper enforces
+    // the same command deadline/interrupt and kills the cleanup-token family.
+    drop(stdout_thread);
+    drop(stderr_thread);
+
+    let stdout_bytes = stdout_drain.bytes;
+    let stderr_bytes = stderr_drain.bytes;
+    let drain_timed_out = stdout_drain.timed_out || stderr_drain.timed_out;
+    let drain_interrupted = stdout_drain.interrupted || stderr_drain.interrupted;
+    let mut drain_cleanup = stdout_drain.process_cleanup;
+    if let Some(stderr_cleanup) = stderr_drain.process_cleanup {
+        if let Some(existing) = drain_cleanup.as_mut() {
+            existing.merge(stderr_cleanup);
+        } else {
+            drain_cleanup = Some(stderr_cleanup);
+        }
+    }
 
     let ended_at = Some(now_rfc3339());
 
-    let (command_status, exit_code, signal, timed_out, process_cleanup) = match outcome {
-        process_handle::WaitOutcome::Exited(status) => {
-            let (exit_code, signal) = decode_status(status);
-            (CommandStatus::Completed, exit_code, signal, false, None)
+    let (mut command_status, mut exit_code, mut signal, mut timed_out, mut process_cleanup) =
+        match outcome {
+            process_handle::WaitOutcome::Exited(status) => {
+                let (exit_code, signal) = decode_status(status);
+                (CommandStatus::Completed, exit_code, signal, false, None)
+            }
+            process_handle::WaitOutcome::TimedOut(report) => (
+                CommandStatus::TimedOut,
+                -1,
+                Some("SIGKILL".to_string()),
+                true,
+                Some(report),
+            ),
+            process_handle::WaitOutcome::Interrupted(report) => (
+                CommandStatus::Killed,
+                -1,
+                Some("SIGTERM".to_string()),
+                false,
+                Some(report),
+            ),
+        };
+    if drain_timed_out || drain_interrupted {
+        if let Some(cleanup) = drain_cleanup {
+            if let Some(existing) = process_cleanup.as_mut() {
+                existing.merge(cleanup);
+            } else {
+                process_cleanup = Some(cleanup);
+            }
         }
-        process_handle::WaitOutcome::TimedOut(report) => (
-            CommandStatus::TimedOut,
-            -1,
-            Some("SIGKILL".to_string()),
-            true,
-            Some(report),
-        ),
-        process_handle::WaitOutcome::Interrupted(report) => (
-            CommandStatus::Killed,
-            -1,
-            Some("SIGTERM".to_string()),
-            false,
-            Some(report),
-        ),
-    };
+        if drain_timed_out {
+            command_status = CommandStatus::TimedOut;
+            exit_code = -1;
+            signal = Some("SIGKILL".to_string());
+            timed_out = true;
+        } else {
+            command_status = CommandStatus::Killed;
+            exit_code = -1;
+            signal = Some("SIGTERM".to_string());
+        }
+    }
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let (stdout, stderr) = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
@@ -255,6 +297,88 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         timed_out,
         process_cleanup,
     })
+}
+
+#[derive(Debug)]
+struct DrainResult {
+    bytes: Vec<u8>,
+    timed_out: bool,
+    interrupted: bool,
+    process_cleanup: Option<process_handle::ProcessCleanupReport>,
+}
+
+fn drain_output(
+    rx: mpsc::Receiver<Vec<u8>>,
+    deadline: Option<std::time::Instant>,
+    already_killed: bool,
+    killer: &Arc<dyn ProcessKiller>,
+) -> DrainResult {
+    use std::sync::mpsc::RecvTimeoutError;
+
+    if already_killed {
+        return DrainResult {
+            bytes: collect_available_output(&rx, Duration::from_millis(100)),
+            timed_out: false,
+            interrupted: false,
+            process_cleanup: None,
+        };
+    }
+
+    loop {
+        let interrupted = harn_vm::op_interrupt::requested();
+        let now = std::time::Instant::now();
+        let timed_out = deadline.is_some_and(|deadline| now >= deadline);
+        if interrupted || timed_out {
+            let cleanup = killer.kill();
+            return DrainResult {
+                bytes: collect_available_output(&rx, Duration::from_millis(100)),
+                timed_out,
+                interrupted,
+                process_cleanup: Some(cleanup),
+            };
+        }
+        let wait = deadline
+            .map(|deadline| {
+                deadline
+                    .saturating_duration_since(now)
+                    .min(Duration::from_millis(20))
+            })
+            .unwrap_or_else(|| Duration::from_millis(20));
+        match rx.recv_timeout(wait) {
+            Ok(bytes) => {
+                let mut all_bytes = bytes;
+                for next in rx.try_iter() {
+                    all_bytes.extend(next);
+                }
+                return DrainResult {
+                    bytes: all_bytes,
+                    timed_out: false,
+                    interrupted: false,
+                    process_cleanup: None,
+                };
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return DrainResult {
+                    bytes: Vec::new(),
+                    timed_out: false,
+                    interrupted: false,
+                    process_cleanup: None,
+                };
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+fn collect_available_output(rx: &mpsc::Receiver<Vec<u8>>, first_wait: Duration) -> Vec<u8> {
+    let mut bytes = match rx.recv_timeout(first_wait) {
+        Ok(bytes) => bytes,
+        Err(_) => return Vec::new(),
+    };
+    for next in rx.try_iter() {
+        bytes.extend(next);
+    }
+    bytes
 }
 
 /// Apply the mise/asdf toolchain PATH normalizer to a run() child environment
@@ -649,6 +773,30 @@ pub(crate) fn parse_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+    struct RecordingKiller {
+        calls: AtomicUsize,
+    }
+
+    impl RecordingKiller {
+        fn calls(&self) -> usize {
+            self.calls.load(AtomicOrdering::SeqCst)
+        }
+    }
+
+    impl ProcessKiller for RecordingKiller {
+        fn kill(&self) -> process_handle::ProcessCleanupReport {
+            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
+            process_handle::ProcessCleanupReport::for_signal(Some(42), 9)
+        }
+    }
+
+    fn recording_killer() -> Arc<RecordingKiller> {
+        Arc::new(RecordingKiller {
+            calls: AtomicUsize::new(0),
+        })
+    }
 
     #[test]
     fn inline_output_does_not_split_utf8_codepoint() {
@@ -690,5 +838,41 @@ mod tests {
             .unwrap();
 
         assert_eq!(parsed, temp.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn drain_output_kills_immediately_when_deadline_already_elapsed() {
+        let (_tx, rx) = mpsc::channel::<Vec<u8>>();
+        let killer = recording_killer();
+        let killer_trait: Arc<dyn ProcessKiller> = killer.clone();
+        let expired_deadline = std::time::Instant::now()
+            .checked_sub(Duration::from_millis(1))
+            .expect("subtracting one millisecond from Instant::now() should be representable");
+
+        let result = drain_output(rx, Some(expired_deadline), false, &killer_trait);
+
+        assert!(result.timed_out);
+        assert!(!result.interrupted);
+        assert_eq!(result.bytes, Vec::<u8>::new());
+        assert_eq!(killer.calls(), 1);
+        assert_eq!(result.process_cleanup.unwrap().root_pid, Some(42));
+    }
+
+    #[test]
+    fn drain_output_collects_all_available_chunks() {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        tx.send(b"alpha".to_vec()).unwrap();
+        tx.send(b"beta".to_vec()).unwrap();
+        drop(tx);
+        let killer = recording_killer();
+        let killer_trait: Arc<dyn ProcessKiller> = killer.clone();
+
+        let result = drain_output(rx, None, false, &killer_trait);
+
+        assert_eq!(result.bytes, b"alphabeta");
+        assert!(!result.timed_out);
+        assert!(!result.interrupted);
+        assert!(result.process_cleanup.is_none());
+        assert_eq!(killer.calls(), 0);
     }
 }
