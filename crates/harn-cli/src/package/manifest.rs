@@ -1400,6 +1400,31 @@ pub(crate) async fn lock_manifest_provider_schemas() -> tokio::sync::MutexGuard<
         .await
 }
 
+fn llm_manifest_diagnostics(content: &str) -> Vec<harn_vm::llm_config::ProviderConfigDiagnostic> {
+    let Ok(value) = toml::from_str::<toml::Value>(content) else {
+        return Vec::new();
+    };
+    let Some(llm) = value.get("llm") else {
+        return Vec::new();
+    };
+    let Ok(llm_src) = toml::to_string(llm) else {
+        return Vec::new();
+    };
+    let Ok(parsed) = harn_vm::llm_config::parse_config_toml_with_diagnostics(&llm_src) else {
+        return Vec::new();
+    };
+    parsed
+        .diagnostics
+        .into_iter()
+        .map(|mut diagnostic| {
+            if !diagnostic.path.is_empty() {
+                diagnostic.path = format!("llm.{}", diagnostic.path);
+            }
+            diagnostic
+        })
+        .collect()
+}
+
 pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageError> {
     let content = fs::read_to_string(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -1412,9 +1437,13 @@ pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageEr
             PackageError::Manifest(format!("failed to read {}: {error}", path.display()))
         }
     })?;
-    toml::from_str::<Manifest>(&content).map_err(|error| {
+    let manifest = toml::from_str::<Manifest>(&content).map_err(|error| {
         PackageError::Manifest(format!("failed to parse {}: {error}", path.display()))
-    })
+    })?;
+    for diagnostic in llm_manifest_diagnostics(&content) {
+        eprintln!("[llm_config] warning in {}: {diagnostic}", path.display());
+    }
+    Ok(manifest)
 }
 
 pub(crate) fn write_manifest_content(path: &Path, content: &str) -> Result<(), PackageError> {
@@ -1781,6 +1810,30 @@ mod tests {
         let none: Manifest = toml::from_str("[package]\nname = \"x\"\n").unwrap();
         assert!(none.rules.rule_dirs.is_empty());
         assert!(none.rules.native_rule_dirs.is_empty());
+    }
+
+    #[test]
+    fn llm_manifest_diagnostics_report_unknown_model_fields() {
+        let diagnostics = llm_manifest_diagnostics(
+            r#"
+[llm.models."demo/model"]
+name = "Demo"
+provider = "demo"
+context_window = 4096
+fast_mode = true
+"#,
+        );
+        let texts: Vec<String> = diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.to_string())
+            .collect();
+        assert!(
+            texts.iter().any(
+                |diagnostic| diagnostic.contains("llm.models.demo/model.fast_mode")
+                    && diagnostic.contains("serving_tiers")
+            ),
+            "expected manifest [llm] unknown-field diagnostic, got {texts:?}"
+        );
     }
 
     #[test]
