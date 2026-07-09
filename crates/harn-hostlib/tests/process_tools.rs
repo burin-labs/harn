@@ -1422,9 +1422,9 @@ fn run_build_command_long_running_returns_handle() {
 // -------- universal catastrophic-command floor --------
 //
 // The floor is enforced UNCONDITIONALLY at `spawn_process` (no command_policy
-// pushed), so every hostlib process tool inherits it. UNIVERSAL destruction is
-// blocked before spawn; the recoverable git WORKFLOW family and benign
-// commands proceed. See `harn_vm::orchestration::universal_catastrophic_reason`.
+// pushed), so every hostlib process tool inherits it. Catastrophic commands are
+// blocked before spawn; benign commands proceed. See
+// `harn_vm::orchestration::universal_catastrophic_reason`.
 
 fn run_command_argv(argv: &[&str]) -> (Arc<MockSpawner>, Result<VmValue, HostlibError>) {
     let (spawner, _guard) = install_mock();
@@ -1461,9 +1461,7 @@ fn run_command_blocks_universal_catastrophes_before_spawn() {
 }
 
 #[test]
-fn run_command_allows_recoverable_git_workflow_with_no_policy() {
-    // Regression guard: the WORKFLOW family is NOT blocked by the universal
-    // backstop, preserving the stdlib `git.push --force-with-lease` flow.
+fn run_command_blocks_git_destructive_family_before_spawn() {
     for argv in [
         vec!["git", "reset", "--hard"],
         vec!["git", "clean", "-fdx"],
@@ -1474,14 +1472,19 @@ fn run_command_allows_recoverable_git_workflow_with_no_policy() {
             "origin",
             "HEAD",
         ],
+        vec!["sh", "-c", "git reset --hard"],
     ] {
         let (spawner, result) = run_command_argv(&argv);
-        let resp = require_dict(result.unwrap_or_else(|e| panic!("{argv:?} blocked: {e:?}")));
-        assert_eq!(require_int(&resp, "exit_code"), 0, "{argv:?}");
+        match result {
+            Err(HostlibError::CatastrophicFloor { message, .. }) => {
+                assert!(!message.is_empty(), "floor reason should be non-empty");
+            }
+            other => panic!("expected CatastrophicFloor for {argv:?}, got {other:?}"),
+        }
         assert_eq!(
             spawner.captured().len(),
-            1,
-            "workflow command {argv:?} must be spawned"
+            0,
+            "git-destructive command {argv:?} must NEVER be spawned"
         );
     }
 }
