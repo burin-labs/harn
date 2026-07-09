@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -23,6 +25,8 @@ use super::{
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
 const LORA_TRAIN_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_PRETTY";
+const BACKEND_OUTPUT_TAIL_BYTES: usize = 120 * 1024;
+const BACKEND_STREAM_READ_CHUNK_BYTES: usize = 8 * 1024;
 
 pub(super) async fn train(args: &ModelsLoraTrainArgs) -> i32 {
     let mut report = match train_report(args) {
@@ -213,6 +217,11 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             "dry_run".to_string()
         },
         exit_code: None,
+        output_tail_bytes: BACKEND_OUTPUT_TAIL_BYTES,
+        stdout_tail: None,
+        stderr_tail: None,
+        stdout_tail_truncated: false,
+        stderr_tail_truncated: false,
     };
     Ok(LoraTrainReport {
         schema_version: 1,
@@ -330,11 +339,26 @@ fn execute_backend(report: &mut LoraTrainReport) -> Result<(), String> {
     }
     command
         .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    let status = command
-        .status()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
         .map_err(|error| format!("failed to launch backend `{program}`: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("failed to capture backend `{program}` stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("failed to capture backend `{program}` stderr"))?;
+    let stdout_tail = Arc::new(Mutex::new(OutputTail::new(BACKEND_OUTPUT_TAIL_BYTES)));
+    let stderr_tail = Arc::new(Mutex::new(OutputTail::new(BACKEND_OUTPUT_TAIL_BYTES)));
+    let stdout_handle = tee_backend_stream(stdout, false, Arc::clone(&stdout_tail));
+    let stderr_handle = tee_backend_stream(stderr, true, Arc::clone(&stderr_tail));
+    let status = child
+        .wait()
+        .map_err(|error| format!("failed to wait for backend `{program}`: {error}"))?;
     let exit_code = status.code().unwrap_or(1);
     report.backend.exit_code = Some(exit_code);
     report.backend.status = if status.success() {
@@ -343,7 +367,135 @@ fn execute_backend(report: &mut LoraTrainReport) -> Result<(), String> {
         "failed".to_string()
     };
     report.ok = status.success();
+    if let Some(warning) = join_stream_thread(stdout_handle, "stdout") {
+        report.warnings.push(warning);
+    }
+    if let Some(warning) = join_stream_thread(stderr_handle, "stderr") {
+        report.warnings.push(warning);
+    }
+    let stdout = output_tail(stdout_tail, "stdout");
+    report.backend.stdout_tail = stdout.text;
+    report.backend.stdout_tail_truncated = stdout.truncated;
+    let stderr = output_tail(stderr_tail, "stderr");
+    report.backend.stderr_tail = stderr.text;
+    report.backend.stderr_tail_truncated = stderr.truncated;
     Ok(())
+}
+
+fn tee_backend_stream<R: Read + Send + 'static>(
+    stream: R,
+    is_stderr: bool,
+    tail: Arc<Mutex<OutputTail>>,
+) -> thread::JoinHandle<Result<(), String>> {
+    thread::spawn(move || {
+        if is_stderr {
+            let mut out = std::io::stderr().lock();
+            capture_backend_stream(stream, &mut out, tail, "stderr")
+        } else {
+            let mut out = std::io::stdout().lock();
+            capture_backend_stream(stream, &mut out, tail, "stdout")
+        }
+    })
+}
+
+fn capture_backend_stream<R: Read, W: Write>(
+    mut stream: R,
+    mirror: &mut W,
+    tail: Arc<Mutex<OutputTail>>,
+    stream_name: &str,
+) -> Result<(), String> {
+    let mut chunk = [0_u8; BACKEND_STREAM_READ_CHUNK_BYTES];
+    let mut mirror_error = None;
+    loop {
+        let read = stream
+            .read(&mut chunk)
+            .map_err(|error| format!("failed to read backend stream: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        let bytes = &chunk[..read];
+        tail.lock()
+            .map_err(|_| "backend output tail lock was poisoned".to_string())?
+            .push(bytes);
+        if mirror_error.is_none() {
+            if let Err(error) = mirror.write_all(bytes).and_then(|_| mirror.flush()) {
+                mirror_error = Some(format!("failed to mirror backend {stream_name}: {error}"));
+            }
+        }
+    }
+    mirror_error.map_or(Ok(()), Err)
+}
+
+fn join_stream_thread(
+    handle: thread::JoinHandle<Result<(), String>>,
+    stream_name: &str,
+) -> Option<String> {
+    match handle.join() {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(format!("backend {stream_name} capture warning: {error}")),
+        Err(_) => Some(format!("backend {stream_name} capture thread panicked")),
+    }
+}
+
+struct CapturedTail {
+    text: Option<String>,
+    truncated: bool,
+}
+
+fn output_tail(tail: Arc<Mutex<OutputTail>>, stream_name: &str) -> CapturedTail {
+    match tail.lock() {
+        Ok(tail) => CapturedTail {
+            text: tail.text(),
+            truncated: tail.truncated,
+        },
+        Err(_) => CapturedTail {
+            text: Some(format!("<failed to read {stream_name} output tail>")),
+            truncated: false,
+        },
+    }
+}
+
+#[derive(Debug)]
+struct OutputTail {
+    bytes: Vec<u8>,
+    limit: usize,
+    truncated: bool,
+}
+
+impl OutputTail {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit,
+            truncated: false,
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        if chunk.is_empty() || self.limit == 0 {
+            return;
+        }
+        if chunk.len() >= self.limit {
+            self.bytes.clear();
+            self.bytes
+                .extend_from_slice(&chunk[chunk.len() - self.limit..]);
+            self.truncated = true;
+            return;
+        }
+        let overflow = self.bytes.len() + chunk.len();
+        if overflow > self.limit {
+            self.bytes.drain(0..(overflow - self.limit));
+            self.truncated = true;
+        }
+        self.bytes.extend_from_slice(chunk);
+    }
+
+    fn text(&self) -> Option<String> {
+        if self.bytes.is_empty() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&self.bytes).into_owned())
+    }
 }
 
 fn write_receipt(path: &Path, report: &LoraTrainReport) -> Result<(), String> {
@@ -709,6 +861,11 @@ struct BackendInvocation {
     execute: bool,
     status: String,
     exit_code: Option<i32>,
+    output_tail_bytes: usize,
+    stdout_tail: Option<String>,
+    stderr_tail: Option<String>,
+    stdout_tail_truncated: bool,
+    stderr_tail_truncated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -727,6 +884,8 @@ struct PathRef {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -794,6 +953,9 @@ mod tests {
         );
         assert_eq!(report.backend.status, "dry_run");
         assert!(!report.backend.execute);
+        assert_eq!(report.backend.output_tail_bytes, BACKEND_OUTPUT_TAIL_BYTES);
+        assert!(report.backend.stdout_tail.is_none());
+        assert!(report.backend.stderr_tail.is_none());
         assert_eq!(report.inputs.dataset.kind, "file");
         assert_eq!(report.dataset_audit.rows, 1);
         assert_eq!(report.dataset_audit.parallel_tool_call_rows, 1);
@@ -868,5 +1030,33 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("no backend argv supplied")));
+    }
+
+    #[test]
+    fn output_tail_keeps_bounded_suffix() {
+        let mut tail = OutputTail::new(5);
+        tail.push(b"abc");
+        assert_eq!(tail.text().as_deref(), Some("abc"));
+        assert!(!tail.truncated);
+        tail.push(b"def");
+        assert_eq!(tail.text().as_deref(), Some("bcdef"));
+        assert!(tail.truncated);
+        tail.push(b"ghijkl");
+        assert_eq!(tail.text().as_deref(), Some("hijkl"));
+        assert!(tail.truncated);
+    }
+
+    #[test]
+    fn backend_stream_capture_keeps_bounded_suffix_for_unbroken_output() {
+        let tail = Arc::new(Mutex::new(OutputTail::new(5)));
+        let input = Cursor::new(b"abcdefghijkl".to_vec());
+        let mut mirrored = Vec::new();
+
+        capture_backend_stream(input, &mut mirrored, Arc::clone(&tail), "stdout").unwrap();
+
+        assert_eq!(mirrored, b"abcdefghijkl");
+        let captured = output_tail(tail, "stdout");
+        assert_eq!(captured.text.as_deref(), Some("hijkl"));
+        assert!(captured.truncated);
     }
 }
