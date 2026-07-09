@@ -628,6 +628,88 @@ fn provider_tool_scorecard_json_is_structurally_identical_across_runs() {
 }
 
 #[test]
+fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
+    let argv = [
+        "provider",
+        "tool-scorecard",
+        "--plan",
+        "--route",
+        "anthropic:claude-sonnet-4-6",
+        "--include-batch-manifest",
+    ];
+
+    let harn = run(&argv, &[]);
+    let repeat = run(&argv, &[]);
+    assert_eq!(
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
+    );
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
+    assert_eq!(
+        repeat_value, harn_value,
+        "tool-scorecard plan JSON shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
+    );
+    assert_eq!(harn_value["kind"], "plan");
+    assert_eq!(harn_value["route_count"], 1);
+    assert_eq!(harn_value["routes"][0]["provider"], "anthropic");
+    assert_eq!(harn_value["routes"][0]["model"], "claude-sonnet-4-6");
+    let cases = harn_value["routes"][0]["cases"]
+        .as_array()
+        .expect("cases should be an array");
+    assert!(
+        cases.iter().any(|case| case["id"] == "single_tool_call"),
+        "single tool case missing: {}",
+        harn.stdout
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case["id"] == "tool_result_followup"),
+        "multi-turn follow-up case missing: {}",
+        harn.stdout
+    );
+}
+
+#[test]
+fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
+    let argv = [
+        "provider",
+        "tool-scorecard",
+        "--plan",
+        "--route",
+        "anthropic:claude-sonnet-4-6",
+        "--json=false",
+    ];
+
+    let harn = run(&argv, &[]);
+    let repeat = run(&argv, &[]);
+    assert_eq!(
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
+    );
+    assert_eq!(
+        harn.stdout, repeat.stdout,
+        "tool-scorecard plan human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
+    );
+    assert!(
+        harn.stdout
+            .contains("provider tool-call scorecard plan: routes=1"),
+        "unexpected human output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("single_tool_call"),
+        "plan cases missing from human output: {}",
+        harn.stdout
+    );
+}
+
+#[test]
 fn provider_tool_scorecard_human_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("passing.json");

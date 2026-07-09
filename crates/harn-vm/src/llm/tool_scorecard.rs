@@ -15,6 +15,7 @@ use super::tool_conformance::{
 };
 
 pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 1;
+pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolScorecardReport {
@@ -64,6 +65,78 @@ pub struct ToolScorecardRoute {
     pub observed_wire_dialects: Vec<&'static str>,
     pub classification_counts: BTreeMap<&'static str, usize>,
     pub issues: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardPlan {
+    pub schema_version: u32,
+    pub kind: &'static str,
+    pub catalog: ToolScorecardCatalogProvenance,
+    pub route_count: usize,
+    pub case_count: usize,
+    pub required_case_count: usize,
+    pub batch_manifest_request_count: usize,
+    pub routes: Vec<ToolScorecardPlanRoute>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub batch_manifest_requests: Vec<ToolScorecardBatchManifestRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardCatalogProvenance {
+    pub schema_version: u32,
+    pub generated_by: String,
+    pub hash_blake3: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardPlanRoute {
+    pub provider: String,
+    pub model: String,
+    pub catalog_claim: ToolScorecardCatalogClaim,
+    pub cases: Vec<ToolScorecardPlanCase>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardCatalogClaim {
+    pub preferred_tool_format: Option<String>,
+    pub tool_mode_parity: Option<String>,
+    pub native_tools: bool,
+    pub text_tools: bool,
+    pub text_tool_wire_format_supported: bool,
+    pub max_tools: Option<u32>,
+    pub supports_parallel_tool_calls: bool,
+    pub server_parser: String,
+    pub tool_search: Vec<String>,
+    pub batch_api: bool,
+    pub batch_wire_format: Option<String>,
+    pub batch_input_mode: Option<String>,
+    pub batch_discount_percent: Option<u32>,
+    pub provider_rate_limits: bool,
+    pub model_rate_limits: bool,
+    pub provider_rpm: Option<u32>,
+    pub pricing: bool,
+    pub provider_latency_p50_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardPlanCase {
+    pub id: &'static str,
+    pub description: &'static str,
+    pub requirement: &'static str,
+    pub requirement_reason: &'static str,
+    pub turn_count: u8,
+    pub batch_eligible: bool,
+    pub probe_focus: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardBatchManifestRequest {
+    pub request_id: String,
+    pub provider: String,
+    pub model: String,
+    pub case_id: &'static str,
+    pub batch_wire_format: Option<String>,
+    pub batch_input_mode: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -124,6 +197,238 @@ pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolS
         summary,
         routes,
     }
+}
+
+pub fn tool_scorecard_plan_from_catalog(
+    route_filters: &[String],
+    include_batch_manifest: bool,
+) -> Result<ToolScorecardPlan, String> {
+    let artifact = crate::provider_catalog::artifact();
+    let catalog_json = serde_json::to_vec(&artifact)
+        .map_err(|error| format!("error: failed to serialize provider catalog: {error}"))?;
+    let catalog_hash = format!("blake3:{}", blake3::hash(&catalog_json));
+    let requested_routes = parse_route_filters(route_filters)?;
+    let provider_by_id = artifact
+        .providers
+        .iter()
+        .map(|provider| (provider.id.as_str(), provider))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut seen_routes = BTreeSet::new();
+    let mut plan_routes = Vec::new();
+    let mut batch_manifest_requests = Vec::new();
+
+    for model in &artifact.models {
+        let route_key = (model.provider.clone(), model.id.clone());
+        if !requested_routes.is_empty() && !requested_routes.contains(&route_key) {
+            continue;
+        }
+        seen_routes.insert(route_key);
+        let caps = crate::llm::capabilities::lookup(&model.provider, &model.id);
+        let provider = provider_by_id.get(model.provider.as_str());
+        let claim = ToolScorecardCatalogClaim {
+            preferred_tool_format: caps
+                .preferred_tool_format
+                .clone()
+                .or_else(|| model.tool_support.preferred_format.clone()),
+            tool_mode_parity: caps
+                .tool_mode_parity
+                .clone()
+                .or_else(|| model.tool_support.parity.clone()),
+            native_tools: caps.native_tools || model.tool_support.native,
+            text_tools: model.tool_support.text,
+            text_tool_wire_format_supported: caps.text_tool_wire_format_supported,
+            max_tools: caps.max_tools.or(model.tool_support.max_tools),
+            supports_parallel_tool_calls: caps.supports_parallel_tool_calls,
+            server_parser: caps.server_parser,
+            tool_search: caps.tool_search,
+            batch_api: caps.batch_api || model.batch.is_some(),
+            batch_wire_format: caps
+                .batch_wire_format
+                .clone()
+                .or_else(|| model.batch.as_ref().map(|batch| batch.wire_format.clone())),
+            batch_input_mode: caps
+                .batch_input_mode
+                .clone()
+                .or_else(|| model.batch.as_ref().map(|batch| batch.input_mode.clone())),
+            batch_discount_percent: caps.batch_discount_percent.or_else(|| {
+                model
+                    .batch
+                    .as_ref()
+                    .and_then(|batch| batch.discount_percent)
+            }),
+            provider_rate_limits: provider
+                .and_then(|provider| provider.rate_limits.as_ref())
+                .is_some(),
+            model_rate_limits: model.rate_limits.is_some(),
+            provider_rpm: provider.and_then(|provider| provider.rpm),
+            pricing: model.pricing.is_some(),
+            provider_latency_p50_ms: provider.and_then(|provider| provider.latency_p50_ms),
+        };
+        let cases = fixed_micro_cases_for_claim(&claim);
+        if include_batch_manifest && claim.batch_api {
+            for case in &cases {
+                if !case.batch_eligible {
+                    continue;
+                }
+                batch_manifest_requests.push(ToolScorecardBatchManifestRequest {
+                    request_id: format!(
+                        "tool-scorecard:{}:{}:{}",
+                        model.provider, model.id, case.id
+                    ),
+                    provider: model.provider.clone(),
+                    model: model.id.clone(),
+                    case_id: case.id,
+                    batch_wire_format: claim.batch_wire_format.clone(),
+                    batch_input_mode: claim.batch_input_mode.clone(),
+                });
+            }
+        }
+        plan_routes.push(ToolScorecardPlanRoute {
+            provider: model.provider.clone(),
+            model: model.id.clone(),
+            catalog_claim: claim,
+            cases,
+        });
+    }
+
+    if !requested_routes.is_empty() {
+        let missing = requested_routes
+            .difference(&seen_routes)
+            .map(|(provider, model)| format!("{provider}:{model}"))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(format!(
+                "error: route(s) not found in provider catalog: {}",
+                missing.join(", ")
+            ));
+        }
+    }
+
+    let case_count = plan_routes.iter().map(|route| route.cases.len()).sum();
+    let required_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| case.requirement == "required")
+        .count();
+
+    Ok(ToolScorecardPlan {
+        schema_version: TOOL_SCORECARD_PLAN_SCHEMA_VERSION,
+        kind: "plan",
+        catalog: ToolScorecardCatalogProvenance {
+            schema_version: artifact.schema_version,
+            generated_by: artifact.generated_by,
+            hash_blake3: catalog_hash,
+        },
+        route_count: plan_routes.len(),
+        case_count,
+        required_case_count,
+        batch_manifest_request_count: batch_manifest_requests.len(),
+        routes: plan_routes,
+        batch_manifest_requests,
+    })
+}
+
+fn parse_route_filters(filters: &[String]) -> Result<BTreeSet<(String, String)>, String> {
+    let mut routes = BTreeSet::new();
+    for filter in filters {
+        let Some((provider, model)) = filter.split_once(':') else {
+            return Err(format!(
+                "error: route filter '{filter}' must use provider:model"
+            ));
+        };
+        let provider = provider.trim();
+        let model = model.trim();
+        if provider.is_empty() || model.is_empty() {
+            return Err(format!(
+                "error: route filter '{filter}' must include both provider and model"
+            ));
+        }
+        routes.insert((provider.to_string(), model.to_string()));
+    }
+    Ok(routes)
+}
+
+fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolScorecardPlanCase> {
+    let parallel_requirement = if claim.supports_parallel_tool_calls {
+        ("required", "route_claims_parallel_tool_calls")
+    } else {
+        ("not_applicable", "route_does_not_claim_parallel_tool_calls")
+    };
+    vec![
+        ToolScorecardPlanCase {
+            id: "single_tool_call",
+            description: "single ordinary tool call with exact JSON arguments",
+            requirement: "required",
+            requirement_reason: "baseline_tool_call_quality",
+            turn_count: 1,
+            batch_eligible: true,
+            probe_focus: vec!["tool_choice", "json_arguments", "wire_dialect"],
+        },
+        ToolScorecardPlanCase {
+            id: "parallel_tool_calls",
+            description: "multiple tool calls in one assistant response",
+            requirement: parallel_requirement.0,
+            requirement_reason: parallel_requirement.1,
+            turn_count: 1,
+            batch_eligible: true,
+            probe_focus: vec!["parallel_dispatch", "tool_call_count", "argument_binding"],
+        },
+        ToolScorecardPlanCase {
+            id: "large_string_argument",
+            description: "large string/code argument with quotes, unicode, and heredoc-shaped text",
+            requirement: "required",
+            requirement_reason: "byte_fidelity_for_edit_payloads",
+            turn_count: 1,
+            batch_eligible: true,
+            probe_focus: vec!["byte_fidelity", "escaping", "unicode"],
+        },
+        ToolScorecardPlanCase {
+            id: "tool_result_followup",
+            description: "assistant continuation after receiving a tool result",
+            requirement: "required",
+            requirement_reason: "multi_turn_agent_loop_quality",
+            turn_count: 2,
+            batch_eligible: false,
+            probe_focus: vec!["tool_result_adjacency", "continuation", "action_vs_prose"],
+        },
+        ToolScorecardPlanCase {
+            id: "no_tool_answer_or_refusal",
+            description: "plain answer or refusal when no tool should be called",
+            requirement: "required",
+            requirement_reason: "spurious_tool_call_guard",
+            turn_count: 1,
+            batch_eligible: true,
+            probe_focus: vec!["no_tool", "refusal", "answer_quality"],
+        },
+        ToolScorecardPlanCase {
+            id: "unavailable_tool_repair",
+            description: "repair or reject a request for an unavailable tool",
+            requirement: "required",
+            requirement_reason: "unsafe_or_unavailable_tool_recovery",
+            turn_count: 1,
+            batch_eligible: true,
+            probe_focus: vec!["tool_name_repair", "no_unsafe_args", "recovery"],
+        },
+        ToolScorecardPlanCase {
+            id: "done_sentinel",
+            description: "completion-contract done sentinel emission",
+            requirement: "required",
+            requirement_reason: "agent_completion_contract",
+            turn_count: 1,
+            batch_eligible: true,
+            probe_focus: vec!["done_sentinel", "completion_contract"],
+        },
+        ToolScorecardPlanCase {
+            id: "parameter_edges",
+            description: "provider-advertised parameter edge behavior",
+            requirement: "required",
+            requirement_reason: "catalog_parameter_claims",
+            turn_count: 1,
+            batch_eligible: true,
+            probe_focus: vec!["temperature", "max_tokens", "tool_choice"],
+        },
+    ]
 }
 
 fn score_route(acc: RouteAccumulator) -> ToolScorecardRoute {
@@ -349,6 +654,39 @@ mod tests {
             scorecard.routes[1].issues,
             vec!["tool_calling_disabled", "empty_or_actionless_completion"]
         );
+    }
+
+    #[test]
+    fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
+        let plan =
+            tool_scorecard_plan_from_catalog(&[String::from("anthropic:claude-sonnet-4-6")], true)
+                .expect("plan from catalog");
+
+        assert_eq!(plan.schema_version, TOOL_SCORECARD_PLAN_SCHEMA_VERSION);
+        assert_eq!(plan.kind, "plan");
+        assert_eq!(plan.route_count, 1);
+        assert_eq!(plan.routes[0].provider, "anthropic");
+        assert_eq!(plan.routes[0].model, "claude-sonnet-4-6");
+        assert!(plan.catalog.hash_blake3.starts_with("blake3:"));
+        let case_ids = plan.routes[0]
+            .cases
+            .iter()
+            .map(|case| case.id)
+            .collect::<Vec<_>>();
+        assert!(case_ids.contains(&"single_tool_call"));
+        assert!(case_ids.contains(&"large_string_argument"));
+        assert!(case_ids.contains(&"tool_result_followup"));
+        assert!(case_ids.contains(&"done_sentinel"));
+        assert_eq!(plan.case_count, plan.routes[0].cases.len());
+        assert!(plan.required_case_count >= 7);
+    }
+
+    #[test]
+    fn scorecard_plan_rejects_unknown_route_filters() {
+        let err = tool_scorecard_plan_from_catalog(&[String::from("missing:nope")], false)
+            .expect_err("unknown route should fail");
+
+        assert!(err.contains("missing:nope"), "{err}");
     }
 
     fn report(
