@@ -12,7 +12,10 @@ use serde::Serialize;
 
 use crate::cli::LocalStopArgs;
 
-use super::runtime::{local_provider_ids, ollama_unload_model, snapshot_provider, terminate_pid};
+use super::runtime::{
+    local_provider_ids, normalize_local_provider_id, ollama_unload_model, snapshot_provider,
+    terminate_pid,
+};
 use super::state::{clear_pid_record, read_pid_record, read_selection};
 
 #[derive(Debug, Serialize)]
@@ -72,7 +75,7 @@ pub(crate) async fn run(args: LocalStopArgs, base_dir: &Path) -> Result<(), Stri
 
 fn resolve_targets(args: &LocalStopArgs, base_dir: &Path) -> Result<Vec<String>, String> {
     if let Some(provider) = args.provider.as_deref() {
-        let provider = provider.trim().to_string();
+        let provider = normalize_local_provider_id(provider);
         if !local_provider_ids(None).contains(&provider) {
             return Err(format!("'{provider}' is not a local provider Harn manages"));
         }

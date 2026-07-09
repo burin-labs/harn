@@ -2372,6 +2372,43 @@ fn models_lora_inspect_human_text_includes_launch_hint() {
 }
 
 #[test]
+fn models_lora_inspect_canonicalizes_local_vllm_provider_alias() {
+    let adapter = write_lora_adapter_fixture();
+    let adapter_path = adapter.path().display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "local-vllm",
+            "--name",
+            "burin-tools",
+            &adapter_path,
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "burin-tools -> gemma-4-e4b-it via vllm",
+        "catalog LoRA launch flags: yes",
+        "LoRA module format: json_with_base_model",
+        "harn local launch local-gemma4-e4b --provider vllm",
+        "--lora-adapter burin-tools=",
+        "--max-lora-rank 16",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
 fn models_lora_inspect_human_text_omits_launch_hint_when_provider_cannot_launch_lora() {
     let adapter = write_lora_adapter_fixture();
     let adapter_path = adapter.path().display().to_string();

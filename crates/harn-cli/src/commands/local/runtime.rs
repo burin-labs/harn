@@ -18,6 +18,19 @@ use super::state::{read_pid_record, PidRecord};
 /// Order is canonical for output stability.
 pub(crate) const LOCAL_PROVIDERS: &[&str] = &["ollama", "llamacpp", "mlx", "local", "vllm"];
 
+pub(crate) fn normalize_local_provider_id(provider: &str) -> String {
+    let trimmed = provider.trim();
+    let normalized = trimmed.to_ascii_lowercase().replace('_', "-");
+    match normalized.as_str() {
+        "ollama" | "local-ollama" => "ollama".to_string(),
+        "llamacpp" | "llama.cpp" | "llama-cpp" | "local-llamacpp" | "local-llama.cpp"
+        | "local-llama-cpp" => "llamacpp".to_string(),
+        "mlx" | "local-mlx" => "mlx".to_string(),
+        "vllm" | "local-vllm" | "vllm-local" => "vllm".to_string(),
+        _ => trimmed.to_string(),
+    }
+}
+
 /// Per-provider runtime snapshot. Combines:
 /// - provider catalog metadata (base_url, port, env override, auth style),
 /// - liveness via `/v1/models` (or `/api/tags` for Ollama),
@@ -56,7 +69,10 @@ pub(crate) struct LoadedModel {
 pub(crate) fn local_provider_ids(filter: Option<&str>) -> Vec<String> {
     let mut ids = Vec::new();
     if let Some(name) = filter.map(str::trim).filter(|name| !name.is_empty()) {
-        ids.push(name.to_string());
+        let id = normalize_local_provider_id(name);
+        if llm_config::provider_config(&id).is_some() {
+            ids.push(id);
+        }
         return ids;
     }
     for id in LOCAL_PROVIDERS {
@@ -71,14 +87,15 @@ pub(crate) async fn snapshot_provider(
     provider: &str,
     state_dir: &Path,
 ) -> Result<LocalProviderSnapshot, String> {
-    let def = llm_config::provider_config(provider)
+    let provider = normalize_local_provider_id(provider);
+    let def = llm_config::provider_config(&provider)
         .ok_or_else(|| format!("unknown provider: {provider}"))?;
     let base_url = llm_config::resolve_base_url(&def);
 
     let (reachable, status, message, served_models) = if provider == "ollama" {
         snapshot_ollama_reachability(&base_url).await
     } else {
-        snapshot_openai_reachability(provider, &base_url).await
+        snapshot_openai_reachability(&provider, &base_url).await
     };
 
     let loaded_models = if provider == "ollama" && reachable {
@@ -88,7 +105,7 @@ pub(crate) async fn snapshot_provider(
     };
 
     Ok(LocalProviderSnapshot {
-        provider: provider.to_string(),
+        provider: provider.clone(),
         display_name: def.display_name.clone(),
         base_url: base_url.clone(),
         base_url_env: def.base_url_env.clone(),
@@ -98,7 +115,7 @@ pub(crate) async fn snapshot_provider(
         message,
         served_models,
         loaded_models,
-        pid_record: read_pid_record(state_dir, provider).ok().flatten(),
+        pid_record: read_pid_record(state_dir, &provider).ok().flatten(),
     })
 }
 
@@ -314,7 +331,8 @@ pub(crate) fn terminate_pid(pid: u32) -> Result<(), String> {
 }
 
 pub(crate) fn resolve_provider_def(provider: &str) -> Result<ProviderDef, String> {
-    llm_config::provider_config(provider)
+    let provider = normalize_local_provider_id(provider);
+    llm_config::provider_config(&provider)
         .ok_or_else(|| format!("unknown provider '{provider}' in Harn provider catalog"))
 }
 
@@ -343,6 +361,23 @@ mod tests {
     fn local_provider_ids_filters_unknown_filter() {
         let ids = local_provider_ids(Some("ollama"));
         assert_eq!(ids, vec!["ollama".to_string()]);
+    }
+
+    #[test]
+    fn local_provider_ids_canonicalizes_local_runtime_aliases() {
+        assert_eq!(
+            local_provider_ids(Some("local-vllm")),
+            vec!["vllm".to_string()]
+        );
+        assert_eq!(
+            local_provider_ids(Some("local-llama.cpp")),
+            vec!["llamacpp".to_string()]
+        );
+        assert_eq!(
+            local_provider_ids(Some("local_ollama")),
+            vec!["ollama".to_string()]
+        );
+        assert!(local_provider_ids(Some("not-a-provider")).is_empty());
     }
 
     #[test]

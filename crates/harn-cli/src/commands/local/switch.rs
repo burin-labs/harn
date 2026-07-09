@@ -37,7 +37,8 @@ use crate::commands::hardware::collect_hardware_snapshot;
 
 use super::profile::{defaults_for, runtime_profile_host};
 use super::runtime::{
-    local_provider_ids, ollama_unload_model, resolve_provider_def, snapshot_provider, terminate_pid,
+    local_provider_ids, normalize_local_provider_id, ollama_unload_model, resolve_provider_def,
+    snapshot_provider, terminate_pid,
 };
 use super::state::{clear_pid_record, read_pid_record, write_selection, LocalSelection};
 
@@ -70,8 +71,9 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
         .as_deref()
         .map(str::trim)
         .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
+        .map(normalize_local_provider_id)
         .unwrap_or_else(|| resolved.provider.clone());
+    let provider = normalize_local_provider_id(&provider);
     if !local_provider_ids(None).contains(&provider) {
         return Err(format!(
             "'{provider}' is not a local provider Harn manages (expected one of: {})",
