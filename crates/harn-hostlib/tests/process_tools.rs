@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use harn_hostlib::process::{
     install_spawner, ExitStatus, MockHandleController, MockProcessConfig, MockSpawner,
-    ProcessError, SpawnerGuard,
+    ProcessCleanupChild, ProcessCleanupReport, ProcessError, SpawnerGuard,
 };
 use harn_hostlib::tools::long_running::register_completion_notifier;
 use harn_hostlib::tools::ToolsCapability;
@@ -139,6 +139,17 @@ fn as_dict(value: &VmValue) -> harn_vm::value::DictMap {
     }
 }
 
+fn assert_response_matches_schema(method: &str, response: &VmValue) {
+    let schema_body =
+        harn_hostlib::schemas::lookup("tools", method, harn_hostlib::schemas::SchemaKind::Response)
+            .unwrap_or_else(|| panic!("missing response schema for tools.{method}"));
+    let schema_json: serde_json::Value =
+        serde_json::from_str(schema_body).expect("response schema must be valid JSON");
+    let schema = harn_vm::schema::json_to_vm_value(&schema_json);
+    harn_vm::schema::validate_value_against_schema(response, &schema, false)
+        .unwrap_or_else(|message| panic!("tools.{method} response schema mismatch: {message}"));
+}
+
 /// Install a fresh `MockSpawner` for the calling thread and return both the
 /// spawner (for inspection / additional enqueues) and the `SpawnerGuard`
 /// that restores the previous spawner on drop. The guard must be kept
@@ -167,6 +178,21 @@ fn unique_session_id(prefix: &str) -> String {
     )
 }
 
+fn cleanup_report_fixture(signal: i32) -> ProcessCleanupReport {
+    ProcessCleanupReport {
+        root_pid: Some(99_999),
+        attempted_signals: vec![signal],
+        children: vec![ProcessCleanupChild {
+            pid: 100_001,
+            parent_pid: Some(99_999),
+            depth: 1,
+            command_name: Some("sleep".to_string()),
+            signals: vec![signal],
+            alive_after_cleanup: Some(false),
+        }],
+    }
+}
+
 // -------- run_command --------
 
 #[test]
@@ -176,7 +202,9 @@ fn run_command_echoes_stdout_and_reports_exit_zero() {
 
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["bash", "-c", "echo hello"]));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    assert_response_matches_schema("run_command", &resp_value);
+    let resp = require_dict(resp_value);
 
     assert_eq!(require_int(&resp, "exit_code"), 0);
     assert_eq!(require_str(&resp, "stdout").trim(), "hello");
@@ -212,7 +240,9 @@ fn run_command_propagates_nonzero_exit_code() {
 
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["bash", "-c", "exit 7"]));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    assert_response_matches_schema("run_command", &resp_value);
+    let resp = require_dict(resp_value);
     assert_eq!(require_int(&resp, "exit_code"), 7);
     assert!(!require_bool(&resp, "timed_out"));
 }
@@ -408,6 +438,7 @@ fn run_command_kills_child_when_timeout_elapses() {
     // immediately, no wall-clock dependence.
     let config = MockProcessConfig {
         force_timeout: true,
+        cleanup_report: Some(cleanup_report_fixture(9)),
         ..MockProcessConfig::running()
     };
     let (_spawner, _controller, _guard) = install_mock_with(config);
@@ -415,11 +446,21 @@ fn run_command_kills_child_when_timeout_elapses() {
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "30"]));
     req.insert("timeout_ms".into(), VmValue::Int(150));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    assert_response_matches_schema("run_command", &resp_value);
+    let resp = require_dict(resp_value);
     assert!(require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "timed_out");
     // Killed children report exit_code -1 + a signal name.
     assert!(matches!(resp.get("signal"), Some(VmValue::String(_))));
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    assert_eq!(require_int(&cleanup, "root_pid"), 99_999);
+    assert_eq!(require_int(&cleanup, "reaped_child_count"), 1);
+    let reaped = require_list(&cleanup, "reaped_children");
+    let child = as_dict(&reaped[0]);
+    assert_eq!(require_int(&child, "pid"), 100_001);
+    assert_eq!(require_str(&child, "command_name"), "sleep");
+    assert!(child.get("command").is_none());
 }
 
 #[test]
@@ -459,6 +500,8 @@ fn run_command_kills_child_when_scope_interrupt_fires() {
     assert_eq!(require_str(&resp, "status"), "killed");
     assert!(!require_bool(&resp, "timed_out"));
     assert_eq!(require_int(&resp, "exit_code"), -1);
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    assert_eq!(require_int(&cleanup, "root_pid"), 99_999);
     assert!(controller.was_killed(), "interrupt must kill the child");
 }
 
@@ -1288,6 +1331,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
 
     let mut config = MockProcessConfig::running();
     config.stdout = b"before timeout\n".to_vec();
+    config.cleanup_report = Some(cleanup_report_fixture(9));
     let (_spawner, _controller, _guard) = install_mock_with(config);
 
     let mut start_req = dict();
@@ -1313,6 +1357,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
 
         assert!(require_bool(&cancel, "cancelled"));
         let result = require_nested_dict(&cancel, "result");
+        assert_response_matches_schema("wait_command", &VmValue::dict(result.clone()));
         (
             require_str(&cancel, "handle_id"),
             require_str(&result, "handle_id"),
@@ -1323,6 +1368,10 @@ fn cancel_handle_can_wait_for_timed_out_result() {
             require_str(&result, "output_path"),
             require_str(&result, "stdout_path"),
             require_int(&result, "byte_count"),
+            require_int(
+                &require_nested_dict(&result, "process_cleanup"),
+                "reaped_child_count",
+            ),
         )
     });
     completion_rx.recv().expect("waiter completion never fired");
@@ -1336,6 +1385,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
         output_path,
         stdout_path,
         byte_count,
+        reaped_child_count,
     ) = cancel_thread.join().expect("cancel thread panicked");
 
     assert_eq!(cancelled_handle_id, handle_id);
@@ -1350,6 +1400,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
         "before timeout\n"
     );
     assert!(byte_count >= 15);
+    assert_eq!(reaped_child_count, 1);
 
     let items = harn_vm::orchestration::agent_inbox::drain(&session_id);
     assert!(

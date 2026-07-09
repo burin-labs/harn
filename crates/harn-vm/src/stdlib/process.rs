@@ -669,13 +669,13 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         })?;
     let (status, timed_out, killed) = match wait_end {
         crate::op_interrupt::ChildWait::Exited(status) => (status, false, false),
-        crate::op_interrupt::ChildWait::TimedOut => {
+        crate::op_interrupt::ChildWait::TimedOut(_) => {
             (std::process::ExitStatus::default(), true, true)
         }
         // Interrupted: the reaped status (or a synthetic fallback) is
         // returned so the builtin completes; the VM raises the pending
         // cancellation / deadline error at the next op boundary.
-        crate::op_interrupt::ChildWait::Interrupted(status) => {
+        crate::op_interrupt::ChildWait::Interrupted(status, _) => {
             (status.unwrap_or_default(), false, true)
         }
     };

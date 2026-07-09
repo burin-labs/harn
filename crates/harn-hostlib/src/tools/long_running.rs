@@ -62,6 +62,8 @@ struct CancelState {
     /// user-requested kill. The waiter uses this for the returned result
     /// status while still suppressing inbox feedback.
     timed_out: AtomicBool,
+    /// Structural process-tree cleanup evidence returned by the killer.
+    process_cleanup: Mutex<Option<process_handle::ProcessCleanupReport>>,
 }
 
 #[derive(Default)]
@@ -253,6 +255,7 @@ pub(crate) fn spawn_long_running_with_options(
     let cancel_state = Arc::new(CancelState {
         cancelled: AtomicBool::new(false),
         timed_out: AtomicBool::new(false),
+        process_cleanup: Mutex::new(None),
     });
 
     {
@@ -419,6 +422,11 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
 
     let cancelled = cancel_state.cancelled.load(Ordering::Acquire);
     let timed_out = cancelled && cancel_state.timed_out.load(Ordering::Acquire);
+    let process_cleanup = cancel_state
+        .process_cleanup
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone();
 
     let (exit_code, signal_name) = match status {
         Some(s) => decode_exit_status(s),
@@ -518,6 +526,12 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     }
     if let Some(snapshot_binding) = context.snapshot_binding.as_ref() {
         payload.insert("snapshot_binding".into(), vm_dict_to_json(snapshot_binding));
+    }
+    if let Some(process_cleanup) = process_cleanup.as_ref() {
+        payload.insert(
+            "process_cleanup".into(),
+            proc::process_cleanup_to_json(process_cleanup),
+        );
     }
 
     if let Some(tx) = result_tx {
@@ -746,7 +760,17 @@ pub fn cancel_session_handles(session_id: &str) {
 fn do_kill(killer: Arc<dyn ProcessKiller>, cancel_state: Arc<CancelState>) {
     // Kill via the handle's killer (works whether or not we still own
     // the handle). The waiter owns process reaping and artifact finalization.
-    killer.kill();
+    let report = killer.kill();
+    {
+        let mut stored = cancel_state
+            .process_cleanup
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        match stored.as_mut() {
+            Some(existing) => existing.merge(report),
+            None => *stored = Some(report),
+        }
+    }
     cancel_state.cancelled.store(true, Ordering::Release);
 }
 

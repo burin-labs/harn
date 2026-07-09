@@ -40,6 +40,108 @@ use std::time::{Duration, Instant};
 /// often need to flush buffers / remove lock files on SIGTERM.
 pub const SUBPROCESS_TERM_GRACE: Duration = Duration::from_secs(2);
 
+/// Structural evidence collected when Harn kills a child process tree.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProcessCleanupReport {
+    pub root_pid: Option<u32>,
+    pub attempted_signals: Vec<i32>,
+    pub children: Vec<ProcessCleanupChild>,
+}
+
+impl ProcessCleanupReport {
+    pub fn for_signal(root_pid: Option<u32>, signal: i32) -> Self {
+        Self {
+            root_pid,
+            attempted_signals: vec![signal],
+            children: Vec::new(),
+        }
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        if self.root_pid.is_none() {
+            self.root_pid = other.root_pid;
+        }
+        for signal in other.attempted_signals {
+            push_unique(&mut self.attempted_signals, signal);
+        }
+        for child in other.children {
+            self.merge_child(child);
+        }
+    }
+
+    pub fn refresh_survivor_status(&mut self) {
+        #[cfg(unix)]
+        {
+            for child in &mut self.children {
+                child.alive_after_cleanup = Some(process_exists(child.pid));
+            }
+        }
+    }
+
+    fn merge_child(&mut self, child: ProcessCleanupChild) {
+        if let Some(existing) = self
+            .children
+            .iter_mut()
+            .find(|entry| entry.pid == child.pid)
+        {
+            for signal in child.signals {
+                push_unique(&mut existing.signals, signal);
+            }
+            if existing.command_name.is_none() {
+                existing.command_name = child.command_name;
+            }
+            if child.alive_after_cleanup.is_some() {
+                existing.alive_after_cleanup = child.alive_after_cleanup;
+            }
+            return;
+        }
+        self.children.push(child);
+        self.children
+            .sort_by(|left, right| left.depth.cmp(&right.depth).then(left.pid.cmp(&right.pid)));
+    }
+}
+
+/// A descendant process Harn targeted during cleanup.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessCleanupChild {
+    pub pid: u32,
+    pub parent_pid: Option<u32>,
+    pub depth: u32,
+    pub command_name: Option<String>,
+    pub signals: Vec<i32>,
+    pub alive_after_cleanup: Option<bool>,
+}
+
+impl ProcessCleanupChild {
+    pub fn new(
+        pid: u32,
+        parent_pid: Option<u32>,
+        depth: u32,
+        command_name: Option<String>,
+    ) -> Self {
+        Self {
+            pid,
+            parent_pid,
+            depth,
+            command_name,
+            signals: Vec::new(),
+            alive_after_cleanup: None,
+        }
+    }
+
+    #[cfg(unix)]
+    fn with_signal(mut self, signal: i32) -> Self {
+        push_unique(&mut self.signals, signal);
+        self
+    }
+}
+
+fn push_unique<T: Copy + Eq>(values: &mut Vec<T>, value: T) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
 #[derive(Clone, Default)]
 struct OpInterrupt {
     cancel: Option<Arc<AtomicBool>>,
@@ -147,40 +249,77 @@ pub fn signal_pid_and_group(pid: u32, signal: i32) {
 /// child that escaped into its own process group (for example via `setsid`)
 /// cannot survive a timeout merely because it left the original group.
 pub fn signal_pid_tree_and_group(pid: u32, signal: i32) {
+    let _ = signal_pid_tree_and_group_with_report(pid, signal);
+}
+
+/// Signal a pid, its process group, and visible descendants, returning the
+/// structural targets observed before signaling.
+pub fn signal_pid_tree_and_group_with_report(pid: u32, signal: i32) -> ProcessCleanupReport {
     #[cfg(unix)]
     {
-        for child_pid in descendant_pids(pid) {
-            signal_pid_and_group(child_pid, signal);
+        let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
+        for child in descendant_processes(pid) {
+            signal_pid_and_group(child.pid, signal);
+            report.merge_child(child.with_signal(signal));
         }
         signal_pid_and_group(pid, signal);
+        report.refresh_survivor_status();
+        report
     }
     #[cfg(not(unix))]
     {
-        let _ = (pid, signal);
+        ProcessCleanupReport::for_signal(Some(pid), signal)
     }
 }
 
 #[cfg(unix)]
-fn descendant_pids(root: u32) -> Vec<u32> {
+fn descendant_processes(root: u32) -> Vec<ProcessCleanupChild> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
     let mut sys = System::new();
-    sys.refresh_processes_specifics(ProcessesToUpdate::All, false, ProcessRefreshKind::nothing());
-    let edges = sys
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        false,
+        ProcessRefreshKind::everything(),
+    );
+    let rows = sys
         .processes()
         .iter()
-        .filter_map(|(pid, process)| Some((pid.as_u32(), process.parent()?.as_u32())))
+        .filter_map(|(pid, process)| {
+            Some((
+                pid.as_u32(),
+                process.parent()?.as_u32(),
+                command_name(process.cmd()),
+            ))
+        })
         .collect::<Vec<_>>();
-    descendant_pids_from_parent_edges(root, &edges)
+    descendant_processes_from_parent_edges(root, &rows)
+}
+
+#[cfg(all(unix, test))]
+fn descendant_pids_from_parent_edges(root: u32, edges: &[(u32, u32)]) -> Vec<u32> {
+    let rows = edges
+        .iter()
+        .map(|(pid, parent)| (*pid, *parent, None))
+        .collect::<Vec<_>>();
+    descendant_processes_from_parent_edges(root, &rows)
+        .into_iter()
+        .map(|child| child.pid)
+        .collect()
 }
 
 #[cfg(unix)]
-fn descendant_pids_from_parent_edges(root: u32, edges: &[(u32, u32)]) -> Vec<u32> {
+fn descendant_processes_from_parent_edges(
+    root: u32,
+    rows: &[(u32, u32, Option<String>)],
+) -> Vec<ProcessCleanupChild> {
     use std::collections::{HashMap, HashSet};
 
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for &(pid, parent) in edges {
-        children.entry(parent).or_default().push(pid);
+    let mut metadata: HashMap<u32, (u32, Option<String>)> = HashMap::new();
+    for (pid, parent, command) in rows {
+        metadata.insert(*pid, (*parent, command.clone()));
+        children.entry(*parent).or_default().push(*pid);
     }
 
     let mut seen = HashSet::new();
@@ -205,7 +344,32 @@ fn descendant_pids_from_parent_edges(root: u32, edges: &[(u32, u32)]) -> Vec<u32
             .cmp(left_depth)
             .then_with(|| left_pid.cmp(right_pid))
     });
-    descendants.into_iter().map(|(pid, _depth)| pid).collect()
+    descendants
+        .into_iter()
+        .map(|(pid, depth)| {
+            let (parent_pid, command) = metadata.get(&pid).cloned().unwrap_or((root, None));
+            ProcessCleanupChild::new(pid, Some(parent_pid), depth as u32, command)
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn command_name(command: &[std::ffi::OsString]) -> Option<String> {
+    if command.is_empty() {
+        return None;
+    }
+    std::path::Path::new(&command[0])
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    unsafe { kill(pid as i32, 0) == 0 }
 }
 
 /// How an interruptible child wait ended.
@@ -213,11 +377,11 @@ pub enum ChildWait {
     /// The child exited on its own.
     Exited(std::process::ExitStatus),
     /// The caller-supplied timeout elapsed; the child tree/group was killed.
-    TimedOut,
+    TimedOut(ProcessCleanupReport),
     /// [`requested`] fired; the child tree/group was SIGTERMed and, after
     /// [`SUBPROCESS_TERM_GRACE`], SIGKILLed. Carries the reaped status when
     /// the OS reported one.
-    Interrupted(Option<std::process::ExitStatus>),
+    Interrupted(Option<std::process::ExitStatus>, ProcessCleanupReport),
 }
 
 /// Wait for `child` while polling [`requested`] and the optional timeout.
@@ -238,17 +402,18 @@ pub fn wait_child_interruptible(
             return Ok(ChildWait::Exited(status));
         }
         if requested() {
-            let status = terminate_child_group(child);
-            return Ok(ChildWait::Interrupted(status));
+            let (status, report) = terminate_child_group_with_report(child);
+            return Ok(ChildWait::Interrupted(status, report));
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             // Timeout keeps its historical semantics: immediate SIGKILL.
-            if let Some(pid) = child_pid(child) {
-                signal_pid_tree_and_group(pid, 9);
-            }
+            let mut report = child_pid(child)
+                .map(|pid| signal_pid_tree_and_group_with_report(pid, 9))
+                .unwrap_or_default();
             let _ = child.kill();
             let _ = child.wait();
-            return Ok(ChildWait::TimedOut);
+            report.refresh_survivor_status();
+            return Ok(ChildWait::TimedOut(report));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -260,19 +425,31 @@ pub fn wait_child_interruptible(
 /// direct `Child::kill` (`TerminateProcess`), which does not reach
 /// grandchildren.
 pub fn terminate_child_group(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
+    terminate_child_group_with_report(child).0
+}
+
+/// Like [`terminate_child_group`], but also returns a structural cleanup
+/// report describing descendants observed and signalled.
+pub fn terminate_child_group_with_report(
+    child: &mut std::process::Child,
+) -> (Option<std::process::ExitStatus>, ProcessCleanupReport) {
+    let mut report = child_pid(child)
+        .map(|pid| ProcessCleanupReport::for_signal(Some(pid), 15))
+        .unwrap_or_default();
     #[cfg(unix)]
     {
         if let Some(pid) = child_pid(child) {
             const SIGTERM: i32 = 15;
-            signal_pid_tree_and_group(pid, SIGTERM);
+            report = signal_pid_tree_and_group_with_report(pid, SIGTERM);
             let grace_deadline = Instant::now() + SUBPROCESS_TERM_GRACE;
             loop {
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         // The direct child is gone, but SIGTERM-immune
                         // descendants may linger — sweep the group.
-                        signal_pid_tree_and_group(pid, 9);
-                        return Some(status);
+                        report.merge(signal_pid_tree_and_group_with_report(pid, 9));
+                        report.refresh_survivor_status();
+                        return (Some(status), report);
                     }
                     Ok(None) => {
                         if Instant::now() >= grace_deadline {
@@ -283,11 +460,13 @@ pub fn terminate_child_group(child: &mut std::process::Child) -> Option<std::pro
                     Err(_) => break,
                 }
             }
-            signal_pid_tree_and_group(pid, 9);
+            report.merge(signal_pid_tree_and_group_with_report(pid, 9));
         }
     }
     let _ = child.kill();
-    child.wait().ok()
+    let status = child.wait().ok();
+    report.refresh_survivor_status();
+    (status, report)
 }
 
 fn child_pid(child: &std::process::Child) -> Option<u32> {
@@ -373,8 +552,8 @@ pub fn capture_output_interruptible(
     let (status, killed) = match wait_child_interruptible(&mut child, None)? {
         ChildWait::Exited(status) => (status, false),
         // No timeout is armed here, but keep the arm total.
-        ChildWait::TimedOut => (std::process::ExitStatus::default(), true),
-        ChildWait::Interrupted(status) => (status.unwrap_or_default(), true),
+        ChildWait::TimedOut(_) => (std::process::ExitStatus::default(), true),
+        ChildWait::Interrupted(status, _) => (status.unwrap_or_default(), true),
     };
     let stdout = rx_out
         .map(|rx| drain_captured_pipe(&rx, killed, pid))
@@ -467,6 +646,53 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn descendant_processes_preserve_metadata_and_depth_order() {
+        let rows = [
+            (20, 10, Some("worker".to_string())),
+            (30, 20, Some("grandchild".to_string())),
+            (40, 20, None),
+            (50, 30, Some("leaf".to_string())),
+        ];
+
+        let descendants = descendant_processes_from_parent_edges(10, &rows);
+        let pids = descendants
+            .iter()
+            .map(|child| {
+                (
+                    child.pid,
+                    child.parent_pid,
+                    child.depth,
+                    child.command_name.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pids,
+            vec![
+                (50, Some(30), 3, Some("leaf")),
+                (30, Some(20), 2, Some("grandchild")),
+                (40, Some(20), 2, None),
+                (20, Some(10), 1, Some("worker")),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_name_keeps_only_argv0_basename() {
+        let command = vec![
+            std::ffi::OsString::from("/usr/local/bin/tool"),
+            std::ffi::OsString::from("--api-key"),
+            std::ffi::OsString::from("secret-value"),
+            std::ffi::OsString::from("plain"),
+        ];
+
+        assert_eq!(command_name(&command).as_deref(), Some("tool"));
+        assert_eq!(command_name(&[]).as_deref(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn interrupted_wait_kills_process_group() {
         // Child spawns a grandchild; the whole group must die on interrupt.
         let mut command = std::process::Command::new("sh");
@@ -479,7 +705,7 @@ mod tests {
         let _guard = install(Some(cancel), None);
         let started = Instant::now();
         let outcome = wait_child_interruptible(&mut child, None).expect("wait");
-        assert!(matches!(outcome, ChildWait::Interrupted(_)));
+        assert!(matches!(outcome, ChildWait::Interrupted(_, _)));
         assert!(started.elapsed() < Duration::from_secs(10));
 
         // kill(-pgid, 0) fails with ESRCH once every member is gone.
