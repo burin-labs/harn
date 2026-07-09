@@ -175,6 +175,21 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.together]]
+model_match = "together/nvidia/nemotron-3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
 model_match = "moonshotai/*"
 native_tools = true
 preferred_tool_format = "native"

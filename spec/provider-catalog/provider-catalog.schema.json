@@ -157,11 +157,49 @@
         },
         "completion_endpoint": {
           "type": "string"
+        },
+        "region_env": {
+          "type": "string"
+        },
+        "regions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/endpoint_region"
+          },
+          "type": "object"
         }
       },
       "required": [
         "base_url",
         "chat_endpoint"
+      ],
+      "type": "object"
+    },
+    "endpoint_region": {
+      "additionalProperties": false,
+      "properties": {
+        "base_url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "last_verified": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "notes": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_url": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_url"
       ],
       "type": "object"
     },
@@ -1217,7 +1255,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v3.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v4.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1255,10 +1293,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v3.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v4.json"
     },
     "schema_version": {
-      "const": 3
+      "const": 4
     },
     "variants": {
       "items": {

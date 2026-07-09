@@ -1,0 +1,421 @@
+# Current provider/model deltas discovered in the July 2026 provider catalog
+# pass. Rows here are either new providers with official OpenAI-compatible APIs
+# or live catalog rows observed with provider API keys. Keep route-specific ids
+# collision-free and use `wire_model` for the exact provider payload where
+# needed.
+
+# Inception Labs Mercury routes.
+[models."mercury-2"]
+name = "Mercury 2"
+provider = "inception"
+context_window = 128000
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.25, output_per_mtok = 0.75 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "reasoning", "tool_use", "agentic"]
+
+[models."mercury-coder-small"]
+name = "Mercury Coder Small"
+provider = "inception"
+context_window = 32768
+capabilities = ["tools", "streaming"]
+tier = "mid"
+open_weight = false
+strengths = ["speed", "coding", "tool_use"]
+
+# xAI direct and OpenRouter mirrors.
+[models."grok-4.5"]
+name = "Grok 4.5"
+provider = "xai"
+context_window = 500000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50 }
+rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-07-09" }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."x-ai/grok-4.5"]
+name = "Grok 4.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 500000
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-5.5"]
+name = "GPT-5.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-5.5-pro"]
+name = "GPT-5.5 Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-5.4-pro"]
+name = "GPT-5.4 Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-5.4-mini"]
+name = "GPT-5.4 Mini (via OpenRouter)"
+provider = "openrouter"
+context_window = 400000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "cheap"]
+
+[models."openai/gpt-5.4-nano"]
+name = "GPT-5.4 Nano (via OpenRouter)"
+provider = "openrouter"
+context_window = 400000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+[models."anthropic/claude-opus-4.8-fast"]
+name = "Claude Opus 4.8 Fast (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openrouter/free"]
+name = "OpenRouter Free Router"
+provider = "openrouter"
+context_window = 200000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
+tier = "small"
+open_weight = false
+strengths = ["cheap", "router", "tool_use"]
+quality_tags = ["free_tier", "aggregate_router", "avoid_reviewer"]
+
+[models."cohere/north-mini-code:free"]
+name = "North Mini Code Free (via OpenRouter)"
+provider = "openrouter"
+context_window = 256000
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "cheap", "tool_use", "long_context"]
+quality_tags = ["free_tier", "avoid_reviewer"]
+
+[models."nvidia/nemotron-3-super-120b-a12b:free"]
+name = "Nemotron 3 Super 120B A12B Free (via OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["cheap", "tool_use", "reasoning", "long_context"]
+quality_tags = ["free_tier", "avoid_reviewer"]
+
+[models."bytedance-seed/seed-2.0-lite"]
+name = "Seed 2.0 Lite (via OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.25, output_per_mtok = 2.00 }
+tier = "mid"
+open_weight = false
+strengths = ["cheap", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."qwen/qwen3.5-plus-20260420"]
+name = "Qwen3.5 Plus 20260420 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.80, cache_write_per_mtok = 0.375 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."qwen/qwen3.6-max-preview"]
+name = "Qwen3.6 Max Preview (via OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.04, output_per_mtok = 6.24, cache_write_per_mtok = 1.30 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+# Groq compound systems.
+[model_defaults."groq/compound*"]
+max_tokens = 8192
+
+[models."groq/compound"]
+name = "Groq Compound"
+provider = "groq"
+wire_model = "groq/compound"
+context_window = 131072
+capabilities = ["streaming"]
+rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-07-09", notes = "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec." }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "agentic"]
+
+[models."groq/compound-mini"]
+name = "Groq Compound Mini"
+provider = "groq"
+wire_model = "groq/compound-mini"
+context_window = 131072
+capabilities = ["streaming"]
+rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-07-09", notes = "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec." }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "agentic"]
+
+# Direct Moonshot legacy route kept for pinned callers.
+[model_defaults."moonshot/kimi-k2.5"]
+# Live Moonshot API probe on 2026-07-09 rejected other temperatures:
+# `invalid temperature: only 1 is allowed for this model`.
+temperature = 1.0
+
+[models."moonshot/kimi-k2.5"]
+name = "Kimi K2.5 (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k2.5"
+logical_model = "moonshot-kimi-k2.5"
+equivalence_group = "moonshot-kimi-k2.5"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+deprecated = true
+deprecation_note = "Moonshot /v1/models still lists kimi-k2.5, but Kimi K2.6 and K2.7 Code are the active agent routes."
+superseded_by = "moonshot/kimi-k2.6"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+
+# Together serverless rows observed from GET /v1/models.
+[models."moonshotai/Kimi-K2.6"]
+name = "Kimi K2.6 (Together)"
+provider = "together"
+context_window = 262144
+logical_model = "moonshot-kimi-k2.6"
+equivalence_group = "moonshot-kimi-k2.6"
+served_variant = "together"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.20, output_per_mtok = 4.50, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+
+[models."openai/gpt-oss-20b"]
+name = "GPT-OSS 20B (Together)"
+provider = "together"
+context_window = 131072
+logical_model = "openai-gpt-oss-20b"
+equivalence_group = "openai-gpt-oss-20b"
+served_variant = "together"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.20 }
+architecture = { parameter_count_b = 21.0, active_parameter_count_b = 3.6, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-20b", last_verified = "2026-07-09" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+[models."Qwen/Qwen3.7-Plus"]
+name = "Qwen3.7 Plus (Together)"
+provider = "together"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.32, output_per_mtok = 1.28 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+
+[models."Qwen/Qwen3.6-Plus"]
+name = "Qwen3.6 Plus (Together)"
+provider = "together"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.50, output_per_mtok = 3.00 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+
+[models."Qwen/Qwen3.5-397B-A17B"]
+name = "Qwen3.5 397B A17B (Together)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 3.60, cache_read_per_mtok = 0.35 }
+architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-09" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
+
+[models."zai-org/GLM-5"]
+name = "GLM 5 (Together)"
+provider = "together"
+context_window = 202752
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 3.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning"]
+
+[models."together/nvidia/nemotron-3-ultra-550b-a55b"]
+name = "Nemotron 3 Ultra 550B A55B (Together)"
+provider = "together"
+wire_model = "nvidia/nemotron-3-ultra-550b-a55b"
+context_window = 512288
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 3.60, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "tool_use", "long_context"]
+
+# DeepInfra live model detail rows.
+[models."deepinfra/Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo"]
+name = "Qwen3 Coder 480B A35B Turbo (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo"
+logical_model = "qwen3-coder-480b-a35b"
+equivalence_group = "qwen3-coder-480b-a35b"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.00, cache_read_per_mtok = 0.10 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic", "tool_use"]
+
+[models."deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507"]
+name = "Qwen3 235B A22B Instruct 2507 (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.10 }
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use", "long_context"]
+
+[models."deepinfra/Qwen/Qwen3.6-27B"]
+name = "Qwen3.6 27B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.6-27B"
+logical_model = "qwen3.6-27b"
+equivalence_group = "qwen3.6-27b"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.32, output_per_mtok = 3.20 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "vision", "long_context"]
+
+[models."deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo"]
+name = "MiniMax M2.7 Turbo (DeepInfra)"
+provider = "deepinfra"
+wire_model = "MiniMaxAI/MiniMax-M2.7-Turbo"
+logical_model = "minimax-m2.7"
+equivalence_group = "minimax-m2.7"
+served_variant = "deepinfra-turbo"
+api_dialect = "openai_chat"
+context_window = 196608
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.40, output_per_mtok = 2.00 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."deepinfra/zai-org/GLM-4.6"]
+name = "GLM 4.6 (DeepInfra)"
+provider = "deepinfra"
+wire_model = "zai-org/GLM-4.6"
+logical_model = "glm-4.6"
+equivalence_group = "glm-4.6"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 202752
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.43, output_per_mtok = 1.74, cache_read_per_mtok = 0.08 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "cheap", "long_context"]
+
+[models."deepinfra/Qwen/Qwen3.5-397B-A17B"]
+name = "Qwen3.5 397B A17B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.5-397B-A17B"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.45, output_per_mtok = 3.00, cache_read_per_mtok = 0.22 }
+architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-09" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
+
+# Fireworks compatibility fill-ins returned by live model discovery.
+[models."accounts/fireworks/models/glm-5p1"]
+name = "GLM 5.1 (Fireworks)"
+provider = "fireworks"
+context_window = 202752
+logical_model = "glm-5.1"
+equivalence_group = "frontier-agent-coding"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/glm-5p1"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/kimi-k2p5"]
+name = "Kimi K2.5 (Fireworks)"
+provider = "fireworks"
+context_window = 262144
+logical_model = "moonshot-kimi-k2.5"
+equivalence_group = "moonshot-kimi-k2.5"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/kimi-k2p5"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+deprecated = true
+deprecation_note = "Fireworks still lists Kimi K2.5, but Kimi K2.6 and K2.7 Code are the active routes."
+superseded_by = "accounts/fireworks/models/kimi-k2p6"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]

@@ -62,9 +62,27 @@ pub struct ProviderEndpoint {
     pub base_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region_env: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub regions: BTreeMap<String, ProviderEndpointRegion>,
     pub chat_endpoint: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion_endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderEndpointRegion {
+    pub base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_verified: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

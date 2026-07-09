@@ -577,6 +577,9 @@ pub struct ModelDef {
     /// synchronous serving path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serving_tiers: Vec<ServingTierDef>,
+    /// Loose catalog annotations for selectors and UI. Conventional tags
+    /// include `avoid_reviewer` for routes that should not be auto-selected as
+    /// independent reviewers even when they are routable and cheap.
     #[serde(default)]
     pub quality_tags: Vec<String>,
     /// Whether the model can be reached over a normal API-key serverless call,

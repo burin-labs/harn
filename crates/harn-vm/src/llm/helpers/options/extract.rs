@@ -166,7 +166,9 @@ pub(crate) fn extract_llm_options(
     let default_int =
         |key: &str| -> Option<i64> { model_defaults.get(key).and_then(|v| v.as_integer()) };
 
-    let max_tokens = opt_int(&options, "max_tokens").unwrap_or(16384);
+    let max_tokens = opt_int(&options, "max_tokens")
+        .or_else(|| default_int("max_tokens"))
+        .unwrap_or(16384);
     let temperature = opt_float(&options, "temperature").or_else(|| default_float("temperature"));
     let top_p = opt_float(&options, "top_p").or_else(|| default_float("top_p"));
     let top_k = opt_int(&options, "top_k").or_else(|| default_int("top_k"));

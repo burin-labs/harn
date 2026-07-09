@@ -108,8 +108,25 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "base_url": {"type": "string"},
                     "base_url_env": {"type": "string"},
+                    "region_env": {"type": "string"},
+                    "regions": {
+                        "type": "object",
+                        "additionalProperties": {"$ref": "#/$defs/endpoint_region"}
+                    },
                     "chat_endpoint": {"type": "string", "minLength": 1},
                     "completion_endpoint": {"type": "string"}
+                },
+                "additionalProperties": false
+            },
+            "endpoint_region": {
+                "type": "object",
+                "required": ["base_url"],
+                "properties": {
+                    "base_url": {"type": "string", "minLength": 1},
+                    "label": {"type": "string", "minLength": 1},
+                    "source_url": {"type": "string", "minLength": 1},
+                    "last_verified": {"type": "string", "minLength": 1},
+                    "notes": {"type": "string", "minLength": 1}
                 },
                 "additionalProperties": false
             },

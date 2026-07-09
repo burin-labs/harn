@@ -42,6 +42,7 @@ vision = true
 vision_supported = true
 prompt_caching = true
 requires_tool_result_adjacency = true
+allowed_tool_choice_modes = ["auto", "none"]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true

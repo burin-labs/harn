@@ -212,3 +212,27 @@ top_k_supported = false
 
 [provider_defaults.atlas]
 top_k_supported = false
+
+[provider_defaults.github_models]
+top_k_supported = false
+
+[provider_defaults.vercel_ai_gateway]
+top_k_supported = false
+
+[provider_defaults.cloudflare_ai_gateway]
+top_k_supported = false
+
+[provider_defaults.inception]
+top_k_supported = false
+
+[provider_defaults.friendli]
+top_k_supported = false
+
+[provider_defaults.volcengine_ark]
+top_k_supported = false
+
+[provider_defaults.hunyuan]
+top_k_supported = false
+
+[provider_defaults.qianfan]
+top_k_supported = false

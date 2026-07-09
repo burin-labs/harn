@@ -295,6 +295,35 @@ fn explicit_options_win_over_model_role_defaults() {
 }
 
 #[test]
+fn model_defaults_fill_missing_generation_options() {
+    let _guard = crate::llm::env_guard();
+    let mut overlay = ProvidersConfig::default();
+    overlay.model_defaults.insert(
+        "mock-capped*".to_string(),
+        std::collections::BTreeMap::from_iter([(
+            "max_tokens".to_string(),
+            toml::Value::Integer(8192),
+        )]),
+    );
+    crate::llm_config::set_user_overrides(Some(overlay));
+    super::super::reset_provider_key_cache();
+
+    let mut options = crate::value::DictMap::new();
+    options.put_str("provider", "mock");
+    options.put_str("model", "mock-capped");
+
+    let opts = extract_with_options(options.clone()).expect("options");
+    assert_eq!(opts.max_tokens, 8192);
+
+    options.insert(crate::value::intern_key("max_tokens"), VmValue::Int(512));
+    let opts = extract_with_options(options).expect("options");
+    assert_eq!(opts.max_tokens, 512);
+
+    crate::llm_config::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
 fn merge_model_role_has_env_overrides() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();

@@ -62,3 +62,98 @@ structured_output_mode = "native_json"
 text_tool_wire_format_supported = true
 tool_mode_parity = "unknown"
 tool_mode_parity_notes = "Atlas is a coding-plan OpenAI-compatible route; Harn has no route-specific tool parity probes yet."
+
+[[provider.github_models]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "GitHub Models publishes capability flags per catalog model; Harn needs route-specific probes before assuming native/text tool parity."
+
+[[provider.vercel_ai_gateway]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Vercel AI Gateway forwards to many upstreams; model-specific provider quirks should override this transport-level default."
+
+[[provider.cloudflare_ai_gateway]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Cloudflare exposes OpenAI-compatible Workers AI and AI Gateway routes, but capabilities depend on the routed model."
+
+[[provider.inception]]
+model_match = "mercury-2"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_block_style = "reasoning_summary"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet."
+
+[[provider.inception]]
+model_match = "mercury-coder-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+structured_output_mode = "delimited"
+thinking_block_style = "none"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass."
+
+[[provider.friendli]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Friendli serverless endpoints are OpenAI-compatible; model-specific capability probes should narrow this wildcard."
+
+[[provider.volcengine_ark]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Volcengine Ark exposes OpenAI-compatible chat completions; routed model families still need native-vs-text tool probes."
+
+[[provider.hunyuan]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Tencent Hunyuan documents OpenAI-compatible function calling; Harn has not yet probed every Hunyuan model family."
+
+[[provider.qianfan]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Baidu Qianfan v2 documents OpenAI-compatible tool calls; model-specific parity remains unprobed."

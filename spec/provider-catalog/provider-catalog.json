@@ -1,6 +1,6 @@
 {
-  "schema_version": 3,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v3.json",
+  "schema_version": 4,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v4.json",
   "generated_by": "harn provider catalog export",
   "providers": [
     {
@@ -195,6 +195,34 @@
       "latency_p50_ms": 150
     },
     {
+      "id": "cloudflare_ai_gateway",
+      "display_name": "Cloudflare Ai Gateway",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
+        "base_url_env": "CLOUDFLARE_AI_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "CLOUDFLARE_API_TOKEN",
+          "CLOUDFLARE_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "responses_api",
+        "native_tools",
+        "reasoning"
+      ],
+      "caveats": []
+    },
+    {
       "id": "cohere",
       "display_name": "Cohere",
       "classification": "hosted",
@@ -232,6 +260,21 @@
       "endpoint": {
         "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         "base_url_env": "DASHSCOPE_BASE_URL",
+        "region_env": "DASHSCOPE_REGION",
+        "regions": {
+          "cn": {
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "label": "China",
+            "source_url": "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope",
+            "last_verified": "2026-07-09"
+          },
+          "intl": {
+            "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            "label": "International",
+            "source_url": "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope",
+            "last_verified": "2026-07-09"
+          }
+        },
         "chat_endpoint": "/chat/completions",
         "completion_endpoint": "/completions"
       },
@@ -374,6 +417,36 @@
       "caveats": []
     },
     {
+      "id": "friendli",
+      "display_name": "Friendli",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.friendli.ai/serverless/v1",
+        "base_url_env": "FRIENDLI_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "FRIENDLI_API_KEY",
+          "FRIENDLI_TOKEN"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": []
+    },
+    {
       "id": "gemini",
       "display_name": "Gemini",
       "classification": "hosted",
@@ -403,6 +476,36 @@
       ],
       "caveats": [],
       "latency_p50_ms": 1800
+    },
+    {
+      "id": "github_models",
+      "display_name": "Github Models",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://models.github.ai/inference",
+        "base_url_env": "GITHUB_MODELS_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "GITHUB_MODELS_TOKEN",
+          "GITHUB_TOKEN"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "url": "https://models.github.ai/catalog/models"
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": []
     },
     {
       "id": "groq",
@@ -464,6 +567,36 @@
       "latency_p50_ms": 2400
     },
     {
+      "id": "hunyuan",
+      "display_name": "Hunyuan",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.hunyuan.cloud.tencent.com/v1",
+        "base_url_env": "HUNYUAN_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "HUNYUAN_API_KEY",
+          "TENCENT_HUNYUAN_API_KEY"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": []
+    },
+    {
       "id": "hyperbolic",
       "display_name": "Hyperbolic",
       "classification": "hosted",
@@ -498,6 +631,36 @@
         "last_verified": "2026-06-23",
         "notes": "Docs also publish a 600 RPM Pro tier after account upgrade/deposit; this row records the conservative default tier."
       }
+    },
+    {
+      "id": "inception",
+      "display_name": "Inception",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.inceptionlabs.ai/v1",
+        "base_url_env": "INCEPTION_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "INCEPTION_API_KEY"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools",
+        "reasoning"
+      ],
+      "caveats": []
     },
     {
       "id": "llamacpp",
@@ -686,6 +849,21 @@
       "endpoint": {
         "base_url": "https://api.moonshot.ai/v1",
         "base_url_env": "MOONSHOT_BASE_URL",
+        "region_env": "MOONSHOT_REGION",
+        "regions": {
+          "cn": {
+            "base_url": "https://api.moonshot.cn/v1",
+            "label": "China",
+            "source_url": "https://platform.moonshot.cn/docs",
+            "last_verified": "2026-07-09"
+          },
+          "global": {
+            "base_url": "https://api.moonshot.ai/v1",
+            "label": "Global",
+            "source_url": "https://platform.moonshot.ai/docs/intro",
+            "last_verified": "2026-07-09"
+          }
+        },
         "chat_endpoint": "/chat/completions",
         "completion_endpoint": "/completions"
       },
@@ -898,6 +1076,36 @@
       "caveats": []
     },
     {
+      "id": "qianfan",
+      "display_name": "Qianfan",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://qianfan.baidubce.com/v2",
+        "base_url_env": "QIANFAN_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "QIANFAN_API_KEY",
+          "BAIDU_QIANFAN_API_KEY"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": []
+    },
+    {
       "id": "sambanova",
       "display_name": "Sambanova",
       "classification": "hosted",
@@ -934,6 +1142,21 @@
       "endpoint": {
         "base_url": "https://api.siliconflow.com/v1",
         "base_url_env": "SILICONFLOW_BASE_URL",
+        "region_env": "SILICONFLOW_REGION",
+        "regions": {
+          "cn": {
+            "base_url": "https://api.siliconflow.cn/v1",
+            "label": "China",
+            "source_url": "https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions",
+            "last_verified": "2026-07-09"
+          },
+          "global": {
+            "base_url": "https://api.siliconflow.com/v1",
+            "label": "Global",
+            "source_url": "https://docs.siliconflow.com/api-reference/chat-completions/chat-completions",
+            "last_verified": "2026-07-09"
+          }
+        },
         "chat_endpoint": "/chat/completions",
         "completion_endpoint": "/completions"
       },
@@ -1014,6 +1237,38 @@
       "latency_p50_ms": 1600
     },
     {
+      "id": "vercel_ai_gateway",
+      "display_name": "Vercel Ai Gateway",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://ai-gateway.vercel.sh/v1",
+        "base_url_env": "VERCEL_AI_GATEWAY_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "AI_GATEWAY_API_KEY",
+          "VERCEL_AI_GATEWAY_API_KEY"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools",
+        "reasoning",
+        "prompt_caching"
+      ],
+      "caveats": []
+    },
+    {
       "id": "vertex",
       "display_name": "Vertex",
       "classification": "hosted",
@@ -1089,6 +1344,38 @@
       "latency_p50_ms": 800
     },
     {
+      "id": "volcengine_ark",
+      "display_name": "Volcengine Ark",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "base_url_env": "VOLCENGINE_ARK_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "ARK_API_KEY",
+          "VOLCENGINE_ARK_API_KEY",
+          "VOLCENGINE_API_KEY"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "responses_api",
+        "native_tools"
+      ],
+      "caveats": []
+    },
+    {
       "id": "xai",
       "display_name": "Xai",
       "classification": "hosted",
@@ -1128,6 +1415,21 @@
       "endpoint": {
         "base_url": "https://api.z.ai/api/paas/v4",
         "base_url_env": "ZAI_BASE_URL",
+        "region_env": "ZAI_REGION",
+        "regions": {
+          "cn": {
+            "base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "label": "China",
+            "source_url": "https://bigmodel.cn/dev/api/normal-model/glm-4",
+            "last_verified": "2026-07-09"
+          },
+          "global": {
+            "base_url": "https://api.z.ai/api/paas/v4",
+            "label": "Global",
+            "source_url": "https://docs.z.ai/guides/start/quickstart",
+            "last_verified": "2026-07-09"
+          }
+        },
         "chat_endpoint": "/chat/completions",
         "completion_endpoint": "/completions"
       },
@@ -4797,6 +5099,374 @@
       ]
     },
     {
+      "id": "deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo",
+      "name": "MiniMax M2.7 Turbo (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 196608,
+      "logical_model": "minimax-m2.7",
+      "equivalence_group": "minimax-m2.7",
+      "served_variant": "deepinfra-turbo",
+      "wire_model": "MiniMaxAI/MiniMax-M2.7-Turbo",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.4,
+        "output_per_mtok": 2.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507",
+      "name": "Qwen3 235B A22B Instruct 2507 (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 262144,
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.09,
+        "output_per_mtok": 0.1,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "deepinfra/Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
+      "name": "Qwen3 Coder 480B A35B Turbo (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "qwen3-coder-480b-a35b",
+      "equivalence_group": "qwen3-coder-480b-a35b",
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "long_context",
+        "agentic",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "deepinfra/Qwen/Qwen3.5-397B-A17B",
+      "name": "Qwen3.5 397B A17B (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 262144,
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3.5-397B-A17B",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 397.0,
+        "active_parameter_count_b": 17.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B",
+        "last_verified": "2026-07-09"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.45,
+        "output_per_mtok": 3.0,
+        "cache_read_per_mtok": 0.22,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
+      "id": "deepinfra/Qwen/Qwen3.6-27B",
+      "name": "Qwen3.6 27B (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "qwen3.6-27b",
+      "equivalence_group": "qwen3.6-27b",
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3.6-27B",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.32,
+        "output_per_mtok": 3.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
       "id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
       "name": "Qwen3.6 35B A3B (DeepInfra)",
       "provider": "deepinfra",
@@ -5401,6 +6071,78 @@
       ]
     },
     {
+      "id": "deepinfra/zai-org/GLM-4.6",
+      "name": "GLM 4.6 (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 202752,
+      "logical_model": "glm-4.6",
+      "equivalence_group": "glm-4.6",
+      "served_variant": "deepinfra",
+      "wire_model": "zai-org/GLM-4.6",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.43,
+        "output_per_mtok": 1.74,
+        "cache_read_per_mtok": 0.08,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "cheap",
+        "long_context"
+      ]
+    },
+    {
       "id": "deepinfra/zai-org/GLM-5.2",
       "name": "GLM 5.2 (DeepInfra)",
       "provider": "deepinfra",
@@ -5868,6 +6610,93 @@
       ]
     },
     {
+      "id": "accounts/fireworks/models/glm-5p1",
+      "name": "GLM 5.1 (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 202752,
+      "logical_model": "glm-5.1",
+      "equivalence_group": "frontier-agent-coding",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/glm-5p1",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
       "id": "accounts/fireworks/models/glm-5p2",
       "name": "GLM 5.2 (Fireworks)",
       "provider": "fireworks",
@@ -6056,6 +6885,97 @@
         "cheap",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/kimi-k2p5",
+      "name": "Kimi K2.5 (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.5",
+      "equivalence_group": "moonshot-kimi-k2.5",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/kimi-k2p5",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Fireworks still lists Kimi K2.5, but Kimi K2.6 and K2.7 Code are the active routes.",
+        "superseded_by": "accounts/fireworks/models/kimi-k2p6"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
       ]
     },
     {
@@ -7367,6 +8287,157 @@
       ]
     },
     {
+      "id": "groq/compound",
+      "name": "Groq Compound",
+      "provider": "groq",
+      "aliases": [],
+      "context_window": 131072,
+      "wire_model": "groq/compound",
+      "rate_limits": {
+        "rpm": 200,
+        "tpm": 200000,
+        "tier": "developer",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-07-09",
+        "notes": "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec."
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "preferred_format": "none",
+        "parity": "unsupported",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "batch"
+      ],
+      "family": "groq",
+      "lineage": "groq",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "agentic"
+      ]
+    },
+    {
+      "id": "groq/compound-mini",
+      "name": "Groq Compound Mini",
+      "provider": "groq",
+      "aliases": [],
+      "context_window": 131072,
+      "wire_model": "groq/compound-mini",
+      "rate_limits": {
+        "rpm": 200,
+        "tpm": 200000,
+        "tier": "developer",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-07-09",
+        "notes": "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec."
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "preferred_format": "none",
+        "parity": "unsupported",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "batch"
+      ],
+      "family": "groq",
+      "lineage": "groq",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "agentic"
+      ]
+    },
+    {
       "id": "groq/openai/gpt-oss-120b",
       "name": "GPT-OSS 120B (Groq)",
       "provider": "groq",
@@ -7844,6 +8915,137 @@
       "benchmarks": {
         "swe_bench_verified": 77.2
       }
+    },
+    {
+      "id": "mercury-2",
+      "name": "Mercury 2",
+      "provider": "inception",
+      "aliases": [],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_notes": "Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.25,
+        "output_per_mtok": 0.75,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "inception",
+      "lineage": "inception",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "reasoning",
+        "tool_use",
+        "agentic"
+      ]
+    },
+    {
+      "id": "mercury-coder-small",
+      "name": "Mercury Coder Small",
+      "provider": "inception",
+      "aliases": [],
+      "context_window": 32768,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_notes": "Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass.",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "inception",
+      "lineage": "inception",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "coding",
+        "tool_use"
+      ]
     },
     {
       "id": "qwen3.6-35b-a3b",
@@ -9601,6 +10803,81 @@
       "open_weight": true,
       "strengths": [
         "coding"
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k2.5",
+      "name": "Kimi K2.5 (Moonshot direct)",
+      "provider": "moonshot",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.5",
+      "equivalence_group": "moonshot-kimi-k2.5",
+      "served_variant": "moonshot-direct",
+      "wire_model": "kimi-k2.5",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Moonshot /v1/models still lists kimi-k2.5, but Kimi K2.6 and K2.7 Code are the active agent routes.",
+        "superseded_by": "moonshot/kimi-k2.6"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
       ]
     },
     {
@@ -12964,6 +14241,75 @@
       }
     },
     {
+      "id": "anthropic/claude-opus-4.8-fast",
+      "name": "Claude Opus 4.8 Fast (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "cache_read_per_mtok": 1.0,
+        "cache_write_per_mtok": 12.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "agentic",
+        "coding",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
       "id": "anthropic/claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6 (via OpenRouter)",
       "provider": "openrouter",
@@ -13113,6 +14459,153 @@
         "tool_use",
         "long_context",
         "agentic"
+      ]
+    },
+    {
+      "id": "bytedance-seed/seed-2.0-lite",
+      "name": "Seed 2.0 Lite (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.25,
+        "output_per_mtok": 2.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "cohere/north-mini-code:free",
+      "name": "North Mini Code Free (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 256000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.0,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "avoid_reviewer",
+        "free_tier"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "cheap",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -14423,6 +15916,466 @@
       ]
     },
     {
+      "id": "nvidia/nemotron-3-super-120b-a12b:free",
+      "name": "Nemotron 3 Super 120B A12B Free (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.0,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "avoid_reviewer",
+        "free_tier"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.4-mini",
+      "name": "GPT-5.4 Mini (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 400000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.75,
+        "output_per_mtok": 4.5,
+        "cache_read_per_mtok": 0.075,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "cheap"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.4-nano",
+      "name": "GPT-5.4 Nano (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 400000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.25,
+        "cache_read_per_mtok": 0.02,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.4-pro",
+      "name": "GPT-5.4 Pro (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 30.0,
+        "output_per_mtok": 180.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.5",
+      "name": "GPT-5.5 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 30.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.5-pro",
+      "name": "GPT-5.5 Pro (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 30.0,
+        "output_per_mtok": 180.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
       "id": "openai/gpt-oss-120b",
       "name": "GPT-OSS 120B",
       "provider": "openrouter",
@@ -14502,6 +16455,80 @@
         "coding",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "openrouter/free",
+      "name": "OpenRouter Free Router",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.0,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "aggregate_router",
+        "avoid_reviewer",
+        "free_tier"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "cheap",
+        "router",
+        "tool_use"
       ]
     },
     {
@@ -14745,6 +16772,77 @@
       }
     },
     {
+      "id": "qwen/qwen3.5-plus-20260420",
+      "name": "Qwen3.5 Plus 20260420 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.8,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": 0.375
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
       "id": "qwen/qwen3.6-35b-a3b",
       "name": "Qwen3.6 35B A3B (via OpenRouter)",
       "provider": "openrouter",
@@ -14892,6 +16990,77 @@
         "coding",
         "tool_use",
         "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "qwen/qwen3.6-max-preview",
+      "name": "Qwen3.6 Max Preview (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.04,
+        "output_per_mtok": 6.24,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": 1.3
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
         "long_context"
       ]
     },
@@ -15210,6 +17379,81 @@
         "long_context",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "x-ai/grok-4.5",
+      "name": "Grok 4.5 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 500000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "agentic",
+        "coding",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
       ]
     },
     {
@@ -16414,6 +18658,173 @@
       ]
     },
     {
+      "id": "Qwen/Qwen3.5-397B-A17B",
+      "name": "Qwen3.5 397B A17B (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 262144,
+      "architecture": {
+        "parameter_count_b": 397.0,
+        "active_parameter_count_b": 17.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B",
+        "last_verified": "2026-07-09"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 3.6,
+        "cache_read_per_mtok": 0.35,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.6-Plus",
+      "name": "Qwen3.6 Plus (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.5,
+        "output_per_mtok": 3.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
       "id": "Qwen/Qwen3.7-Max",
       "name": "Qwen3.7 Max (Together)",
       "provider": "together",
@@ -16493,6 +18904,85 @@
         "qwen",
         "kimi"
       ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.7-Plus",
+      "name": "Qwen3.7 Plus (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.32,
+        "output_per_mtok": 1.28,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -16757,6 +19247,91 @@
       ]
     },
     {
+      "id": "moonshotai/Kimi-K2.6",
+      "name": "Kimi K2.6 (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.6",
+      "equivalence_group": "moonshot-kimi-k2.6",
+      "served_variant": "together",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 1.2,
+        "output_per_mtok": 4.5,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
       "id": "moonshotai/Kimi-K2.7-Code",
       "name": "Kimi K2.7 Code (Together)",
       "provider": "together",
@@ -16834,6 +19409,258 @@
         "coding",
         "agentic",
         "long_context",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "name": "GPT-OSS 20B (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-20b",
+      "equivalence_group": "openai-gpt-oss-20b",
+      "served_variant": "together",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 21.0,
+        "active_parameter_count_b": 3.6,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-20b",
+        "last_verified": "2026-07-09"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.05,
+        "output_per_mtok": 0.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "together/nvidia/nemotron-3-ultra-550b-a55b",
+      "name": "Nemotron 3 Ultra 550B A55B (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 512288,
+      "wire_model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 3.6,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "together",
+      "lineage": "together",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-5",
+      "name": "GLM 5 (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 3.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
         "tool_use",
         "reasoning"
       ]
@@ -17114,6 +19941,99 @@
       "open_weight": false,
       "strengths": [
         "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "grok-4.5",
+      "name": "Grok 4.5",
+      "provider": "xai",
+      "aliases": [],
+      "context_window": 500000,
+      "rate_limits": {
+        "source_url": "https://docs.x.ai/developers/models",
+        "last_verified": "2026-07-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "xai",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "turnaround_hours": 24,
+        "operational_notes": [
+          "Most text batch jobs complete within 24 hours, but completion time is best effort and not guaranteed.",
+          "Batch discounts vary by model; do not assume a global 50% discount for xAI.",
+          "Official pricing distinguishes text/language batch discounts from image/video paths that may bill at standard rates."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "xai",
+      "lineage": "xai",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "agentic",
+        "coding",
         "tool_use",
         "reasoning",
         "vision",
@@ -18545,24 +21465,24 @@
       "id": "cheap",
       "label": "Cheap",
       "description": "Lowest known hosted input+output token price.",
-      "model_id": "llama-3.1-8b-instant",
-      "provider": "groq",
+      "model_id": "cohere/north-mini-code:free",
+      "provider": "openrouter",
       "source": "catalog"
     },
     {
       "id": "vision-capable",
       "label": "Vision capable",
       "description": "A model route that accepts image input.",
-      "model_id": "gpt-5.5-pro",
-      "provider": "openai",
+      "model_id": "openai/gpt-5.5-pro",
+      "provider": "openrouter",
       "source": "catalog"
     },
     {
       "id": "long-context",
       "label": "Long context",
       "description": "Largest context-window route in the checked-in catalog.",
-      "model_id": "gpt-5.5-pro",
-      "provider": "openai",
+      "model_id": "openai/gpt-5.5-pro",
+      "provider": "openrouter",
       "source": "catalog"
     }
   ],
@@ -19117,6 +22037,93 @@
     },
     {
       "provider": "deepinfra",
+      "model": "MiniMaxAI/MiniMax-M2.7-Turbo",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "MiniMax M2.7 Turbo (DeepInfra)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3 235B A22B Instruct 2507 (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3 Coder 480B A35B Turbo (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3.5 397B A17B (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "Qwen/Qwen3.6-27B",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3.6 27B (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "deepinfra",
       "model": "Qwen/Qwen3.6-35B-A3B",
       "base_url": "https://api.deepinfra.com/v1/openai",
       "secret_env": "DEEPINFRA_API_KEY",
@@ -19252,6 +22259,23 @@
     },
     {
       "provider": "deepinfra",
+      "model": "zai-org/GLM-4.6",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "GLM 4.6 (DeepInfra)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
       "model": "zai-org/GLM-5.2",
       "base_url": "https://api.deepinfra.com/v1/openai",
       "secret_env": "DEEPINFRA_API_KEY",
@@ -19314,6 +22338,26 @@
       "secret_env": "FIREWORKS_API_KEY",
       "label": "DeepSeek V4 Pro (Fireworks)",
       "family": "deepseek",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-5p1",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "GLM 5.1 (Fireworks)",
+      "family": "glm",
       "capabilities": [
         "batch",
         "native_tools",
@@ -19626,6 +22670,34 @@
     },
     {
       "provider": "groq",
+      "model": "groq/compound",
+      "base_url": "https://api.groq.com/openai/v1",
+      "secret_env": "GROQ_API_KEY",
+      "label": "Groq Compound",
+      "family": "groq",
+      "capabilities": [
+        "batch",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output_mode:none"
+      ]
+    },
+    {
+      "provider": "groq",
+      "model": "groq/compound-mini",
+      "base_url": "https://api.groq.com/openai/v1",
+      "secret_env": "GROQ_API_KEY",
+      "label": "Groq Compound Mini",
+      "family": "groq",
+      "capabilities": [
+        "batch",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output_mode:none"
+      ]
+    },
+    {
+      "provider": "groq",
       "model": "openai/gpt-oss-120b",
       "base_url": "https://api.groq.com/openai/v1",
       "secret_env": "GROQ_API_KEY",
@@ -19698,6 +22770,41 @@
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "inception",
+      "model": "mercury-2",
+      "base_url": "https://api.inceptionlabs.ai/v1",
+      "secret_env": "INCEPTION_API_KEY",
+      "label": "Mercury 2",
+      "family": "inception",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "inception",
+      "model": "mercury-coder-small",
+      "base_url": "https://api.inceptionlabs.ai/v1",
+      "secret_env": "INCEPTION_API_KEY",
+      "label": "Mercury Coder Small",
+      "family": "inception",
+      "capabilities": [
+        "native_tools",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
         "text_tools",
         "tools"
       ]
@@ -20770,6 +23877,24 @@
     },
     {
       "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.8-fast",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Opus 4.8 Fast (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4-6",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -20801,6 +23926,45 @@
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "bytedance-seed/seed-2.0-lite",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Seed 2.0 Lite (via OpenRouter)",
+      "family": "openrouter",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "cohere/north-mini-code:free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "North Mini Code Free (via OpenRouter)",
+      "family": "openrouter",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
         "tools"
       ]
     },
@@ -21132,6 +24296,134 @@
     },
     {
       "provider": "openrouter",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Nemotron 3 Super 120B A12B Free (via OpenRouter)",
+      "family": "openrouter",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.4-mini",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.4 Mini (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.4-nano",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.4 Nano (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.4-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.4 Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.5 (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.5-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.5 Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "openai/gpt-oss-120b",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -21147,6 +24439,25 @@
         "text_tools",
         "thinking",
         "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openrouter/free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "OpenRouter Free Router",
+      "family": "openrouter",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
@@ -21203,6 +24514,24 @@
     },
     {
       "provider": "openrouter",
+      "model": "qwen/qwen3.5-plus-20260420",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.5 Plus 20260420 (via OpenRouter)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "qwen/qwen3.6-35b-a3b",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -21230,6 +24559,24 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.6-max-preview",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.6 Max Preview (via OpenRouter)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
@@ -21313,6 +24660,27 @@
         "text_tools",
         "thinking",
         "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "x-ai/grok-4.5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Grok 4.5 (via OpenRouter)",
+      "family": "openrouter",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
@@ -21568,6 +24936,44 @@
     },
     {
       "provider": "together",
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Qwen3.5 397B A17B (Together)",
+      "family": "qwen",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "Qwen/Qwen3.6-Plus",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Qwen3.6 Plus (Together)",
+      "family": "qwen",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
       "model": "Qwen/Qwen3.7-Max",
       "base_url": "https://api.together.xyz/v1",
       "secret_env": "TOGETHER_AI_API_KEY",
@@ -21578,6 +24984,25 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "Qwen/Qwen3.7-Plus",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Qwen3.7 Plus (Together)",
+      "family": "qwen",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
@@ -21647,6 +25072,25 @@
     },
     {
       "provider": "together",
+      "model": "moonshotai/Kimi-K2.6",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Kimi K2.6 (Together)",
+      "family": "kimi",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
       "model": "moonshotai/Kimi-K2.7-Code",
       "base_url": "https://api.together.xyz/v1",
       "secret_env": "TOGETHER_AI_API_KEY",
@@ -21656,6 +25100,66 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "GPT-OSS 20B (Together)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Nemotron 3 Ultra 550B A55B (Together)",
+      "family": "together",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "zai-org/GLM-5",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "GLM 5 (Together)",
+      "family": "glm",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -21710,6 +25214,28 @@
       "base_url": "https://api.x.ai/v1",
       "secret_env": "XAI_API_KEY",
       "label": "Grok 4.3",
+      "family": "xai",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.5",
+      "base_url": "https://api.x.ai/v1",
+      "secret_env": "XAI_API_KEY",
+      "label": "Grok 4.5",
       "family": "xai",
       "capabilities": [
         "batch",

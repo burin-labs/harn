@@ -1376,6 +1376,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_llm_response_rejects_structured_reasoning_only_tool_turn() {
+        // Same contract as top-level `reasoning_content`, but through
+        // structured content blocks. A pseudo-call in private reasoning is not
+        // committed visible text and must never be accepted as a tool turn.
+        let response = serde_json::json!({
+            "id": "gen-structured-hidden",
+            "model": "qwen/qwen3.6-35b-a3b",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "reasoning",
+                        "text": "<tool_call>\nrun({ command: \"echo should-not-run\" })\n</tool_call>"
+                    }]
+                }
+            }],
+            "usage": { "prompt_tokens": 321, "completion_tokens": 342 }
+        });
+
+        let err = parse_llm_response(&response, "openrouter", "qwen/qwen3.6-35b-a3b", false, true)
+            .expect_err("structured hidden reasoning must not satisfy a tool turn");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("upstream contract violation"),
+            "error must name the contract violation: {message}"
+        );
+    }
+
+    #[test]
     fn parse_llm_response_allows_billed_empty_length_truncation() {
         // Some reasoning routes consume the output cap in a hidden channel and
         // return no visible content or reasoning string, only a length stop and

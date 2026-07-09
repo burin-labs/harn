@@ -29,18 +29,7 @@ pub(super) fn render_openai_message_content_as_text(content: &serde_json::Value)
                         rendered.push_str("[Result] ");
                         rendered.push_str(content);
                     }
-                    "reasoning" | "thinking" => {
-                        if let Some(text) = block
-                            .get("text")
-                            .and_then(|v| v.as_str())
-                            .or_else(|| block.get("thinking").and_then(|v| v.as_str()))
-                        {
-                            if !rendered.is_empty() {
-                                rendered.push('\n');
-                            }
-                            rendered.push_str(text);
-                        }
-                    }
+                    "reasoning" | "thinking" => {}
                     _ => {
                         if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
                             if !rendered.is_empty() {
@@ -61,6 +50,32 @@ pub(super) fn render_openai_message_content_as_text(content: &serde_json::Value)
         serde_json::Value::Null => String::new(),
         other => other.to_string(),
     }
+}
+
+fn render_openai_message_content_reasoning_as_text(content: &serde_json::Value) -> String {
+    let serde_json::Value::Array(blocks) = content else {
+        return String::new();
+    };
+    let mut rendered = String::new();
+    for block in blocks {
+        let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if !matches!(block_type, "reasoning" | "thinking") {
+            continue;
+        }
+        let text = block
+            .get("text")
+            .and_then(|v| v.as_str())
+            .or_else(|| block.get("thinking").and_then(|v| v.as_str()))
+            .unwrap_or_default();
+        if text.trim().is_empty() {
+            continue;
+        }
+        if !rendered.is_empty() {
+            rendered.push('\n');
+        }
+        rendered.push_str(text.trim());
+    }
+    rendered
 }
 
 pub(super) fn extract_openai_message_field_as_text(
@@ -122,6 +137,10 @@ pub(super) fn normalize_openai_message_text(
     promote_reasoning_to_text: bool,
 ) -> (String, String) {
     let raw_text = extract_openai_message_field_as_text(message, &["content"]);
+    let content_reasoning = message
+        .get("content")
+        .map(render_openai_message_content_reasoning_as_text)
+        .unwrap_or_default();
     let reasoning_text = extract_openai_message_field_as_text(
         message,
         &["reasoning", "reasoning_content", "reasoning_details"],
@@ -132,6 +151,7 @@ pub(super) fn normalize_openai_message_text(
     // inside them.
     let (mut text, inline_thinking) = split_openai_thinking_blocks(&raw_text);
     let mut extracted_thinking = String::new();
+    append_paragraph(&mut extracted_thinking, &content_reasoning);
     append_paragraph(&mut extracted_thinking, &reasoning_text);
     append_paragraph(&mut extracted_thinking, &inline_thinking);
     // When a reasoning model is cut off mid-thought (finish_reason == "length")
@@ -239,7 +259,7 @@ pub(crate) fn debug_log_message_shapes(label: &str, messages: &[serde_json::Valu
 mod tests {
     use super::{
         extract_openai_delta_field_str, extract_openai_message_field_as_text,
-        normalize_openai_message_text,
+        normalize_openai_message_text, normalize_openai_style_messages,
     };
 
     #[test]
@@ -319,6 +339,72 @@ mod tests {
         assert_eq!(
             thinking,
             "We need to write unit tests for the parser. First inspect parser.rs."
+        );
+    }
+
+    #[test]
+    fn normalize_openai_message_text_does_not_promote_reasoning_when_tools_are_offered() {
+        // Some OpenAI-compatible routes put failed text-tool attempts in a
+        // provider reasoning field without emitting a native `tool_calls`
+        // array. When the caller offered tools, that reasoning is not a final
+        // answer and must stay private.
+        let message = serde_json::json!({
+            "content": "",
+            "reasoning_content": "<tool_call>\nrun({ command: \"echo should-not-run\" })\n</tool_call>"
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"), false);
+        assert_eq!(
+            visible, "",
+            "tools-offered reasoning leaked into visible text"
+        );
+        assert_eq!(
+            thinking,
+            "<tool_call>\nrun({ command: \"echo should-not-run\" })\n</tool_call>"
+        );
+    }
+
+    #[test]
+    fn normalize_openai_message_text_keeps_structured_reasoning_private() {
+        // Some OpenAI-style providers use structured content blocks for
+        // hidden reasoning. Those blocks must not be flattened into visible
+        // text, because downstream text-tool parsing only sees visible text.
+        let message = serde_json::json!({
+            "content": [
+                {
+                    "type": "reasoning",
+                    "text": "<tool_call>\nrun({ command: \"echo should-not-run\" })\n</tool_call>"
+                },
+                { "type": "output_text", "text": "Done." }
+            ]
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"), false);
+        assert_eq!(visible, "Done.");
+        assert_eq!(
+            thinking,
+            "<tool_call>\nrun({ command: \"echo should-not-run\" })\n</tool_call>"
+        );
+    }
+
+    #[test]
+    fn normalize_openai_style_messages_does_not_stringify_structured_reasoning() {
+        // When a string-only provider receives conversation history, private
+        // reasoning blocks should not be coerced into the visible `content`
+        // string sent back to the model.
+        let messages = vec![serde_json::json!({
+            "role": "assistant",
+            "content": [
+                { "type": "reasoning", "text": "private plan" },
+                { "type": "output_text", "text": "public answer" }
+            ]
+        })];
+
+        let normalized = normalize_openai_style_messages(messages, true);
+
+        assert_eq!(
+            normalized[0]
+                .get("content")
+                .and_then(|value| value.as_str()),
+            Some("public answer")
         );
     }
 
