@@ -17,6 +17,10 @@ struct CapturingAgentEventSink {
     events: Arc<std::sync::Mutex<Vec<crate::agent_events::AgentEvent>>>,
 }
 
+thread_local! {
+    static FALLBACK_TEXT_TOOL_CALL_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
     fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
         if event.session_id() != self.session_id {
@@ -780,7 +784,8 @@ async fn host_agent_parse_tool_calls_impl(
         _ => String::new(),
     };
     let format = tools::TextToolFormat::from_option(&tool_format);
-    let parsed = tools::parse_text_tool_calls_in_format(&text, tools.as_ref(), format);
+    let mut parsed = tools::parse_text_tool_calls_in_format(&text, tools.as_ref(), format);
+    tools::stamp_synthetic_tool_call_ids(&mut parsed.calls, next_text_tool_call_seq_for_parse);
     Ok(json_to_vm_value(&serde_json::json!({
         "calls": parsed.calls,
         "tool_calls": parsed.calls,
@@ -792,6 +797,19 @@ async fn host_agent_parse_tool_calls_impl(
         "done_marker": parsed.done_marker,
         "canonical_text": parsed.canonical,
     })))
+}
+
+fn next_text_tool_call_seq_for_parse() -> u64 {
+    if let Some(session_id) = crate::agent_sessions::current_session_id() {
+        if let Some(seq) = crate::agent_sessions::next_text_tool_call_seq(&session_id) {
+            return seq;
+        }
+    }
+    FALLBACK_TEXT_TOOL_CALL_SEQ.with(|cell| {
+        let seq = cell.get();
+        cell.set(seq.checked_add(1).unwrap_or(0));
+        seq
+    })
 }
 
 fn agent_primitive_max_concurrent_tools(options: &crate::value::DictMap) -> usize {
@@ -3065,5 +3083,129 @@ mod mcp_bootstrap_tests {
             tagged.get("defer_loading").and_then(|v| v.as_bool()),
             Some(false)
         );
+    }
+}
+
+#[cfg(test)]
+mod parse_tool_call_id_tests {
+    use super::host_agent_parse_tool_calls_impl;
+    use crate::value::VmValue;
+
+    fn vm_str(value: &str) -> VmValue {
+        VmValue::String(arcstr::ArcStr::from(value))
+    }
+
+    fn look_tool_catalog() -> VmValue {
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "tools": [
+                {
+                    "name": "look",
+                    "description": "Read a file",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "file": { "type": "string" },
+                            "intent": { "type": "string" }
+                        },
+                        "required": ["file", "intent"]
+                    }
+                }
+            ]
+        }))
+    }
+
+    fn parse_ids(text: &str) -> Vec<String> {
+        let value = futures::executor::block_on(host_agent_parse_tool_calls_impl(
+            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            vec![vm_str(text), look_tool_catalog(), vm_str("text")],
+        ))
+        .expect("parse primitive succeeds");
+        let json = crate::llm::helpers::vm_value_to_json(&value);
+        json.get("calls")
+            .and_then(|calls| calls.as_array())
+            .expect("calls array")
+            .iter()
+            .map(|call| {
+                call.get("id")
+                    .and_then(|id| id.as_str())
+                    .expect("call id")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn parse_tool_call_ids_are_session_scoped_across_turns() {
+        crate::agent_sessions::reset_session_store();
+        let session_a = crate::agent_sessions::open_or_create(Some("parse-id-a".to_string()));
+        let session_b = crate::agent_sessions::open_or_create(Some("parse-id-b".to_string()));
+        let text = "<tool_call>\nlook({ file: \"Cargo.toml\", intent: \"read\" })\n</tool_call>";
+
+        {
+            let _guard = crate::agent_sessions::enter_current_session(session_a.clone());
+            assert_eq!(parse_ids(text), vec!["tc_0"]);
+            assert_eq!(parse_ids(text), vec!["tc_1"]);
+        }
+
+        {
+            let _guard = crate::agent_sessions::enter_current_session(session_b);
+            assert_eq!(parse_ids(text), vec!["tc_0"]);
+        }
+
+        {
+            let _guard = crate::agent_sessions::enter_current_session(session_a);
+            assert_eq!(parse_ids(text), vec!["tc_2"]);
+        }
+    }
+
+    #[test]
+    fn parse_tool_call_ids_are_unique_within_one_turn() {
+        crate::agent_sessions::reset_session_store();
+        let session = crate::agent_sessions::open_or_create(Some("parse-id-batch".to_string()));
+        let _guard = crate::agent_sessions::enter_current_session(session);
+        let text = [
+            "<tool_call>\nlook({ file: \"Cargo.toml\", intent: \"read\" })\n</tool_call>",
+            "<tool_call>\nlook({ file: \"README.md\", intent: \"read\" })\n</tool_call>",
+        ]
+        .join("\n");
+
+        assert_eq!(parse_ids(&text), vec!["tc_0", "tc_1"]);
+    }
+
+    #[test]
+    fn parse_tool_call_ids_continue_after_seeded_transcript() {
+        crate::agent_sessions::reset_session_store();
+        let session = crate::agent_sessions::seed_from_messages(
+            Some("parse-id-seeded".to_string()),
+            &[
+                serde_json::json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "tc_5",
+                            "type": "function",
+                            "function": {
+                                "name": "look",
+                                "arguments": "{\"file\":\"Cargo.toml\",\"intent\":\"read\"}"
+                            }
+                        }
+                    ]
+                }),
+                serde_json::json!({
+                    "role": "tool",
+                    "tool_call_id": "tc_5",
+                    "content": "{}"
+                }),
+            ],
+            serde_json::json!({}),
+            None,
+            Some("text".to_string()),
+        )
+        .expect("seed session");
+        let _guard = crate::agent_sessions::enter_current_session(session);
+        let text = "<tool_call>\nlook({ file: \"README.md\", intent: \"read\" })\n</tool_call>";
+
+        assert_eq!(parse_ids(text), vec!["tc_6"]);
     }
 }

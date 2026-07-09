@@ -27,6 +27,7 @@ pub(crate) use parse::parse_text_tool_call_from_native_arguments;
 pub(crate) use parse::parse_text_tool_call_from_native_name;
 pub(crate) use parse::parse_text_tool_calls_in_format;
 pub(crate) use parse::parse_text_tool_calls_with_tools;
+pub(crate) use parse::stamp_synthetic_tool_call_ids;
 pub(crate) use parse::unwrap_fully_wrapping_heredoc;
 pub(crate) use parse::NativeToolNameTextCall;
 pub(crate) use parse::StreamingToolCallDetector;

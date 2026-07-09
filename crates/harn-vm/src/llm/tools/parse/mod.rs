@@ -75,6 +75,20 @@ pub(crate) fn parse_text_tool_calls_in_format(
     }
 }
 
+pub(crate) fn stamp_synthetic_tool_call_ids(
+    calls: &mut [serde_json::Value],
+    mut next_seq: impl FnMut() -> u64,
+) {
+    for call in calls {
+        if let Some(obj) = call.as_object_mut() {
+            obj.insert(
+                "id".to_string(),
+                serde_json::Value::String(format!("tc_{}", next_seq())),
+            );
+        }
+    }
+}
+
 /// Parse the argument payload from a provider-native tool call that appears to
 /// contain Harn's text-tool syntax rather than strict JSON.
 ///
@@ -280,8 +294,38 @@ pub(crate) struct TextToolParseResult {
 mod tests {
     use super::{
         parse_text_tool_argument_payload, parse_text_tool_call_from_native_arguments,
-        parse_text_tool_call_from_native_name, NativeToolNameTextCall,
+        parse_text_tool_call_from_native_name, stamp_synthetic_tool_call_ids,
+        NativeToolNameTextCall,
     };
+
+    fn call_ids(calls: &[serde_json::Value]) -> Vec<String> {
+        calls
+            .iter()
+            .map(|call| {
+                call.get("id")
+                    .and_then(|id| id.as_str())
+                    .expect("call id")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn synthetic_tool_call_ids_use_supplied_sequence() {
+        let mut calls = vec![
+            serde_json::json!({ "id": "tc_0", "name": "look", "arguments": {} }),
+            serde_json::json!({ "id": "tc_0", "name": "edit", "arguments": {} }),
+        ];
+        let mut seq = 7;
+
+        stamp_synthetic_tool_call_ids(&mut calls, || {
+            let current = seq;
+            seq += 1;
+            current
+        });
+
+        assert_eq!(call_ids(&calls), vec!["tc_7", "tc_8"]);
+    }
 
     #[test]
     fn text_tool_argument_payload_parses_object_literal_heredoc() {

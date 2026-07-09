@@ -581,13 +581,9 @@ fn accepted_response_tag_name(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Overwrite every parsed call's `id` with a turn-unique `tc_{n}`. The per-body
-/// parsers mint ids against their *local* call vector, so a body with a single
-/// call always gets `tc_0` and the JSON path hard-codes `tc_json` — meaning two
-/// `<tool_call>` blocks in one turn collide on `tc_0` and their results can't be
-/// correlated in the run-event stream. This is the one place with the
-/// turn-global index, so it owns final id assignment (mirroring the streaming
-/// detector's globally-unique `text-cand-{seq}` ids).
+/// Normalize ids within this parser invocation so multiple calls in one model
+/// body do not collide. The host primitive restamps ids at the execution seam,
+/// where the owning agent session is known.
 fn assign_turn_unique_ids(calls: &mut [serde_json::Value]) {
     for (idx, call) in calls.iter_mut().enumerate() {
         if let Some(obj) = call.as_object_mut() {

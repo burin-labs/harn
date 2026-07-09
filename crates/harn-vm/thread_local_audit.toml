@@ -135,6 +135,12 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
+path = "src/llm/agent_host_primitives.rs"
+statics = ["FALLBACK_TEXT_TOOL_CALL_SEQ"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/llm/autonomy_budget.rs"
 statics = ["AUTONOMY_COUNTERS"]
 category = "logical_task"
