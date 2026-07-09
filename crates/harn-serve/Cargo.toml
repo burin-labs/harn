@@ -14,11 +14,11 @@ axum = { version = "0.8", features = ["multipart", "ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 base64 = "0.22"
 bytes = "1"
-ed25519-dalek = { version = "2", features = ["rand_core"] }
 futures = "0.3"
 globset = "0.4"
 harn-clock = { path = "../harn-clock", version = "=0.10.2" }
 harn-parser = { path = "../harn-parser", version = "=0.10.2" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.2" }
 # `default-features = false` keeps the in-process embedding surface lean:
 # Postgres (sqlx) and the hostlib grammars are opt-in via this crate's
 # feature flags rather than dragged in unconditionally. harn-cli re-enables
@@ -31,7 +31,6 @@ hmac = "0.13"
 ipnet = "2"
 rcgen = "0.14"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rusqlite = { version = "0.40", features = ["bundled"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -27,6 +28,7 @@ use super::store::{
 };
 
 const SCHEMA_VERSION: i64 = 1;
+const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct SqliteSessionStore {
@@ -60,6 +62,8 @@ impl SqliteSessionStore {
     }
 
     fn initialize(conn: Connection, path: PathBuf, hooks: StoreHooks) -> StoreResult<Self> {
+        conn.busy_timeout(DEFAULT_BUSY_TIMEOUT)
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "synchronous", "NORMAL")

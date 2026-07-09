@@ -1,54 +1,23 @@
-//! Session-store primitive for `harn-serve` (issue #2502).
+//! HTTP adapter for the reusable Harn session-store primitive.
 //!
-//! The agent-session/transcript primitive owned by `harn-serve`. One
-//! source of truth for events (`Message`, `ToolCall`, `ToolResult`,
-//! `Plan`, `Compaction`, `SystemReminder`, `Hypothesis`, `Receipt`,
-//! `Reminder`, `PermissionDecision`, plus arbitrary `Custom` shapes),
-//! snapshots, replay, fork/truncate, signed receipts (Ed25519 over
-//! canonical JSON), retention, and HTTP exposure. This is the durable
-//! session boundary for hosts that would otherwise need separate replay
-//! tape, receipt, and transcript stores.
-//!
-//! ## Layout
-//!
-//! - [`event`] — event taxonomy + canonical JSON encoder
-//! - [`signing`] — Ed25519 chain hashes + receipt signatures
-//! - [`store`] — public `SessionStore` trait + shared types
-//! - [`memory`] — in-memory backend (tests + headless dev)
-//! - [`sqlite`] — persistent SQLite backend (local self-host, TUI)
-//! - [`retention`] — declarative per-tenant retention policy
-//! - [`api`] — axum router exposing `/v1/sessions/*`
-//!
-//! The trait is storage-agnostic so additional backends can be added
-//! without changing callers.
+//! `harn-session-store` owns the durable event/store/signing/retention
+//! semantics. `harn-serve` adds the Axum router and reexports the store
+//! surface so existing server consumers do not need to know whether they
+//! are linked through the transport crate or the storage crate directly.
 
 pub mod api;
-pub mod event;
-pub mod memory;
-pub(crate) mod memory_helpers;
-pub mod retention;
-pub mod signing;
-pub mod sqlite;
-pub mod store;
 
 #[cfg(test)]
 mod tests;
 
 pub use api::sessions_router;
-pub use event::{
-    canonical_event_bytes, canonical_json_bytes, AppendEvent, EventId, EventSignature,
-    SessionEventKind, StoredEvent,
-};
-pub use memory::MemorySessionStore;
-pub use retention::{ArchiveSink, RetentionPolicy, SharedArchiveSink, Tombstone};
-pub use signing::{
-    chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
-    verify_event, verify_receipt_root, SessionSigner, VerifyError,
-    ALGORITHM as SIGNATURE_ALGORITHM,
-};
-pub use sqlite::SqliteSessionStore;
-pub use store::{
-    CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
-    SessionStatus, SessionStore, SharedSessionStore, Snapshot, SnapshotId, StoreError, StoreHooks,
-    StoreResult, SweepReport, TruncateResult, VerifyFailure, VerifyReport, MAX_READ_BATCH,
+pub use harn_session_store::{
+    canonical_event_bytes, canonical_json_bytes, chain_root_fold, chain_root_hash, chain_root_init,
+    compute_record_hash, re_anchor_events, verify_event, verify_receipt_root, AppendEvent,
+    ArchiveSink, CreateSession, EventId, EventPage, EventSignature, ForkResult, ListFilter,
+    MemorySessionStore, ReadRange, RetentionPolicy, SessionEventKind, SessionId, SessionMeta,
+    SessionSigner, SessionStatus, SessionStore, SharedArchiveSink, SharedSessionStore, Snapshot,
+    SnapshotId, SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent, SweepReport,
+    Tombstone, TruncateResult, VerifyError, VerifyFailure, VerifyReport, MAX_READ_BATCH,
+    SIGNATURE_ALGORITHM,
 };
