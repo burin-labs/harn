@@ -179,18 +179,9 @@ fn generated_catalog_exports_provider_healthcheck_metadata() {
         .healthcheck
         .as_ref()
         .expect("anthropic healthcheck is exported");
-    assert_eq!(anthropic_healthcheck.method, "POST");
-    assert_eq!(
-        anthropic_healthcheck.path.as_deref(),
-        Some("/messages/count_tokens")
-    );
-    assert!(
-        anthropic_healthcheck
-            .body
-            .as_deref()
-            .is_some_and(|body| body.contains("claude-sonnet-4-6")),
-        "anthropic healthcheck body should include a token-count model"
-    );
+    assert_eq!(anthropic_healthcheck.method, "GET");
+    assert_eq!(anthropic_healthcheck.path.as_deref(), Some("/models"));
+    assert!(anthropic_healthcheck.body.is_none());
 
     let openrouter = catalog
         .providers
@@ -462,13 +453,13 @@ fn catalog_roundtrips_provider_healthcheck_metadata_into_config() {
             .map(String::as_str),
         Some("2023-06-01")
     );
-    assert_eq!(
-        anthropic
-            .healthcheck
-            .as_ref()
-            .and_then(|healthcheck| healthcheck.path.as_deref()),
-        Some("/messages/count_tokens")
-    );
+    let anthropic_healthcheck = anthropic
+        .healthcheck
+        .as_ref()
+        .expect("anthropic healthcheck roundtrips");
+    assert_eq!(anthropic_healthcheck.method, "GET");
+    assert_eq!(anthropic_healthcheck.path.as_deref(), Some("/models"));
+    assert!(anthropic_healthcheck.body.is_none());
 }
 
 #[tokio::test]
