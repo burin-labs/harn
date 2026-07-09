@@ -128,8 +128,19 @@ fn generated_provider_config(source_dir: &Path) -> Result<GeneratedProviderConfi
         body.push('\n');
     }
 
-    harn_vm::llm_config::parse_config_toml(&body)
+    let parsed = harn_vm::llm_config::parse_config_toml_with_diagnostics(&body)
         .map_err(|error| format!("generated provider config does not parse: {error}"))?;
+    if !parsed.diagnostics.is_empty() {
+        let rendered = parsed
+            .diagnostics
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(format!(
+            "generated provider config contains unknown fields:\n{rendered}"
+        ));
+    }
 
     Ok(GeneratedProviderConfig {
         body,
@@ -261,7 +272,9 @@ fn leading_bare_key_error(label: &str, fragment: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::leading_bare_key_error;
+    use std::fs;
+
+    use super::{generated_provider_config, leading_bare_key_error};
 
     #[test]
     fn rejects_leading_bare_key_before_first_table() {
@@ -304,5 +317,34 @@ name = \"Y\"
 tier = \"frontier\"
 ";
         assert!(leading_bare_key_error("60-models/test.toml", fragment).is_none());
+    }
+
+    #[test]
+    fn generated_config_rejects_unknown_model_fields() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let model_dir = tempdir.path().join("60-models");
+        fs::create_dir_all(&model_dir).expect("create model dir");
+        fs::write(
+            model_dir.join("bad.toml"),
+            r#"
+[models."demo/bad"]
+name = "Bad"
+provider = "demo"
+context_window = 8192
+fast_mode = true
+"#,
+        )
+        .expect("write fragment");
+
+        let error = match generated_provider_config(tempdir.path()) {
+            Ok(_) => panic!("unknown field should be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("generated provider config contains unknown fields"),
+            "got: {error}"
+        );
+        assert!(error.contains("fast_mode"), "got: {error}");
+        assert!(error.contains("serving_tiers"), "got: {error}");
     }
 }
