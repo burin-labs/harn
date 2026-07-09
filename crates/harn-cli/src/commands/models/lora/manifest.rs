@@ -9,10 +9,11 @@ use super::{
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_modules_to_save,
-    normalize_plan_tool_format, parse_target_metadata, render_embedded_lora_report, serving_recipe,
-    sha256_file, target_modules_for_route, teacher_report, template_recipe_for_route,
-    BaseModelReport, EvaluationRecipe, LoraContractReport, LoraTrainingContract, PrecisionContract,
-    ServingRecipe, TeacherReport, TemplateRecipe, ToolCallingReport,
+    normalize_plan_tool_format, parse_target_metadata, render_embedded_lora_report,
+    resolve_lora_provider, serving_recipe, sha256_file, target_modules_for_route, teacher_report,
+    template_recipe_for_route, BaseModelReport, EvaluationRecipe, LoraContractReport,
+    LoraTrainingContract, PrecisionContract, ServingRecipe, TeacherReport, TemplateRecipe,
+    ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -51,13 +52,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
-    let provider = args
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| resolved.provider.clone());
+    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let catalog_default_tool_format =

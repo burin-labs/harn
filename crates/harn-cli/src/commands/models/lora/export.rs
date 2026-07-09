@@ -14,8 +14,8 @@ use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
     normalize_modules_to_save, normalize_plan_tool_format, parse_target_metadata,
-    render_embedded_lora_report, sha256_file, BaseModelReport, EvaluationRecipe,
-    LoraContractReport, ToolCallingReport,
+    render_embedded_lora_report, resolve_lora_provider, sha256_file, BaseModelReport,
+    EvaluationRecipe, LoraContractReport, ToolCallingReport,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -51,13 +51,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     }
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
-    let provider = args
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| resolved.provider.clone());
+    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let local_runtime =

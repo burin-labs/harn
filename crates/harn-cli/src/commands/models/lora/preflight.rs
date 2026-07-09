@@ -13,7 +13,7 @@ use super::export::{
     source_tool_format, ExportRegexes,
 };
 use super::{
-    normalize_plan_tool_format, render_embedded_lora_report,
+    normalize_plan_tool_format, render_embedded_lora_report, resolve_lora_provider,
     source_tool_format_required_for_target, BaseModelReport, ToolCallingReport,
 };
 
@@ -61,13 +61,7 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
     }
 
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
-    let provider = args
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| resolved.provider.clone());
+    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let catalog_default_tool_format =

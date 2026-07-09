@@ -2340,7 +2340,7 @@ fn models_lora_inspect_human_text_includes_launch_hint() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--name",
             "burin-tools",
             &adapter_path,
@@ -2462,7 +2462,7 @@ fn models_lora_inspect_json_shape_is_stable() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--name",
             "burin-tools",
             "--json",
@@ -2554,7 +2554,7 @@ fn models_lora_inspect_manifest_contract_reports_match() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--name",
             "burin-tools",
             "--manifest",
@@ -2601,7 +2601,7 @@ fn models_lora_inspect_manifest_human_text_reports_contract_route() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--name",
             "burin-tools",
             "--manifest",
@@ -2640,7 +2640,7 @@ fn models_lora_inspect_require_contract_id_fails_when_adapter_omits_it() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--name",
             "burin-tools",
             "--manifest",
@@ -2680,7 +2680,7 @@ fn models_lora_plan_human_text_includes_recipe() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--tool-format",
             "auto",
             "--corpus",
@@ -3368,7 +3368,7 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--tool-format",
             "native",
             "--corpus",
@@ -3399,6 +3399,7 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     assert_eq!(report["stats"]["tool_calls"].as_u64(), Some(1));
     assert_eq!(report["stats"]["tool_results"].as_u64(), Some(1));
     assert_eq!(report["target"]["adapter_name"], "burin-tools");
+    assert_eq!(report["target"]["provider"], "vllm");
     let contract_id = report["contract"]["id"].as_str().expect("contract id");
     assert!(
         contract_id.starts_with("sha256:"),
@@ -3407,6 +3408,7 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     assert_eq!(report["target"]["contract_id"], contract_id);
     assert_eq!(report["contract"]["base_model"], "gemma-4-e4b-it");
     assert_eq!(report["contract"]["provider"], "vllm");
+    assert_eq!(report["serving"]["provider"], "vllm");
     assert_eq!(report["contract"]["harn_tool_format"], "native");
     assert_eq!(
         report["contract"]["dataset_format"],
@@ -3587,7 +3589,7 @@ fn models_lora_manifest_json_writes_training_manifest() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--tool-format",
             "json",
             "--dataset",
@@ -3630,6 +3632,8 @@ fn models_lora_manifest_json_writes_training_manifest() {
     let report = success_data(&harn_value);
     assert_eq!(report["producer"], "harn_models_lora_manifest_v1");
     assert_eq!(report["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(report["base"]["provider"], "vllm");
+    assert_eq!(report["target"]["provider"], "vllm");
     assert_eq!(report["target"]["adapter_name"], "burin-tools");
     assert_eq!(report["target"]["request_model"], "burin-tools");
     assert_eq!(report["target"]["harn_tool_format"], "json");
@@ -3683,6 +3687,7 @@ fn models_lora_manifest_json_writes_training_manifest() {
         report["artifacts"]["adapter_files"]
     );
     assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
+    assert_eq!(report["serving"]["provider"], "vllm");
     assert_eq!(
         report["serving"]["lora_module_value_format"],
         "json_with_base_model"
@@ -3770,7 +3775,7 @@ fn models_lora_manifest_json_writes_training_manifest() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--name",
             "burin-tools",
             "--manifest",
@@ -3811,7 +3816,7 @@ fn models_lora_train_json_writes_dry_run_receipt() {
             "--base",
             "local-gemma4-e4b",
             "--provider",
-            "vllm",
+            "local-vllm",
             "--tool-format",
             "json",
             "--dataset",
@@ -3859,6 +3864,7 @@ fn models_lora_train_json_writes_dry_run_receipt() {
     assert_eq!(report["producer"], "harn_models_lora_train_v1");
     assert_eq!(report["mode"], "dry_run");
     assert_eq!(report["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(report["base"]["provider"], "vllm");
     assert_eq!(report["request"]["effective_tool_format"], "json");
     assert_eq!(
         report["request"]["dataset_format"],
@@ -3875,6 +3881,8 @@ fn models_lora_train_json_writes_dry_run_receipt() {
         report["target"]["metadata"]["serving_adapter_binding"],
         "runtime_lora_adapter"
     );
+    assert_eq!(report["target"]["metadata"]["serving_provider"], "vllm");
+    assert_eq!(report["serving"]["provider"], "vllm");
     assert_eq!(report["training"]["trainer"], "unsloth_sft");
     assert_eq!(report["training"]["trainer_version"], "unsloth-2026.7");
     assert_eq!(report["training"]["rank"], 24);

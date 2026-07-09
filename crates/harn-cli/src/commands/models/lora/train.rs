@@ -14,11 +14,11 @@ use super::{
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
     normalize_modules_to_save, normalize_plan_tool_format, parse_target_metadata,
-    precision_contract_for_method, render_embedded_lora_report, serving_recipe, sha256_file,
-    target_modules_for_route, teacher_report, template_recipe_for_route,
-    trainer_contract_for_dataset, BaseModelReport, EvaluationRecipe, LoraContractReport,
-    LoraTrainingContract, PrecisionContract, ServingRecipe, TeacherReport, TemplateRecipe,
-    ToolCallingReport,
+    precision_contract_for_method, render_embedded_lora_report, resolve_lora_provider,
+    serving_recipe, sha256_file, target_modules_for_route, teacher_report,
+    template_recipe_for_route, trainer_contract_for_dataset, BaseModelReport, EvaluationRecipe,
+    LoraContractReport, LoraTrainingContract, PrecisionContract, ServingRecipe, TeacherReport,
+    TemplateRecipe, ToolCallingReport,
 };
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
@@ -64,13 +64,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
-    let provider = args
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| resolved.provider.clone());
+    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let catalog_default_tool_format =
@@ -746,7 +740,7 @@ mod tests {
         .expect("dataset");
         let args = ModelsLoraTrainArgs {
             base_model: "local-gemma4-e4b".to_string(),
-            provider: Some("vllm".to_string()),
+            provider: Some("local-vllm".to_string()),
             tool_format: "json".to_string(),
             dataset,
             corpus: None,
@@ -779,6 +773,8 @@ mod tests {
         };
         let report = train_report(&args).expect("report");
         assert_eq!(report.mode, "dry_run");
+        assert_eq!(report.base.provider, "vllm");
+        assert_eq!(report.serving.provider, "vllm");
         assert_eq!(report.training.trainer, "unsloth_sft");
         assert_eq!(
             report.training.trainer_version.as_deref(),
@@ -803,6 +799,11 @@ mod tests {
         assert_eq!(report.dataset_audit.parallel_tool_call_rows, 1);
         assert_eq!(report.dataset_audit.schema_repaired_rows, 1);
         assert_eq!(report.target.request_model, "burin-tools");
+        assert!(report
+            .post_training
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--provider", "vllm"]));
         assert!(report
             .post_training
             .manifest_command

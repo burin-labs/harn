@@ -121,14 +121,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         return Err("--require-contract-id requires --manifest".to_string());
     }
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
-    let provider = args
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .map(normalize_local_provider_id)
-        .unwrap_or_else(|| resolved.provider.clone());
-    let provider = normalize_local_provider_id(&provider);
+    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let tool_format = harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
@@ -472,14 +465,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let target_modules =
         target_modules_for_route(&method, &resolved.id, &resolved.family, &resolved.lineage);
-    let provider = args
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .map(normalize_local_provider_id)
-        .unwrap_or_else(|| resolved.provider.clone());
-    let provider = normalize_local_provider_id(&provider);
+    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let catalog_default_tool_format =
@@ -1028,6 +1014,14 @@ fn normalize_lora_trainer(raw: &str) -> Result<String, String> {
             "unsupported LoRA trainer `{raw}`; expected `trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`"
         )),
     }
+}
+
+pub(super) fn resolve_lora_provider(provider: Option<&str>, resolved_provider: &str) -> String {
+    provider
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .map(normalize_local_provider_id)
+        .unwrap_or_else(|| normalize_local_provider_id(resolved_provider))
 }
 
 fn normalize_lora_rank(rank: u32) -> Result<u32, String> {
