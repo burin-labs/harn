@@ -110,7 +110,7 @@ grammar-data = [
 # Hostlib never issues Postgres queries, so it takes the VM lean and lets
 # the full CLI re-enable `pg.*` through its own direct harn-vm edge (Cargo
 # unifies the feature across the build graph).
-harn-vm = { path = "../harn-vm", version = "=0.10.2", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.3", default-features = false }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -197,7 +197,7 @@ tree-sitter-css = { version = "0.25", optional = true }
 tree-sitter-html = { version = "0.23", optional = true }
 tree-sitter-sequel = { version = "0.3", optional = true }
 tree-sitter-md = { version = "0.5", optional = true }
-tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=0.10.2", optional = true }
+tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=0.10.3", optional = true }
 arcstr = { version = "1", features = ["serde", "std"] }
 
 # Per-OS secret-store backends. The file backend is always compiled in
@@ -217,8 +217,8 @@ windows-sys = { version = "0.61.2", features = [
 serde_json = "1"
 filetime = "0.2"
 criterion = "0.8"
-harn-lexer = { path = "../harn-lexer", version = "=0.10.2" }
-harn-parser = { path = "../harn-parser", version = "=0.10.2" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.3" }
+harn-parser = { path = "../harn-parser", version = "=0.10.3" }
 
 [[bench]]
 name = "ast_parse"

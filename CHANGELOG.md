@@ -9,6 +9,41 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.3
+
+### Changed
+
+- **Session store crate.** Durable session event, store, signing, SQLite,
+  memory, and retention primitives now live in a reusable
+  `harn-session-store` crate, with `harn-serve` reduced to the HTTP adapter
+  and compatibility reexports (#4295).
+- **GitHub trigger payloads.** Normalized GitHub events now preserve
+  connector-promoted `reaction_topics` across the typed runtime payload
+  boundary, including an empty list for events with no semantic reactions.
+
+### Fixed
+
+- **Agent loop same-resource fail-fast receipts are now typed (#4134).** Skipped
+  sibling tool calls after a mutating same-resource failure include structured
+  partial-apply metadata for the executed prefix, skipped dependent suffix,
+  blocking prior call, mutation status, and next recovery action.
+- Block textual git-destructive commands in Harn's universal catastrophic command floor.
+- Give no-progress monologue hard stops one bounded tool-call recovery turn with structured recovery receipts before stopping.
+- Warn on unknown provider catalog fields, including removed `fast_mode` rows,
+  and fail generated catalog builds when source fragments would otherwise be
+  silently ignored.
+- Made agent judge-decision events carry an explicit `source` and stopped model-visible no-progress nudges
+  from falling back to raw numeric counters.
+- Warn on unknown provider-config fields in package `[llm]` sections and
+  `[patch.models.*.batch]` tables instead of silently ignoring them.
+- Forward `env_remove` through stdlib command helpers, agent command tools, and
+  command-policy rewrites so host integrations can strip caller-selected child
+  environment variables without replacing the rest of the inherited environment.
+- `harn models lora` and `harn local` now canonicalize local runtime provider aliases such as `local-vllm`
+  to the catalog-backed provider id before planning LoRA launches.
+- Normalize local provider aliases in `harn models lora` export, manifest,
+  preflight, and train receipts.
+
 ## v0.10.2
 
 ### Added
