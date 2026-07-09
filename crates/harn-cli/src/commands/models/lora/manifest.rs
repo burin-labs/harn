@@ -8,12 +8,13 @@ use super::{
     adapter_name_from_input, dataset_format_for_tool_format, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
-    normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_modules_to_save,
-    normalize_plan_tool_format, normalize_tool_catalog_policy, parse_target_metadata,
-    render_embedded_lora_report, resolve_lora_provider, serving_recipe, sha256_file,
-    target_modules_for_route, teacher_report, template_recipe_for_route, tool_catalog_contract,
-    BaseModelReport, EvaluationRecipe, LoraContractReport, LoraTrainingContract, PrecisionContract,
-    ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
+    normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
+    normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
+    parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, serving_recipe,
+    sha256_file, target_modules_for_route, teacher_report, template_recipe_for_route,
+    tool_catalog_contract, BaseModelReport, EvaluationRecipe, LoraContractReport,
+    LoraTrainingContract, PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport,
+    TemplateRecipe, ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -46,6 +47,7 @@ pub(super) async fn manifest(args: &ModelsLoraManifestArgs) -> i32 {
 
 fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, String> {
     let method = normalize_lora_method(&args.method)?;
+    let trainer = normalize_lora_trainer(&args.trainer)?;
     let rank = normalize_lora_rank(args.rank)?;
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
@@ -246,7 +248,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         contract,
         training: ManifestTraining {
             run_id: args.training_run_id.clone(),
-            trainer: args.trainer.clone(),
+            trainer,
             trainer_version: args.trainer_version.clone(),
             method,
             adapter_type: "peft_lora".to_string(),
@@ -452,4 +454,60 @@ struct PathRef {
     exists: bool,
     kind: String,
     sha256: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest_args_with_trainer(trainer: &str) -> ModelsLoraManifestArgs {
+        ModelsLoraManifestArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("local-vllm".to_string()),
+            tool_format: "json".to_string(),
+            dataset: None,
+            corpus: None,
+            export_manifest: None,
+            out: None,
+            adapter_name: Some("burin-tools".to_string()),
+            adapter_path: None,
+            request_model: None,
+            chat_template: None,
+            trainer: trainer.to_string(),
+            trainer_version: Some("trainer-2026.7".to_string()),
+            method: "qlora".to_string(),
+            rank: 16,
+            alpha: None,
+            dropout: 0.05,
+            training_run_id: Some("train-001".to_string()),
+            teacher: None,
+            target_metadata: vec!["lane=tool-calls".to_string()],
+            tool_catalog_policy: "full_schema".to_string(),
+            tool_catalog_id: None,
+            tool_catalog_hash: None,
+            modules_to_save: Vec::new(),
+            json: true,
+        }
+    }
+
+    #[test]
+    fn manifest_report_normalizes_trainer_aliases() {
+        let mlx_report = manifest_report(&manifest_args_with_trainer("mlx-lm")).expect("mlx");
+        assert_eq!(mlx_report.training.trainer, "mlx_lm");
+        assert_eq!(
+            mlx_report.training.trainer_version.as_deref(),
+            Some("trainer-2026.7")
+        );
+
+        let unsloth_report =
+            manifest_report(&manifest_args_with_trainer("unsloth_trl_sft")).expect("unsloth");
+        assert_eq!(unsloth_report.training.trainer, "unsloth_sft");
+    }
+
+    #[test]
+    fn manifest_report_rejects_unknown_trainer() {
+        let error = manifest_report(&manifest_args_with_trainer("homegrown_python"))
+            .expect_err("unknown trainer should fail closed");
+        assert!(error.contains("unsupported LoRA trainer"));
+    }
 }

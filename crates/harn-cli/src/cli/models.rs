@@ -325,6 +325,7 @@ pub(crate) struct ModelsLoraManifestArgs {
     #[arg(long = "chat-template")]
     pub chat_template: Option<String>,
     /// Trainer/backend name to record in the manifest.
+    /// Canonical values: `trl_sft_trainer`, `unsloth_sft`, `mlx_lm`, or `external_sft_trainer`.
     #[arg(long, default_value = "external_sft_trainer")]
     pub trainer: String,
     /// Trainer/backend version or package revision to record.
@@ -391,7 +392,8 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// Adapter training method (`qlora` or `lora`).
     #[arg(long, default_value = "qlora")]
     pub method: String,
-    /// Trainer/backend contract (`trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`).
+    /// Trainer/backend contract.
+    /// Canonical values: `trl_sft_trainer`, `unsloth_sft`, `mlx_lm`, or `external_sft_trainer`.
     #[arg(long, default_value = "external_sft_trainer")]
     pub trainer: String,
     /// LoRA rank to plan for training and serving.
@@ -481,7 +483,8 @@ pub(crate) struct ModelsLoraTrainArgs {
     /// Chat template identifier used for training and serving.
     #[arg(long = "chat-template")]
     pub chat_template: Option<String>,
-    /// Trainer/backend contract (`trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`).
+    /// Trainer/backend contract.
+    /// Canonical values: `trl_sft_trainer`, `unsloth_sft`, `mlx_lm`, or `external_sft_trainer`.
     #[arg(long, default_value = "external_sft_trainer")]
     pub trainer: String,
     /// Trainer/backend version or package revision to record.
