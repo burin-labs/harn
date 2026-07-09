@@ -6,6 +6,7 @@ use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use crate::cli::{ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs, ModelsLoraPlanArgs};
+use crate::commands::local::runtime::normalize_local_provider_id;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
@@ -125,8 +126,9 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         .as_deref()
         .map(str::trim)
         .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
+        .map(normalize_local_provider_id)
         .unwrap_or_else(|| resolved.provider.clone());
+    let provider = normalize_local_provider_id(&provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let tool_format = harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
@@ -475,8 +477,9 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         .as_deref()
         .map(str::trim)
         .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
+        .map(normalize_local_provider_id)
         .unwrap_or_else(|| resolved.provider.clone());
+    let provider = normalize_local_provider_id(&provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
     let catalog_default_tool_format =
@@ -2880,6 +2883,44 @@ mod tests {
     }
 
     #[test]
+    fn inspect_canonicalizes_local_vllm_provider_alias() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let adapter_dir = tmp.path().join("burin-tools");
+        std::fs::create_dir(&adapter_dir).expect("adapter dir");
+        std::fs::write(adapter_dir.join("adapter_model.safetensors"), b"stub")
+            .expect("adapter weights");
+        std::fs::write(
+            adapter_dir.join("adapter_config.json"),
+            r#"{
+                "peft_type": "LORA",
+                "base_model_name_or_path": "google/gemma-4-e4b-it",
+                "r": 16
+            }"#,
+        )
+        .expect("adapter config");
+
+        let args = ModelsLoraInspectArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            adapter: adapter_dir.display().to_string(),
+            name: Some("burin-tools".to_string()),
+            provider: Some("local-vllm".to_string()),
+            manifest: None,
+            require_contract_id: false,
+            json: true,
+        };
+        let report = inspect_report(&args).expect("report");
+        assert_eq!(report.base.provider, "vllm");
+        assert_eq!(report.serving.provider, "vllm");
+        assert!(report.compatibility.provider_supports_lora_launch);
+        assert!(report.compatibility.provider_supports_lora_max_rank);
+        assert!(report
+            .launch
+            .harn_local_launch
+            .windows(2)
+            .any(|pair| pair == ["--provider", "vllm"]));
+    }
+
+    #[test]
     fn mismatched_base_model_marks_report_failed() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let adapter_dir = tmp.path().join("other");
@@ -3041,6 +3082,42 @@ mod tests {
         };
         let explicit = plan_report(&explicit_args).expect("explicit report");
         assert_eq!(explicit.training.alpha, 32);
+    }
+
+    #[test]
+    fn lora_plan_canonicalizes_local_vllm_provider_alias() {
+        let args = ModelsLoraPlanArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("local-vllm".to_string()),
+            tool_format: "json".to_string(),
+            corpus: Some("lora-corpus".to_string()),
+            teacher: None,
+            corpus_strategy: "auto".to_string(),
+            method: "qlora".to_string(),
+            trainer: "trl_sft_trainer".to_string(),
+            rank: 24,
+            alpha: None,
+            dropout: 0.1,
+            modules_to_save: Vec::new(),
+            json: true,
+        };
+        let report = plan_report(&args).expect("report");
+        assert_eq!(report.base.provider, "vllm");
+        assert_eq!(report.serving.adapter_binding, "runtime_lora_adapter");
+        assert_eq!(
+            report.serving.lora_module_value_format,
+            "json_with_base_model"
+        );
+        assert!(report
+            .launch
+            .local_launch_command
+            .windows(2)
+            .any(|pair| pair == ["--provider", "vllm"]));
+        assert!(report
+            .launch
+            .local_launch_command
+            .windows(2)
+            .any(|pair| pair == ["--max-lora-rank", "24"]));
     }
 
     #[test]

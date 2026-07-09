@@ -20,7 +20,9 @@ use crate::cli::LocalLaunchArgs;
 use crate::commands::hardware::{collect_hardware_snapshot, HardwareSnapshot};
 
 use super::profile::defaults_for;
-use super::runtime::{local_provider_ids, port_from_base_url, resolve_provider_def};
+use super::runtime::{
+    local_provider_ids, normalize_local_provider_id, port_from_base_url, resolve_provider_def,
+};
 use super::state::{
     ensure_state_dir, write_pid_record, write_selection, LocalSelection, PidRecord,
 };
@@ -119,8 +121,9 @@ pub(crate) async fn run(args: LocalLaunchArgs, base_dir: &Path) -> Result<(), St
         .as_deref()
         .map(str::trim)
         .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
+        .map(normalize_local_provider_id)
         .unwrap_or_else(|| resolved.provider.clone());
+    let provider = normalize_local_provider_id(&provider);
     if !local_provider_ids(None).contains(&provider) {
         return Err(format!(
             "'{provider}' is not a local provider Harn manages (expected one of: {})",
