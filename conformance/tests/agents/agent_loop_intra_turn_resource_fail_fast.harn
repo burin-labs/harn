@@ -458,6 +458,16 @@ fn has_tool_update(events, status: string, category: string, text: string) -> bo
     != nil
 }
 
+fn partial_apply_receipt_at_index(events, skipped_call_index: number) {
+  for event in events {
+    const receipt = event?.raw_output?.partial_apply
+    if receipt?.skipped_call_index == skipped_call_index {
+      return receipt
+    }
+  }
+  return nil
+}
+
 pipeline main() {
   // Default-on fail-fast: second same-file edit is skipped, different file runs.
   const defaulted = run_scripted(same_file_failure_batch())
@@ -480,6 +490,32 @@ pipeline main() {
   assert(
     has_tool_update(defaulted.events, "failed", "rejected_loop", "skipped dependent `edit` call"),
     "synthetic same-resource skip must emit a terminal tool_call_update for the skipped call",
+  )
+  const defaulted_receipt = partial_apply_receipt_at_index(defaulted.events, 1)
+  assert(
+    defaulted_receipt?.kind == "intra_turn_same_resource_partial_apply",
+    "synthetic same-resource skip must expose a typed partial-apply receipt",
+  )
+  assert(
+    defaulted_receipt.executed_prefix_count == 1,
+    "receipt should name the executed prefix length",
+  )
+  assert(
+    defaulted_receipt.skipped_suffix_count == 1,
+    "receipt should count only the skipped same-resource dependent suffix",
+  )
+  assert(defaulted_receipt.skipped_call_index == 1, "receipt should name the skipped sibling index")
+  assert(
+    defaulted_receipt.blocking_prior_tool_call_id != "",
+    "receipt should point to the prior mutating failure that blocked the sibling",
+  )
+  assert(
+    defaulted_receipt.blocking_prior_mutation_status == "unknown",
+    "opaque mutating failures should preserve an unknown mutation status",
+  )
+  assert(
+    defaulted_receipt.next_expected_action == "read_current_resource_then_issue_one_reanchored_call",
+    "receipt should expose the recovery action as structured data",
   )
   // Burin exposes this metadata as `policy`; Harn must treat it as resource annotations.
   const policy_metadata = run_scripted(same_file_failure_batch(), {tools: edit_tools("policy")})
@@ -566,6 +602,11 @@ pipeline main() {
   assert(
     !contains(applied_failure.transcript, "applied src/a.zig second"),
     "the later same-file edit must not run after a mutating failure (stale-anchor hazard)",
+  )
+  const applied_failure_receipt = partial_apply_receipt_at_index(applied_failure.events, 1)
+  assert(
+    applied_failure_receipt.blocking_prior_mutation_status == "applied",
+    "post-apply diagnostics should preserve an applied mutation status in the partial receipt",
   )
   const dependency_params = edit_dependency_key_params()
   const range_params = edit_dependency_range_params()
