@@ -15,9 +15,13 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
     // `--capabilities-overlay`), never the developer's home config or
     // environment. Otherwise a personal `~/.config/harn/providers.toml` would
     // leak aliases/providers into the catalog we validate and ship.
-    let artifact =
-        harn_vm::provider_catalog::artifact_embedded(overlay.as_ref(), capabilities.as_ref());
+    let artifact = harn_vm::provider_catalog::artifact_embedded(
+        overlay.config.as_ref(),
+        capabilities.as_ref(),
+    );
     let logical = harn_vm::provider_catalog::validate_artifact(&artifact);
+    let mut warnings = logical.warnings.clone();
+    warnings.extend(overlay.diagnostics.clone());
     let schema = harn_vm::provider_catalog::schema_value();
     let artifact_value = serde_json::to_value(&artifact)
         .map_err(|error| format!("failed to serialize provider catalog: {error}"))?;
@@ -25,14 +29,18 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
     validate_against_schema(&schema, &artifact_value, &mut schema_errors)?;
     let mut drift = Vec::new();
     if args.check_artifacts {
-        drift = artifact_drift(&args.artifact_dir, overlay.as_ref(), capabilities.as_ref())?;
+        drift = artifact_drift(
+            &args.artifact_dir,
+            overlay.config.as_ref(),
+            capabilities.as_ref(),
+        )?;
     }
 
     if args.json {
         let payload = json!({
             "valid": logical.errors.is_empty() && schema_errors.is_empty() && drift.is_empty(),
             "errors": logical.errors,
-            "warnings": logical.warnings,
+            "warnings": warnings,
             "schema_errors": schema_errors,
             "artifact_drift": drift,
         });
@@ -42,7 +50,7 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
                 .map_err(|error| format!("failed to render validation JSON: {error}"))?
         );
     } else {
-        for warning in &logical.warnings {
+        for warning in &warnings {
             eprintln!("warning: {warning}");
         }
         for error in &logical.errors {
@@ -69,10 +77,13 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
 pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
     let overlay = load_overlay(args.overlay.as_deref())?;
     let capabilities = load_capabilities_overlay(args.capabilities_overlay.as_deref())?;
+    for warning in &overlay.diagnostics {
+        eprintln!("warning: {warning}");
+    }
     // Export from the embedded catalog only (plus any explicit `--overlay` /
     // `--capabilities-overlay`) so the checked-in artifacts are a pure
     // function of the source tree.
-    let artifacts = generated_artifacts(overlay.as_ref(), capabilities.as_ref())?;
+    let artifacts = generated_artifacts(overlay.config.as_ref(), capabilities.as_ref())?;
     if args.check {
         let drift = artifact_drift_from(&args.output_dir, &artifacts)?;
         if drift.is_empty() {
@@ -104,15 +115,31 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
 /// top of the embedded catalog. Returning the parsed overlay (instead of
 /// installing it via `set_user_overrides`) keeps generation hermetic: only this
 /// declared overlay influences the artifacts, never ambient thread-local state.
-fn load_overlay(path: Option<&Path>) -> Result<Option<ProvidersConfig>, String> {
+struct LoadedOverlay {
+    config: Option<ProvidersConfig>,
+    diagnostics: Vec<String>,
+}
+
+fn load_overlay(path: Option<&Path>) -> Result<LoadedOverlay, String> {
     let Some(path) = path else {
-        return Ok(None);
+        return Ok(LoadedOverlay {
+            config: None,
+            diagnostics: Vec::new(),
+        });
     };
     let src = fs::read_to_string(path)
         .map_err(|error| format!("failed to read overlay {}: {error}", path.display()))?;
-    let overlay = harn_vm::llm_config::parse_config_toml(&src)
+    let parsed = harn_vm::llm_config::parse_config_toml_with_diagnostics(&src)
         .map_err(|error| format!("failed to parse overlay {}: {error}", path.display()))?;
-    Ok(Some(overlay))
+    let diagnostics = parsed
+        .diagnostics
+        .into_iter()
+        .map(|diagnostic| format!("{}: {diagnostic}", path.display()))
+        .collect();
+    Ok(LoadedOverlay {
+        config: Some(parsed.config),
+        diagnostics,
+    })
 }
 
 /// Parse an explicit `--capabilities-overlay` capabilities.toml file (the same
@@ -284,5 +311,35 @@ prompt_caching = true
         assert!(after.prompt_cache);
         assert!(!before.modalities.input.contains(&"image".to_string()));
         assert!(after.modalities.input.contains(&"image".to_string()));
+    }
+
+    #[test]
+    fn overlay_loader_preserves_unknown_field_diagnostics() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let overlay_path = tempdir.path().join("providers.toml");
+        fs::write(
+            &overlay_path,
+            r#"
+[models."demo/bad"]
+name = "Bad"
+provider = "demo"
+context_window = 8192
+fast_mode = true
+"#,
+        )
+        .expect("write overlay");
+
+        let overlay = load_overlay(Some(&overlay_path)).expect("overlay parses");
+        assert!(overlay.config.is_some(), "valid config still loads");
+        assert!(
+            overlay
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("fast_mode")
+                    && diagnostic.contains("serving_tiers")
+                    && diagnostic.contains(&overlay_path.display().to_string())),
+            "expected path-qualified migration diagnostic, got {:?}",
+            overlay.diagnostics
+        );
     }
 }
