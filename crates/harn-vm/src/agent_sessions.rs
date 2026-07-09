@@ -173,6 +173,7 @@ pub struct SessionState {
     pub live_controller_id: Option<String>,
     pub completed_turn_checkpoints: Vec<SessionTurnCheckpoint>,
     pub redo_stack: Vec<SessionRedoEntry>,
+    pub text_tool_call_seq: u64,
 }
 
 impl SessionState {
@@ -204,6 +205,7 @@ impl SessionState {
             live_controller_id: None,
             completed_turn_checkpoints: Vec::new(),
             redo_stack: Vec::new(),
+            text_tool_call_seq: 0,
         }
     }
 
@@ -508,6 +510,73 @@ pub(crate) fn pop_current_session() {
 
 pub fn current_session_id() -> Option<String> {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+pub(crate) fn next_text_tool_call_seq(id: &str) -> Option<u64> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let state = map.get_mut(id)?;
+        let seq = state.text_tool_call_seq;
+        state.text_tool_call_seq = state.text_tool_call_seq.checked_add(1).unwrap_or(0);
+        state.touch();
+        Some(seq)
+    })
+}
+
+fn parse_text_tool_call_seq(id: &str) -> Option<u64> {
+    let digits = id.strip_prefix("tc_")?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+fn update_next_text_tool_call_seq(value: &serde_json::Value, next_seq: &mut u64) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                update_next_text_tool_call_seq(item, next_seq);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for key in ["id", "tool_call_id"] {
+                if let Some(seq) = map
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(parse_text_tool_call_seq)
+                {
+                    *next_seq = (*next_seq).max(seq.saturating_add(1));
+                }
+            }
+            for item in map.values() {
+                update_next_text_tool_call_seq(item, next_seq);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn next_text_tool_call_seq_from_json_messages(messages: &[serde_json::Value]) -> u64 {
+    let mut next_seq = 0;
+    for message in messages {
+        update_next_text_tool_call_seq(message, &mut next_seq);
+    }
+    next_seq
+}
+
+fn next_text_tool_call_seq_from_transcript(transcript: &VmValue) -> u64 {
+    let Some(dict) = transcript.as_dict() else {
+        return 0;
+    };
+    let Some(VmValue::List(messages)) = dict.get("messages") else {
+        return 0;
+    };
+    next_text_tool_call_seq_from_json_messages(
+        &messages
+            .iter()
+            .map(crate::llm::helpers::vm_value_to_json)
+            .collect::<Vec<_>>(),
+    )
 }
 
 pub fn current_actor_chain() -> Option<ActorChain> {
@@ -1338,6 +1407,7 @@ pub fn reset_transcript(id: &str) -> bool {
         state.last_transcript_budget_action = None;
         state.completed_turn_checkpoints.clear();
         state.redo_stack.clear();
+        state.text_tool_call_seq = 0;
         state.touch();
         true
     })
@@ -1363,6 +1433,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         src_scratchpad_version,
         src_transcript_budget_policy,
         src_last_transcript_budget_action,
+        src_text_tool_call_seq,
         dst,
     ) = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
@@ -1383,6 +1454,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             src.scratchpad_version,
             src.transcript_budget_policy.clone(),
             src.last_transcript_budget_action.clone(),
+            src.text_tool_call_seq,
             dst,
         ))
     })?;
@@ -1403,6 +1475,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.scratchpad_version = src_scratchpad_version;
             state.transcript_budget_policy = src_transcript_budget_policy;
             state.last_transcript_budget_action = src_last_transcript_budget_action;
+            state.text_tool_call_seq = src_text_tool_call_seq;
             state.touch();
         }
         update_lineage(&mut map, src_id, &dst, None);
@@ -1754,6 +1827,7 @@ pub fn seed_from_messages(
                 crate::llm::helpers::system_prompt_metadata(system_prompt),
             );
         }
+        let text_tool_call_seq = next_text_tool_call_seq_from_json_messages(messages);
         let vm_messages = crate::llm::helpers::json_messages_to_vm(messages);
         let candidate = crate::llm::helpers::new_transcript_with(
             Some(resolved.clone()),
@@ -1764,6 +1838,7 @@ pub fn seed_from_messages(
             ))),
         );
         apply_transcript_with_budget(state, candidate, "seed_from_messages")?;
+        state.text_tool_call_seq = text_tool_call_seq;
         Ok(resolved)
     })
 }
@@ -1857,7 +1932,9 @@ pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {
             ));
         };
         let transcript = transcript_with_session_metadata(transcript, state);
+        let text_tool_call_seq = next_text_tool_call_seq_from_transcript(&transcript);
         apply_transcript_with_budget(state, transcript, "store_transcript")?;
+        state.text_tool_call_seq = state.text_tool_call_seq.max(text_tool_call_seq);
         Ok(())
     })
 }
