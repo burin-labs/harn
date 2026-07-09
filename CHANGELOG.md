@@ -9,6 +9,23 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.7
+
+### Added
+
+- Added a catalog-backed `harn provider tool-scorecard --plan` contract for fixed provider/model tool-call probe matrices.
+
+### Fixed
+
+- **Process cleanup now reaps escaped subprocess descendants.** Foreground
+  command timeouts and cancellations can rediscover descendants that reparent
+  or leave the original process group by using a private Harn cleanup token,
+  preventing inherited stdout/stderr pipes from hanging command completion.
+- Record bounded backend stdout/stderr tails in `harn models lora train`
+  receipts while still streaming trainer output to the console.
+- Preserve visible nested `tool_result.content` text when rendering raw
+  Ollama/Qwen prompts while keeping private nested content filtered.
+
 ## v0.10.6
 
 ### Fixed
