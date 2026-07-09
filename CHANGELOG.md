@@ -9,6 +9,30 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.2
+
+### Added
+
+- `tools.run_command` now honors `env_remove`: a list of variable names stripped
+  from the child's inherited environment before explicit `env` overrides apply
+  (an explicit `env` entry for the same key still wins; no effect with
+  `env_mode: "replace"`). Previously the key was silently ignored, and the
+  v0.10.1 strict request validation rejected it outright.
+
+### Changed
+
+- Add first-class LoRA promotion probe cases to the evidence contract and CLI renderers.
+
+### Fixed
+
+- Make `std/command::command_run_streaming` enforce process timeouts through
+  the background command wait/cancel contract and wait for timeout cancellation
+  results before returning.
+- Recover Harmony-framed text tool calls without dropping valid multi-call batches.
+- **Python boundary checks now reject stale MCP helper shims.** The boundary allowlist no longer
+  permits MCP helper filenames that were already cut over to Harn, and the remaining proxy fixture
+  documents its real TCP-listener constraint instead of pointing at closed cutover work.
+
 ## v0.10.1
 
 ### Added
