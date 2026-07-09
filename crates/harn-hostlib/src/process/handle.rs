@@ -308,13 +308,13 @@ pub fn current_spawner() -> Arc<dyn ProcessSpawner> {
 /// enforced HERE, UNCONDITIONALLY — no `command_policy` on the stack is
 /// required — so a machine/disk/data-destroying command (`rm -rf /`, fork bomb,
 /// `mkfs`, `dd of=<device>`, `chmod -R 000`, `truncate -s 0` of a source file,
-/// redirect-over-source, project-root delete) is rejected before the child is
-/// ever created, on standalone Harn and under every embedder alike. The
-/// recoverable git workflow family (`git reset --hard`, `git clean -fd`,
-/// force-push) is deliberately NOT enforced here: it stays policy-gated so
-/// Harn's own stdlib `git.push --force-with-lease` flow keeps working. The
-/// spec's raw `program`/`args` are classified BEFORE any sandbox wrapper is
-/// applied, so a `sandbox-exec`/`bwrap` prefix can't bury the real command.
+/// redirect-over-source, project-root delete) and the textual git-destructive
+/// family (`git reset --hard`, `git clean -fd`, force-push) is rejected before
+/// the child is ever created, on standalone Harn and under every embedder
+/// alike. Structured git builtins remain the reviewed path for legitimate
+/// force-with-lease workflows. The spec's raw `program`/`args` are classified
+/// BEFORE any sandbox wrapper is applied, so a `sandbox-exec`/`bwrap` prefix
+/// can't bury the real command.
 pub fn spawn_process(spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
     let workspace_roots: Vec<String> = spec
         .cwd
