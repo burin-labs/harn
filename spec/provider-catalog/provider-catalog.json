@@ -490,8 +490,7 @@
       "auth": {
         "style": "bearer",
         "env": [
-          "GITHUB_MODELS_TOKEN",
-          "GITHUB_TOKEN"
+          "GITHUB_MODELS_TOKEN"
         ],
         "required": true
       },

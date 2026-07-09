@@ -901,8 +901,7 @@
       "endpoint_style": "OpenAI-compatible chat completions",
       "classification": "hosted",
       "auth_env": [
-        "GITHUB_MODELS_TOKEN",
-        "GITHUB_TOKEN"
+        "GITHUB_MODELS_TOKEN"
       ],
       "recommended": {
         "selector": "github_models",
