@@ -1487,6 +1487,34 @@ mod tests {
     }
 
     #[test]
+    fn parse_llm_response_keeps_reasoning_only_clean_stop_private_by_default() {
+        // A route with no explicit capability row must not treat a provider
+        // reasoning field as committed answer text. Known exceptions can opt in
+        // with `reasoning_text_promotable = true`.
+        let response = serde_json::json!({
+            "id": "gen-reasoning-only",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "private answer-shaped trace"
+                }
+            }],
+            "usage": { "prompt_tokens": 8, "completion_tokens": 4 }
+        });
+        let result = parse_llm_response(&response, "openai", "synthetic-default", false, false)
+            .expect("reasoning-only stop should parse without visible promotion");
+
+        assert_eq!(result.text, "");
+        assert_eq!(
+            result.thinking.as_deref(),
+            Some("private answer-shaped trace")
+        );
+    }
+
+    #[test]
     fn cache_write_tokens_supports_openrouter_prompt_details_shape() {
         let usage = serde_json::json!({
             "prompt_tokens": 194,

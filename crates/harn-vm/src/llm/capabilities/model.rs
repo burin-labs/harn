@@ -563,7 +563,7 @@ impl Default for Capabilities {
             max_thinking_budget: None,
             reasoning_disable_supported: true,
             reasoning_required_for_tools: false,
-            reasoning_text_promotable: true,
+            reasoning_text_promotable: false,
             reasoning_wire_format: None,
             seed_supported: true,
             top_k_supported: true,
