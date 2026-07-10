@@ -1,0 +1,2 @@
+status=done
+routes=openrouter:openai/gpt-oss-120b:text,cerebras:gpt-oss-120b:native,

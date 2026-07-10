@@ -1526,7 +1526,8 @@ fn __with_resolved_tool_format(opts, resolution) {
   if resolution?.tool_format == nil {
     return opts
   }
-  let next = opts + {tool_format: resolution.tool_format}
+  let next = opts
+    + {tool_format: resolution.tool_format, _tool_format_source: resolution?.source ?? "unresolved"}
   if resolution?.capability_gap_event != nil {
     next = next + {_tool_format_capability_gap: resolution.capability_gap_event}
   }
@@ -1534,6 +1535,58 @@ fn __with_resolved_tool_format(opts, resolution) {
     next = next + {_tool_format_override: resolution.tool_format_override_event}
   }
   return next
+}
+
+fn __auto_tool_format_source(value) {
+  const source = to_string(value ?? "")
+  return source == "capabilities" || source == "fallback" || source == "unresolved"
+}
+
+fn __clear_tool_format_resolution(opts) {
+  return opts
+    .remove("tool_format")
+    .remove("_tool_format_source")
+    .remove("_tool_format_capability_gap")
+    .remove("_tool_format_override")
+}
+
+/**
+ * Merge per-turn LLM overrides while preserving the difference between a
+ * caller-explicit `tool_format` and an auto-resolved format carried from an
+ * earlier route.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_merge_llm_options(base = nil, overrides = nil) {
+  let merged = (base ?? {}) + (overrides ?? {})
+  if __explicit_tool_format(overrides ?? {}) != nil {
+    merged = merged + {_tool_format_source: "explicit"}
+  }
+  return merged
+}
+
+/**
+ * Re-resolve the effective tool_format for the current provider/model route.
+ * Auto-derived formats from a previous route are discarded before resolution;
+ * explicit caller pins are revalidated and preserved unless catalog parity
+ * steers them the same way the provider wire gate will.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_refresh_tool_format_for_route(options = nil) {
+  let opts = options ?? {}
+  if !__has_key(opts, "tool_format") && opts?.tools == nil {
+    return opts
+  }
+  if __auto_tool_format_source(opts?._tool_format_source) {
+    opts = __clear_tool_format_resolution(opts)
+  }
+  const resolution = agent_tool_format_resolution(opts)
+  return __with_resolved_tool_format(opts, resolution)
 }
 
 fn __normalize_iteration_budget(opts) {
@@ -1708,13 +1761,10 @@ pub fn agent_loop_options(options = nil) {
   const defaults = __profile_defaults(profile)
   opts = defaults + opts
   opts = __with_project_context_profile(opts)
-  const tool_format_resolution = agent_tool_format_resolution(opts)
-  if __has_key(opts, "tool_format") || opts?.tools != nil {
-    opts = __with_resolved_tool_format(opts, tool_format_resolution)
-  }
+  opts = agent_refresh_tool_format_for_route(opts)
   if !__has_key(opts, "tool_format")
     && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
-    opts = opts + {tool_format: __fallback_tool_format()}
+    opts = opts + {tool_format: __fallback_tool_format(), _tool_format_source: "fallback"}
   }
   if (opts?.loop_until_done ?? false) && !__has_key(opts, "done_sentinel") {
     opts = opts
