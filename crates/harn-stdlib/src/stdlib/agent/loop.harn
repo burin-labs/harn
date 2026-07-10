@@ -23,6 +23,8 @@ import {
 } from "std/agent/mcp"
 import {
   agent_loop_options,
+  agent_merge_llm_options,
+  agent_refresh_tool_format_for_route,
   agent_sanitize_model_options,
   agent_tool_format,
 } from "std/agent/options"
@@ -2822,13 +2824,13 @@ fn __agent_loop_llm_overrides(opts) {
 
 fn __agent_loop_effective_llm_options(opts) {
   const base = opts ?? {}
-  let merged = base + __agent_loop_llm_overrides(base)
+  let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))
   const call_opts = if merged?._output_schema_repair ?? false {
     merged
   } else {
     __agent_loop_ordinary_turn_llm_options(merged)
   }
-  return agent_sanitize_model_options(call_opts)
+  return agent_sanitize_model_options(agent_refresh_tool_format_for_route(call_opts))
 }
 
 fn __agent_loop_has_terminal_schema_contract(opts) {
