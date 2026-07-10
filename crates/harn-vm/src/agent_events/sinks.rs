@@ -6,6 +6,17 @@ use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic}
 
 use super::AgentEvent;
 
+fn should_persist_event(event: &AgentEvent) -> bool {
+    match event {
+        // Text-mode parsing candidates are live UX signals, not durable tool-call
+        // lifecycle records for replay/audit consumers.
+        AgentEvent::ToolCall { parsing, .. } | AgentEvent::ToolCallUpdate { parsing, .. } => {
+            parsing.is_none()
+        }
+        _ => true,
+    }
+}
+
 /// External consumers of the event stream (e.g. the harn-cli ACP server,
 /// which translates events into JSON-RPC notifications).
 pub trait AgentEventSink: Send + Sync {
@@ -160,6 +171,9 @@ impl EventLogSink {
 
 impl AgentEventSink for JsonlEventSink {
     fn handle_event(&self, event: &AgentEvent) {
+        if !should_persist_event(event) {
+            return;
+        }
         use std::io::Write as _;
         let mut state = self.state.lock().expect("jsonl sink mutex poisoned");
         let index = state.index;
@@ -199,6 +213,9 @@ impl AgentEventSink for JsonlEventSink {
 
 impl AgentEventSink for EventLogSink {
     fn handle_event(&self, event: &AgentEvent) {
+        if !should_persist_event(event) {
+            return;
+        }
         let event_json = match serde_json::to_value(event) {
             Ok(value) => value,
             Err(_) => return,

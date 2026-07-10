@@ -333,6 +333,76 @@ fn jsonl_sink_redacts_tool_payloads_before_write() {
 }
 
 #[test]
+fn jsonl_sink_skips_text_parsing_candidates() {
+    use std::io::{BufRead, BufReader};
+
+    let dir = std::env::temp_dir().join(format!(
+        "harn-candidate-filter-event-log-{}",
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("event_log.jsonl");
+    let sink = JsonlEventSink::open(&path).unwrap();
+
+    sink.handle_event(&AgentEvent::ToolCall {
+        session_id: "s".into(),
+        tool_call_id: "text-cand-0".into(),
+        tool_name: "read".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: serde_json::json!({}),
+        parsing: Some(true),
+        audit: None,
+    });
+    sink.handle_event(&AgentEvent::ToolCallUpdate {
+        session_id: "s".into(),
+        tool_call_id: "text-cand-0".into(),
+        tool_name: "read".into(),
+        status: ToolCallStatus::Failed,
+        raw_output: None,
+        error: Some("candidate aborted".into()),
+        duration_ms: None,
+        execution_duration_ms: None,
+        error_category: Some(ToolCallErrorCategory::ParseAborted),
+        executor: None,
+        parsing: Some(false),
+        raw_input: None,
+        raw_input_partial: None,
+        audit: None,
+    });
+    sink.handle_event(&AgentEvent::ToolCall {
+        session_id: "s".into(),
+        tool_call_id: "call-real".into(),
+        tool_name: "read".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: serde_json::json!({"path": "README.md"}),
+        parsing: None,
+        audit: None,
+    });
+    sink.flush().unwrap();
+
+    assert_eq!(
+        sink.event_count(),
+        1,
+        "skipped candidates must not consume indices"
+    );
+    let file = std::fs::File::open(&path).unwrap();
+    let lines = BufReader::new(file)
+        .lines()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(lines.len(), 1);
+    let value: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+    assert_eq!(value["index"], serde_json::json!(0));
+    assert_eq!(value["tool_call_id"], "call-real");
+    assert!(!lines[0].contains("text-cand-0"));
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
 fn event_log_sink_redacts_tool_payloads_before_append() {
     use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, Topic};
 
@@ -363,6 +433,47 @@ fn event_log_sink_redacts_tool_payloads_before_append() {
             "event-log sink appended secret {secret}: {persisted}"
         );
     }
+}
+
+#[test]
+fn event_log_sink_skips_text_parsing_candidates() {
+    use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, Topic};
+
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    let sink = EventLogSink::new(log.clone(), "s");
+    sink.handle_event(&AgentEvent::ToolCall {
+        session_id: "s".into(),
+        tool_call_id: "text-cand-0".into(),
+        tool_name: "read".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: serde_json::json!({}),
+        parsing: Some(true),
+        audit: None,
+    });
+    sink.handle_event(&AgentEvent::ToolCallUpdate {
+        session_id: "s".into(),
+        tool_call_id: "call-real".into(),
+        tool_name: "read".into(),
+        status: ToolCallStatus::Completed,
+        raw_output: Some(serde_json::json!({"text": "ok"})),
+        error: None,
+        duration_ms: None,
+        execution_duration_ms: None,
+        error_category: None,
+        executor: None,
+        parsing: None,
+        raw_input: None,
+        raw_input_partial: None,
+        audit: None,
+    });
+
+    let topic = Topic::new("observability.agent_events.s").unwrap();
+    let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
+    assert_eq!(events.len(), 1);
+    let persisted = serde_json::to_string(&events[0].1).unwrap();
+    assert!(persisted.contains("call-real"));
+    assert!(!persisted.contains("text-cand-0"));
 }
 
 #[test]
