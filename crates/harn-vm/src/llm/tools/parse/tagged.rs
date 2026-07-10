@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::type_expr::TypeExpr;
-use super::super::{text_tool_call_block, TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT};
+use super::super::{
+    assistant_prose_block, text_tool_call_block, TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT,
+};
 use super::bare::parse_bare_calls_in_body;
 use super::syntax::{
     collapse_blank_lines, find_close_tag, ident_length, match_block, match_tool_call_block,
@@ -185,7 +187,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             if let Some(narration) = recover_tool_call_narration(body, tools_val) {
                 for prose in &narration.prose {
                     assistant_prose_parts.push(prose.clone());
-                    canonical_parts.push(format!("<assistant_prose>\n{prose}\n</assistant_prose>"));
+                    canonical_parts.push(assistant_prose_block(prose));
                 }
                 if let Some(call) = narration.call {
                     let name = call
@@ -351,7 +353,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             let trimmed = body.trim();
             if !trimmed.is_empty() {
                 assistant_prose_parts.push(trimmed.to_string());
-                canonical_parts.push(format!("<assistant_prose>\n{trimmed}\n</assistant_prose>"));
+                canonical_parts.push(assistant_prose_block(trimmed));
             }
             cursor = after;
             last_block_end = after;
@@ -488,8 +490,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                                 .push(format!("<user_response>\n{body}\n</user_response>"));
                         } else {
                             assistant_prose_parts.push(body.to_string());
-                            canonical_parts
-                                .push(format!("<assistant_prose>\n{body}\n</assistant_prose>"));
+                            canonical_parts.push(assistant_prose_block(body));
                         }
                     }
                     cursor = bytes.len();
@@ -1320,7 +1321,7 @@ fn push_assistant_prose(
         return;
     }
     assistant_prose_parts.push(trimmed.to_string());
-    canonical_parts.push(format!("<assistant_prose>\n{trimmed}\n</assistant_prose>"));
+    canonical_parts.push(assistant_prose_block(trimmed));
 }
 
 fn push_user_response(

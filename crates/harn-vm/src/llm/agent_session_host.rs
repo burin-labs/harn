@@ -23,7 +23,10 @@ use crate::vm::Vm;
 
 use super::cost::calculate_cost_for_provider;
 use super::permissions;
-use super::tools::build_assistant_response_message;
+use super::tools::{
+    assistant_prose_block, build_assistant_response_message, render_canonical_call,
+    text_tool_call_block,
+};
 
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
 const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assistant";
@@ -1023,6 +1026,37 @@ fn host_agent_session_messages_builtin(
     Ok(messages)
 }
 
+fn canonical_text_history_for_tool_calls(
+    text: &str,
+    tool_calls: &[serde_json::Value],
+) -> Option<String> {
+    let mut parts = Vec::new();
+    let trimmed = text.trim();
+    if !trimmed.is_empty() {
+        parts.push(assistant_prose_block(trimmed));
+    }
+    for call in tool_calls {
+        let name = call
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim();
+        if name.is_empty() {
+            continue;
+        }
+        let args = call
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        parts.push(text_tool_call_block(&render_canonical_call(name, &args)));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
 fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
     let text = dict_get(llm_result, "text")
         .map(|v| v.display())
@@ -1044,6 +1078,22 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .collect::<Vec<_>>();
     let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
     let agent_tool_format = dict_get(llm_result, "_agent_tool_format").map(|v| v.display());
+    let text_history_requested = agent_tool_format.as_deref() == Some("text");
+    if text_history_requested && !native_calls_json.is_empty() {
+        if let Some(canonical_text) =
+            canonical_text_history_for_tool_calls(&text, &native_calls_json)
+        {
+            let msg = build_assistant_response_message(
+                &canonical_text,
+                &[],
+                &[],
+                thinking.as_deref(),
+                &provider,
+                &model,
+            );
+            return json_to_vm(&msg);
+        }
+    }
     if native_calls_json.is_empty() {
         // gpt-oss / harmony channel-leak backstop. A native-tools model is
         // supposed to split its harmony channels at the wire: analysis ->

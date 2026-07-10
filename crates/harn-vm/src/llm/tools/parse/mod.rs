@@ -19,6 +19,7 @@ pub(crate) use fenced_json::parse_fenced_json_tool_calls;
 pub(crate) use native_json::parse_native_json_tool_calls;
 pub(crate) use streaming::StreamingToolCallDetector;
 pub(crate) use syntax::ident_length;
+pub(crate) use syntax::render_canonical_call;
 pub(crate) use syntax::unescape_heredoc_body;
 pub(crate) use syntax::unwrap_fully_wrapping_heredoc;
 pub(crate) use syntax::{scan_heredoc, HeredocError};

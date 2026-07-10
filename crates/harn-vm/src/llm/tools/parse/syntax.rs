@@ -316,7 +316,7 @@ pub(super) fn match_block<'a>(src: &'a str, start: usize, tag: &str) -> Option<(
 
 /// Render a parsed tool call back to the bare TS syntax used inside
 /// `<tool_call>` tags. Used to build the canonical history entry.
-pub(super) fn render_canonical_call(name: &str, args: &serde_json::Value) -> String {
+pub(crate) fn render_canonical_call(name: &str, args: &serde_json::Value) -> String {
     // JSON object literals are accepted by our tool-call grammar, so
     // pretty-printed JSON is sufficient for replay.
     let rendered_args = serde_json::to_string_pretty(args).unwrap_or_else(|_| "{}".to_string());
