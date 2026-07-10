@@ -1141,14 +1141,14 @@ from `std/agent/options`.
 | `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |
 | `top_logprobs` | int | nil | Request top alternative token log probabilities where supported. |
 | `tools` | list | nil | Registered tool schemas. |
-| `reasoning_policy` / `thinking_policy` | string \| bool | nil | Provider-aware reasoning policy for direct calls. Values: `auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`; `none`, `disabled`, `no_think`, and `nothink` alias to `off`. Explicit `thinking` or `reasoning_effort` wins. |
+| `reasoning_policy` / `thinking_policy` | string \| bool | nil | Provider-aware reasoning policy for direct calls. Values: `auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; `none`, `disabled`, `no_think`, and `nothink` alias to `off`. Explicit `thinking` or `reasoning_effort` wins. |
 | `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize`. |
 | `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. `thinking: false` on Qwen3 routes auto-prepends `/no_think` to the system message (capability-driven; no per-template knowledge needed in scripts). |
 | `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
 | `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |
 | `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` / `"hybrid"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex" \| "hybrid", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "hybrid" \| closure \| {handler}, always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
-| `api_mode` | string | `"chat_completions"` | OpenAI only: set `"responses"` to use Harn's native OpenAI Responses path. Generic OpenAI-compatible providers stay on chat completions. |
+| `api_mode` | string | provider/model default | OpenAI only: set `"responses"` to use Harn's native OpenAI Responses path. GPT-5.6 automatically uses Responses when native function tools and enabled reasoning are combined because Chat Completions rejects that combination. Generic OpenAI-compatible providers stay on chat completions. |
 | `provider_tools` / `hosted_tools` | list | nil | OpenAI Responses only. Provider-hosted tools such as `{type: "web_search"}`, `{type: "file_search", ...}`, or `{type: "mcp", server_label, server_url, require_approval}`. |
 | `previous_response_id`, `response_store`, `background`, `truncation`, `compact`, `include`, `max_tool_calls` | mixed | nil | OpenAI Responses conversation-state, persistence, background, provider truncation/compaction, standalone `/responses/compact`, metadata expansion, and provider-executed tool limit controls. A bool `store` is accepted for direct raw Responses calls, but cache handlers reserve `store: {backend...}` for cache configuration. |
 | `output_format` | dict \| string | `{kind: "text"}` | Provider-agnostic output shape. Dicts: `{kind: "json_schema", schema: {...}, strict: true}`, `{kind: "json_object"}`, `{kind: "text"}`. Strings: `"json_schema"`, `"json_object"`/`"json"`, `"text"`. |
@@ -3816,7 +3816,7 @@ Nine opinionated modules wrap common LLM patterns:
 - `std/llm/defaults` — `pack_for(opts)` and convenience wrappers
   (`pack_chat`, `pack_agent`, `pack_refine`, `pack_judge`,
   `pack_summarize`, `pack_code`, `pack_json`). Calibrated for
-  Anthropic Sonnet/Opus/Haiku 4.x, OpenAI GPT-5/5.5/4o/4.1, Gemini
+  Anthropic Sonnet/Opus/Haiku 4.x, OpenAI GPT-5/5.5/5.6/4o/4.1, Gemini
   2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
 - `std/llm/safe` — `safe_call`, `safe_field`, `dict_get_ci`,
   `with_case_insensitive_keys`, `structured_envelope_or_default`,

@@ -147,6 +147,9 @@
 #   reasoning_none_supported:
 #                     whether the effort surface accepts "none" as a true
 #                     reasoning-off setting.
+#   reasoning_tools_require_responses:
+#                     whether enabled reasoning plus function tools must use
+#                     Responses even though reasoning-off Chat Completions works.
 #   max_thinking_budget:
 #                     max thinkingBudget tokens for high/xhigh/max reasoning
 #                     when the provider takes an explicit token budget

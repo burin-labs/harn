@@ -1,12 +1,63 @@
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 
-# OpenAI section verified 2026-07-02 against the models and pricing docs
+# OpenAI section verified 2026-07-10 against the models and pricing docs
 # (platform.openai.com now redirects to developers.openai.com). Current
-# lineup: gpt-5.5 / gpt-5.5-pro flagship, the gpt-5.4 tier family
-# (base/mini/nano), and gpt-5.3-codex for agentic coding. The entire
+# lineup: the GPT-5.6 family (Sol/Terra/Luna), gpt-5.5 / gpt-5.5-pro,
+# the gpt-5.4 tier family, and gpt-5.3-codex for agentic coding. The entire
 # GPT-4/o-series legacy exits by 2026-10-23 (announced 2026-04-22), and
 # the gpt-5 dated snapshots plus o3/o3-pro shut down 2026-12-11
 # (announced 2026-06-11).
+
+# GPT-5.6 — current OpenAI family. The bare gpt-5.6 API alias routes to Sol;
+# Harn resolves it through the alias catalog so receipts keep the explicit
+# tier. All three models accept none/low/medium/high/xhigh/max effort, support
+# image input, and expose the Responses-first hosted tool surface. Cache writes
+# cost 1.25x standard input; the catalog records that rate separately so cost
+# projections remain correct when usage reports cache_write_tokens.
+[models."gpt-5.6-sol"]
+name = "GPT-5.6 Sol"
+provider = "openai"
+context_window = 1050000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "priority", label = "Priority processing", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 10.00, output_per_mtok = 60.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "lower and more consistent latency for user-facing traffic", reliability = "provider may downgrade unavailable priority capacity", unsuitable_workloads = ["batch"] },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "ga", pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 3.125 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+
+[models."gpt-5.6-terra"]
+name = "GPT-5.6 Terra"
+provider = "openai"
+context_window = 1050000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 3.125 }
+tier = "mid"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "priority", label = "Priority processing", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }, latency = "lower and more consistent latency for user-facing traffic", reliability = "provider may downgrade unavailable priority capacity", unsuitable_workloads = ["batch"] },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "ga", pricing = { input_per_mtok = 1.25, output_per_mtok = 7.50, cache_read_per_mtok = 0.125, cache_write_per_mtok = 1.5625 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+
+[models."gpt-5.6-luna"]
+name = "GPT-5.6 Luna"
+provider = "openai"
+context_window = 1050000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "priority", label = "Priority processing", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }, latency = "lower and more consistent latency for user-facing traffic", reliability = "provider may downgrade unavailable priority capacity", unsuitable_workloads = ["batch"] },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "ga", pricing = { input_per_mtok = 0.50, output_per_mtok = 3.00, cache_read_per_mtok = 0.05, cache_write_per_mtok = 0.625 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
 
 # GPT-5.5 — current OpenAI frontier (Responses + Chat Completions).
 # Reasoning model driven by `reasoning_effort` (none/low/medium/high/

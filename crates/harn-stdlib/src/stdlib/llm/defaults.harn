@@ -24,8 +24,8 @@
 //     <https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7>
 //   - OpenAI reasoning_effort levels:
 //     <https://developers.openai.com/api/docs/guides/reasoning>
-//   - OpenAI GPT-5.5 ("none"-allowed reasoning_effort):
-//     <https://developers.openai.com/api/docs/models/gpt-5.5>
+//   - OpenAI GPT-5.6 ("none"-allowed, no "minimal", through "max"):
+//     <https://developers.openai.com/api/docs/models/gpt-5.6-sol>
 //   - Gemini thinkingBudget (0=off, -1=dynamic, max 24576 Flash / 32768 Pro):
 //     <https://ai.google.dev/gemini-api/docs/thinking>
 //   - Ollama num_predict default 128:
@@ -56,9 +56,9 @@ fn __has_key(d, key) {
  * - Anthropic Opus 4.7+: adaptive thinking; manual budgets return 400 —
  * strip the field. See __maybe_emit_strip for the warn event.
  * - Anthropic Haiku 4.x: no extended-thinking support; omit.
- * - OpenAI GPT-5/5.5: reasoning_effort levels per
- * <https://developers.openai.com/api/docs/guides/reasoning>; "off"
- * maps to "minimal" (safe floor across GPT-5 + GPT-5.5).
+ * - OpenAI GPT-5: reasoning_effort levels per
+ * <https://developers.openai.com/api/docs/guides/reasoning>; "off" maps to
+ * "none" for GPT-5.6 and "minimal" for older GPT-5 models.
  * - OpenAI legacy GPT-4o/4.1: omit.
  * - Gemini 2.5 Flash max thinkingBudget = 24576; Pro max = 32768; Harn
  * lowers typed `thinking` to native generationConfig.thinkingConfig.
@@ -67,7 +67,7 @@ fn __has_key(d, key) {
  * - Ollama qwen3: host injects /no_think capability-side; don't
  * duplicate. All other Ollama: omit.
  */
-fn __thinking_patch(lineage, thinking) {
+fn __thinking_patch(lineage, model, thinking) {
   if lineage == "claude-sonnet-opus" {
     if thinking == "off" {
       return {}
@@ -91,7 +91,9 @@ fn __thinking_patch(lineage, thinking) {
   }
   if lineage == "openai-gpt5" {
     if thinking == "off" {
-      // "minimal" is the safe floor across GPT-5 + GPT-5.5.
+      if model.starts_with("gpt-5.6") {
+        return {reasoning_effort: "none"}
+      }
       return {reasoning_effort: "minimal"}
     }
     if thinking == "low" {
@@ -388,7 +390,7 @@ pub fn pack_for(opts) {
   if lineage == "claude-opus-adaptive" && thinking_req != "auto" && thinking_req != nil {
     __maybe_emit_strip(opts, thinking_req)
   }
-  const t_patch = __thinking_patch(lineage, thinking_req)
+  const t_patch = __thinking_patch(lineage, model, thinking_req)
   result = result + t_patch
   // 4. Task overlay — only fill fields not already set above.
   const task = opts?.task ?? "chat"

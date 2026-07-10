@@ -441,6 +441,8 @@ pub struct Capabilities {
     /// rejects `/v1/chat/completions` (OpenAI `*-codex` models). Harn routes
     /// such calls through the Responses provider automatically.
     pub chat_completions_unsupported: bool,
+    /// See [`ProviderRule::reasoning_tools_require_responses`].
+    pub reasoning_tools_require_responses: bool,
     pub requires_streaming: bool,
     pub reasoning_effort_supported: bool,
     pub reasoning_effort_levels: Vec<String>,
@@ -556,6 +558,7 @@ impl Default for Capabilities {
             chat_template_options_field: None,
             requires_completion_tokens: false,
             chat_completions_unsupported: false,
+            reasoning_tools_require_responses: false,
             requires_streaming: false,
             reasoning_effort_supported: false,
             reasoning_effort_levels: Vec::new(),

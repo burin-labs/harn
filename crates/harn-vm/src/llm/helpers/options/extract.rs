@@ -129,7 +129,7 @@ pub(crate) fn extract_llm_options(
     let fallback_chain = parse_fallback_chain_option(options.as_ref());
     let api_key = resolve_api_key(&provider)?;
     let caps = crate::llm::capabilities::lookup(&provider, &model);
-    let api_mode = parse_api_mode_option(options.as_ref())?;
+    let mut api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "api_mode: \"responses\" is only supported by provider \"openai\"; got provider \"{provider}\""
@@ -472,6 +472,13 @@ pub(crate) fn extract_llm_options(
         None
     };
     let mut provider_tools = parse_provider_tools_option(options.as_ref())?;
+    if provider == "openai"
+        && caps.reasoning_tools_require_responses
+        && thinking.is_enabled()
+        && native_tools.as_ref().is_some_and(|tools| !tools.is_empty())
+    {
+        api_mode = LlmApiMode::Responses;
+    }
     if enforce_capability_gates && !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "provider_tools requires api_mode: \"responses\"",

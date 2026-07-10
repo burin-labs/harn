@@ -51,7 +51,21 @@ id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
 [aliases."openai/mid"]
-id = "gpt-5.4-mini"
+id = "gpt-5.6-terra"
+provider = "openai"
+
+[aliases."openai/frontier"]
+id = "gpt-5.6-sol"
+provider = "openai"
+
+[aliases."openai/small"]
+id = "gpt-5.6-luna"
+provider = "openai"
+
+# Preserve OpenAI's public family alias while resolving to the explicit tier
+# for stable catalog metadata, receipts, and cost projections.
+[aliases."gpt-5.6"]
+id = "gpt-5.6-sol"
 provider = "openai"
 
 # The small tier default stays on an open-weight host by policy (see

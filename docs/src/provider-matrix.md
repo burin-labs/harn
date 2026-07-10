@@ -150,6 +150,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `gpt-4o*` | `any` | no | yes | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-4.1*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*codex*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `gpt-5.6*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*` | `>=5.4` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*` | `>=5.1` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*` | `>=5.0` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
@@ -390,6 +391,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openai` | `gpt-5.4-nano` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-5.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-5.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.6-luna` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.6-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.6-terra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o1-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
