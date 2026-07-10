@@ -277,6 +277,9 @@ pub(crate) struct ProviderToolScorecardArgs {
     /// cases on routes whose catalog/capabilities claim batch support.
     #[arg(long, requires = "plan_from_catalog")]
     pub include_batch_manifest: bool,
+    /// Emit a Markdown artifact instead of JSON or the compact human summary.
+    #[arg(long, conflicts_with = "json")]
+    pub markdown: bool,
     /// Saved JSON output from `harn provider tool-probe`. Repeat the flag to
     /// aggregate several routes into one scorecard.
     #[arg(

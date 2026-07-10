@@ -239,6 +239,7 @@ pub(crate) async fn run_provider_tool_scorecard(args: ProviderToolScorecardArgs)
 }
 
 async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i32 {
+    let render = TOOL_SCORECARD_REPORT_DISPATCH;
     if args.plan_from_catalog {
         let plan = match harn_vm::llm::tool_scorecard::tool_scorecard_plan_from_catalog(
             &args.routes,
@@ -250,7 +251,7 @@ async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i3
                 return 1;
             }
         };
-        return dispatch_provider_report(TOOL_SCORECARD_REPORT_DISPATCH, args.json, &plan).await;
+        return render.render(args.json, args.markdown, &plan).await;
     }
 
     let report = match aggregate_tool_scorecard(&args) {
@@ -260,7 +261,7 @@ async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i3
             return 1;
         }
     };
-    dispatch_provider_report(TOOL_SCORECARD_REPORT_DISPATCH, args.json, &report).await
+    render.render(args.json, args.markdown, &report).await
 }
 
 fn aggregate_tool_scorecard(

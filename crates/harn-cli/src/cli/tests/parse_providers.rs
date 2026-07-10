@@ -1563,6 +1563,7 @@ fn test_parses_provider_tool_scorecard_args() {
     assert!(!args.plan_from_catalog);
     assert!(args.routes.is_empty());
     assert!(!args.include_batch_manifest);
+    assert!(!args.markdown);
     assert!(!args.json);
 }
 
@@ -1587,8 +1588,32 @@ fn test_parses_provider_tool_scorecard_plan_args() {
     assert!(args.plan_from_catalog);
     assert_eq!(args.routes, vec!["anthropic:claude-sonnet-5"]);
     assert!(args.include_batch_manifest);
+    assert!(!args.markdown);
     assert!(args.tool_probe_reports.is_empty());
     assert!(args.json);
+}
+
+#[test]
+fn test_parses_provider_tool_scorecard_markdown_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider",
+        "tool-scorecard",
+        "--plan-from-catalog",
+        "--route",
+        "anthropic:claude-sonnet-5",
+        "--markdown",
+    ]);
+
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::ToolScorecard(args) = provider.command else {
+        panic!("expected provider tool-scorecard command");
+    };
+    assert!(args.plan_from_catalog);
+    assert_eq!(args.routes, vec!["anthropic:claude-sonnet-5"]);
+    assert!(args.markdown);
 }
 
 #[test]

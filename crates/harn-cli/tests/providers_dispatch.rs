@@ -710,6 +710,47 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
 }
 
 #[test]
+fn provider_tool_scorecard_plan_markdown_is_byte_identical_across_runs() {
+    let argv = [
+        "provider",
+        "tool-scorecard",
+        "--plan-from-catalog",
+        "--route",
+        "anthropic:claude-sonnet-5",
+        "--markdown",
+    ];
+
+    let harn = run(&argv, &[]);
+    let repeat = run(&argv, &[]);
+    assert_eq!(
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
+    );
+    assert_eq!(
+        harn.stdout, repeat.stdout,
+        "tool-scorecard plan markdown stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
+    );
+    assert!(
+        harn.stdout
+            .starts_with("# Provider Tool-Call Scorecard Plan"),
+        "unexpected markdown output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("| Provider | Model | Preferred |"),
+        "markdown table missing: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("single_tool_call"),
+        "plan cases missing from markdown output: {}",
+        harn.stdout
+    );
+}
+
+#[test]
 fn provider_tool_scorecard_json_reports_catalog_mismatches() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("text-observed.json");
@@ -782,6 +823,44 @@ fn provider_tool_scorecard_human_reports_catalog_mismatch_codes() {
         harn.stdout
             .contains("catalog_mismatches=preferred_tool_format_disagrees"),
         "unexpected human output: {}",
+        harn.stdout
+    );
+}
+
+#[test]
+fn provider_tool_scorecard_markdown_reports_catalog_mismatch_codes() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("text-observed.json");
+    let (provider, model) = native_preferred_text_supported_scorecard_route();
+    write_tool_probe_report_fixture(
+        &fixture,
+        1,
+        &provider,
+        &model,
+        "parseable_harn_text_tool_call",
+        true,
+    );
+    let path = fixture.to_string_lossy().into_owned();
+    let harn = run(
+        &[
+            "provider",
+            "tool-scorecard",
+            "--tool-probe-report",
+            path.as_str(),
+            "--markdown",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
+    assert!(
+        harn.stdout.starts_with("# Provider Tool-Call Scorecard"),
+        "unexpected markdown output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("preferred_tool_format_disagrees"),
+        "catalog mismatch code missing from markdown output: {}",
         harn.stdout
     );
 }
