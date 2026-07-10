@@ -31,16 +31,20 @@ name: Build release binaries
 #
 #   3. schedule, daily — safety-net warm-up that refreshes the cache
 #      against GitHub's 7-day no-access eviction even during quiet
-#      stretches on main.
+#      stretches on main. Scheduled warms use their own concurrency group
+#      so a later no-op `main` push cannot cancel a full warm matrix and
+#      replace it with a skipped setup-only run.
 #
-#   4. workflow_dispatch — manual (re-)release of an existing tag, e.g.
-#      to recover when binaries were aborted mid-build last time.
+#   4. workflow_dispatch — either manual (re-)release of an existing tag
+#      (e.g. to recover when binaries were aborted mid-build last time) or
+#      an explicit warm-cache-only run on `main`.
 #
 # Cache architecture note. GitHub Actions caches are scoped per-ref: a
 # tag-push run (refs/tags/vX.Y.Z) can only restore caches saved on that
 # exact tag or on the default branch (main). It cannot reach caches
-# saved by another tag's run. So the warm-only events (2 and 3) own the
-# save; tag-push and workflow_dispatch only restore. Swatinem's
+# saved by another tag's run. So the warm-only events (2, 3, and explicit
+# warm-cache workflow_dispatch) own the save; tag-push and release
+# workflow_dispatch only restore. Swatinem's
 # restore-keys prefix-matches on `release-${target}`, so even when
 # Cargo.lock changes between two warms (every release rotates internal
 # `harn-*` crate versions, which propagate into Cargo.lock and rotate
@@ -60,9 +64,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to (re-)release, e.g. v0.7.31. Required for workflow_dispatch.'
-        required: true
+        description: 'Tag to (re-)release, e.g. v0.7.31. Leave empty when warm_cache_only is true.'
+        required: false
         type: string
+      warm_cache_only:
+        description: 'Build the release matrix on main only to refresh default-branch Rust caches.'
+        required: false
+        type: boolean
+        default: false
       force_rebuild:
         description: 'Rebuild/re-publish even when release assets and the versioned container image already exist.'
         required: false
@@ -75,14 +84,16 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ inputs.tag || github.ref_name }}
+  group: build-release-binaries-${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || inputs.tag || github.ref_name }}
   # Tag-push runs must never be cancelled mid-build (the release waits on
   # their artifacts), and neither should manual workflow_dispatch recovery
-  # runs. Warm-cache-only events (push to main, schedule) ARE safe to
-  # cancel: a newer warm fully supersedes the older one, and the cache it
-  # produces will be at least as fresh as the cancelled run's would have
-  # been.
-  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'schedule' }}
+  # runs. Warm-cache-only events ARE safe to cancel inside their own lane:
+  # a newer warm fully supersedes the older one, and the cache it produces
+  # will be at least as fresh as the cancelled run's would have been.
+  # Scheduled/manual warms deliberately do not share the `main` branch-push
+  # group, because a no-op push that skips the matrix must not cancel a full
+  # scheduled warm before it saves the default-branch cache.
+  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -119,6 +130,7 @@ jobs:
         id: resolve
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
@@ -208,7 +220,28 @@ jobs:
           }
 
           BUILD_MATRIX="[]"
-          if [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
+          if [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
+            if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+              echo "::error::warm_cache_only is only valid for workflow_dispatch"
+              exit 1
+            fi
+            if [[ -n "$INPUT_TAG" ]]; then
+              echo "::error::warm_cache_only cannot be combined with a release tag"
+              exit 1
+            fi
+            if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+              echo "::error::warm_cache_only must be dispatched on the main branch so tag releases can restore the saved default-branch cache (got ${REF_TYPE}/${REF_NAME})"
+              exit 1
+            fi
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            if skip_warm_cache_if_release_active; then
+              echo "::notice::Warm-cache-only workflow_dispatch suppressed while release binaries are already building."
+            else
+              SHOULD_BUILD_BINARIES=true
+              BUILD_MATRIX="$FULL_BUILD_MATRIX"
+              echo "::notice::Warm-cache-only workflow_dispatch on main. Building release binaries to refresh default-branch Swatinem rust-cache entries. No sign/notarize/package/upload/release/container."
+            fi
+          elif [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
             IS_RELEASE=true
             if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::expected tag of form vX.Y.Z, got '$REF'"
@@ -250,6 +283,9 @@ jobs:
                 echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / scripts/check_binary_size.harn / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
               fi
             fi
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "::error::workflow_dispatch requires either tag=vX.Y.Z for release recovery or warm_cache_only=true on main"
+            exit 1
           else
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           fi
@@ -501,7 +537,7 @@ jobs:
           shared-key: release-${{ matrix.target }}
           cache-on-failure: true
           cache-bin: false
-          save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
+          save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main') }}
 
       - name: Summarize cache mode
         shell: bash
@@ -510,7 +546,7 @@ jobs:
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.os }}
           HARN_RELEASE_SCCACHE_REQUESTED: ${{ matrix.use_sccache }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
-          HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule') && 'true' || 'false' }}
+          HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
         run: |
           set -euo pipefail
           {
