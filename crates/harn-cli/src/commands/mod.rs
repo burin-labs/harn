@@ -4,6 +4,7 @@ pub(crate) mod canon;
 pub(crate) mod check;
 pub(crate) mod codemod;
 pub(crate) mod config_cmd;
+pub(crate) mod conformance_helper;
 pub(crate) mod connect;
 pub(crate) mod connector;
 pub(crate) mod connector_schema_codegen;

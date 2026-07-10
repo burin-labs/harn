@@ -53,12 +53,9 @@ or subprocess-fixture reason and must be allowlisted in
 
 ## Temporary Harn cutover debt
 
-These files are explicitly issue-backed and should be replaced or deleted rather
-than treated as permanent foreign infrastructure.
-
-- **`conformance/helpers/*.py`** — remaining MCP/proxy conformance helper
-  servers. Harn owns durable fixture serving and capture; tracked by
-  `harn#4219`.
+There is no active repo-owned Python cutover debt. New Python requires a
+concrete foreign-toolchain, generated-binding, external-spec, or subprocess
+fixture reason and must be allowlisted in `check_python_boundary.harn`.
 
 ## Out of scope — stays in its current language
 

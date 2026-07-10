@@ -200,6 +200,12 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(1);
             }
         }
+        Command::ConformanceHelper(args) => {
+            if let Err(error) = commands::conformance_helper::run(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Command::Skill(args) => match args.command {
             SkillCommand::List(list) => commands::skills::run_list(&list),
             SkillCommand::Get(get) => commands::skills::run_get(&get),

@@ -16,6 +16,7 @@ mod check;
 mod codemod;
 mod completion;
 mod config_cmd;
+mod conformance_helper;
 mod connect;
 mod connector;
 mod contracts;
@@ -82,6 +83,9 @@ pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use codemod::CodemodArgs;
 pub(crate) use completion::{CompletionArgs, CompletionShell};
 pub(crate) use config_cmd::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};
+pub(crate) use conformance_helper::{
+    ConformanceHelperArgs, ConformanceHelperCommand, ConformanceHelperHttpProxyArgs,
+};
 pub(crate) use connect::{
     ConnectApiKeyArgs, ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs,
     ConnectLinearArgs, ConnectOAuthArgs, ConnectSetupPlanArgs, ConnectStatusArgs,
@@ -548,6 +552,9 @@ SCRIPTING
     /// `make gen-connector-schemas` target.
     #[command(hide = true, name = "connector-schema-codegen")]
     ConnectorSchemaCodegen(ConnectorSchemaCodegenArgs),
+    /// Internal fixtures used by the conformance suite.
+    #[command(hide = true, name = "conformance-helper")]
+    ConformanceHelper(ConformanceHelperArgs),
 }
 
 #[cfg(test)]
