@@ -296,6 +296,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "models lora promote",
+            schema_version: 1,
+            description:
+                "LoRA promotion probe matrix receipt collected from adapter-loaded behavioral probe outputs.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "models lora train",
             schema_version: 1,
             description:
@@ -531,6 +538,7 @@ mod tests {
             "models lora export",
             "models lora manifest",
             "models lora preflight",
+            "models lora promote",
             "models lora train",
         ] {
             let entry = entries

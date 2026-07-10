@@ -204,6 +204,8 @@ pub(crate) enum ModelsLoraCommand {
     Plan(ModelsLoraPlanArgs),
     /// Check a tool-calling corpus before spending GPU time on LoRA training.
     Preflight(ModelsLoraPreflightArgs),
+    /// Collect adapter-loaded promotion probe outputs into one promotion receipt.
+    Promote(ModelsLoraPromoteArgs),
     /// Render or launch a named LoRA trainer backend and write a training receipt.
     Train(Box<ModelsLoraTrainArgs>),
 }
@@ -386,6 +388,32 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// PEFT modules_to_save entries to plan for.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraPromoteArgs {
+    /// LoRA manifest, train receipt, or plan report containing a promotion evidence contract.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: std::path::PathBuf,
+    /// Directory containing per-case `<case_id>/summary.json` probe outputs.
+    #[arg(
+        long = "probe-root",
+        value_name = "DIR",
+        default_value = "PROMOTION_PROBES"
+    )]
+    pub probe_root: std::path::PathBuf,
+    /// Record a required-but-not-applicable probe as CASE=REASON.
+    #[arg(long = "not-applicable", value_name = "CASE=REASON")]
+    pub not_applicable: Vec<String>,
+    /// Write the promotion probe matrix receipt JSON to this path.
+    #[arg(long, value_name = "PATH")]
+    pub out: Option<std::path::PathBuf>,
+    /// Exit non-zero when required probe evidence is missing or failing.
+    #[arg(long)]
+    pub check: bool,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

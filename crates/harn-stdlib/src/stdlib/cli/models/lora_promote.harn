@@ -1,0 +1,137 @@
+/**
+ * `harn models lora promote` renderer.
+ *
+ * Rust reads manifest/eval receipt files and builds the promotion matrix
+ * receipt. This Harn source owns human presentation and JSON passthrough.
+ *
+ * Inputs:
+ *   HARN_MODELS_LORA_PROMOTE_PAYLOAD_JSON   - compact report JSON.
+ *   HARN_MODELS_LORA_PROMOTE_PAYLOAD_PRETTY - pretty report JSON.
+ *   HARN_OUTPUT_JSON                        - "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_number_string,
+  safe_string,
+} from "std/cli/render"
+
+fn __render_human(harness: Harness, report: dict) {
+  const request = safe_dict(report["request"])
+  const contract = safe_dict(report["contract"])
+  const totals = safe_dict(report["totals"])
+  const cases = safe_list(report["cases"])
+  const warnings = safe_list(report["warnings"])
+  const errors = safe_list(report["errors"])
+  harness.stdio.println("LoRA promotion probe matrix")
+  harness.stdio.println("  manifest: " + safe_string(request["manifest"], ""))
+  harness.stdio.println("  probe root: " + safe_string(request["probe_root"], ""))
+  const out = safe_string(request["out"], "")
+  if out != "" {
+    harness.stdio.println("  receipt: " + out)
+  }
+  harness.stdio.println("  promotion id: " + safe_string(contract["promotion_id"], ""))
+  harness.stdio.println("  LoRA contract: " + safe_string(contract["lora_contract_id"], ""))
+  harness.stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
+  harness.stdio
+    .println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
+  harness.stdio
+    .println(
+    "  totals: passed="
+      + safe_int_string(totals["passed"], "0")
+      + " failed="
+      + safe_int_string(totals["failed"], "0")
+      + " missing="
+      + safe_int_string(totals["missing"], "0")
+      + " not_applicable="
+      + safe_int_string(totals["not_applicable"], "0")
+      + " cost_usd="
+      + safe_number_string(totals["total_cost_usd"], "0"),
+  )
+  if len(cases) > 0 {
+    harness.stdio.println("  probe cases:")
+    for item in cases {
+      const probe = safe_dict(item)
+      const summary_path = safe_string(probe["summary_path"], "")
+      let line = safe_string(probe["case_id"], "")
+        + " "
+        + safe_string(probe["status"], "")
+        + " "
+        + safe_int_string(probe["passed_cases"], "0")
+        + "/"
+        + safe_int_string(probe["total_cases"], "0")
+      const reason = safe_string(probe["reason"], "")
+      if reason != "" {
+        line = line + " - " + reason
+      }
+      if summary_path != "" {
+        line = line + " (" + summary_path + ")"
+      }
+      harness.stdio.println("    - " + line)
+      print_list(
+        harness,
+        "probe " + safe_string(probe["case_id"], "") + " failures",
+        safe_list(probe["failed_case_reasons"]),
+      )
+    }
+  }
+  print_list(harness, "warnings", warnings)
+  print_list(harness, "errors", errors)
+  const result = if safe_bool(report["ok"], false) {
+    "PASS"
+  } else {
+    "FAIL"
+  }
+  harness.stdio.println("  result: " + result)
+}
+
+fn __render_json(report: dict) -> string {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
+    cli_json_envelope({schema_version: 1, ok: true, data: report})
+  } else {
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "lora_promotion_probe_matrix_failed",
+          message: "LoRA promotion probe matrix is incomplete or failing.",
+          details: report,
+        },
+      },
+    )
+  }
+  return json_stringify_pretty(envelope)
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_MODELS_LORA_PROMOTE_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PROMOTE_PAYLOAD_JSON not set")
+    return 70
+  }
+  const report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse LoRA promote payload: " + to_string(e))
+    return 70
+  }
+  const ok = safe_bool(report["ok"], false)
+  const request = safe_dict(report["request"])
+  const check = safe_bool(request["check"], false)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness, report)
+  }
+  if ok || !check {
+    return 0
+  }
+  return 1
+}

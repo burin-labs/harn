@@ -719,6 +719,54 @@ fn test_parses_models_lora_train_args() {
 }
 
 #[test]
+fn test_parses_models_lora_promote_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "promote",
+        "--manifest",
+        "./adapters/burin-tools.manifest.json",
+        "--probe-root",
+        "./promotions/probes",
+        "--not-applicable",
+        "parallel_tool_calls=route does not advertise parallel tools",
+        "--out",
+        "./promotions/probe-matrix.receipt.json",
+        "--check",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Promote(args) = args.command else {
+        panic!("expected models lora promote command");
+    };
+    assert_eq!(
+        args.manifest.display().to_string(),
+        "./adapters/burin-tools.manifest.json"
+    );
+    assert_eq!(args.probe_root.display().to_string(), "./promotions/probes");
+    assert_eq!(
+        args.not_applicable,
+        vec!["parallel_tool_calls=route does not advertise parallel tools"]
+    );
+    assert_eq!(
+        args.out
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./promotions/probe-matrix.receipt.json")
+    );
+    assert!(args.check);
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_lora_train_recipe_args() {
     let cli = Cli::parse_from([
         "harn",

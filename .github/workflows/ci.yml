@@ -713,7 +713,7 @@ jobs:
   windows-cross-check:
     name: Windows cross-compile check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -728,14 +728,14 @@ jobs:
         # toolchain action's `targets:` — that adds it to the wrong toolchain.
         run: rustup target add x86_64-pc-windows-gnu
       - name: Install mingw-w64 cross toolchain
-        # gcc-mingw-w64-x86-64 provides x86_64-w64-mingw32-{gcc,g++,ar}, which
-        # cc-rs / the C build scripts (ring, aws-lc-sys) use to cross-compile.
-        # cmake + nasm are needed by aws-lc-sys's assembly/build; they are the
-        # only non-mingw prerequisites this cross-check adds.
+        # Use the POSIX thread-model packages directly instead of the broad
+        # target meta packages; the meta packages also pull the unused Win32
+        # compiler/runtime variants and can exhaust the required gate timeout
+        # on slow hosted-runner apt mirrors.
         uses: ./.github/actions/apt-install
         with:
-          packages: gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm cmake
-          check-command: x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++ nasm cmake
+          packages: binutils-mingw-w64-x86-64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix nasm cmake
+          check-command: x86_64-w64-mingw32-ar x86_64-w64-mingw32-gcc-posix x86_64-w64-mingw32-g++-posix nasm cmake
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -746,13 +746,13 @@ jobs:
           # cargo check does not link; keep sccache out of the way and let
           # rust-cache handle incrementality (mirrors the Windows job's rationale).
           CARGO_INCREMENTAL: "0"
-          # Point the C build scripts + linker at the mingw toolchain explicitly
-          # (matches the validated local repro) rather than relying on cc-rs
-          # target auto-detection.
-          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
-          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
+          # Point the C build scripts + linker at the mingw POSIX toolchain
+          # explicitly rather than relying on cc-rs target auto-detection or
+          # update-alternatives state from broader meta packages.
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc-posix
+          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++-posix
           AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc-posix
         run: |
           # --workspace (libs + bins + build scripts), not --all-targets: keep
           # the required gate reliable by not depending on dev-only deps
