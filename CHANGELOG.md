@@ -9,6 +9,19 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.8
+
+### Removed
+
+- **Provider catalog DeepSeek V4 cutover (#4059).** The direct DeepSeek catalog
+  no longer exposes the retiring `deepseek-chat` and `deepseek-reasoner` IDs; use
+  `deepseek-v4-flash` or `deepseek-v4-pro` instead.
+
+### Fixed
+
+- Preserve Fireworks gpt-oss native tool calls in text-locked sessions as
+  canonical text tool-call history instead of blank assistant turns.
+
 ## v0.10.7
 
 ### Added
