@@ -1,0 +1,27 @@
+import "std/schema"
+
+pipeline test(task) {
+  const user_schema = schema_closed_object(
+    {
+      name: schema_field(schema_string() + {min_length: 2}),
+      role: schema_default(schema_string(), "user"),
+    },
+    {title: "ClosedUser"},
+  )
+  const validator = schema_validator(user_schema, {apply_defaults: true})
+  __io_println(validator.is({name: "Ada"}))
+  __io_println(!validator.is({name: "Ada", extra: true}))
+  const bad_report = validator.report({name: "Ada", extra: true})
+  __io_println(!bad_report.ok)
+  __io_println(contains(join(bad_report.errors, "\n"), "unexpected key 'extra'"))
+  __io_println(validator.expect({name: "Ada"}).role)
+  __io_println(validator.json_schema().additionalProperties)
+  const alias_schema = schema_strict_object(
+    {mode: schema_enum(["fast", "safe"])},
+    {additional_properties: schema_string()},
+  )
+  const alias_validator = schema_validator(alias_schema)
+  __io_println(alias_validator.is({mode: "fast"}))
+  __io_println(!alias_validator.is({mode: "fast", extra: "disallowed"}))
+  __io_println(alias_validator.json_schema().additionalProperties)
+}

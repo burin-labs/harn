@@ -842,7 +842,10 @@ const summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
 For schema-first code, `schema_report(value, schema, apply_defaults?)` returns
 `{ok, message, errors, issues, value?}` without throwing. Import `std/schema`
 for builder/composition helpers such as `schema_object(...)`,
-`get_typed_report(...)`, and `get_typed_value(...)`.
+`schema_closed_object(...)`, `schema_strict_object(...)`,
+`get_typed_report(...)`, and `get_typed_value(...)`. Prefer closed/strict
+objects for option bags, receipts, structured LLM outputs, and host contracts
+that should reject unknown keys.
 
 Import `std/slug` for human-readable non-secret identifiers:
 `random_slug({segments: 3})`, `slug_from(value, {salt: "ci"})`, and
