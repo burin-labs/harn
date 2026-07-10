@@ -100,6 +100,7 @@ fn run_with_bridge_in_parent_workspace(
                 harn_vm::stdlib::process::set_thread_execution_context(Some(
                     harn_vm::orchestration::RunExecutionRecord {
                         cwd: Some(parent_cwd),
+                        project_root: None,
                         source_dir: None,
                         env: BTreeMap::new(),
                         adapter: None,

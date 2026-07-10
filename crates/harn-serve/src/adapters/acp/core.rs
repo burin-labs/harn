@@ -103,6 +103,7 @@ impl AcpServer {
         source_path: Option<&Path>,
         target_pipeline: Option<&str>,
         cwd: &Path,
+        project_root: &Path,
         mode_id: &str,
     ) -> Result<(Option<harn_vm::VmBaseline>, Option<bool>, u64), String> {
         let Some(source_path) = source_path else {
@@ -115,9 +116,7 @@ impl AcpServer {
             .and_then(|m| m.modified())
             .ok()
             .map(|mtime| (source_path.to_path_buf(), mtime));
-        let source_parent = source_path.parent().unwrap_or(cwd);
-        let project_root = harn_vm::stdlib::process::find_project_root(source_parent)
-            .or_else(|| harn_vm::stdlib::process::find_project_root(cwd));
+        let project_root = Some(project_root.to_path_buf());
 
         if let Some((ref path, mtime)) = cache_key {
             if let Some(entry) = self.vm_baseline_cache.as_ref() {
@@ -142,6 +141,7 @@ impl AcpServer {
             source,
             source_path,
             cwd,
+            project_root.as_deref(),
             self.runtime_configurator.clone(),
         )
         .await?;

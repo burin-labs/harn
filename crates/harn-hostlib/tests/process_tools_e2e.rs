@@ -380,6 +380,7 @@ fn real_run_command_sandbox_scope_allows_temp_cwd_outside_empty_policy_fallback(
     harn_vm::stdlib::process::set_thread_execution_context(Some(
         harn_vm::orchestration::RunExecutionRecord {
             cwd: Some(execution_root.path().to_string_lossy().into_owned()),
+            project_root: None,
             source_dir: None,
             env: Default::default(),
             adapter: None,

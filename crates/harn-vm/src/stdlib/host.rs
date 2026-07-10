@@ -669,14 +669,18 @@ async fn dispatch_builtin_host_operation(
             Ok(VmValue::Nil)
         }
         ("workspace", "project_root") => {
-            // Standalone fallback: prefer HARN_PROJECT_ROOT, then the
-            // current working directory. Pipelines call this very early so
-            // crashing here would block any debug-launched script.
-            let path = std::env::var("HARN_PROJECT_ROOT").unwrap_or_else(|_| {
-                std::env::current_dir()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default()
-            });
+            // Standalone fallback: prefer the typed execution project root,
+            // then the legacy env root, then the current working directory.
+            // Pipelines call this very early, so crashing here would block any
+            // debug-launched script.
+            let path = crate::stdlib::process::project_root_path()
+                .map(|root| root.display().to_string())
+                .or_else(|| std::env::var("HARN_PROJECT_ROOT").ok())
+                .unwrap_or_else(|| {
+                    std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
+                });
             Ok(VmValue::String(arcstr::ArcStr::from(path)))
         }
         ("workspace", "cwd") => {
@@ -1434,6 +1438,7 @@ mod tests {
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(dir.path().to_string_lossy().into_owned()),
+                project_root: None,
                 source_dir: Some(dir.path().join("src").to_string_lossy().into_owned()),
                 env: std::collections::BTreeMap::new(),
                 adapter: None,
@@ -1451,6 +1456,36 @@ mod tests {
         );
 
         crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    #[test]
+    fn workspace_project_root_fallback_prefers_execution_context_project_root() {
+        run_host_async_test(|| async {
+            let project = tempfile::tempdir().expect("project root");
+            let cwd = tempfile::tempdir().expect("cwd");
+            crate::stdlib::process::set_thread_execution_context(Some(
+                crate::orchestration::RunExecutionRecord {
+                    cwd: Some(cwd.path().to_string_lossy().into_owned()),
+                    project_root: Some(project.path().to_string_lossy().into_owned()),
+                    source_dir: None,
+                    env: std::collections::BTreeMap::new(),
+                    adapter: None,
+                    repo_path: None,
+                    worktree_path: None,
+                    branch: None,
+                    base_ref: None,
+                    cleanup: None,
+                },
+            ));
+
+            let result =
+                dispatch_host_operation("workspace", "project_root", &crate::value::DictMap::new())
+                    .await
+                    .expect("workspace.project_root result");
+
+            crate::stdlib::process::set_thread_execution_context(None);
+            assert_eq!(result.display(), project.path().display().to_string());
+        });
     }
 
     #[test]

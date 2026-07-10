@@ -867,6 +867,12 @@ impl Vm {
         self.project_root = Some(root.to_path_buf());
     }
 
+    /// Get only the explicit or auto-detected project root, without falling
+    /// back to `source_dir`.
+    pub(crate) fn explicit_project_root(&self) -> Option<&std::path::Path> {
+        self.project_root.as_deref()
+    }
+
     /// Get the project root directory, falling back to source_dir.
     pub fn project_root(&self) -> Option<&std::path::Path> {
         self.project_root.as_deref().or(self.source_dir.as_deref())

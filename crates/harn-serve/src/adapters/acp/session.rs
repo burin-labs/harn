@@ -172,6 +172,11 @@ impl AcpServer {
             return;
         }
         let reason = string_param(params, "reason", "reason");
+        let next_project_root = session_project_root_for_cwd(&PathBuf::from(&path));
+        if let Err(message) = self.ensure_session_root_can_move(&session_id, &next_project_root) {
+            self.send_error(id, -32602, &message);
+            return;
+        }
         let anchor = harn_vm::workspace_anchor::WorkspaceAnchor {
             primary: PathBuf::from(path),
             additional_roots: Vec::new(),
@@ -190,6 +195,10 @@ impl AcpServer {
                 return;
             }
         };
+        if let Err(message) = self.sync_session_root_from_workspace_anchor(&session_id) {
+            self.send_error(id, -32602, &message);
+            return;
+        }
         self.send_response(
             id,
             serde_json::json!({
@@ -199,6 +208,59 @@ impl AcpServer {
                 "workspaceAnchor": outcome.current.to_json(),
             }),
         );
+    }
+
+    pub(super) fn ensure_session_root_can_move(
+        &self,
+        session_id: &str,
+        next_project_root: &Path,
+    ) -> Result<(), String> {
+        let Some(session) = self.sessions.get(session_id) else {
+            return Err(format!("Unknown session: {session_id}"));
+        };
+        if session.project_root.as_path() == next_project_root {
+            return Ok(());
+        }
+        #[cfg(feature = "hostlib")]
+        {
+            let status = harn_hostlib::fs::staged_status(session_id).map_err(|error| {
+                format!("failed to inspect staged filesystem state for {session_id}: {error}")
+            })?;
+            if !status.pending_writes.is_empty() {
+                return Err(format!(
+                    "cannot change session project root with {} staged filesystem change(s) pending; commit or discard staged changes first",
+                    status.pending_writes.len()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn sync_session_root_from_workspace_anchor(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(), String> {
+        let Some(anchor) = harn_vm::agent_sessions::workspace_anchor(session_id) else {
+            return Ok(());
+        };
+        let next_cwd = anchor.primary;
+        let next_project_root = session_project_root_for_cwd(&next_cwd);
+        let needs_update = match self.sessions.get(session_id) {
+            Some(session) => session.cwd != next_cwd || session.project_root != next_project_root,
+            None => return Err(format!("Unknown session: {session_id}")),
+        };
+        if !needs_update {
+            return Ok(());
+        }
+        self.ensure_session_root_can_move(session_id, &next_project_root)?;
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return Err(format!("Unknown session: {session_id}"));
+        };
+        session.cwd = next_cwd;
+        session.project_root = next_project_root;
+        #[cfg(feature = "hostlib")]
+        harn_hostlib::fs::configure_session_root(session_id, &session.project_root);
+        Ok(())
     }
 
     /// Read the configured pipeline source for `session_id`. Returns
@@ -388,10 +450,15 @@ impl AcpServer {
             .map(|session| session.budget.clone())
             .unwrap_or_default();
         let cancellation = self.register_session_cancellation(&new_session_id);
+        let fork_cwd = harn_vm::agent_sessions::workspace_anchor(&new_session_id)
+            .map(|anchor| anchor.primary)
+            .unwrap_or(src_cwd);
+        let project_root = session_project_root_for_cwd(&fork_cwd);
         self.sessions.insert(
             new_session_id.clone(),
             Session {
-                cwd: src_cwd,
+                cwd: fork_cwd,
+                project_root,
                 cancellation,
                 host_bridge: None,
                 inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),

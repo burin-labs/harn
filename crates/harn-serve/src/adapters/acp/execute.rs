@@ -21,6 +21,7 @@ pub(super) struct VmSetup<'a> {
     pub baseline_prepare_ms: u64,
     pub source_path: Option<&'a Path>,
     pub cwd: &'a Path,
+    pub project_root: Option<&'a Path>,
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 }
 
@@ -32,7 +33,14 @@ fn pipeline_name_for(source_path: Option<&Path>) -> String {
         .to_string()
 }
 
-fn acp_project_root(source_path: Option<&Path>, cwd: &Path) -> Option<PathBuf> {
+fn acp_project_root(
+    source_path: Option<&Path>,
+    cwd: &Path,
+    explicit_project_root: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(root) = explicit_project_root {
+        return Some(std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
+    }
     if let Ok(root) = std::env::var("HARN_PROJECT_ROOT") {
         if !root.trim().is_empty() {
             return Some(PathBuf::from(root));
@@ -48,12 +56,13 @@ async fn configure_stable_vm(
     source: &str,
     source_path: Option<&Path>,
     cwd: &Path,
+    project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<String, String> {
     harn_vm::register_vm_stdlib(vm);
     // Metadata/store rooted at the launched project when supplied by the host,
     // otherwise at harn.toml when present.
-    let project_root = acp_project_root(source_path, cwd);
+    let project_root = acp_project_root(source_path, cwd, project_root);
     let store_base = project_root.as_deref().unwrap_or(cwd);
     harn_vm::register_store_builtins(vm, store_base);
     harn_vm::register_metadata_builtins(vm, store_base);
@@ -83,6 +92,7 @@ pub(super) async fn prepare_vm_baseline(
     source: &str,
     source_path: &Path,
     cwd: &Path,
+    project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<harn_vm::VmBaseline, String> {
     let mut vm = harn_vm::Vm::new();
@@ -91,6 +101,7 @@ pub(super) async fn prepare_vm_baseline(
         source,
         Some(source_path),
         cwd,
+        project_root,
         runtime_configurator,
     )
     .await?;
@@ -120,6 +131,7 @@ pub(super) async fn execute_chunk(
             setup.source,
             setup.source_path,
             setup.cwd,
+            setup.project_root,
             setup.runtime_configurator,
         )
         .await?;
@@ -206,6 +218,7 @@ pub(super) async fn execute_chunk(
 
     let execution = harn_vm::orchestration::RunExecutionRecord {
         cwd: Some(setup.cwd.to_string_lossy().into_owned()),
+        project_root: setup.project_root.map(|p| p.to_string_lossy().into_owned()),
         source_dir: setup
             .source_path
             .and_then(|p| p.parent())
@@ -333,8 +346,27 @@ mod tests {
         let source_path = pipeline_root.path().join("agent.harn");
 
         assert_eq!(
-            acp_project_root(Some(&source_path), pipeline_root.path()),
+            acp_project_root(Some(&source_path), pipeline_root.path(), None),
             Some(host_root.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn acp_project_root_prefers_explicit_session_root_over_env() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let host_root = tempfile::tempdir().expect("host root");
+        let session_root = tempfile::tempdir().expect("session root");
+        let pipeline_root = tempfile::tempdir().expect("pipeline root");
+        let _env = ScopedEnvVar::set(host_root.path());
+        let source_path = pipeline_root.path().join("agent.harn");
+
+        assert_eq!(
+            acp_project_root(
+                Some(&source_path),
+                pipeline_root.path(),
+                Some(session_root.path())
+            ),
+            Some(session_root.path().to_path_buf())
         );
     }
 
@@ -349,7 +381,7 @@ mod tests {
         let source_path = nested.join("agent.harn");
 
         assert_eq!(
-            acp_project_root(Some(&source_path), &nested),
+            acp_project_root(Some(&source_path), &nested, None),
             Some(project_root.path().to_path_buf())
         );
     }

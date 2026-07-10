@@ -1639,6 +1639,30 @@ fn current_mcp_roots_prefers_project_root_over_child_cwd() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+#[test]
+fn current_mcp_roots_prefers_explicit_project_root_without_harn_toml() {
+    let root = std::env::temp_dir().join(format!("harn-mcp-explicit-{}", uuid::Uuid::now_v7()));
+    let child = root.join("nested");
+    std::fs::create_dir_all(&child).unwrap();
+
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(child.to_string_lossy().into_owned()),
+            project_root: Some(root.to_string_lossy().into_owned()),
+            source_dir: Some(child.to_string_lossy().into_owned()),
+            ..Default::default()
+        },
+    ));
+
+    let roots = current_mcp_roots();
+    let expected_root = std::fs::canonicalize(&root).unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].path, expected_root.to_string_lossy());
+
+    crate::stdlib::process::reset_process_state();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn handle_inbound_routes_roots_list() {
     let root = std::env::temp_dir().join(format!("harn-mcp-roots-{}", uuid::Uuid::now_v7()));

@@ -23,13 +23,12 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
-        let (cwd, cancellation, current_mode_id, inject_state, session_budget) =
+        let (cancellation, current_mode_id, inject_state, session_budget) =
             match self.sessions.get_mut(&session_id) {
                 Some(s) => {
                     s.cancellation.begin_prompt();
                     s.host_bridge = None;
                     (
-                        s.cwd.clone(),
                         s.cancellation.clone(),
                         s.current_mode_id.clone(),
                         s.inject_state.clone(),
@@ -51,8 +50,19 @@ impl AcpServer {
             self.actor_chain(),
         );
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+        if let Err(message) = self.sync_session_root_from_workspace_anchor(&session_id) {
+            self.send_prompt_error(&session_id, id, &message);
+            return;
+        }
+        let (cwd, project_root) = match self.sessions.get(&session_id) {
+            Some(session) => (session.cwd.clone(), session.project_root.clone()),
+            None => {
+                self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                return;
+            }
+        };
         #[cfg(feature = "hostlib")]
-        harn_hostlib::fs::configure_session_root(&session_id, &cwd);
+        harn_hostlib::fs::configure_session_root(&session_id, &project_root);
         let before_turn_transcript = harn_vm::agent_sessions::transcript(&session_id)
             .unwrap_or_else(|| {
                 harn_vm::agent_sessions::snapshot(&session_id).unwrap_or(harn_vm::VmValue::Nil)
@@ -226,6 +236,7 @@ impl AcpServer {
                 source_path.as_deref(),
                 target_pipeline.as_deref(),
                 &cwd,
+                &project_root,
                 &current_mode_id,
             )
             .await
@@ -258,6 +269,7 @@ impl AcpServer {
                 baseline_prepare_ms: vm_baseline_prepare_ms,
                 source_path: source_path.as_deref(),
                 cwd: &cwd,
+                project_root: Some(&project_root),
                 runtime_configurator: self.runtime_configurator.clone(),
             },
         )

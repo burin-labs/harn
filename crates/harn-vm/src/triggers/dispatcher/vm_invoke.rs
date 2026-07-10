@@ -180,6 +180,9 @@ impl DispatchProcessContextGuard {
             .source_dir
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned());
+        let fallback_project_root = vm
+            .explicit_project_root()
+            .map(|path| path.to_string_lossy().into_owned());
         let fallback_cwd = vm
             .project_root()
             .map(|path| path.to_string_lossy().into_owned());
@@ -190,6 +193,9 @@ impl DispatchProcessContextGuard {
                 if context.cwd.is_none() {
                     context.cwd = fallback_cwd;
                 }
+                if context.project_root.is_none() {
+                    context.project_root = fallback_project_root;
+                }
                 if context.source_dir.is_none() {
                     context.source_dir = execution_source_dir;
                 }
@@ -198,6 +204,7 @@ impl DispatchProcessContextGuard {
             None if fallback_cwd.is_some() || execution_source_dir.is_some() => {
                 Some(crate::orchestration::RunExecutionRecord {
                     cwd: fallback_cwd,
+                    project_root: fallback_project_root,
                     source_dir: execution_source_dir,
                     env: Default::default(),
                     adapter: None,
@@ -236,6 +243,7 @@ mod tests {
     ) -> crate::orchestration::RunExecutionRecord {
         crate::orchestration::RunExecutionRecord {
             cwd: cwd.map(|path| path.to_string_lossy().into_owned()),
+            project_root: None,
             source_dir: source_dir.map(|path| path.to_string_lossy().into_owned()),
             env: Default::default(),
             adapter: None,
@@ -270,6 +278,7 @@ mod tests {
                 current.source_dir.as_deref(),
                 Some(handler_source.path().to_string_lossy().as_ref())
             );
+            assert!(current.project_root.is_none());
         }
 
         let restored = crate::stdlib::process::current_execution_context().unwrap();
@@ -299,9 +308,49 @@ mod tests {
                 current.source_dir.as_deref(),
                 Some(handler_source.path().to_string_lossy().as_ref())
             );
+            assert!(
+                current.project_root.is_none(),
+                "source_dir fallback must not become a typed project_root"
+            );
         }
 
         assert!(crate::stdlib::process::current_execution_context().is_none());
+        crate::stdlib::process::reset_process_state();
+    }
+
+    #[test]
+    fn dispatch_context_installs_explicit_project_root_without_overwriting_cwd() {
+        crate::stdlib::process::reset_process_state();
+        let existing_cwd = tempfile::tempdir().unwrap();
+        let explicit_root = tempfile::tempdir().unwrap();
+        let handler_source = tempfile::tempdir().unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(run_record(
+            Some(existing_cwd.path()),
+            None,
+        )));
+        let mut vm = crate::vm::Vm::new();
+        vm.set_source_dir(handler_source.path());
+        vm.set_project_root(explicit_root.path());
+
+        {
+            let _guard = DispatchProcessContextGuard::install(&vm);
+            let current = crate::stdlib::process::current_execution_context().unwrap();
+            assert_eq!(
+                current.cwd.as_deref(),
+                Some(existing_cwd.path().to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                current.project_root.as_deref(),
+                Some(explicit_root.path().to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                current.source_dir.as_deref(),
+                Some(handler_source.path().to_string_lossy().as_ref())
+            );
+        }
+
+        let restored = crate::stdlib::process::current_execution_context().unwrap();
+        assert!(restored.project_root.is_none());
         crate::stdlib::process::reset_process_state();
     }
 }

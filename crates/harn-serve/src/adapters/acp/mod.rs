@@ -50,7 +50,8 @@ pub use schema::{
 };
 use sessions::{
     apply_session_budget_rearm, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_prompt, Session, SessionBudget, SessionCancellation, SessionInfo,
+    prepare_session_prompt, session_project_root_for_cwd, Session, SessionBudget,
+    SessionCancellation, SessionInfo,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{

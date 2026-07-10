@@ -1129,6 +1129,7 @@ pub(crate) fn run_child_record_from_worker_metadata(
 #[serde(default)]
 pub struct RunExecutionRecord {
     pub cwd: Option<String>,
+    pub project_root: Option<String>,
     pub source_dir: Option<String>,
     pub env: BTreeMap<String, String>,
     pub adapter: Option<String>,

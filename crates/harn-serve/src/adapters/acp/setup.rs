@@ -396,10 +396,12 @@ impl AcpServer {
 
     pub(super) fn insert_session(&mut self, session_id: String, cwd: PathBuf, info: SessionInfo) {
         let cancellation = self.register_session_cancellation(&session_id);
+        let project_root = session_project_root_for_cwd(&cwd);
         self.sessions.insert(
             session_id.clone(),
             Session {
                 cwd,
+                project_root,
                 cancellation,
                 host_bridge: None,
                 inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
@@ -416,7 +418,7 @@ impl AcpServer {
         );
         #[cfg(feature = "hostlib")]
         if let Some(session) = self.sessions.get(&session_id) {
-            harn_hostlib::fs::configure_session_root(&session_id, &session.cwd);
+            harn_hostlib::fs::configure_session_root(&session_id, &session.project_root);
         }
     }
 }
