@@ -699,6 +699,10 @@ fn test_parses_models_lora_train_args() {
     assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
     assert_eq!(args.target_metadata, vec!["lane=structured"]);
     assert_eq!(args.modules_to_save, vec!["embed_tokens", "lm_head"]);
+    assert_eq!(args.backend_recipe, "explicit_argv");
+    assert!(args.backend_runner.is_empty());
+    assert!(args.backend_script.is_none());
+    assert!(args.backend_config.is_none());
     assert_eq!(
         args.backend_cwd
             .as_ref()
@@ -712,6 +716,57 @@ fn test_parses_models_lora_train_args() {
         args.backend_argv,
         vec!["uv", "run", "python", "train.py", "config/e4b.yaml"]
     );
+}
+
+#[test]
+fn test_parses_models_lora_train_recipe_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "train",
+        "--base",
+        "local-gemma4-e4b",
+        "--dataset",
+        "./data/tool-calls.jsonl",
+        "--output-dir",
+        "./adapters/burin-tools",
+        "--backend-recipe",
+        "harn_lora_sft_v1",
+        "--backend-runner",
+        "uv,run,python",
+        "--backend-script",
+        "train.py",
+        "--backend-config",
+        "config/e4b.yaml",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Train(args) = args.command else {
+        panic!("expected models lora train command");
+    };
+    assert_eq!(args.backend_recipe, "harn_lora_sft_v1");
+    assert_eq!(args.backend_runner, vec!["uv", "run", "python"]);
+    assert_eq!(
+        args.backend_script
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("train.py")
+    );
+    assert_eq!(
+        args.backend_config
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("config/e4b.yaml")
+    );
+    assert!(args.backend_argv.is_empty());
 }
 
 #[test]
@@ -740,6 +795,10 @@ fn test_models_lora_train_defaults_to_external_trainer_contract() {
     };
     assert_eq!(args.trainer, "external_sft_trainer");
     assert!(args.modules_to_save.is_empty());
+    assert_eq!(args.backend_recipe, "explicit_argv");
+    assert!(args.backend_runner.is_empty());
+    assert!(args.backend_script.is_none());
+    assert!(args.backend_config.is_none());
 }
 
 #[test]

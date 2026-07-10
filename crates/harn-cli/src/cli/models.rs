@@ -456,6 +456,18 @@ pub(crate) struct ModelsLoraTrainArgs {
     /// PEFT modules_to_save entries used by the backend trainer.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
+    /// Backend launch recipe (`explicit_argv` or `harn_lora_sft_v1`).
+    #[arg(long = "backend-recipe", default_value = "explicit_argv")]
+    pub backend_recipe: String,
+    /// Command prefix for recipe-rendered backend launches, as comma-separated argv.
+    #[arg(long = "backend-runner", value_delimiter = ',', value_name = "ARG")]
+    pub backend_runner: Vec<String>,
+    /// Trainer entrypoint for recipe-rendered backend launches.
+    #[arg(long = "backend-script", value_name = "PATH")]
+    pub backend_script: Option<std::path::PathBuf>,
+    /// Trainer config passed to recipe-rendered backend launches as `--config`.
+    #[arg(long = "backend-config", value_name = "PATH")]
+    pub backend_config: Option<std::path::PathBuf>,
     /// Execute the backend argv after rendering the receipt plan. Omit for deterministic dry-run.
     #[arg(long)]
     pub execute: bool,

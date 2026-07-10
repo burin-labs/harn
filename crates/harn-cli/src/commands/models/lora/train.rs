@@ -25,6 +25,8 @@ use super::{
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
 const LORA_TRAIN_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_PRETTY";
+const BACKEND_RECIPE_EXPLICIT_ARGV: &str = "explicit_argv";
+const BACKEND_RECIPE_HARN_LORA_SFT_V1: &str = "harn_lora_sft_v1";
 const BACKEND_OUTPUT_TAIL_BYTES: usize = 120 * 1024;
 const BACKEND_STREAM_READ_CHUNK_BYTES: usize = 8 * 1024;
 
@@ -140,6 +142,22 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         .teacher
         .as_ref()
         .map(|selector| teacher_report(selector));
+    let backend_plan = render_backend_plan(BackendPlanContext {
+        args,
+        provider: &provider,
+        tool_format: &decision.effective,
+        adapter_name: &adapter_name,
+        request_model: &request_model,
+        chat_template: &chat_template,
+        trainer: &trainer,
+        trainer_version: args.trainer_version.as_deref(),
+        method: &method,
+        rank,
+        alpha,
+        dropout,
+        metadata: &metadata,
+        modules_to_save: &modules_to_save,
+    })?;
     let manifest_command = post_training_manifest_command(PostTrainingManifestCommand {
         args,
         provider: &provider,
@@ -191,11 +209,14 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             args.dataset.display()
         ));
     }
-    if args.execute && args.backend_argv.is_empty() {
-        return Err("--execute requires backend argv after `--`".to_string());
+    if args.execute && backend_plan.argv.is_empty() {
+        return Err(
+            "--execute requires backend argv after `--` or a backend recipe that renders argv"
+                .to_string(),
+        );
     }
     let dataset_audit = dataset_audit_report(&args.dataset)?;
-    let backend_argv_required = args.backend_argv.is_empty();
+    let backend_argv_required = backend_plan.argv.is_empty();
     if backend_argv_required {
         warnings.push(
             "no backend argv supplied; dry-run receipt records the named trainer contract only"
@@ -204,7 +225,9 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
     }
     let backend = BackendInvocation {
         trainer: trainer.clone(),
-        argv: args.backend_argv.clone(),
+        recipe: backend_plan.recipe,
+        argv_source: backend_plan.argv_source,
+        argv: backend_plan.argv,
         argv_required: backend_argv_required,
         cwd: args
             .backend_cwd
@@ -326,6 +349,143 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         },
         warnings,
     })
+}
+
+struct BackendPlanContext<'a> {
+    args: &'a ModelsLoraTrainArgs,
+    provider: &'a str,
+    tool_format: &'a str,
+    adapter_name: &'a str,
+    request_model: &'a str,
+    chat_template: &'a str,
+    trainer: &'a str,
+    trainer_version: Option<&'a str>,
+    method: &'a str,
+    rank: u32,
+    alpha: u32,
+    dropout: f64,
+    metadata: &'a BTreeMap<String, String>,
+    modules_to_save: &'a [String],
+}
+
+struct RenderedBackendPlan {
+    recipe: String,
+    argv_source: String,
+    argv: Vec<String>,
+}
+
+fn render_backend_plan(ctx: BackendPlanContext<'_>) -> Result<RenderedBackendPlan, String> {
+    let recipe = normalize_backend_recipe(&ctx.args.backend_recipe)?;
+    match recipe.as_str() {
+        BACKEND_RECIPE_EXPLICIT_ARGV => {
+            if !ctx.args.backend_runner.is_empty()
+                || ctx.args.backend_script.is_some()
+                || ctx.args.backend_config.is_some()
+            {
+                return Err(format!(
+                    "--backend-runner, --backend-script, and --backend-config require --backend-recipe {BACKEND_RECIPE_HARN_LORA_SFT_V1}"
+                ));
+            }
+            Ok(RenderedBackendPlan {
+                recipe,
+                argv_source: "explicit".to_string(),
+                argv: ctx.args.backend_argv.clone(),
+            })
+        }
+        BACKEND_RECIPE_HARN_LORA_SFT_V1 => {
+            if !ctx.args.backend_argv.is_empty() {
+                return Err(format!(
+                    "backend argv after `--` cannot be combined with --backend-recipe {BACKEND_RECIPE_HARN_LORA_SFT_V1}; use --backend-runner, --backend-script, and --backend-config"
+                ));
+            }
+            let script = ctx.args.backend_script.as_deref().ok_or_else(|| {
+                format!(
+                    "--backend-recipe {BACKEND_RECIPE_HARN_LORA_SFT_V1} requires --backend-script"
+                )
+            })?;
+            let mut argv = if ctx.args.backend_runner.is_empty() {
+                vec!["python".to_string()]
+            } else {
+                ctx.args.backend_runner.clone()
+            };
+            argv.push(script.display().to_string());
+            argv.extend([
+                "--dataset".to_string(),
+                ctx.args.dataset.display().to_string(),
+                "--output-dir".to_string(),
+                ctx.args.output_dir.display().to_string(),
+                "--base".to_string(),
+                ctx.args.base_model.clone(),
+                "--provider".to_string(),
+                ctx.provider.to_string(),
+                "--tool-format".to_string(),
+                ctx.tool_format.to_string(),
+                "--adapter-name".to_string(),
+                ctx.adapter_name.to_string(),
+                "--request-model".to_string(),
+                ctx.request_model.to_string(),
+                "--chat-template".to_string(),
+                ctx.chat_template.to_string(),
+                "--trainer".to_string(),
+                ctx.trainer.to_string(),
+                "--method".to_string(),
+                ctx.method.to_string(),
+                "--rank".to_string(),
+                ctx.rank.to_string(),
+                "--alpha".to_string(),
+                ctx.alpha.to_string(),
+                "--dropout".to_string(),
+                ctx.dropout.to_string(),
+            ]);
+            if let Some(trainer_version) = ctx.trainer_version {
+                argv.extend(["--trainer-version".to_string(), trainer_version.to_string()]);
+            }
+            if let Some(max_seq_length) = ctx.args.max_seq_length {
+                argv.extend(["--max-seq-length".to_string(), max_seq_length.to_string()]);
+            }
+            if let Some(corpus) = &ctx.args.corpus {
+                argv.extend(["--corpus".to_string(), corpus.display().to_string()]);
+            }
+            if let Some(export_manifest) = &ctx.args.export_manifest {
+                argv.extend([
+                    "--export-manifest".to_string(),
+                    export_manifest.display().to_string(),
+                ]);
+            }
+            if let Some(teacher) = &ctx.args.teacher {
+                argv.extend(["--teacher".to_string(), teacher.clone()]);
+            }
+            for module in ctx.modules_to_save {
+                argv.extend(["--modules-to-save".to_string(), module.clone()]);
+            }
+            for (key, value) in ctx.metadata {
+                argv.extend(["--target-metadata".to_string(), format!("{key}={value}")]);
+            }
+            if let Some(config) = &ctx.args.backend_config {
+                argv.extend(["--config".to_string(), config.display().to_string()]);
+            }
+            Ok(RenderedBackendPlan {
+                recipe,
+                argv_source: "recipe".to_string(),
+                argv,
+            })
+        }
+        _ => unreachable!("normalize_backend_recipe returned an unsupported recipe"),
+    }
+}
+
+fn normalize_backend_recipe(input: &str) -> Result<String, String> {
+    match input.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "" | "explicit" | "explicit_argv" | "external_argv" | "argv" => {
+            Ok(BACKEND_RECIPE_EXPLICIT_ARGV.to_string())
+        }
+        "harn_lora_sft_v1" | "harn_sft_v1" | "canonical_sft_v1" => {
+            Ok(BACKEND_RECIPE_HARN_LORA_SFT_V1.to_string())
+        }
+        other => Err(format!(
+            "unsupported LoRA backend recipe `{other}`; expected {BACKEND_RECIPE_EXPLICIT_ARGV} or {BACKEND_RECIPE_HARN_LORA_SFT_V1}"
+        )),
+    }
 }
 
 fn execute_backend(report: &mut LoraTrainReport) -> Result<(), String> {
@@ -855,6 +1015,8 @@ struct TrainInputs {
 #[derive(Debug, Serialize)]
 struct BackendInvocation {
     trainer: String,
+    recipe: String,
+    argv_source: String,
     argv: Vec<String>,
     argv_required: bool,
     cwd: Option<String>,
@@ -919,6 +1081,10 @@ mod tests {
             teacher: None,
             target_metadata: vec!["lane=tool-calls".to_string()],
             modules_to_save: vec!["embed_tokens".to_string()],
+            backend_recipe: "explicit_argv".to_string(),
+            backend_runner: Vec::new(),
+            backend_script: None,
+            backend_config: None,
             execute: false,
             backend_cwd: None,
             json: true,
@@ -951,6 +1117,8 @@ mod tests {
                 .peft_save_policy
                 .requires_weight_tying_check
         );
+        assert_eq!(report.backend.recipe, "explicit_argv");
+        assert_eq!(report.backend.argv_source, "explicit");
         assert_eq!(report.backend.status, "dry_run");
         assert!(!report.backend.execute);
         assert_eq!(report.backend.output_tail_bytes, BACKEND_OUTPUT_TAIL_BYTES);
@@ -1018,6 +1186,10 @@ mod tests {
             teacher: None,
             target_metadata: Vec::new(),
             modules_to_save: Vec::new(),
+            backend_recipe: "explicit_argv".to_string(),
+            backend_runner: Vec::new(),
+            backend_script: None,
+            backend_config: None,
             execute: false,
             backend_cwd: None,
             json: true,
@@ -1030,6 +1202,254 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("no backend argv supplied")));
+    }
+
+    #[test]
+    fn train_report_renders_harn_lora_sft_recipe_backend_argv() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dataset = tmp.path().join("dataset.jsonl");
+        let export_manifest = tmp.path().join("export.manifest.json");
+        std::fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+        std::fs::write(&export_manifest, "{}\n").expect("manifest");
+        let args = ModelsLoraTrainArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            dataset: dataset.clone(),
+            corpus: Some(tmp.path().join("corpus")),
+            export_manifest: Some(export_manifest.clone()),
+            output_dir: tmp.path().join("adapter"),
+            receipt_out: None,
+            adapter_name: Some("burin-tools".to_string()),
+            request_model: Some("burin-tools".to_string()),
+            chat_template: Some("harn_text_tool_calls_json_fences".to_string()),
+            trainer: "unsloth_sft".to_string(),
+            trainer_version: Some("unsloth-2026.7".to_string()),
+            method: "lora".to_string(),
+            rank: 32,
+            alpha: Some(64),
+            dropout: 0.1,
+            max_seq_length: Some(8192),
+            teacher: Some("dashscope/qwen3-coder-next".to_string()),
+            target_metadata: vec!["lane=structured".to_string()],
+            modules_to_save: vec!["embed_tokens".to_string(), "lm_head".to_string()],
+            backend_recipe: "harn_lora_sft_v1".to_string(),
+            backend_runner: vec!["uv".to_string(), "run".to_string(), "python".to_string()],
+            backend_script: Some("train.py".into()),
+            backend_config: Some("config/e4b.yaml".into()),
+            execute: false,
+            backend_cwd: Some(tmp.path().join("trainer")),
+            json: true,
+            backend_argv: Vec::new(),
+        };
+        let report = train_report(&args).expect("report");
+
+        assert_eq!(report.backend.recipe, "harn_lora_sft_v1");
+        assert_eq!(report.backend.argv_source, "recipe");
+        let expected_cwd = tmp.path().join("trainer").display().to_string();
+        assert_eq!(report.backend.cwd.as_deref(), Some(expected_cwd.as_str()));
+        let first_four: Vec<&str> = report
+            .backend
+            .argv
+            .iter()
+            .take(4)
+            .map(String::as_str)
+            .collect();
+        assert_eq!(first_four, vec!["uv", "run", "python", "train.py"]);
+        let expected_pairs = vec![
+            ("--dataset".to_string(), dataset.display().to_string()),
+            (
+                "--output-dir".to_string(),
+                tmp.path().join("adapter").display().to_string(),
+            ),
+            ("--base".to_string(), "local-gemma4-e4b".to_string()),
+            ("--provider".to_string(), "vllm".to_string()),
+            ("--tool-format".to_string(), "json".to_string()),
+            ("--adapter-name".to_string(), "burin-tools".to_string()),
+            ("--request-model".to_string(), "burin-tools".to_string()),
+            (
+                "--chat-template".to_string(),
+                "harn_text_tool_calls_json_fences".to_string(),
+            ),
+            ("--trainer".to_string(), "unsloth_sft".to_string()),
+            (
+                "--trainer-version".to_string(),
+                "unsloth-2026.7".to_string(),
+            ),
+            ("--method".to_string(), "lora".to_string()),
+            ("--rank".to_string(), "32".to_string()),
+            ("--alpha".to_string(), "64".to_string()),
+            ("--dropout".to_string(), "0.1".to_string()),
+            ("--max-seq-length".to_string(), "8192".to_string()),
+            (
+                "--corpus".to_string(),
+                tmp.path().join("corpus").display().to_string(),
+            ),
+            (
+                "--export-manifest".to_string(),
+                export_manifest.display().to_string(),
+            ),
+            (
+                "--teacher".to_string(),
+                "dashscope/qwen3-coder-next".to_string(),
+            ),
+            (
+                "--target-metadata".to_string(),
+                "lane=structured".to_string(),
+            ),
+            ("--config".to_string(), "config/e4b.yaml".to_string()),
+        ];
+        for (flag, value) in expected_pairs {
+            assert!(
+                report
+                    .backend
+                    .argv
+                    .windows(2)
+                    .any(|pair| pair[0] == flag && pair[1] == value),
+                "missing backend argv pair: {flag} {value}"
+            );
+        }
+        assert_eq!(
+            report
+                .backend
+                .argv
+                .windows(2)
+                .filter(|pair| *pair == ["--modules-to-save", "embed_tokens"])
+                .count(),
+            1
+        );
+        assert_eq!(
+            report
+                .backend
+                .argv
+                .windows(2)
+                .filter(|pair| *pair == ["--modules-to-save", "lm_head"])
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn train_report_rejects_recipe_options_in_explicit_mode() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dataset = tmp.path().join("dataset.jsonl");
+        std::fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+        let args = ModelsLoraTrainArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            dataset,
+            corpus: None,
+            export_manifest: None,
+            output_dir: tmp.path().join("adapter"),
+            receipt_out: None,
+            adapter_name: None,
+            request_model: None,
+            chat_template: None,
+            trainer: "external_sft_trainer".to_string(),
+            trainer_version: None,
+            method: "qlora".to_string(),
+            rank: 16,
+            alpha: None,
+            dropout: 0.05,
+            max_seq_length: None,
+            teacher: None,
+            target_metadata: Vec::new(),
+            modules_to_save: Vec::new(),
+            backend_recipe: "explicit_argv".to_string(),
+            backend_runner: vec!["uv".to_string()],
+            backend_script: None,
+            backend_config: None,
+            execute: false,
+            backend_cwd: None,
+            json: true,
+            backend_argv: Vec::new(),
+        };
+
+        let error = train_report(&args).expect_err("recipe option should fail explicit mode");
+        assert!(error.contains("require --backend-recipe harn_lora_sft_v1"));
+    }
+
+    #[test]
+    fn train_report_rejects_recipe_without_script() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dataset = tmp.path().join("dataset.jsonl");
+        std::fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+        let args = ModelsLoraTrainArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            dataset,
+            corpus: None,
+            export_manifest: None,
+            output_dir: tmp.path().join("adapter"),
+            receipt_out: None,
+            adapter_name: None,
+            request_model: None,
+            chat_template: None,
+            trainer: "external_sft_trainer".to_string(),
+            trainer_version: None,
+            method: "qlora".to_string(),
+            rank: 16,
+            alpha: None,
+            dropout: 0.05,
+            max_seq_length: None,
+            teacher: None,
+            target_metadata: Vec::new(),
+            modules_to_save: Vec::new(),
+            backend_recipe: "harn-lora-sft-v1".to_string(),
+            backend_runner: Vec::new(),
+            backend_script: None,
+            backend_config: None,
+            execute: false,
+            backend_cwd: None,
+            json: true,
+            backend_argv: Vec::new(),
+        };
+
+        let error = train_report(&args).expect_err("recipe without script should fail");
+        assert!(error.contains("requires --backend-script"));
+    }
+
+    #[test]
+    fn train_report_rejects_raw_backend_argv_in_recipe_mode() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dataset = tmp.path().join("dataset.jsonl");
+        std::fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+        let args = ModelsLoraTrainArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            dataset,
+            corpus: None,
+            export_manifest: None,
+            output_dir: tmp.path().join("adapter"),
+            receipt_out: None,
+            adapter_name: None,
+            request_model: None,
+            chat_template: None,
+            trainer: "external_sft_trainer".to_string(),
+            trainer_version: None,
+            method: "qlora".to_string(),
+            rank: 16,
+            alpha: None,
+            dropout: 0.05,
+            max_seq_length: None,
+            teacher: None,
+            target_metadata: Vec::new(),
+            modules_to_save: Vec::new(),
+            backend_recipe: "harn_lora_sft_v1".to_string(),
+            backend_runner: Vec::new(),
+            backend_script: Some("train.py".into()),
+            backend_config: None,
+            execute: false,
+            backend_cwd: None,
+            json: true,
+            backend_argv: vec!["python".to_string(), "legacy_train.py".to_string()],
+        };
+
+        let error = train_report(&args).expect_err("recipe with raw argv should fail");
+        assert!(error.contains("cannot be combined"));
     }
 
     #[test]
