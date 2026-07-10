@@ -282,14 +282,15 @@ else
   echo "=== Pre-push: skipping language spec check (no spec changes) ==="
 fi
 
-if hook_paths_match "$changed" "$HOOK_HIGHLIGHT_PATTERN"; then
+if hook_paths_need_highlight "$changed" "${validation_base}...HEAD"; then
   echo "=== Pre-push: checking generated highlight keywords ==="
-  # Highlight keywords mirror the branch lexer/stdlib. Do not reuse an
-  # installed HARN_BIN here; pre-commit also forces branch-source generation.
+  # Highlight keywords mirror the branch lexer plus globally-registered
+  # builtins. Do not reuse an installed HARN_BIN here; pre-commit also forces
+  # branch-source generation for relevant changes.
   HARN_BIN= make -s check-highlight
   echo "    Highlight keywords OK."
 else
-  echo "=== Pre-push: skipping highlight check (no lexer/stdlib changes) ==="
+  echo "=== Pre-push: skipping highlight check (no lexer/global-builtin changes) ==="
 fi
 
 if hook_paths_match "$changed" "$HOOK_DIAGCATALOG_PATTERN"; then

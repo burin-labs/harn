@@ -6,7 +6,8 @@ HOOK_HARN_PATTERN='(\.harn$|^conformance/tests/|^experiments/)'
 HOOK_MARKDOWN_PATTERN='\.md$'
 HOOK_ACTIONS_PATTERN='(^\.github/workflows/|^\.githooks/|^Makefile$)'
 HOOK_PORTAL_PATTERN='(^crates/harn-cli/portal/|^package(-lock)?\.json$)'
-HOOK_HIGHLIGHT_PATTERN='(^crates/harn-lexer/|^crates/harn-stdlib/src/stdlib/|^crates/harn-vm/src/(stdlib|lib\.rs)|^crates/harn-modules/|^docs/theme/harn-keywords\.js$)'
+HOOK_HIGHLIGHT_CORE_PATTERN='(^crates/harn-lexer/|^crates/harn-stdlib/src/lib\.rs$|^crates/harn-vm/src/(stdlib|lib\.rs)|^crates/harn-modules/|^crates/harn-cli/src/commands/dump_highlight_keywords\.rs$|^crates/harn-cli/src/commands/portal/highlight\.rs$|^docs/theme/harn-keywords\.js$)'
+HOOK_HIGHLIGHT_ENTRYPOINT_MARKER='@harn-entrypoint-category'
 HOOK_LANGSPEC_PATTERN='(^spec/chapters/.*\.md$|^spec/HARN_SPEC\.md$|^docs/src/language-spec\.md$|^docs/src/spec/language/.*\.md$|^docs/src/SUMMARY\.md$)'
 HOOK_DIAGCATALOG_PATTERN='(^crates/harn-parser/src/diagnostic_codes(\.rs|/)|^docs/src/diagnostics\.md$|^docs/diagnostics-catalog\.json$)'
 HOOK_SESSION_BUNDLE_SCHEMA_PATTERN='(^crates/harn-vm/src/session_bundle\.rs$|^crates/harn-vm/src/session_bundle/|^crates/harn-cli/src/commands/session\.rs$|^spec/schemas/session-bundle\.v1\.schema\.json$)'
@@ -25,6 +26,34 @@ hook_paths_match() {
   file_list=$1
   pattern=$2
   [ -s "$file_list" ] && grep -Eq "$pattern" "$file_list"
+}
+
+hook_paths_need_highlight() {
+  file_list=$1
+  shift
+
+  if hook_paths_match "$file_list" "$HOOK_HIGHLIGHT_CORE_PATTERN"; then
+    return 0
+  fi
+
+  [ -s "$file_list" ] || return 1
+  while IFS= read -r path; do
+    case "$path" in
+      crates/harn-stdlib/src/stdlib/*.harn)
+        # Imported stdlib modules are not highlighted as globals. Only Harn
+        # entrypoint modules are registered as callable VM builtins whose
+        # exported names can change docs/portal highlighting.
+        if [ -f "$path" ] && grep -Fq "$HOOK_HIGHLIGHT_ENTRYPOINT_MARKER" "$path"; then
+          return 0
+        fi
+        if [ "$#" -gt 0 ] && git diff "$@" -- "$path" 2>/dev/null | grep -Fq "$HOOK_HIGHLIGHT_ENTRYPOINT_MARKER"; then
+          return 0
+        fi
+        ;;
+    esac
+  done < "$file_list"
+
+  return 1
 }
 
 hook_no_local_build_mode() {
