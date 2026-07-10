@@ -1068,6 +1068,19 @@ fn streamed_native_tool_name_text_call_parse_error(
     })
 }
 
+fn streamed_native_tool_arguments_text_call_parse_error(
+    raw_arguments: &str,
+    error: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "__parse_error": format!(
+            "Could not parse streamed provider tool arguments as Harn text-tool call: {}. Raw input: {}",
+            error,
+            preview_chars(raw_arguments, 200)
+        )
+    })
+}
+
 fn push_internal_tool_call(
     tool_calls: &mut Vec<serde_json::Value>,
     blocks: &mut Vec<serde_json::Value>,
@@ -1609,6 +1622,32 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 continue;
             }
             crate::llm::tools::NativeToolNameTextCall::NotCall => {}
+        }
+        // Keep streaming and non-streaming OpenAI-compatible parsing in
+        // parity. Some routes put Harn's complete text call in the native
+        // wrapper's arguments (`tool_call` + `search({...})`). Parsing only
+        // the argument object discards the inner name and sends the wrapper
+        // itself to the tool ceiling.
+        if crate::llm::tools::is_generic_wrapper_name(&stream.name) {
+            match crate::llm::tools::parse_text_tool_call_from_native_arguments(&stream.args) {
+                crate::llm::tools::NativeToolNameTextCall::Parsed { name, arguments } => {
+                    let (name, arguments) =
+                        crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                    let id = stream.tool_call_id;
+                    push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, arguments);
+                    continue;
+                }
+                crate::llm::tools::NativeToolNameTextCall::Malformed { name, error } => {
+                    let arguments =
+                        streamed_native_tool_arguments_text_call_parse_error(&stream.args, &error);
+                    let (name, arguments) =
+                        crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                    let id = stream.tool_call_id;
+                    push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, arguments);
+                    continue;
+                }
+                crate::llm::tools::NativeToolNameTextCall::NotCall => {}
+            }
         }
         let args_values = parse_openai_streamed_tool_argument_values(
             &stream.name,
@@ -2883,6 +2922,48 @@ mod streaming_tool_call_tests {
         assert_eq!(result.tool_calls.len(), 1);
         assert_eq!(result.tool_calls[0]["name"], "look");
         assert_eq!(result.tool_calls[0]["arguments"]["path"], "parser.rs");
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_recovers_text_call_from_generic_wrapper_arguments() {
+        let frame = |value: serde_json::Value| format!("data: {value}\n");
+        let body = format!(
+            "{}{}data: [DONE]\n",
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_search_wrapped",
+                            "function": {
+                                "name": "tool_call",
+                                "arguments": "search({ path: \"internal/engine\", query: \"Reconcile(\" })"
+                            }
+                        }]
+                    }
+                }]
+            })),
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "delta": {}
+                }],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 20}
+            })),
+        );
+        let session_id = fresh_session_id("oai-wrapper-argument-call");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_search_wrapped");
+        assert_eq!(result.tool_calls[0]["name"], "search");
+        assert_eq!(result.tool_calls[0]["arguments"]["path"], "internal/engine");
+        assert_eq!(result.tool_calls[0]["arguments"]["query"], "Reconcile(");
 
         clear_session_sinks(&session_id);
     }
