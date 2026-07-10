@@ -471,6 +471,64 @@ fn export_json_schema_omits_invalid_any_type() {
 }
 
 #[test]
+fn export_json_schema_emits_required_empty_for_object_properties() {
+    let schema = make_vm_dict(vec![
+        ("type", s("dict")),
+        ("properties", make_vm_dict(vec![])),
+    ]);
+
+    let exported = schema_to_json_schema_value(&schema).unwrap();
+    let dict = exported.as_dict().unwrap();
+
+    assert_eq!(dict.get("type").unwrap().display(), "object");
+    assert!(dict
+        .get("properties")
+        .unwrap()
+        .as_dict()
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        dict.get("required"),
+        Some(VmValue::List(items)) if items.is_empty()
+    ));
+}
+
+#[test]
+fn export_json_schema_emits_nested_required_empty() {
+    let schema = make_vm_dict(vec![
+        ("type", s("dict")),
+        (
+            "properties",
+            make_vm_dict(vec![(
+                "options",
+                make_vm_dict(vec![
+                    ("type", s("dict")),
+                    (
+                        "properties",
+                        make_vm_dict(vec![("limit", make_vm_dict(vec![("type", s("int"))]))]),
+                    ),
+                ]),
+            )]),
+        ),
+        ("required", make_list(vec![s("options")])),
+    ]);
+
+    let exported = schema_to_json_schema_value(&schema).unwrap();
+    let options = exported
+        .as_dict()
+        .and_then(|dict| dict.get("properties"))
+        .and_then(VmValue::as_dict)
+        .and_then(|properties| properties.get("options"))
+        .and_then(VmValue::as_dict)
+        .expect("options property schema");
+
+    assert!(matches!(
+        options.get("required"),
+        Some(VmValue::List(items)) if items.is_empty()
+    ));
+}
+
+#[test]
 fn json_schema_unique_items_validates_lists_without_requiring_harn_set() {
     let schema = make_vm_dict(vec![
         ("type", s("array")),
