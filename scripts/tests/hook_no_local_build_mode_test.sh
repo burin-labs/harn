@@ -10,7 +10,8 @@ fake_bin="$tmp_root/bin"
 record="$tmp_root/unexpected-command-record.txt"
 work="$tmp_root/work"
 mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-vm/src" \
-  "$work/crates/harn-lexer/src" "$work/conformance/tests" "$work/scripts"
+  "$work/crates/harn-lexer/src" "$work/crates/harn-stdlib/src/stdlib/agent" \
+  "$work/conformance/tests" "$work/scripts"
 
 for name in cargo harn; do
   cat > "$fake_bin/$name" <<'SH'
@@ -48,6 +49,8 @@ git -C "$work" config commit.gpgsign false
 
 printf '%s\n' 'pub fn touched() {}' > "$work/crates/harn-vm/src/lib.rs"
 printf '%s\n' 'pub const KEYWORDS: &[&str] = &["let"];' > "$work/crates/harn-lexer/src/token.rs"
+printf '%s\n' 'pub fn schema_closed_object() {}' > "$work/crates/harn-stdlib/src/stdlib/stdlib_schema.harn"
+printf '%s\n' '// @harn-entrypoint-category agent.stdlib' 'pub fn agent_loop() {}' > "$work/crates/harn-stdlib/src/stdlib/agent/loop.harn"
 printf '%s\n' 'fn main(harness: Harness) {}' > "$work/conformance/tests/demo.harn"
 printf '%s\n' '[artifacts]' > "$work/scripts/generated_artifacts.toml"
 git -C "$work" add .
@@ -169,6 +172,8 @@ if ! grep -Fq "skipping expensive local checks" "$tmp_root/pre-push.out"; then
   exit 1
 fi
 
+git -C "$work" commit --quiet --no-verify -m initial
+
 (
   cd "$work"
   # shellcheck source=/dev/null
@@ -177,6 +182,34 @@ fi
   HARN_HOOKS_NO_LOCAL_BUILD=0 HARN_HOOKS_FAST_ONLY=1 hook_no_local_build_mode
   if HARN_HOOKS_NO_LOCAL_BUILD=0 HARN_HOOKS_FAST_ONLY=0 hook_no_local_build_mode; then
     echo "hook_no_local_build_mode should be false when both env vars are unset/0" >&2
+    exit 1
+  fi
+
+  highlight_changed="$tmp_root/highlight-changed.txt"
+
+  printf '%s\n' 'crates/harn-stdlib/src/stdlib/stdlib_schema.harn' > "$highlight_changed"
+  if hook_paths_need_highlight "$highlight_changed" --cached; then
+    echo "ordinary imported stdlib module should not require highlight regeneration" >&2
+    exit 1
+  fi
+
+  printf '%s\n' 'crates/harn-stdlib/src/stdlib/agent/loop.harn' > "$highlight_changed"
+  if ! hook_paths_need_highlight "$highlight_changed" --cached; then
+    echo "entrypoint stdlib module should require highlight regeneration" >&2
+    exit 1
+  fi
+
+  printf '%s\n' 'crates/harn-lexer/src/token.rs' > "$highlight_changed"
+  if ! hook_paths_need_highlight "$highlight_changed" --cached; then
+    echo "lexer keyword change should require highlight regeneration" >&2
+    exit 1
+  fi
+
+  printf '%s\n' 'pub fn agent_loop() {}' > crates/harn-stdlib/src/stdlib/agent/loop.harn
+  git add crates/harn-stdlib/src/stdlib/agent/loop.harn
+  printf '%s\n' 'crates/harn-stdlib/src/stdlib/agent/loop.harn' > "$highlight_changed"
+  if ! hook_paths_need_highlight "$highlight_changed" --cached; then
+    echo "removing an entrypoint marker should require highlight regeneration" >&2
     exit 1
   fi
 )

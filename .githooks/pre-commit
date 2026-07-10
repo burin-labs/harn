@@ -240,16 +240,17 @@ else
   echo "=== Pre-commit: skipping clippy (no Rust/Cargo changes) ==="
 fi
 
-if hook_paths_match "$changed" "$HOOK_HIGHLIGHT_PATTERN"; then
+if hook_paths_need_highlight "$changed" --cached; then
   echo "=== Pre-commit: syncing generated highlight keywords ==="
-  # Highlight keywords mirror the branch lexer/stdlib. Do not reuse an
-  # installed HARN_BIN here: stdlib-only commits can otherwise generate a mirror
-  # from stale installed builtins and fail CI's branch-source check-highlight.
+  # Highlight keywords mirror the branch lexer plus globally-registered
+  # builtins. Do not reuse an installed HARN_BIN here: relevant stdlib/VM
+  # changes can otherwise generate a mirror from stale installed builtins and
+  # fail CI's branch-source check-highlight.
   HARN_BIN= make gen-highlight
   git add docs/theme/harn-keywords.js
   echo "    Highlight keywords OK."
 else
-  echo "=== Pre-commit: skipping highlight sync (no lexer/stdlib changes) ==="
+  echo "=== Pre-commit: skipping highlight sync (no lexer/global-builtin changes) ==="
 fi
 
 if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
