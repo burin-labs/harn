@@ -200,11 +200,14 @@ type refinement when the schema is a literal (or a variable bound from a
 literal schema).
 
 The lazy `std/schema` module provides ergonomic builders such as
-`schema_string()`, `schema_object(...)`, `schema_union(...)`,
-`schema_validator(...)`,
+`schema_string()`, `schema_object(...)`, `schema_closed_object(...)`,
+`schema_strict_object(...)`, `schema_union(...)`, `schema_validator(...)`,
 `get_typed_result(...)`, `get_typed_report(...)`, `get_typed_issues(...)`,
 `get_typed_value(...)`, `parse_json_typed_report(...)`,
 `parse_json_typed(...)`, and `is_type(...)`.
+Use `schema_closed_object(...)` / `schema_strict_object(...)` for option bags,
+receipts, structured LLM outputs, and host-contract payloads where unexpected
+keys should fail closed.
 The JSON helpers accept `Schema<T>` arguments, so aliases passed directly or via
 `schema_of(T)` preserve typed return values:
 

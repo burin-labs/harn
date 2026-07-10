@@ -90,6 +90,33 @@ pub fn schema_object(fields, options = nil) {
   return out
 }
 
+/**
+ * Return a dict/object schema that rejects unknown keys.
+ *
+ * This is the preferred builder for option bags, receipts, structured LLM
+ * outputs, and host-contract payloads where unexpected keys should fail closed
+ * instead of drifting through validation.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_closed_object(fields, options = nil) {
+  if options == nil {
+    return schema_object(fields, {additional_properties: false})
+  }
+  return schema_object(fields, options + {additional_properties: false})
+}
+
+/**
+ * Alias for `schema_closed_object(...)` using strict-schema terminology.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_strict_object(fields, options = nil) {
+  return schema_closed_object(fields, options)
+}
+
 pub fn schema_union(branches) {
   return {union: branches}
 }
