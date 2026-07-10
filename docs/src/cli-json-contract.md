@@ -99,11 +99,11 @@ versions.
 | `harn models batch status --json` | Provider batch status receipt with dry-run cached status validation and normalized `lifecycle` counts |
 | `harn models batch cancel --json` | Batch cancellation receipt with redacted cancel operations, skipped-job reasons, and normalized `lifecycle` counts |
 | `harn models batch download --json` | Provider result-file download receipt with artifact paths, hashes, and normalized `lifecycle` counts |
-| `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, promotion evidence, launch contract, and `serving.serving_requirements` |
+| `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, promotion evidence, launch contract, `training.contract.tool_catalog`, and `serving.serving_requirements` |
 | `harn models lora inspect --json` | PEFT adapter compatibility report, launch metadata, and `serving.serving_requirements` |
-| `harn models lora export --json` | Trainer dataset export report with contract id, stats, and promotion evidence contract |
-| `harn models lora manifest --json` | LoRA training-run manifest with route, data, artifact, structured serving requirements, and promotion evidence contracts |
-| `harn models lora train --json` | LoRA trainer receipt with backend argv/status, `backend.argv_required` when argv is omitted, input hashes, route metadata, `dataset_audit`, and post-training commands |
+| `harn models lora export --json` | Trainer dataset export report with contract id, tool-catalog contract, stats, and promotion evidence contract |
+| `harn models lora manifest --json` | LoRA training-run manifest with route, data, artifact, tool-catalog contract, structured serving requirements, and promotion evidence contracts |
+| `harn models lora train --json` | LoRA trainer receipt with backend argv/status, `backend.argv_required` when argv is omitted, input hashes, route/tool-catalog metadata, `dataset_audit`, and post-training commands |
 | `harn models lora preflight --json` | Corpus readiness report before LoRA training |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |

@@ -2,6 +2,7 @@ import {
   render_peft_save_policy,
   render_probe_command_templates,
   render_required_probe_cases,
+  render_tool_catalog_contract,
 } from "std/cli/models/lora_render"
 /**
  * `harn models lora manifest` renderer.
@@ -134,6 +135,7 @@ fn __render_human(harness: Harness, report: dict) {
   render_peft_save_policy(harness, peft_save_policy)
   harness.stdio
     .println("  parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
+  render_tool_catalog_contract(harness, safe_dict(training_contract["tool_catalog"]))
   harness.stdio
     .println("  split policy: " + safe_string(training_contract["dataset_split_policy"], ""))
   harness.stdio

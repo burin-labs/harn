@@ -9,11 +9,11 @@ use super::{
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_modules_to_save,
-    normalize_plan_tool_format, parse_target_metadata, render_embedded_lora_report,
-    resolve_lora_provider, serving_recipe, sha256_file, target_modules_for_route, teacher_report,
-    template_recipe_for_route, BaseModelReport, EvaluationRecipe, LoraContractReport,
-    LoraTrainingContract, PrecisionContract, ServingRecipe, TeacherReport, TemplateRecipe,
-    ToolCallingReport,
+    normalize_plan_tool_format, normalize_tool_catalog_policy, parse_target_metadata,
+    render_embedded_lora_report, resolve_lora_provider, serving_recipe, sha256_file,
+    target_modules_for_route, teacher_report, template_recipe_for_route, tool_catalog_contract,
+    BaseModelReport, EvaluationRecipe, LoraContractReport, LoraTrainingContract, PrecisionContract,
+    ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -51,6 +51,12 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
     let dropout = normalize_lora_dropout(args.dropout)?;
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
+    let tool_catalog_policy = normalize_tool_catalog_policy(&args.tool_catalog_policy)?;
+    let tool_catalog = tool_catalog_contract(
+        &tool_catalog_policy,
+        args.tool_catalog_id.as_deref(),
+        args.tool_catalog_hash.as_deref(),
+    )?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
@@ -102,6 +108,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         dataset_format,
         Some(&chat_template),
         &modules_to_save,
+        &tool_catalog,
     )?;
     let contract = lora_contract_report(
         contract_id.clone(),
@@ -111,6 +118,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         dataset_format,
         Some(chat_template.clone()),
         &modules_to_save,
+        &tool_catalog,
     );
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
@@ -119,16 +127,17 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
         .is_some();
     let lora_module_value_format = lora_modules_value_format(local_runtime.as_ref());
-    let serving = serving_recipe(
-        &resolved.id,
-        &provider,
-        &request_model,
-        &adapter_name,
-        &decision.effective,
+    let serving = serving_recipe(ServingRecipeInput {
+        base_model: &resolved.id,
+        provider: &provider,
+        request_model: &request_model,
+        adapter_name: &adapter_name,
+        tool_format: &decision.effective,
         dataset_format,
         provider_supports_lora_launch,
-        &lora_module_value_format,
-    );
+        lora_module_value_format: &lora_module_value_format,
+        tool_catalog: &tool_catalog,
+    });
     let eval_dataset = args
         .dataset
         .as_ref()
@@ -211,6 +220,9 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
             effective_tool_format: decision.effective.clone(),
             tool_format_correction: decision.correction,
             dataset_format: dataset_format.to_string(),
+            tool_catalog_policy: tool_catalog.policy.clone(),
+            tool_catalog_id: tool_catalog.catalog_id.clone(),
+            tool_catalog_hash: tool_catalog.catalog_hash.clone(),
             output: args.out.as_ref().map(|path| path.display().to_string()),
         },
         tool_calling: ToolCallingReport {
@@ -244,7 +256,12 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
             target_modules,
             precision,
             template,
-            contract: lora_training_contract(dataset_format, &decision.effective, &modules_to_save),
+            contract: lora_training_contract(
+                dataset_format,
+                &decision.effective,
+                &modules_to_save,
+                &tool_catalog,
+            ),
         },
         inputs: ManifestInputs {
             dataset: args.dataset.as_deref().map(path_ref).transpose()?,
@@ -379,6 +396,9 @@ struct ManifestRequest {
     effective_tool_format: String,
     tool_format_correction: Option<String>,
     dataset_format: String,
+    tool_catalog_policy: String,
+    tool_catalog_id: Option<String>,
+    tool_catalog_hash: Option<String>,
     output: Option<String>,
 }
 

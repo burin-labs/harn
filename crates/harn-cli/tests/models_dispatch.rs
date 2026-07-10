@@ -2822,7 +2822,24 @@ fn models_lora_plan_json_shape_is_stable() {
             .is_some_and(|text| text.contains("compute dtype"))),
         "precision gates={precision_gates:?}"
     );
-    assert_eq!(report["training"]["contract"]["schema_version"], 2);
+    assert_eq!(report["training"]["contract"]["schema_version"], 3);
+    assert_eq!(
+        report["training"]["contract"]["tool_catalog"]["policy"],
+        "full_schema"
+    );
+    assert_eq!(
+        report["training"]["contract"]["tool_catalog"]["inference_catalog"],
+        "full_json_schema"
+    );
+    let tool_catalog_gates = report["training"]["contract"]["tool_catalog"]["promotion_gates"]
+        .as_array()
+        .expect("tool catalog gates");
+    assert!(
+        tool_catalog_gates.iter().any(|gate| gate
+            .as_str()
+            .is_some_and(|text| text.contains("catalog policy"))),
+        "tool catalog gates={tool_catalog_gates:?}"
+    );
     assert_eq!(
         report["training"]["contract"]["assistant_mask_policy"],
         "require_chat_template_generation_masks"
@@ -2892,6 +2909,7 @@ fn models_lora_plan_json_shape_is_stable() {
         report["serving"]["dataset_format"],
         "messages_with_tool_calls"
     );
+    assert_eq!(report["serving"]["tool_catalog"]["policy"], "full_schema");
     let export = report["launch"]["export_command"]
         .as_array()
         .expect("export argv");
@@ -3192,6 +3210,110 @@ fn models_lora_plan_json_shape_is_stable() {
             .any(|pair| pair[0] == "--max-lora-rank" && pair[1] == "16"),
         "launch argv={launch:?}"
     );
+}
+
+#[test]
+fn models_lora_plan_fixed_catalog_policy_is_explicit() {
+    let missing_identity = run(
+        &[
+            "models",
+            "lora",
+            "plan",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "json",
+            "--tool-catalog-policy",
+            "fixed-catalog-internalized",
+            "--json",
+        ],
+        &[],
+    );
+    assert_ne!(missing_identity.exit_code, 0);
+    assert!(
+        missing_identity
+            .stderr
+            .contains("requires --tool-catalog-id or --tool-catalog-hash"),
+        "stderr={}",
+        missing_identity.stderr
+    );
+
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "plan",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "json",
+            "--tool-catalog-policy",
+            "fixed-catalog-internalized",
+            "--tool-catalog-id",
+            "burin-tools-v1",
+            "--tool-catalog-hash",
+            "sha256:burin-tool-catalog",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let report = success_data(&harn_value);
+    let catalog = &report["training"]["contract"]["tool_catalog"];
+    assert_eq!(catalog["policy"], "fixed_catalog_internalized");
+    assert_eq!(catalog["catalog_id"], "burin-tools-v1");
+    assert_eq!(catalog["catalog_hash"], "sha256:burin-tool-catalog");
+    assert_eq!(catalog["inference_catalog"], "no_runtime_catalog");
+    assert_eq!(
+        catalog["prompt_catalog_requirement"],
+        "omit runtime tool catalog; adapter weights are bound to the declared fixed catalog"
+    );
+    let required_metadata = report["training"]["contract"]["required_example_metadata"]
+        .as_array()
+        .expect("required example metadata");
+    for field in [
+        "tool_catalog_policy",
+        "tool_catalog_id",
+        "tool_catalog_hash",
+    ] {
+        assert!(
+            required_metadata.iter().any(|value| value == field),
+            "required metadata missing {field}: {required_metadata:?}"
+        );
+    }
+    assert_eq!(
+        report["serving"]["tool_catalog"]["policy"],
+        "fixed_catalog_internalized"
+    );
+    for command_name in ["export_command", "train_command", "manifest_command"] {
+        let command = report["launch"][command_name]
+            .as_array()
+            .expect("command argv");
+        assert!(
+            command.windows(2).any(|pair| {
+                pair[0] == "--tool-catalog-policy" && pair[1] == "fixed_catalog_internalized"
+            }),
+            "{command_name}={command:?}"
+        );
+        assert!(
+            command
+                .windows(2)
+                .any(|pair| pair[0] == "--tool-catalog-id" && pair[1] == "burin-tools-v1"),
+            "{command_name}={command:?}"
+        );
+        assert!(
+            command.windows(2).any(|pair| {
+                pair[0] == "--tool-catalog-hash" && pair[1] == "sha256:burin-tool-catalog"
+            }),
+            "{command_name}={command:?}"
+        );
+    }
 }
 
 #[test]
@@ -3794,8 +3916,8 @@ fn models_lora_manifest_json_writes_training_manifest() {
         "manifest required probe cases={manifest_probe_cases:?}"
     );
     assert!(out.is_file(), "manifest file missing");
-    assert_eq!(report["contract"]["schema_version"], 2);
-    assert_eq!(report["contract"]["training_contract"]["schema_version"], 2);
+    assert_eq!(report["contract"]["schema_version"], 3);
+    assert_eq!(report["contract"]["training_contract"]["schema_version"], 3);
     assert_eq!(
         report["contract"]["training_contract"]["peft_save_policy"]["schema_version"],
         1
@@ -3806,10 +3928,10 @@ fn models_lora_manifest_json_writes_training_manifest() {
         "training manifest",
     );
     let contract_id = report["contract"]["id"].as_str().expect("contract id");
-    assert_eq!(manifest_value["contract"]["schema_version"], 2);
+    assert_eq!(manifest_value["contract"]["schema_version"], 3);
     assert_eq!(
         manifest_value["contract"]["training_contract"]["schema_version"],
-        2
+        3
     );
     assert_eq!(
         manifest_value["contract"]["training_contract"]["peft_save_policy"]["schema_version"],
@@ -4263,6 +4385,7 @@ fn models_lora_manifest_human_text_reports_contract() {
         "training: qlora + peft_lora",
         "assistant mask: require_chat_template_generation_masks",
         "parser owner: harn_text_tool_parser",
+        "tool catalog policy: full_schema",
         "adapter reference:",
         "adapter binding: runtime_lora_adapter",
         "LoRA module format: json_with_base_model",
@@ -4379,10 +4502,22 @@ fn write_lora_manifest_fixture(root: &std::path::Path, contract_id: &str) -> std
             "provider": "vllm",
             "adapter_name": "burin-tools",
             "harn_tool_format": "json",
-            "contract_id": contract_id
+            "contract_id": contract_id,
+            "tool_catalog": {
+                "schema_version": 1,
+                "policy": "full_schema",
+                "catalog_id": null,
+                "catalog_hash": null,
+                "training_catalog": "full_json_schema",
+                "inference_catalog": "full_json_schema",
+                "schema_columns_required": true,
+                "prompt_catalog_requirement": "include full tool schemas at inference",
+                "notes": [],
+                "promotion_gates": []
+            }
         },
         "contract": {
-            "schema_version": 2,
+            "schema_version": 3,
             "id": contract_id,
             "base_model": "gemma-4-e4b-it",
             "provider": "vllm",
@@ -4390,13 +4525,25 @@ fn write_lora_manifest_fixture(root: &std::path::Path, contract_id: &str) -> std
             "dataset_format": "harn_text_tool_calls_json_fences",
             "chat_template": "harn_text_tool_calls_json_fences",
             "training_contract": {
-                "schema_version": 2,
+                "schema_version": 3,
                 "loss_scope": "assistant_tool_calls",
                 "assistant_mask_policy": "require_chat_template_generation_masks",
                 "packing_policy": "disabled_unless_boundary_aware_tool_pack_pairs",
                 "tool_parser_owner": "harn_text_tool_parser",
                 "dataset_format": "harn_text_tool_calls_json_fences",
                 "dataset_split_policy": "train_tune_holdout_disjoint_no_eval_holdout_training",
+                "tool_catalog": {
+                    "schema_version": 1,
+                    "policy": "full_schema",
+                    "catalog_id": null,
+                    "catalog_hash": null,
+                    "training_catalog": "full_json_schema",
+                    "inference_catalog": "full_json_schema",
+                    "schema_columns_required": true,
+                    "prompt_catalog_requirement": "include full tool schemas at inference",
+                    "notes": [],
+                    "promotion_gates": []
+                },
                 "peft_save_policy": {
                     "schema_version": 1,
                     "modules_to_save": [],
@@ -4417,7 +4564,19 @@ fn write_lora_manifest_fixture(root: &std::path::Path, contract_id: &str) -> std
             "lora_module_value_format": "json_with_base_model",
             "tool_format": "json",
             "dataset_format": "harn_text_tool_calls_json_fences",
-            "contract_id": contract_id
+            "contract_id": contract_id,
+            "tool_catalog": {
+                "schema_version": 1,
+                "policy": "full_schema",
+                "catalog_id": null,
+                "catalog_hash": null,
+                "training_catalog": "full_json_schema",
+                "inference_catalog": "full_json_schema",
+                "schema_columns_required": true,
+                "prompt_catalog_requirement": "include full tool schemas at inference",
+                "notes": [],
+                "promotion_gates": []
+            }
         },
         "promotion": {
             "minimum_trials": 5,
