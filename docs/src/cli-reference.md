@@ -1267,6 +1267,32 @@ network request. Use `--repeat` for live reliability checks; repeated summaries
 only pass when every attempted probe for that mode succeeds. `harn local switch`
 can consume the JSON with `--probe-result`.
 
+## harn provider tool-scorecard
+
+Aggregate one or more `harn provider tool-probe --json` reports into a stable
+route scorecard. Fixture input is offline-only: the command reads saved probe
+reports and does not call providers. The JSON report uses `schema_version: 2`
+and includes route-level `catalog_claim`, `catalog_mismatches`, and
+`suggested_catalog_updates` fields so catalog drift can be reviewed from
+evidence instead of incident notes. Suggested updates are advisory and are only
+emitted for positive observed tool-call evidence, such as a route that reliably
+produces native or text-channel tool calls. Because scorecard aggregation only
+observes the text channel, not the exact text grammar, text-channel preferred
+format suggestions use Harn's fenced-JSON `json` default unless the catalog
+already pins a compatible `text` or `json` format.
+
+```bash
+harn provider tool-scorecard --tool-probe-report ./probe.json
+harn provider tool-scorecard --tool-probe-report ./probe-a.json --tool-probe-report ./probe-b.json --json=false
+```
+
+Use `--plan-from-catalog` to render the fixed micro-case matrix for catalogued
+routes before probing. Plan output remains `schema_version: 1`.
+
+```bash
+harn provider tool-scorecard --plan-from-catalog --route anthropic:claude-sonnet-5
+```
+
 ## harn local launch
 
 Bring a local model up through Harn's provider catalog:

@@ -1560,7 +1560,7 @@ fn test_parses_provider_tool_scorecard_args() {
             PathBuf::from("fireworks.json")
         ]
     );
-    assert!(!args.plan);
+    assert!(!args.plan_from_catalog);
     assert!(args.routes.is_empty());
     assert!(!args.include_batch_manifest);
     assert!(!args.json);
@@ -1572,9 +1572,9 @@ fn test_parses_provider_tool_scorecard_plan_args() {
         "harn",
         "provider",
         "tool-scorecard",
-        "--plan",
+        "--plan-from-catalog",
         "--route",
-        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-sonnet-5",
         "--include-batch-manifest",
     ]);
 
@@ -1584,8 +1584,8 @@ fn test_parses_provider_tool_scorecard_plan_args() {
     let ProviderCommand::ToolScorecard(args) = provider.command else {
         panic!("expected provider tool-scorecard command");
     };
-    assert!(args.plan);
-    assert_eq!(args.routes, vec!["anthropic:claude-sonnet-4-6"]);
+    assert!(args.plan_from_catalog);
+    assert_eq!(args.routes, vec!["anthropic:claude-sonnet-5"]);
     assert!(args.include_batch_manifest);
     assert!(args.tool_probe_reports.is_empty());
     assert!(args.json);

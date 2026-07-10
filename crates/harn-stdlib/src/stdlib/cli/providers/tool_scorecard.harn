@@ -89,6 +89,29 @@ fn __join_case_ids(values: list, fallback: string) -> string {
   return out
 }
 
+fn __join_dict_field(values: list, key: string, fallback: string) -> string {
+  let out = ""
+  let first = true
+  for value in values {
+    if type_of(value) != "dict" {
+      continue
+    }
+    const item = __safe_string(value[key], "")
+    if item == "" {
+      continue
+    }
+    if !first {
+      out = out + ","
+    }
+    out = out + item
+    first = false
+  }
+  if out == "" {
+    return fallback
+  }
+  return out
+}
+
 fn __render_human(report: dict) -> string {
   const summary = __safe_dict(report["summary"])
   let out = "provider tool-call scorecard: routes="
@@ -118,6 +141,7 @@ fn __render_human(report: dict) -> string {
     }
     const cases = __safe_int(route["case_count"], 0)
     const passed = __safe_int(route["successful_cases"], 0)
+    const catalog_mismatches = __safe_list(route["catalog_mismatches"])
     out = out + "  "
       + __safe_string(route["provider"], "")
       + " "
@@ -140,6 +164,8 @@ fn __render_human(report: dict) -> string {
       + to_string(__safe_int(route["actionless_cases"], 0))
       + " issues="
       + __join_strings(__safe_list(route["issues"]), "-")
+      + " catalog_mismatches="
+      + __join_dict_field(catalog_mismatches, "code", "-")
       + "\n"
   }
   return out

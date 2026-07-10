@@ -239,7 +239,7 @@ pub(crate) async fn run_provider_tool_scorecard(args: ProviderToolScorecardArgs)
 }
 
 async fn dispatch_provider_tool_scorecard(args: ProviderToolScorecardArgs) -> i32 {
-    if args.plan {
+    if args.plan_from_catalog {
         let plan = match harn_vm::llm::tool_scorecard::tool_scorecard_plan_from_catalog(
             &args.routes,
             args.include_batch_manifest,

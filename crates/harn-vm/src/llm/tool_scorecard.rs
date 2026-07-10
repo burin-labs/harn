@@ -10,11 +10,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
+use crate::provider_catalog::{CatalogModel, CatalogProvider};
+
 use super::tool_conformance::{
     ToolConformanceCase, ToolConformanceReport, ToolProbeClassification, ToolProbeFallbackMode,
 };
 
-pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 1;
+pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 2;
 pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,6 +46,7 @@ pub struct ToolScorecardRouteKey {
 pub struct ToolScorecardRoute {
     pub provider: String,
     pub model: String,
+    pub catalog_claim: Option<ToolScorecardCatalogClaim>,
     pub report_count: usize,
     pub case_count: usize,
     pub successful_cases: usize,
@@ -65,6 +68,8 @@ pub struct ToolScorecardRoute {
     pub observed_wire_dialects: Vec<&'static str>,
     pub classification_counts: BTreeMap<&'static str, usize>,
     pub issues: Vec<&'static str>,
+    pub catalog_mismatches: Vec<ToolScorecardCatalogMismatch>,
+    pub suggested_catalog_updates: Vec<ToolScorecardCatalogUpdate>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,6 +124,23 @@ pub struct ToolScorecardCatalogClaim {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardCatalogMismatch {
+    pub code: &'static str,
+    pub field: &'static str,
+    pub observed: String,
+    pub catalog: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardCatalogUpdate {
+    pub field: &'static str,
+    pub operation: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    pub reason: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ToolScorecardPlanCase {
     pub id: &'static str,
     pub description: &'static str,
@@ -148,6 +170,7 @@ struct RouteAccumulator {
 }
 
 pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolScorecardReport {
+    let catalog_claims = catalog_claims_by_route();
     let mut grouped: BTreeMap<(String, String), RouteAccumulator> = BTreeMap::new();
     for report in reports {
         let key = (report.provider.clone(), report.model.clone());
@@ -162,8 +185,8 @@ pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolS
     }
 
     let mut routes = grouped
-        .into_values()
-        .map(score_route)
+        .into_iter()
+        .map(|(key, acc)| score_route(acc, catalog_claims.get(&key).cloned()))
         .collect::<Vec<ToolScorecardRoute>>();
     routes.sort_by(|left, right| {
         right
@@ -208,11 +231,7 @@ pub fn tool_scorecard_plan_from_catalog(
         .map_err(|error| format!("error: failed to serialize provider catalog: {error}"))?;
     let catalog_hash = format!("blake3:{}", blake3::hash(&catalog_json));
     let requested_routes = parse_route_filters(route_filters)?;
-    let provider_by_id = artifact
-        .providers
-        .iter()
-        .map(|provider| (provider.id.as_str(), provider))
-        .collect::<BTreeMap<_, _>>();
+    let provider_by_id = providers_by_id(&artifact.providers);
 
     let mut seen_routes = BTreeSet::new();
     let mut plan_routes = Vec::new();
@@ -224,47 +243,7 @@ pub fn tool_scorecard_plan_from_catalog(
             continue;
         }
         seen_routes.insert(route_key);
-        let caps = crate::llm::capabilities::lookup(&model.provider, &model.id);
-        let provider = provider_by_id.get(model.provider.as_str());
-        let claim = ToolScorecardCatalogClaim {
-            preferred_tool_format: caps
-                .preferred_tool_format
-                .clone()
-                .or_else(|| model.tool_support.preferred_format.clone()),
-            tool_mode_parity: caps
-                .tool_mode_parity
-                .clone()
-                .or_else(|| model.tool_support.parity.clone()),
-            native_tools: caps.native_tools || model.tool_support.native,
-            text_tools: model.tool_support.text,
-            text_tool_wire_format_supported: caps.text_tool_wire_format_supported,
-            max_tools: caps.max_tools.or(model.tool_support.max_tools),
-            supports_parallel_tool_calls: caps.supports_parallel_tool_calls,
-            server_parser: caps.server_parser,
-            tool_search: caps.tool_search,
-            batch_api: caps.batch_api || model.batch.is_some(),
-            batch_wire_format: caps
-                .batch_wire_format
-                .clone()
-                .or_else(|| model.batch.as_ref().map(|batch| batch.wire_format.clone())),
-            batch_input_mode: caps
-                .batch_input_mode
-                .clone()
-                .or_else(|| model.batch.as_ref().map(|batch| batch.input_mode.clone())),
-            batch_discount_percent: caps.batch_discount_percent.or_else(|| {
-                model
-                    .batch
-                    .as_ref()
-                    .and_then(|batch| batch.discount_percent)
-            }),
-            provider_rate_limits: provider
-                .and_then(|provider| provider.rate_limits.as_ref())
-                .is_some(),
-            model_rate_limits: model.rate_limits.is_some(),
-            provider_rpm: provider.and_then(|provider| provider.rpm),
-            pricing: model.pricing.is_some(),
-            provider_latency_p50_ms: provider.and_then(|provider| provider.latency_p50_ms),
-        };
+        let claim = catalog_claim_for_model(model, &provider_by_id);
         let cases = fixed_micro_cases_for_claim(&claim);
         if include_batch_manifest && claim.batch_api {
             for case in &cases {
@@ -327,6 +306,61 @@ pub fn tool_scorecard_plan_from_catalog(
         routes: plan_routes,
         batch_manifest_requests,
     })
+}
+
+fn catalog_claims_by_route() -> BTreeMap<(String, String), ToolScorecardCatalogClaim> {
+    let artifact = crate::provider_catalog::artifact();
+    let provider_by_id = providers_by_id(&artifact.providers);
+    artifact
+        .models
+        .iter()
+        .map(|model| {
+            (
+                (model.provider.clone(), model.id.clone()),
+                catalog_claim_for_model(model, &provider_by_id),
+            )
+        })
+        .collect()
+}
+
+fn providers_by_id(providers: &[CatalogProvider]) -> BTreeMap<&str, &CatalogProvider> {
+    providers
+        .iter()
+        .map(|provider| (provider.id.as_str(), provider))
+        .collect()
+}
+
+fn catalog_claim_for_model(
+    model: &CatalogModel,
+    provider_by_id: &BTreeMap<&str, &CatalogProvider>,
+) -> ToolScorecardCatalogClaim {
+    let caps = crate::llm::capabilities::lookup(&model.provider, &model.id);
+    let provider = provider_by_id.get(model.provider.as_str()).copied();
+    ToolScorecardCatalogClaim {
+        preferred_tool_format: model.tool_support.preferred_format.clone(),
+        tool_mode_parity: model.tool_support.parity.clone(),
+        native_tools: model.tool_support.native,
+        text_tools: model.tool_support.text,
+        text_tool_wire_format_supported: model.tool_support.text,
+        max_tools: model.tool_support.max_tools,
+        supports_parallel_tool_calls: caps.supports_parallel_tool_calls,
+        server_parser: caps.server_parser,
+        tool_search: model.tool_support.tool_search.clone(),
+        batch_api: model.batch.is_some(),
+        batch_wire_format: model.batch.as_ref().map(|batch| batch.wire_format.clone()),
+        batch_input_mode: model.batch.as_ref().map(|batch| batch.input_mode.clone()),
+        batch_discount_percent: model
+            .batch
+            .as_ref()
+            .and_then(|batch| batch.discount_percent),
+        provider_rate_limits: provider
+            .and_then(|provider| provider.rate_limits.as_ref())
+            .is_some(),
+        model_rate_limits: model.rate_limits.is_some(),
+        provider_rpm: provider.and_then(|provider| provider.rpm),
+        pricing: model.pricing.is_some(),
+        provider_latency_p50_ms: provider.and_then(|provider| provider.latency_p50_ms),
+    }
 }
 
 fn parse_route_filters(filters: &[String]) -> Result<BTreeSet<(String, String)>, String> {
@@ -431,7 +465,10 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
     ]
 }
 
-fn score_route(acc: RouteAccumulator) -> ToolScorecardRoute {
+fn score_route(
+    acc: RouteAccumulator,
+    catalog_claim: Option<ToolScorecardCatalogClaim>,
+) -> ToolScorecardRoute {
     let case_count = acc.cases.len();
     let mut successful_cases = 0;
     let mut parseable_tool_call_cases = 0;
@@ -488,6 +525,8 @@ fn score_route(acc: RouteAccumulator) -> ToolScorecardRoute {
     let actionless_rate = rate(actionless_cases, case_count);
     let quality_score = ((pass_rate * 100.0).round() as u16).min(100);
     let recommended_tool_mode = recommended_tool_mode(native_tool_call_cases, text_tool_call_cases);
+    let (catalog_mismatches, suggested_catalog_updates) =
+        catalog_drift(&catalog_claim, recommended_tool_mode);
     let issues = route_issues(
         case_count,
         successful_cases,
@@ -502,6 +541,7 @@ fn score_route(acc: RouteAccumulator) -> ToolScorecardRoute {
     ToolScorecardRoute {
         provider: acc.provider,
         model: acc.model,
+        catalog_claim,
         report_count: acc.report_count,
         case_count,
         successful_cases,
@@ -523,6 +563,117 @@ fn score_route(acc: RouteAccumulator) -> ToolScorecardRoute {
         observed_wire_dialects: observed_wire_dialects.into_iter().collect(),
         classification_counts,
         issues,
+        catalog_mismatches,
+        suggested_catalog_updates,
+    }
+}
+
+fn catalog_drift(
+    claim: &Option<ToolScorecardCatalogClaim>,
+    recommended_tool_mode: &str,
+) -> (
+    Vec<ToolScorecardCatalogMismatch>,
+    Vec<ToolScorecardCatalogUpdate>,
+) {
+    let Some(claim) = claim else {
+        return (
+            vec![ToolScorecardCatalogMismatch {
+                code: "route_missing_from_catalog",
+                field: "provider_catalog.models",
+                observed: recommended_tool_mode.to_string(),
+                catalog: None,
+            }],
+            Vec::new(),
+        );
+    };
+
+    let mut mismatches = Vec::new();
+    let mut updates = Vec::new();
+    let preferred = claim.preferred_tool_format.as_deref();
+    let recommended_preferred_format = recommended_preferred_format(recommended_tool_mode);
+
+    if let (Some(preferred), Some(recommended_preferred_format)) =
+        (preferred, recommended_preferred_format)
+    {
+        if !tool_format_matches_mode(preferred, recommended_tool_mode) {
+            mismatches.push(ToolScorecardCatalogMismatch {
+                code: "preferred_tool_format_disagrees",
+                field: "tool_support.preferred_format",
+                observed: recommended_tool_mode.to_string(),
+                catalog: Some(preferred.to_string()),
+            });
+            updates.push(set_catalog_update(
+                "tool_support.preferred_format",
+                recommended_preferred_format.to_string(),
+                "scorecard_recommended_tool_mode",
+            ));
+        }
+    }
+
+    match recommended_tool_mode {
+        "native" if !claim.native_tools => {
+            mismatches.push(ToolScorecardCatalogMismatch {
+                code: "observed_native_not_cataloged",
+                field: "tool_support.native",
+                observed: "true".to_string(),
+                catalog: Some("false".to_string()),
+            });
+            updates.push(set_catalog_update(
+                "tool_support.native",
+                "true".to_string(),
+                "scorecard_observed_native_tool_calls",
+            ));
+        }
+        "text" if !claim.text_tools => {
+            mismatches.push(ToolScorecardCatalogMismatch {
+                code: "observed_text_not_cataloged",
+                field: "tool_support.text",
+                observed: "true".to_string(),
+                catalog: Some("false".to_string()),
+            });
+            updates.push(set_catalog_update(
+                "tool_support.text",
+                "true".to_string(),
+                "scorecard_observed_text_tool_calls",
+            ));
+        }
+        _ => {}
+    }
+
+    (mismatches, updates)
+}
+
+fn tool_format_matches_mode(format: &str, recommended_tool_mode: &str) -> bool {
+    let Some(format_channel) = crate::llm_config::tool_format_channel(format) else {
+        return false;
+    };
+    matches!(
+        (format_channel, recommended_tool_mode),
+        (crate::llm_config::ToolFormatChannel::Native, "native")
+            | (crate::llm_config::ToolFormatChannel::Text, "text")
+    )
+}
+
+fn recommended_preferred_format(recommended_tool_mode: &str) -> Option<&'static str> {
+    match recommended_tool_mode {
+        "native" => Some("native"),
+        // A scorecard text-channel observation does not distinguish heredoc
+        // from fenced JSON; prefer Harn's safer global text-channel default.
+        "text" => Some("json"),
+        _ => None,
+    }
+}
+
+fn set_catalog_update(
+    field: &'static str,
+    value: String,
+    reason: &'static str,
+) -> ToolScorecardCatalogUpdate {
+    ToolScorecardCatalogUpdate {
+        field,
+        operation: "set",
+        value: Some(value),
+        reason,
     }
 }
 
@@ -644,6 +795,7 @@ mod tests {
 
         let scorecard = scorecard_from_tool_reports(vec![fail, pass]);
 
+        assert_eq!(scorecard.schema_version, TOOL_SCORECARD_SCHEMA_VERSION);
         assert_eq!(scorecard.route_count, 2);
         assert_eq!(scorecard.summary.pass, 1);
         assert_eq!(scorecard.summary.fail, 1);
@@ -657,16 +809,85 @@ mod tests {
     }
 
     #[test]
+    fn scorecard_reports_catalog_drift_without_failing_route() {
+        let scorecard = scorecard_from_tool_reports(vec![report(
+            "anthropic",
+            "claude-sonnet-4-6",
+            vec![case(
+                ToolProbeClassification::ParseableHarnTextToolCall,
+                true,
+            )],
+        )]);
+
+        let route = &scorecard.routes[0];
+        assert_eq!(route.status, "pass");
+        assert_eq!(route.recommended_tool_mode, "text");
+        assert!(route.catalog_claim.is_some());
+        assert!(route
+            .catalog_mismatches
+            .iter()
+            .any(|mismatch| mismatch.code == "preferred_tool_format_disagrees"));
+        assert!(route.suggested_catalog_updates.iter().any(|update| {
+            update.field == "tool_support.preferred_format"
+                && update.operation == "set"
+                && update.value.as_deref() == Some("json")
+        }));
+    }
+
+    #[test]
+    fn scorecard_does_not_suggest_catalog_disable_without_positive_evidence() {
+        let scorecard = scorecard_from_tool_reports(vec![report(
+            "anthropic",
+            "claude-sonnet-4-6",
+            vec![case(ToolProbeClassification::HttpError, false)],
+        )]);
+
+        let route = &scorecard.routes[0];
+        assert_eq!(route.status, "fail");
+        assert_eq!(route.recommended_tool_mode, "disabled");
+        assert!(route.catalog_mismatches.is_empty());
+        assert!(route.suggested_catalog_updates.is_empty());
+    }
+
+    #[test]
+    fn catalog_drift_treats_missing_preferred_format_as_no_preference() {
+        let (mismatches, updates) =
+            catalog_drift(&Some(catalog_claim(None, true, false)), "native");
+
+        assert!(mismatches.is_empty());
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn catalog_drift_treats_json_preferred_format_as_text_channel_match() {
+        let (mismatches, updates) =
+            catalog_drift(&Some(catalog_claim(Some("json"), false, true)), "text");
+
+        assert!(mismatches.is_empty());
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn catalog_drift_suggests_safe_text_channel_default_for_native_mismatch() {
+        let (mismatches, updates) =
+            catalog_drift(&Some(catalog_claim(Some("native"), true, true)), "text");
+
+        assert_eq!(mismatches[0].code, "preferred_tool_format_disagrees");
+        assert_eq!(updates[0].field, "tool_support.preferred_format");
+        assert_eq!(updates[0].value.as_deref(), Some("json"));
+    }
+
+    #[test]
     fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
         let plan =
-            tool_scorecard_plan_from_catalog(&[String::from("anthropic:claude-sonnet-4-6")], true)
+            tool_scorecard_plan_from_catalog(&[String::from("anthropic:claude-sonnet-5")], true)
                 .expect("plan from catalog");
 
         assert_eq!(plan.schema_version, TOOL_SCORECARD_PLAN_SCHEMA_VERSION);
         assert_eq!(plan.kind, "plan");
         assert_eq!(plan.route_count, 1);
         assert_eq!(plan.routes[0].provider, "anthropic");
-        assert_eq!(plan.routes[0].model, "claude-sonnet-4-6");
+        assert_eq!(plan.routes[0].model, "claude-sonnet-5");
         assert!(plan.catalog.hash_blake3.starts_with("blake3:"));
         let case_ids = plan.routes[0]
             .cases
@@ -726,6 +947,33 @@ mod tests {
             parser_errors: Vec::new(),
             protocol_violations: Vec::new(),
             content_sample: None,
+        }
+    }
+
+    fn catalog_claim(
+        preferred_tool_format: Option<&str>,
+        native_tools: bool,
+        text_tools: bool,
+    ) -> ToolScorecardCatalogClaim {
+        ToolScorecardCatalogClaim {
+            preferred_tool_format: preferred_tool_format.map(str::to_string),
+            tool_mode_parity: None,
+            native_tools,
+            text_tools,
+            text_tool_wire_format_supported: text_tools,
+            max_tools: None,
+            supports_parallel_tool_calls: false,
+            server_parser: "unknown".to_string(),
+            tool_search: Vec::new(),
+            batch_api: false,
+            batch_wire_format: None,
+            batch_input_mode: None,
+            batch_discount_percent: None,
+            provider_rate_limits: false,
+            model_rate_limits: false,
+            provider_rpm: None,
+            pricing: false,
+            provider_latency_p50_ms: None,
         }
     }
 }
