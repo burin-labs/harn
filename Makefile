@@ -221,6 +221,11 @@ lint-actions:
 		echo "actionlint not installed; skipping GitHub Actions lint"; \
 		echo "hint: brew install actionlint or go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"; \
 	fi
+	@if grep -R -n -E 'uses: burin-labs/\.github/\.github/workflows/runner-availability\.yml@' .github/workflows \
+		| grep -v -E '@[0-9a-f]{40}([[:space:]]|$$)'; then \
+		echo "Pin org runner-availability workflow references to a full commit SHA." >&2; \
+		exit 1; \
+	fi
 
 # Lint Harn conformance tests (check for warnings).
 # Skip .harn files that have a paired .error file — those are intentional
