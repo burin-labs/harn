@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 
+const RETIRED_DEEPSEEK_DIRECT_IDS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
+
 pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogValidation {
     let mut result = ProviderCatalogValidation::default();
     if artifact.schema_version != PROVIDER_CATALOG_SCHEMA_VERSION {
@@ -159,6 +161,13 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         {
             result.errors.push(format!(
                 "deprecated model {} must include deprecation.note",
+                model.id
+            ));
+        }
+        if model.provider == "deepseek" && RETIRED_DEEPSEEK_DIRECT_IDS.contains(&model.id.as_str())
+        {
+            result.errors.push(format!(
+                "direct DeepSeek model {} is retired; use deepseek-v4-flash or deepseek-v4-pro",
                 model.id
             ));
         }

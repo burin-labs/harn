@@ -1202,6 +1202,29 @@ deprecated = true
 }
 
 #[test]
+fn direct_deepseek_legacy_models_are_rejected() {
+    let _guard = install_overlay(
+        r#"
+[models."deepseek-chat"]
+name = "DeepSeek Chat"
+provider = "deepseek"
+context_window = 1000000
+deprecated = true
+deprecation_note = "Retired by DeepSeek V4."
+"#,
+    );
+    let report = validate_current();
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|message| message.contains("direct DeepSeek model deepseek-chat is retired")),
+        "expected retired direct DeepSeek validation error, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
 fn generated_schema_accepts_generated_artifact_shape() {
     let schema = schema_value();
     assert_eq!(schema["$id"], PROVIDER_CATALOG_SCHEMA_ID);

@@ -120,11 +120,3 @@ provider = "zai"
 [[inference_rules]]
 pattern = "deepseek-v4*"
 provider = "deepseek"
-
-[[inference_rules]]
-pattern = "deepseek-chat"
-provider = "deepseek"
-
-[[inference_rules]]
-pattern = "deepseek-reasoner"
-provider = "deepseek"

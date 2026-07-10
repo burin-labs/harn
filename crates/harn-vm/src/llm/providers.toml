@@ -976,14 +976,6 @@ provider = "zai"
 pattern = "deepseek-v4*"
 provider = "deepseek"
 
-[[inference_rules]]
-pattern = "deepseek-chat"
-provider = "deepseek"
-
-[[inference_rules]]
-pattern = "deepseek-reasoner"
-provider = "deepseek"
-
 # --- source: 20-routing/tier-defaults.toml ---
 # ── Tier defaults ────────────────────────────────────────────────────────────
 # Tier is self-declared on each model row via `tier = "small" | "mid" |
@@ -3085,9 +3077,9 @@ strengths = ["vision", "coding", "agentic"]
 # --- source: 60-models/60-deepseek-openrouter-qwen.toml ---
 # DeepSeek V4 family ─ pricing pages: api-docs.deepseek.com/quick_start/pricing.
 # Both V4 models share a 1M-token context window and 384K-token output
-# cap. `deepseek-chat`/`deepseek-reasoner` are retained as deprecated
-# aliases on V4-Flash (non-thinking) and V4-Flash thinking-mode
-# respectively; per provider notes they retire 2026-07-24.
+# cap. DeepSeek's 2026-04-24 V4 notice says to keep the base_url and use
+# `deepseek-v4-flash` or `deepseek-v4-pro`; `deepseek-chat` and
+# `deepseek-reasoner` become inaccessible after 2026-07-24 15:59 UTC.
 [models."deepseek-v4-flash"]
 name = "DeepSeek V4 Flash"
 provider = "deepseek"
@@ -3108,31 +3100,8 @@ tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
 benchmarks = { aa_intelligence_index = 68.0 }
-[models."deepseek-chat"]
-name = "DeepSeek Chat (legacy → V4 Flash, non-thinking)"
-provider = "deepseek"
-context_window = 1000000
-capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
-deprecated = true
-deprecation_note = "Maps to deepseek-v4-flash non-thinking mode; retirement 2026-07-24 15:59 UTC per provider docs."
-tier = "mid"
-open_weight = true
-strengths = ["coding", "tool_use"]
-[models."deepseek-reasoner"]
-name = "DeepSeek Reasoner (legacy → V4 Flash, thinking)"
-provider = "deepseek"
-context_window = 1000000
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
-deprecated = true
-deprecation_note = "Maps to deepseek-v4-flash thinking mode; retirement 2026-07-24 15:59 UTC per provider docs."
-
 # DeepSeek V4 OpenRouter mirrors. OpenRouter publishes an independent
 # rate card and a binary 1M-token context window for these routes.
-tier = "reasoning"
-open_weight = true
-strengths = ["reasoning", "coding"]
 [models."deepseek/deepseek-v4-flash"]
 name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
