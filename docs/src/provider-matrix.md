@@ -69,8 +69,6 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `deepinfra` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `deepseek` | `deepseek-v4-pro*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepseek` | `deepseek-v4-flash*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `deepseek` | `deepseek-chat*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
-| `deepseek` | `deepseek-reasoner*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `fireworks` | `accounts/fireworks/models/gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
 | `fireworks` | `accounts/fireworks/models/glm-5p*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -309,8 +307,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepinfra` | `deepinfra/openai/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68. |
 | `deepinfra` | `deepinfra/zai-org/GLM-4.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/zai-org/GLM-5.2` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted a malformed native call whose function name was the whole JSON payload; fenced JSON text-channel tools completed the loop. |
-| `deepseek` | `deepseek-chat` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `deepseek` | `deepseek-reasoner` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
