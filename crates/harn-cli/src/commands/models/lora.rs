@@ -1046,11 +1046,12 @@ fn normalize_lora_trainer(raw: &str) -> Result<String, String> {
     match trainer.as_str() {
         "trl" | "trl_sft" | "trl_sft_trainer" => Ok("trl_sft_trainer".to_string()),
         "unsloth" | "unsloth_sft" | "unsloth_trl_sft" => Ok("unsloth_sft".to_string()),
+        "mlx" | "mlx_lm" | "mlx_lm_sft" | "mlx_lora" => Ok("mlx_lm".to_string()),
         "external" | "external_sft" | "external_sft_trainer" => {
             Ok("external_sft_trainer".to_string())
         }
         _ => Err(format!(
-            "unsupported LoRA trainer `{raw}`; expected `trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`"
+            "unsupported LoRA trainer `{raw}`; expected `trl_sft_trainer`, `unsloth_sft`, `mlx_lm`, or `external_sft_trainer`"
         )),
     }
 }
@@ -1587,6 +1588,17 @@ fn trainer_contract_for_dataset(
         "external_sft_trainer" => {
             contract.push(
                 "external trainers must reproduce the Harn trainer contract exactly and stamp their backend/version in the LoRA manifest".to_string(),
+            );
+        }
+        "mlx_lm" => {
+            contract.push(
+                "use mlx-lm only as the trainer backend; Harn remains the authority for export, manifest, eval, and serving contracts".to_string(),
+            );
+            contract.push(
+                "record mlx-lm, MLX, macOS, and Apple Silicon hardware versions in `harn models lora manifest --target-metadata` after training".to_string(),
+            );
+            contract.push(
+                "verify the produced adapter format can be served by the selected local runtime before promotion evidence is accepted".to_string(),
             );
         }
         _ => {
@@ -3370,6 +3382,23 @@ mod tests {
         assert!(unsloth
             .iter()
             .any(|item| item.contains("modules_to_save=[]")));
+
+        assert_eq!(
+            normalize_lora_trainer("mlx-lm").expect("mlx alias"),
+            "mlx_lm"
+        );
+        let mlx = trainer_contract_for_dataset(
+            "harn_text_tool_calls_json_fences",
+            "json",
+            "mlx_lm",
+            &[],
+            &tool_catalog,
+        );
+        assert!(mlx.iter().any(|item| item.contains("mlx-lm")));
+        assert!(mlx.iter().any(|item| item.contains("Apple Silicon")));
+        assert!(mlx
+            .iter()
+            .any(|item| item.contains("selected local runtime")));
     }
 
     #[test]
