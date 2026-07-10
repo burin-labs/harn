@@ -15,12 +15,6 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
-    kind: "exact",
-    pattern: "tests/bridge_mock_host.py",
-    category: "test-harness-adapter",
-    reason: "Out-of-process bridge test host intentionally runs as a foreign subprocess.",
-  },
-  {
     kind: "prefix",
     pattern: "crates/harn-cli/assets/demo/",
     category: "fixture",

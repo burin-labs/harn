@@ -84,7 +84,8 @@ pub(crate) use codemod::CodemodArgs;
 pub(crate) use completion::{CompletionArgs, CompletionShell};
 pub(crate) use config_cmd::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};
 pub(crate) use conformance_helper::{
-    ConformanceHelperArgs, ConformanceHelperCommand, ConformanceHelperHttpProxyArgs,
+    ConformanceHelperArgs, ConformanceHelperBridgeMockHostArgs, ConformanceHelperCommand,
+    ConformanceHelperHttpProxyArgs,
 };
 pub(crate) use connect::{
     ConnectApiKeyArgs, ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs,
