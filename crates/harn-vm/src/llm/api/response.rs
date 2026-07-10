@@ -1115,7 +1115,7 @@ pub(crate) fn parse_llm_response(
 /// Extract cache-read token count from a provider `usage` JSON value,
 /// covering Anthropic, OpenAI (and OpenAI-compatibles), and OpenRouter
 /// passthrough field shapes. Returns 0 when the provider doesn't report it.
-pub(super) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
+pub(crate) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
     // Anthropic / OpenRouter passthrough: usage.cache_read_input_tokens
     if let Some(n) = usage
         .get("cache_read_input_tokens")
@@ -1140,6 +1140,9 @@ pub(super) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
     }
     // OpenRouter variants: cache_read_tokens / cached_prompt_tokens.
     if let Some(n) = usage.get("cache_read_tokens").and_then(|v| v.as_i64()) {
+        return n;
+    }
+    if let Some(n) = usage.get("cached_input_tokens").and_then(|v| v.as_i64()) {
         return n;
     }
     if let Some(n) = usage.get("cached_prompt_tokens").and_then(|v| v.as_i64()) {
@@ -1170,7 +1173,10 @@ pub(super) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
 /// Extract cache-write (creation) token count from a provider `usage` JSON.
 /// Anthropic reports this at top level; OpenRouter/OpenAI-compatible
 /// providers may nest it under `prompt_tokens_details`.
-pub(super) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
+pub(crate) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
+    if let Some(n) = usage.get("cache_write_tokens").and_then(|v| v.as_i64()) {
+        return n;
+    }
     if let Some(n) = usage
         .get("cache_creation_input_tokens")
         .and_then(|v| v.as_i64())

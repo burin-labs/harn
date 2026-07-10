@@ -600,6 +600,28 @@ pub fn calculate_cost_for_provider(
         / 1000.0
 }
 
+/// Calculate per-call USD cost with provider prompt-cache accounting. Unknown
+/// pricing still returns 0.0, matching [`calculate_cost_for_provider`].
+pub(crate) fn calculate_cost_for_provider_with_cache(
+    provider: &str,
+    model: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+) -> f64 {
+    let Some(detail) = pricing_detail_for(provider, model) else {
+        return 0.0;
+    };
+    project_call_cost(
+        &detail,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+    )
+}
+
 /// Per-call USD cost for trace attribution, or `None` when the
 /// (provider, model) pair has no catalog pricing. Unlike
 /// [`calculate_cost_for_provider`] (which coerces unknown pricing to
@@ -1322,6 +1344,29 @@ mod tests {
         assert!(
             (cost - expected).abs() < 1e-9,
             "cost={cost}, expected={expected}"
+        );
+    }
+
+    #[test]
+    fn calculate_cost_for_provider_with_cache_applies_cache_read_discount() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+
+        let without_cache =
+            calculate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 1_000, 1_000);
+        let with_cache = calculate_cost_for_provider_with_cache(
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            1_000,
+            1_000,
+            500,
+            0,
+        );
+
+        assert!(with_cache > 0.0);
+        assert!(
+            with_cache < without_cache,
+            "cache reads should be priced below uncached prompt input"
         );
     }
 
