@@ -632,9 +632,9 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
     let argv = [
         "provider",
         "tool-scorecard",
-        "--plan",
+        "--plan-from-catalog",
         "--route",
-        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-sonnet-5",
         "--include-batch-manifest",
     ];
 
@@ -655,7 +655,7 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
     assert_eq!(harn_value["kind"], "plan");
     assert_eq!(harn_value["route_count"], 1);
     assert_eq!(harn_value["routes"][0]["provider"], "anthropic");
-    assert_eq!(harn_value["routes"][0]["model"], "claude-sonnet-4-6");
+    assert_eq!(harn_value["routes"][0]["model"], "claude-sonnet-5");
     let cases = harn_value["routes"][0]["cases"]
         .as_array()
         .expect("cases should be an array");
@@ -678,9 +678,9 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
     let argv = [
         "provider",
         "tool-scorecard",
-        "--plan",
+        "--plan-from-catalog",
         "--route",
-        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-sonnet-5",
         "--json=false",
     ];
 
@@ -707,6 +707,121 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
         "plan cases missing from human output: {}",
         harn.stdout
     );
+}
+
+#[test]
+fn provider_tool_scorecard_json_reports_catalog_mismatches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("text-observed.json");
+    let (provider, model) = native_preferred_text_supported_scorecard_route();
+    write_tool_probe_report_fixture(
+        &fixture,
+        1,
+        &provider,
+        &model,
+        "parseable_harn_text_tool_call",
+        true,
+    );
+    let path = fixture.to_string_lossy().into_owned();
+    let harn = run(
+        &[
+            "provider",
+            "tool-scorecard",
+            "--tool-probe-report",
+            path.as_str(),
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["schema_version"], 2);
+    let route = &harn_value["routes"][0];
+    assert_eq!(route["provider"], provider);
+    assert_eq!(route["model"], model);
+    assert_eq!(route["recommended_tool_mode"], "text");
+    assert_eq!(
+        route["catalog_mismatches"][0]["code"],
+        "preferred_tool_format_disagrees"
+    );
+    assert_eq!(
+        route["suggested_catalog_updates"][0]["field"],
+        "tool_support.preferred_format"
+    );
+    assert_eq!(route["suggested_catalog_updates"][0]["operation"], "set");
+    assert_eq!(route["suggested_catalog_updates"][0]["value"], "json");
+}
+
+#[test]
+fn provider_tool_scorecard_human_reports_catalog_mismatch_codes() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("text-observed.json");
+    let (provider, model) = native_preferred_text_supported_scorecard_route();
+    write_tool_probe_report_fixture(
+        &fixture,
+        1,
+        &provider,
+        &model,
+        "parseable_harn_text_tool_call",
+        true,
+    );
+    let path = fixture.to_string_lossy().into_owned();
+    let harn = run(
+        &[
+            "provider",
+            "tool-scorecard",
+            "--tool-probe-report",
+            path.as_str(),
+            "--json=false",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
+    assert!(
+        harn.stdout
+            .contains("catalog_mismatches=preferred_tool_format_disagrees"),
+        "unexpected human output: {}",
+        harn.stdout
+    );
+}
+
+#[test]
+fn provider_tool_scorecard_json_reports_unknown_catalog_route() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("unknown-route.json");
+    write_tool_probe_report_fixture(
+        &fixture,
+        1,
+        "unknown-provider",
+        "unknown-model",
+        "structured_native_tool_call",
+        true,
+    );
+    let path = fixture.to_string_lossy().into_owned();
+    let harn = run(
+        &[
+            "provider",
+            "tool-scorecard",
+            "--tool-probe-report",
+            path.as_str(),
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["schema_version"], 2);
+    let route = &harn_value["routes"][0];
+    assert!(route["catalog_claim"].is_null());
+    assert_eq!(
+        route["catalog_mismatches"][0]["code"],
+        "route_missing_from_catalog"
+    );
+    assert!(route["suggested_catalog_updates"]
+        .as_array()
+        .expect("updates should be an array")
+        .is_empty());
 }
 
 #[test]
@@ -790,7 +905,15 @@ fn write_tool_probe_report_fixture(
     classification: &str,
     ok: bool,
 ) {
-    let fallback = if ok { "native" } else { "disabled" };
+    let native_tool_call_count = usize::from(ok && classification == "structured_native_tool_call");
+    let text_tool_call_count = usize::from(ok && classification == "parseable_harn_text_tool_call");
+    let fallback = if native_tool_call_count > 0 {
+        "native"
+    } else if text_tool_call_count > 0 {
+        "text"
+    } else {
+        "disabled"
+    };
     let body = serde_json::json!({
         "schema_version": schema_version,
         "provider": provider,
@@ -803,8 +926,8 @@ fn write_tool_probe_report_fixture(
                 "ok": ok,
                 "classification": classification,
                 "fallback_mode": fallback,
-                "native_tool_call_count": usize::from(ok),
-                "text_tool_call_count": 0,
+                "native_tool_call_count": native_tool_call_count,
+                "text_tool_call_count": text_tool_call_count,
                 "parser_errors": [],
                 "protocol_violations": []
             }
@@ -821,4 +944,30 @@ fn write_tool_probe_report_fixture(
         serde_json::to_string_pretty(&body).expect("serialize fixture"),
     )
     .expect("write scorecard fixture");
+}
+
+fn native_preferred_text_supported_scorecard_route() -> (String, String) {
+    let harn = run(&["provider", "tool-scorecard", "--plan-from-catalog"], &[]);
+    assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let routes = harn_value["routes"]
+        .as_array()
+        .expect("tool-scorecard plan routes should be an array");
+    for route in routes {
+        let claim = &route["catalog_claim"];
+        if claim["preferred_tool_format"].as_str() == Some("native")
+            && claim["text_tools"].as_bool() == Some(true)
+        {
+            let provider = route["provider"]
+                .as_str()
+                .expect("route provider should be a string")
+                .to_string();
+            let model = route["model"]
+                .as_str()
+                .expect("route model should be a string")
+                .to_string();
+            return (provider, model);
+        }
+    }
+    panic!("expected at least one native-preferred catalog route with text-channel support");
 }

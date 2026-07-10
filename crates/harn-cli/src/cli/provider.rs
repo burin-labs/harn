@@ -265,20 +265,24 @@ pub(crate) struct ProviderToolProbeArgs {
 pub(crate) struct ProviderToolScorecardArgs {
     /// Emit the catalog-backed fixed micro-case plan instead of aggregating
     /// saved tool-probe reports.
-    #[arg(long, conflicts_with = "tool_probe_reports")]
-    pub plan: bool,
-    /// Restrict `--plan` to one catalog route. Repeat for multiple routes.
+    #[arg(long = "plan-from-catalog", conflicts_with = "tool_probe_reports")]
+    pub plan_from_catalog: bool,
+    /// Restrict `--plan-from-catalog` to one catalog route. Repeat for
+    /// multiple routes.
     /// Format is `provider:model`; the model part may contain additional `:`
     /// characters.
-    #[arg(long = "route", requires = "plan")]
+    #[arg(long = "route", requires = "plan_from_catalog")]
     pub routes: Vec<String>,
     /// Include batch-manifest request rows for latency-tolerant single-turn
     /// cases on routes whose catalog/capabilities claim batch support.
-    #[arg(long, requires = "plan")]
+    #[arg(long, requires = "plan_from_catalog")]
     pub include_batch_manifest: bool,
     /// Saved JSON output from `harn provider tool-probe`. Repeat the flag to
     /// aggregate several routes into one scorecard.
-    #[arg(long = "tool-probe-report", required_unless_present = "plan")]
+    #[arg(
+        long = "tool-probe-report",
+        required_unless_present = "plan_from_catalog"
+    )]
     pub tool_probe_reports: Vec<PathBuf>,
     /// Emit JSON. Defaults to true because catalog reviews and promotion gates
     /// consume the structured scorecard.
