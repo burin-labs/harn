@@ -737,6 +737,7 @@ fn denial_gate_serializes_as_snake_case() {
     use crate::agent_events::DenialGate;
     let pairs = [
         (DenialGate::ToolCeiling, "tool_ceiling"),
+        (DenialGate::MalformedToolWrapper, "malformed_tool_wrapper"),
         (DenialGate::CapabilityCeiling, "capability_ceiling"),
         (DenialGate::SideEffectCeiling, "side_effect_ceiling"),
         (DenialGate::ArgConstraint, "arg_constraint"),

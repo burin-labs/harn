@@ -260,6 +260,7 @@ fn agent_primitive_denied_tool(
     let denial_json = denial.map(|denial| {
         let mut denial = denial.clone();
         if repaired {
+            denial.gate = crate::agent_events::DenialGate::MalformedToolWrapper;
             denial.retryable = true;
         }
         denial.to_json()
@@ -2680,10 +2681,12 @@ mod denied_tool_routing_tests {
             !next.to_lowercase().contains("permission") && !next.contains("Do not retry"),
             "repair must be retry-positive with no permission framing: {next}"
         );
-        // The structured denial keeps the precise gate but flips retryable:
-        // re-issuing WITH the correction is exactly the coached next move.
-        assert_eq!(envelope["denial"]["gate"], "tool_ceiling");
+        // The structured denial names the wrapper-syntax cause instead of the
+        // lower-level policy gate and flips retryable: re-issuing WITH the
+        // correction is exactly the coached next move.
+        assert_eq!(envelope["denial"]["gate"], "malformed_tool_wrapper");
         assert_eq!(envelope["denial"]["retryable"], true);
+        assert_eq!(result["denial"]["gate"], "malformed_tool_wrapper");
         assert_eq!(result["denial"]["retryable"], true);
         // The wire-level category is unchanged for host harnesses.
         assert_eq!(envelope["error_category"], "permission_denied");
@@ -2720,6 +2723,7 @@ mod denied_tool_routing_tests {
             "next_step should name the failure class: {next}"
         );
         // Still terminal: re-sending the identical call can never succeed.
+        assert_eq!(envelope["denial"]["gate"], "tool_ceiling");
         assert_eq!(envelope["denial"]["retryable"], false);
         assert_eq!(envelope["error_category"], "permission_denied");
     }

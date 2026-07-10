@@ -161,6 +161,10 @@ impl ToolCallErrorCategory {
 pub enum DenialGate {
     /// The tool is not in the policy's allowed-tool list.
     ToolCeiling,
+    /// The model emitted Harn text-tool wrapper syntax as a native/provider
+    /// tool name or arguments payload, so dispatch refused the wrapper while
+    /// coaching a direct re-issue of the embedded tool call.
+    MalformedToolWrapper,
     /// The tool requires a capability/operation the policy does not grant
     /// (e.g. `workspace.write_text`, `process.exec`).
     CapabilityCeiling,
@@ -188,8 +192,9 @@ pub enum DenialGate {
 }
 
 impl DenialGate {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::ToolCeiling,
+        Self::MalformedToolWrapper,
         Self::CapabilityCeiling,
         Self::SideEffectCeiling,
         Self::ArgConstraint,
@@ -204,6 +209,7 @@ impl DenialGate {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ToolCeiling => "tool_ceiling",
+            Self::MalformedToolWrapper => "malformed_tool_wrapper",
             Self::CapabilityCeiling => "capability_ceiling",
             Self::SideEffectCeiling => "side_effect_ceiling",
             Self::ArgConstraint => "arg_constraint",
