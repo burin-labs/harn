@@ -248,6 +248,15 @@ pub(crate) struct ModelsLoraExportArgs {
     /// Extra target provenance copied into row metadata, as KEY=VALUE.
     #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
     pub target_metadata: Vec<String>,
+    /// Inference tool-catalog policy (`full_schema`, `compressed_names`, or `fixed_catalog_internalized`).
+    #[arg(long = "tool-catalog-policy", default_value = "full_schema")]
+    pub tool_catalog_policy: String,
+    /// Stable id for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-id")]
+    pub tool_catalog_id: Option<String>,
+    /// Stable hash for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-hash")]
+    pub tool_catalog_hash: Option<String>,
     /// PEFT modules_to_save entries to include in the LoRA contract.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
@@ -342,6 +351,15 @@ pub(crate) struct ModelsLoraManifestArgs {
     /// Extra target provenance copied into the manifest, as KEY=VALUE.
     #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
     pub target_metadata: Vec<String>,
+    /// Inference tool-catalog policy (`full_schema`, `compressed_names`, or `fixed_catalog_internalized`).
+    #[arg(long = "tool-catalog-policy", default_value = "full_schema")]
+    pub tool_catalog_policy: String,
+    /// Stable id for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-id")]
+    pub tool_catalog_id: Option<String>,
+    /// Stable hash for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-hash")]
+    pub tool_catalog_hash: Option<String>,
     /// PEFT modules_to_save entries used by the trainer.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
@@ -388,6 +406,15 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// PEFT modules_to_save entries to plan for.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
+    /// Inference tool-catalog policy (`full_schema`, `compressed_names`, or `fixed_catalog_internalized`).
+    #[arg(long = "tool-catalog-policy", default_value = "full_schema")]
+    pub tool_catalog_policy: String,
+    /// Stable id for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-id")]
+    pub tool_catalog_id: Option<String>,
+    /// Stable hash for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-hash")]
+    pub tool_catalog_hash: Option<String>,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
@@ -481,6 +508,15 @@ pub(crate) struct ModelsLoraTrainArgs {
     /// Extra target provenance copied into the receipt and manifest command, as KEY=VALUE.
     #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
     pub target_metadata: Vec<String>,
+    /// Inference tool-catalog policy (`full_schema`, `compressed_names`, or `fixed_catalog_internalized`).
+    #[arg(long = "tool-catalog-policy", default_value = "full_schema")]
+    pub tool_catalog_policy: String,
+    /// Stable id for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-id")]
+    pub tool_catalog_id: Option<String>,
+    /// Stable hash for the fixed tool catalog used by compressed/no-catalog experiments.
+    #[arg(long = "tool-catalog-hash")]
+    pub tool_catalog_hash: Option<String>,
     /// PEFT modules_to_save entries used by the backend trainer.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,

@@ -196,7 +196,8 @@ failures; keep holdouts frozen; and stop refresh rounds when they stop clearing
 new buckets or regress no-write/non-tool behavior. The
 `harn models lora export` command carries the same contract into dataset rows
 and manifests with a stable contract id derived from the base model, provider,
-effective tool format, dataset format, and chat template, plus
+effective tool format, dataset format, chat template, and tool-catalog policy,
+plus
 `contract.training_contract` fields for assistant mask, packing, parser
 ownership, split policy, and required row metadata. Exported rows always carry
 the source record/transcript ids, teacher route, target base/tool format,
@@ -206,7 +207,11 @@ template hash. Source metadata wins when it declares those fields; otherwise
 manifest repeats the required metadata list and defaults, so external trainers
 can prove that a PEFT/QLoRA run used the same frozen cases, schemas, prompt
 template, and Harn tool-call contract that promotion evals will probe. The
-promotion recipe carries `evaluation.evidence_contract`, which names the
+default tool-catalog policy is `full_schema`; fixed-catalog compression
+experiments must opt into `compressed_names` or `fixed_catalog_internalized` and
+record `--tool-catalog-id` or `--tool-catalog-hash`, which becomes part of the
+adapter contract and downstream receipts.
+The promotion recipe carries `evaluation.evidence_contract`, which names the
 preflight/export/manifest/inspect/tool-probe/base-eval/adapter-eval receipts
 required for promotion plus optional `harn models batch` receipts for
 latency-tolerant eval or corpus-refresh sweeps. The

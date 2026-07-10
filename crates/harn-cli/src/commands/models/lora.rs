@@ -20,10 +20,11 @@ const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
 const LORA_PLAN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_JSON";
 const LORA_PLAN_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY";
-const LORA_CONTRACT_SCHEMA_VERSION: u64 = 2;
-const LORA_CONTRACT_HASH_SCHEMA_VERSION: u64 = 2;
-const LORA_TRAINING_CONTRACT_SCHEMA_VERSION: u64 = 2;
+const LORA_CONTRACT_SCHEMA_VERSION: u64 = 3;
+const LORA_CONTRACT_HASH_SCHEMA_VERSION: u64 = 3;
+const LORA_TRAINING_CONTRACT_SCHEMA_VERSION: u64 = 3;
 const LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION: u64 = 1;
+const LORA_TOOL_CATALOG_CONTRACT_SCHEMA_VERSION: u64 = 1;
 const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 3;
 /// Serialises the dispatch path so concurrent in-process callers do not race on
 /// the env vars that carry the Rust-collected adapter/catalog facts.
@@ -463,6 +464,12 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let precision = precision_contract_for_method(&method);
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let requested_corpus_strategy = normalize_corpus_strategy(&args.corpus_strategy)?;
+    let tool_catalog_policy = normalize_tool_catalog_policy(&args.tool_catalog_policy)?;
+    let tool_catalog = tool_catalog_contract(
+        &tool_catalog_policy,
+        args.tool_catalog_id.as_deref(),
+        args.tool_catalog_hash.as_deref(),
+    )?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let target_modules =
@@ -518,6 +525,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         dataset_format,
         Some(&template.name),
         &modules_to_save,
+        &tool_catalog,
     )?;
     let inspect_command = vec![
         "harn".to_string(),
@@ -539,16 +547,17 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         .as_ref()
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
         .is_some();
-    let serving = serving_recipe(
-        &resolved.id,
-        &provider,
-        &request_model,
-        &adapter_name,
-        &decision.effective,
+    let serving = serving_recipe(ServingRecipeInput {
+        base_model: &resolved.id,
+        provider: &provider,
+        request_model: &request_model,
+        adapter_name: &adapter_name,
+        tool_format: &decision.effective,
         dataset_format,
         provider_supports_lora_launch,
-        &lora_module_value_format,
-    );
+        lora_module_value_format: &lora_module_value_format,
+        tool_catalog: &tool_catalog,
+    });
     let launch_command = if provider_supports_lora_launch {
         let mut command = vec![
             "harn".to_string(),
@@ -629,6 +638,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     ];
     export_command.extend(precision_target_metadata(&precision));
     export_command.extend(modules_to_save_args(&modules_to_save));
+    export_command.extend(tool_catalog_args(&tool_catalog));
     let mut train_command = vec![
         "harn".to_string(),
         "models".to_string(),
@@ -670,6 +680,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     }
     train_command.extend(precision_target_metadata(&precision));
     train_command.extend(modules_to_save_args(&modules_to_save));
+    train_command.extend(tool_catalog_args(&tool_catalog));
     train_command.extend(target_metadata_args_from_map(&serving_target_metadata(
         &serving,
     )));
@@ -716,6 +727,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     }
     manifest_command.extend(precision_target_metadata(&precision));
     manifest_command.extend(modules_to_save_args(&modules_to_save));
+    manifest_command.extend(tool_catalog_args(&tool_catalog));
     manifest_command.extend(target_metadata_args_from_map(&serving_target_metadata(
         &serving,
     )));
@@ -787,6 +799,9 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             requested_corpus_strategy,
             effective_corpus_strategy: effective_corpus_strategy.clone(),
             teacher: teacher.clone(),
+            tool_catalog_policy: tool_catalog.policy.clone(),
+            tool_catalog_id: tool_catalog.catalog_id.clone(),
+            tool_catalog_hash: tool_catalog.catalog_hash.clone(),
         },
         tool_calling: ToolCallingReport {
             native_tools: capabilities.native_tools,
@@ -805,12 +820,18 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             loss_scope: "assistant_tool_calls".to_string(),
             packing: "off_by_default_for_tool_boundaries".to_string(),
             target_modules,
-            contract: lora_training_contract(dataset_format, &decision.effective, &modules_to_save),
+            contract: lora_training_contract(
+                dataset_format,
+                &decision.effective,
+                &modules_to_save,
+                &tool_catalog,
+            ),
             trainer_contract: trainer_contract_for_dataset(
                 dataset_format,
                 &decision.effective,
                 &trainer,
                 &modules_to_save,
+                &tool_catalog,
             ),
             notes: training_notes(&decision.effective),
         },
@@ -1135,6 +1156,112 @@ fn normalize_corpus_strategy(raw: &str) -> Result<String, String> {
     }
 }
 
+fn normalize_tool_catalog_policy(raw: &str) -> Result<String, String> {
+    match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "" | "full_schema" | "full_tool_schema" | "full_tool_schemas" => {
+            Ok("full_schema".to_string())
+        }
+        "compressed_names" | "names_only" | "tool_names_only" | "compressed_tool_names" => {
+            Ok("compressed_names".to_string())
+        }
+        "fixed_catalog_internalized" | "internalized_fixed_catalog" | "internalized"
+        | "no_catalog" | "none" => Ok("fixed_catalog_internalized".to_string()),
+        other => Err(format!(
+            "unsupported tool catalog policy `{other}`; expected `full_schema`, `compressed_names`, or `fixed_catalog_internalized`"
+        )),
+    }
+}
+
+fn normalize_optional_catalog_identity(
+    raw: Option<&str>,
+    flag: &str,
+) -> Result<Option<String>, String> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value.contains(char::is_whitespace) {
+                Err(format!("{flag} must not contain whitespace"))
+            } else {
+                Ok(value.to_string())
+            }
+        })
+        .transpose()
+}
+
+fn tool_catalog_contract(
+    policy: &str,
+    catalog_id: Option<&str>,
+    catalog_hash: Option<&str>,
+) -> Result<ToolCatalogContract, String> {
+    let catalog_id = normalize_optional_catalog_identity(catalog_id, "--tool-catalog-id")?;
+    let catalog_hash = normalize_optional_catalog_identity(catalog_hash, "--tool-catalog-hash")?;
+    if policy != "full_schema" && catalog_id.is_none() && catalog_hash.is_none() {
+        return Err(format!(
+            "--tool-catalog-policy {policy} requires --tool-catalog-id or --tool-catalog-hash so the fixed catalog is auditable"
+        ));
+    }
+    let (training_catalog, inference_catalog, prompt_catalog_requirement, notes) = match policy {
+        "full_schema" => (
+            "full_json_schema",
+            "full_json_schema",
+            "include full tool schemas at inference",
+            vec![
+                "default production route: prompts keep the same full tool schemas used to validate the dataset".to_string(),
+                "safe for changing tool catalogs as long as each prompt carries the current schema set".to_string(),
+            ],
+        ),
+        "compressed_names" => (
+            "full_json_schema_for_validation",
+            "compressed_tool_names_only",
+            "include the fixed tool names only; omit argument schemas from the prompt",
+            vec![
+                "experiment route: adapter must infer argument schemas from a declared fixed catalog".to_string(),
+                "promotion must compare against the full-schema baseline before this route is used outside controlled evals".to_string(),
+            ],
+        ),
+        "fixed_catalog_internalized" => (
+            "fixed_full_json_schema_for_training",
+            "no_runtime_catalog",
+            "omit runtime tool catalog; adapter weights are bound to the declared fixed catalog",
+            vec![
+                "experiment route: any tool addition, deletion, rename, or schema change creates a new adapter contract".to_string(),
+                "do not use as the default production route without adapter-loaded promotion receipts for the exact fixed catalog".to_string(),
+            ],
+        ),
+        _ => unreachable!("normalize_tool_catalog_policy returned an unsupported policy"),
+    };
+    Ok(ToolCatalogContract {
+        schema_version: LORA_TOOL_CATALOG_CONTRACT_SCHEMA_VERSION,
+        policy: policy.to_string(),
+        catalog_id,
+        catalog_hash,
+        training_catalog: training_catalog.to_string(),
+        inference_catalog: inference_catalog.to_string(),
+        schema_columns_required: true,
+        prompt_catalog_requirement: prompt_catalog_requirement.to_string(),
+        notes,
+        promotion_gates: vec![
+            "record the exact catalog policy and catalog identity in export, train, manifest, and promotion receipts".to_string(),
+            "compare compressed/no-catalog adapters against a full-schema baseline on the same frozen tool cases".to_string(),
+            "rerun promotion when any tool name, argument schema, catalog id, catalog hash, or prompt catalog policy changes".to_string(),
+        ],
+    })
+}
+
+fn tool_catalog_args(contract: &ToolCatalogContract) -> Vec<String> {
+    let mut args = Vec::new();
+    if contract.policy != "full_schema" {
+        args.extend(["--tool-catalog-policy".to_string(), contract.policy.clone()]);
+    }
+    if let Some(catalog_id) = &contract.catalog_id {
+        args.extend(["--tool-catalog-id".to_string(), catalog_id.clone()]);
+    }
+    if let Some(catalog_hash) = &contract.catalog_hash {
+        args.extend(["--tool-catalog-hash".to_string(), catalog_hash.clone()]);
+    }
+    args
+}
+
 fn parse_target_metadata(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
     let mut metadata = BTreeMap::new();
     for item in raw {
@@ -1276,6 +1403,16 @@ fn serving_target_metadata(serving: &ServingRecipe) -> BTreeMap<String, String> 
         "serving_request_model".to_string(),
         serving.request_model.clone(),
     );
+    metadata.insert(
+        "tool_catalog_policy".to_string(),
+        serving.tool_catalog.policy.clone(),
+    );
+    if let Some(catalog_id) = &serving.tool_catalog.catalog_id {
+        metadata.insert("tool_catalog_id".to_string(), catalog_id.clone());
+    }
+    if let Some(catalog_hash) = &serving.tool_catalog.catalog_hash {
+        metadata.insert("tool_catalog_hash".to_string(), catalog_hash.clone());
+    }
     for requirement in &serving.serving_requirements {
         match (
             requirement.kind.as_str(),
@@ -1393,14 +1530,21 @@ fn trainer_contract_for_dataset(
     tool_format: &str,
     trainer: &str,
     modules_to_save: &[String],
+    tool_catalog: &ToolCatalogContract,
 ) -> Vec<String> {
-    let machine_contract = lora_training_contract(dataset_format, tool_format, modules_to_save);
+    let machine_contract =
+        lora_training_contract(dataset_format, tool_format, modules_to_save, tool_catalog);
     let peft_policy = &machine_contract.peft_save_policy;
     let mut contract = vec![
         "use TRL SFTTrainer with PEFT LoRA/QLoRA; keep the base weights frozen and save only adapter artifacts".to_string(),
         "set assistant_only_loss=true so prompts, tool schemas, and tool observations are context rather than targets".to_string(),
         "verify the tokenizer chat template emits assistant generation masks before trusting assistant_only_loss".to_string(),
         "keep packing=false unless a boundary-aware packer preserves complete tool-call/tool-result pairs".to_string(),
+        format!(
+            "inference tool catalog policy={}; catalog prompt requirement={}",
+            machine_contract.tool_catalog.policy,
+            machine_contract.tool_catalog.prompt_catalog_requirement
+        ),
         format!(
             "set PEFT modules_to_save={}; keep embedding/lm_head saves explicit in the manifest",
             if peft_policy.modules_to_save.is_empty() {
@@ -1465,7 +1609,31 @@ pub(super) fn lora_training_contract(
     dataset_format: &str,
     tool_format: &str,
     modules_to_save: &[String],
+    tool_catalog: &ToolCatalogContract,
 ) -> LoraTrainingContract {
+    let mut required_example_metadata = vec![
+        "dataset_format".to_string(),
+        "source_tool_format".to_string(),
+        "source_record_id".to_string(),
+        "source_transcript_id".to_string(),
+        "teacher_model".to_string(),
+        "teacher_provider".to_string(),
+        "target_base_model".to_string(),
+        "target_tool_format".to_string(),
+        "tool_schema_hash".to_string(),
+        "prompt_template_hash".to_string(),
+        "split".to_string(),
+        "license".to_string(),
+        "lora_contract_id".to_string(),
+        "lora_target".to_string(),
+        "tool_catalog_policy".to_string(),
+    ];
+    if tool_catalog.catalog_id.is_some() {
+        required_example_metadata.push("tool_catalog_id".to_string());
+    }
+    if tool_catalog.catalog_hash.is_some() {
+        required_example_metadata.push("tool_catalog_hash".to_string());
+    }
     LoraTrainingContract {
         schema_version: LORA_TRAINING_CONTRACT_SCHEMA_VERSION,
         loss_scope: "assistant_tool_calls".to_string(),
@@ -1474,23 +1642,9 @@ pub(super) fn lora_training_contract(
         tool_parser_owner: tool_parser_owner_for_format(tool_format).to_string(),
         dataset_format: dataset_format.to_string(),
         dataset_split_policy: "train_tune_holdout_disjoint_no_eval_holdout_training".to_string(),
+        tool_catalog: tool_catalog.clone(),
         peft_save_policy: peft_save_policy(modules_to_save),
-        required_example_metadata: vec![
-            "dataset_format".to_string(),
-            "source_tool_format".to_string(),
-            "source_record_id".to_string(),
-            "source_transcript_id".to_string(),
-            "teacher_model".to_string(),
-            "teacher_provider".to_string(),
-            "target_base_model".to_string(),
-            "target_tool_format".to_string(),
-            "tool_schema_hash".to_string(),
-            "prompt_template_hash".to_string(),
-            "split".to_string(),
-            "license".to_string(),
-            "lora_contract_id".to_string(),
-            "lora_target".to_string(),
-        ],
+        required_example_metadata,
     }
 }
 
@@ -1528,6 +1682,7 @@ fn lora_contract_id(
     dataset_format: &str,
     chat_template: Option<&str>,
     modules_to_save: &[String],
+    tool_catalog: &ToolCatalogContract,
 ) -> Result<String, String> {
     let input = LoraContractHashInput {
         schema_version: LORA_CONTRACT_HASH_SCHEMA_VERSION,
@@ -1537,6 +1692,9 @@ fn lora_contract_id(
         dataset_format,
         chat_template,
         modules_to_save,
+        tool_catalog_policy: &tool_catalog.policy,
+        tool_catalog_id: tool_catalog.catalog_id.as_deref(),
+        tool_catalog_hash: tool_catalog.catalog_hash.as_deref(),
     };
     let bytes = serde_json::to_vec(&input)
         .map_err(|error| format!("failed to render LoRA contract hash input: {error}"))?;
@@ -1551,6 +1709,7 @@ fn lora_contract_report(
     dataset_format: &str,
     chat_template: Option<String>,
     modules_to_save: &[String],
+    tool_catalog: &ToolCatalogContract,
 ) -> LoraContractReport {
     LoraContractReport {
         schema_version: LORA_CONTRACT_SCHEMA_VERSION,
@@ -1564,6 +1723,7 @@ fn lora_contract_report(
             dataset_format,
             harn_tool_format,
             modules_to_save,
+            tool_catalog,
         ),
     }
 }
@@ -1593,16 +1753,30 @@ pub(super) fn lora_modules_value_format(
         .to_string()
 }
 
-fn serving_recipe(
-    base_model: &str,
-    provider: &str,
-    request_model: &str,
-    adapter_name: &str,
-    tool_format: &str,
-    dataset_format: &str,
+struct ServingRecipeInput<'a> {
+    base_model: &'a str,
+    provider: &'a str,
+    request_model: &'a str,
+    adapter_name: &'a str,
+    tool_format: &'a str,
+    dataset_format: &'a str,
     provider_supports_lora_launch: bool,
-    lora_module_value_format: &str,
-) -> ServingRecipe {
+    lora_module_value_format: &'a str,
+    tool_catalog: &'a ToolCatalogContract,
+}
+
+fn serving_recipe(input: ServingRecipeInput<'_>) -> ServingRecipe {
+    let ServingRecipeInput {
+        base_model,
+        provider,
+        request_model,
+        adapter_name,
+        tool_format,
+        dataset_format,
+        provider_supports_lora_launch,
+        lora_module_value_format,
+        tool_catalog,
+    } = input;
     let adapter_binding = lora_adapter_binding(provider_supports_lora_launch).to_string();
     let mut runtime_notes = Vec::new();
     if provider_supports_lora_launch {
@@ -1639,6 +1813,7 @@ fn serving_recipe(
         lora_module_value_format: lora_module_value_format.to_string(),
         tool_format: tool_format.to_string(),
         dataset_format: dataset_format.to_string(),
+        tool_catalog: tool_catalog.clone(),
         serving_requirements,
         runtime_notes,
         promotion_gates: vec![
@@ -2616,6 +2791,9 @@ struct PlanRequest {
     requested_corpus_strategy: String,
     effective_corpus_strategy: String,
     teacher: Option<TeacherReport>,
+    tool_catalog_policy: String,
+    tool_catalog_id: Option<String>,
+    tool_catalog_hash: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2655,8 +2833,23 @@ pub(super) struct LoraTrainingContract {
     tool_parser_owner: String,
     dataset_format: String,
     dataset_split_policy: String,
+    tool_catalog: ToolCatalogContract,
     peft_save_policy: PeftSavePolicy,
     required_example_metadata: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(super) struct ToolCatalogContract {
+    schema_version: u64,
+    policy: String,
+    catalog_id: Option<String>,
+    catalog_hash: Option<String>,
+    training_catalog: String,
+    inference_catalog: String,
+    schema_columns_required: bool,
+    prompt_catalog_requirement: String,
+    notes: Vec<String>,
+    promotion_gates: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -2690,6 +2883,9 @@ struct LoraContractHashInput<'a> {
     dataset_format: &'a str,
     chat_template: Option<&'a str>,
     modules_to_save: &'a [String],
+    tool_catalog_policy: &'a str,
+    tool_catalog_id: Option<&'a str>,
+    tool_catalog_hash: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2824,6 +3020,7 @@ struct ServingRecipe {
     lora_module_value_format: String,
     tool_format: String,
     dataset_format: String,
+    tool_catalog: ToolCatalogContract,
     serving_requirements: Vec<ServingRequirement>,
     runtime_notes: Vec<String>,
     promotion_gates: Vec<String>,
@@ -2863,6 +3060,40 @@ enum BaseModelMatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn default_tool_catalog_contract() -> ToolCatalogContract {
+        tool_catalog_contract("full_schema", None, None).expect("default catalog contract")
+    }
+
+    fn fixed_tool_catalog_contract() -> ToolCatalogContract {
+        tool_catalog_contract(
+            "fixed_catalog_internalized",
+            Some("burin-tools-v1"),
+            Some("sha256:fixedcatalog"),
+        )
+        .expect("fixed catalog contract")
+    }
+
+    fn default_plan_args() -> ModelsLoraPlanArgs {
+        ModelsLoraPlanArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            corpus: None,
+            teacher: None,
+            corpus_strategy: "auto".to_string(),
+            method: "qlora".to_string(),
+            trainer: "trl_sft_trainer".to_string(),
+            rank: 24,
+            alpha: None,
+            dropout: 0.1,
+            modules_to_save: Vec::new(),
+            tool_catalog_policy: "full_schema".to_string(),
+            tool_catalog_id: None,
+            tool_catalog_hash: None,
+            json: true,
+        }
+    }
 
     #[test]
     fn inspects_local_peft_lora_config() {
@@ -3050,11 +3281,13 @@ mod tests {
 
     #[test]
     fn lora_trainer_contract_keeps_loss_masks_and_tool_columns_explicit() {
+        let tool_catalog = default_tool_catalog_contract();
         let native = trainer_contract_for_dataset(
             "messages_with_tool_calls",
             "native",
             "trl_sft_trainer",
             &[],
+            &tool_catalog,
         );
         assert!(native
             .iter()
@@ -3069,13 +3302,15 @@ mod tests {
             "json",
             "trl_sft_trainer",
             &[],
+            &tool_catalog,
         );
         assert!(text.iter().any(|item| item.contains("assistant_tool_text")));
         assert!(text
             .iter()
             .any(|item| item.contains("Harn remains the parser")));
 
-        let native_contract = lora_training_contract("messages_with_tool_calls", "native", &[]);
+        let native_contract =
+            lora_training_contract("messages_with_tool_calls", "native", &[], &tool_catalog);
         assert_eq!(
             native_contract.schema_version,
             LORA_TRAINING_CONTRACT_SCHEMA_VERSION
@@ -3093,7 +3328,12 @@ mod tests {
             "train_tune_holdout_disjoint_no_eval_holdout_training"
         );
 
-        let text_contract = lora_training_contract("harn_text_tool_calls_json_fences", "json", &[]);
+        let text_contract = lora_training_contract(
+            "harn_text_tool_calls_json_fences",
+            "json",
+            &[],
+            &tool_catalog,
+        );
         assert_eq!(
             text_contract.peft_save_policy.schema_version,
             LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION
@@ -3106,6 +3346,7 @@ mod tests {
             "harn_text_tool_calls_json_fences",
             "json",
             &["embed_tokens".to_string(), "lm_head".to_string()],
+            &tool_catalog,
         );
         assert_eq!(
             embedding_contract.peft_save_policy.modules_to_save,
@@ -3122,6 +3363,7 @@ mod tests {
             "json",
             "unsloth_sft",
             &[],
+            &tool_catalog,
         );
         assert!(unsloth.iter().any(|item| item.contains("Unsloth")));
         assert!(unsloth.iter().any(|item| item.contains("torch/CUDA")));
@@ -3131,22 +3373,52 @@ mod tests {
     }
 
     #[test]
+    fn lora_tool_catalog_policy_is_part_of_contract_identity() {
+        let default_catalog = default_tool_catalog_contract();
+        let fixed_catalog = fixed_tool_catalog_contract();
+        let full_id = lora_contract_id(
+            "gemma-4-e4b-it",
+            "vllm",
+            "json",
+            "harn_text_tool_calls_json_fences",
+            Some("harn_text_tool_calls_json_fences"),
+            &[],
+            &default_catalog,
+        )
+        .expect("full-schema contract id");
+        let fixed_id = lora_contract_id(
+            "gemma-4-e4b-it",
+            "vllm",
+            "json",
+            "harn_text_tool_calls_json_fences",
+            Some("harn_text_tool_calls_json_fences"),
+            &[],
+            &fixed_catalog,
+        )
+        .expect("fixed-catalog contract id");
+
+        assert_ne!(full_id, fixed_id);
+        assert_eq!(fixed_catalog.policy, "fixed_catalog_internalized");
+        assert_eq!(fixed_catalog.inference_catalog, "no_runtime_catalog");
+        assert!(fixed_catalog
+            .promotion_gates
+            .iter()
+            .any(|gate| gate.contains("catalog policy")));
+        let fixed_contract = lora_training_contract(
+            "harn_text_tool_calls_json_fences",
+            "json",
+            &[],
+            &fixed_catalog,
+        );
+        assert!(fixed_contract
+            .required_example_metadata
+            .iter()
+            .any(|field| field == "tool_catalog_hash"));
+    }
+
+    #[test]
     fn lora_plan_normalizes_hyperparameters_for_serving_contract() {
-        let default_args = ModelsLoraPlanArgs {
-            base_model: "local-gemma4-e4b".to_string(),
-            provider: Some("vllm".to_string()),
-            tool_format: "json".to_string(),
-            corpus: None,
-            teacher: None,
-            corpus_strategy: "auto".to_string(),
-            method: "qlora".to_string(),
-            trainer: "trl_sft_trainer".to_string(),
-            rank: 24,
-            alpha: None,
-            dropout: 0.1,
-            modules_to_save: Vec::new(),
-            json: true,
-        };
+        let default_args = default_plan_args();
         let report = plan_report(&default_args).expect("report");
         assert_eq!(report.training.rank, 24);
         assert_eq!(report.training.alpha, 48);
@@ -3168,19 +3440,9 @@ mod tests {
     #[test]
     fn lora_plan_canonicalizes_local_vllm_provider_alias() {
         let args = ModelsLoraPlanArgs {
-            base_model: "local-gemma4-e4b".to_string(),
             provider: Some("local-vllm".to_string()),
-            tool_format: "json".to_string(),
             corpus: Some("lora-corpus".to_string()),
-            teacher: None,
-            corpus_strategy: "auto".to_string(),
-            method: "qlora".to_string(),
-            trainer: "trl_sft_trainer".to_string(),
-            rank: 24,
-            alpha: None,
-            dropout: 0.1,
-            modules_to_save: Vec::new(),
-            json: true,
+            ..default_plan_args()
         };
         let report = plan_report(&args).expect("report");
         assert_eq!(report.base.provider, "vllm");
@@ -3204,19 +3466,11 @@ mod tests {
     #[test]
     fn lora_plan_records_model_aware_selection_contract() {
         let args = ModelsLoraPlanArgs {
-            base_model: "local-gemma4-e4b".to_string(),
-            provider: Some("vllm".to_string()),
-            tool_format: "json".to_string(),
             corpus: Some("lora-corpus".to_string()),
             teacher: Some("dashscope/qwen3-coder-next".to_string()),
             corpus_strategy: "refresh".to_string(),
-            method: "qlora".to_string(),
             trainer: "unsloth_trl_sft".to_string(),
-            rank: 24,
-            alpha: None,
-            dropout: 0.1,
-            modules_to_save: Vec::new(),
-            json: true,
+            ..default_plan_args()
         };
         let report = plan_report(&args).expect("report");
         assert_eq!(report.training.trainer, "unsloth_sft");
@@ -3242,19 +3496,13 @@ mod tests {
     #[test]
     fn lora_plan_emits_post_training_receipt_and_probe_commands() {
         let args = ModelsLoraPlanArgs {
-            base_model: "local-gemma4-e4b".to_string(),
-            provider: Some("vllm".to_string()),
-            tool_format: "json".to_string(),
             corpus: Some("lora-corpus".to_string()),
             teacher: Some("dashscope/qwen3-coder-next".to_string()),
             corpus_strategy: "refresh".to_string(),
-            method: "qlora".to_string(),
             trainer: "unsloth_sft".to_string(),
-            rank: 24,
             alpha: Some(48),
-            dropout: 0.1,
             modules_to_save: vec!["embed_tokens".to_string(), "lm_head".to_string()],
-            json: true,
+            ..default_plan_args()
         };
         let report = plan_report(&args).expect("report");
         assert_eq!(
@@ -3537,6 +3785,7 @@ mod tests {
 
     #[test]
     fn lora_serving_recipe_keeps_runtime_binding_explicit() {
+        let tool_catalog = default_tool_catalog_contract();
         let has_requirement = |recipe: &ServingRecipe,
                                kind: &str,
                                name: &str,
@@ -3550,16 +3799,17 @@ mod tests {
             })
         };
 
-        let supported = serving_recipe(
-            "gemma-4-e4b-it",
-            "vllm",
-            "ADAPTER_MODEL",
-            "ADAPTER_NAME",
-            "json",
-            "harn_text_tool_calls_json_fences",
-            true,
-            "json_with_base_model",
-        );
+        let supported = serving_recipe(ServingRecipeInput {
+            base_model: "gemma-4-e4b-it",
+            provider: "vllm",
+            request_model: "ADAPTER_MODEL",
+            adapter_name: "ADAPTER_NAME",
+            tool_format: "json",
+            dataset_format: "harn_text_tool_calls_json_fences",
+            provider_supports_lora_launch: true,
+            lora_module_value_format: "json_with_base_model",
+            tool_catalog: &tool_catalog,
+        });
         assert_eq!(supported.adapter_binding, "runtime_lora_adapter");
         assert_eq!(supported.lora_module_value_format, "json_with_base_model");
         assert!(supported
@@ -3585,16 +3835,17 @@ mod tests {
             true,
         ));
 
-        let external = serving_recipe(
-            "gemma-4-e4b-it",
-            "external",
-            "ADAPTER_MODEL",
-            "ADAPTER_NAME",
-            "json",
-            "harn_text_tool_calls_json_fences",
-            false,
-            "name_path",
-        );
+        let external = serving_recipe(ServingRecipeInput {
+            base_model: "gemma-4-e4b-it",
+            provider: "external",
+            request_model: "ADAPTER_MODEL",
+            adapter_name: "ADAPTER_NAME",
+            tool_format: "json",
+            dataset_format: "harn_text_tool_calls_json_fences",
+            provider_supports_lora_launch: false,
+            lora_module_value_format: "name_path",
+            tool_catalog: &tool_catalog,
+        });
         assert_eq!(
             external.adapter_binding,
             "external_runtime_or_merged_adapter"
@@ -3604,16 +3855,17 @@ mod tests {
             .iter()
             .any(|note| note.contains("external runtime")));
 
-        let native_functiongemma = serving_recipe(
-            "google/functiongemma-270m-it",
-            "vllm",
-            "ADAPTER_MODEL",
-            "ADAPTER_NAME",
-            "native",
-            "messages_with_tool_calls",
-            true,
-            "json_with_base_model",
-        );
+        let native_functiongemma = serving_recipe(ServingRecipeInput {
+            base_model: "google/functiongemma-270m-it",
+            provider: "vllm",
+            request_model: "ADAPTER_MODEL",
+            adapter_name: "ADAPTER_NAME",
+            tool_format: "native",
+            dataset_format: "messages_with_tool_calls",
+            provider_supports_lora_launch: true,
+            lora_module_value_format: "json_with_base_model",
+            tool_catalog: &tool_catalog,
+        });
         assert!(native_functiongemma
             .runtime_notes
             .iter()
@@ -3637,16 +3889,17 @@ mod tests {
             true,
         ));
 
-        let native_gemma4 = serving_recipe(
-            "google/gemma-4-e4b-it",
-            "vllm",
-            "ADAPTER_MODEL",
-            "ADAPTER_NAME",
-            "native",
-            "messages_with_tool_calls",
-            true,
-            "json_with_base_model",
-        );
+        let native_gemma4 = serving_recipe(ServingRecipeInput {
+            base_model: "google/gemma-4-e4b-it",
+            provider: "vllm",
+            request_model: "ADAPTER_MODEL",
+            adapter_name: "ADAPTER_NAME",
+            tool_format: "native",
+            dataset_format: "messages_with_tool_calls",
+            provider_supports_lora_launch: true,
+            lora_module_value_format: "json_with_base_model",
+            tool_catalog: &tool_catalog,
+        });
         assert!(has_requirement(
             &native_gemma4,
             "server_flag",

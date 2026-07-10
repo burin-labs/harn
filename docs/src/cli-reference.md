@@ -1555,9 +1555,10 @@ harn models lora export --base local-gemma4-e4b --provider vllm --tool-format na
 The export resolves the same provider capability matrix as model calls and
 emits either native `messages`/`tools` rows or Harn text-tool rows. Reports,
 row metadata, and manifests include a stable LoRA contract id derived from the
-base model, provider, effective Harn tool format, dataset format, and chat
-template. Use that id to keep training, adapter inspection, eval, and serving
-on the same wire contract even when adapter paths or request-model names change.
+base model, provider, effective Harn tool format, dataset format, chat
+template, and tool-catalog policy. Use that id to keep training, adapter
+inspection, eval, and serving on the same wire contract even when adapter paths
+or request-model names change.
 The manifest's `contract.training_contract` block also records the assistant
 mask policy, packing policy, parser owner, split policy, and PEFT
 `modules_to_save` / embedding-head save policy so trainers can verify the SFT
@@ -1565,6 +1566,12 @@ setup without scraping human-readable notes. The default policy is adapter-only;
 declare `--modules-to-save embed_tokens,lm_head` only when tokenizer resize or
 output-head training requires it, and keep the weight-tying evidence in target
 metadata before merging adapters.
+`--tool-catalog-policy full_schema` is the default production contract: prompts
+carry the full tool schemas used to validate the dataset. `compressed_names`
+and `fixed_catalog_internalized` are explicit fixed-catalog experiment modes;
+they require `--tool-catalog-id` or `--tool-catalog-hash` and are hashed into
+the LoRA contract so names-only or no-catalog adapters cannot reuse full-schema
+manifests.
 `--check` validates conversion without writing JSONL rows.
 
 ## harn models lora manifest
@@ -1620,6 +1627,10 @@ shaping, and promotion receipts. Dry-runs with no backend argv set
 `--modules-to-save` is part of the hashed LoRA contract and is forwarded to the
 post-training manifest command, so PEFT embedding/head saves cannot silently
 drift between export, train, manifest, inspect, and promotion.
+`--tool-catalog-policy`, `--tool-catalog-id`, and `--tool-catalog-hash` are also
+forwarded into backend recipes and post-training manifests when fixed-catalog
+compression experiments intentionally train for names-only or no-catalog
+inference.
 
 ## harn models lora preflight
 
@@ -1719,6 +1730,13 @@ rows.
 The launch block includes the matching `harn models lora export` command so the
 trainer dataset, provenance manifest, eval route, and serving route share the
 same base model, provider, tool format, and chat-template contract.
+Use `--tool-catalog-policy compressed_names` or
+`--tool-catalog-policy fixed_catalog_internalized` only for fixed-catalog
+experiments, and pair it with `--tool-catalog-id` or `--tool-catalog-hash`.
+The policy controls whether inference still includes full tool schemas,
+compressed tool names only, or no runtime catalog; it is recorded in
+`training.contract.tool_catalog`, included in the LoRA contract id, and
+forwarded to export, train, and manifest commands.
 Use `--rank`, `--alpha`, and `--dropout` to pin adapter hyperparameters in the
 same contract; when the runtime exposes a LoRA rank flag, the local launch hint
 uses the planned rank as `--max-lora-rank` so serving buffers match training.

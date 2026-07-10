@@ -13,9 +13,10 @@ use crate::cli::ModelsLoraExportArgs;
 use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
-    normalize_modules_to_save, normalize_plan_tool_format, parse_target_metadata,
-    render_embedded_lora_report, resolve_lora_provider, sha256_file, BaseModelReport,
-    EvaluationRecipe, LoraContractReport, ToolCallingReport,
+    normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
+    parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, sha256_file,
+    tool_catalog_contract, BaseModelReport, EvaluationRecipe, LoraContractReport,
+    ToolCallingReport, ToolCatalogContract,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -77,6 +78,12 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     };
     let dataset_format = dataset_format_for_tool_format(&decision.effective).to_string();
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
+    let tool_catalog_policy = normalize_tool_catalog_policy(&args.tool_catalog_policy)?;
+    let tool_catalog = tool_catalog_contract(
+        &tool_catalog_policy,
+        args.tool_catalog_id.as_deref(),
+        args.tool_catalog_hash.as_deref(),
+    )?;
     let corpus_path = resolve_corpus_path(&args.corpus)?;
     let contract_id = lora_contract_id(
         &resolved.id,
@@ -85,6 +92,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &dataset_format,
         args.chat_template.as_deref(),
         &modules_to_save,
+        &tool_catalog,
     )?;
     let target = ExportTarget {
         base_model: resolved.id.clone(),
@@ -96,6 +104,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         default_license: non_empty_or_default(&args.default_license, "unknown"),
         contract_id: contract_id.clone(),
         metadata: parse_target_metadata(&args.target_metadata)?,
+        tool_catalog,
     };
     let contract = lora_contract_report(
         contract_id.clone(),
@@ -105,6 +114,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &dataset_format,
         target.chat_template.clone(),
         &modules_to_save,
+        &target.tool_catalog,
     );
     let mut writer = if args.check {
         None
@@ -286,6 +296,9 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             effective_tool_format: decision.effective,
             tool_format_correction: decision.correction,
             dataset_format,
+            tool_catalog_policy: target.tool_catalog.policy.clone(),
+            tool_catalog_id: target.tool_catalog.catalog_id.clone(),
+            tool_catalog_hash: target.tool_catalog.catalog_hash.clone(),
             corpus: corpus_path.display().to_string(),
             check: args.check,
             default_split: target.default_split.clone(),
@@ -306,6 +319,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             chat_template: target.chat_template,
             contract_id,
             metadata: target.metadata,
+            tool_catalog: target.tool_catalog,
         },
         contract,
         serving,
@@ -395,6 +409,7 @@ struct ExportTarget {
     default_license: String,
     contract_id: String,
     metadata: BTreeMap<String, String>,
+    tool_catalog: ToolCatalogContract,
 }
 
 pub(super) struct ParsedToolCall {
@@ -941,6 +956,22 @@ fn export_metadata(
         Value::String(target.harn_tool_format.clone()),
     );
     metadata.insert(
+        "tool_catalog_policy".to_string(),
+        Value::String(target.tool_catalog.policy.clone()),
+    );
+    if let Some(catalog_id) = &target.tool_catalog.catalog_id {
+        metadata.insert(
+            "tool_catalog_id".to_string(),
+            Value::String(catalog_id.clone()),
+        );
+    }
+    if let Some(catalog_hash) = &target.tool_catalog.catalog_hash {
+        metadata.insert(
+            "tool_catalog_hash".to_string(),
+            Value::String(catalog_hash.clone()),
+        );
+    }
+    metadata.insert(
         "tool_schema_hash".to_string(),
         Value::String(canonical_json_sha256(&Value::Array(tools.to_vec()))),
     );
@@ -1017,6 +1048,9 @@ fn prompt_template_hash(target: &ExportTarget, dataset_format: &str, system_text
         "chat_template": target.chat_template.as_deref().unwrap_or(""),
         "dataset_format": dataset_format,
         "harn_tool_format": target.harn_tool_format.as_str(),
+        "tool_catalog_policy": target.tool_catalog.policy.as_str(),
+        "tool_catalog_id": target.tool_catalog.catalog_id.as_deref().unwrap_or(""),
+        "tool_catalog_hash": target.tool_catalog.catalog_hash.as_deref().unwrap_or(""),
         "system": system_text,
     }))
 }
@@ -1073,6 +1107,10 @@ fn export_target_value(target: &ExportTarget) -> Value {
         "contract_id".to_string(),
         Value::String(target.contract_id.clone()),
     );
+    object.insert(
+        "tool_catalog".to_string(),
+        serde_json::to_value(&target.tool_catalog).unwrap_or_else(|_| json!({})),
+    );
     if !target.metadata.is_empty() {
         object.insert(
             "metadata".to_string(),
@@ -1098,6 +1136,7 @@ fn export_serving_report(
         tool_format: target.harn_tool_format.clone(),
         dataset_format: dataset_format.to_string(),
         contract_id: target.contract_id.clone(),
+        tool_catalog: target.tool_catalog.clone(),
     }
 }
 
@@ -1214,6 +1253,9 @@ struct ExportRequest {
     effective_tool_format: String,
     tool_format_correction: Option<String>,
     dataset_format: String,
+    tool_catalog_policy: String,
+    tool_catalog_id: Option<String>,
+    tool_catalog_hash: Option<String>,
     corpus: String,
     check: bool,
     default_split: String,
@@ -1229,6 +1271,7 @@ struct ExportTargetReport {
     chat_template: Option<String>,
     contract_id: String,
     metadata: BTreeMap<String, String>,
+    tool_catalog: ToolCatalogContract,
 }
 
 #[derive(Debug, Serialize)]
@@ -1242,6 +1285,7 @@ struct ExportServingReport {
     tool_format: String,
     dataset_format: String,
     contract_id: String,
+    tool_catalog: ToolCatalogContract,
 }
 
 #[derive(Debug, Serialize)]
