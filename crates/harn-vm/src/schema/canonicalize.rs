@@ -618,6 +618,8 @@ fn canonical_to_json_schema_with(
                         .collect(),
                 ),
             );
+        } else if !openapi_style && out.contains_key("properties") {
+            out.insert("required".to_string(), serde_json::Value::Array(Vec::new()));
         }
         if let Some(extra) = schema_dict.get("additional_properties") {
             let exported = match extra {
