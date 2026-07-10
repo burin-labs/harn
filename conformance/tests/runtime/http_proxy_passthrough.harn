@@ -1,4 +1,6 @@
 import { process_shell } from "std/runtime"
+import { shell_quote } from "std/runtime"
+import { resolve_harn_bin } from "../_common.harn"
 
 fn wait_for_file(harness: Harness, path, attempts) {
   let remaining = attempts
@@ -11,7 +13,7 @@ fn wait_for_file(harness: Harness, path, attempts) {
 
 pipeline default() {
   const root = project_root() ?? cwd()
-  const helper = path_join(root, "conformance/helpers/http_proxy_server.py")
+  const harn_bin = resolve_harn_bin(harness, root)
   const state_dir = path_join(harness.fs.temp_dir(), "harn-http-proxy-" + uuid())
   const port_path = path_join(state_dir, "port")
   const state_path = path_join(state_dir, "state.json")
@@ -19,9 +21,13 @@ pipeline default() {
   const log_path = path_join(state_dir, "server.log")
   harness.fs.mkdir(state_dir)
   const start = process_shell(
-    "python3 \"" + helper + "\" \"" + state_dir + "\" >\"" + log_path + "\" 2>&1 & echo $! > \""
-      + pid_path
-      + "\"",
+    shell_quote(harn_bin)
+      + " conformance-helper http-proxy "
+      + shell_quote(state_dir)
+      + " >"
+      + shell_quote(log_path)
+      + " 2>&1 & echo $! > "
+      + shell_quote(pid_path),
   )
   require start?.success, "proxy server started"
   wait_for_file(harness, port_path, 100)

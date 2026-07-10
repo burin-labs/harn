@@ -21,12 +21,6 @@ const PYTHON_ALLOWLIST = [
     reason: "Out-of-process bridge test host intentionally runs as a foreign subprocess.",
   },
   {
-    kind: "exact",
-    pattern: "conformance/helpers/http_proxy_server.py",
-    category: "test-harness-adapter",
-    reason: "Proxy passthrough conformance needs a real TCP HTTP proxy listener; Harn's http_server is currently an in-process test surface.",
-  },
-  {
     kind: "prefix",
     pattern: "crates/harn-cli/assets/demo/",
     category: "fixture",

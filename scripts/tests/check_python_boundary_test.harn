@@ -47,10 +47,7 @@ pipeline test_allowlist_exact_and_prefix_rules(task) {
   assert_eq(python_boundary_rule_for("scripts/affected-crates.py").allowed, false)
   const mcp_rule = python_boundary_rule_for("conformance/helpers/mcp_stdio_tool.py")
   assert_eq(mcp_rule.allowed, false)
-  const proxy_rule = python_boundary_rule_for("conformance/helpers/http_proxy_server.py")
-  assert_eq(proxy_rule.allowed, true)
-  assert_eq(proxy_rule.category, "test-harness-adapter")
-  assert_eq(to_string(proxy_rule.reason).contains("real TCP HTTP proxy listener"), true)
+  assert_eq(python_boundary_rule_for("conformance/helpers/http_proxy_server.py").allowed, false)
   assert_eq(python_boundary_rule_for("conformance/helpers/github_mock_server.py").allowed, false)
   assert_eq(python_boundary_rule_for("conformance/helpers/new_mock_server.py").allowed, false)
   assert_eq(python_boundary_rule_for("scripts/_bench_cli_cold_start.py").allowed, false)
@@ -75,10 +72,11 @@ pipeline test_temp_tree_reports_only_unclassified_python(task) {
       assert_eq(files.contains(".harn/tmp/ignored.py"), false)
       assert_eq(files.contains("target/generated.py"), false)
       const report = check_python_boundary(root)
-      assert_eq(report.violation_count, 3)
+      assert_eq(report.violation_count, 4)
       assert_eq(
         report.violations.map({ row -> row.path }).to_list().sort(),
         [
+          "conformance/helpers/http_proxy_server.py",
           "conformance/helpers/new_mock_server.py",
           "scripts/affected-crates.py",
           "scripts/new_orchestration.py",
