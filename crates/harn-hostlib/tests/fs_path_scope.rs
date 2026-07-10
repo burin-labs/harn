@@ -9,6 +9,7 @@
 //! VM-side. In-root paths must still succeed, and relative paths must be
 //! resolved before the check so the two surfaces agree.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -18,7 +19,8 @@ use harn_hostlib::{
     HostlibCapability, HostlibError,
 };
 use harn_vm::orchestration::{
-    pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    pop_execution_policy, push_execution_policy, CapabilityPolicy, RunExecutionRecord,
+    SandboxProfile,
 };
 use harn_vm::stdlib::process::set_thread_execution_context;
 use harn_vm::VmValue;
@@ -59,6 +61,32 @@ impl PolicyGuard {
 impl Drop for PolicyGuard {
     fn drop(&mut self) {
         pop_execution_policy();
+        set_thread_execution_context(None);
+    }
+}
+
+struct ExecutionRootGuard;
+
+impl ExecutionRootGuard {
+    fn push(root: &Path) -> Self {
+        let root = path_string(root);
+        set_thread_execution_context(Some(RunExecutionRecord {
+            cwd: Some(root.clone()),
+            source_dir: Some(root),
+            env: BTreeMap::new(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+        }));
+        ExecutionRootGuard
+    }
+}
+
+impl Drop for ExecutionRootGuard {
+    fn drop(&mut self) {
         set_thread_execution_context(None);
     }
 }
@@ -480,6 +508,97 @@ fn relative_paths_are_resolved_before_the_scope_check() {
     );
 }
 
+#[test]
+fn write_surfaces_resolve_relative_noncanonical_paths_against_execution_root() {
+    let root = TempDir::new().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    let unique = format!("hostlib-scope-{}", uuid::Uuid::now_v7());
+    let write_rel = format!("src/../generated/{unique}-tools.txt");
+    let patch_rel = format!("src/../generated/{unique}-patch.txt");
+    let escaped_rel = format!("../{unique}-escape.txt");
+
+    let process_cwd_shadow = std::env::current_dir()
+        .unwrap()
+        .join("generated")
+        .join(format!("{unique}-tools.txt"));
+    assert!(
+        !process_cwd_shadow.exists(),
+        "test fixture should start without the process-cwd shadow path"
+    );
+    let escaped_target = root
+        .path()
+        .parent()
+        .unwrap()
+        .join(format!("{unique}-escape.txt"));
+    assert!(
+        !escaped_target.exists(),
+        "test fixture should start without the sibling escape path"
+    );
+
+    let reg = registry();
+    let _execution = ExecutionRootGuard::push(root.path());
+    let _guard = PolicyGuard::worktree(&[root.path()]);
+
+    call(
+        &reg,
+        "hostlib_tools_write_file",
+        &[
+            ("path", vm_string(&write_rel)),
+            ("content", vm_string("tool write\n")),
+        ],
+    )
+    .expect("relative non-canonical tool write succeeds in execution root");
+    assert_eq!(
+        fs::read_to_string(root.path().join(format!("generated/{unique}-tools.txt"))).unwrap(),
+        "tool write\n"
+    );
+    assert!(
+        !process_cwd_shadow.exists(),
+        "relative hostlib write must not land under the process cwd"
+    );
+
+    call(
+        &reg,
+        "hostlib_fs_safe_text_patch",
+        &[
+            ("path", vm_string(&patch_rel)),
+            ("content", vm_string("safe patch\n")),
+        ],
+    )
+    .expect("relative non-canonical safe_text_patch succeeds in execution root");
+    assert_eq!(
+        fs::read_to_string(root.path().join(format!("generated/{unique}-patch.txt"))).unwrap(),
+        "safe patch\n"
+    );
+
+    assert_rejected(
+        call(
+            &reg,
+            "hostlib_tools_write_file",
+            &[
+                ("path", vm_string(&escaped_rel)),
+                ("content", vm_string("escape\n")),
+            ],
+        ),
+        "hostlib_tools_write_file",
+    );
+    assert_rejected(
+        call(
+            &reg,
+            "hostlib_fs_safe_text_patch",
+            &[
+                ("path", vm_string(&escaped_rel)),
+                ("content", vm_string("escape\n")),
+            ],
+        ),
+        "hostlib_fs_safe_text_patch",
+    );
+    assert!(
+        !escaped_target.exists(),
+        "out-of-root relative writes must not touch disk"
+    );
+}
+
 fn dict_field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
     match value {
         VmValue::Dict(d) => d.get(key).unwrap_or_else(|| panic!("key {key} present")),
@@ -623,4 +742,81 @@ fn write_delete_reject_symlink_swap_escape() {
     )
     .expect("in-root real-file delete succeeds");
     assert!(!real.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn write_surfaces_respect_symlinked_intermediate_directories() {
+    use std::os::unix::fs::symlink;
+
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let real_dir = root.path().join("real");
+    fs::create_dir(&real_dir).unwrap();
+    symlink(&real_dir, root.path().join("inside_link")).unwrap();
+    symlink(outside.path(), root.path().join("outside_link")).unwrap();
+
+    let reg = registry();
+    let _execution = ExecutionRootGuard::push(root.path());
+    let _guard = PolicyGuard::worktree(&[root.path()]);
+
+    call(
+        &reg,
+        "hostlib_tools_write_file",
+        &[
+            ("path", vm_string("inside_link/tool.txt")),
+            ("content", vm_string("through in-root symlink\n")),
+        ],
+    )
+    .expect("in-root symlinked intermediate tool write succeeds");
+    assert_eq!(
+        fs::read_to_string(real_dir.join("tool.txt")).unwrap(),
+        "through in-root symlink\n"
+    );
+
+    call(
+        &reg,
+        "hostlib_fs_safe_text_patch",
+        &[
+            ("path", vm_string("inside_link/patch.txt")),
+            ("content", vm_string("through in-root symlink patch\n")),
+        ],
+    )
+    .expect("in-root symlinked intermediate safe_text_patch succeeds");
+    assert_eq!(
+        fs::read_to_string(real_dir.join("patch.txt")).unwrap(),
+        "through in-root symlink patch\n"
+    );
+
+    assert_rejected(
+        call(
+            &reg,
+            "hostlib_tools_write_file",
+            &[
+                ("path", vm_string("outside_link/tool.txt")),
+                ("content", vm_string("escape\n")),
+            ],
+        ),
+        "hostlib_tools_write_file",
+    );
+    assert!(
+        !outside.path().join("tool.txt").exists(),
+        "tool write must not follow an escaping intermediate symlink"
+    );
+
+    assert_rejected(
+        call(
+            &reg,
+            "hostlib_fs_safe_text_patch",
+            &[
+                ("path", vm_string("outside_link/patch.txt")),
+                ("content", vm_string("escape\n")),
+            ],
+        ),
+        "hostlib_fs_safe_text_patch",
+    );
+    assert!(
+        !outside.path().join("patch.txt").exists(),
+        "safe_text_patch must not follow an escaping intermediate symlink"
+    );
 }

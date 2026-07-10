@@ -23,7 +23,7 @@ use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
-    require_string, str_value, to_agent_path,
+    require_string, resolve_host_path, str_value, to_agent_path,
 };
 use crate::tools::permissions::enforce_path_scope;
 
@@ -897,10 +897,10 @@ fn read_text_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let dict = raw.as_ref();
     let path_str = require_string(READ_TEXT_BUILTIN, dict, "path")?;
     let session_id = optional_string(READ_TEXT_BUILTIN, dict, "session_id")?;
-    let path = Path::new(&path_str);
-    enforce_path_scope(READ_TEXT_BUILTIN, path, FsAccess::Read)?;
+    let path = resolve_host_path(&path_str);
+    enforce_path_scope(READ_TEXT_BUILTIN, &path, FsAccess::Read)?;
 
-    let (bytes, existed) = read_existing(READ_TEXT_BUILTIN, path, session_id.as_deref())?;
+    let (bytes, existed) = read_existing(READ_TEXT_BUILTIN, &path, session_id.as_deref())?;
     let hash = hash_label(&bytes);
     let content = match std::str::from_utf8(&bytes) {
         Ok(s) => s.to_string(),
@@ -932,13 +932,10 @@ fn safe_text_patch_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let create_parents = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "create_parents", true)?;
     let overwrite = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "overwrite", true)?;
 
-    enforce_path_scope(
-        SAFE_TEXT_PATCH_BUILTIN,
-        Path::new(&path_str),
-        FsAccess::Write,
-    )?;
+    let path = resolve_host_path(&path_str);
+    enforce_path_scope(SAFE_TEXT_PATCH_BUILTIN, &path, FsAccess::Write)?;
     let outcome = safe_text_patch(
-        Path::new(&path_str),
+        &path,
         &content,
         expected_hash.as_deref(),
         session_id.as_deref(),
@@ -1026,7 +1023,8 @@ fn set_mode_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         SET_MODE_BUILTIN,
         &require_string(SET_MODE_BUILTIN, dict, "mode")?,
     )?;
-    let root = optional_string(SET_MODE_BUILTIN, dict, "root")?.map(PathBuf::from);
+    let root =
+        optional_string(SET_MODE_BUILTIN, dict, "root")?.map(|path| resolve_host_path(&path));
     let result = set_mode(&session_id, mode, root.as_deref())?;
     Ok(build_dict([(
         "previous_mode",
@@ -1502,7 +1500,7 @@ fn validate_session_id(builtin: &'static str, session_id: &str) -> Result<(), Ho
 }
 
 fn default_root() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    harn_vm::stdlib::process::execution_root_path()
 }
 
 fn session_dir(root: &Path, session_id: &str) -> PathBuf {

@@ -14,7 +14,8 @@ use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string,
+    resolve_host_path, str_value,
 };
 use crate::tools::permissions::enforce_path_scope;
 
@@ -70,7 +71,7 @@ pub(super) fn read_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         });
     }
 
-    let path = PathBuf::from(&path_str);
+    let path = resolve_host_path(&path_str);
     enforce_path_scope(READ_FILE_BUILTIN, &path, FsAccess::Read)?;
     let offset_u64 = offset as u64;
     let (buf, total_size) = read_bytes(
@@ -121,7 +122,7 @@ pub(super) fn write_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let overwrite = optional_bool(WRITE_FILE_BUILTIN, dict, "overwrite", true)?;
     let session_id = optional_string(WRITE_FILE_BUILTIN, dict, "session_id")?;
 
-    let path = PathBuf::from(&path_str);
+    let path = resolve_host_path(&path_str);
     enforce_path_scope(WRITE_FILE_BUILTIN, &path, FsAccess::Write)?;
 
     let bytes: Vec<u8> = match encoding_raw.as_deref() {
@@ -197,7 +198,7 @@ pub(super) fn delete_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let recursive = optional_bool(DELETE_FILE_BUILTIN, dict, "recursive", false)?;
     let session_id = optional_string(DELETE_FILE_BUILTIN, dict, "session_id")?;
 
-    let path = PathBuf::from(&path_str);
+    let path = resolve_host_path(&path_str);
     enforce_path_scope(DELETE_FILE_BUILTIN, &path, FsAccess::Delete)?;
     if let Some(removed) = crate::fs::stage_delete_or_none(
         DELETE_FILE_BUILTIN,
@@ -296,7 +297,7 @@ pub(super) fn list_directory(args: &[VmValue]) -> Result<VmValue, HostlibError> 
         max_entries as usize
     };
 
-    let path = PathBuf::from(&path_str);
+    let path = resolve_host_path(&path_str);
     enforce_path_scope(LIST_DIRECTORY_BUILTIN, &path, FsAccess::Read)?;
     let mut entries: Vec<(String, VmValue)> = Vec::new();
     let mut truncated = false;

@@ -134,6 +134,12 @@ pub fn str_value(s: impl AsRef<str>) -> VmValue {
     VmValue::string(s)
 }
 
+/// Resolve a host filesystem argument relative to the current Harn execution
+/// root before sandbox checks or disk I/O.
+pub(crate) fn resolve_host_path(path: impl AsRef<str>) -> std::path::PathBuf {
+    harn_vm::stdlib::process::resolve_source_relative_path(path.as_ref())
+}
+
 /// Normalize a filesystem path into the string form the agent/tool surface
 /// must emit on **every** platform: forward-slash (`/`) separators.
 ///
