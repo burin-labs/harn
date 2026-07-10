@@ -8,11 +8,30 @@ pipeline default() {
       const structured = agent_loop(
         "grade this",
         nil,
-        {provider: "mock", profile: "verifier", output_schema: schema, output_validation: "error"},
+        {
+          provider: "mock",
+          profile: "verifier",
+          response_format: "json",
+          json_schema: schema,
+          output_schema: schema,
+          output_format: {kind: "json_schema", schema: schema, strict: true},
+          output_validation: "error",
+        },
       )
       __io_println(structured.visible_text)
-      __io_println(len(llm_mock_calls()))
-      assert(len(llm_mock_calls()) == 2, "verifier profile should retry schema-invalid output")
+      const calls = llm_mock_calls()
+      __io_println(len(calls))
+      assert(len(calls) == 2, "verifier profile should retry schema-invalid output")
+      assert(
+        calls[0].output_format.kind == "text",
+        "ordinary agent_loop turns must not force provider structured-output mode",
+      )
+      assert(
+        calls[1].output_format.kind == "json_schema",
+        "terminal output-schema repair should enforce structured output",
+      )
+      assert(structured.output_valid, "terminal repair should validate the final output")
+      assert(structured.output.verdict == "pass", "terminal repair should surface parsed output")
     },
   )
   with_llm_script(
