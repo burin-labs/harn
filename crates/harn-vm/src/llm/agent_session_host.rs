@@ -21,7 +21,7 @@ use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-use super::cost::calculate_cost_for_provider;
+use super::cost::calculate_cost_for_provider_with_cache;
 use super::permissions;
 use super::tools::{
     assistant_prose_block, build_assistant_response_message, render_canonical_call,
@@ -65,6 +65,8 @@ struct AgentHostSession {
     cost_used: f64,
     input_tokens: i64,
     output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
     active_skills: Vec<String>,
     tool_calls: Vec<serde_json::Value>,
     successful_tools: Vec<String>,
@@ -152,6 +154,8 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         cost_used: 0.0,
         input_tokens: 0,
         output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         active_skills: Vec::new(),
         tool_calls: Vec::new(),
         successful_tools: Vec::new(),
@@ -262,6 +266,38 @@ fn dict_get<'a>(value: &'a VmValue, key: &str) -> Option<&'a VmValue> {
         VmValue::Dict(d) => d.get(key),
         _ => None,
     }
+}
+
+fn value_as_i64(value: &VmValue) -> Option<i64> {
+    match value {
+        VmValue::Int(i) => Some(*i),
+        VmValue::Float(f) => Some(*f as i64),
+        _ => None,
+    }
+}
+
+fn first_dict_i64(sources: &[&VmValue], keys: &[&str]) -> i64 {
+    for source in sources {
+        for key in keys {
+            if let Some(value) = dict_get(source, key).and_then(value_as_i64) {
+                return value;
+            }
+        }
+    }
+    0
+}
+
+fn first_provider_cache_usage_i64(
+    sources: &[&VmValue],
+    extractor: fn(&serde_json::Value) -> i64,
+) -> i64 {
+    for source in sources {
+        let tokens = extractor(&vm_to_json(source));
+        if tokens != 0 {
+            return tokens;
+        }
+    }
+    0
 }
 
 fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {
@@ -483,6 +519,8 @@ async fn host_agent_session_init(
         cost_used: 0.0,
         input_tokens: 0,
         output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         active_skills: persisted_active_skills,
         tool_calls: Vec::new(),
         successful_tools: Vec::new(),
@@ -854,6 +892,9 @@ async fn host_agent_session_finalize(
             "duration_ms": 0,
             "input_tokens": session.input_tokens,
             "output_tokens": session.output_tokens,
+            "cache_read_tokens": session.cache_read_tokens,
+            "cache_write_tokens": session.cache_write_tokens,
+            "cache_creation_input_tokens": session.cache_write_tokens,
         },
         "tools": {
             "calls": session.tool_calls,
@@ -1986,29 +2027,30 @@ fn host_agent_session_record_usage_builtin(
     let llm_block = dict_get(&llm_result, "llm")
         .cloned()
         .unwrap_or(VmValue::Nil);
-    let input_tokens = dict_get(&llm_block, "input_tokens")
-        .or_else(|| dict_get(&llm_result, "input_tokens"))
-        .and_then(|v| match v {
-            VmValue::Int(i) => Some(*i),
-            VmValue::Float(f) => Some(*f as i64),
-            _ => None,
-        })
-        .unwrap_or(0);
-    let output_tokens = dict_get(&llm_block, "output_tokens")
-        .or_else(|| dict_get(&llm_result, "output_tokens"))
-        .and_then(|v| match v {
-            VmValue::Int(i) => Some(*i),
-            VmValue::Float(f) => Some(*f as i64),
-            _ => None,
-        })
-        .unwrap_or(0);
+    let usage_block = dict_get(&llm_result, "usage")
+        .cloned()
+        .unwrap_or(VmValue::Nil);
+    let input_tokens = first_dict_i64(&[&llm_block, &llm_result], &["input_tokens"]);
+    let output_tokens = first_dict_i64(&[&llm_block, &llm_result], &["output_tokens"]);
+    let usage_sources = [&llm_result, &usage_block, &llm_block];
+    let cache_read_tokens =
+        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_read_tokens);
+    let cache_write_tokens =
+        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_write_tokens);
     let provider = dict_get(&llm_result, "provider")
         .map(|v| v.display())
         .unwrap_or_default();
     let model = dict_get(&llm_result, "model")
         .map(|v| v.display())
         .unwrap_or_default();
-    let cost = calculate_cost_for_provider(&provider, &model, input_tokens, output_tokens);
+    let cost = calculate_cost_for_provider_with_cache(
+        &provider,
+        &model,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+    );
     let stop_reason = match dict_get(&llm_result, "stop_reason") {
         Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
         _ => None,
@@ -2021,11 +2063,20 @@ fn host_agent_session_record_usage_builtin(
             .saturating_add(output_tokens);
         session.input_tokens = session.input_tokens.saturating_add(input_tokens);
         session.output_tokens = session.output_tokens.saturating_add(output_tokens);
+        session.cache_read_tokens = session.cache_read_tokens.saturating_add(cache_read_tokens);
+        session.cache_write_tokens = session
+            .cache_write_tokens
+            .saturating_add(cache_write_tokens);
         session.cost_used += cost;
         if stop_reason.is_some() {
             session.last_llm_stop_reason = stop_reason.clone();
         }
-        Ok((session.tokens_used, session.cost_used))
+        Ok((
+            session.tokens_used,
+            session.cost_used,
+            session.cache_read_tokens,
+            session.cache_write_tokens,
+        ))
     })?;
     crate::agent_sessions::append_event(
         &session_id,
@@ -2037,6 +2088,9 @@ fn host_agent_session_record_usage_builtin(
             Some(serde_json::json!({
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_write_tokens": cache_write_tokens,
+                "cache_creation_input_tokens": cache_write_tokens,
                 "provider": provider,
                 "model": model,
                 "cost_usd": cost,
@@ -2054,6 +2108,18 @@ fn host_agent_session_record_usage_builtin(
     out.insert(
         crate::value::intern_key("cost_usd"),
         VmValue::Float(totals.1),
+    );
+    out.insert(
+        crate::value::intern_key("cache_read_tokens"),
+        VmValue::Int(totals.2),
+    );
+    out.insert(
+        crate::value::intern_key("cache_write_tokens"),
+        VmValue::Int(totals.3),
+    );
+    out.insert(
+        crate::value::intern_key("cache_creation_input_tokens"),
+        VmValue::Int(totals.3),
     );
     Ok(VmValue::dict(out))
 }
@@ -2146,6 +2212,8 @@ fn host_agent_session_totals_builtin(
             session.cost_used,
             session.input_tokens,
             session.output_tokens,
+            session.cache_read_tokens,
+            session.cache_write_tokens,
         ))
     })?;
     let mut out = crate::value::DictMap::new();
@@ -2168,6 +2236,18 @@ fn host_agent_session_totals_builtin(
     out.insert(
         crate::value::intern_key("output_tokens"),
         VmValue::Int(totals.3),
+    );
+    out.insert(
+        crate::value::intern_key("cache_read_tokens"),
+        VmValue::Int(totals.4),
+    );
+    out.insert(
+        crate::value::intern_key("cache_write_tokens"),
+        VmValue::Int(totals.5),
+    );
+    out.insert(
+        crate::value::intern_key("cache_creation_input_tokens"),
+        VmValue::Int(totals.5),
     );
     Ok(VmValue::dict(out))
 }

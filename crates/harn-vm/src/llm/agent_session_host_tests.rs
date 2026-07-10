@@ -5,9 +5,9 @@ use crate::agent_events::AgentEvent;
 use super::{
     agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
     canonical_provider_stop_reason, dict_get, initial_user_content, is_length_truncation,
-    last_assistant_text, list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
-    screenshots_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
-    text_has_tool_call_prefix, tool_result_message_for_provider,
+    json_to_vm, last_assistant_text, list_items, pair_orphaned_tool_use,
+    reset_agent_session_host_state, screenshots_from_tool_result, seed_host_session_provider_model,
+    synthesize_orphan_tool_results, text_has_tool_call_prefix, tool_result_message_for_provider,
     truncated_tool_call_should_continue, vm_to_json,
 };
 
@@ -1534,6 +1534,8 @@ fn session_totals_expose_cumulative_input_and_output_token_split() {
     super::with_session(&session_id, "totals-token-split", |session| {
         session.input_tokens = 140;
         session.output_tokens = 40;
+        session.cache_read_tokens = 90;
+        session.cache_write_tokens = 12;
         session.tokens_used = 180;
         Ok(())
     })
@@ -1556,4 +1558,71 @@ fn session_totals_expose_cumulative_input_and_output_token_split() {
         json["tokens_used"], 180,
         "tokens_used remains the input+output sum"
     );
+    assert_eq!(
+        json["cache_read_tokens"], 90,
+        "cumulative cache-read tokens are exposed separately"
+    );
+    assert_eq!(
+        json["cache_write_tokens"], 12,
+        "cumulative cache-write tokens are exposed separately"
+    );
+    assert_eq!(
+        json["cache_creation_input_tokens"], 12,
+        "cache_creation_input_tokens aliases cache_write_tokens"
+    );
+}
+
+#[test]
+fn record_usage_accumulates_cache_tokens_from_top_level_and_nested_usage() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("totals-cache-token-split".to_string()));
+    seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
+
+    let first = json_to_vm(&serde_json::json!({
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5",
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cache_read_tokens": 70,
+        "cache_creation_input_tokens": 10,
+    }));
+    super::host_agent_session_record_usage_builtin(
+        &[crate::value::VmValue::string(&session_id), first],
+        &mut String::new(),
+    )
+    .expect("first record_usage");
+
+    let second = json_to_vm(&serde_json::json!({
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5",
+        "llm": {"input_tokens": 80, "output_tokens": 15},
+        "usage": {
+            "prompt_tokens_details": {
+                "cached_tokens": 30,
+                "cache_write_tokens": 5
+            }
+        },
+    }));
+    let returned = super::host_agent_session_record_usage_builtin(
+        &[crate::value::VmValue::string(&session_id), second],
+        &mut String::new(),
+    )
+    .expect("second record_usage");
+    let returned_json = vm_to_json(&returned);
+    assert_eq!(returned_json["cache_read_tokens"], 100);
+    assert_eq!(returned_json["cache_write_tokens"], 15);
+    assert_eq!(returned_json["cache_creation_input_tokens"], 15);
+
+    let totals = super::host_agent_session_totals_builtin(
+        &[crate::value::VmValue::string(&session_id)],
+        &mut String::new(),
+    )
+    .expect("totals");
+    let json = vm_to_json(&totals);
+    assert_eq!(json["input_tokens"], 180);
+    assert_eq!(json["output_tokens"], 35);
+    assert_eq!(json["cache_read_tokens"], 100);
+    assert_eq!(json["cache_write_tokens"], 15);
+    assert_eq!(json["cache_creation_input_tokens"], 15);
 }
