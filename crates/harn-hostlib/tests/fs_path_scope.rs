@@ -72,6 +72,7 @@ impl ExecutionRootGuard {
         let root = path_string(root);
         set_thread_execution_context(Some(RunExecutionRecord {
             cwd: Some(root.clone()),
+            project_root: Some(root.clone()),
             source_dir: Some(root),
             env: BTreeMap::new(),
             adapter: None,

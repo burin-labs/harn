@@ -1313,6 +1313,7 @@ mod tests {
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(temp.path().to_string_lossy().into_owned()),
+                project_root: None,
                 source_dir: Some(temp.path().to_string_lossy().into_owned()),
                 env: BTreeMap::new(),
                 adapter: None,

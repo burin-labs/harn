@@ -74,6 +74,7 @@ impl SessionCancellation {
 
 pub(super) struct Session {
     pub(super) cwd: PathBuf,
+    pub(super) project_root: PathBuf,
     /// If a cancel was requested for the current prompt execution.
     pub(super) cancellation: SessionCancellation,
     /// Host bridge for the active prompt, if one is running.
@@ -93,6 +94,11 @@ pub(super) struct Session {
     pub(super) budget: SessionBudget,
     /// Prompt executions emitted to profile output for this ACP session.
     pub(super) profile_turn: u64,
+}
+
+pub(super) fn session_project_root_for_cwd(cwd: &Path) -> PathBuf {
+    let cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    harn_vm::stdlib::process::find_project_root(&cwd).unwrap_or(cwd)
 }
 
 pub(super) fn mark_cancelled_session(

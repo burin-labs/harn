@@ -1176,6 +1176,9 @@ async fn execute_case(
             harn_vm::stdlib::process::set_thread_execution_context(Some(
                 harn_vm::orchestration::RunExecutionRecord {
                     cwd: Some(execution_cwd.to_string_lossy().into_owned()),
+                    project_root: project_root
+                        .as_ref()
+                        .map(|root| root.to_string_lossy().into_owned()),
                     source_dir: Some(source_dir),
                     env: BTreeMap::new(),
                     adapter: None,

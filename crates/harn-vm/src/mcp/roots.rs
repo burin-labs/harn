@@ -28,9 +28,13 @@ pub(crate) fn current_mcp_roots() -> Vec<McpRoot> {
 
 pub(crate) fn current_mcp_root_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
+    let explicit_project_root = crate::stdlib::process::project_root_path();
     if let Some(context) = crate::stdlib::process::current_execution_context() {
         if let Some(path) = non_empty_path(context.worktree_path.as_deref()) {
             candidates.push(path);
+        }
+        if let Some(project_root) = explicit_project_root {
+            candidates.push(project_root);
         }
         if let Some(cwd) = non_empty_path(context.cwd.as_deref()) {
             push_project_root_or_path(&mut candidates, cwd);

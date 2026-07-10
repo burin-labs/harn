@@ -24,6 +24,7 @@ use crate::vm::AsyncBuiltinCtx;
 fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::RunExecutionRecord {
     let mut record = crate::orchestration::RunExecutionRecord {
         cwd: profile.cwd.clone(),
+        project_root: None,
         source_dir: None,
         env: profile.env.clone(),
         adapter: None,

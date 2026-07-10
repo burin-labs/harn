@@ -105,6 +105,23 @@ pub fn execution_root_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+pub fn project_root_path() -> Option<PathBuf> {
+    current_execution_context().and_then(|context| {
+        let project_root = context.project_root?;
+        if project_root.trim().is_empty() {
+            return None;
+        }
+        let path = PathBuf::from(project_root);
+        if path.is_absolute() {
+            Some(path)
+        } else if let Some(cwd) = context.cwd {
+            Some(PathBuf::from(cwd).join(path))
+        } else {
+            Some(normalize_context_path(&path))
+        }
+    })
+}
+
 pub fn source_root_path() -> PathBuf {
     VM_SOURCE_DIR
         .with(|sd| sd.borrow().clone())
@@ -132,7 +149,8 @@ pub(crate) fn read_env_value(name: &str) -> Option<String> {
 }
 
 pub fn runtime_root_base() -> PathBuf {
-    find_project_root(&execution_root_path())
+    project_root_path()
+        .or_else(|| find_project_root(&execution_root_path()))
         .or_else(|| find_project_root(&source_root_path()))
         .unwrap_or_else(source_root_path)
 }
@@ -917,6 +935,11 @@ fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(sig = "project_root() -> string?", category = "process")]
 fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if let Some(root) = project_root_path() {
+        return Ok(VmValue::String(arcstr::ArcStr::from(
+            root.to_string_lossy().as_ref(),
+        )));
+    }
     let base = current_execution_context()
         .and_then(|context| context.cwd.map(PathBuf::from))
         .or_else(|| VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
@@ -1096,6 +1119,7 @@ mod tests {
         set_thread_source_dir(&dir);
         set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
             cwd: Some(dir.to_string_lossy().into_owned()),
+            project_root: None,
             source_dir: Some(dir.to_string_lossy().into_owned()),
             env: BTreeMap::new(),
             adapter: None,
@@ -1141,6 +1165,7 @@ mod tests {
         set_thread_source_dir(&source_dir);
         set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
             cwd: Some(cwd.to_string_lossy().into_owned()),
+            project_root: None,
             source_dir: Some(source_dir.to_string_lossy().into_owned()),
             env: BTreeMap::new(),
             adapter: None,
@@ -1167,6 +1192,7 @@ mod tests {
         set_thread_source_dir(&source_dir);
         set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
             cwd: Some(cwd.to_string_lossy().into_owned()),
+            project_root: None,
             source_dir: Some(source_dir.to_string_lossy().into_owned()),
             env: BTreeMap::new(),
             adapter: None,
@@ -1190,6 +1216,28 @@ mod tests {
         set_thread_source_dir(std::path::Path::new("scripts"));
         assert_eq!(source_root_path(), current_dir.join("scripts"));
         reset_process_state();
+    }
+
+    #[test]
+    fn project_root_builtin_prefers_explicit_execution_project_root() {
+        let cwd = std::env::temp_dir().join(format!("harn-process-cwd-{}", uuid::Uuid::now_v7()));
+        let project_root =
+            std::env::temp_dir().join(format!("harn-process-root-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(&project_root).unwrap();
+        set_thread_execution_context(Some(RunExecutionRecord {
+            cwd: Some(cwd.to_string_lossy().into_owned()),
+            project_root: Some(project_root.to_string_lossy().into_owned()),
+            ..Default::default()
+        }));
+
+        let mut out = String::new();
+        let value = project_root_impl(&[], &mut out).unwrap();
+        assert_eq!(value.display(), project_root.display().to_string());
+
+        reset_process_state();
+        let _ = std::fs::remove_dir_all(&cwd);
+        let _ = std::fs::remove_dir_all(&project_root);
     }
 
     #[test]

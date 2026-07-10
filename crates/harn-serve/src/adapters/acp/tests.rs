@@ -1726,6 +1726,7 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             Some(pipeline_path.as_path()),
             None,
             dir.path(),
+            dir.path(),
             "code",
         )
         .await
@@ -1738,6 +1739,7 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             Some(pipeline_path.as_path()),
             None,
             dir.path(),
+            dir.path(),
             "code",
         )
         .await
@@ -1749,6 +1751,7 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             source,
             Some(pipeline_path.as_path()),
             Some("review"),
+            dir.path(),
             dir.path(),
             "code",
         )
@@ -1766,6 +1769,7 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             Some(pipeline_path.as_path()),
             Some("review"),
             dir.path(),
+            dir.path(),
             "plan",
         )
         .await
@@ -1776,13 +1780,31 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
         "ACP mode is part of baseline invalidation"
     );
 
-    let (baseline, hit5, ms5) = server
-        .prepare_vm_baseline_cached(source, None, None, dir.path(), "code")
+    let other_root = tempfile::tempdir().expect("other project root");
+    let (_baseline, hit5, _ms5) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(pipeline_path.as_path()),
+            Some("review"),
+            dir.path(),
+            other_root.path(),
+            "plan",
+        )
+        .await
+        .expect("different project-root prepare");
+    assert_eq!(
+        hit5,
+        Some(false),
+        "session project root is part of baseline invalidation"
+    );
+
+    let (baseline, hit6, ms6) = server
+        .prepare_vm_baseline_cached(source, None, None, dir.path(), dir.path(), "code")
         .await
         .expect("inline prepare");
     assert!(baseline.is_none());
-    assert_eq!(hit5, None);
-    assert_eq!(ms5, 0);
+    assert_eq!(hit6, None);
+    assert_eq!(ms6, 0);
 }
 
 #[test]

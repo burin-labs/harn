@@ -221,6 +221,9 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
             harn_vm::stdlib::process::set_thread_execution_context(Some(
                 harn_vm::orchestration::RunExecutionRecord {
                     cwd: Some(execution_cwd),
+                    project_root: project_root
+                        .as_ref()
+                        .map(|root| root.to_string_lossy().into_owned()),
                     source_dir: Some(source_dir),
                     env: std::collections::BTreeMap::new(),
                     adapter: None,
