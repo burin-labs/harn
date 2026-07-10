@@ -1,11 +1,10 @@
 #!/bin/bash
-# Integration tests for harn --bridge mode using the Python mock host.
+# Integration tests for harn --bridge mode using the Harn CLI mock host.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HARN="$REPO_ROOT/target/debug/harn"
-MOCK_HOST="$SCRIPT_DIR/../bridge_mock_host.py"
 
 # Build first
 echo "Building harn..."
@@ -21,7 +20,7 @@ run_test() {
     shift 3
 
     local actual
-    actual=$(python3 "$MOCK_HOST" "$HARN" "$pipeline" "$@" 2>/dev/null) || true
+    actual=$("$HARN" conformance-helper bridge-mock-host "$pipeline" "$@" 2>/dev/null) || true
 
     if echo "$actual" | grep -qF "$expected"; then
         echo "  PASS  $name"
