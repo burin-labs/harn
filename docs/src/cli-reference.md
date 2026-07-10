@@ -1284,6 +1284,7 @@ already pins a compatible `text` or `json` format.
 ```bash
 harn provider tool-scorecard --tool-probe-report ./probe.json
 harn provider tool-scorecard --tool-probe-report ./probe-a.json --tool-probe-report ./probe-b.json --json=false
+harn provider tool-scorecard --tool-probe-report ./probe.json --markdown > scorecard.md
 ```
 
 Use `--plan-from-catalog` to render the fixed micro-case matrix for catalogued
@@ -1291,6 +1292,7 @@ routes before probing. Plan output remains `schema_version: 1`.
 
 ```bash
 harn provider tool-scorecard --plan-from-catalog --route anthropic:claude-sonnet-5
+harn provider tool-scorecard --plan-from-catalog --route anthropic:claude-sonnet-5 --markdown > scorecard-plan.md
 ```
 
 ## harn local launch

@@ -10,7 +10,9 @@
  *     `ToolScorecardReport` shape.
  *   HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_PRETTY — pretty-printed companion,
  *     forwarded verbatim in JSON mode to preserve serde float fidelity.
- *   HARN_OUTPUT_JSON — "1" for the JSON envelope, else the human summary.
+ *   HARN_OUTPUT_JSON — "1" for the JSON envelope, else rendered text.
+ *   HARN_PROVIDER_TOOL_SCORECARD_MARKDOWN — "1" for Markdown instead of the
+ *     compact human summary when JSON mode is off.
  */
 fn __safe_string(value, fallback: string) -> string {
   if type_of(value) == "string" {
@@ -171,6 +173,60 @@ fn __render_human(report: dict) -> string {
   return out
 }
 
+fn __render_report_markdown(report: dict) -> string {
+  const summary = __safe_dict(report["summary"])
+  let out = "# Provider Tool-Call Scorecard\n\n"
+  out = out + "- Routes: " + to_string(__safe_int(report["route_count"], 0)) + "\n"
+  out = out + "- Pass: " + to_string(__safe_int(summary["pass"], 0)) + "\n"
+  out = out + "- Warn: " + to_string(__safe_int(summary["warn"], 0)) + "\n"
+  out = out + "- Fail: " + to_string(__safe_int(summary["fail"], 0)) + "\n"
+  const best = __safe_dict(summary["best_route"])
+  const best_provider = __safe_string(best["provider"], "")
+  if best_provider != "" {
+    out = out + "- Best route: `" + best_provider + " "
+      + __safe_string(best["model"], "")
+      + "` (score "
+      + to_string(__safe_int(best["quality_score"], 0))
+      + ")\n"
+  }
+  out = out + "\n"
+  out = out
+    + "| Provider | Model | Score | Status | Mode | Pass | Parseable | Issues | Catalog mismatches |\n"
+  out = out + "| --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |\n"
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const cases = __safe_int(route["case_count"], 0)
+    const catalog_mismatches = __safe_list(route["catalog_mismatches"])
+    out = out + "| "
+      + __safe_string(route["provider"], "")
+      + " | "
+      + __safe_string(route["model"], "")
+      + " | "
+      + to_string(__safe_int(route["quality_score"], 0))
+      + " | "
+      + __safe_string(route["status"], "")
+      + " | "
+      + __safe_string(route["recommended_tool_mode"], "")
+      + " | "
+      + to_string(__safe_int(route["successful_cases"], 0))
+      + "/"
+      + to_string(cases)
+      + " | "
+      + to_string(__safe_int(route["parseable_tool_call_cases"], 0))
+      + "/"
+      + to_string(cases)
+      + " | "
+      + __join_strings(__safe_list(route["issues"]), "-")
+      + " | "
+      + __join_dict_field(catalog_mismatches, "code", "-")
+      + " |\n"
+  }
+  return out
+}
+
 fn __render_plan_human(report: dict) -> string {
   const catalog = __safe_dict(report["catalog"])
   let out = "provider tool-call scorecard plan: routes="
@@ -217,6 +273,54 @@ fn __render_plan_human(report: dict) -> string {
   return out
 }
 
+fn __render_plan_markdown(report: dict) -> string {
+  const catalog = __safe_dict(report["catalog"])
+  let out = "# Provider Tool-Call Scorecard Plan\n\n"
+  out = out + "- Routes: " + to_string(__safe_int(report["route_count"], 0)) + "\n"
+  out = out + "- Cases: " + to_string(__safe_int(report["case_count"], 0)) + "\n"
+  out = out + "- Required cases: "
+    + to_string(__safe_int(report["required_case_count"], 0))
+    + "\n"
+  out = out + "- Batch manifest requests: "
+    + to_string(__safe_int(report["batch_manifest_request_count"], 0))
+    + "\n"
+  out = out + "- Catalog: `"
+    + __safe_string(catalog["hash_blake3"], "-")
+    + "` (schema "
+    + to_string(__safe_int(catalog["schema_version"], 0))
+    + ")\n\n"
+  out = out + "| Provider | Model | Preferred | Parity | Native | Text | Parallel | Batch | Cases |\n"
+  out = out + "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const claim = __safe_dict(route["catalog_claim"])
+    const cases = __safe_list(route["cases"])
+    out = out + "| "
+      + __safe_string(route["provider"], "")
+      + " | "
+      + __safe_string(route["model"], "")
+      + " | "
+      + __safe_string(claim["preferred_tool_format"], "-")
+      + " | "
+      + __safe_string(claim["tool_mode_parity"], "-")
+      + " | "
+      + to_string(__safe_bool(claim["native_tools"], false))
+      + " | "
+      + to_string(__safe_bool(claim["text_tools"], false))
+      + " | "
+      + to_string(__safe_bool(claim["supports_parallel_tool_calls"], false))
+      + " | "
+      + to_string(__safe_bool(claim["batch_api"], false))
+      + " | "
+      + __join_case_ids(cases, "-")
+      + " |\n"
+  }
+  return out
+}
+
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON", "")
   if raw == "" {
@@ -227,6 +331,7 @@ fn main(harness: Harness) -> int {
     return 70
   }
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const markdown_mode = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_MARKDOWN", "0") == "1"
   if json_mode {
     const pretty = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_PRETTY", raw)
     harness.stdio.println(pretty)
@@ -241,7 +346,11 @@ fn main(harness: Harness) -> int {
       return 70
     }
     const kind = __safe_string(report["kind"], "report")
-    const text = if kind == "plan" {
+    const text = if markdown_mode && kind == "plan" {
+      __render_plan_markdown(report)
+    } else if markdown_mode {
+      __render_report_markdown(report)
+    } else if kind == "plan" {
       __render_plan_human(report)
     } else {
       __render_human(report)
