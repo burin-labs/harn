@@ -195,6 +195,7 @@ fn __render_human(harness: Harness, report: dict) {
   render_command(harness, "export dataset", safe_list(launch["export_command"]))
   render_command(harness, "train adapter", safe_list(launch["train_command"]))
   render_command(harness, "eval", safe_list(evaluation["eval_command"]))
+  render_command(harness, "collect promotion receipt", safe_list(launch["promote_command"]))
   render_command(harness, "batch eval manifest", safe_list(batch_ready["manifest_command"]))
   render_command(harness, "inspect adapter", safe_list(launch["inspect_command"]))
   render_command(harness, "local launch", safe_list(launch["local_launch_command"]))

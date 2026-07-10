@@ -13,6 +13,7 @@ use crate::env_guard::ScopedEnvVar;
 mod export;
 mod manifest;
 mod preflight;
+mod promote;
 mod train;
 
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
@@ -35,6 +36,7 @@ pub(crate) async fn run(args: ModelsLoraArgs) {
         ModelsLoraCommand::Manifest(args) => Box::pin(manifest::manifest(&args)).await,
         ModelsLoraCommand::Plan(args) => Box::pin(plan(&args)).await,
         ModelsLoraCommand::Preflight(args) => Box::pin(preflight::preflight(&args)).await,
+        ModelsLoraCommand::Promote(args) => Box::pin(promote::promote(&args)).await,
         ModelsLoraCommand::Train(args) => Box::pin(train::train(&args)).await,
     };
     if exit_code != 0 {
@@ -688,6 +690,8 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         export_corpus_arg,
         "--export-manifest".to_string(),
         "ADAPTER_DATASET.manifest.json".to_string(),
+        "--out".to_string(),
+        "ADAPTER_OUTPUT_DIR/adapter.manifest.json".to_string(),
         "--adapter-name".to_string(),
         adapter_name,
         "--adapter-path".to_string(),
@@ -727,6 +731,19 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "--repeat".to_string(),
         "5".to_string(),
         "--json".to_string(),
+    ];
+    let promote_command = vec![
+        "harn".to_string(),
+        "models".to_string(),
+        "lora".to_string(),
+        "promote".to_string(),
+        "--manifest".to_string(),
+        "ADAPTER_OUTPUT_DIR/adapter.manifest.json".to_string(),
+        "--probe-root".to_string(),
+        "PROMOTION_PROBES".to_string(),
+        "--out".to_string(),
+        "ADAPTER_OUTPUT_DIR/promotion.receipt.json".to_string(),
+        "--check".to_string(),
     ];
     let mut warnings = plan_warnings(
         &provider,
@@ -828,6 +845,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             inspect_command,
             local_launch_command: launch_command,
             tool_probe_command,
+            promote_command,
             request_model,
         },
         warnings,
@@ -2829,6 +2847,7 @@ struct PlanLaunchHints {
     inspect_command: Vec<String>,
     local_launch_command: Vec<String>,
     tool_probe_command: Vec<String>,
+    promote_command: Vec<String>,
     request_model: String,
 }
 
@@ -3272,6 +3291,11 @@ mod tests {
             .launch
             .manifest_command
             .windows(2)
+            .any(|pair| pair == ["--out", "ADAPTER_OUTPUT_DIR/adapter.manifest.json"]));
+        assert!(report
+            .launch
+            .manifest_command
+            .windows(2)
             .any(|pair| pair == ["--chat-template", "harn_text_tool_calls_json_fences"]));
         assert!(report
             .launch
@@ -3317,6 +3341,25 @@ mod tests {
                 "--repeat",
                 "5",
                 "--json",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            report.launch.promote_command,
+            [
+                "harn",
+                "models",
+                "lora",
+                "promote",
+                "--manifest",
+                "ADAPTER_OUTPUT_DIR/adapter.manifest.json",
+                "--probe-root",
+                "PROMOTION_PROBES",
+                "--out",
+                "ADAPTER_OUTPUT_DIR/promotion.receipt.json",
+                "--check",
             ]
             .into_iter()
             .map(str::to_string)
