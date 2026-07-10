@@ -55,6 +55,29 @@ pipeline test(task) {
   assert_eq(green.progress_credit, false)
   assert_eq(green.blocks_completion, false)
   assert_eq(green.previous.classification.status, "bound_stale")
+  const newer_green_supersedes_red = verification_gate_input(
+    fresh_red,
+    {rung: "R3", rowId: "zig/test", at: "2026-07-03T00:02:00Z", snapshot: hashes, success: true},
+    hashes,
+    normalization,
+  )
+  assert_eq(newer_green_supersedes_red.status, "cleared")
+  assert_eq(newer_green_supersedes_red.progress_credit, true)
+  assert_eq(newer_green_supersedes_red.blocks_completion, false)
+  assert_eq(newer_green_supersedes_red.previous.classification.status, "bound_fresh")
+  assert_eq(newer_green_supersedes_red.current.classification.status, "bound_fresh")
+  const late_background_red = verification_gate_input(
+    newer_green_supersedes_red.current.value,
+    old_red + {source: "background", at: "2026-07-03T00:03:00Z"},
+    hashes,
+    normalization,
+  )
+  assert_eq(late_background_red.status, "advisory")
+  assert_eq(late_background_red.feedsGates, false)
+  assert_eq(late_background_red.progress_credit, false)
+  assert_eq(late_background_red.blocks_completion, false)
+  assert_eq(late_background_red.current.classification.status, "bound_stale")
+  assert_eq(late_background_red.current.value.source, "background")
   const stale_previous_not_baseline = verification_gate_input(old_red, fresh_red + {diagnostics: ["B"]}, hashes)
   assert_eq(stale_previous_not_baseline.status, "initialized")
   assert_eq(stale_previous_not_baseline.progress_credit, false)
