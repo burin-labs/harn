@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::agent_events::{AgentEvent, ToolCallStatus};
+use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
 use crate::llm::capabilities::WireDialect;
 use crate::value::{VmError, VmValue};
 
@@ -795,6 +795,111 @@ fn canonical_stream_event_tool_name(tool_name: &str) -> String {
     name
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AnnouncedStreamToolCall {
+    tool_call_id: String,
+    tool_name: String,
+}
+
+struct StreamToolCallCloseout {
+    session_id: Option<String>,
+    announced: Vec<AnnouncedStreamToolCall>,
+    disarmed: bool,
+}
+
+impl StreamToolCallCloseout {
+    fn new(session_id: Option<&str>) -> Self {
+        Self {
+            session_id: session_id.map(str::to_string),
+            announced: Vec::new(),
+            disarmed: false,
+        }
+    }
+
+    fn announce(&mut self, tool_call_id: &str, tool_name: &str) {
+        if self.session_id.is_none() {
+            return;
+        }
+        let id = tool_call_id.trim();
+        if id.is_empty() {
+            return;
+        }
+        let name = tool_name.trim();
+        if let Some(existing) = self
+            .announced
+            .iter_mut()
+            .find(|entry| entry.tool_call_id == id)
+        {
+            if !name.is_empty() {
+                existing.tool_name = name.to_string();
+            }
+            return;
+        }
+        self.announced.push(AnnouncedStreamToolCall {
+            tool_call_id: id.to_string(),
+            tool_name: name.to_string(),
+        });
+    }
+
+    fn finish_success(&mut self, returned_tool_calls: &[serde_json::Value]) {
+        let Some(session_id) = self.session_id.clone() else {
+            self.announced.clear();
+            self.disarmed = true;
+            return;
+        };
+        for announcement in self.announced.drain(..) {
+            if returned_tool_calls.iter().any(|call| {
+                call.get("id").and_then(serde_json::Value::as_str)
+                    == Some(announcement.tool_call_id.as_str())
+            }) {
+                continue;
+            }
+            emit_stream_tool_call_closeout(&session_id, &announcement);
+        }
+        self.disarmed = true;
+    }
+
+    fn fail_all(&mut self) {
+        let Some(session_id) = self.session_id.clone() else {
+            self.announced.clear();
+            return;
+        };
+        for announcement in self.announced.drain(..) {
+            emit_stream_tool_call_closeout(&session_id, &announcement);
+        }
+    }
+}
+
+impl Drop for StreamToolCallCloseout {
+    fn drop(&mut self) {
+        if !self.disarmed {
+            self.fail_all();
+        }
+    }
+}
+
+fn emit_stream_tool_call_closeout(session_id: &str, announcement: &AnnouncedStreamToolCall) {
+    let event = AgentEvent::ToolCallUpdate {
+        session_id: session_id.to_string(),
+        tool_call_id: announcement.tool_call_id.clone(),
+        tool_name: announcement.tool_name.clone(),
+        status: ToolCallStatus::Failed,
+        raw_output: None,
+        error: Some(
+            "provider stream ended before this announced tool call reached dispatch".to_string(),
+        ),
+        duration_ms: None,
+        execution_duration_ms: None,
+        error_category: Some(ToolCallErrorCategory::ParseAborted),
+        executor: None,
+        raw_input: None,
+        raw_input_partial: None,
+        audit: crate::orchestration::current_mutation_session(),
+        parsing: None,
+    };
+    crate::llm::agent_runtime::emit_agent_event_sync(&event);
+}
+
 async fn send_stream_request_with_ollama_warmup(
     req: reqwest::RequestBuilder,
     provider: &str,
@@ -1047,6 +1152,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     // stream so the coalesced updates reuse the same id the dispatcher
     // would compute.
     let mut anth_tool_block_index: usize = 0;
+    let mut stream_tool_closeout = StreamToolCallCloseout::new(session_id);
 
     /// Per-tool-call OpenAI streaming state. Tracks the accumulated
     /// arguments string, the tool name (filled when the first delta
@@ -1148,7 +1254,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                     &AgentEvent::ToolCall {
                                         session_id: sid.to_string(),
                                         tool_call_id: tool_call_id.clone(),
-                                        tool_name: event_tool_name,
+                                        tool_name: event_tool_name.clone(),
                                         kind: tool_kind,
                                         status: ToolCallStatus::Pending,
                                         raw_input: serde_json::Value::Object(Default::default()),
@@ -1157,6 +1263,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                         parsing: None,
                                     },
                                 );
+                                stream_tool_closeout.announce(&tool_call_id, &event_tool_name);
                             }
                             current_tool = Some(ToolBlock {
                                 name,
@@ -1429,7 +1536,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                 &AgentEvent::ToolCall {
                                     session_id: sid.to_string(),
                                     tool_call_id: entry.tool_call_id.clone(),
-                                    tool_name: event_tool_name,
+                                    tool_name: event_tool_name.clone(),
                                     kind: tool_kind,
                                     status: ToolCallStatus::Pending,
                                     raw_input: serde_json::Value::Object(Default::default()),
@@ -1438,6 +1545,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                     parsing: None,
                                 },
                             );
+                            stream_tool_closeout.announce(&entry.tool_call_id, &event_tool_name);
                             entry.announced = true;
                         }
                     }
@@ -1615,6 +1723,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
             output_tokens,
         ));
     }
+    stream_tool_closeout.finish_success(&tool_calls);
 
     // Use the caller-supplied provider id rather than collapsing every
     // non-anthropic stream to "openai". The provider name shows up in the
@@ -2355,6 +2464,15 @@ mod streaming_tool_call_tests {
         session_id: &str,
         is_anthropic: bool,
     ) -> (LlmResult, Vec<AgentEvent>) {
+        let (result, captured) = drive_result(bytes, session_id, is_anthropic).await;
+        (result.expect("sse parse should succeed"), captured)
+    }
+
+    async fn drive_result(
+        bytes: &[u8],
+        session_id: &str,
+        is_anthropic: bool,
+    ) -> (Result<LlmResult, VmError>, Vec<AgentEvent>) {
         let events = install_capturing_sink(session_id);
         let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let reader = tokio::io::BufReader::new(bytes);
@@ -2368,10 +2486,25 @@ mod streaming_tool_call_tests {
             None,
             false,
         )
-        .await
-        .expect("sse parse should succeed");
+        .await;
         let captured = events.lock().expect("capture mutex").clone();
         (result, captured)
+    }
+
+    fn failed_update_for<'a>(
+        events: &'a [AgentEvent],
+        tool_call_id: &str,
+    ) -> Option<&'a AgentEvent> {
+        events.iter().find(|event| {
+            matches!(
+                event,
+                AgentEvent::ToolCallUpdate {
+                    tool_call_id: id,
+                    status: ToolCallStatus::Failed,
+                    ..
+                } if id == tool_call_id
+            )
+        })
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2459,6 +2592,71 @@ mod streaming_tool_call_tests {
         // The agent loop reuses the dispatched call id for the executed
         // lifecycle, so it must match the streaming announcement id.
         assert_eq!(result.tool_calls[0]["id"], "toolu_a1");
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_stream_terminalizes_announced_tool_when_block_never_dispatches() {
+        let body = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_orphan\",\"name\":\"search_web\"}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("anth-orphan-tool");
+        let (result, events) = drive(body.as_bytes(), &session_id, true).await;
+
+        assert!(
+            result.tool_calls.is_empty(),
+            "unfinished stream block must not become dispatchable"
+        );
+        let closeout = failed_update_for(&events, "toolu_orphan")
+            .expect("unfinished announced tool call must be closed out");
+        match closeout {
+            AgentEvent::ToolCallUpdate {
+                tool_name,
+                error_category,
+                error,
+                ..
+            } => {
+                assert_eq!(tool_name, "search_web");
+                assert_eq!(*error_category, Some(ToolCallErrorCategory::ParseAborted));
+                assert!(
+                    error
+                        .as_deref()
+                        .is_some_and(|message| message.contains("reached dispatch")),
+                    "closeout error should name dispatch: {error:?}"
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_stream_error_closes_announced_tool_before_returning_error() {
+        let body = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_error\",\"name\":\"edit\"}}\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":4},\"delta\":{\"stop_reason\":\"stop\"}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("anth-error-tool");
+        let (result, events) = drive_result(body.as_bytes(), &session_id, true).await;
+
+        assert!(result.is_err(), "billed empty stream should still error");
+        let closeout = failed_update_for(&events, "toolu_error")
+            .expect("errored stream must close the announced tool");
+        match closeout {
+            AgentEvent::ToolCallUpdate {
+                tool_name,
+                error_category,
+                ..
+            } => {
+                assert_eq!(tool_name, "edit");
+                assert_eq!(*error_category, Some(ToolCallErrorCategory::ParseAborted));
+            }
+            _ => unreachable!(),
+        }
 
         clear_session_sinks(&session_id);
     }

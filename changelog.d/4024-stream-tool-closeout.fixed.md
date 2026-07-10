@@ -1,0 +1,1 @@
+- Close streamed tool-call lifecycle events when a provider stream exits before dispatch.
