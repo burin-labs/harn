@@ -558,6 +558,42 @@ fn text_tool_calls_replay_as_text_history_even_on_native_capable_routes() {
 }
 
 #[test]
+fn native_tool_calls_on_text_locked_session_replay_as_canonical_text_history() {
+    let result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "fireworks",
+        "model": "gpt-oss-120b",
+        "text": "",
+        "_agent_tool_format": "text",
+        "native_tool_calls": [{
+            "id": "call_1",
+            "name": "look",
+            "arguments": {"file": "README.md"}
+        }],
+    }));
+
+    let message = vm_to_json(&assistant_message_from_llm_result(&result));
+
+    assert_eq!(message["role"], "assistant");
+    let content = message["content"].as_str().expect("text history content");
+    assert!(
+        !content.trim().is_empty(),
+        "text-locked native-call surprises must not become blank assistant history"
+    );
+    assert!(
+        content.contains("<tool_call>") && content.contains("look({"),
+        "native call should be reserialized into the canonical text dialect: {content}"
+    );
+    assert!(
+        content.contains("\"file\": \"README.md\""),
+        "arguments should survive canonical text replay: {content}"
+    );
+    assert!(
+        message.get("tool_calls").is_none(),
+        "text-locked sessions must not persist provider-native tool_calls in history"
+    );
+}
+
+#[test]
 fn initial_user_content_preserves_multimodal_blocks() {
     let mut opts = crate::value::DictMap::new();
     opts.insert(
