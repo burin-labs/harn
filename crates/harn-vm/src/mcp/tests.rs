@@ -762,7 +762,13 @@ async fn install_sampling_mock() {
     execute_test_harn(
         r#"
 llm_mock({text: "sampled", provider: "mock", model: "mock"})
-host_mock("mcp", "sample", {action: "accept", options: {provider: "mock", model: "mock"}})
+host_mock("mcp", "sample", {
+  result: {
+    action: "accept",
+    options: {provider: "mock", model: "mock"},
+  },
+  unregistered_ok: true
+})
 "#,
     )
     .await;
