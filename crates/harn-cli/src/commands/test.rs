@@ -7,6 +7,7 @@ use clap::{error::ErrorKind, CommandFactory};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::io::AsyncReadExt;
 
 use crate::cli::{Cli, TestArgs};
 use crate::commands::run::{
@@ -915,6 +916,8 @@ async fn verify_unoptimized_conformance_subprocess(
         .map_err(|error| format!("failed to resolve current harn executable: {error}"))?;
     let start = std::time::Instant::now();
     let mut command = tokio::process::Command::new(exe);
+    harn_vm::op_interrupt::configure_tokio_kill_group(&mut command);
+    let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
     command
         .arg("test")
         .arg("conformance")
@@ -922,6 +925,10 @@ async fn verify_unoptimized_conformance_subprocess(
         .arg("--timeout")
         .arg(timeout_ms.to_string())
         .env(harn_vm::HARN_DISABLE_OPTIMIZATIONS_ENV, "1")
+        .env(
+            harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
+            &cleanup_token,
+        )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -930,17 +937,61 @@ async fn verify_unoptimized_conformance_subprocess(
     }
 
     let wait_timeout = std::time::Duration::from_millis(timeout_ms.saturating_add(2_000));
-    let output = match tokio::time::timeout(wait_timeout, command.output()).await {
-        Ok(Ok(output)) => output,
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("unoptimized subprocess launch failed: {error}"))?;
+    let pid = child.id();
+    let _cleanup_registration =
+        harn_vm::op_interrupt::register_active_process_cleanup(pid, &cleanup_token, None);
+    let stdout = match child.stdout.take() {
+        Some(pipe) => pipe,
+        None => {
+            terminate_unoptimized_subprocess(&mut child, pid, &cleanup_token).await;
+            return Err("unoptimized subprocess stdout pipe was not captured".to_string());
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(pipe) => pipe,
+        None => {
+            terminate_unoptimized_subprocess(&mut child, pid, &cleanup_token).await;
+            return Err("unoptimized subprocess stderr pipe was not captured".to_string());
+        }
+    };
+    let stdout_task = tokio::spawn(async move {
+        let mut reader = stdout;
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await.map(|_| bytes)
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut reader = stderr;
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await.map(|_| bytes)
+    });
+
+    let status = match tokio::time::timeout(wait_timeout, child.wait()).await {
+        Ok(Ok(status)) => status,
         Ok(Err(error)) => {
-            return Err(format!("unoptimized subprocess launch failed: {error}"));
+            terminate_unoptimized_subprocess(&mut child, pid, &cleanup_token).await;
+            let _ = read_subprocess_pipe(stdout_task, "stdout").await;
+            let _ = read_subprocess_pipe(stderr_task, "stderr").await;
+            return Err(format!("unoptimized subprocess wait failed: {error}"));
         }
         Err(_) => {
+            terminate_unoptimized_subprocess(&mut child, pid, &cleanup_token).await;
+            let _ = read_subprocess_pipe(stdout_task, "stdout").await;
+            let _ = read_subprocess_pipe(stderr_task, "stderr").await;
             return Err(format!(
                 "unoptimized subprocess timed out after {}ms",
                 wait_timeout.as_millis()
             ));
         }
+    };
+    let stdout = read_subprocess_pipe(stdout_task, "stdout").await?;
+    let stderr = read_subprocess_pipe(stderr_task, "stderr").await?;
+    let output = std::process::Output {
+        status,
+        stdout,
+        stderr,
     };
     let duration_ms = start.elapsed().as_millis() as u64;
     if output.status.success() {
@@ -962,6 +1013,43 @@ async fn verify_unoptimized_conformance_subprocess(
         message.push_str(stderr.trim_end());
     }
     Err(message)
+}
+
+async fn terminate_unoptimized_subprocess(
+    child: &mut tokio::process::Child,
+    pid: Option<u32>,
+    cleanup_token: &str,
+) {
+    if let Some(pid) = pid {
+        let mut report = harn_vm::op_interrupt::signal_pid_tree_group_and_token_with_report(
+            pid,
+            Some(cleanup_token),
+            9,
+        );
+        report.refresh_survivor_status();
+        tracing::warn!(
+            pid,
+            children = report.children.len(),
+            "unoptimized conformance subprocess signalled child process tree"
+        );
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+async fn read_subprocess_pipe(
+    task: tokio::task::JoinHandle<std::io::Result<Vec<u8>>>,
+    name: &str,
+) -> Result<Vec<u8>, String> {
+    match task.await {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(error)) => Err(format!(
+            "unoptimized subprocess {name} read failed: {error}"
+        )),
+        Err(error) => Err(format!(
+            "unoptimized subprocess {name} read task failed: {error}"
+        )),
+    }
 }
 
 fn canonicalize_or_err(path: &Path) -> Result<PathBuf, String> {

@@ -1,5 +1,6 @@
 use clap::Args;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::ProfileArgs;
 
@@ -28,6 +29,17 @@ pub(crate) struct RunArgs {
     /// network egress fail-closed guard for this run.
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
     pub no_sandbox: bool,
+    /// Interrupt the run after this duration and hard-exit with code 124 if it
+    /// does not unwind within Harn's subprocess cleanup grace. Supports
+    /// integer durations with ms, s, m, or h suffixes, for example `500ms`,
+    /// `8s`, `2m`.
+    #[arg(
+        long = "timeout",
+        value_name = "DURATION",
+        value_parser = parse_run_timeout,
+        conflicts_with = "as_job"
+    )]
+    pub timeout: Option<Duration>,
     /// Extra read-only filesystem roots. Repeatable; each path is
     /// readable but never writable.
     #[arg(
@@ -208,4 +220,73 @@ pub(crate) struct RunArgs {
     // with `trailing_var_arg = true` panics at clap runtime.
     #[arg(last = true)]
     pub argv: Vec<String>,
+}
+
+pub(crate) fn parse_run_timeout(raw: &str) -> Result<Duration, String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err("duration must not be empty".to_string());
+    }
+    let Some((number, unit)) = value
+        .strip_suffix("ms")
+        .map(|number| (number, "ms"))
+        .or_else(|| value.strip_suffix('s').map(|number| (number, "s")))
+        .or_else(|| value.strip_suffix('m').map(|number| (number, "m")))
+        .or_else(|| value.strip_suffix('h').map(|number| (number, "h")))
+    else {
+        return Err("duration must use an ms, s, m, or h suffix".to_string());
+    };
+    let amount = number
+        .parse::<u64>()
+        .map_err(|_| "duration amount must be a positive integer".to_string())?;
+    if amount == 0 {
+        return Err("duration must be greater than zero".to_string());
+    }
+    let millis = match unit {
+        "ms" => amount,
+        "s" => amount
+            .checked_mul(1_000)
+            .ok_or_else(|| "duration is too large".to_string())?,
+        "m" => amount
+            .checked_mul(60_000)
+            .ok_or_else(|| "duration is too large".to_string())?,
+        "h" => amount
+            .checked_mul(3_600_000)
+            .ok_or_else(|| "duration is too large".to_string())?,
+        _ => unreachable!("duration suffix matched above"),
+    };
+    Ok(Duration::from_millis(millis))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_run_timeout;
+    use std::time::Duration;
+
+    #[test]
+    fn parse_run_timeout_accepts_explicit_units() {
+        assert_eq!(
+            parse_run_timeout("500ms").expect("milliseconds"),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            parse_run_timeout("8s").expect("seconds"),
+            Duration::from_secs(8)
+        );
+        assert_eq!(
+            parse_run_timeout("2m").expect("minutes"),
+            Duration::from_mins(2)
+        );
+        assert_eq!(
+            parse_run_timeout("1h").expect("hours"),
+            Duration::from_hours(1)
+        );
+    }
+
+    #[test]
+    fn parse_run_timeout_rejects_ambiguous_or_zero_values() {
+        assert!(parse_run_timeout("8").is_err());
+        assert!(parse_run_timeout("0s").is_err());
+        assert!(parse_run_timeout("1.5s").is_err());
+    }
 }

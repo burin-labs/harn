@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::Value as JsonValue;
+use tokio::io::AsyncReadExt;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{values_equal, VmError, VmValue};
@@ -85,6 +86,12 @@ fn pop_host_mock_scope() -> bool {
         }
         None => false,
     }
+}
+
+fn async_builtin_cancel_token(
+    ctx: Option<&AsyncBuiltinCtx>,
+) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    ctx.and_then(|ctx| ctx.child_vm().cancel_token.clone())
 }
 
 fn capability_manifest_map() -> crate::value::DictMap {
@@ -604,7 +611,13 @@ pub(crate) async fn dispatch_host_operation_with_ctx(
         return dispatch_process_spawn_with_policy(ctx, params, caller).await;
     }
     if capability == "process" && matches!(operation, "poll" | "wait" | "kill" | "release") {
-        if let Some(result) = crate::stdlib::process_spawn::dispatch(operation, params).await {
+        if let Some(result) = crate::stdlib::process_spawn::dispatch(
+            operation,
+            params,
+            async_builtin_cancel_token(ctx),
+        )
+        .await
+        {
             return result;
         }
     }
@@ -779,7 +792,9 @@ async fn dispatch_process_spawn_with_policy(
             }
         };
 
-    match crate::stdlib::process_spawn::dispatch("spawn", &params).await {
+    match crate::stdlib::process_spawn::dispatch("spawn", &params, async_builtin_cancel_token(ctx))
+        .await
+    {
         Some(result) => result,
         None => Err(VmError::Runtime(
             "host_call process.spawn: dispatch returned None".to_string(),
@@ -807,60 +822,124 @@ async fn dispatch_process_exec_after_policy(
         None => None,
     };
     let mut cmd = build_sandboxed_command(params, "process.exec")?;
+    crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
+    let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
+    cmd.env(
+        crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
+        &cleanup_token,
+    );
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
     let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
     drop(profile_guard);
     let pid = child.id();
-    let timed_out;
-    let output_result = if let Some(timeout_ms) = timeout_ms {
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            child.wait_with_output(),
-        )
-        .await
-        {
-            Ok(result) => {
-                timed_out = false;
-                result
-            }
-            Err(_) => {
-                let response = process_exec_response(ProcessExecResponse {
-                    pid,
-                    started_at,
-                    started,
-                    stdout: "",
-                    stderr: "",
-                    exit_code: -1,
-                    status: "timed_out",
-                    success: false,
-                    timed_out: true,
-                });
-                return crate::orchestration::run_command_policy_postflight_with_ctx(
-                    ctx,
-                    params,
-                    response,
-                    command_policy_context,
-                    command_policy_decisions,
-                )
+    let cleanup_registration = crate::op_interrupt::register_active_process_cleanup(
+        pid,
+        &cleanup_token,
+        async_builtin_cancel_token(ctx),
+    );
+    let stdout_pipe = match child.stdout.take() {
+        Some(pipe) => pipe,
+        None => {
+            terminate_process_exec_child(&mut child, pid, &cleanup_token, "missing_stdout_pipe")
                 .await;
+            drop(cleanup_registration);
+            return Err(VmError::Runtime(
+                "host_call process.exec stdout pipe was not captured".to_string(),
+            ));
+        }
+    };
+    let stderr_pipe = match child.stderr.take() {
+        Some(pipe) => pipe,
+        None => {
+            terminate_process_exec_child(&mut child, pid, &cleanup_token, "missing_stderr_pipe")
+                .await;
+            drop(cleanup_registration);
+            return Err(VmError::Runtime(
+                "host_call process.exec stderr pipe was not captured".to_string(),
+            ));
+        }
+    };
+    let stdout_task = tokio::spawn(read_process_exec_pipe(stdout_pipe));
+    let stderr_task = tokio::spawn(read_process_exec_pipe(stderr_pipe));
+
+    enum ProcessExecWait {
+        Exited(std::io::Result<std::process::ExitStatus>),
+        TimedOut,
+    }
+
+    let exec_deadline = timeout_ms.map(|timeout_ms| {
+        tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms)
+    });
+    let wait_result = {
+        let wait = child.wait();
+        tokio::pin!(wait);
+        if let Some(deadline) = exec_deadline {
+            let sleep = tokio::time::sleep_until(deadline);
+            tokio::pin!(sleep);
+            tokio::select! {
+                result = &mut wait => ProcessExecWait::Exited(result),
+                _ = &mut sleep => ProcessExecWait::TimedOut,
             }
+        } else {
+            ProcessExecWait::Exited(wait.await)
+        }
+    };
+
+    let (mut status, mut success, mut timed_out, mut exit_code) = match wait_result {
+        ProcessExecWait::Exited(result) => {
+            let status =
+                result.map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+            let exit_code = status.code().unwrap_or(-1);
+            ("completed", status.success(), false, exit_code)
+        }
+        ProcessExecWait::TimedOut => {
+            terminate_process_exec_child(&mut child, pid, &cleanup_token, "timeout").await;
+            ("timed_out", false, true, -1)
+        }
+    };
+
+    let drain_pipes = async {
+        let stdout = collect_process_exec_pipe(stdout_task, "stdout").await?;
+        let stderr = collect_process_exec_pipe(stderr_task, "stderr").await?;
+        Ok::<_, VmError>((stdout, stderr))
+    };
+    tokio::pin!(drain_pipes);
+    let (stdout, stderr) = if !timed_out {
+        if let Some(deadline) = exec_deadline {
+            tokio::select! {
+                result = &mut drain_pipes => result?,
+                _ = tokio::time::sleep_until(deadline) => {
+                    terminate_process_exec_child(
+                        &mut child,
+                        pid,
+                        &cleanup_token,
+                        "pipe_drain_timeout",
+                    )
+                    .await;
+                    status = "timed_out";
+                    success = false;
+                    timed_out = true;
+                    exit_code = -1;
+                    drain_pipes.await?
+                }
+            }
+        } else {
+            drain_pipes.await?
         }
     } else {
-        timed_out = false;
-        child.wait_with_output().await
+        drain_pipes.await?
     };
-    let output =
-        output_result.map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit_code = output.status.code().unwrap_or(-1);
+    drop(cleanup_registration);
+
+    let stdout = String::from_utf8_lossy(&stdout).to_string();
+    let stderr = String::from_utf8_lossy(&stderr).to_string();
     let response = process_exec_response(ProcessExecResponse {
         pid,
         started_at,
@@ -868,8 +947,8 @@ async fn dispatch_process_exec_after_policy(
         stdout: &stdout,
         stderr: &stderr,
         exit_code,
-        status: if timed_out { "timed_out" } else { "completed" },
-        success: output.status.success(),
+        status,
+        success,
         timed_out,
     });
     crate::orchestration::run_command_policy_postflight_with_ctx(
@@ -880,6 +959,54 @@ async fn dispatch_process_exec_after_policy(
         command_policy_decisions,
     )
     .await
+}
+
+async fn read_process_exec_pipe<R>(mut pipe: R) -> std::io::Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut bytes = Vec::new();
+    pipe.read_to_end(&mut bytes).await?;
+    Ok(bytes)
+}
+
+async fn collect_process_exec_pipe(
+    task: tokio::task::JoinHandle<std::io::Result<Vec<u8>>>,
+    name: &str,
+) -> Result<Vec<u8>, VmError> {
+    match task.await {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(error)) => Err(VmError::Runtime(format!(
+            "host_call process.exec read {name}: {error}"
+        ))),
+        Err(error) => Err(VmError::Runtime(format!(
+            "host_call process.exec join {name} reader: {error}"
+        ))),
+    }
+}
+
+async fn terminate_process_exec_child(
+    child: &mut tokio::process::Child,
+    pid: Option<u32>,
+    cleanup_token: &str,
+    reason: &'static str,
+) {
+    if let Some(pid) = pid {
+        let mut report = crate::op_interrupt::signal_pid_tree_group_and_token_with_report(
+            pid,
+            Some(cleanup_token),
+            9,
+        );
+        report.refresh_survivor_status();
+        tracing::warn!(
+            pid,
+            children = report.children.len(),
+            reason,
+            "host_call process.exec signalled child process tree"
+        );
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 /// Build a sandboxed `tokio::process::Command` from process-call params,
