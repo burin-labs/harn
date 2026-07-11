@@ -1489,6 +1489,17 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         apply_transcript_with_budget(state, candidate, "fork").is_ok()
     });
     if !budget_ok {
+        // The lineage edge was established before the budget check ran
+        // (update_lineage rewrites dst's transcript with the parent
+        // metadata that the check budgets). Undo it so a rejected fork
+        // never leaves a dangling child_id pointing at the session we
+        // are about to close.
+        SESSIONS.with(|s| {
+            let mut map = s.borrow_mut();
+            if let Some(parent) = map.get_mut(src_id) {
+                parent.child_ids.retain(|id| id != &dst);
+            }
+        });
         close(&dst);
         return None;
     }
