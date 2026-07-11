@@ -289,6 +289,18 @@ fn json_stream_validator_status_impl(
     with_validator(&handle, |validator| Ok(status_value(&validator.status)))
 }
 
+#[harn_builtin(
+    sig = "__json_stream_validator_partial(handle: string) -> any",
+    category = "json_stream"
+)]
+fn json_stream_validator_partial_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handle = handle_arg(args, "__json_stream_validator_partial")?;
+    with_validator(&handle, |validator| Ok(validator.partial_value()))
+}
+
 // `std/json/stream_validate` (E5.1, #1773): plain-dict verdict API
 // built on top of the same `JsonStreamValidator` storage that the
 // `stream_validator` closure-bag uses. The verdict shape is
@@ -345,6 +357,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &JSON_STREAM_VALIDATE_CREATE_IMPL_DEF,
     &JSON_STREAM_VALIDATE_CHUNK_IMPL_DEF,
     &JSON_STREAM_VALIDATE_FINALIZE_IMPL_DEF,
+    &JSON_STREAM_VALIDATOR_PARTIAL_IMPL_DEF,
 ];
 
 impl JsonStreamValidator {
@@ -420,6 +433,21 @@ impl JsonStreamValidator {
         self.value = None;
     }
 
+    /// Best-effort partially-filled value from the bytes seen so far — the
+    /// engine behind Vercel `streamObject` / Instructor `Partial[T]`. Once the
+    /// document is `Valid` this is the finished value; while `Pending` it
+    /// materializes the largest structurally-complete prefix by closing the
+    /// open string/containers at the frontier and dropping any trailing
+    /// incomplete member (a half-typed key or value). Structural only — the
+    /// schema is not applied to a partial. Returns `Nil` when nothing
+    /// parseable has arrived yet.
+    fn partial_value(&self) -> VmValue {
+        if let (JsonStreamStatus::Valid, Some(value)) = (&self.status, &self.value) {
+            return value.clone();
+        }
+        best_effort_partial(self.scan.json_slice(&self.buffer))
+    }
+
     /// Close out a stream. If the validator is still `Pending` and the
     /// buffer holds a partial document, transition to `Invalid` with an
     /// "incomplete JSON document" reason. An empty/whitespace-only
@@ -475,6 +503,136 @@ fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
             path: "$".to_string(),
         },
     }
+}
+
+/// Materialize the largest structurally-complete prefix of a partial JSON
+/// `body` by closing the frontier and trimming any trailing incomplete member.
+///
+/// The actual value is built by `serde_json` — this never re-implements JSON
+/// value parsing. It only does a structural scan to find safe truncation
+/// frontiers (positions before a top-level comma, just inside an opener, or
+/// just past a closer, tracking string/escape state so string-internal
+/// punctuation is ignored), then, longest first, closes the still-open string
+/// and containers at that frontier and asks `serde_json` to parse the result.
+/// The first frontier that parses wins, so a half-typed trailing key/value is
+/// dropped rather than corrupting the object.
+fn best_effort_partial(body: &str) -> VmValue {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return VmValue::Nil;
+    }
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return schema::json_to_vm_value(&json);
+    }
+    // Above this size, skip the frontier search (O(frontiers x parse)) so a
+    // pathological multi-megabyte partial stream can't go quadratic. Streaming
+    // LLM JSON — the target — is far below this; a huge still-incomplete
+    // document simply reports no partial until it parses whole via the fast
+    // path above.
+    const MAX_PARTIAL_SEARCH_BYTES: usize = 256 * 1024;
+    if trimmed.len() > MAX_PARTIAL_SEARCH_BYTES {
+        return VmValue::Nil;
+    }
+    let mut frontiers = collect_partial_frontiers(trimmed);
+    // Longest prefix first so we keep the most complete partial object.
+    frontiers.sort_by_key(|frontier| std::cmp::Reverse(frontier.end));
+    for frontier in frontiers {
+        let candidate = close_partial_frontier(
+            &trimmed[..frontier.end],
+            frontier.in_string,
+            &frontier.stack,
+        );
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&candidate) {
+            return schema::json_to_vm_value(&json);
+        }
+    }
+    VmValue::Nil
+}
+
+/// A candidate truncation point: the byte index to cut `body` at, plus the
+/// structural state (open string, open-container closer stack) at that point.
+struct PartialFrontier {
+    end: usize,
+    in_string: bool,
+    stack: Vec<char>,
+}
+
+/// Structural pass collecting every safe truncation frontier of `body` (plus
+/// the full length). String and escape state are tracked so that commas and
+/// brackets inside string literals are not treated as structure.
+fn collect_partial_frontiers(body: &str) -> Vec<PartialFrontier> {
+    let mut frontiers = Vec::new();
+    let mut stack: Vec<char> = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, ch) in body.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => {
+                stack.push('}');
+                // Just inside the opener: an empty container is always valid.
+                frontiers.push(PartialFrontier {
+                    end: index + ch.len_utf8(),
+                    in_string: false,
+                    stack: stack.clone(),
+                });
+            }
+            '[' => {
+                stack.push(']');
+                frontiers.push(PartialFrontier {
+                    end: index + ch.len_utf8(),
+                    in_string: false,
+                    stack: stack.clone(),
+                });
+            }
+            '}' | ']' => {
+                stack.pop();
+                frontiers.push(PartialFrontier {
+                    end: index + ch.len_utf8(),
+                    in_string: false,
+                    stack: stack.clone(),
+                });
+            }
+            // Cut *before* a top-level comma so the trailing (possibly
+            // incomplete) member is dropped with its separator.
+            ',' => frontiers.push(PartialFrontier {
+                end: index,
+                in_string: false,
+                stack: stack.clone(),
+            }),
+            _ => {}
+        }
+    }
+    frontiers.push(PartialFrontier {
+        end: body.len(),
+        in_string,
+        stack,
+    });
+    frontiers
+}
+
+/// Close the frontier of `head`: terminate an open string, then append the
+/// pending container closers innermost-first.
+fn close_partial_frontier(head: &str, in_string: bool, stack: &[char]) -> String {
+    let mut candidate = String::with_capacity(head.len() + stack.len() + 1);
+    candidate.push_str(head);
+    if in_string {
+        candidate.push('"');
+    }
+    for closer in stack.iter().rev() {
+        candidate.push(*closer);
+    }
+    candidate
 }
 
 impl JsonStreamScan {
@@ -1558,6 +1716,89 @@ mod tests {
         assert!(
             matches!(status, JsonStreamStatus::Invalid { .. }),
             "`1 2 3` must be Invalid, got {status:?}"
+        );
+    }
+
+    fn partial_json(body: &str) -> serde_json::Value {
+        crate::llm::helpers::vm_value_to_json(&best_effort_partial(body))
+    }
+
+    #[test]
+    fn partial_drops_incomplete_trailing_key() {
+        // A half-typed trailing key with no value is dropped, not corrupted.
+        assert_eq!(
+            partial_json("{\"name\":\"Ada\",\"ag"),
+            serde_json::json!({"name": "Ada"})
+        );
+    }
+
+    #[test]
+    fn partial_keeps_incomplete_trailing_value() {
+        // A half-typed string *value* is kept as-is (it grows across chunks);
+        // the key-vs-value distinction falls out of serde_json validity.
+        assert_eq!(
+            partial_json("{\"name\":\"Ad"),
+            serde_json::json!({"name": "Ad"})
+        );
+        // A complete value without a trailing comma is included.
+        assert_eq!(
+            partial_json("{\"name\":\"Ada\",\"age\":3"),
+            serde_json::json!({"name": "Ada", "age": 3})
+        );
+    }
+
+    #[test]
+    fn partial_grows_monotonically_to_final() {
+        // Empty object frontier, then each complete member, then the finished
+        // document — the partial only ever gains keys.
+        assert_eq!(partial_json("{"), serde_json::json!({}));
+        assert_eq!(partial_json("{\"a\":1,"), serde_json::json!({"a": 1}));
+        assert_eq!(
+            partial_json("{\"a\":1,\"b\":[1,2"),
+            serde_json::json!({"a": 1, "b": [1, 2]})
+        );
+        assert_eq!(
+            partial_json("{\"a\":1,\"b\":[1,2]}"),
+            serde_json::json!({"a": 1, "b": [1, 2]})
+        );
+    }
+
+    #[test]
+    fn partial_ignores_string_internal_punctuation() {
+        // Commas/braces inside a string value must not be treated as structure.
+        assert_eq!(
+            partial_json("{\"note\":\"a, b, {c}\",\"x"),
+            serde_json::json!({"note": "a, b, {c}"})
+        );
+    }
+
+    #[test]
+    fn partial_empty_buffer_is_nil() {
+        assert!(matches!(best_effort_partial("   "), VmValue::Nil));
+    }
+
+    #[test]
+    fn partial_skips_frontier_search_above_size_cap() {
+        // An incomplete document larger than the cap returns Nil rather than
+        // running the quadratic frontier search. (A *complete* large document
+        // still parses via the fast path; only the incomplete-search is gated.)
+        let huge = format!("{{\"a\":\"{}", "x".repeat(300_000));
+        assert!(matches!(best_effort_partial(&huge), VmValue::Nil));
+    }
+
+    #[test]
+    fn partial_value_builtin_matches_helper() {
+        // End-to-end through the builtin + validator storage.
+        let schema = dict([("type", string("object"))]);
+        let handle = call("__json_stream_validator", vec![schema]);
+        call(
+            "__json_stream_validator_feed",
+            vec![handle.clone(), string("{\"name\":\"Ada\",\"ag")],
+        );
+        let partial = call("__json_stream_validator_partial", vec![handle]);
+        assert_eq!(
+            crate::llm::helpers::vm_value_to_json(&partial),
+            serde_json::json!({"name": "Ada"})
         );
     }
 }

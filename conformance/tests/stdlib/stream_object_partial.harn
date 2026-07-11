@@ -1,0 +1,42 @@
+import { stream_object } from "std/json"
+
+/**
+ * stream_object yields the current partial object per chunk (growing
+ * monotonically) and ends with the fully-parsed object. Assertions check
+ * behavior — partial growth + final equality — not exact intermediate prose.
+ */
+pipeline default() {
+  const chunks = ["{\"name\":\"A", "da\",\"age\"", ":30,\"tags\":[\"x", "\",\"y\"]}"]
+  let partials = []
+  for obj in stream_object(chunks) {
+    partials = partials.push(obj)
+  }
+  // More than one partial was emitted as the object filled in.
+  __io_println(len(partials) >= 2)
+  // The first partial already exposes the first field (possibly a partial value).
+  __io_println(partials[0]?.name != nil)
+  // Key count never decreases across successive partials (monotonic growth).
+  let monotonic = true
+  let prev = 0
+  for partial in partials {
+    const count = len(partial.keys())
+    if count < prev {
+      monotonic = false
+    }
+    prev = count
+  }
+  __io_println(monotonic)
+  // The final emission is the complete, fully-parsed object.
+  const final = partials[len(partials) - 1]
+  __io_println(final.name)
+  __io_println(final.age)
+  __io_println(join(final.tags, ","))
+  // A truncated stream still yields its best-effort final partial (no throw):
+  // the complete `a` member survives, the half-typed `b` key is dropped.
+  let truncated = nil
+  for obj in stream_object(["{\"a\":1,\"b"]) {
+    truncated = obj
+  }
+  __io_println(truncated.a)
+  __io_println(truncated?.b == nil)
+}
