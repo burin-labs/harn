@@ -92,8 +92,8 @@ import { mock_host_result, assert_host_called, clear_host_mocks } from "std/test
 | Function | Description |
 |----------|-------------|
 | `clear_host_mocks()` | Remove all registered host mocks |
-| `mock_host_result(cap, op, result, params?)` | Mock a host capability to return a value |
-| `mock_host_error(cap, op, message, params?)` | Mock a host capability to return an error |
+| `mock_host_result(cap, op, result, params?, unregistered_ok?)` | Mock a host capability to return a value |
+| `mock_host_error(cap, op, message, params?, unregistered_ok?)` | Mock a host capability to return an error |
 | `mock_host_response(cap, op, config)` | Mock with full response configuration |
 
 ### Host call assertions
@@ -176,6 +176,10 @@ Each entry in the host-mock list is a dict shaped like the existing
 `error` (if non-nil) takes precedence over `result`, mirroring
 `mock_host_error` / `mock_host_result`.
 
+Host mocks are strict by default: the capability/operation must be registered
+by Harn or the active hostlib embedder. Use `unregistered_ok: true` only for a
+pure test-local operation that does not correspond to a real host boundary.
+
 Hostlib builtins that take a request dict use the same registry under their
 module/method pair, so `hostlib_tools_run_command(...)` can be mocked with
 `{capability: "tools", operation: "run_command"}`. For the `process.exec` to
@@ -190,7 +194,7 @@ pipeline test_skill_registry() {
   with_host_mocks(
     [
       {capability: "runtime", operation: "pipeline_input", result: {}},
-      {capability: "project", operation: "skills", result: []},
+      {capability: "project", operation: "skills", result: [], unregistered_ok: true},
     ],
     { ->
       const registry = skill_registry_from_host()
@@ -218,7 +222,7 @@ Key properties:
 ```harn,ignore
 with_mocks(
   {
-    host_mocks: [{capability: "ws", operation: "read", result: "ok"}],
+    host_mocks: [{capability: "ws", operation: "read", result: "ok", unregistered_ok: true}],
     llm_mocks: [{text: "agreed"}],
   },
   { ->

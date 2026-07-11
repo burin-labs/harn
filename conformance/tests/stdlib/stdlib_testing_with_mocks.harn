@@ -34,7 +34,10 @@ fn body_inner_nested() {
 
 fn body_outer_nested() {
   const outer_v = host_call("outer.op", {})
-  const inner_summary = with_host_mocks([{capability: "inner", operation: "op", result: "inner_v"}], body_inner_nested)
+  const inner_summary = with_host_mocks(
+    [{capability: "inner", operation: "op", result: "inner_v", unregistered_ok: true}],
+    body_inner_nested,
+  )
   const after = host_call("outer.op", {})
   return {outer_v: outer_v, inner_summary: inner_summary, after: after, outer_count: host_call_count()}
 }
@@ -69,11 +72,11 @@ pipeline test_with_mocks(task) {
   // === basic host scope ===
   clear_host_mocks()
   llm_mock_clear()
-  mock_host_result("outer", "op", "outer_result", nil)
+  mock_host_result("outer", "op", "outer_result", nil, true)
   host_call("outer.op", {})
   assert_eq(host_call_count(), 1)
   const basic = with_host_mocks(
-    [{capability: "inner", operation: "op", result: "inner_result"}],
+    [{capability: "inner", operation: "op", result: "inner_result", unregistered_ok: true}],
     body_basic_host_scope,
   )
   assert_eq(basic.v, "inner_result")
@@ -85,7 +88,7 @@ pipeline test_with_mocks(task) {
   // === one-arg fixture bodies receive a nil context ===
   clear_host_mocks()
   const context_body = with_host_mocks(
-    [{capability: "inner", operation: "op", result: "context_result"}],
+    [{capability: "inner", operation: "op", result: "context_result", unregistered_ok: true}],
     body_context_host_scope,
   )
   assert_eq(context_body.v, "context_result")
@@ -93,9 +96,12 @@ pipeline test_with_mocks(task) {
   assert_eq(context_body.inner_count, 1)
   // === thrown body still cleans up ===
   clear_host_mocks()
-  mock_host_result("outer", "op", "outer_result", nil)
+  mock_host_result("outer", "op", "outer_result", nil, true)
   const caught = try {
-    with_host_mocks([{capability: "inner", operation: "op", result: "inner_result"}], body_thrown_inner)
+    with_host_mocks(
+      [{capability: "inner", operation: "op", result: "inner_result", unregistered_ok: true}],
+      body_thrown_inner,
+    )
     "unreachable"
   } catch (e) {
     e
@@ -105,7 +111,10 @@ pipeline test_with_mocks(task) {
   assert_eq(host_call("outer.op", {}), "outer_result")
   // === nested scopes ===
   clear_host_mocks()
-  const nested = with_host_mocks([{capability: "outer", operation: "op", result: "outer_v"}], body_outer_nested)
+  const nested = with_host_mocks(
+    [{capability: "outer", operation: "op", result: "outer_v", unregistered_ok: true}],
+    body_outer_nested,
+  )
   assert_eq(nested.outer_v, "outer_v")
   assert_eq(nested.inner_summary.v, "inner_v")
   assert_eq(nested.inner_summary.count, 1)
@@ -115,8 +124,8 @@ pipeline test_with_mocks(task) {
   clear_host_mocks()
   const asserted = with_host_mocks(
     [
-      {capability: "ws", operation: "read", result: "data", params: {path: "x"}},
-      {capability: "ws", operation: "write", error: "denied", params: {path: "y"}},
+      {capability: "ws", operation: "read", result: "data", params: {path: "x"}, unregistered_ok: true},
+      {capability: "ws", operation: "write", error: "denied", params: {path: "y"}, unregistered_ok: true},
     ],
     body_call_assertions,
   )
@@ -137,7 +146,7 @@ pipeline test_with_mocks(task) {
   // A missing capability should propagate a clear error AND leave the
   // outer scope clean (no leaked pushed scope, no leaked outer mock).
   clear_host_mocks()
-  mock_host_result("outer", "op", "outer_result", nil)
+  mock_host_result("outer", "op", "outer_result", nil, true)
   const bad_entry_err = try {
     with_host_mocks([{operation: "broken"}], body_basic_host_scope)
     "unreachable"
@@ -158,7 +167,10 @@ pipeline test_with_mocks(task) {
   clear_host_mocks()
   llm_mock_clear()
   const combined = with_mocks(
-    {host_mocks: [{capability: "h", operation: "op", result: "host_v"}], llm_mocks: [{text: "llm_v"}]},
+    {
+      host_mocks: [{capability: "h", operation: "op", result: "host_v", unregistered_ok: true}],
+      llm_mocks: [{text: "llm_v"}],
+    },
     body_combined_mocks,
   )
   assert_eq(combined.h, "host_v")

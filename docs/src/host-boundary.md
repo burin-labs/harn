@@ -78,8 +78,11 @@ capabilities Harn defines today:
   per `(model_hint, content_hash)` so replays are deterministic. See
   [Memory](memory.md) for the recall and storage contract.
 
-Tests can satisfy any capability with `host_mock(capability, op, {result})`;
-embedders ship richer behavior via the `HostCallBridge` trait described in
+Tests satisfy registered capabilities with `host_mock(capability, op,
+{result})`. Deliberately synthetic test-only operations must pass
+`unregistered_ok: true` so typos in real host boundaries fail at registration
+instead of surfacing later as unsupported host calls. Embedders ship richer
+behavior via the `HostCallBridge` trait described in
 `crates/harn-vm/src/stdlib/host.rs`.
 
 ## Process sandbox
