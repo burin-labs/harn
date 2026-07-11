@@ -4,34 +4,34 @@ use super::*;
 
 #[test]
 fn test_strict_types_json_parse_property_access() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const data = json_parse("{}")
   log(data.name)
 }"#,
     );
     assert!(
-        warns.iter().any(|w| w.contains("unvalidated")),
-        "expected unvalidated warning, got: {warns:?}"
+        errs.iter().any(|w| w.contains("unvalidated")),
+        "expected unvalidated error, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_direct_chain_access() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   log(json_parse("{}").name)
 }"#,
     );
     assert!(
-        warns.iter().any(|w| w.contains("Direct property access")),
-        "expected direct access warning, got: {warns:?}"
+        errs.iter().any(|w| w.contains("Direct property access")),
+        "expected direct access error, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_schema_expect_clears() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const my_schema = {type: "object", properties: {name: {type: "string"}}}
   const data = json_parse("{}")
@@ -40,14 +40,14 @@ fn test_strict_types_schema_expect_clears() {
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "expected no unvalidated warning after schema_expect, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "expected no unvalidated error after schema_expect, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_schema_is_if_guard() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const my_schema = {type: "object", properties: {name: {type: "string"}}}
   const data = json_parse("{}")
@@ -57,28 +57,28 @@ log(data.name)
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "expected no unvalidated warning inside schema_is guard, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "expected no unvalidated error inside schema_is guard, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_shape_annotation_clears() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const data: {name: string, age: int} = json_parse("{}")
   log(data.name)
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "expected no warning with shape annotation, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "expected no error with shape annotation, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_propagation() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const data = json_parse("{}")
   const x = data
@@ -86,38 +86,37 @@ fn test_strict_types_propagation() {
 }"#,
     );
     assert!(
-        warns
-            .iter()
+        errs.iter()
             .any(|w| w.contains("unvalidated") && w.contains("'x'")),
-        "expected propagation warning for x, got: {warns:?}"
+        "expected propagation error for x, got: {errs:?}"
     );
 }
 
 #[test]
-fn test_strict_types_non_boundary_no_warning() {
-    let warns = strict_warnings(
+fn test_strict_types_non_boundary_no_error() {
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const x = len("hello")
   log(x)
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "non-boundary function should not be flagged, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "non-boundary function should not be flagged, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_subscript_access() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const data = json_parse("{}")
   log(data["name"])
 }"#,
     );
     assert!(
-        warns.iter().any(|w| w.contains("unvalidated")),
-        "expected subscript warning, got: {warns:?}"
+        errs.iter().any(|w| w.contains("unvalidated")),
+        "expected subscript error, got: {errs:?}"
     );
 }
 
@@ -137,21 +136,21 @@ fn test_strict_types_disabled_by_default() {
 
 #[test]
 fn test_strict_types_llm_call_without_schema() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const result = llm_call("prompt", "system")
   log(result.text)
 }"#,
     );
     assert!(
-        warns.iter().any(|w| w.contains("unvalidated")),
-        "llm_call without schema should warn, got: {warns:?}"
+        errs.iter().any(|w| w.contains("unvalidated")),
+        "llm_call without schema should error, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_llm_call_with_schema_clean() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const result = llm_call("prompt", "system", {
 schema: {type: "object", properties: {name: {type: "string"}}}
@@ -161,14 +160,14 @@ schema: {type: "object", properties: {name: {type: "string"}}}
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "llm_call with schema should not warn, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "llm_call with schema should not error, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_schema_expect_result_typed() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const my_schema = {type: "object", properties: {name: {type: "string"}}}
   const validated = schema_expect(json_parse("{}"), my_schema)
@@ -176,14 +175,14 @@ fn test_strict_types_schema_expect_result_typed() {
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "schema_expect result should be typed, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "schema_expect result should be typed, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_realistic_orchestration() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const payload_schema = {type: "object", properties: {
 name: {type: "string"},
@@ -206,14 +205,14 @@ schema: payload_schema
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "validated orchestration should be clean, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "validated orchestration should be clean, got: {errs:?}"
     );
 }
 
 #[test]
 fn test_strict_types_llm_call_with_schema_via_variable() {
-    let warns = strict_warnings(
+    let errs = strict_errors(
         r#"pipeline t(task) {
   const my_schema = {type: "object", properties: {score: {type: "float"}}}
   const result = llm_call("rate this", "system", {
@@ -223,8 +222,8 @@ schema: my_schema
 }"#,
     );
     assert!(
-        !warns.iter().any(|w| w.contains("unvalidated")),
-        "llm_call with schema variable should not warn, got: {warns:?}"
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "llm_call with schema variable should not error, got: {errs:?}"
     );
 }
 

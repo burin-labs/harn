@@ -89,10 +89,10 @@ pub(super) fn check_source_strict(source: &str) -> Vec<TypeDiagnostic> {
     TypeChecker::with_strict_types(true).check(&program)
 }
 
-pub(super) fn strict_warnings(source: &str) -> Vec<String> {
+pub(super) fn strict_errors(source: &str) -> Vec<String> {
     check_source_strict(source)
         .into_iter()
-        .filter(|d| d.severity == DiagnosticSeverity::Warning)
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
         .map(|d| d.message)
         .collect()
 }

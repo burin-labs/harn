@@ -373,10 +373,11 @@ fn check_strict_with_source_enables_strict_mode() {
     let program = parser.parse().unwrap();
     let diagnostics = TypeChecker::new().check_strict_with_source(&program, source);
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("unvalidated")),
-        "expected strict unvalidated warning, got: {diagnostics:?}"
+        diagnostics.iter().any(
+            |diagnostic| diagnostic.severity == DiagnosticSeverity::Error
+                && diagnostic.message.contains("unvalidated")
+        ),
+        "expected strict unvalidated error, got: {diagnostics:?}"
     );
 }
 

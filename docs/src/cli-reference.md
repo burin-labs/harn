@@ -832,7 +832,7 @@ harn check --preflight warning src/
 | `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
 | `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
-| `--strict-types` | Flag unvalidated boundary-API values used in field access. |
+| `--strict-types` | Fail on unvalidated boundary-API values used in field or subscript access. |
 
 Files are checked on a parallel worker pool sized to the machine's available
 cores, and resolved-module parsing is memoized for the whole run, so

@@ -53,10 +53,24 @@ fn __missing_tool_call_float(value, fallback) {
   return parsed
 }
 
+fn __missing_tool_call_config_error(code: string, message: string, fields = {}) {
+  return {
+    error: code,
+    category: "invalid_config",
+    component: "missing_tool_call_classifier",
+    message: message,
+  }
+    + (fields ?? {})
+}
+
 fn __missing_tool_call_threshold(value) -> float {
   const threshold = to_float(value ?? 0.65)
   if threshold == nil || threshold < 0.0 || threshold > 1.0 {
-    throw "missing_tool_call_classifier: confidence_threshold must be between 0.0 and 1.0"
+    throw __missing_tool_call_config_error(
+      "missing_tool_call.invalid_confidence_threshold",
+      "confidence_threshold must be between 0.0 and 1.0",
+      {field: "confidence_threshold", expected: "0.0..1.0", actual: value, min: 0.0, max: 1.0},
+    )
   }
   return threshold
 }
@@ -235,17 +249,29 @@ fn __missing_tool_call_fail_open(error, threshold: float) -> MissingToolCallVerd
 pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
   const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
-    throw "missing_tool_call_classifier: opts must be a dict or nil; got " + type_of(cfg)
+    throw __missing_tool_call_config_error(
+      "missing_tool_call.invalid_options",
+      "opts must be a dict or nil; got " + type_of(cfg),
+      {field: "opts", expected: "dict", actual_type: type_of(cfg)},
+    )
   }
   const enabled = cfg.enabled ?? true
   if type_of(enabled) != "bool" {
-    throw "missing_tool_call_classifier: enabled must be a bool"
+    throw __missing_tool_call_config_error(
+      "missing_tool_call.invalid_enabled",
+      "enabled must be a bool",
+      {field: "enabled", expected: "bool", actual_type: type_of(enabled)},
+    )
   }
   const model = __missing_tool_call_string(cfg.model)
   const threshold = __missing_tool_call_threshold(cfg.confidence_threshold)
   const classifier = cfg.classifier
   if classifier != nil && type_of(classifier) != "closure" {
-    throw "missing_tool_call_classifier: classifier must be a closure or nil; got " + type_of(classifier)
+    throw __missing_tool_call_config_error(
+      "missing_tool_call.invalid_classifier",
+      "classifier must be a closure or nil; got " + type_of(classifier),
+      {field: "classifier", expected: "closure|nil", actual_type: type_of(classifier)},
+    )
   }
   return { payload ->
     if !enabled {
