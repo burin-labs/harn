@@ -795,3 +795,99 @@ fn find_text_long_running_returns_handle_and_feedback() {
     assert_eq!(result[0]["line"], 1);
     assert_eq!(result[0]["col"], 1);
 }
+
+#[test]
+fn io_error_kind_str_maps_representative_kinds() {
+    use std::io::{Error, ErrorKind};
+
+    // Contract keys `.harn` consumers branch on (issue #4420). A handful of
+    // representative kinds — including the two the atomic-write consumer needs
+    // (storage_full / quota_exceeded) — plus the non_exhaustive catch-all.
+    assert_eq!(
+        io_error_kind_str(&Error::from(ErrorKind::NotFound)),
+        "not_found"
+    );
+    assert_eq!(
+        io_error_kind_str(&Error::from(ErrorKind::PermissionDenied)),
+        "permission_denied"
+    );
+    assert_eq!(
+        io_error_kind_str(&Error::from(ErrorKind::AlreadyExists)),
+        "already_exists"
+    );
+    assert_eq!(
+        io_error_kind_str(&Error::from(ErrorKind::StorageFull)),
+        "storage_full"
+    );
+    assert_eq!(
+        io_error_kind_str(&Error::from(ErrorKind::QuotaExceeded)),
+        "quota_exceeded"
+    );
+    // An unnamed / platform-specific kind normalizes to "other" via the
+    // required non_exhaustive catch-all rather than leaking a Debug string.
+    assert_eq!(
+        io_error_kind_str(&Error::from(ErrorKind::WriteZero)),
+        "other"
+    );
+}
+
+#[test]
+fn io_error_value_is_structured_dict() {
+    use std::io::{Error, ErrorKind};
+
+    let value = io_error_value(
+        "Failed to write file /tmp/x: disk full",
+        &Error::from(ErrorKind::StorageFull),
+    );
+    assert_eq!(field(&value, "error").display(), "io_error");
+    assert_eq!(field(&value, "kind").display(), "storage_full");
+    // Message prose is preserved verbatim so a stringifying catch still reads.
+    assert_eq!(
+        field(&value, "message").display(),
+        "Failed to write file /tmp/x: disk full"
+    );
+}
+
+#[test]
+fn read_file_missing_throws_typed_io_error() {
+    use crate::orchestration::{
+        clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
+        CapabilityPolicy, SandboxProfile,
+    };
+
+    // A genuine io failure (NotFound) on an in-sandbox path lowers to the
+    // structured `{error, kind, message}` dict — not a prose string — so
+    // consumers branch on `kind == "not_found"`.
+    clear_execution_policy_stacks();
+    let workspace = tempfile::tempdir().unwrap();
+    let missing = workspace.path().join("missing.txt");
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    let mut vm = vm();
+    let err = call(&mut vm, "read_file", vec![s(&missing.to_string_lossy())])
+        .expect_err("reading a missing file must fail");
+    match err {
+        VmError::Thrown(VmValue::Dict(dict)) => {
+            assert_eq!(
+                dict.get("error").map(|v| v.display()).as_deref(),
+                Some("io_error")
+            );
+            assert_eq!(
+                dict.get("kind").map(|v| v.display()).as_deref(),
+                Some("not_found")
+            );
+            assert!(dict
+                .get("message")
+                .map(|v| v.display())
+                .unwrap_or_default()
+                .contains("Failed to read file"));
+        }
+        other => panic!("expected a structured io_error dict, got {other:?}"),
+    }
+
+    pop_execution_policy();
+}

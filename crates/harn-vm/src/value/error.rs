@@ -1,6 +1,6 @@
 use harn_lexer::Span;
 
-use super::VmValue;
+use super::{VmDictExt, VmValue};
 
 /// Bound expressing how many arguments a callable accepts. Used in
 /// [`VmError::ArityMismatch`] so error messages can render the exact
@@ -142,7 +142,10 @@ impl VmError {
     /// The `VmValue` a `catch` binding (or a `parallel settle` result) observes
     /// for this error: the raw thrown value for [`VmError::Thrown`] (so a
     /// structured error — e.g. a `{category, message}` dict from `throw_error` —
-    /// keeps its shape and category), otherwise the rendered message.
+    /// keeps its shape and category), a structured `{category, message}` dict for
+    /// [`VmError::CategorizedError`] (so consumers branch on the typed category
+    /// rather than substring-matching rendered prose), otherwise the rendered
+    /// message.
     ///
     /// Single source of truth for VM-error-to-value lowering so every seam that
     /// surfaces a caught error to Harn (`try`/`catch` via `handle_error`,
@@ -150,9 +153,21 @@ impl VmError {
     /// this was shared, `parallel settle` stringified errors via `to_string()`,
     /// so a categorized error thrown in a settle branch lost its category (a
     /// `cancelled`/`internal` fault that must propagate looked `generic`).
+    ///
+    /// The `category` key uses [`ErrorCategory::as_str`] — a canonical,
+    /// exhaustively-matched snake_case contract — so a new variant added there
+    /// is compiler-forced to name its key. `message` preserves the original
+    /// rendered text, so a `catch` that stringifies the caught value still reads
+    /// sensibly (the dict renders both fields).
     pub fn thrown_value(&self) -> VmValue {
         match self {
             VmError::Thrown(v) => v.clone(),
+            VmError::CategorizedError { message, category } => {
+                let mut dict = std::collections::BTreeMap::new();
+                dict.put_str("category", category.as_str());
+                dict.put_str("message", message);
+                VmValue::dict(dict)
+            }
             other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
         }
     }
@@ -578,6 +593,53 @@ mod tests {
             classify_error_message("invalid model id supplied"),
             ErrorCategory::NotFound
         );
+    }
+
+    #[test]
+    fn categorized_error_lowers_to_structured_dict() {
+        // A caught `CategorizedError` must surface as a `{category, message}`
+        // dict so `.harn` consumers branch on the typed category instead of
+        // substring-matching the rendered prose (issue #4420).
+        let err = categorized_error(
+            "sandbox violation: /etc/passwd",
+            ErrorCategory::ToolRejected,
+        );
+        let VmValue::Dict(dict) = err.thrown_value() else {
+            panic!(
+                "categorized error must lower to a dict, got {:?}",
+                err.thrown_value()
+            );
+        };
+        assert_eq!(
+            dict.get("category").map(|v| v.display()).as_deref(),
+            Some("tool_rejected"),
+        );
+        assert_eq!(
+            dict.get("message").map(|v| v.display()).as_deref(),
+            Some("sandbox violation: /etc/passwd"),
+        );
+        // The key is the canonical, exhaustively-matched `ErrorCategory::as_str`
+        // contract — not the Display prose. A stringified catch still renders the
+        // message + category (so generic catch-and-log stays sensible).
+        let rendered = categorized_error("boom", ErrorCategory::Cancelled)
+            .thrown_value()
+            .display();
+        assert!(rendered.contains("cancelled"), "rendered dict: {rendered}");
+        assert!(rendered.contains("boom"), "rendered dict: {rendered}");
+    }
+
+    #[test]
+    fn thrown_value_passes_structured_thrown_through_unchanged() {
+        // A user `throw` of a structured value keeps its exact shape — the
+        // lowering seam must not stringify or re-wrap it.
+        let original = VmValue::dict(std::collections::BTreeMap::from([(
+            "code".to_string(),
+            VmValue::Int(7),
+        )]));
+        let VmValue::Dict(dict) = VmError::Thrown(original).thrown_value() else {
+            panic!("thrown dict must pass through as a dict");
+        };
+        assert!(matches!(dict.get("code"), Some(VmValue::Int(7))));
     }
 
     #[test]
