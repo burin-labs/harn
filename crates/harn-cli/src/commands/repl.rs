@@ -262,7 +262,176 @@ fn repl_history_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".harn").join("repl_history"))
 }
 
+/// Accumulated REPL state shared by the interactive and piped drivers.
+///
+/// Replay model: each accepted line is appended to `accumulated` and the whole
+/// block is re-executed on every new input so bindings persist. Side effects
+/// from prior lines run again on each cycle, so only the newly emitted output
+/// tail is printed.
+#[derive(Default)]
+struct ReplSession {
+    accumulated: Vec<String>,
+    // Top-level `fn`/`struct`/`enum`/`type` items live outside the pipeline
+    // body, so they're tracked separately and spliced in at emit time.
+    top_level: Vec<String>,
+    prior_output_len: usize,
+    // Bare expressions get auto-wrapped as `let _N = <expr>` so the value
+    // is both displayed and reachable later via `_1`, `_2`, ...
+    result_counter: usize,
+}
+
+impl ReplSession {
+    /// Evaluate one accepted input line, printing any newly produced output.
+    /// The line is trimmed; blank lines are a no-op.
+    async fn eval_line(&mut self, raw_line: &str) {
+        let line = raw_line.trim().to_string();
+        if line.is_empty() {
+            return;
+        }
+
+        let first_word = line.split_whitespace().next();
+        let is_top_level = matches!(
+            first_word,
+            Some("fn" | "struct" | "enum" | "type" | "pub" | "import"),
+        );
+        // Statement-introducing keywords skip the bare-expression
+        // auto-wrap path.
+        let is_statement_kw = matches!(
+            first_word,
+            Some(
+                "let"
+                    | "var"
+                    | "if"
+                    | "for"
+                    | "while"
+                    | "return"
+                    | "break"
+                    | "continue"
+                    | "match"
+                    | "try"
+                    | "throw"
+                    | "log"
+                    | "print"
+                    | "println"
+                    | "assert"
+                    | "assert_eq"
+                    | "assert_ne"
+                    | "spawn"
+                    | "guard"
+                    | "deadline"
+                    | "retry"
+                    | "parallel"
+                    | "defer"
+                    | "mutex"
+            ),
+        );
+        let is_assignment = !is_top_level
+            && !is_statement_kw
+            && line.contains('=')
+            && !line.contains("==")
+            && !line.contains("!=")
+            && !line.contains("<=")
+            && !line.contains(">=");
+        let is_bare_expression = !is_top_level && !is_statement_kw && !is_assignment;
+
+        let emitted_line = if is_bare_expression {
+            self.result_counter += 1;
+            let counter = self.result_counter;
+            format!("let _{counter} = {line}\n__io_println(to_string(_{counter}))")
+        } else {
+            line.clone()
+        };
+
+        let body_lines = if is_top_level {
+            self.accumulated.clone()
+        } else {
+            let mut body = self.accumulated.clone();
+            body.push(emitted_line.clone());
+            body
+        };
+        let top_level_block = if is_top_level {
+            let mut tl = self.top_level.clone();
+            tl.push(line.clone());
+            tl.join("\n")
+        } else {
+            self.top_level.join("\n")
+        };
+
+        let body_block = body_lines.join("\n");
+        let source = if top_level_block.is_empty() {
+            format!("pipeline repl(task) {{\n{body_block}\n}}")
+        } else {
+            format!("{top_level_block}\npipeline repl(task) {{\n{body_block}\n}}")
+        };
+
+        match execute(&source, None).await {
+            Ok(output) => {
+                // Skip the prior prefix so replayed side effects
+                // from earlier lines don't print again.
+                let new_portion = if output.len() > self.prior_output_len {
+                    &output[self.prior_output_len..]
+                } else {
+                    ""
+                };
+                if !new_portion.is_empty() {
+                    io::stdout().write_all(new_portion.as_bytes()).ok();
+                }
+                self.prior_output_len = output.len();
+                if is_top_level {
+                    self.top_level.push(line);
+                } else {
+                    self.accumulated.push(emitted_line);
+                }
+            }
+            Err(e) => eprintln!("Error: {e}"),
+        }
+    }
+}
+
 pub(crate) async fn run_repl() {
+    use std::io::IsTerminal;
+
+    // Without a controlling terminal (e.g. `printf '1+2\n' | harn repl`), the
+    // interactive line editor cannot open the tty and fails with os error 6.
+    // Fall back to reading piped source from stdin to EOF instead of crashing.
+    if std::io::stdin().is_terminal() {
+        run_repl_interactive().await;
+    } else {
+        run_repl_piped().await;
+    }
+}
+
+/// Read Harn source from stdin to EOF and evaluate it line-by-line, joining
+/// lines that leave a delimiter open (multi-line `fn`/`if`/... blocks) before
+/// executing. Used when stdin is not a tty.
+async fn run_repl_piped() {
+    use std::io::Read;
+
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+
+    let mut session = ReplSession::default();
+    let mut pending = String::new();
+    for line in input.lines() {
+        if !pending.is_empty() {
+            pending.push('\n');
+        }
+        pending.push_str(line);
+        if scan_input_state(&pending).is_incomplete() {
+            continue;
+        }
+        let block = std::mem::take(&mut pending);
+        session.eval_line(&block).await;
+    }
+    // Best-effort flush of a trailing unterminated block.
+    if !pending.trim().is_empty() {
+        session.eval_line(&pending).await;
+    }
+}
+
+async fn run_repl_interactive() {
     use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
 
     println!("Harn REPL v{}", env!("CARGO_PKG_VERSION"));
@@ -299,17 +468,7 @@ pub(crate) async fn run_repl() {
         DefaultPromptSegment::Empty,
     );
 
-    // Replay model: each accepted line is appended to `accumulated` and the
-    // whole block is re-executed on every new input so bindings persist.
-    // Side effects from prior lines run again on each cycle.
-    let mut accumulated: Vec<String> = Vec::new();
-    // Top-level `fn`/`struct`/`enum`/`type` items live outside the pipeline
-    // body, so they're tracked separately and spliced in at emit time.
-    let mut top_level: Vec<String> = Vec::new();
-    let mut prior_output_len: usize = 0;
-    // Bare expressions get auto-wrapped as `let _N = <expr>` so the value
-    // is both displayed and reachable later via `_1`, `_2`, ...
-    let mut result_counter: usize = 0;
+    let mut session = ReplSession::default();
 
     loop {
         // reedline blocks on terminal input, so off-thread it.
@@ -326,108 +485,7 @@ pub(crate) async fn run_repl() {
         match input {
             Ok((editor, Ok(Signal::Success(line)))) => {
                 line_editor = editor;
-                let line = line.trim().to_string();
-                if line.is_empty() {
-                    continue;
-                }
-
-                let first_word = line.split_whitespace().next();
-                let is_top_level = matches!(
-                    first_word,
-                    Some("fn" | "struct" | "enum" | "type" | "pub" | "import"),
-                );
-                // Statement-introducing keywords skip the bare-expression
-                // auto-wrap path.
-                let is_statement_kw = matches!(
-                    first_word,
-                    Some(
-                        "let"
-                            | "var"
-                            | "if"
-                            | "for"
-                            | "while"
-                            | "return"
-                            | "break"
-                            | "continue"
-                            | "match"
-                            | "try"
-                            | "throw"
-                            | "log"
-                            | "print"
-                            | "println"
-                            | "assert"
-                            | "assert_eq"
-                            | "assert_ne"
-                            | "spawn"
-                            | "guard"
-                            | "deadline"
-                            | "retry"
-                            | "parallel"
-                            | "defer"
-                            | "mutex"
-                    ),
-                );
-                let is_assignment = !is_top_level
-                    && !is_statement_kw
-                    && line.contains('=')
-                    && !line.contains("==")
-                    && !line.contains("!=")
-                    && !line.contains("<=")
-                    && !line.contains(">=");
-                let is_bare_expression = !is_top_level && !is_statement_kw && !is_assignment;
-
-                let emitted_line = if is_bare_expression {
-                    result_counter += 1;
-                    format!(
-                        "let _{result_counter} = {line}\n__io_println(to_string(_{result_counter}))"
-                    )
-                } else {
-                    line.clone()
-                };
-
-                let body_lines = if is_top_level {
-                    accumulated.clone()
-                } else {
-                    let mut body = accumulated.clone();
-                    body.push(emitted_line.clone());
-                    body
-                };
-                let top_level_block = if is_top_level {
-                    let mut tl = top_level.clone();
-                    tl.push(line.clone());
-                    tl.join("\n")
-                } else {
-                    top_level.join("\n")
-                };
-
-                let body_block = body_lines.join("\n");
-                let source = if top_level_block.is_empty() {
-                    format!("pipeline repl(task) {{\n{body_block}\n}}")
-                } else {
-                    format!("{top_level_block}\npipeline repl(task) {{\n{body_block}\n}}")
-                };
-
-                match execute(&source, None).await {
-                    Ok(output) => {
-                        // Skip the prior prefix so replayed side effects
-                        // from earlier lines don't print again.
-                        let new_portion = if output.len() > prior_output_len {
-                            &output[prior_output_len..]
-                        } else {
-                            ""
-                        };
-                        if !new_portion.is_empty() {
-                            io::stdout().write_all(new_portion.as_bytes()).ok();
-                        }
-                        prior_output_len = output.len();
-                        if is_top_level {
-                            top_level.push(line);
-                        } else {
-                            accumulated.push(emitted_line);
-                        }
-                    }
-                    Err(e) => eprintln!("Error: {e}"),
-                }
+                session.eval_line(&line).await;
             }
             Ok((_, Ok(Signal::CtrlC))) | Ok((_, Ok(Signal::CtrlD))) => {
                 println!("Goodbye!");
@@ -482,6 +540,22 @@ mod tests {
     fn validator_type_exists_for_reedline_integration() {
         #[allow(clippy::no_effect_underscore_binding)]
         let _validator = HarnValidator;
+    }
+
+    #[tokio::test]
+    async fn eval_line_runs_headless_without_a_tty() {
+        // The piped driver (stdin is not a tty) relies on `eval_line` running
+        // outside any terminal. Exercise a binding, a bare expression, and a
+        // top-level `fn` to guard against the os-error-6 regression.
+        let mut session = super::ReplSession::default();
+        session.eval_line("let x = 40").await;
+        assert_eq!(session.accumulated.len(), 1);
+        session.eval_line("fn inc(n) { return n + 1 }").await;
+        assert_eq!(session.top_level.len(), 1);
+        session.eval_line("inc(x) + 1").await;
+        // Binding + bare expression are accumulated; the `fn` is top-level.
+        assert_eq!(session.accumulated.len(), 2);
+        assert_eq!(session.result_counter, 1);
     }
 
     #[test]

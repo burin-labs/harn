@@ -130,11 +130,11 @@ fn __basic_files(project_name: string, harn_range: string) -> list {
     ],
     [
       "lib/helpers.harn",
-      "fn greet(name) {\n"
+      "pub fn greet(name) {\n"
         + "  return \"Hello, \" + name + \"!\"\n"
         + "}\n"
         + "\n"
-        + "fn add(a, b) {\n"
+        + "pub fn add(a, b) {\n"
         + "  return a + b\n"
         + "}\n",
     ],

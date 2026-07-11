@@ -192,6 +192,43 @@ fn init_basic_dispatch_is_deterministic() {
 }
 
 #[test]
+fn init_basic_project_runs_and_tests_green() {
+    // A fresh `harn init` project must run its own pipeline and pass its
+    // bundled tests. Guards against the module-visibility regression where a
+    // whole-module `import "lib/helpers"` no longer binds non-`pub` names.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+
+    let init = run_scaffold(&["init"], root);
+    assert!(
+        init.status.success(),
+        "harn init failed: stderr={}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let run = run_scaffold(&["run", "main.harn"], root);
+    assert!(
+        run.status.success(),
+        "harn run main.harn failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr),
+    );
+    assert!(
+        String::from_utf8_lossy(&run.stdout).contains("Hello"),
+        "scaffold run should print the greeting: stdout={}",
+        String::from_utf8_lossy(&run.stdout)
+    );
+
+    let test = run_scaffold(&["test", "tests/"], root);
+    assert!(
+        test.status.success(),
+        "harn test tests/ failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&test.stdout),
+        String::from_utf8_lossy(&test.stderr),
+    );
+}
+
+#[test]
 fn new_package_dispatch_is_deterministic() {
     let (harn_snap, repeat_snap) = pair_run(
         "new package",
