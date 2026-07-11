@@ -401,7 +401,7 @@ where
             .get("method")
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
-        let response = if method == "session/request_permission" {
+        let response = if method == crate::llm::acp_permission::METHOD_REQUEST_PERMISSION {
             json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -694,11 +694,22 @@ mod tests {
                 json!({
                     "jsonrpc": "2.0",
                     "id": 99,
-                    "method": "session/request_permission",
+                    "method": crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
                     "params": {
                         "sessionId": "sess-test",
                         "toolCall": {"toolCallId": "tool-1", "title": "write"},
-                        "options": [{"optionId": "approve", "name": "Approve", "kind": "allow_once"}]
+                        "options": [
+                            {
+                                "optionId": crate::llm::acp_permission::OPTION_ALLOW,
+                                "name": "Allow",
+                                "kind": "allow_once"
+                            },
+                            {
+                                "optionId": crate::llm::acp_permission::OPTION_REJECT,
+                                "name": "Reject",
+                                "kind": "reject_once"
+                            }
+                        ]
                     }
                 }),
             )

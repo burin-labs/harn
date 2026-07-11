@@ -685,7 +685,7 @@ async fn request_permission(
     let approval_request_json = serde_json::to_value(&approval_request).unwrap_or(JsonValue::Null);
     let response = bridge
         .call(
-            "session/request_permission",
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
             crate::llm::acp_permission::request_params(
                 crate::llm::current_agent_session_id().as_deref(),
                 &approval_id,
