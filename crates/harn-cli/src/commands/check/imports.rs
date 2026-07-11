@@ -30,10 +30,10 @@ pub(super) fn scan_import_collisions(
                     continue;
                 };
                 let import_str = import_path.to_string_lossy().into_owned();
-                let Some((import_source, _)) = parse_resolved_module(&import_path) else {
+                let Some(parsed) = parse_resolved_module(&import_path) else {
                     continue;
                 };
-                let names = collect_exported_names(&import_source, &import_path);
+                let names = collect_exported_names(&parsed.0, &import_path);
                 for name in names {
                     if let Some(existing) = imported_names.get(&name) {
                         if existing.module_path != import_str {
@@ -296,8 +296,8 @@ fn collect_exported_names_into(
                 is_pub: true,
             } => {
                 if let Some(nested_path) = resolve_import_path(file_path, nested) {
-                    if let Some((nested_source, _)) = parse_resolved_module(&nested_path) {
-                        collect_exported_names_into(&nested_source, &nested_path, names, visited);
+                    if let Some(parsed) = parse_resolved_module(&nested_path) {
+                        collect_exported_names_into(&parsed.0, &nested_path, names, visited);
                     }
                 }
             }

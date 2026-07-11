@@ -24,8 +24,22 @@ pub(super) fn print_lint_diagnostics(
     source: &str,
     diagnostics: &[harn_lint::LintDiagnostic],
 ) -> (bool, usize) {
+    let (has_error, fixable, rendered) = render_lint_diagnostics(path, source, diagnostics);
+    eprint!("{rendered}");
+    (has_error, fixable)
+}
+
+/// Buffered form of [`print_lint_diagnostics`] for callers that replay text
+/// output later (the parallel check driver). Returns
+/// `(has_error, fixable_count, rendered_text)`.
+pub(super) fn render_lint_diagnostics(
+    path: &str,
+    source: &str,
+    diagnostics: &[harn_lint::LintDiagnostic],
+) -> (bool, usize, String) {
     let mut has_error = false;
     let mut fixable = 0usize;
+    let mut out = String::new();
     for diag in diagnostics {
         if diag.fix.is_some() {
             fixable += 1;
@@ -48,7 +62,7 @@ pub(super) fn print_lint_diagnostics(
             Some(&format!("lint[{}]", diag.rule)),
             diag.suggestion.as_deref(),
         );
-        eprint!("{rendered}");
+        out.push_str(&rendered);
     }
-    (has_error, fixable)
+    (has_error, fixable, out)
 }

@@ -250,10 +250,10 @@ fn scan_node_bundle(
     match &node.node {
         Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
             if let Some(import_path) = resolve_import_path(file_path, path) {
-                if let Some((_, import_program)) = parse_resolved_module(&import_path) {
+                if let Some(parsed) = parse_resolved_module(&import_path) {
                     manifest.add_module(&import_path, "import");
                     manifest.add_import_edge(file_path, &import_path);
-                    scan_program_bundle(&import_path, &import_program, config, visited, manifest);
+                    scan_program_bundle(&import_path, &parsed.1, config, visited, manifest);
                 }
             }
         }
