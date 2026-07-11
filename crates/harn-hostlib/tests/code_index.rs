@@ -902,3 +902,56 @@ fn read_range_reads_raw_path_when_primary_index_is_unbuilt() {
         "unbuilt-index read_range must return raw file contents, got {content:?}"
     );
 }
+
+#[test]
+fn read_range_totals_ignore_trailing_newline_phantom_line() {
+    // Regression: `content.split('\n')` yields a phantom trailing "" for a
+    // newline-terminated file, so `total`/default `end` over-reported by one
+    // (vs `crate::text::count_lines`) and `start = total` returned a phantom
+    // empty line. A two-line, newline-terminated file must report total == 2.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("two-lines.txt");
+    fs::write(&file, "a\nb\n").unwrap();
+    let (registry, _cap) = build_registry();
+    let path_value =
+        |p: &std::path::Path| VmValue::String(arcstr::ArcStr::from(p.to_string_lossy().as_ref()));
+
+    // Default `end` (no start/end past the whole-file shortcut): request from
+    // line 1 and confirm the reported `end` is the real line count, not 3.
+    let read = call(
+        &registry,
+        "hostlib_code_index_read_range",
+        dict(&[("path", path_value(&file)), ("start", VmValue::Int(1))]),
+    );
+    let read = extract_dict(&read);
+    assert_eq!(extract_int(read.get("end").unwrap()), 2, "end must be 2");
+    assert_eq!(
+        extract_str(read.get("content").unwrap()),
+        "a\nb",
+        "content must be both real lines with no phantom trailing line"
+    );
+
+    // `start == total` (2) is the last real line, not an out-of-range phantom.
+    let last = call(
+        &registry,
+        "hostlib_code_index_read_range",
+        dict(&[("path", path_value(&file)), ("start", VmValue::Int(2))]),
+    );
+    assert_eq!(
+        extract_str(extract_dict(&last).get("content").unwrap()),
+        "b",
+        "start == total must return the last real line"
+    );
+
+    // One past the end is empty.
+    let past = call(
+        &registry,
+        "hostlib_code_index_read_range",
+        dict(&[("path", path_value(&file)), ("start", VmValue::Int(3))]),
+    );
+    assert_eq!(
+        extract_str(extract_dict(&past).get("content").unwrap()),
+        "",
+        "start beyond the last line must return empty content"
+    );
+}

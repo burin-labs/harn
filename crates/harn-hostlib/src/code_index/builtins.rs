@@ -573,7 +573,19 @@ pub(super) fn run_read_range_merged(
     if start.is_none() && end.is_none() {
         return Ok(build_dict([("content", str_value(&content))]));
     }
-    let lines: Vec<&str> = content.split('\n').collect();
+    // `split('\n')` yields a phantom trailing "" for newline-terminated content
+    // (and a lone "" for empty content), which would over-report `total` by one
+    // and let `start = total` return a phantom empty line. Drop it so totals and
+    // ranges match `crate::text::count_lines`, the canonical line-count semantics.
+    let lines: Vec<&str> = if content.is_empty() {
+        Vec::new()
+    } else {
+        let mut parts: Vec<&str> = content.split('\n').collect();
+        if content.ends_with('\n') {
+            parts.pop();
+        }
+        parts
+    };
     let total = lines.len() as i64;
     let lo = (start.unwrap_or(1) - 1).max(0) as usize;
     let hi = end.unwrap_or(total).min(total).max(0) as usize;
