@@ -333,6 +333,7 @@ module.exports = grammar({
 
     let_binding: ($) =>
       seq(
+        optional("pub"),
         "let",
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
@@ -355,6 +356,7 @@ module.exports = grammar({
     // destructuring pattern is permitted (only identifier bindings fold).
     const_binding: ($) =>
       seq(
+        optional("pub"),
         "const",
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),

@@ -393,6 +393,7 @@ mod tests {
                 left: Box::new(dummy(Node::IntLiteral(1))),
                 right: Box::new(dummy(Node::IntLiteral(2))),
             })),
+            is_pub: false,
         })];
         let mut seen = Vec::new();
 

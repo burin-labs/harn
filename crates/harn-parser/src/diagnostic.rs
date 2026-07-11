@@ -613,8 +613,8 @@ pub fn parser_error_help(err: &ParserError) -> Option<&'static str> {
                 "fn, struct, enum, or pipeline after pub" => {
                     Some("use `pub fn`, `pub pipeline`, `pub enum`, or `pub struct`")
                 }
-                "fn, tool, skill, eval_pack, struct, enum, type, pipeline, or import after pub" => Some(
-                    "use `pub` with `fn`, `tool`, `skill`, `eval_pack`, `struct`, `enum`, `type`, `pipeline`, or `import`",
+                "fn, tool, skill, eval_pack, struct, enum, type, pipeline, const, let, or import after pub" => Some(
+                    "use `pub` with `fn`, `tool`, `skill`, `eval_pack`, `struct`, `enum`, `type`, `pipeline`, `const`, `let`, or `import`",
                 ),
                 _ => None,
             }

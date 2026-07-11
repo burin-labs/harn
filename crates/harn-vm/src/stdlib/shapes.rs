@@ -114,6 +114,28 @@ fn __assert_list(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(runtime_only = true, category = "shapes")]
+fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = args.first().cloned().unwrap_or(VmValue::Nil);
+    if matches!(val, VmValue::Pair(_)) {
+        Ok(VmValue::Nil)
+    } else {
+        // A `for (a, b) in ...` head destructures each yielded item as a
+        // `Pair` (`.first`/`.second`). It fits Pair-yielding iterators —
+        // `iter(x).enumerate()`, `iter(x).zip(...)`, `dict.iter()`. It does
+        // NOT fit `list.enumerate()` (yields `{index, value}` dicts) or
+        // `list.zip(...)` (yields `[a, b]` lists), which previously bound
+        // both names to nil silently. Name the alternatives so the fix is
+        // obvious.
+        Err(VmError::TypeError(format!(
+            "cannot destructure {} with a `for (a, b)` pair pattern — expected a Pair. \
+             Use `for {{index, value}} in list.enumerate()`, `for [a, b] in list.zip(...)`, \
+             or wrap the source with `iter(...)` to yield Pairs.",
+            val.type_name()
+        )))
+    }
+}
+
+#[harn_builtin(runtime_only = true, category = "shapes")]
 fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
     let param_name = match args.get(1) {
@@ -189,6 +211,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &__ASSERT_INTERFACE_DEF,
     &__ASSERT_DICT_DEF,
     &__ASSERT_LIST_DEF,
+    &__ASSERT_PAIR_DEF,
     &__ASSERT_SCHEMA_DEF,
     &__DICT_REST_DEF,
     &__MAKE_STRUCT_DEF,

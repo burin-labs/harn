@@ -253,6 +253,7 @@ impl<'a> Linter<'a> {
                 pattern,
                 type_ann,
                 value,
+                ..
             } => {
                 if let Some(name) = Self::simple_binding_name(pattern) {
                     self.record_mcp_registry_binding(name, value);
@@ -270,6 +271,7 @@ impl<'a> Linter<'a> {
                 pattern,
                 type_ann,
                 value,
+                ..
             } => {
                 if let Some(name) = Self::simple_binding_name(pattern) {
                     self.record_mcp_registry_binding(name, value);

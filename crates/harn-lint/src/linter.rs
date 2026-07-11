@@ -1944,11 +1944,13 @@ impl<'a> Linter<'a> {
             pattern: BindingPattern::Identifier(name),
             type_ann: None,
             value,
+            ..
         }
         | Node::ConstBinding {
             pattern: BindingPattern::Identifier(name),
             type_ann: None,
             value,
+            ..
         }) = &node.node
         else {
             return;

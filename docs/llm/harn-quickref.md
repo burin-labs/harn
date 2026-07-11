@@ -446,9 +446,15 @@ const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
 const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
 ```
 
-Note: `for (a, b) in ...` with parentheses is NOT supported — only list
-patterns `[a, b]` and dict patterns `{name1, name2}`. Use `enumerate()`
-/ `entries()` (dict-shaped) or `zip()` (list-shaped) accordingly.
+Note: `for` heads accept three destructuring shapes, each matching what the
+iterable yields — mixing them fails loudly (no more silent `nil` bindings):
+
+- `for (a, b) in ...` — a **pair** pattern, for iterables that yield `Pair`
+  values: `iter(x).enumerate()`, `iter(x).zip(...)`, `dict.iter()`.
+- `for [a, b] in ...` — a **list** pattern, for `list.zip(other)` (yields
+  `[a, b]` lists).
+- `for {index, value} in ...` — a **dict** pattern, for `list.enumerate()` /
+  `entries()` (yield `{index, value}` / `{key, value}` dicts).
 
 ## Streams
 

@@ -1,0 +1,11 @@
+// This library exports a perfectly good `slugify_title`, but a syntax error
+// further down makes the WHOLE file fail to parse. Before the fix, importers
+// saw zero exports and blamed their own call site ("slugify_title is not
+// defined"); now the consumer's check surfaces THIS file's real error.
+pub fn slugify_title(title) {
+  return title
+}
+
+pub fn broken_helper( {
+  return 1
+}

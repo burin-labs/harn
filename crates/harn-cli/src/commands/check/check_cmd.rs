@@ -184,6 +184,50 @@ pub(crate) fn check_file_report_inner(
     let mut diagnostic_count = 0;
     let mut diagnostics = Vec::new();
 
+    // Imported-module compile failures. When an `import` resolves to a module
+    // that itself fails to lex/parse, that module contributes no symbols — so
+    // without this the type checker would flag every imported name as
+    // "undefined" at this file's call sites, sending the author to debug the
+    // wrong file. Surface the imported module's real error anchored at the
+    // `import` statement instead. (`imported_names_for_file` returns `None`
+    // for the same reason, which suppresses the misleading call-site errors.)
+    for failure in module_graph.import_compile_failures(path) {
+        has_error = true;
+        diagnostic_count += 1;
+        let code = harn_parser::diagnostic_codes::Code::ModuleImportCompileFailed;
+        let message = format!(
+            "imported module '{}' failed to compile ({}): {}",
+            failure.import_raw_path,
+            failure.module_path.display(),
+            failure.error.message,
+        );
+        let help = format!(
+            "fix the lex/parse error in {} before this import can resolve",
+            failure.module_path.display(),
+        );
+        if let Some(text) = text.as_mut() {
+            let rendered = harn_parser::diagnostic::render_diagnostic_with_code(
+                &source,
+                &path_str,
+                &failure.import_span,
+                "error",
+                code,
+                &message,
+                None,
+                Some(help.as_str()),
+            );
+            text.stderr.push_str(&rendered);
+        }
+        diagnostics.push(CheckDiagnostic {
+            source: "module",
+            severity: "error",
+            code: Some(code.to_string()),
+            message,
+            span: Some(check_span(failure.import_span)),
+            help: Some(help),
+        });
+    }
+
     for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;

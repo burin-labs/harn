@@ -80,6 +80,18 @@ impl Compiler {
                 }
             }
             BindingPattern::Pair(first_name, second_name) => {
+                // Runtime `__assert_pair(value)` guard on the RHS. Without it,
+                // extracting `.first`/`.second` from a non-Pair (a
+                // `{index, value}` dict from `list.enumerate()`, an `[a, b]`
+                // list from `list.zip(...)`) silently yields nil for both
+                // names instead of failing loudly.
+                self.chunk.emit(Op::Dup, self.line);
+                let assert_idx = self.string_constant("__assert_pair");
+                self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
+                self.chunk.emit(Op::Swap, self.line);
+                self.chunk.emit_u8(Op::Call, 1, self.line);
+                self.chunk.emit(Op::Pop, self.line);
+
                 self.chunk.emit(Op::Dup, self.line);
                 let first_key_idx = self.string_constant("first");
                 self.chunk

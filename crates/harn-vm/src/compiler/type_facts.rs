@@ -500,6 +500,7 @@ impl Compiler {
                 pattern: BindingPattern::Identifier(name),
                 value,
                 type_ann,
+                ..
             } = &sn.node
             else {
                 continue;
@@ -640,11 +641,13 @@ impl Compiler {
                         pattern: BindingPattern::Identifier(name),
                         type_ann,
                         value,
+                        ..
                     }
                     | Node::LetBinding {
                         pattern: BindingPattern::Identifier(name),
                         type_ann,
                         value,
+                        ..
                     } => {
                         // A reassigned `let` is not stable; `const` is immutable so
                         // it always is, even though they share this arm.

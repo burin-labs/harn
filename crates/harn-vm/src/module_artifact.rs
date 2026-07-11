@@ -38,6 +38,12 @@ pub struct ModuleArtifact {
     pub init_chunk: Option<CachedChunk>,
     pub functions: BTreeMap<String, CachedCompiledFunction>,
     pub public_names: HashSet<String>,
+    /// Names of top-level `pub const` / `pub let` value bindings. Their values
+    /// are not known at compile time (they are produced by replaying
+    /// [`init_chunk`](Self::init_chunk)); the runtime reads each name out of
+    /// the instantiated module env and binds it into importers. Disjoint from
+    /// [`functions`](Self::functions) and [`public_type_names`](Self::public_type_names).
+    pub public_value_names: HashSet<String>,
     /// Names of `pub type` aliases. Type aliases are erased at runtime — they
     /// carry no value of their own — but importers may still name them in a
     /// selective `import { T } from "..."` (for annotations and
@@ -107,6 +113,7 @@ pub fn compile_module_artifact(
 
     let mut functions = BTreeMap::new();
     let mut public_names = HashSet::new();
+    let mut public_value_names = HashSet::new();
     let mut public_type_names = HashSet::new();
     for node in program {
         let inner = match &node.node {
@@ -118,6 +125,23 @@ pub fn compile_module_artifact(
         } = &inner.node
         {
             public_type_names.insert(name.clone());
+            continue;
+        }
+        // `pub const` / `pub let`: record the exported value-binding names. The
+        // value itself is produced when the init chunk is replayed at
+        // instantiation time; the runtime reads it out of the module env then.
+        if let harn_parser::Node::ConstBinding {
+            pattern,
+            is_pub: true,
+            ..
+        }
+        | harn_parser::Node::LetBinding {
+            pattern,
+            is_pub: true,
+            ..
+        } = &inner.node
+        {
+            collect_binding_identifier_names(pattern, &mut public_value_names);
             continue;
         }
         let harn_parser::Node::FnDecl {
@@ -153,9 +177,39 @@ pub fn compile_module_artifact(
         init_chunk,
         functions,
         public_names,
+        public_value_names,
         public_type_names,
         public_type_schemas,
     })
+}
+
+/// Collect every plain-identifier name bound by a binding pattern (recursing
+/// into list/dict/pair destructures). Used to enumerate the value names a
+/// `pub const` / `pub let` contributes to a module's public surface.
+fn collect_binding_identifier_names(
+    pattern: &harn_parser::BindingPattern,
+    out: &mut HashSet<String>,
+) {
+    use harn_parser::BindingPattern;
+    match pattern {
+        BindingPattern::Identifier(name) => {
+            out.insert(name.clone());
+        }
+        BindingPattern::Pair(first, second) => {
+            out.insert(first.clone());
+            out.insert(second.clone());
+        }
+        BindingPattern::List(elements) => {
+            for element in elements {
+                out.insert(element.name.clone());
+            }
+        }
+        BindingPattern::Dict(fields) => {
+            for field in fields {
+                out.insert(field.alias.clone().unwrap_or_else(|| field.key.clone()));
+            }
+        }
+    }
 }
 
 /// Lex + parse + [`compile_module_artifact`] in one call. Used when the

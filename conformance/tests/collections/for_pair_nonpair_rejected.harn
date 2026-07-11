@@ -1,0 +1,10 @@
+// `list.enumerate()` yields `{index, value}` dicts, NOT Pairs. A `for (a, b)`
+// head destructures each item as a Pair (`.first`/`.second`), so before the
+// __assert_pair guard both `i` and `name` silently bound to nil. It must now
+// fail loudly, naming the supported forms.
+pipeline test(task) {
+  const names = ["alice", "bob"]
+  for (i, name) in names.enumerate() {
+    log("${i}: ${name}")
+  }
+}

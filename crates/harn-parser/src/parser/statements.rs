@@ -35,8 +35,8 @@ impl Parser {
 
         match &tok.kind {
             TokenKind::At => self.parse_attributed_decl(),
-            TokenKind::Let => self.parse_let_binding(),
-            TokenKind::Const => self.parse_const_binding(),
+            TokenKind::Let => self.parse_let_binding(false),
+            TokenKind::Const => self.parse_const_binding(false),
             TokenKind::Var => self.parse_var_binding(),
             TokenKind::If => self.parse_if_else(),
             TokenKind::For => self.parse_for_in(),
@@ -70,7 +70,7 @@ impl Parser {
                 self.advance(); // consume 'pub'
                 let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
                     expected:
-                        "fn, tool, skill, eval_pack, struct, enum, type, pipeline, or import after pub"
+                        "fn, tool, skill, eval_pack, struct, enum, type, pipeline, const, let, or import after pub"
                             .into(),
                     span: self.prev_span(),
                 })?;
@@ -89,8 +89,10 @@ impl Parser {
                     TokenKind::Struct => self.parse_struct_decl_with_pub(true),
                     TokenKind::Import => self.parse_import_with_pub(true),
                     TokenKind::TypeKw => self.parse_type_decl_with_pub(true),
+                    TokenKind::Const => self.parse_const_binding(true),
+                    TokenKind::Let => self.parse_let_binding(true),
                     _ => Err(self.error(
-                        "fn, tool, skill, eval_pack, struct, enum, type, pipeline, or import after pub",
+                        "fn, tool, skill, eval_pack, struct, enum, type, pipeline, const, let, or import after pub",
                     )),
                 }
             }
@@ -120,7 +122,7 @@ impl Parser {
         }
     }
 
-    pub(super) fn parse_let_binding(&mut self) -> Result<SNode, ParserError> {
+    pub(super) fn parse_let_binding(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Let, "let")?;
         let pattern = self.parse_binding_pattern()?;
@@ -142,6 +144,7 @@ impl Parser {
                 pattern,
                 type_ann,
                 value: Box::new(value),
+                is_pub,
             },
             Span::merge(start, end),
         ))
@@ -152,7 +155,7 @@ impl Parser {
     /// identifier binding is eligible for compile-time folding by
     /// `harn_parser::const_eval`. An impure initializer is not an error — it
     /// is simply a non-folded immutable runtime binding.
-    pub(super) fn parse_const_binding(&mut self) -> Result<SNode, ParserError> {
+    pub(super) fn parse_const_binding(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Const, "const")?;
         let pattern = self.parse_binding_pattern()?;
@@ -169,6 +172,7 @@ impl Parser {
                 pattern,
                 type_ann,
                 value: Box::new(value),
+                is_pub,
             },
             Span::merge(start, end),
         ))
