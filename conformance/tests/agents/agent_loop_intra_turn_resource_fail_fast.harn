@@ -435,6 +435,20 @@ fn run_scripted(calls, opts = {}) {
             max_iterations: 3,
             done_judge: nil,
             session_id: session,
+            tool_caller: { envelope, next ->
+              const result = next(envelope)
+              const args = envelope?.tool_args ?? {}
+              const mutation_status = if (args?.fail_noop ?? false) || (args?.fail_return ?? false) {
+                "not_applied"
+              } else if (args?.fail_applied ?? false) || (args?.diagnostics ?? false) {
+                "applied"
+              } else if result?.ok ?? result?.success ?? false {
+                "applied"
+              } else {
+                "unknown"
+              }
+              return result + {mutation_status: mutation_status}
+            },
           }
             + opts,
         ) },
@@ -545,11 +559,12 @@ pipeline main() {
   __io_println(contains(turn_policy_metadata.transcript, "skipped dependent `edit` call"))
   __io_println(!contains(turn_policy_metadata.transcript, "applied src/a.zig second"))
   __io_println(contains(turn_policy_metadata.transcript, "applied src/b.zig other"))
-  // Product-level errors returned as text (`Error: ...`) also block same-resource siblings.
+  // Product-level errors that carry a structured no-op mutation verdict leave
+  // the resource unpoisoned even when their rendered text begins with `Error:`.
   const product_error = run_scripted(same_file_product_error_batch())
   __io_println(product_error.result.status)
-  __io_println(contains(product_error.transcript, "skipped dependent `edit` call"))
-  __io_println(!contains(product_error.transcript, "applied src/a.zig second"))
+  __io_println(!contains(product_error.transcript, "skipped dependent `edit` call"))
+  __io_println(contains(product_error.transcript, "applied src/a.zig second"))
   __io_println(contains(product_error.transcript, "applied src/b.zig other"))
   // Post-edit diagnostics are product-level write failures even when the
   // transport dispatch succeeded.

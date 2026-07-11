@@ -119,6 +119,7 @@ fn generated_types_include_harn_wire_vocabularies() {
         .into_iter()
         .chain(tool_call_status_values())
         .chain(tool_call_error_category_values())
+        .chain(tool_mutation_status_values())
         .chain(worker_status_values())
         .chain(
             TOOL_CALL_RECEIPT_STATUSES
@@ -356,7 +357,10 @@ fn generated_python_includes_harn_wire_vocabularies() {
     assert!(py.contains("class MCPCacheScope(str, Enum):"));
     assert!(py.contains("class ACPSessionUpdate(str, Enum):"));
     assert!(py.contains("class HarnToolCallErrorCategory(str, Enum):"));
+    assert!(py.contains("class HarnToolMutationStatus(str, Enum):"));
     assert!(py.contains("class HarnWorkerStatus(str, Enum):"));
+    assert!(py.contains("changedPaths: Optional[List[str]] = None"));
+    assert!(py.contains("mutationStatus: Optional[HarnToolMutationStatus] = None"));
     assert!(py.contains("class ToolCallReceipt(_HarnDataclass):"));
     assert!(py.contains("class ToolCallReceiptStatus(str, Enum):"));
     assert!(py.contains("class _HarnDataclass:"));
@@ -388,6 +392,9 @@ fn generated_go_includes_harn_wire_vocabularies() {
     assert!(go.contains("type MCPInputRequiredResult struct"));
     assert!(go.contains("MCPUnsupportedProtocolVersionErrorCode"));
     assert!(go.contains("type JSONRPCID struct"));
+    assert!(go.contains("type HarnToolMutationStatus = string"));
+    assert!(go.contains("ChangedPaths"));
+    assert!(go.contains("MutationStatus"));
     assert!(go.contains("type ACPSessionUpdateNotification struct"));
     assert!(go.contains("func IsRequest(envelope map[string]json.RawMessage)"));
     assert!(go.contains("type HarnWorkerStatus = string"));

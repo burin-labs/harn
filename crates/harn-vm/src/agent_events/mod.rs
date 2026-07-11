@@ -43,5 +43,7 @@ pub use registry::{
     session_has_external_sink, unregister_wildcard_sink, WildcardSinkHandle,
 };
 pub use sinks::{AgentEventSink, EventLogSink, JsonlEventSink, MultiSink, PersistedAgentEvent};
-pub use tool::{DenialGate, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor};
+pub use tool::{
+    DenialGate, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
+};
 pub use worker::{FsWatchEvent, WorkerEvent};

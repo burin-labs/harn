@@ -208,6 +208,13 @@ export const HARN_TOOL_CALL_ERROR_CATEGORIES = [
 ] as const
 export type HarnToolCallErrorCategory = (typeof HARN_TOOL_CALL_ERROR_CATEGORIES)[number]
 
+export const HARN_TOOL_MUTATION_STATUSES = [
+  "applied",
+  "not_applied",
+  "unknown",
+] as const
+export type HarnToolMutationStatus = (typeof HARN_TOOL_MUTATION_STATUSES)[number]
+
 export const HARN_SIDE_EFFECT_LEVELS = [
   "none",
   "read_only",
@@ -422,11 +429,13 @@ export type ACPToolExecutor =
 
 export interface HarnToolLifecycleMeta {
   audit?: ACPValue
+  changedPaths?: string[]
   durationMs?: number
   error?: string
   errorCategory?: HarnToolCallErrorCategory
   executionDurationMs?: number
   executor?: ACPToolExecutor
+  mutationStatus?: HarnToolMutationStatus
   parsing?: boolean
   rawInputPartial?: string
 }

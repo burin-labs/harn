@@ -52,21 +52,34 @@ pub fn agent_event_capture_schema() {
  * @api_stability: experimental
  */
 pub fn agent_tool_lifecycle_event_schema() {
-  return schema_object(
-    {
-      type: schema_enum(["tool_call", "tool_call_update"]),
-      tool_call_id: schema_string(),
-      tool_name: schema_string(),
-      status: schema_enum(["pending", "in_progress", "completed", "failed"]),
-      raw_input: schema_field(schema_any(), false),
-      raw_output: schema_field(schema_any(), false),
-      error: schema_field(schema_any(), false),
-      duration_ms: schema_field(__agent_event_number_schema(), false),
-      execution_duration_ms: schema_field(__agent_event_number_schema(), false),
-      error_category: schema_field(schema_string(), false),
-      executor: schema_field(schema_any(), false),
-    },
-    {additional_properties: schema_any()},
+  const common = {
+    tool_call_id: schema_string(),
+    tool_name: schema_string(),
+    status: schema_enum(["pending", "in_progress", "completed", "failed"]),
+    raw_input: schema_field(schema_any(), false),
+    raw_output: schema_field(schema_any(), false),
+    error: schema_field(schema_any(), false),
+    duration_ms: schema_field(__agent_event_number_schema(), false),
+    execution_duration_ms: schema_field(__agent_event_number_schema(), false),
+    error_category: schema_field(schema_string(), false),
+    executor: schema_field(schema_any(), false),
+  }
+  return schema_union(
+    [
+      schema_object(
+        common + {type: schema_literal("tool_call"), status: schema_literal("pending")},
+        {additional_properties: schema_any()},
+      ),
+      schema_object(
+        common
+          + {
+          type: schema_literal("tool_call_update"),
+          mutation_status: schema_enum(["applied", "not_applied", "unknown"]),
+          changed_paths: schema_field(schema_list(schema_string()), false),
+        },
+        {additional_properties: schema_any()},
+      ),
+    ],
   )
 }
 
@@ -192,6 +205,30 @@ pub fn agent_convergence_guard_receipt_schema() {
   )
 }
 
+fn __agent_event_contract_report(value) {
+  if type_of(value) != "dict" {
+    return nil
+  }
+  const event_type = to_string(value?.type ?? "")
+  if event_type == "tool_call" && to_string(value?.status ?? "") != "pending" {
+    const message = "tool_call lifecycle events must have status 'pending'"
+    return {ok: false, message: message, errors: [message], issues: []}
+  }
+  if event_type != "tool_call_update" {
+    return nil
+  }
+  if value?.mutation_status == nil {
+    const message = "missing required key 'mutation_status'"
+    return {ok: false, message: message, errors: [message], issues: []}
+  }
+  const mutation_status = to_string(value.mutation_status)
+  if !contains(["applied", "not_applied", "unknown"], mutation_status) {
+    const message = "mutation_status must be one of applied, not_applied, unknown"
+    return {ok: false, message: message, errors: [message], issues: []}
+  }
+  return nil
+}
+
 /**
  * Validate one captured agent event and return a structured schema report.
  *
@@ -200,6 +237,10 @@ pub fn agent_convergence_guard_receipt_schema() {
  * @api_stability: experimental
  */
 pub fn agent_event_report(value, schema = nil, apply_defaults = false) {
+  const contract_report = __agent_event_contract_report(value)
+  if contract_report != nil {
+    return contract_report
+  }
   return get_typed_report(value, schema ?? agent_event_schema(), apply_defaults)
 }
 
@@ -212,6 +253,10 @@ pub fn agent_event_report(value, schema = nil, apply_defaults = false) {
  * @api_stability: experimental
  */
 pub fn agent_event_value(value, schema = nil, apply_defaults = false) {
+  const contract_report = __agent_event_contract_report(value)
+  if contract_report != nil {
+    throw contract_report.message
+  }
   return get_typed_value(value, schema ?? agent_event_schema(), apply_defaults)
 }
 

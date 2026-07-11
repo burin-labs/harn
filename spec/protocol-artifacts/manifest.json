@@ -338,13 +338,20 @@
     ],
     "toolLifecycleExtensionFields": [
       "audit",
+      "changedPaths",
       "durationMs",
       "error",
       "errorCategory",
       "executionDurationMs",
       "executor",
+      "mutationStatus",
       "parsing",
       "rawInputPartial"
+    ],
+    "toolMutationStatuses": [
+      "applied",
+      "not_applied",
+      "unknown"
     ],
     "transportControlMethods": [
       "session/set_budget"

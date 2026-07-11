@@ -106,6 +106,11 @@ pub(super) fn generate_typescript() -> String {
         "HarnToolCallErrorCategory",
     ));
     out.push_str(&ts_array_owned(
+        "HARN_TOOL_MUTATION_STATUSES",
+        &tool_mutation_status_values(),
+        "HarnToolMutationStatus",
+    ));
+    out.push_str(&ts_array_owned(
         "HARN_SIDE_EFFECT_LEVELS",
         &side_effect_level_values(),
         "HarnSideEffectLevel",
@@ -244,11 +249,13 @@ export type ACPToolExecutor =
 
 export interface HarnToolLifecycleMeta {
   audit?: ACPValue
+  changedPaths?: string[]
   durationMs?: number
   error?: string
   errorCategory?: HarnToolCallErrorCategory
   executionDurationMs?: number
   executor?: ACPToolExecutor
+  mutationStatus?: HarnToolMutationStatus
   parsing?: boolean
   rawInputPartial?: string
 }

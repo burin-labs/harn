@@ -106,6 +106,10 @@ pub(super) fn generate_python() -> String {
         &tool_call_error_category_values(),
     ));
     out.push_str(&py_const_tuple_owned(
+        "HARN_TOOL_MUTATION_STATUSES",
+        &tool_mutation_status_values(),
+    ));
+    out.push_str(&py_const_tuple_owned(
         "HARN_SIDE_EFFECT_LEVELS",
         &side_effect_level_values(),
     ));
@@ -172,6 +176,10 @@ pub(super) fn generate_python() -> String {
     out.push_str(&py_str_enum_owned(
         "HarnToolCallErrorCategory",
         &tool_call_error_category_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
+        "HarnToolMutationStatus",
+        &tool_mutation_status_values(),
     ));
     out.push_str(&py_str_enum_owned(
         "HarnSideEffectLevel",
@@ -303,11 +311,13 @@ class ACPContentBlock(_HarnDataclass):
 @dataclass
 class HarnToolLifecycleMeta(_HarnDataclass):
     audit: Optional[JsonValue] = None
+    changedPaths: Optional[List[str]] = None
     durationMs: Optional[float] = None
     error: Optional[str] = None
     errorCategory: Optional[str] = None
     executionDurationMs: Optional[float] = None
     executor: Optional[JsonValue] = None
+    mutationStatus: Optional[HarnToolMutationStatus] = None
     parsing: Optional[bool] = None
     rawInputPartial: Optional[str] = None
 

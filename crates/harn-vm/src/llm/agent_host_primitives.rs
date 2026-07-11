@@ -283,6 +283,7 @@ fn agent_primitive_denied_tool(
         "observation": observation,
         "error": reason,
         "error_category": category.as_str(),
+        "mutation_status": crate::agent_events::ToolMutationStatus::NotApplied.as_str(),
         "denial": denial_json,
         "executor": null,
     })
@@ -550,6 +551,7 @@ fn agent_primitive_unexecuted_tool_base(
         "observation": observation,
         "error": error_message,
         "error_category": crate::agent_events::ToolCallErrorCategory::Cancelled.as_str(),
+        "mutation_status": crate::agent_events::ToolMutationStatus::Unknown.as_str(),
     })
 }
 
@@ -651,10 +653,76 @@ fn agent_primitive_undispatched_tool(
         error_message,
     );
     if let Some(obj) = result.as_object_mut() {
+        obj.insert(
+            "mutation_status".to_string(),
+            serde_json::json!(crate::agent_events::ToolMutationStatus::NotApplied.as_str()),
+        );
         obj.insert("dispatched".to_string(), serde_json::Value::Bool(false));
         obj.insert("skip_reason".to_string(), serde_json::json!(reason));
     }
     result
+}
+
+fn structured_tool_mutation_status(result: &serde_json::Value) -> &'static str {
+    let status = result
+        .get("mutation_status")
+        .and_then(serde_json::Value::as_str);
+    match status {
+        Some("applied") => crate::agent_events::ToolMutationStatus::Applied.as_str(),
+        Some("not_applied") => crate::agent_events::ToolMutationStatus::NotApplied.as_str(),
+        _ => crate::agent_events::ToolMutationStatus::Unknown.as_str(),
+    }
+}
+
+fn structured_tool_changed_paths(result: &serde_json::Value) -> Option<Vec<&str>> {
+    let paths = result
+        .get("changed_paths")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|path| !path.trim().is_empty())
+        .collect();
+    Some(paths)
+}
+
+#[cfg(test)]
+mod structured_tool_mutation_tests {
+    use super::{structured_tool_changed_paths, structured_tool_mutation_status};
+
+    #[test]
+    fn lifts_only_declared_mutation_outcomes() {
+        assert_eq!(
+            structured_tool_mutation_status(&serde_json::json!({"mutation_status": "applied"})),
+            "applied"
+        );
+        assert_eq!(
+            structured_tool_mutation_status(&serde_json::json!({"mutation_status": "not_applied"})),
+            "not_applied"
+        );
+        for result in [
+            serde_json::json!({}),
+            serde_json::json!({"mutation_status": "maybe"}),
+            serde_json::json!({"mutation_status": 1}),
+            serde_json::json!({"mutationStatus": "applied"}),
+        ] {
+            assert_eq!(structured_tool_mutation_status(&result), "unknown");
+        }
+    }
+
+    #[test]
+    fn lifts_only_nonempty_string_paths() {
+        let result = serde_json::json!({
+            "changed_paths": ["src/lib.rs", "", 7, "tests/lib.rs"]
+        });
+        assert_eq!(
+            structured_tool_changed_paths(&result),
+            Some(vec!["src/lib.rs", "tests/lib.rs"])
+        );
+        assert!(structured_tool_changed_paths(&serde_json::json!({
+            "changed_paths": "src/lib.rs"
+        }))
+        .is_none());
+    }
 }
 
 /// Synthesize placeholder tool_results for calls that were persisted as an
@@ -1792,6 +1860,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
 
     match outcome.result {
         Ok(raw_result) => {
+            let mutation_status = structured_tool_mutation_status(&raw_result);
+            let changed_paths = structured_tool_changed_paths(&raw_result);
             // Render from a base64-elided copy so a screenshot (or any image)
             // result does not swamp the transcript text — the full image payload
             // still travels to the model as an image content block via the
@@ -1869,6 +1939,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 "observation": observation,
                 "error": error,
                 "error_category": error_category,
+                "mutation_status": mutation_status,
+                "changed_paths": changed_paths,
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
@@ -1924,6 +1996,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 "observation": observation,
                 "error": error_text,
                 "error_category": category.as_str(),
+                "mutation_status": crate::agent_events::ToolMutationStatus::Unknown.as_str(),
+                "changed_paths": serde_json::Value::Null,
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,

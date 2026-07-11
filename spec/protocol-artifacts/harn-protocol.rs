@@ -548,22 +548,26 @@ pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &[
 ];
 
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_AUDIT: &str = "audit";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_CHANGEDPATHS: &str = "changedPaths";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_DURATIONMS: &str = "durationMs";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERROR: &str = "error";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERRORCATEGORY: &str = "errorCategory";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTIONDURATIONMS: &str = "executionDurationMs";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTOR: &str = "executor";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_MUTATIONSTATUS: &str = "mutationStatus";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_PARSING: &str = "parsing";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_RAWINPUTPARTIAL: &str = "rawInputPartial";
 
 /// `_meta.harn` tool-lifecycle extension keys on tool_call / tool_call_update notifications.
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "audit",
+    "changedPaths",
     "durationMs",
     "error",
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "mutationStatus",
     "parsing",
     "rawInputPartial",
 ];

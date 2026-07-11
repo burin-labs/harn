@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
 use harn_serve::adapters::acp::{ACP_SESSION_UPDATE_VARIANTS, HARN_SESSION_UPDATE_EXTENSIONS};
-use harn_vm::agent_events::{ToolCallErrorCategory, ToolCallStatus, WorkerEvent};
+use harn_vm::agent_events::{
+    ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus, WorkerEvent,
+};
 use harn_vm::tool_annotations::{SideEffectLevel, ToolKind};
 use serde::Serialize;
 
@@ -29,6 +31,13 @@ pub(super) fn tool_call_error_category_values() -> Vec<String> {
     ToolCallErrorCategory::ALL
         .iter()
         .map(|category| category.as_str().to_string())
+        .collect()
+}
+
+pub(super) fn tool_mutation_status_values() -> Vec<String> {
+    ToolMutationStatus::ALL
+        .iter()
+        .map(|status| status.as_str().to_string())
         .collect()
 }
 

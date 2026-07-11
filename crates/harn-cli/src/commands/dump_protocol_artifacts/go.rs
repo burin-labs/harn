@@ -150,6 +150,11 @@ pub(super) fn generate_go() -> String {
         &tool_call_error_category_values(),
     ));
     out.push_str(&go_typed_array_owned(
+        "HarnToolMutationStatus",
+        "HarnToolMutationStatuses",
+        &tool_mutation_status_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
         "HarnSideEffectLevel",
         "HarnSideEffectLevels",
         &side_effect_level_values(),
@@ -327,11 +332,13 @@ type ACPContentBlock struct {
 // living under `_meta.harn` on tool_call / tool_call_update notifications.
 type HarnToolLifecycleMeta struct {
 	Audit               json.RawMessage `json:"audit,omitempty"`
+	ChangedPaths        []string        `json:"changedPaths,omitempty"`
 	DurationMs          *float64        `json:"durationMs,omitempty"`
 	Error               *string         `json:"error,omitempty"`
 	ErrorCategory       *string         `json:"errorCategory,omitempty"`
 	ExecutionDurationMs *float64        `json:"executionDurationMs,omitempty"`
 	Executor            json.RawMessage `json:"executor,omitempty"`
+	MutationStatus      *HarnToolMutationStatus `json:"mutationStatus,omitempty"`
 	Parsing             *bool           `json:"parsing,omitempty"`
 	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`
 }

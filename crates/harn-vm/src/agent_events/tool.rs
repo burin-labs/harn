@@ -32,6 +32,33 @@ impl ToolCallStatus {
     }
 }
 
+/// Whether a terminal tool result changed workspace state. This is
+/// intentionally orthogonal to [`ToolCallStatus`]: a successfully completed
+/// tool can be a no-op, while a failed tool may have applied a mutation before
+/// reporting a post-apply error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolMutationStatus {
+    /// The tool changed workspace state.
+    Applied,
+    /// The tool did not change workspace state.
+    NotApplied,
+    /// The execution boundary did not provide a definitive outcome.
+    Unknown,
+}
+
+impl ToolMutationStatus {
+    pub const ALL: [Self; 3] = [Self::Applied, Self::NotApplied, Self::Unknown];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::NotApplied => "not_applied",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Wire-level classification of a `ToolCallUpdate` failure. Pairs with the
 /// human-readable `error` string so clients can render each failure type
 /// distinctly (e.g. surface a "permission denied" badge, or a different

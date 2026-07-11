@@ -10,6 +10,16 @@ fn echo_tools() {
   )
 }
 
+fn mutation_status_code(status) -> int {
+  if status == "applied" {
+    return 1
+  }
+  if status == "not_applied" {
+    return 2
+  }
+  return 0
+}
+
 fn observe_lifecycle(session_id: string, expected_msg: string) -> dict {
   const pending = atomic(0)
   const in_progress = atomic(0)
@@ -17,6 +27,7 @@ fn observe_lifecycle(session_id: string, expected_msg: string) -> dict {
   const failed = atomic(0)
   const saw_error_category = atomic(0)
   const saw_args = atomic(0)
+  const mutation_status = atomic(0)
   agent_subscribe(
     session_id,
     { ev ->
@@ -28,12 +39,15 @@ fn observe_lifecycle(session_id: string, expected_msg: string) -> dict {
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "in_progress" {
         const _ = atomic_add(in_progress, 1)
+        assert(ev?.mutation_status == "unknown", "nonterminal mutation status is unknown")
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "completed" {
         const _ = atomic_add(completed, 1)
+        const _ = atomic_set(mutation_status, mutation_status_code(ev?.mutation_status))
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "failed" {
         const _ = atomic_add(failed, 1)
+        const _ = atomic_set(mutation_status, mutation_status_code(ev?.mutation_status))
         if ev?.error_category == "tool_error" {
           const _ = atomic_set(saw_error_category, 1)
         }
@@ -47,6 +61,7 @@ fn observe_lifecycle(session_id: string, expected_msg: string) -> dict {
     failed: failed,
     saw_error_category: saw_error_category,
     saw_args: saw_args,
+    mutation_status: mutation_status,
   }
 }
 
@@ -80,6 +95,7 @@ pipeline test(task) {
     },
   )
   assert_counts("text tool", text_events)
+  assert(atomic_get(text_events.mutation_status) == 0, "opaque result mutation status")
   const middleware_session = "tool-lifecycle-middleware-" + uuid()
   const middleware_events = observe_lifecycle(middleware_session, "short")
   with_llm_script(
@@ -95,6 +111,7 @@ pipeline test(task) {
         rendered_result: "short-circuited",
         observation: "[result of echo]\nshort-circuited\n[end of echo result]\n",
         executor: "harn",
+        mutation_status: "applied",
       } }
       const result = agent_loop(
         "Call echo once.",
@@ -114,6 +131,7 @@ pipeline test(task) {
     },
   )
   assert_counts("middleware short-circuit", middleware_events)
+  assert(atomic_get(middleware_events.mutation_status) == 1, "structured applied outcome")
   const failed_session = "tool-lifecycle-failed-" + uuid()
   const failed_events = observe_lifecycle(failed_session, "failed")
   with_llm_script(
@@ -129,6 +147,7 @@ pipeline test(task) {
         error_category: "generic",
         observation: "[result of echo]\nerror: failed on purpose\n[end of echo result]\n",
         executor: "harn",
+        mutation_status: "not_applied",
       } }
       const result = agent_loop(
         "Call echo once.",
@@ -152,4 +171,5 @@ pipeline test(task) {
   assert(atomic_get(failed_events.failed) == 1, "failed tool terminal event")
   assert(atomic_get(failed_events.saw_args) == 1, "failed tool raw input")
   assert(atomic_get(failed_events.saw_error_category) == 1, "failed tool canonical error category")
+  assert(atomic_get(failed_events.mutation_status) == 2, "structured rejected outcome")
 }

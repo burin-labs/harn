@@ -811,6 +811,7 @@ fn __emit_tool_lifecycle_start(envelope) {
       tool_call_id: envelope.call_id,
       tool_name: envelope.tool_name,
       status: "in_progress",
+      mutation_status: "unknown",
       raw_input: envelope.tool_args,
     },
   )
@@ -880,6 +881,17 @@ fn __tool_lifecycle_error_category(raw) {
   return "unknown"
 }
 
+fn __tool_lifecycle_mutation_status(raw) {
+  if raw == nil {
+    return "unknown"
+  }
+  const status = to_string(raw)
+  if contains(["applied", "not_applied", "unknown"], status) {
+    return status
+  }
+  return "unknown"
+}
+
 fn __emit_tool_lifecycle_finish(envelope, result) {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
@@ -897,16 +909,32 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
   } else {
     result?.rendered_result ?? result?.output ?? result
   }
-  const payload = {
+  let payload = {
     tool_call_id: tool_call_id,
     tool_name: tool_name,
     status: __tool_terminal_status(result),
     raw_output: raw_output,
-    error: result?.error,
-    duration_ms: result?.duration_ms ?? result?.execution_duration_ms,
-    execution_duration_ms: result?.execution_duration_ms,
-    error_category: __tool_lifecycle_error_category(result?.error_category),
-    executor: result?.executor,
+    mutation_status: __tool_lifecycle_mutation_status(result?.mutation_status),
+  }
+  if result?.error != nil {
+    payload = payload + {error: result.error}
+  }
+  const duration_ms = result?.duration_ms ?? result?.execution_duration_ms
+  if duration_ms != nil {
+    payload = payload + {duration_ms: duration_ms}
+  }
+  if result?.execution_duration_ms != nil {
+    payload = payload + {execution_duration_ms: result.execution_duration_ms}
+  }
+  const error_category = __tool_lifecycle_error_category(result?.error_category)
+  if error_category != nil {
+    payload = payload + {error_category: error_category}
+  }
+  if result?.executor != nil {
+    payload = payload + {executor: result.executor}
+  }
+  if result?.changed_paths != nil {
+    payload = payload + {changed_paths: result.changed_paths}
   }
   let _ = agent_emit_event(session_id, "tool_call_update", payload)
 }
@@ -2087,72 +2115,15 @@ fn __intra_turn_partial_apply_receipt(
 }
 
 /**
- * Canonical NON-mutating write-failure vocabulary: failure shapes that a host
- * emits when the write was REJECTED BEFORE TOUCHING the file, so the on-disk
- * view is byte-identical to what the model already saw. Mirrors the same
- * canonical strings the product-error classifier (`__tool_result_write_product_error_text`)
- * already keys on, restricted to the pre-apply (no-mutation) subset. The
- * post-apply `## diagnostics (...)` shape is DELIBERATELY excluded — that edit
- * DID land, so a later same-resource sibling could be stale.
- */
-fn __intra_turn_failure_text_is_nonmutating(text: string) -> bool {
-  const lower = lowercase(trim(text))
-  if lower == "" {
-    return false
-  }
-  // Post-apply diagnostics mean the write LANDED — never treat as non-mutating.
-  if lower.starts_with("## diagnostics (") || lower.contains("\n## diagnostics (") {
-    return false
-  }
-  return lower.contains("[edit rejected]")
-    || lower.contains("not applied")
-    || lower.contains("old_string not found")
-    || lower.starts_with("file already exists")
-    || lower.starts_with("missing required parameter")
-    || __tool_result_dispatch_rejection_text(lower)
-}
-
-/**
- * Tri-state mutation verdict for a FAILED tool result: did the failure leave the
- * workspace resource mutated?
- *
- *   `false` — the host reported the write was REJECTED before applying (a stale /
- *             missing anchor, "old_string not found", "[Edit rejected] ... NOT
- *             applied", an invalid-arguments/permission rejection). The view is
- *             byte-identical, so a later same-resource sibling is NOT stale.
- *   `nil`   — unknown. We cannot rule out a mutation (a post-apply diagnostic, an
- *             opaque error, a non-edit mutating tool), so the caller poisons the
- *             resource EXACTLY like today.
- *
- * Uses the SAME canonical write-failure vocabulary the dispatch classifier
- * (`__tool_result_write_product_error_text`) already relies on, so it does not
- * introduce a new, divergent text-matching surface. Conservative by
- * construction: anything not affirmatively a pre-apply rejection stays `nil`,
- * preserving today's safety property.
+ * Read the execution boundary's typed mutation verdict. Rendered output is never
+ * inspected: an absent or invalid verdict remains `unknown`, which conservatively
+ * poisons a same-resource sibling rather than guessing from locale-dependent text.
  */
 fn __intra_turn_result_mutation_status(result) -> string {
   if type_of(result) != "dict" {
     return "unknown"
   }
-  if !__tool_result_write_product_tool(result) {
-    // Only reason about edit/scaffold/write/run_codemod rejection vocabulary.
-    // Any other mutating tool stays unknown (poison), exactly as today.
-    return "unknown"
-  }
-  for key in ["error", "rendered_result", "observation", "result", "output"] {
-    if result[key] != nil && __intra_turn_failure_text_is_nonmutating(to_string(result[key])) {
-      return "not_applied"
-    }
-  }
-  for key in ["error", "rendered_result", "observation", "result", "output"] {
-    if result[key] != nil {
-      const lower = lowercase(trim(to_string(result[key])))
-      if lower.starts_with("## diagnostics (") || lower.contains("\n## diagnostics (") {
-        return "applied"
-      }
-    }
-  }
-  return "unknown"
+  return __tool_lifecycle_mutation_status(result?.mutation_status)
 }
 
 fn __intra_turn_result_mutated(result) {
@@ -2476,10 +2447,10 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       const result = __invoke_tool_with_index(call, index, tools, options)
       results = results.push(result)
       // Poison this resource for later same-resource siblings only when the
-      // failure could have left it mutated. A host-confirmed no-op failure
-      // (rejected anchor / "old_string not found") leaves the view byte-identical,
-      // so an independent later edit to the same file is NOT stale and may run.
-      // Unknown (no structured signal) still poisons, preserving today's behavior.
+      // execution boundary cannot prove the failure was a no-op. A structured
+      // `mutation_status: "not_applied"` leaves the view byte-identical, so an
+      // independent later edit to the same file is NOT stale and may run.
+      // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
         && __intra_turn_failure_poisons_resource(result) {
         failed_resource_guards = failed_resource_guards

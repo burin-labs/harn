@@ -106,6 +106,7 @@ pub(super) fn generate_manifest() -> Result<String, String> {
             "toolKinds": tool_kind_values(),
             "toolCallStatuses": tool_call_status_values(),
             "toolCallErrorCategories": tool_call_error_category_values(),
+            "toolMutationStatuses": tool_mutation_status_values(),
             "toolExecutorSimpleValues": ACP_TOOL_EXECUTOR_SIMPLE_VALUES,
             "workerStatuses": worker_status_values(),
         },
