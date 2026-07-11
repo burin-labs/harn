@@ -1,0 +1,259 @@
+// std/pii — structured PII detection + reversible redaction (Presidio-class core).
+//
+// Import: import { pii_detect, pii_redact, pii_restore } from "std/pii"
+//
+// Detects structured PII entities via regex packs (checksum-validated where a
+// checksum exists — Luhn for cards, mod-97 for IBAN, octet range for IPv4),
+// and supports the canonical harness flow: `pii_redact` replaces each entity
+// with a stable placeholder (`<EMAIL_1>`) before text is sent to a model, and
+// `pii_restore` reverses it on the model's response. Pure — no I/O.
+//
+// This is the STRUCTURED-entity engine and is deliberately separate from the
+// one-way *secret* scanner (`secret_scan` / `token_redaction`): secrets are
+// hard-blocked credentials, PII is reversible personal data. NER-based
+// detection of names/addresses is out of scope (needs a host ML capability),
+// tracked as a future extension.
+
+// -------------------------------------------------------------------------------------------------
+// checksum validators
+// -------------------------------------------------------------------------------------------------
+
+/** Digits-and-separators → digits only. */
+fn __pii_digits(text: string) -> string {
+  return regex_replace("[^0-9]", "", to_string(text))
+}
+
+/** Luhn (mod-10) check used for credit-card / PAN validation. */
+fn __pii_luhn_valid(candidate: string) -> bool {
+  const digits = __pii_digits(candidate)
+  const n = len(digits)
+  if n < 13 || n > 19 {
+    return false
+  }
+  let sum = 0
+  let doubled = false
+  let i = n - 1
+  while i >= 0 {
+    let d = to_int(substring(digits, i, i + 1))
+    if doubled {
+      d = d * 2
+      if d > 9 {
+        d = d - 9
+      }
+    }
+    sum = sum + d
+    doubled = !doubled
+    i = i - 1
+  }
+  return sum % 10 == 0
+}
+
+const __PII_IBAN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+/**
+ * IBAN mod-97 (ISO 7064) check. Moves the first four chars to the end, maps
+ * letters to 10..35, and folds the resulting base-10 integer mod 97 digit by
+ * digit (avoiding bignum). A valid IBAN leaves remainder 1.
+ */
+fn __pii_iban_valid(candidate: string) -> bool {
+  const compact = uppercase(regex_replace("[^A-Za-z0-9]", "", to_string(candidate)))
+  const n = len(compact)
+  if n < 15 || n > 34 {
+    return false
+  }
+  const rearranged = substring(compact, 4, n) + substring(compact, 0, 4)
+  let remainder = 0
+  let i = 0
+  while i < len(rearranged) {
+    const code = index_of(__PII_IBAN_ALPHABET, substring(rearranged, i, i + 1))
+    if code < 0 {
+      return false
+    }
+    if code >= 10 {
+      remainder = (remainder * 100 + code) % 97
+    } else {
+      remainder = (remainder * 10 + code) % 97
+    }
+    i = i + 1
+  }
+  return remainder == 1
+}
+
+// -------------------------------------------------------------------------------------------------
+// entity pattern pack
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Each entry: {type, regex, flags?, validate?}. `validate` is a closure over
+ * the matched substring returning a bool; absent means the shape alone is
+ * sufficient. Multiple entries may share a `type` (e.g. two phone shapes); the
+ * overlap resolver dedupes their matches.
+ */
+fn __pii_patterns() -> list {
+  return [
+    {type: "EMAIL", regex: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"},
+    {type: "PHONE", regex: "\\+[1-9]\\d{6,14}"},
+    {type: "PHONE", regex: "\\(?\\d{3}\\)?[-.\\s]\\d{3}[-.\\s]\\d{4}"},
+    {type: "US_SSN", regex: "\\b\\d{3}-\\d{2}-\\d{4}\\b"},
+    {type: "CREDIT_CARD", regex: "\\b(?:\\d[ -]?){12,18}\\d\\b", validate: { m -> __pii_luhn_valid(m) }},
+    {
+      type: "IBAN",
+      regex: "\\b[A-Z]{2}\\d{2}(?:\\s?[A-Z0-9]){11,30}\\b",
+      validate: { m -> __pii_iban_valid(m) },
+    },
+    {
+      type: "IPV4",
+      regex: "\\b(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\b",
+    },
+    {type: "IPV6", regex: __PII_IPV6_REGEX, flags: "i"},
+  ]
+}
+
+// Comprehensive IPv6 matcher covering full and `::`-compressed forms. Kept as a
+// named constant because the alternation is long; sourced from the widely-used
+// reference pattern.
+const __PII_IPV6_REGEX = "(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,7}:|(?:[A-Fa-f0-9]{1,4}:){1,6}:[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,5}(?::[A-Fa-f0-9]{1,4}){1,2}|(?:[A-Fa-f0-9]{1,4}:){1,4}(?::[A-Fa-f0-9]{1,4}){1,3}|(?:[A-Fa-f0-9]{1,4}:){1,3}(?::[A-Fa-f0-9]{1,4}){1,4}|(?:[A-Fa-f0-9]{1,4}:){1,2}(?::[A-Fa-f0-9]{1,4}){1,5}|[A-Fa-f0-9]{1,4}:(?::[A-Fa-f0-9]{1,4}){1,6}|:(?:(?::[A-Fa-f0-9]{1,4}){1,7}|:)"
+
+/**
+ * Return the PII entity types this engine detects.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pii_types() -> list {
+  return ["EMAIL", "PHONE", "US_SSN", "CREDIT_CARD", "IBAN", "IPV4", "IPV6"]
+}
+
+// -------------------------------------------------------------------------------------------------
+// detection
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Keep the earliest, then longest, non-overlapping matches. Sorting by
+ * `start * BIG - length` puts the earliest start first and, on ties, the
+ * longest span first; a greedy sweep then drops anything that overlaps the
+ * last accepted span (adjacent spans, where start == prev end, are kept).
+ */
+fn __pii_resolve_overlaps(entities: list) -> list {
+  const sorted = entities.sort_by({ e -> e.start * 1000000 - (e.end - e.start) })
+  let result = []
+  let last_end = -1
+  for entity in sorted {
+    if entity.start >= last_end {
+      result = result.push(entity)
+      last_end = entity.end
+    }
+  }
+  return result
+}
+
+/**
+ * Detect structured PII entities in `text`.
+ *
+ * Returns a list of `{type, value, start, end}` (character offsets), sorted by
+ * position, with overlapping matches resolved to the earliest-then-longest
+ * span. Checksum-bearing types are validated (Luhn for `CREDIT_CARD`, mod-97
+ * for `IBAN`, octet ranges for `IPV4`), so an invalid card or IBAN is not
+ * reported.
+ *
+ * `options.entities` restricts detection to a subset of `pii_types()`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pii_detect(text, options = nil) -> list {
+  const source = to_string(text)
+  const wanted = (options ?? {})?.entities
+  let found = []
+  for pattern in __pii_patterns() {
+    if wanted == nil || contains(wanted, pattern.type) {
+      const captures = regex_captures(pattern.regex, source, pattern?.flags ?? "")
+      for capture in captures {
+        const value = capture.match
+        const accepted = if pattern?.validate == nil {
+          true
+        } else {
+          pattern.validate(value) ? true : false
+        }
+        if accepted {
+          found = found.push({type: pattern.type, value: value, start: capture.start, end: capture.end})
+        }
+      }
+    }
+  }
+  return __pii_resolve_overlaps(found)
+}
+
+// -------------------------------------------------------------------------------------------------
+// reversible redaction
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Redact structured PII from `text`, returning a reversible result.
+ *
+ * Returns `{clean, restore, entities}`:
+ *   - clean    : `text` with each detected entity replaced by a stable
+ *                placeholder token (`<EMAIL_1>`, `<CREDIT_CARD_1>`, …).
+ *   - restore  : `{token: original_value}` map for `pii_restore`.
+ *   - entities : the detected entities, each augmented with its `token`.
+ *
+ * Tokens are deterministic within a call: the same entity value always maps to
+ * the same token, and tokens are numbered per type in first-appearance order.
+ * This is the canonical harness flow — redact before sending to a model, then
+ * `pii_restore` the model's response:
+ *
+ *     const r = pii_redact(user_text)
+ *     const answer = llm_call(r.clean, nil, {})
+ *     const final = pii_restore(answer.text, r.restore)
+ *
+ * `options.entities` restricts redaction to a subset of `pii_types()`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pii_redact(text, options = nil) -> dict {
+  const source = to_string(text)
+  const entities = pii_detect(source, options).sort_by({ e -> e.start })
+  let counters = {}
+  let value_token = {}
+  let restore = {}
+  let annotated = []
+  let clean = ""
+  let cursor = 0
+  for entity in entities {
+    clean = clean + substring(source, cursor, entity.start)
+    const value_key = entity.type + "|" + entity.value
+    let token = value_token[value_key]
+    if token == nil {
+      const next_index = (counters[entity.type] ?? 0) + 1
+      counters = counters + {[entity.type]: next_index}
+      token = "<" + entity.type + "_" + to_string(next_index) + ">"
+      value_token = value_token + {[value_key]: token}
+      restore = restore + {[token]: entity.value}
+    }
+    clean = clean + token
+    cursor = entity.end
+    annotated = annotated.push(entity + {token: token})
+  }
+  clean = clean + substring(source, cursor, len(source))
+  return {clean: clean, restore: restore, entities: annotated}
+}
+
+/**
+ * Reverse a `pii_redact` on `text` using its `restore` map.
+ *
+ * Replaces each placeholder token with its original value. Longer tokens are
+ * substituted first so a token can never be corrupted by a shorter prefix.
+ * Round-trips exactly: `pii_restore(pii_redact(t).clean, pii_redact(t).restore) == t`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pii_restore(text, restore) -> string {
+  let output = to_string(text)
+  const tokens = (restore ?? {}).keys().sort_by({ token -> 0 - len(token) })
+  for token in tokens {
+    output = replace(output, token, to_string(restore[token]))
+  }
+  return output
+}

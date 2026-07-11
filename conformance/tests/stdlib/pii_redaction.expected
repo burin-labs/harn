@@ -1,0 +1,17 @@
+EMAIL:true
+PHONE:true
+US_SSN:true
+CREDIT_CARD:true
+IBAN:true
+IPV4:true
+IPV6:true
+non_overlapping:true
+valid_card:1
+invalid_card:0
+valid_iban:1
+invalid_iban:0
+roundtrip:true
+email_scrubbed:true
+dup_tokens:1
+dup_clean:from <EMAIL_1> to <EMAIL_1>
+adjacent:2

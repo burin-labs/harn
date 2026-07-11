@@ -821,6 +821,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         module: "security",
         source: include_str!("stdlib/stdlib_security.harn"),
     },
+    StdlibSource {
+        module: "pii",
+        source: include_str!("stdlib/stdlib_pii.harn"),
+    },
 ];
 
 /// Canonical normalized connector event schemas, authored as Harn `type`
