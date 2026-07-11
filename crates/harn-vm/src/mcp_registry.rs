@@ -25,6 +25,8 @@ use std::time::{Duration, Instant};
 use crate::mcp::{connect_mcp_server_from_json, VmMcpClientHandle};
 use crate::value::VmError;
 
+pub const DEFAULT_MCP_TRANSPORT: &str = "stdio";
+
 /// One server's registration. Mirrors `McpServerConfig` but is owned
 /// by the VM side so harn-cli can hand off and forget.
 #[derive(Clone, Debug)]
@@ -291,6 +293,10 @@ fn spec_string(spec: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+pub fn spec_transport(spec: &serde_json::Value) -> String {
+    spec_string(spec, "transport").unwrap_or_else(|| DEFAULT_MCP_TRANSPORT.to_string())
+}
+
 pub fn snapshot_status() -> Vec<RegistryStatus> {
     let guard = REGISTRY.lock().expect("mcp registry poisoned");
     let mut out = Vec::new();
@@ -298,7 +304,7 @@ pub fn snapshot_status() -> Vec<RegistryStatus> {
         let active = guard.active.get(name);
         out.push(RegistryStatus {
             name: name.clone(),
-            transport: spec_string(&server.spec, "transport").unwrap_or_else(|| "stdio".into()),
+            transport: spec_transport(&server.spec),
             url: spec_string(&server.spec, "url"),
             lazy: server.lazy,
             active: active.is_some(),
@@ -321,10 +327,18 @@ mod tests {
     fn make_spec(name: &str) -> serde_json::Value {
         serde_json::json!({
             "name": name,
-            "transport": "stdio",
             "command": "/bin/true",
             "args": [],
         })
+    }
+
+    #[test]
+    fn spec_transport_defaults_to_stdio() {
+        assert_eq!(spec_transport(&make_spec("x")), DEFAULT_MCP_TRANSPORT);
+        assert_eq!(
+            spec_transport(&serde_json::json!({"name": "x", "transport": "http"})),
+            "http",
+        );
     }
 
     #[test]
@@ -341,7 +355,7 @@ mod tests {
         let snap = snapshot_status();
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].name, "x");
-        assert_eq!(snap[0].transport, "stdio");
+        assert_eq!(snap[0].transport, DEFAULT_MCP_TRANSPORT);
         assert!(snap[0].url.is_none());
         assert!(snap[0].lazy);
         assert!(!snap[0].active);
