@@ -441,7 +441,7 @@ fn parse_boundary(raw: Option<&str>, is_until: bool) -> Result<Option<i64>, Stri
     if let Ok(dt) = OffsetDateTime::parse(raw, &Rfc3339) {
         return Ok(Some(dt.unix_timestamp_nanos() as i64 / 1_000_000));
     }
-    let date_format = time::format_description::parse("[year]-[month]-[day]")
+    let date_format = time::format_description::parse_borrowed::<1>("[year]-[month]-[day]")
         .map_err(|error| format!("failed to build date parser: {error}"))?;
     if let Ok(date) = Date::parse(raw, &date_format) {
         let date = if is_until {
