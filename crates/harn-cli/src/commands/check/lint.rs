@@ -163,8 +163,13 @@ pub(crate) fn lint_file_inner(
     }
 }
 
-/// Apply autofix edits from lint and type-check diagnostics and write back to disk.
-/// Returns the number of fixes applied.
+/// Apply autofix edits from lint and type-check diagnostics and write back to
+/// disk. Returns a [`CommandOutcome`] describing the *residual* diagnostics —
+/// the unfixable findings when nothing was autofixable, or whatever survives a
+/// re-lint after fixes are applied — so the caller folds `--fix` into the exit
+/// code exactly like the plain and `--json` lint paths. Without this, an
+/// error-level unfixable diagnostic would let `harn lint --fix` exit 0 (and
+/// print nothing) over a real error.
 pub(crate) fn lint_fix_file(
     analysis: &mut AnalysisDatabase,
     path: &Path,
@@ -174,7 +179,7 @@ pub(crate) fn lint_fix_file(
     require_file_header: bool,
     complexity_threshold: Option<usize>,
     persona_step_allowlist: &[String],
-) -> usize {
+) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
     let output = analyze_file(analysis, path, config, module_graph)
         .unwrap_or_else(|error| render_file_analysis_error_or_exit(&path_str, error));
@@ -221,7 +226,15 @@ pub(crate) fn lint_fix_file(
         .collect();
 
     if edits.is_empty() {
-        return 0;
+        // Nothing is machine-fixable. Mirror the plain lint path: print the
+        // diagnostics and report their outcome so the caller can fail the exit
+        // code, instead of silently returning success over a real error.
+        let mut diagnostics = lint_diags;
+        diagnostics.extend(harn_lint::lint_diagnostics_from_type_diagnostics(
+            &output.diagnostics,
+            &config.disable_rules,
+        ));
+        return outcome_from_diagnostics(&path_str, &source, &diagnostics);
     }
 
     // Drop overlaps and splice right-to-left via the shared FixEdit policy, so
@@ -253,11 +266,32 @@ pub(crate) fn lint_fix_file(
         &output2.diagnostics,
         &config.disable_rules,
     ));
-    if !remaining.is_empty() {
-        let _ = print_lint_diagnostics(&path_str, &source2, &remaining);
-    }
+    // Report whatever survived the fix so the caller folds it into the exit
+    // code. `applied` is only advisory (printed above); the residual outcome is
+    // what governs pass/fail.
+    outcome_from_diagnostics(&path_str, &source2, &remaining)
+}
 
-    applied
+/// Print `diagnostics` (when any) and summarize them as a [`CommandOutcome`],
+/// matching how the plain lint path renders and tallies findings.
+fn outcome_from_diagnostics(
+    path_str: &str,
+    source: &str,
+    diagnostics: &[harn_lint::LintDiagnostic],
+) -> CommandOutcome {
+    if diagnostics.is_empty() {
+        return CommandOutcome::default();
+    }
+    let has_warning = diagnostics
+        .iter()
+        .any(|d| d.severity == LintSeverity::Warning);
+    let (has_error, fixable) = print_lint_diagnostics(path_str, source, diagnostics);
+    CommandOutcome {
+        has_error,
+        has_warning,
+        findings: diagnostics.len(),
+        fixable,
+    }
 }
 
 /// Stdlib metadata enforcement is path-driven: when `harn lint` runs over a
