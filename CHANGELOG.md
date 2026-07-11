@@ -9,6 +9,125 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.11
+
+### Breaking
+
+- **Tool lifecycle events now require a typed mutation outcome (#4423).**
+  Every `tool_call_update` carries `mutation_status` as `applied`,
+  `not_applied`, or `unknown`; ACP exposes the same value under
+  `harn.meta.mutationStatus`. Agent policy no longer infers workspace mutation
+  from rendered, locale-dependent tool output.
+
+### Added
+
+- Added a `harn dap` subcommand that launches the Harn debug adapter (DAP) over
+  stdio, so the step-through debugger is reachable with just `harn` on your PATH
+  instead of only via the standalone `harn-dap` binary alias. It runs the same
+  adapter server. A new end-to-end smoke test drives the real binary over stdio —
+  initialize, set a breakpoint, launch, hit the breakpoint, read a live local
+  variable, and run to termination — so the debugger can't silently regress.
+- Reachable editor support: an `Editor setup` guide with copy-pasteable
+  Neovim and Zed configuration that points a generic LSP client at the
+  `harn-lsp` binary already installed on `PATH`, plus VS Code extension
+  install steps. A new `publish-vscode.yml` release workflow packages the
+  `editors/vscode` extension into an installable `.vsix` artifact on every
+  tag and publishes it to the VS Code Marketplace and Open VSX once a
+  maintainer sets the `VSCE_PAT` / `OVSX_PAT` repo secrets — inert (never
+  CI-failing) until then.
+- Added a top-level `harn doc [path]` command that renders Markdown API reference docs for a Harn file or
+  project's `pub` symbols (functions, consts, types, enums, structs) drawn from their HarnDoc comments —
+  signature, description, parameters, `@effects`, and `@errors`. Prints to stdout by default, or writes a file
+  with `--output <file>`. Unlike `harn package docs`, which only documents modules declared in a `harn.toml`
+  `[exports]` table, `harn doc` walks the target path directly, so a plain project produces real reference docs
+  for every `pub` symbol it defines. Reuses the package pipeline's HarnDoc extractor and per-symbol renderer;
+  `pub const` declarations are now recognized by both. HTML sites and doc-example testing remain future extensions.
+- LSP: the language server now reacts to external `.harn` file changes (git checkout, another editor, codegen)
+  by re-validating open documents via `workspace/didChangeWatchedFiles`, so cross-file diagnostics no longer
+  go stale.
+- LSP: added `textDocument/rangeFormatting` ("Format Selection"), which reuses the whole-document formatter
+  and confines its edits to the selected lines.
+- LSP: completion items now attach builtin and keyword documentation lazily through `completionItem/resolve`
+  instead of computing every item's docs up front.
+- Added `std/pii` — structured PII detection and reversible redaction. `pii_detect` finds email, phone,
+  US SSN, credit-card (Luhn-validated), IBAN (mod-97-validated), IPv4, and IPv6 entities with character spans;
+  `pii_redact` replaces them with stable placeholder tokens (`<EMAIL_1>`) and `pii_restore` reverses the mapping,
+  for the redact-before-model / restore-after-model harness flow. Pure-`.harn` regex packs over the existing
+  `regex_captures` seam; NER-based name/address detection is a documented future extension.
+- Added three composable harness primitives to the standard library: `with_semantic_cache` (embedding-similarity
+  response cache) and `with_result_schema` (Instructor-style validate-and-repair of a caller's structured return
+  value) in `std/llm/handlers`, and `faithfulness_guard` (RAGAS-style RAG groundedness scoring) in
+  `std/llm/faithfulness`, plus a raw `embed` primitive in `std/memory` exposing the host `memory.embed` capability.
+
+### Changed
+
+- **LoRA training now has a typed backend-result handoff (#4251).** `harn models
+  lora train` can pass a backend result path to named trainer recipes, ingest
+  realized row/runtime/artifact metadata after execution, and fail closed when a
+  backend attempts to override Harn-planned target metadata.
+- Make LoRA target-module policy and normalized module lists authoritative across planning, export, training,
+  manifests, inspection, and backend recipes.
+- Require reproducible trainer identity for LoRA training receipts and promotion gates.
+- Include active tool-surface context in agent post-turn callback payloads so
+  hosts can make classifier-backed recovery decisions without duplicating tool
+  lists.
+- Consolidated per-provider content-block construction (output-text, tool-call, reasoning)
+  into shared `common.rs` builders across the Bedrock, Gemini, Ollama, and ACP adapters.
+  Output shape and telemetry are unchanged.
+- Deduplicate MCP default transport handling across registry status and re-auth filtering.
+- `harn check --strict-types` now fails unvalidated boundary-value field/subscript
+  access, and `missing_tool_call_classifier` configuration errors use structured
+  error objects.
+- `harn check` now keeps a persistent per-file result cache under the shared
+  Harn cache directory, so re-checking an unchanged tree replays diagnostics
+  in milliseconds instead of re-running the typechecker, linter, and preflight
+  for every file. Cache keys cover the file's content, its transitive import
+  closure, the effective `[check]` config, CLI overrides, and the compiler/CLI
+  build fingerprint; preflight's filesystem probes (templates, prompt assets,
+  directory targets) are recorded and revalidated on every hit so external
+  edits invalidate correctly. `HARN_CHECK_RESULT_CACHE=0` disables just this
+  cache; `HARN_BYTECODE_CACHE=0` disables it along with the bytecode cache.
+- Module-graph construction now loads each import wave on a parallel worker
+  pool (`HARN_MODULE_GRAPH_JOBS=<n>` pins it; `1` restores the serial walk),
+  path canonicalization is memoized process-wide, and `harn check` loads the
+  per-directory `[check]` config once per directory instead of once per file.
+  Together these cut the syscall-bound remainder of whole-tree `harn check`
+  after the parallel-driver work landed.
+- Thrown errors now carry typed structure instead of only rendered prose. A
+  caught `CategorizedError` (e.g. a `tool_rejected` sandbox violation) lowers to a
+  `{category, message}` dict keyed by the canonical `ErrorCategory` string, and
+  the `fs` builtins that wrap an `io::Error` (`read_file`, `write_file`,
+  `append_file`, `mkdir`, `delete_file`, `copy_file`, `move_file`, `stat`,
+  `list_dir`, `read_lines`, `mkdtemp`, …) now throw
+  `{error: "io_error", kind, message}` with a stable `kind` (`storage_full`,
+  `quota_exceeded`, `not_found`, `permission_denied`, …). Consumers branch on the
+  typed fields instead of substring-matching English prose; a `catch` that
+  stringifies the value still renders sensibly because `message` is preserved.
+- Add a `cargo-deny` supply-chain gate (`deny.toml` + a `Supply chain` CI
+  workflow) covering security advisories, license posture, and dependency
+  sourcing across the whole Rust workspace. Licenses/bans/sources block; the
+  RustSec advisory scan is advisory-only so a newly-published advisory can't red
+  an unrelated PR.
+- Collapsed the copy-pasted non-2xx HTTP error handling in the Azure, Bedrock, Gemini, Vertex, and OpenAI
+  Responses LLM adapters into a single `err_for_non_success` helper, normalizing cosmetic wrapping drift with
+  no change to the surfaced error value.
+
+### Fixed
+
+- Add `harn run --timeout <duration>` and route async process timeout/kill paths
+  through Harn's token-scoped process-tree cleanup registry, so timed-out runs do
+  not depend on host `timeout(1)` behavior.
+- Fixed three first-run papercuts. A fresh `harn init` project now runs green:
+  the basic scaffold's `lib/helpers.harn` exports `greet`/`add` with `pub` so
+  the whole-module `import "lib/helpers"` binds them (previously
+  `harn run main.harn` failed with `HARN-NAM-002` and `harn test` failed after
+  the module-visibility change). The LLM quickref no longer documents the
+  non-parsing `retry { } catch err { }`; it now shows `retry <count> { }`
+  (count mandatory, returns nil on exhaustion, no `catch`). And `harn repl`
+  no longer crashes with `Read error: Device not configured` when stdin is a
+  pipe — it reads and evaluates piped source to EOF while keeping interactive
+  behavior unchanged.
+
 ## v0.10.10
 
 ### Added

@@ -11,9 +11,9 @@ description = "WebAssembly target for the Harn programming language playground"
 crate-type = ["cdylib"]
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "=0.10.10" }
-harn-parser = { path = "../harn-parser", version = "=0.10.10" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.10" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.11" }
+harn-parser = { path = "../harn-parser", version = "=0.10.11" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.11" }
 wasm-bindgen = "0.2"
 serde_json = "1"
 
