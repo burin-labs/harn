@@ -881,7 +881,8 @@ const results = parallel settle paths with { max_concurrent: 4 } { p ->
 ```
 
 `max_concurrent: 0` (or no `with` clause) means unlimited. See also
-`retry { } catch err { }`, channels, `select`, and `deadline` in
+`retry <count> { }` (count mandatory; returns nil when all attempts fail —
+no `catch` clause), channels, `select`, and `deadline` in
 `docs/src/concurrency.md`.
 
 For quotas shared across Harn processes, use
