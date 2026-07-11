@@ -63,7 +63,7 @@ pub(crate) fn collect_preflight_diagnostics_with_module_graph(
 ) -> Vec<PreflightDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut visited = HashSet::new();
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical = harn_modules::canonical_path(path);
     let mut host_capabilities = load_host_capabilities(config);
     let mut mocked_caps_visited = HashSet::new();
     collect_mock_host_capabilities(
@@ -961,9 +961,7 @@ fn scan_program_preflight(
     visited: &mut HashSet<PathBuf>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
-    let canonical = file_path
-        .canonicalize()
-        .unwrap_or_else(|_| file_path.to_path_buf());
+    let canonical = harn_modules::canonical_path(file_path);
     if !visited.insert(canonical.clone()) {
         return;
     }

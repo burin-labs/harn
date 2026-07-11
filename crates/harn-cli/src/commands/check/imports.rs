@@ -260,9 +260,7 @@ fn collect_exported_names_into(
     names: &mut Vec<String>,
     visited: &mut std::collections::HashSet<PathBuf>,
 ) {
-    let canonical = file_path
-        .canonicalize()
-        .unwrap_or_else(|_| file_path.to_path_buf());
+    let canonical = harn_modules::canonical_path(file_path);
     if !visited.insert(canonical) {
         return;
     }
