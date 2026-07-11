@@ -491,6 +491,9 @@ jobs:
       # against the committed JSON fixture.
       - run: make check-bindings
       - run: make lint-diagnostic-codes
+      # Strict-types ratchet: no unvalidated boundary access (HARN-OWN-004) in
+      # the gated stdlib. Runs the in-repo checker through the warm HARN_BIN.
+      - run: make check-stdlib-strict-types
       # Sync guards. check-generated-registry is the meta-guard
       # that keeps scripts/generated_artifacts.toml in agreement with the
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the

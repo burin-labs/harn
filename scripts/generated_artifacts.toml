@@ -53,6 +53,7 @@ exempt_checks = [
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
   "check-crate-sibling-versions",   # validates publish-time intra-workspace crate pins, not a mirror
   "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
+  "check-stdlib-strict-types",      # strict-types boundary ratchet over the stdlib, not a mirror
   "check-generated-registry",       # the auditor itself
 ]
 
