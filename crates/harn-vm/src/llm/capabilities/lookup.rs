@@ -621,6 +621,23 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn openai_gpt_5_6_exposes_exact_reasoning_efforts() {
+        reset();
+        for model in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            let caps = lookup("openai", model);
+            assert_eq!(
+                caps.reasoning_effort_levels,
+                vec!["none", "low", "medium", "high", "xhigh", "max"],
+                "{model} reasoning effort contract"
+            );
+            assert!(caps.responses_api);
+            assert!(caps.vision_supported);
+            assert!(caps.reasoning_tools_require_responses);
+            assert!(!caps.temperature_supported);
+        }
+    }
+
+    #[test]
     fn openai_codex_models_are_responses_only() {
         reset();
         // *-codex routes are served only by the Responses API; flag them so

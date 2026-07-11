@@ -269,6 +269,11 @@ pub struct ProviderRule {
     /// `api_mode: "responses"`.
     #[serde(default)]
     pub chat_completions_unsupported: Option<bool>,
+    /// Whether function tools combined with enabled reasoning must use the
+    /// Responses API even though reasoning-off calls remain compatible with
+    /// Chat Completions.
+    #[serde(default)]
+    pub reasoning_tools_require_responses: Option<bool>,
     /// Whether this route rejects non-streaming chat-completion requests.
     /// Harn forces streaming for such routes so callers can keep provider-
     /// neutral `stream` preferences.
@@ -546,6 +551,7 @@ impl ProviderRule {
             chat_template_options_field,
             requires_completion_tokens,
             chat_completions_unsupported,
+            reasoning_tools_require_responses,
             requires_streaming,
             reasoning_effort_supported,
             reasoning_effort_levels,
@@ -656,6 +662,10 @@ impl ProviderRule {
         fill_opt(
             &mut self.chat_completions_unsupported,
             chat_completions_unsupported,
+        );
+        fill_opt(
+            &mut self.reasoning_tools_require_responses,
+            reasoning_tools_require_responses,
         );
         fill_opt(&mut self.requires_streaming, requires_streaming);
         fill_opt(
@@ -1007,6 +1017,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         chat_template_options_field: None,
         requires_completion_tokens: None,
         chat_completions_unsupported: None,
+        reasoning_tools_require_responses: None,
         requires_streaming: None,
         reasoning_effort_supported: None,
         reasoning_effort_levels: None,
@@ -1176,6 +1187,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         chat_template_options_field: rule.chat_template_options_field.clone(),
         requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
         chat_completions_unsupported: rule.chat_completions_unsupported.unwrap_or(false),
+        reasoning_tools_require_responses: rule.reasoning_tools_require_responses.unwrap_or(false),
         requires_streaming: rule.requires_streaming.unwrap_or(false),
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
         reasoning_effort_levels: rule.reasoning_effort_levels.clone().unwrap_or_default(),

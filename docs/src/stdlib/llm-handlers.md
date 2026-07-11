@@ -458,7 +458,7 @@ Layering (low → high):
 | `pack_json(model, opts?)` | `(string, dict?) -> dict` | `task: "json"` (sets `output_format: {kind: "json_object"}`). |
 
 Calibrated families: Anthropic Sonnet/Opus/Haiku 4.x, OpenAI
-GPT-5/5.5/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
+GPT-5/5.5/5.6/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
 
 ### Edge cases
 

@@ -1373,6 +1373,57 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
 }
 
 #[test]
+fn gpt_5_6_reasoning_tools_auto_route_to_responses() {
+    let _openai_key = ScopedEnvVar::set("OPENAI_API_KEY", "test-key");
+    crate::llm::capabilities::clear_user_overrides();
+    crate::llm_config::clear_user_overrides();
+
+    let extract = |effort: &str, explicit_api: Option<&str>| {
+        let mut options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("openai")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("gpt-5.6-terra")),
+            ),
+            (
+                crate::value::intern_key("reasoning_effort"),
+                VmValue::String(arcstr::ArcStr::from(effort)),
+            ),
+            (crate::value::intern_key("tools"), one_tool_list()),
+        ]);
+        if let Some(api) = explicit_api {
+            options.insert(
+                crate::value::intern_key("api_mode"),
+                VmValue::String(arcstr::ArcStr::from(api)),
+            );
+        }
+        extract_llm_options(&[
+            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::Nil,
+            VmValue::dict(options),
+        ])
+        .expect("GPT-5.6 tool options")
+    };
+
+    assert_eq!(
+        extract("medium", None).api_mode,
+        crate::llm::api::LlmApiMode::Responses
+    );
+    assert_eq!(
+        extract("none", None).api_mode,
+        crate::llm::api::LlmApiMode::ChatCompletions
+    );
+    assert_eq!(
+        extract("medium", Some("chat_completions")).api_mode,
+        crate::llm::api::LlmApiMode::Responses,
+        "the provider compatibility constraint must prevent an invalid request"
+    );
+}
+
+#[test]
 fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
     let options = crate::value::DictMap::from_iter([
         (

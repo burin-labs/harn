@@ -103,6 +103,7 @@ impl OpenAiResponsesProvider {
     }
 
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
+        let caps = crate::llm::capabilities::lookup("openai", &opts.model);
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
             "model": wire_model,
@@ -115,22 +116,28 @@ impl OpenAiResponsesProvider {
         if opts.max_tokens > 0 {
             body["max_output_tokens"] = serde_json::json!(opts.max_tokens);
         }
-        if let Some(temp) = opts.temperature {
+        if let Some(temp) = opts.temperature.filter(|_| caps.temperature_supported) {
             body["temperature"] = serde_json::json!(temp);
         }
-        if let Some(top_p) = opts.top_p {
+        if let Some(top_p) = opts.top_p.filter(|_| caps.top_p_supported) {
             body["top_p"] = serde_json::json!(top_p);
         }
         if let Some(ref stop) = opts.stop {
             body["stop"] = serde_json::json!(stop);
         }
-        if let Some(seed) = opts.seed {
+        if let Some(seed) = opts.seed.filter(|_| caps.seed_supported) {
             body["seed"] = serde_json::json!(seed);
         }
-        if let Some(fp) = opts.frequency_penalty {
+        if let Some(fp) = opts
+            .frequency_penalty
+            .filter(|_| caps.frequency_penalty_supported)
+        {
             body["frequency_penalty"] = serde_json::json!(fp);
         }
-        if let Some(pp) = opts.presence_penalty {
+        if let Some(pp) = opts
+            .presence_penalty
+            .filter(|_| caps.presence_penalty_supported)
+        {
             body["presence_penalty"] = serde_json::json!(pp);
         }
         if let Some(ref previous_response_id) = opts.previous_response_id {
@@ -640,6 +647,19 @@ mod tests {
             ["function_call_output", "function_call_output", "user"],
             "outputs stay adjacent; image flushes after the run: {items:?}"
         );
+    }
+
+    #[test]
+    fn responses_body_omits_model_unsupported_sampling_controls() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.6-terra".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.temperature = Some(0.0);
+        let payload = LlmRequestPayload::from(&opts);
+
+        let body = OpenAiResponsesProvider::build_request_body(&payload);
+
+        assert!(body.get("temperature").is_none());
     }
 
     #[test]
