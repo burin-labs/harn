@@ -914,10 +914,7 @@ fn oauth_servers_from_specs(
     specs
         .iter()
         .filter_map(|spec| {
-            let transport = spec
-                .get("transport")
-                .and_then(|value| value.as_str())
-                .unwrap_or("stdio");
+            let transport = crate::mcp_registry::spec_transport(spec);
             let url = spec
                 .get("url")
                 .and_then(|value| value.as_str())
@@ -926,7 +923,7 @@ fn oauth_servers_from_specs(
                 .get("auth_token")
                 .and_then(|value| value.as_str())
                 .is_some_and(|token| !token.is_empty());
-            if transport != "http" || url.is_empty() || has_static_bearer {
+            if transport.as_str() != "http" || url.is_empty() || has_static_bearer {
                 return None;
             }
             let name = spec
@@ -992,6 +989,11 @@ mod reauth_tests {
                 "name": "Local",
                 "transport": "stdio",
                 "command": "./server",
+            }),
+            // Missing transport defaults to stdio, so a URL alone is not enough.
+            serde_json::json!({
+                "name": "ImplicitStdio",
+                "url": "https://implicit/mcp",
             }),
             // HTTP with no URL → excluded.
             serde_json::json!({ "name": "Bad", "transport": "http", "url": "" }),
