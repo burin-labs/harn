@@ -81,7 +81,7 @@ ignore = "0.4"
 mimalloc = { version = "0.1.52", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "sync", "time", "process"] }
 serde_json = "1"
-serde_yml = "0.0.13"
+serde_yaml_ng = "0.10"
 semver = "1"
 reedline = "0.48"
 nu-ansi-term = "0.50"

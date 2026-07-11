@@ -242,7 +242,7 @@ fn read_spec_path(path: &Path) -> Result<(String, Vec<u8>), PackageError> {
 fn parse_spec_value(text: &str, source_label: &str) -> Result<(Value, bool), PackageError> {
     match serde_json::from_str::<Value>(text) {
         Ok(value) => Ok((value, true)),
-        Err(json_error) => match serde_yml::from_str::<Value>(text) {
+        Err(json_error) => match serde_yaml_ng::from_str::<Value>(text) {
             Ok(value) => Ok((value, false)),
             Err(yaml_error) => Err(format!(
                 "failed to parse OpenAPI spec {source_label} as JSON ({json_error}) or YAML ({yaml_error})"

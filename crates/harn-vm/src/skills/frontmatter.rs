@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_yml::Value as YamlValue;
+use serde_yaml_ng::Value as YamlValue;
 
 /// Recognized SKILL.md frontmatter fields.
 ///
@@ -184,7 +184,7 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
         });
     }
     let raw: YamlValue =
-        serde_yml::from_str(yaml).map_err(|e| format!("invalid SKILL.md YAML: {e}"))?;
+        serde_yaml_ng::from_str(yaml).map_err(|e| format!("invalid SKILL.md YAML: {e}"))?;
     let map = match raw {
         YamlValue::Mapping(m) => m,
         YamlValue::Null => {
@@ -202,21 +202,26 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
     };
 
     // Normalize keys: hyphens -> underscores, strip surrounding whitespace.
-    let mut normalized = serde_yml::Mapping::new();
+    let mut normalized = serde_yaml_ng::Mapping::new();
     let mut unknown_fields = Vec::new();
-    for (key_str, v) in map {
+    for (key, v) in map {
+        let YamlValue::String(key_str) = key else {
+            // Frontmatter keys are always strings; surface anything else as unknown.
+            unknown_fields.push(format!("{key:?}"));
+            continue;
+        };
         let canonical = key_str.trim().replace('-', "_");
         if !KNOWN_CANONICAL_KEYS.contains(&canonical.as_str()) {
             unknown_fields.push(key_str);
             continue;
         }
-        normalized.insert(canonical, v);
+        normalized.insert(YamlValue::String(canonical), v);
     }
 
     // Hooks sometimes arrive as a list of `{event: "...", command: "..."}`
     // entries rather than a map. Normalize both into a BTreeMap.
     if let Some(YamlValue::Sequence(seq)) = normalized.get("hooks").cloned() {
-        let mut flat = serde_yml::Mapping::new();
+        let mut flat = serde_yaml_ng::Mapping::new();
         for item in seq {
             if let YamlValue::Mapping(entry) = item {
                 let event = entry
@@ -230,15 +235,18 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 if let (Some(event), Some(cmd)) = (event, cmd) {
-                    flat.insert(event, YamlValue::String(cmd));
+                    flat.insert(YamlValue::String(event), YamlValue::String(cmd));
                 }
             }
         }
-        normalized.insert("hooks", YamlValue::Mapping(flat));
+        normalized.insert(
+            YamlValue::String("hooks".to_string()),
+            YamlValue::Mapping(flat),
+        );
     }
 
-    let manifest: SkillManifest =
-        serde_yml::from_value(YamlValue::Mapping(normalized)).map_err(|e| {
+    let manifest: SkillManifest = serde_yaml_ng::from_value(YamlValue::Mapping(normalized))
+        .map_err(|e| {
             format!(
                 "SKILL.md frontmatter is well-formed YAML but doesn't match the expected field \
                  shapes: {e}"
@@ -442,5 +450,56 @@ mod tests {
     fn rejects_missing_short_field() {
         let err = parse_frontmatter("name: hi\n").unwrap_err();
         assert!(err.contains("`short`"), "{err}");
+    }
+
+    #[test]
+    fn non_string_mapping_key_surfaces_as_unknown_not_panic() {
+        // serde_yaml_ng (like upstream serde_yaml) is Value-keyed, so a
+        // mapping key can be a number or bool rather than a string. The old
+        // String-keyed YAML crate could never surface this shape, so the
+        // key-extraction here is the semantic delta of the migration. Assert we
+        // neither panic nor silently drop such keys:
+        // they land in `unknown_fields` while the real string keys still parse.
+        let yaml = "name: hi\nshort: Quick card\n123: numeric-key\ntrue: bool-key\n";
+        let parsed = parse_frontmatter(yaml).expect("non-string keys must not error");
+        assert_eq!(parsed.manifest.name, "hi");
+        assert_eq!(parsed.manifest.short, "Quick card");
+        assert_eq!(
+            parsed.unknown_fields.len(),
+            2,
+            "both non-string keys must be surfaced: {:?}",
+            parsed.unknown_fields,
+        );
+        assert!(
+            parsed.unknown_fields.iter().any(|f| f.contains("123")),
+            "numeric key must be surfaced: {:?}",
+            parsed.unknown_fields,
+        );
+        assert!(
+            parsed.unknown_fields.iter().any(|f| f.contains("true")),
+            "boolean key must be surfaced: {:?}",
+            parsed.unknown_fields,
+        );
+    }
+
+    #[test]
+    fn string_keyed_frontmatter_round_trips_after_value_keyed_migration() {
+        // Guard the happy path across the String-keyed -> Value-keyed swap:
+        // hyphenated canonical keys normalize, a hooks *list* still folds into
+        // a map, and nothing spurious lands in `unknown_fields`.
+        let yaml = "name: deploy\nshort: Ship it\ndisable-model-invocation: true\n\
+                    hooks:\n  - event: on-activate\n    command: \"echo up\"\n";
+        let parsed = parse_frontmatter(yaml).expect("string-keyed frontmatter must parse");
+        assert_eq!(parsed.manifest.name, "deploy");
+        assert!(parsed.manifest.disable_model_invocation);
+        assert_eq!(
+            parsed.manifest.hooks.get("on-activate").map(String::as_str),
+            Some("echo up"),
+        );
+        assert!(
+            parsed.unknown_fields.is_empty(),
+            "canonical string keys must not surface as unknown: {:?}",
+            parsed.unknown_fields,
+        );
     }
 }
