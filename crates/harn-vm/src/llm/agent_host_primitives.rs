@@ -1461,7 +1461,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 serde_json::to_value(&approval_request).unwrap_or(serde_json::Value::Null);
             let response = bridge
                 .call(
-                    "session/request_permission",
+                    crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
                     crate::llm::acp_permission::request_params(
                         Some(&session_id),
                         &approval_id,

@@ -23,8 +23,27 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::visible_text::VisibleTextState;
 use crate::vm::Vm;
 
-/// Default timeout for bridge calls (5 minutes).
+/// Default timeout for non-interactive bridge calls (5 minutes).
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
+
+fn bridge_call_timeout(method: &str) -> Option<Duration> {
+    match method {
+        // A human approval is intentionally open-ended. Cancellation and host
+        // disconnects still wake the waiter, but a slow approver must not be
+        // converted into a terminal denial by the transport watchdog.
+        crate::llm::acp_permission::METHOD_REQUEST_PERMISSION => None,
+        _ => Some(DEFAULT_TIMEOUT),
+    }
+}
+
+async fn wait_for_bridge_call_timeout(method: &str) -> Duration {
+    if let Some(timeout) = bridge_call_timeout(method) {
+        tokio::time::sleep(timeout).await;
+        timeout
+    } else {
+        std::future::pending::<Duration>().await
+    }
+}
 
 pub type HostBridgeWriter = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
@@ -59,6 +78,9 @@ pub struct HostBridge {
     cancelled: Arc<AtomicBool>,
     /// Wakes pending host calls when cancellation arrives.
     cancel_notify: Arc<Notify>,
+    /// Whether the host transport has closed. Checked while holding `pending`
+    /// so a request cannot register after the reader's final clear.
+    disconnected: Arc<AtomicBool>,
     /// Transport writer used to send JSON-RPC to the host.
     writer: HostBridgeWriter,
     /// ACP session ID (set in ACP mode for session-scoped notifications).
@@ -128,7 +150,9 @@ impl InProcessHost {
                     .invoke_optional_export("host_tools_list", &[])
                     .await
                     .map(|value| value.unwrap_or_else(|| serde_json::json!({ "tools": [] }))),
-                "session/request_permission" => self.request_permission(params).await,
+                crate::llm::acp_permission::METHOD_REQUEST_PERMISSION => {
+                    self.request_permission(params).await
+                }
                 other => Err(VmError::Runtime(format!(
                     "playground host backend does not implement bridge method '{other}'"
                 ))),
@@ -816,6 +840,7 @@ impl HostBridge {
             Arc::new(Mutex::new(HashMap::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancel_notify = Arc::new(Notify::new());
+        let disconnected = Arc::new(AtomicBool::new(false));
         let queued_transcript_injections = HostBridgeInjectionState::default();
         let resume_requested = Arc::new(AtomicBool::new(false));
         let skills_reload_requested = Arc::new(AtomicBool::new(false));
@@ -825,6 +850,7 @@ impl HostBridge {
         let pending_clone = pending.clone();
         let cancelled_clone = cancelled.clone();
         let cancel_notify_clone = cancel_notify.clone();
+        let disconnected_clone = disconnected.clone();
         let queued_clone = queued_transcript_injections.clone();
         let resume_clone = resume_requested.clone();
         let skills_reload_clone = skills_reload_requested.clone();
@@ -874,7 +900,10 @@ impl HostBridge {
                 }
             }
 
-            // stdin closed: drop pending senders to cancel waiters.
+            // Publish disconnect before taking the map lock. New callers check
+            // this state while holding the same lock, so none can register
+            // after the final clear and wait forever.
+            disconnected_clone.store(true, Ordering::SeqCst);
             let mut pending = pending_clone.lock().await;
             pending.clear();
         });
@@ -884,6 +913,7 @@ impl HostBridge {
             pending,
             cancelled,
             cancel_notify,
+            disconnected,
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
@@ -957,6 +987,7 @@ impl HostBridge {
             pending,
             cancelled,
             cancel_notify,
+            disconnected: Arc::new(AtomicBool::new(false)),
             writer,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
@@ -980,6 +1011,7 @@ impl HostBridge {
             pending: Arc::new(Mutex::new(HashMap::new())),
             cancelled: Arc::new(AtomicBool::new(false)),
             cancel_notify: Arc::new(Notify::new()),
+            disconnected: Arc::new(AtomicBool::new(false)),
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
@@ -1030,7 +1062,9 @@ impl HostBridge {
     }
 
     /// Send a JSON-RPC request to the host and wait for the response.
-    /// Times out after 5 minutes to prevent deadlocks.
+    /// Non-interactive calls time out after 5 minutes to prevent deadlocks.
+    /// Interactive permission requests remain pending until the host answers,
+    /// cancels the run, or disconnects.
     pub async fn call(
         &self,
         method: &str,
@@ -1047,12 +1081,21 @@ impl HostBridge {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let cancel_wait = self.cancel_notify.notified();
         tokio::pin!(cancel_wait);
+        // `notify_waiters` does not retain a permit for a waiter that has not
+        // been polled. Register before the final atomic cancellation check so
+        // cancellation cannot land in the check/select gap and be lost.
+        cancel_wait.as_mut().enable();
 
         let request = crate::jsonrpc::request(id, method, params);
 
         let (tx, rx) = oneshot::channel();
         {
             let mut pending = self.pending.lock().await;
+            if self.disconnected.load(Ordering::SeqCst) {
+                return Err(VmError::Runtime(
+                    "Bridge: host connection is already closed".into(),
+                ));
+            }
             pending.insert(id, tx);
         }
 
@@ -1070,6 +1113,9 @@ impl HostBridge {
             return Err(VmError::Runtime("Bridge: operation cancelled".into()));
         }
 
+        let timeout_wait = wait_for_bridge_call_timeout(method);
+        tokio::pin!(timeout_wait);
+
         let response = tokio::select! {
             result = rx => match result {
                 Ok(msg) => msg,
@@ -1085,12 +1131,12 @@ impl HostBridge {
                 pending.remove(&id);
                 return Err(VmError::Runtime("Bridge: operation cancelled".into()));
             }
-            _ = tokio::time::sleep(DEFAULT_TIMEOUT) => {
+            timeout = &mut timeout_wait => {
                 let mut pending = self.pending.lock().await;
                 pending.remove(&id);
                 return Err(VmError::Runtime(format!(
                     "Bridge: host did not respond to '{method}' within {}s",
-                    DEFAULT_TIMEOUT.as_secs()
+                    timeout.as_secs()
                 )));
             }
         };
@@ -1750,46 +1796,81 @@ mod tests {
         assert!(cancelled.load(Ordering::SeqCst));
     }
 
-    #[test]
-    fn pending_host_calls_return_when_cancellation_arrives() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        runtime.block_on(async {
-            let pending = Arc::new(Mutex::new(HashMap::new()));
-            let cancelled = Arc::new(AtomicBool::new(false));
-            let bridge = HostBridge::from_parts_with_writer(
-                pending.clone(),
-                cancelled.clone(),
-                Arc::new(|_| Ok(())),
-                1,
-            );
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn pending_permission_calls_return_when_cancellation_arrives() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let bridge = HostBridge::from_parts_with_writer(
+            pending.clone(),
+            cancelled.clone(),
+            Arc::new(|_| Ok(())),
+            1,
+        );
 
-            let call = bridge.call("host/work", serde_json::json!({}));
-            tokio::pin!(call);
+        let call = bridge.call(
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+            serde_json::json!({}),
+        );
+        tokio::pin!(call);
+        wait_for_pending(&pending, 1, call.as_mut()).await;
 
-            loop {
-                tokio::select! {
-                    result = &mut call => panic!("call completed before cancellation: {result:?}"),
-                    _ = tokio::task::yield_now() => {}
-                }
-                if !pending.lock().await.is_empty() {
-                    break;
-                }
-            }
+        cancelled.store(true, Ordering::SeqCst);
+        bridge.cancel_notify.notify_waiters();
 
-            cancelled.store(true, Ordering::SeqCst);
-            bridge.cancel_notify.notify_waiters();
+        let result = tokio::time::timeout(Duration::from_secs(1), call)
+            .await
+            .expect("pending permission call should observe cancellation");
+        assert!(matches!(
+            result,
+            Err(VmError::Runtime(message)) if message.contains("cancelled")
+        ));
+        assert!(pending.lock().await.is_empty());
+    }
 
-            let result = tokio::time::timeout(Duration::from_secs(1), call)
-                .await
-                .expect("pending call should observe cancellation promptly");
-            assert!(
-                matches!(result, Err(VmError::Runtime(message)) if message.contains("cancelled"))
-            );
-            assert!(pending.lock().await.is_empty());
-        });
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn registered_cancel_wait_survives_notification_before_first_poll() {
+        let notify = Notify::new();
+        let wait = notify.notified();
+        tokio::pin!(wait);
+        wait.as_mut().enable();
+
+        notify.notify_waiters();
+
+        tokio::select! {
+            () = &mut wait => {}
+            _ = tokio::task::yield_now() => panic!("registered cancellation notification was lost"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn bridge_call_cannot_register_after_disconnect_clear() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let bridge = HostBridge::from_parts_with_writer(
+            pending.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(|_| Ok(())),
+            1,
+        );
+        let guard = pending.lock().await;
+        let call = bridge.call(
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+            serde_json::json!({}),
+        );
+        tokio::pin!(call);
+        tokio::select! {
+            result = &mut call => panic!("call bypassed pending lock: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+
+        bridge.disconnected.store(true, Ordering::SeqCst);
+        drop(guard);
+
+        let result = call.await;
+        assert!(matches!(
+            result,
+            Err(VmError::Runtime(message)) if message.contains("already closed")
+        ));
+        assert!(pending.lock().await.is_empty());
     }
 
     #[test]
@@ -2405,6 +2486,100 @@ mod tests {
 
     #[test]
     fn test_timeout_duration() {
+        assert_eq!(bridge_call_timeout("host/work"), Some(DEFAULT_TIMEOUT));
         assert_eq!(DEFAULT_TIMEOUT.as_secs(), 300);
+    }
+
+    #[test]
+    fn interactive_permission_requests_have_no_bridge_timeout() {
+        assert_eq!(
+            bridge_call_timeout(crate::llm::acp_permission::METHOD_REQUEST_PERMISSION),
+            None
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn non_interactive_bridge_calls_timeout_under_paused_time() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let bridge = HostBridge::from_parts_with_writer(
+            pending.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(|_| Ok(())),
+            1,
+        );
+
+        let call = bridge.call("host/work", serde_json::json!({}));
+        tokio::pin!(call);
+        wait_for_pending(&pending, 1, call.as_mut()).await;
+
+        tokio::time::advance(DEFAULT_TIMEOUT).await;
+        let result = call.await;
+        assert!(matches!(
+            result,
+            Err(VmError::Runtime(message)) if message.contains("host/work")
+                && message.contains("within 300s")
+        ));
+        assert!(pending.lock().await.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn permission_bridge_calls_survive_timeout_window_under_paused_time() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let bridge = HostBridge::from_parts_with_writer(
+            pending.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(|_| Ok(())),
+            1,
+        );
+
+        let call = bridge.call(
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+            serde_json::json!({}),
+        );
+        tokio::pin!(call);
+        wait_for_pending(&pending, 1, call.as_mut()).await;
+
+        tokio::time::advance(DEFAULT_TIMEOUT + Duration::from_secs(1)).await;
+        tokio::select! {
+            result = &mut call => panic!("permission request timed out: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert!(pending.lock().await.contains_key(&1));
+
+        let sender = pending
+            .lock()
+            .await
+            .remove(&1)
+            .expect("pending permission sender");
+        sender
+            .send(serde_json::json!({
+                "result": crate::llm::acp_permission::allow_response()
+            }))
+            .expect("send permission response");
+
+        let response = call.await.expect("permission response");
+        assert_eq!(
+            crate::llm::acp_permission::parse_response(&response),
+            crate::llm::acp_permission::WireOutcome::Allowed
+        );
+    }
+
+    async fn wait_for_pending<F>(
+        pending: &Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+        id: u64,
+        mut call: Pin<&mut F>,
+    ) where
+        F: Future<Output = Result<serde_json::Value, VmError>>,
+    {
+        for _ in 0..8 {
+            tokio::select! {
+                result = call.as_mut() => panic!("call completed before entering pending map: {result:?}"),
+                _ = tokio::task::yield_now() => {}
+            }
+            if pending.lock().await.contains_key(&id) {
+                return;
+            }
+        }
+        panic!("bridge call {id} did not enter the pending map after bounded polling");
     }
 }

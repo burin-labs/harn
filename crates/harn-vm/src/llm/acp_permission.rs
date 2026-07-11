@@ -19,15 +19,17 @@
 
 use serde_json::{json, Value as JsonValue};
 
+/// Canonical ACP method for asking the client to decide a tool permission.
+pub(crate) const METHOD_REQUEST_PERMISSION: &str = "session/request_permission";
 /// Stable `optionId` for the canonical "allow this call" option. The
 /// agent maps a `selected` response on this id to a grant.
 pub(crate) const OPTION_ALLOW: &str = "allow";
 /// Stable `optionId` for the canonical "reject this call" option.
 pub(crate) const OPTION_REJECT: &str = "reject";
 
-/// The two canonical [`PermissionOption`]s the agent offers for a
-/// host-gated tool call: allow-once and reject-once. The client renders
-/// these and answers with `{ outcome: { outcome: "selected", optionId } }`.
+/// The canonical [`PermissionOption`]s the agent offers for a host-gated tool
+/// call. Harn only offers semantics it can honor; clients may remember a
+/// one-shot grant locally, but the runtime does not advertise persistence.
 fn canonical_options() -> JsonValue {
     json!([
         { "optionId": OPTION_ALLOW, "name": "Allow", "kind": "allow_once" },
@@ -107,7 +109,7 @@ pub(crate) fn request_params(
 /// The agent's interpretation of a canonical permission response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WireOutcome {
-    /// `{ outcome: { outcome: "selected", optionId: "allow" } }`.
+    /// The selected canonical `allow_once` option.
     Allowed,
     /// `{ outcome: { outcome: "selected", optionId: "reject" } }` or a
     /// `cancelled` outcome (the client dismissed the prompt). Both stop
@@ -122,7 +124,7 @@ pub(crate) enum WireOutcome {
 /// Canonical only: the response `result` is `{ outcome: <outcome> }` where
 /// `<outcome>` is `{ outcome: "selected", optionId }` or
 /// `{ outcome: "cancelled" }`. A `selected` outcome whose `optionId` is
-/// not the allow option (including a missing id) is treated as a rejection
+/// not the offered allow option (including a missing id) is treated as a rejection
 /// — fail closed.
 pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
     let outcome = response.get("outcome");
@@ -194,6 +196,22 @@ mod tests {
     fn selected_allow_is_allowed() {
         let response = allow_response();
         assert_eq!(parse_response(&response), WireOutcome::Allowed);
+    }
+
+    #[test]
+    fn every_offered_option_has_a_defined_parser_outcome() {
+        for option in canonical_options().as_array().expect("options") {
+            let option_id = option["optionId"].as_str().expect("option id");
+            let kind = option["kind"].as_str().expect("option kind");
+            let response = json!({
+                "outcome": { "outcome": "selected", "optionId": option_id }
+            });
+            assert_eq!(
+                matches!(parse_response(&response), WireOutcome::Allowed),
+                kind.starts_with("allow_"),
+                "offered option {option_id} ({kind})"
+            );
+        }
     }
 
     #[test]
