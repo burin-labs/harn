@@ -288,6 +288,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 .json
                 .then_some(commands::run::RunJsonOptions { quiet: args.quiet });
             let aux_options = commands::run::run_aux_options_from_args(&args);
+            let control_options = commands::run::run_control_options_from_args(&args);
             let harnpack_options = commands::run::harnpack::HarnpackRunOptions {
                 allow_unsigned: args.allow_unsigned,
                 dry_run_verify: args.dry_run_verify,
@@ -306,6 +307,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     sandbox_options.clone(),
                     json_options,
                     aux_options,
+                    control_options,
                 )
                 .await;
                 return;
@@ -346,6 +348,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                             sandbox_options.clone(),
                             json_options.clone(),
                             aux_options.clone(),
+                            control_options.clone(),
                             harnpack_options.clone(),
                         )
                         .await;
@@ -368,6 +371,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                             sandbox_options,
                             json_options,
                             aux_options,
+                            control_options,
                             harnpack_options,
                         )
                         .await;

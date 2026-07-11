@@ -30,8 +30,9 @@
 //!   builtin starts; the wait loop compares against `Instant::now()`.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 /// Private environment marker inherited by subprocess descendants. Cleanup uses
@@ -163,6 +164,133 @@ thread_local! {
     static CURRENT: RefCell<Option<OpInterrupt>> = const { RefCell::new(None) };
 }
 
+#[derive(Clone, Debug)]
+struct ActiveProcessCleanup {
+    pid: Option<u32>,
+    cleanup_token: String,
+    owner_cancel_token: Option<Arc<AtomicBool>>,
+}
+
+static ACTIVE_PROCESS_CLEANUP_ID: AtomicU64 = AtomicU64::new(1);
+static ACTIVE_PROCESS_CLEANUPS: LazyLock<Mutex<BTreeMap<u64, ActiveProcessCleanup>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+/// Registration guard for an asynchronously waited child process. The VM's
+/// sync process paths poll [`requested`] directly, but Tokio wait paths can be
+/// parked inside `wait_with_output()`/`child.wait()` and need an out-of-band
+/// cleanup hook when `harn run` is interrupted or reaches its run deadline.
+pub struct ActiveProcessCleanupGuard {
+    id: u64,
+}
+
+impl Drop for ActiveProcessCleanupGuard {
+    fn drop(&mut self) {
+        unregister_active_process_cleanup(self.id);
+    }
+}
+
+pub fn register_active_process_cleanup(
+    pid: Option<u32>,
+    cleanup_token: &str,
+    owner_cancel_token: Option<Arc<AtomicBool>>,
+) -> ActiveProcessCleanupGuard {
+    let id = ACTIVE_PROCESS_CLEANUP_ID.fetch_add(1, Ordering::SeqCst);
+    ACTIVE_PROCESS_CLEANUPS
+        .lock()
+        .expect("active process cleanup registry poisoned")
+        .insert(
+            id,
+            ActiveProcessCleanup {
+                pid,
+                cleanup_token: cleanup_token.to_string(),
+                owner_cancel_token,
+            },
+        );
+    ActiveProcessCleanupGuard { id }
+}
+
+fn unregister_active_process_cleanup(id: u64) {
+    ACTIVE_PROCESS_CLEANUPS
+        .lock()
+        .expect("active process cleanup registry poisoned")
+        .remove(&id);
+}
+
+/// Signal every actively registered async child process tree. Prefer
+/// [`signal_active_process_cleanups_for_cancel_token`] or
+/// [`signal_ownerless_active_process_cleanups`] when the caller can avoid a
+/// process-global sweep.
+pub fn signal_active_process_cleanups(signal: i32) -> ProcessCleanupReport {
+    signal_active_process_cleanups_matching(signal, |_| true)
+}
+
+pub fn signal_ownerless_active_process_cleanups(signal: i32) -> ProcessCleanupReport {
+    signal_active_process_cleanups_matching(signal, |entry| entry.owner_cancel_token.is_none())
+}
+
+pub fn signal_active_process_cleanups_for_cancel_token(
+    signal: i32,
+    cancel_token: &Arc<AtomicBool>,
+) -> ProcessCleanupReport {
+    signal_active_process_cleanups_matching(signal, |entry| {
+        entry
+            .owner_cancel_token
+            .as_ref()
+            .is_some_and(|owner| Arc::ptr_eq(owner, cancel_token))
+    })
+}
+
+#[cfg(test)]
+fn active_cleanup_tokens_for_cancel_token_for_test(cancel_token: &Arc<AtomicBool>) -> Vec<String> {
+    ACTIVE_PROCESS_CLEANUPS
+        .lock()
+        .expect("active process cleanup registry poisoned")
+        .values()
+        .filter(|entry| {
+            entry
+                .owner_cancel_token
+                .as_ref()
+                .is_some_and(|owner| Arc::ptr_eq(owner, cancel_token))
+        })
+        .map(|entry| entry.cleanup_token.clone())
+        .collect()
+}
+
+#[cfg(test)]
+fn ownerless_active_cleanup_tokens_for_test() -> Vec<String> {
+    ACTIVE_PROCESS_CLEANUPS
+        .lock()
+        .expect("active process cleanup registry poisoned")
+        .values()
+        .filter(|entry| entry.owner_cancel_token.is_none())
+        .map(|entry| entry.cleanup_token.clone())
+        .collect()
+}
+
+fn signal_active_process_cleanups_matching(
+    signal: i32,
+    matches_entry: impl Fn(&ActiveProcessCleanup) -> bool,
+) -> ProcessCleanupReport {
+    let entries = ACTIVE_PROCESS_CLEANUPS
+        .lock()
+        .expect("active process cleanup registry poisoned")
+        .values()
+        .filter(|entry| matches_entry(entry))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut report = ProcessCleanupReport::default();
+    for entry in entries {
+        if let Some(pid) = entry.pid {
+            report.merge(signal_pid_tree_group_and_token_with_report(
+                pid,
+                Some(&entry.cleanup_token),
+                signal,
+            ));
+        }
+    }
+    report
+}
+
 /// Guard returned by [`install`]. Restores the previously installed
 /// interrupt context on drop so nested builtin dispatch (child VMs running
 /// on the same thread) composes correctly.
@@ -227,6 +355,20 @@ pub fn configure_kill_group(command: &mut std::process::Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
+}
+
+/// Tokio-process variant of [`configure_kill_group`]. Tokio's command wrapper
+/// does not flow through `std::process::Command`, so async spawn paths must opt
+/// in separately before they rely on group/tree cleanup.
+pub fn configure_tokio_kill_group(command: &mut tokio::process::Command) {
+    #[cfg(unix)]
+    {
         command.process_group(0);
     }
     #[cfg(not(unix))]
@@ -737,6 +879,48 @@ mod tests {
             assert!(!requested());
         }
         assert!(requested());
+    }
+
+    #[test]
+    fn active_cleanup_owner_scopes_are_disjoint() {
+        let owner = Arc::new(AtomicBool::new(false));
+        let _owned =
+            register_active_process_cleanup(None, "owned-scope-test", Some(Arc::clone(&owner)));
+        let _ownerless = register_active_process_cleanup(None, "ownerless-scope-test", None);
+
+        assert_eq!(
+            active_cleanup_tokens_for_cancel_token_for_test(&owner),
+            vec!["owned-scope-test".to_string()]
+        );
+        assert!(
+            ownerless_active_cleanup_tokens_for_test()
+                .iter()
+                .any(|token| token == "ownerless-scope-test"),
+            "explicit ownerless fallback should remain separately discoverable"
+        );
+    }
+
+    #[test]
+    fn active_cleanup_guard_unregisters_on_drop() {
+        let owner = Arc::new(AtomicBool::new(false));
+        let token = "guard-lifetime-test";
+        let guard = register_active_process_cleanup(None, token, Some(Arc::clone(&owner)));
+
+        assert!(
+            active_cleanup_tokens_for_cancel_token_for_test(&owner)
+                .iter()
+                .any(|entry| entry == token),
+            "active cleanup must remain registered while its guard is alive"
+        );
+
+        drop(guard);
+
+        assert!(
+            !active_cleanup_tokens_for_cancel_token_for_test(&owner)
+                .iter()
+                .any(|entry| entry == token),
+            "dropping the guard must unregister the cleanup token"
+        );
     }
 
     #[cfg(unix)]

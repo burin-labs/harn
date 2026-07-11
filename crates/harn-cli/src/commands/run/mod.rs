@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use harn_parser::DiagnosticSeverity;
 use harn_vm::event_log::EventLog;
@@ -56,6 +56,11 @@ pub struct RunAuxOptions {
     pub summary: Option<RunSummaryOptions>,
     pub phase: Option<RunPhaseOptions>,
     pub rusage: Option<RunRusageOptions>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RunControlOptions {
+    pub timeout: Option<Duration>,
 }
 
 #[derive(Clone, Debug)]
@@ -125,6 +130,12 @@ pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOpt
         summary: run_summary_options_from_args(args),
         phase: run_phase_options_from_args(args),
         rusage: run_rusage_options_from_args(args),
+    }
+}
+
+pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunControlOptions {
+    RunControlOptions {
+        timeout: args.timeout,
     }
 }
 
@@ -750,6 +761,7 @@ pub(crate) async fn run_file(
         RunSandboxOptions::default(),
         None,
         RunAuxOptions::default(),
+        RunControlOptions::default(),
         HarnpackRunOptions::default(),
     )
     .await;
@@ -781,10 +793,14 @@ pub(crate) async fn run_file_with_skill_dirs(
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
     aux: RunAuxOptions,
+    control: RunControlOptions,
     harnpack: HarnpackRunOptions,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let interrupt_tokens = install_signal_shutdown_handler();
+    let deadline_guard = control
+        .timeout
+        .map(|timeout| start_run_deadline_watchdog(timeout, interrupt_tokens.clone()));
 
     let _stdout_passthrough = StdoutPassthroughGuard::enable();
     let json_with_stdout =
@@ -806,6 +822,9 @@ pub(crate) async fn run_file_with_skill_dirs(
         harnpack,
     })
     .await;
+    if let Some(guard) = &deadline_guard {
+        guard.finish();
+    }
 
     // `harn run` streams normal program stdout during execution. Any stdout
     // left here came from older capture paths, so flush it after diagnostics.
@@ -817,7 +836,11 @@ pub(crate) async fn run_file_with_skill_dirs(
     }
 
     let mut exit_code = outcome.exit_code;
-    if exit_code != 0 && interrupt_tokens.cancel_token.load(Ordering::SeqCst) {
+    if deadline_guard
+        .as_ref()
+        .is_some_and(RunDeadlineGuard::timed_out)
+        || (exit_code != 0 && interrupt_tokens.cancel_token.load(Ordering::SeqCst))
+    {
         exit_code = 124;
     }
     if exit_code != 0 {
@@ -838,6 +861,7 @@ pub(crate) async fn run_resume_with_skill_dirs(
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
     aux: RunAuxOptions,
+    control: RunControlOptions,
 ) {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
@@ -876,6 +900,7 @@ pipeline main(task) {
         sandbox,
         json,
         aux,
+        control,
         HarnpackRunOptions::default(),
     )
     .await;
@@ -1086,6 +1111,58 @@ fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json::Value {
 // shortcut and losing the chance to inspect the error trace.
 const FIRST_SIGNAL_MESSAGE: &str =
     "[harn] signal received, interrupting VM (give it a moment to unwind in-flight async ops; Ctrl-C again to force-exit)...";
+const RUN_TIMEOUT_MESSAGE: &str =
+    "[harn] run timeout reached, interrupting VM and in-flight subprocesses...";
+const RUN_TIMEOUT_HARD_EXIT_MESSAGE: &str = "[harn] run timeout grace elapsed, terminating";
+const SIGTERM: i32 = 15;
+const SIGKILL: i32 = 9;
+
+struct RunDeadlineGuard {
+    finished: Arc<AtomicBool>,
+    timed_out: Arc<AtomicBool>,
+}
+
+impl RunDeadlineGuard {
+    fn finish(&self) {
+        self.finished.store(true, Ordering::SeqCst);
+    }
+
+    fn timed_out(&self) -> bool {
+        self.timed_out.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for RunDeadlineGuard {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+fn start_run_deadline_watchdog(timeout: Duration, tokens: RunInterruptTokens) -> RunDeadlineGuard {
+    let finished = Arc::new(AtomicBool::new(false));
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let task_finished = Arc::clone(&finished);
+    let task_timed_out = Arc::clone(&timed_out);
+    tokio::spawn(async move {
+        tokio::time::sleep(timeout).await;
+        if task_finished.load(Ordering::SeqCst) {
+            return;
+        }
+        task_timed_out.store(true, Ordering::SeqCst);
+        request_vm_interrupt(&tokens, "timeout");
+        eprintln!("{RUN_TIMEOUT_MESSAGE}");
+        tokio::time::sleep(harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE).await;
+        if !task_finished.load(Ordering::SeqCst) {
+            signal_run_process_cleanups(&tokens, SIGKILL);
+            eprintln!("{RUN_TIMEOUT_HARD_EXIT_MESSAGE}");
+            process::exit(124);
+        }
+    });
+    RunDeadlineGuard {
+        finished,
+        timed_out,
+    }
+}
 
 fn install_signal_shutdown_handler() -> RunInterruptTokens {
     let tokens = RunInterruptTokens {
@@ -1154,6 +1231,21 @@ fn request_vm_interrupt(tokens: &RunInterruptTokens, signal_name: &str) {
         *signal = Some(signal_name.to_string());
     }
     tokens.cancel_token.store(true, Ordering::SeqCst);
+    signal_run_process_cleanups(tokens, SIGTERM);
+}
+
+fn signal_run_process_cleanups(tokens: &RunInterruptTokens, signal: i32) {
+    let mut report = harn_vm::op_interrupt::signal_active_process_cleanups_for_cancel_token(
+        signal,
+        &tokens.cancel_token,
+    );
+    // Older/integration-created entries may not have an owner token. Keep the
+    // fail-closed fallback for the standalone `harn run` process, while the
+    // token path above prevents scoped VM runs from becoming process-global.
+    if report.root_pid.is_none() && report.children.is_empty() {
+        report = harn_vm::op_interrupt::signal_ownerless_active_process_cleanups(signal);
+    }
+    drop(report);
 }
 
 /// In-process equivalent of `run_file_with_skill_dirs`. Returns the captured

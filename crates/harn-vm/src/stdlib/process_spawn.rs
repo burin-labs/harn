@@ -26,6 +26,7 @@
 
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
@@ -88,6 +89,9 @@ struct SpawnState {
 struct SpawnEntry {
     handle_id: String,
     pid: Option<u32>,
+    cleanup_token: String,
+    owner_key: Option<usize>,
+    cleanup_registration: Mutex<Option<crate::op_interrupt::ActiveProcessCleanupGuard>>,
     command_display: String,
     started_at: String,
     /// Monotonic registration sequence — used for oldest-first eviction.
@@ -100,6 +104,14 @@ struct SpawnEntry {
 }
 
 impl SpawnEntry {
+    fn unregister_cleanup(&self) {
+        let _ = self
+            .cleanup_registration
+            .lock()
+            .expect("spawn cleanup registration poisoned")
+            .take();
+    }
+
     fn current_status(&self) -> SpawnStatus {
         self.state
             .lock()
@@ -156,13 +168,21 @@ fn lookup(handle_id: &str) -> Result<Arc<SpawnEntry>, VmError> {
 /// Evict oldest terminal entries to keep the registry at or below the cap.
 /// Never evicts a `Running` entry under normal flow; the defensive branch
 /// kills a running child if it is ever forced out (should not happen).
-fn evict_if_needed(registry: &mut BTreeMap<String, Arc<SpawnEntry>>) {
+fn evict_if_needed(registry: &mut BTreeMap<String, Arc<SpawnEntry>>, owner_key: Option<usize>) {
     while registry.len() >= REGISTRY_CAP {
-        // Prefer the oldest terminal entry.
+        // Prefer the oldest terminal entry in the same owner scope. A busy
+        // run should not evict another run's still-observable terminal
+        // handles while it has its own terminal entries available.
         let victim = registry
             .values()
-            .filter(|e| e.current_status().is_terminal())
+            .filter(|e| e.owner_key == owner_key && e.current_status().is_terminal())
             .min_by_key(|e| e.seq)
+            .or_else(|| {
+                registry
+                    .values()
+                    .filter(|e| e.current_status().is_terminal())
+                    .min_by_key(|e| e.seq)
+            })
             .map(|e| e.handle_id.clone());
         let victim = match victim {
             Some(handle_id) => handle_id,
@@ -187,6 +207,7 @@ fn evict_if_needed(registry: &mut BTreeMap<String, Arc<SpawnEntry>>) {
             }
         };
         if let Some(entry) = registry.remove(&victim) {
+            signal_entry_process_tree(&entry);
             tracing::info!(
                 handle_id = %entry.handle_id,
                 cap = REGISTRY_CAP,
@@ -202,9 +223,10 @@ fn evict_if_needed(registry: &mut BTreeMap<String, Arc<SpawnEntry>>) {
 pub(crate) async fn dispatch(
     operation: &str,
     params: &crate::value::DictMap,
+    owner_cancel_token: Option<Arc<AtomicBool>>,
 ) -> Option<Result<VmValue, VmError>> {
     match operation {
-        "spawn" => Some(spawn(params).await),
+        "spawn" => Some(spawn(params, owner_cancel_token).await),
         "poll" => Some(poll(params)),
         "wait" => Some(wait(params).await),
         "kill" => Some(kill(params).await),
@@ -213,7 +235,10 @@ pub(crate) async fn dispatch(
     }
 }
 
-async fn spawn(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
+async fn spawn(
+    params: &crate::value::DictMap,
+    owner_cancel_token: Option<Arc<AtomicBool>>,
+) -> Result<VmValue, VmError> {
     let timeout_ms = optional_i64(params, "timeout")
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
@@ -226,6 +251,12 @@ async fn spawn(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
         None => None,
     };
     let mut cmd = build_sandboxed_command(params, "process.spawn")?;
+    crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
+    let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
+    cmd.env(
+        crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
+        &cleanup_token,
+    );
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -241,9 +272,22 @@ async fn spawn(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let pid = child.id();
     let (handle_id, seq) = next_handle(pid);
 
+    let owner_key = owner_cancel_token
+        .as_ref()
+        .map(|token| Arc::as_ptr(token) as usize);
+
     let entry = Arc::new(SpawnEntry {
         handle_id: handle_id.clone(),
         pid,
+        cleanup_token: cleanup_token.clone(),
+        owner_key,
+        cleanup_registration: Mutex::new(Some(
+            crate::op_interrupt::register_active_process_cleanup(
+                pid,
+                &cleanup_token,
+                owner_cancel_token,
+            ),
+        )),
         command_display: command_display.clone(),
         started_at: started_at.clone(),
         seq,
@@ -263,7 +307,7 @@ async fn spawn(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
 
     {
         let mut registry = SPAWN_REGISTRY.lock().expect("spawn registry poisoned");
-        evict_if_needed(&mut registry);
+        evict_if_needed(&mut registry, owner_key);
         registry.insert(handle_id.clone(), entry);
     }
 
@@ -309,16 +353,16 @@ async fn run_to_completion(
         Exited(std::io::Result<std::process::ExitStatus>),
         Terminate(SpawnStatus),
     }
+    let mut timeout_sleep =
+        timeout_ms.map(|ms| Box::pin(tokio::time::sleep(Duration::from_millis(ms))));
     let outcome = {
         let wait = child.wait();
         tokio::pin!(wait);
-        if let Some(ms) = timeout_ms {
-            let sleep = tokio::time::sleep(Duration::from_millis(ms));
-            tokio::pin!(sleep);
+        if let Some(sleep) = timeout_sleep.as_mut() {
             tokio::select! {
                 result = &mut wait => Outcome::Exited(result),
                 _ = entry.kill_signal.notified() => Outcome::Terminate(SpawnStatus::Killed),
-                _ = &mut sleep => Outcome::Terminate(SpawnStatus::TimedOut),
+                _ = sleep.as_mut() => Outcome::Terminate(SpawnStatus::TimedOut),
             }
         } else {
             tokio::select! {
@@ -330,6 +374,7 @@ async fn run_to_completion(
     let (status, exit_code) = match outcome {
         Outcome::Exited(result) => exit_status(result),
         Outcome::Terminate(status) => {
+            signal_entry_process_tree(&entry);
             let _ = child.kill().await;
             let _ = child.wait().await;
             (status, -1)
@@ -337,12 +382,34 @@ async fn run_to_completion(
     };
 
     // Wait for the drain tasks so captured output is complete.
-    if let Some(task) = stdout_task {
-        let _ = task.await;
-    }
-    if let Some(task) = stderr_task {
-        let _ = task.await;
-    }
+    let drain_output = async {
+        if let Some(task) = stdout_task {
+            let _ = task.await;
+        }
+        if let Some(task) = stderr_task {
+            let _ = task.await;
+        }
+    };
+    tokio::pin!(drain_output);
+    let (status, exit_code) = if status == SpawnStatus::Exited {
+        if let Some(sleep) = timeout_sleep.as_mut() {
+            tokio::select! {
+                _ = &mut drain_output => (status, exit_code),
+                _ = sleep.as_mut() => {
+                    signal_entry_process_tree(&entry);
+                    drain_output.await;
+                    (SpawnStatus::TimedOut, -1)
+                }
+            }
+        } else {
+            drain_output.await;
+            (status, exit_code)
+        }
+    } else {
+        drain_output.await;
+        (status, exit_code)
+    };
+    entry.unregister_cleanup();
 
     let stdout = std::mem::take(&mut *stdout_buf.lock().expect("stdout buf poisoned"));
     let stderr = std::mem::take(&mut *stderr_buf.lock().expect("stderr buf poisoned"));
@@ -498,6 +565,7 @@ async fn kill(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     tokio::pin!(drained);
     // Ask the detached reaper to perform the real OS kill, child reap, and
     // output drain.
+    signal_entry_process_tree(&entry);
     entry.kill_signal.notify_one();
     // Publish the terminal status synchronously: the kill is observably done on
     // return, regardless of when the reaper's runtime is next scheduled. Under
@@ -522,6 +590,23 @@ fn kill_result(success: bool, status: SpawnStatus) -> VmValue {
     VmValue::dict(result)
 }
 
+fn signal_entry_process_tree(entry: &SpawnEntry) {
+    if let Some(pid) = entry.pid {
+        let mut report = crate::op_interrupt::signal_pid_tree_group_and_token_with_report(
+            pid,
+            Some(&entry.cleanup_token),
+            9,
+        );
+        report.refresh_survivor_status();
+        tracing::warn!(
+            handle_id = %entry.handle_id,
+            pid,
+            children = report.children.len(),
+            "host_call process.spawn signalled child process tree"
+        );
+    }
+}
+
 fn release(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let handle_id = require_param(params, "handle_id")?;
     let removed = {
@@ -532,6 +617,7 @@ fn release(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
         // If somehow still running, signal a kill so we never leak the
         // child after the caller has dropped its handle.
         if !entry.current_status().is_terminal() {
+            signal_entry_process_tree(entry);
             entry.kill_signal.notify_one();
         }
     }
@@ -590,8 +676,15 @@ mod tests {
     }
 
     async fn spawn_argv(items: &[&str]) -> VmValue {
+        spawn_argv_with_owner(items, None).await
+    }
+
+    async fn spawn_argv_with_owner(
+        items: &[&str],
+        owner_cancel_token: Option<StdArc<AtomicBool>>,
+    ) -> VmValue {
         let p = params(&[("mode", vstr("argv")), ("argv", argv(items))]);
-        dispatch("spawn", &p)
+        dispatch("spawn", &p, owner_cancel_token)
             .await
             .expect("spawn dispatched")
             .expect("spawn ok")
@@ -604,7 +697,7 @@ mod tests {
         assert!(handle_id.starts_with("psh-"));
         assert_eq!(get_str(&handle, "status"), "running");
 
-        let waited = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]))
+        let waited = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .expect("wait dispatched")
             .expect("wait ok");
@@ -615,7 +708,7 @@ mod tests {
         assert!(!get_bool(&waited, "running"));
 
         // Poll after completion is non-blocking and reports exited.
-        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]))
+        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
@@ -623,7 +716,7 @@ mod tests {
         assert!(!get_bool(&polled, "running"));
         assert_eq!(get_str(&polled, "stdout"), "hello");
 
-        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]))
+        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
@@ -634,21 +727,21 @@ mod tests {
         let handle = spawn_argv(&["sh", "-c", "sleep 0.4; printf done"]).await;
         let handle_id = get_str(&handle, "handle_id");
 
-        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]))
+        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(get_str(&polled, "status"), "running");
         assert!(get_bool(&polled, "running"));
 
-        let waited = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]))
+        let waited = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(get_str(&waited, "status"), "exited");
         assert_eq!(get_str(&waited, "stdout"), "done");
 
-        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]))
+        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
@@ -659,21 +752,21 @@ mod tests {
         let handle = spawn_argv(&["sh", "-c", "sleep 30"]).await;
         let handle_id = get_str(&handle, "handle_id");
 
-        let killed = dispatch("kill", &params(&[("handle_id", vstr(&handle_id))]))
+        let killed = dispatch("kill", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
         assert!(get_bool(&killed, "success"));
         assert_eq!(get_str(&killed, "status"), "killed");
 
-        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]))
+        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(get_str(&polled, "status"), "killed");
         assert!(!get_bool(&polled, "running"));
 
-        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]))
+        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
@@ -686,17 +779,17 @@ mod tests {
             ("argv", argv(&["sh", "-c", "sleep 30"])),
             ("timeout_ms", VmValue::Int(150)),
         ]);
-        let handle = dispatch("spawn", &p).await.unwrap().unwrap();
+        let handle = dispatch("spawn", &p, None).await.unwrap().unwrap();
         let handle_id = get_str(&handle, "handle_id");
 
-        let waited = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]))
+        let waited = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(get_str(&waited, "status"), "timed_out");
         assert!(get_bool(&waited, "timed_out"));
 
-        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]))
+        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
@@ -713,6 +806,7 @@ mod tests {
                 ("handle_id", vstr(&handle_id)),
                 ("timeout_ms", VmValue::Int(100)),
             ]),
+            None,
         )
         .await
         .unwrap()
@@ -721,14 +815,14 @@ mod tests {
         assert!(get_bool(&waited, "running"));
 
         // Process must still be alive — a second wait completes it.
-        let finished = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]))
+        let finished = dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(get_str(&finished, "status"), "exited");
         assert_eq!(get_str(&finished, "stdout"), "later");
 
-        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]))
+        dispatch("release", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
@@ -737,15 +831,20 @@ mod tests {
     #[tokio::test]
     async fn unknown_handle_errors_on_every_op() {
         for op in ["poll", "wait", "kill"] {
-            let result = dispatch(op, &params(&[("handle_id", vstr("psh-deadbeef-999"))]))
-                .await
-                .unwrap();
+            let result = dispatch(
+                op,
+                &params(&[("handle_id", vstr("psh-deadbeef-999"))]),
+                None,
+            )
+            .await
+            .unwrap();
             assert!(result.is_err(), "{op} should error on unknown handle");
         }
         // release of an unknown handle is a no-op reporting released:false.
         let released = dispatch(
             "release",
             &params(&[("handle_id", vstr("psh-deadbeef-999"))]),
+            None,
         )
         .await
         .unwrap()
@@ -757,19 +856,19 @@ mod tests {
     async fn release_frees_entry() {
         let handle = spawn_argv(&["sh", "-c", "printf x"]).await;
         let handle_id = get_str(&handle, "handle_id");
-        dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]))
+        dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
 
-        let released = dispatch("release", &params(&[("handle_id", vstr(&handle_id))]))
+        let released = dispatch("release", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap()
             .unwrap();
         assert!(get_bool(&released, "released"));
 
         // Now the handle is unknown.
-        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]))
+        let polled = dispatch("poll", &params(&[("handle_id", vstr(&handle_id))]), None)
             .await
             .unwrap();
         assert!(polled.is_err());
@@ -783,11 +882,11 @@ mod tests {
         let bh = get_str(&b, "handle_id");
         assert_ne!(ah, bh);
 
-        let aw = dispatch("wait", &params(&[("handle_id", vstr(&ah))]))
+        let aw = dispatch("wait", &params(&[("handle_id", vstr(&ah))]), None)
             .await
             .unwrap()
             .unwrap();
-        let bw = dispatch("wait", &params(&[("handle_id", vstr(&bh))]))
+        let bw = dispatch("wait", &params(&[("handle_id", vstr(&bh))]), None)
             .await
             .unwrap()
             .unwrap();
@@ -795,7 +894,7 @@ mod tests {
         assert_eq!(get_str(&bw, "stdout"), "BBB");
 
         for h in [ah, bh] {
-            dispatch("release", &params(&[("handle_id", vstr(&h))]))
+            dispatch("release", &params(&[("handle_id", vstr(&h))]), None)
                 .await
                 .unwrap()
                 .unwrap();
@@ -807,11 +906,13 @@ mod tests {
         // Spawn a quick child and wait for it to terminate, then force the
         // registry over cap: eviction must drop terminal entries and keep
         // the registry bounded at REGISTRY_CAP.
+        let owner = StdArc::new(AtomicBool::new(false));
         let mut handles = Vec::new();
         for _ in 0..(REGISTRY_CAP + 8) {
-            let handle = spawn_argv(&["sh", "-c", "printf z"]).await;
+            let handle =
+                spawn_argv_with_owner(&["sh", "-c", "printf z"], Some(StdArc::clone(&owner))).await;
             let handle_id = get_str(&handle, "handle_id");
-            dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]))
+            dispatch("wait", &params(&[("handle_id", vstr(&handle_id))]), None)
                 .await
                 .unwrap()
                 .unwrap();
@@ -825,7 +926,7 @@ mod tests {
 
         // Clean up whatever survived eviction.
         for h in handles {
-            let _ = dispatch("release", &params(&[("handle_id", vstr(&h))])).await;
+            let _ = dispatch("release", &params(&[("handle_id", vstr(&h))]), None).await;
         }
     }
 }
