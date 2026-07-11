@@ -792,7 +792,7 @@ fn default_log_path(base_dir: &Path, provider: &str) -> Result<PathBuf, String> 
     let dir = ensure_state_dir(base_dir)?.join("logs");
     let stamp = OffsetDateTime::now_utc()
         .format(
-            &format_description::parse("[year][month][day]T[hour][minute][second]Z")
+            &format_description::parse_borrowed::<1>("[year][month][day]T[hour][minute][second]Z")
                 .map_err(|error| format!("failed to build timestamp format: {error}"))?,
         )
         .unwrap_or_else(|_| "unknown-time".to_string());

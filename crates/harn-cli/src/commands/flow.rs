@@ -1299,7 +1299,7 @@ fn parse_since(raw: &str) -> Result<OffsetDateTime, String> {
         };
         return parsed.map_err(|error| format!("invalid --since timestamp '{raw}': {error}"));
     }
-    let date_format = time::format_description::parse("[year]-[month]-[day]")
+    let date_format = time::format_description::parse_borrowed::<1>("[year]-[month]-[day]")
         .map_err(|error| format!("failed to build date parser: {error}"))?;
     let date = Date::parse(raw, &date_format).map_err(|_| {
         format!("invalid --since date '{raw}'; use RFC3339, unix time, or YYYY-MM-DD")
