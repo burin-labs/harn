@@ -1151,7 +1151,20 @@ pub(crate) fn project_call_cost(
 ) -> f64 {
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
     let cache_write_rate = detail.cache_write_per_1k.unwrap_or(detail.input_per_1k);
-    let billable_input = (input_tokens - cache_read_tokens - cache_write_tokens).max(0);
+    // Providers report cache tokens under two conventions. OpenAI folds cached
+    // tokens into `input_tokens`, so cached counts must be subtracted to avoid
+    // double-billing. Anthropic (and OpenRouter-Anthropic) report `input_tokens`
+    // already excluding cache, with cache counts in separate fields, so the raw
+    // input is the non-cached remainder. Normalize the same way `cache_hit_ratio`
+    // does: if the cache total fits within input, treat cache as a subset;
+    // otherwise treat input as already exclusive of cache.
+    let cache_total = cache_read_tokens.saturating_add(cache_write_tokens);
+    let billable_input = if cache_total <= input_tokens {
+        input_tokens - cache_total
+    } else {
+        input_tokens
+    }
+    .max(0);
     (billable_input as f64 * detail.input_per_1k
         + output_tokens as f64 * detail.output_per_1k
         + cache_read_tokens as f64 * cache_read_rate
@@ -1454,10 +1467,48 @@ mod tests {
 
     #[test]
     fn project_call_cost_excludes_cached_input_from_full_rate() {
+        // OpenAI (subset) convention: cache tokens are folded into `input_tokens`,
+        // so subtracting them yields fewer full-rate tokens than the no-cache call.
         let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
         let with_cache = project_call_cost(&detail, 10_000, 500, 8_000, 0);
         let no_cache = project_call_cost(&detail, 10_000, 500, 0, 0);
         assert!(with_cache < no_cache);
+    }
+
+    #[test]
+    fn project_call_cost_openai_subset_convention_subtracts_cache() {
+        // OpenAI reports cache tokens inside `input_tokens`. Billable input is the
+        // remainder after removing the cached subset; cache billed at cache rate.
+        let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
+        let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
+        let got = project_call_cost(&detail, 10_000, 500, 8_000, 0);
+        let expected = (2_000.0 * detail.input_per_1k
+            + 500.0 * detail.output_per_1k
+            + 8_000.0 * cache_read_rate)
+            / 1000.0;
+        assert!((got - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn project_call_cost_anthropic_separate_convention_bills_full_input() {
+        // Anthropic reports `input_tokens` already excluding cache, with cache in
+        // separate fields (cache_read > input). The 200 real non-cached input
+        // tokens must be billed at the full input rate, not zeroed out.
+        let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
+        let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
+        let got = project_call_cost(&detail, 200, 500, 10_000, 0);
+        let expected = (200.0 * detail.input_per_1k
+            + 500.0 * detail.output_per_1k
+            + 10_000.0 * cache_read_rate)
+            / 1000.0;
+        assert!((got - expected).abs() < 1e-9);
+        // Regression guard for the pre-fix bug: (200 - 10000).max(0) == 0 dropped
+        // the real input entirely.
+        let buggy = ((200_i64 - 10_000).max(0) as f64 * detail.input_per_1k
+            + 500.0 * detail.output_per_1k
+            + 10_000.0 * cache_read_rate)
+            / 1000.0;
+        assert!(got > buggy);
     }
 
     #[test]
