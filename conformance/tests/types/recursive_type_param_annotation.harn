@@ -1,0 +1,23 @@
+// A recursive type alias used as a parameter annotation must lower to a finite
+// runtime schema (cycle-broken) instead of overflowing the stack. Regression
+// for the `types_compatible_at` infinite alias re-resolution (and the
+// compiler's `expand_alias` cycle) that used to SIGABRT `harn check`/`harn run`
+// on any function whose parameter is annotated with a self-referential type.
+type Tree = {value: int, children: list<Tree>}
+
+type Node = {head: int, tail: Node?}
+
+fn root_value(t: Tree) -> int {
+  return t.value
+}
+
+fn head_value(n: Node) -> int {
+  return n.head
+}
+
+pipeline default() {
+  const tree: Tree = {value: 7, children: [{value: 2, children: []}]}
+  __io_println(to_string(root_value(tree)))
+  const list: Node = {head: 10, tail: {head: 20, tail: nil}}
+  __io_println(to_string(head_value(list)))
+}

@@ -17,6 +17,18 @@ use super::super::scope::{Polarity, TypeScope};
 use super::super::union::collapse_members;
 use super::super::TypeChecker;
 
+/// RAII pop for the coinductive recursion guard in
+/// [`TypeChecker::types_compatible_at`]. Holding the guard by value means every
+/// exit path — including the many early `return`s in that function — removes
+/// the pushed `(expected, actual)` pair when the borrow ends.
+struct SubtypeCycleGuard<'a>(&'a std::cell::RefCell<Vec<(TypeExpr, TypeExpr)>>);
+
+impl Drop for SubtypeCycleGuard<'_> {
+    fn drop(&mut self) {
+        self.0.borrow_mut().pop();
+    }
+}
+
 /// Whether an open record's trailing row tails are *gradual* — a `dict`,
 /// `dict<K, V>`, or `any` tail stands for unknown fields, so a required
 /// expected field absent from the known fields may still be present at
@@ -264,6 +276,55 @@ impl TypeChecker {
         self.types_compatible_at(Polarity::Covariant, expected, actual, scope)
     }
 
+    /// Maximum structural nesting depth of a subtype check before the
+    /// coinductive backstop assumes compatibility. Recursive types normally
+    /// terminate via reflexivity or the repeated-pair guard; this only fires on
+    /// pathological growth and sits far above any realistic hand-written type.
+    const SUBTYPE_RECURSION_LIMIT: usize = 256;
+
+    /// Types whose subtype check recurses into components (or resolves through a
+    /// user alias) and can therefore close a cycle through a recursive alias.
+    /// A `Named` referring to a built-in scalar/gradual type resolves to itself
+    /// and cannot recurse, so it stays on the fast path alongside literals and
+    /// `never`; every other `Named` is a potential (possibly recursive) alias.
+    /// This gates the coinductive guard in [`Self::types_compatible_at`], which
+    /// keys on the pre-resolution pair.
+    fn type_can_cycle(ty: &TypeExpr) -> bool {
+        match ty {
+            TypeExpr::Named(name) => !matches!(
+                name.as_str(),
+                "int"
+                    | "float"
+                    | "string"
+                    | "bool"
+                    | "nil"
+                    | "list"
+                    | "dict"
+                    | "set"
+                    | "closure"
+                    | "bytes"
+                    | "any"
+                    | "unknown"
+                    | "never"
+                    | "number"
+                    | "_"
+            ),
+            TypeExpr::Shape(_)
+            | TypeExpr::OpenShape { .. }
+            | TypeExpr::List(_)
+            | TypeExpr::DictType(..)
+            | TypeExpr::Applied { .. }
+            | TypeExpr::Union(_)
+            | TypeExpr::Intersection(_)
+            | TypeExpr::Iter(_)
+            | TypeExpr::Generator(_)
+            | TypeExpr::Stream(_)
+            | TypeExpr::FnType { .. }
+            | TypeExpr::Owned(_) => true,
+            TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => false,
+        }
+    }
+
     /// Check a record's explicit fields against an actual record's known
     /// fields (the shared core of shape / open-shape subtyping). Each expected
     /// field must be present-and-compatible, be optional, or — when missing —
@@ -320,6 +381,53 @@ impl TypeChecker {
         if Self::is_wildcard_type(expected) || Self::is_wildcard_type(actual) {
             return true;
         }
+
+        // Reflexivity: a type is always a subtype of itself. Besides being a
+        // cheap fast path, this is what terminates the common recursive-type
+        // comparison (`types_compatible(Tree, Tree)` where
+        // `type Tree = {value: int, children: [Tree]}`): each structural step
+        // re-expands the alias one level deeper, so the resolved pair grows
+        // without bound, but the two sides stay *identical* the whole way down.
+        // Bailing out here closes that cycle before it can recurse.
+        if expected == actual {
+            return true;
+        }
+
+        // Coinductive guard for recursive type aliases. A recursive alias
+        // (`type Tree = {value: int, children: [Tree]}`) makes the structural
+        // walk below re-resolve the alias one layer deeper at every level, so a
+        // naive recursion never terminates. The guard is keyed on the
+        // *pre-resolution* `(expected, actual)` pair — that is stable across the
+        // cycle (`Tree` vs `Tree` recurs as `Tree` vs `Tree`), whereas the
+        // resolved shapes grow without bound. A repeat means we have closed a
+        // cycle through the recursion, at which point we assume compatibility
+        // (equirecursive / greatest-fixpoint subtyping — the same rule
+        // TypeScript and Flow use). Only alias names and compound types can
+        // cycle, so scalars skip the bookkeeping and stay on the fast path.
+        // `_cycle_guard` pops the pushed pair on every exit path via `Drop`.
+        let _cycle_guard = if Self::type_can_cycle(expected) {
+            let stack = self.subtype_cycle_guard.borrow();
+            if stack.iter().any(|(e, a)| e == expected && a == actual) {
+                return true;
+            }
+            // Depth backstop: recursive types that never present an identical or
+            // repeated pair (e.g. two structurally-distinct mutually-recursive
+            // aliases whose resolved forms grow in lockstep) would otherwise
+            // recurse until the stack overflows. Past this generous nesting
+            // depth we assume compatibility — the greatest-fixpoint answer, and
+            // far deeper than any hand-written non-recursive type.
+            if stack.len() >= Self::SUBTYPE_RECURSION_LIMIT {
+                return true;
+            }
+            drop(stack);
+            self.subtype_cycle_guard
+                .borrow_mut()
+                .push((expected.clone(), actual.clone()));
+            Some(SubtypeCycleGuard(&self.subtype_cycle_guard))
+        } else {
+            None
+        };
+
         let expected = self.resolve_alias(expected, scope);
         let actual = self.resolve_alias(actual, scope);
 
