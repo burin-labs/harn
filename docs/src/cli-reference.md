@@ -840,7 +840,9 @@ whole-tree checks scale with the number of distinct modules rather than
 `files x import closure`. Per-file output order and content match the serial
 driver exactly. Set `HARN_CHECK_JOBS=<n>` to pin the pool size
 (`HARN_CHECK_JOBS=1` restores fully serial checking, e.g. when bisecting a
-diagnostic that depends on machine load).
+diagnostic that depends on machine load). The module-graph build that
+precedes checking is likewise parallel per import wave; pin it independently
+with `HARN_MODULE_GRAPH_JOBS=<n>`.
 
 `--invariants` includes the capability-policy lattice:
 

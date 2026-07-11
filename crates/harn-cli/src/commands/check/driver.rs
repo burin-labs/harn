@@ -80,6 +80,7 @@ pub(crate) fn check_files(
 ) -> Vec<CheckedFile> {
     let workers = worker_count(files.len());
     let parsed_sources = Mutex::new(parsed_sources);
+    let config_by_dir: Mutex<HashMap<PathBuf, package::CheckConfig>> = Mutex::new(HashMap::new());
     let next = AtomicUsize::new(0);
 
     let run_worker = || {
@@ -95,6 +96,7 @@ pub(crate) fn check_files(
                 file,
                 module_graph,
                 &parsed_sources,
+                &config_by_dir,
                 cross_file_imports,
                 overrides,
                 want_text,
@@ -136,6 +138,7 @@ fn check_one(
     file: &Path,
     module_graph: &harn_modules::ModuleGraph,
     parsed_sources: &Mutex<HashMap<PathBuf, harn_modules::ParsedModuleSource>>,
+    config_by_dir: &Mutex<HashMap<PathBuf, package::CheckConfig>>,
     cross_file_imports: &HashSet<String>,
     overrides: &CheckCliOverrides,
     want_text: bool,
@@ -148,7 +151,7 @@ fn check_one(
             parsed.program,
         );
     }
-    let mut config = package::load_check_config(Some(file));
+    let mut config = load_check_config_cached(config_by_dir, file);
     if let Some(path) = overrides.host_capabilities.as_ref() {
         config.host_capabilities_path = Some(path.clone());
     }
@@ -178,6 +181,34 @@ fn check_one(
     }
 }
 
+/// Load the `[check]` config for `file`, memoized per parent directory for
+/// the run. `load_check_config` walks up to 16 ancestor directories probing
+/// for `harn.toml` and re-parses the manifest on every call; sibling files
+/// share the answer, so a whole-tree check needs it once per directory, not
+/// once per file.
+fn load_check_config_cached(
+    config_by_dir: &Mutex<HashMap<PathBuf, package::CheckConfig>>,
+    file: &Path,
+) -> package::CheckConfig {
+    let Some(dir) = file.parent() else {
+        return package::load_check_config(Some(file));
+    };
+    if let Some(hit) = config_by_dir
+        .lock()
+        .expect("check config memo lock poisoned")
+        .get(dir)
+        .cloned()
+    {
+        return hit;
+    }
+    let config = package::load_check_config(Some(file));
+    config_by_dir
+        .lock()
+        .expect("check config memo lock poisoned")
+        .insert(dir.to_path_buf(), config.clone());
+    config
+}
+
 /// Claim the module-graph build's parsed AST for `file`, if still unclaimed.
 /// Keyed by canonical path exactly like the graph build's retention set; on
 /// any canonicalization failure the worker just re-parses from disk.
@@ -185,7 +216,7 @@ fn take_parsed_source(
     parsed_sources: &Mutex<HashMap<PathBuf, harn_modules::ParsedModuleSource>>,
     file: &Path,
 ) -> Option<harn_modules::ParsedModuleSource> {
-    let canonical = std::fs::canonicalize(file).ok()?;
+    let canonical = harn_modules::canonical_path(file);
     parsed_sources
         .lock()
         .expect("parsed-source map lock poisoned")

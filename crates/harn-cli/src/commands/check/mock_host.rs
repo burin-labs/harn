@@ -13,9 +13,7 @@ pub(super) fn collect_mock_host_capabilities(
     visited: &mut HashSet<PathBuf>,
     capabilities: &mut HashMap<String, HashSet<String>>,
 ) {
-    let canonical = file_path
-        .canonicalize()
-        .unwrap_or_else(|_| file_path.to_path_buf());
+    let canonical = harn_modules::canonical_path(file_path);
     if !visited.insert(canonical.clone()) {
         return;
     }

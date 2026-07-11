@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use harn_lexer::Span;
@@ -165,56 +165,116 @@ fn build_inner(
     let mut modules: HashMap<PathBuf, ModuleInfo> = HashMap::new();
     let mut parsed_sources: HashMap<PathBuf, ParsedModuleSource> = HashMap::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
-    let mut queue: VecDeque<PathBuf> = VecDeque::new();
+    let mut wave: Vec<PathBuf> = Vec::new();
     for file in files {
         let canonical = normalize_path(file);
         if seen.insert(canonical.clone()) {
-            queue.push_back(canonical);
+            wave.push(canonical);
         }
     }
-    while let Some(path) = queue.pop_front() {
-        if modules.contains_key(&path) {
-            continue;
-        }
-        let retain_parsed_source =
-            parsed_source_targets.is_some_and(|targets| targets.contains(&path));
-        let (module, parsed) = load_module(&path);
-        if retain_parsed_source {
-            if let Some(parsed) = parsed {
-                parsed_sources.insert(path.clone(), parsed);
-            }
-        }
-        // Enqueue resolved import targets so the whole reachable graph is
-        // discovered without the caller having to pre-walk imports.
-        //
-        // `resolve_import_path` returns paths as `base.join(import)` —
-        // i.e. with `..` segments preserved rather than collapsed. If we
-        // dedupe on those raw forms, two files that import each other
-        // across sibling dirs (`lib/context/` ↔ `lib/runtime/`) produce a
-        // different path spelling on every cycle — `.../context/../runtime/`,
-        // then `.../context/../runtime/../context/`, and so on — each of
-        // which is treated as a new file. The walk only terminates when
-        // `path.exists()` starts failing at the filesystem's `PATH_MAX`,
-        // which is 1024 on macOS but 4096 on Linux. Linux therefore
-        // re-parses the same handful of files thousands of times, balloons
-        // RSS into the multi-GB range, and gets SIGKILL'd by CI runners.
-        // Canonicalize once here so `seen` dedupes by the underlying file,
-        // not by its path spelling.
-        for import in &module.imports {
-            if let Some(import_path) = &import.path {
-                let canonical = normalize_path(import_path);
-                if seen.insert(canonical.clone()) {
-                    queue.push_back(canonical);
+    // Breadth-first over import waves. Every path in a wave is new (the
+    // `seen` set dedupes before enqueue), and `load_module` is a pure
+    // read+lex+parse+extract, so each wave loads in parallel; discovery of
+    // the next wave stays sequential to keep the dedup deterministic. A
+    // whole-tree seed set arrives as one large first wave, which is where
+    // nearly all the parse work is, so the serial-BFS tail on deep import
+    // chains does not matter in practice.
+    while !wave.is_empty() {
+        let loaded = load_wave(&wave);
+        let mut next_wave: Vec<PathBuf> = Vec::new();
+        for (path, (module, parsed)) in wave.drain(..).zip(loaded) {
+            let retain_parsed_source =
+                parsed_source_targets.is_some_and(|targets| targets.contains(&path));
+            if retain_parsed_source {
+                if let Some(parsed) = parsed {
+                    parsed_sources.insert(path.clone(), parsed);
                 }
             }
+            // Enqueue resolved import targets so the whole reachable graph is
+            // discovered without the caller having to pre-walk imports.
+            //
+            // `resolve_import_path` returns paths as `base.join(import)` —
+            // i.e. with `..` segments preserved rather than collapsed. If we
+            // dedupe on those raw forms, two files that import each other
+            // across sibling dirs (`lib/context/` ↔ `lib/runtime/`) produce a
+            // different path spelling on every cycle — `.../context/../runtime/`,
+            // then `.../context/../runtime/../context/`, and so on — each of
+            // which is treated as a new file. The walk only terminates when
+            // `path.exists()` starts failing at the filesystem's `PATH_MAX`,
+            // which is 1024 on macOS but 4096 on Linux. Linux therefore
+            // re-parses the same handful of files thousands of times, balloons
+            // RSS into the multi-GB range, and gets SIGKILL'd by CI runners.
+            // Canonicalize once here so `seen` dedupes by the underlying file,
+            // not by its path spelling.
+            for import in &module.imports {
+                if let Some(import_path) = &import.path {
+                    let canonical = normalize_path(import_path);
+                    if seen.insert(canonical.clone()) {
+                        next_wave.push(canonical);
+                    }
+                }
+            }
+            modules.insert(path, module);
         }
-        modules.insert(path, module);
+        wave = next_wave;
     }
     resolve_re_exports(&mut modules);
     ModuleGraphBuild {
         graph: ModuleGraph { modules },
         parsed_sources,
     }
+}
+
+/// Environment override for the graph-build worker-pool size. `1` forces the
+/// serial walk; unset defaults to the machine's available parallelism.
+pub const MODULE_GRAPH_JOBS_ENV: &str = "HARN_MODULE_GRAPH_JOBS";
+
+/// Load one BFS wave of module paths, in parallel when the wave is large
+/// enough to pay for the threads. Results are index-aligned with `paths`.
+fn load_wave(paths: &[PathBuf]) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
+    const MIN_PARALLEL_WAVE: usize = 8;
+    let configured = std::env::var(MODULE_GRAPH_JOBS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|&jobs| jobs > 0);
+    let workers = configured
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(std::num::NonZeroUsize::get)
+                .unwrap_or(1)
+        })
+        .min(paths.len());
+    if workers <= 1 || paths.len() < MIN_PARALLEL_WAVE {
+        return paths.iter().map(|path| load_module(path)).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut produced: Vec<(usize, (ModuleInfo, Option<ParsedModuleSource>))> =
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..workers)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut local = Vec::new();
+                        loop {
+                            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(path) = paths.get(index) else {
+                                break;
+                            };
+                            local.push((index, load_module(path)));
+                        }
+                        local
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|handle| match handle.join() {
+                    Ok(local) => local,
+                    Err(panic) => std::panic::resume_unwind(panic),
+                })
+                .collect()
+        });
+    produced.sort_unstable_by_key(|(index, _)| *index);
+    produced.into_iter().map(|(_, loaded)| loaded).collect()
 }
 
 /// Iteratively expand each module's `exports` set to include the transitive
@@ -1204,10 +1264,45 @@ fn pattern_names(pattern: &BindingPattern) -> Vec<String> {
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
+    canonical_path(path)
+}
+
+/// Canonicalize `path`, memoized process-wide.
+///
+/// Module-graph construction and every per-file graph query canonicalize
+/// paths to dedupe import-edge spellings, and the check preflight scan
+/// canonicalizes each visited module per checked file. `Path::canonicalize`
+/// resolves every component through the kernel, so a whole-tree `harn check`
+/// used to spend the bulk of its wall clock in path-resolution syscalls
+/// (`getattrlist` dominated system time). One positive-result memo removes
+/// the `O(files x import closure)` repetition; failed canonicalizations are
+/// not memoized (mirroring the bytecode cache's `canonicalize_cached`) so a
+/// file that appears later still resolves correctly in long-lived processes.
+/// `<std>/` virtual paths pass through untouched.
+pub fn canonical_path(path: &Path) -> PathBuf {
+    use std::sync::OnceLock;
     if stdlib_module_from_path(path).is_some() {
         return path.to_path_buf();
     }
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    static MEMO: OnceLock<std::sync::Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    let memo = MEMO.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    if let Some(hit) = memo
+        .lock()
+        .expect("canonical path memo lock poisoned")
+        .get(path)
+        .cloned()
+    {
+        return hit;
+    }
+    match path.canonicalize() {
+        Ok(canonical) => {
+            memo.lock()
+                .expect("canonical path memo lock poisoned")
+                .insert(path.to_path_buf(), canonical.clone());
+            canonical
+        }
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 #[cfg(test)]
@@ -1219,6 +1314,38 @@ mod tests {
         let path = dir.join(name);
         fs::write(&path, contents).unwrap();
         path
+    }
+
+    #[test]
+    fn wave_parallel_build_matches_serial_semantics() {
+        // Seed enough files to cross MIN_PARALLEL_WAVE so `load_wave` takes
+        // the threaded path, and verify the graph resolves exactly as the
+        // serial walk always did: every seed sees the shared module's export
+        // and the shared module knows all its importers.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(root, "shared.harn", "pub fn shared_fn() { 1 }\n");
+        let seeds: Vec<PathBuf> = (0..12)
+            .map(|i| {
+                write_file(
+                    root,
+                    &format!("mod{i}.harn"),
+                    &format!(
+                        "import {{ shared_fn }} from \"./shared\"\npub fn f{i}() {{ shared_fn() }}\n"
+                    ),
+                )
+            })
+            .collect();
+
+        let graph = build(&seeds);
+        for seed in &seeds {
+            let names = graph
+                .imported_names_for_file(seed)
+                .expect("seed imports should resolve");
+            assert!(names.contains("shared_fn"));
+        }
+        let importers = graph.importers_of(&root.join("shared.harn"));
+        assert_eq!(importers.len(), seeds.len());
     }
 
     #[test]
