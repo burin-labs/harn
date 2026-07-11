@@ -8,10 +8,10 @@ use serde::Serialize;
 use crate::package::{CheckConfig, PreflightSeverity};
 
 use super::analysis::{
-    analyze_file, render_file_analysis_error_or_exit, span_from_lexer_error,
+    analyze_file, render_file_analysis_error_to_string, span_from_lexer_error,
     span_from_parser_error, FileAnalysisError,
 };
-use super::outcome::{print_lint_diagnostics, CommandOutcome};
+use super::outcome::{render_lint_diagnostics, CommandOutcome};
 use super::preflight::{collect_preflight_diagnostics_with_module_graph, is_preflight_allowed};
 
 pub(crate) const CHECK_SCHEMA_VERSION: u32 = 1;
@@ -90,6 +90,30 @@ impl CheckReport {
     }
 }
 
+/// Rendered per-file text output, kept separate by destination stream so a
+/// parallel driver can buffer whole-file output and replay it in input order
+/// without interleaving. `stdout` carries the `<path>: ok` line; `stderr`
+/// carries rendered diagnostics — matching what the serial CLI always did.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CheckTextOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl CheckTextOutput {
+    pub(crate) fn print(&self) {
+        use std::io::Write as _;
+        if !self.stderr.is_empty() {
+            eprint!("{}", self.stderr);
+            let _ = std::io::stderr().flush();
+        }
+        if !self.stdout.is_empty() {
+            print!("{}", self.stdout);
+            let _ = std::io::stdout().flush();
+        }
+    }
+}
+
 pub(crate) fn check_file_inner(
     analysis: &mut AnalysisDatabase,
     path: &Path,
@@ -98,18 +122,21 @@ pub(crate) fn check_file_inner(
     module_graph: &harn_modules::ModuleGraph,
     check_invariants: bool,
 ) -> CommandOutcome {
-    check_file_report_inner(
+    let mut text = CheckTextOutput::default();
+    let report = check_file_report_inner(
         analysis,
         path,
         config,
         externally_imported_names,
         module_graph,
         check_invariants,
-        true,
-    )
-    .outcome()
+        Some(&mut text),
+    );
+    text.print();
+    report.outcome()
 }
 
+#[cfg(test)]
 pub(crate) fn check_file_report(
     analysis: &mut AnalysisDatabase,
     path: &Path,
@@ -125,25 +152,26 @@ pub(crate) fn check_file_report(
         externally_imported_names,
         module_graph,
         check_invariants,
-        false,
+        None,
     )
 }
 
-fn check_file_report_inner(
+pub(crate) fn check_file_report_inner(
     analysis: &mut AnalysisDatabase,
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
     check_invariants: bool,
-    emit_text: bool,
+    mut text: Option<&mut CheckTextOutput>,
 ) -> CheckFileReport {
     let path_str = path.to_string_lossy().into_owned();
     let output = match analyze_file(analysis, path, config, module_graph) {
         Ok(output) => output,
         Err(error) => {
-            if emit_text {
-                render_file_analysis_error_or_exit(&path_str, error);
+            if let Some(text) = text.as_mut() {
+                text.stderr
+                    .push_str(&render_file_analysis_error_to_string(&path_str, &error));
             }
             return file_analysis_error_report(&path_str, error);
         }
@@ -165,10 +193,10 @@ fn check_file_report_inner(
             DiagnosticSeverity::Warning => has_warning = true,
         }
         diagnostic_count += 1;
-        if emit_text {
+        if let Some(text) = text.as_mut() {
             let rendered =
                 harn_parser::diagnostic::render_type_diagnostic(&source, &path_str, diag);
-            eprint!("{rendered}");
+            text.stderr.push_str(&rendered);
         }
         diagnostics.push(CheckDiagnostic {
             source: "type",
@@ -194,7 +222,7 @@ fn check_file_report_inner(
             diagnostic_count += 1;
             let code = harn_parser::diagnostic_codes::Code::CompilerError;
             let span = harn_lexer::Span::with_offsets(0, 0, compile_err.line as usize, 1);
-            if emit_text {
+            if let Some(text) = text.as_mut() {
                 let rendered = harn_parser::diagnostic::render_diagnostic_with_code(
                     &source,
                     &path_str,
@@ -205,7 +233,7 @@ fn check_file_report_inner(
                     None,
                     None,
                 );
-                eprint!("{rendered}");
+                text.stderr.push_str(&rendered);
             }
             diagnostics.push(CheckDiagnostic {
                 source: "compile",
@@ -237,8 +265,11 @@ fn check_file_report_inner(
     {
         has_warning = true;
     }
-    if emit_text {
-        if print_lint_diagnostics(&path_str, &source, &lint_diagnostics).0 {
+    if let Some(text) = text.as_mut() {
+        let (lint_has_error, _, rendered) =
+            render_lint_diagnostics(&path_str, &source, &lint_diagnostics);
+        text.stderr.push_str(&rendered);
+        if lint_has_error {
             has_error = true;
         }
     } else if lint_diagnostics
@@ -279,7 +310,7 @@ fn check_file_report_inner(
                 PreflightSeverity::Off => unreachable!(),
             }
             diagnostic_count += 1;
-            if emit_text {
+            if let Some(text) = text.as_mut() {
                 let rendered = harn_parser::diagnostic::render_diagnostic_with_code(
                     &diag.source,
                     &diag.path,
@@ -290,7 +321,7 @@ fn check_file_report_inner(
                     Some(category),
                     diag.help.as_deref(),
                 );
-                eprint!("{rendered}");
+                text.stderr.push_str(&rendered);
             }
             diagnostics.push(CheckDiagnostic {
                 source: category,
@@ -308,7 +339,7 @@ fn check_file_report_inner(
         for diag in &report.diagnostics {
             has_error = true;
             diagnostic_count += 1;
-            if emit_text {
+            if let Some(text) = text.as_mut() {
                 let rendered = harn_parser::diagnostic::render_diagnostic(
                     &source,
                     &path_str,
@@ -318,7 +349,7 @@ fn check_file_report_inner(
                     Some(&format!("invariant[{}]", diag.invariant)),
                     diag.help.as_deref(),
                 );
-                eprint!("{rendered}");
+                text.stderr.push_str(&rendered);
             }
             diagnostics.push(CheckDiagnostic {
                 source: "invariant",
@@ -331,8 +362,10 @@ fn check_file_report_inner(
         }
     }
 
-    if diagnostic_count == 0 && emit_text {
-        println!("{path_str}: ok");
+    if diagnostic_count == 0 {
+        if let Some(text) = text.as_mut() {
+            text.stdout.push_str(&format!("{path_str}: ok\n"));
+        }
     }
 
     let status = if has_error {

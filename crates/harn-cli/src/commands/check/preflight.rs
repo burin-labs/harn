@@ -993,13 +993,11 @@ fn scan_node_preflight(
         Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
             match resolve_import_path(file_path, path) {
                 Some(import_path) => {
-                    if let Some((import_source, import_program)) =
-                        parse_resolved_module(&import_path)
-                    {
+                    if let Some(parsed) = parse_resolved_module(&import_path) {
                         scan_program_preflight(
                             &import_path,
-                            &import_source,
-                            &import_program,
+                            &parsed.0,
+                            &parsed.1,
                             config,
                             host_capabilities,
                             visited,

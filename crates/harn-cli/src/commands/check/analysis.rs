@@ -49,27 +49,38 @@ pub(crate) fn typecheck_config(
 }
 
 pub(crate) fn render_file_analysis_error_or_exit(path: &str, error: FileAnalysisError) -> ! {
+    eprint!("{}", render_file_analysis_error_to_string(path, &error));
+    std::process::exit(1);
+}
+
+/// Render a lex/parse/read failure exactly as the exiting variant prints it,
+/// but into a string, so buffered drivers can replay it in file order and
+/// keep checking the remaining files.
+pub(crate) fn render_file_analysis_error_to_string(
+    path: &str,
+    error: &FileAnalysisError,
+) -> String {
     match error {
         FileAnalysisError::Read(error) => {
-            eprintln!("Error reading {path}: {error}");
+            format!("Error reading {path}: {error}\n")
         }
         FileAnalysisError::Analysis(AnalysisError::Lex { source, error }) => {
-            let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
-                &source,
+            harn_parser::diagnostic::render_diagnostic_with_code(
+                source,
                 path,
-                &span_from_lexer_error(&error),
+                &span_from_lexer_error(error),
                 "error",
-                harn_parser::diagnostic::lexer_error_code(&error),
+                harn_parser::diagnostic::lexer_error_code(error),
                 &error.to_string(),
                 Some("here"),
                 None,
-            );
-            eprint!("{diagnostic}");
+            )
         }
         FileAnalysisError::Analysis(AnalysisError::Parse { source, errors }) => {
-            for error in &errors {
-                let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
-                    &source,
+            let mut out = String::new();
+            for error in errors {
+                out.push_str(&harn_parser::diagnostic::render_diagnostic_with_code(
+                    source,
                     path,
                     &span_from_parser_error(error),
                     "error",
@@ -77,15 +88,14 @@ pub(crate) fn render_file_analysis_error_or_exit(path: &str, error: FileAnalysis
                     &harn_parser::diagnostic::parser_error_message(error),
                     Some(harn_parser::diagnostic::parser_error_label(error)),
                     harn_parser::diagnostic::parser_error_help(error),
-                );
-                eprint!("{diagnostic}");
+                ));
             }
+            out
         }
         FileAnalysisError::Analysis(AnalysisError::MissingSource(id)) => {
-            eprintln!("missing analysis source {}", id.as_str());
+            format!("missing analysis source {}\n", id.as_str())
         }
     }
-    std::process::exit(1);
 }
 
 pub(crate) fn span_from_lexer_error(error: &harn_lexer::LexerError) -> harn_lexer::Span {

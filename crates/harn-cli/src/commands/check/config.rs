@@ -147,6 +147,20 @@ pub(crate) fn build_module_graph(files: &[PathBuf]) -> harn_modules::ModuleGraph
     harn_modules::build(files)
 }
 
+/// Build the module graph and hand back the seed files' parsed ASTs for the
+/// parallel driver to distribute (each worker seeds its own
+/// [`AnalysisDatabase`] from this map instead of re-parsing from disk).
+pub(crate) fn build_module_graph_with_parsed_sources(
+    files: &[PathBuf],
+) -> (
+    harn_modules::ModuleGraph,
+    HashMap<PathBuf, harn_modules::ParsedModuleSource>,
+) {
+    ensure_module_dependencies(files);
+    let build = harn_modules::build_with_parsed_sources(files);
+    (build.graph, build.parsed_sources)
+}
+
 pub(crate) fn build_module_graph_and_seed_analysis(
     files: &[PathBuf],
     analysis: &mut AnalysisDatabase,

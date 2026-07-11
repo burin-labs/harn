@@ -834,6 +834,14 @@ harn check --preflight warning src/
 | `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
 | `--strict-types` | Flag unvalidated boundary-API values used in field access. |
 
+Files are checked on a parallel worker pool sized to the machine's available
+cores, and resolved-module parsing is memoized for the whole run, so
+whole-tree checks scale with the number of distinct modules rather than
+`files x import closure`. Per-file output order and content match the serial
+driver exactly. Set `HARN_CHECK_JOBS=<n>` to pin the pool size
+(`HARN_CHECK_JOBS=1` restores fully serial checking, e.g. when bisecting a
+diagnostic that depends on machine load).
+
 `--invariants` includes the capability-policy lattice:
 
 ```harn,ignore

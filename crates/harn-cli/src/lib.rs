@@ -469,47 +469,35 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 }
                 command_error("no .harn or .harn.txt files found under the given target(s)");
             }
-            let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
-            let module_graph =
-                commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
+            let (module_graph, parsed_sources) =
+                commands::check::build_module_graph_with_parsed_sources(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+            let overrides = commands::check::CheckCliOverrides {
+                host_capabilities: args.host_capabilities.clone(),
+                bundle_root: args.bundle_root.clone(),
+                strict_types: args.strict_types,
+                preflight: args.preflight.clone(),
+                invariants: args.invariants,
+            };
+            let checked = commands::check::check_files(
+                &files,
+                &module_graph,
+                parsed_sources,
+                &cross_file_imports,
+                &overrides,
+                !args.json,
+            );
             let mut should_fail = false;
             let mut json_files = Vec::new();
-            for file in &files {
-                let mut config = package::load_check_config(Some(file));
-                if let Some(path) = args.host_capabilities.as_ref() {
-                    config.host_capabilities_path = Some(path.clone());
-                }
-                if let Some(path) = args.bundle_root.as_ref() {
-                    config.bundle_root = Some(path.clone());
-                }
-                if args.strict_types {
-                    config.strict_types = true;
-                }
-                if let Some(sev) = args.preflight.as_deref() {
-                    config.preflight_severity = Some(sev.to_string());
-                }
+            for checked_file in checked {
+                should_fail |= checked_file
+                    .report
+                    .outcome()
+                    .should_fail(checked_file.strict);
                 if args.json {
-                    let report = commands::check::check_file_report(
-                        &mut analysis,
-                        file,
-                        &config,
-                        &cross_file_imports,
-                        &module_graph,
-                        args.invariants,
-                    );
-                    should_fail |= report.outcome().should_fail(config.strict);
-                    json_files.push(report);
+                    json_files.push(checked_file.report);
                 } else {
-                    let outcome = commands::check::check_file_inner(
-                        &mut analysis,
-                        file,
-                        &config,
-                        &cross_file_imports,
-                        &module_graph,
-                        args.invariants,
-                    );
-                    should_fail |= outcome.should_fail(config.strict);
+                    checked_file.text.print();
                 }
             }
             if args.json {
