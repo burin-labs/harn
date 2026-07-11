@@ -1,4 +1,6 @@
 use std::collections::BTreeSet;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use serde_json::json;
 
@@ -119,6 +121,7 @@ fn generated_types_include_harn_wire_vocabularies() {
         .into_iter()
         .chain(tool_call_status_values())
         .chain(tool_call_error_category_values())
+        .chain(tool_mutation_status_values())
         .chain(worker_status_values())
         .chain(
             TOOL_CALL_RECEIPT_STATUSES
@@ -356,7 +359,10 @@ fn generated_python_includes_harn_wire_vocabularies() {
     assert!(py.contains("class MCPCacheScope(str, Enum):"));
     assert!(py.contains("class ACPSessionUpdate(str, Enum):"));
     assert!(py.contains("class HarnToolCallErrorCategory(str, Enum):"));
+    assert!(py.contains("class HarnToolMutationStatus(str, Enum):"));
     assert!(py.contains("class HarnWorkerStatus(str, Enum):"));
+    assert!(py.contains("changedPaths: Optional[List[str]] = None"));
+    assert!(py.contains("mutationStatus: Optional[HarnToolMutationStatus] = None"));
     assert!(py.contains("class ToolCallReceipt(_HarnDataclass):"));
     assert!(py.contains("class ToolCallReceiptStatus(str, Enum):"));
     assert!(py.contains("class _HarnDataclass:"));
@@ -388,6 +394,9 @@ fn generated_go_includes_harn_wire_vocabularies() {
     assert!(go.contains("type MCPInputRequiredResult struct"));
     assert!(go.contains("MCPUnsupportedProtocolVersionErrorCode"));
     assert!(go.contains("type JSONRPCID struct"));
+    assert!(go.contains("type HarnToolMutationStatus = string"));
+    assert!(go.contains("ChangedPaths"));
+    assert!(go.contains("MutationStatus"));
     assert!(go.contains("type ACPSessionUpdateNotification struct"));
     assert!(go.contains("func IsRequest(envelope map[string]json.RawMessage)"));
     assert!(go.contains("type HarnWorkerStatus = string"));
@@ -408,6 +417,58 @@ fn generated_go_includes_harn_wire_vocabularies() {
     for value in worker_status_values() {
         assert!(go.contains(&value), "Go artifact missing {value}");
     }
+}
+
+#[test]
+fn go_struct_field_formatter_aligns_long_generated_fields() {
+    let raw = "\
+type Example struct {
+\tA string `json:\"a\"`
+\tMutationStatus *HarnToolMutationStatus `json:\"mutationStatus,omitempty\"`
+\tRaw json.RawMessage `json:\"raw\"`
+}
+";
+    let formatted = "\
+type Example struct {
+\tA              string                  `json:\"a\"`
+\tMutationStatus *HarnToolMutationStatus `json:\"mutationStatus,omitempty\"`
+\tRaw            json.RawMessage         `json:\"raw\"`
+}
+";
+    assert_eq!(format_go_struct_fields(raw), formatted);
+}
+
+#[test]
+fn generated_go_is_gofmt_stable_when_gofmt_is_available() {
+    let go = generate_go();
+    let mut child = match Command::new("gofmt")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to spawn gofmt: {error}"),
+    };
+
+    child
+        .stdin
+        .as_mut()
+        .expect("gofmt stdin")
+        .write_all(go.as_bytes())
+        .expect("write generated Go to gofmt");
+    let output = child.wait_with_output().expect("wait for gofmt");
+    assert!(
+        output.status.success(),
+        "gofmt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("gofmt stdout utf8"),
+        go,
+        "generated Go protocol artifact must be gofmt-stable before it is written"
+    );
 }
 
 #[test]

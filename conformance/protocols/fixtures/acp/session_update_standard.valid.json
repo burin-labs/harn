@@ -34,7 +34,8 @@
             "harn": {
               "durationMs": 8,
               "executionDurationMs": 6,
-              "executor": "harn_builtin"
+              "executor": "harn_builtin",
+              "mutationStatus": "not_applied"
             }
           },
           "rawOutput": {

@@ -5,7 +5,7 @@ use crate::llm::receipts::ToolCallReceipt;
 use crate::orchestration::{HandoffArtifact, MutationSessionRecord};
 use crate::tool_annotations::ToolKind;
 
-use super::tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor};
+use super::tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus};
 use super::worker::{FsWatchEvent, WorkerEvent};
 
 /// Events emitted by the agent loop. Some variants map 1:1 to ACP
@@ -82,6 +82,14 @@ pub enum AgentEvent {
         /// `errorCategory` in the ACP wire format.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error_category: Option<ToolCallErrorCategory>,
+        /// Structured workspace mutation outcome supplied by the tool execution
+        /// boundary. Nonterminal, non-write, and opaque outcomes are `Unknown`;
+        /// no rendered output is inspected to derive this value.
+        mutation_status: ToolMutationStatus,
+        /// Workspace-relative paths changed by this tool result when the
+        /// execution boundary can report them precisely.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        changed_paths: Option<Vec<String>>,
         /// Where the tool actually ran. `None` only for events emitted
         /// from sites that pre-date the dispatch decision (e.g. the
         /// pending → in-progress transition the loop emits before the

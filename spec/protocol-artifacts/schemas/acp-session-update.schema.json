@@ -273,7 +273,7 @@
     },
     "ToolCallUpdate": {
       "type": "object",
-      "required": ["sessionUpdate", "toolCallId"],
+      "required": ["sessionUpdate", "toolCallId", "_meta"],
       "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "tool_call_update" },
@@ -285,7 +285,15 @@
         "locations": { "type": "array" },
         "rawInput": {},
         "rawOutput": {},
-        "_meta": { "$ref": "#/$defs/ExtensionMeta" }
+        "_meta": { "$ref": "#/$defs/ToolCallUpdateExtensionMeta" }
+      }
+    },
+    "ToolCallUpdateExtensionMeta": {
+      "type": "object",
+      "required": ["harn"],
+      "additionalProperties": true,
+      "properties": {
+        "harn": { "$ref": "#/$defs/ToolCallUpdateLifecycleMeta" }
       }
     },
     "ExtensionMeta": {
@@ -311,14 +319,23 @@
       "additionalProperties": false,
       "properties": {
         "audit": {},
+        "changedPaths": { "type": "array", "items": { "type": "string" } },
         "durationMs": { "type": "number", "minimum": 0 },
         "error": { "type": "string" },
         "errorCategory": { "type": "string" },
         "executionDurationMs": { "type": "number", "minimum": 0 },
         "executor": {},
+        "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
         "parsing": { "type": "boolean" },
         "rawInputPartial": { "type": "string" }
       }
+    },
+    "ToolCallUpdateLifecycleMeta": {
+      "allOf": [{ "$ref": "#/$defs/HarnToolLifecycleMeta" }],
+      "required": ["mutationStatus"]
+    },
+    "ToolMutationStatus": {
+      "enum": ["applied", "not_applied", "unknown"]
     },
     "ToolCallStatus": {
       "enum": ["pending", "in_progress", "completed", "failed"]

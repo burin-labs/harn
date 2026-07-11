@@ -65,7 +65,8 @@
             "harn": {
               "durationMs": 7,
               "executionDurationMs": 5,
-              "executor": "harn_builtin"
+              "executor": "harn_builtin",
+              "mutationStatus": "unknown"
             }
           },
           "rawOutput": {

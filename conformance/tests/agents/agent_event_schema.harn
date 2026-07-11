@@ -28,6 +28,7 @@ pipeline default() {
           tool_call_id: "call-1",
           tool_name: "edit",
           status: "completed",
+          mutation_status: "applied",
           raw_output: {ok: true},
           duration_ms: 12,
           future_extension: {schema: "harn.future.event.v1"},
@@ -92,11 +93,20 @@ pipeline default() {
   __io_println(agent_event_report(captured.events[1].receipt, agent_tool_call_receipt_schema()).ok)
   __io_println(agent_event_report(captured.events[2], agent_typed_checkpoint_event_schema()).ok)
   const missing = agent_event_report(
-    {type: "tool_call_update", tool_call_id: "missing-name", status: "completed"},
+    {
+      type: "tool_call_update",
+      tool_call_id: "missing-name",
+      status: "completed",
+      mutation_status: "unknown",
+    },
     agent_tool_lifecycle_event_schema(),
   )
   __io_println(!missing.ok)
-  __io_println(contains(join(missing.errors, "\n"), "missing required key 'tool_name'"))
+  const missing_mutation_status = agent_event_report(
+    {type: "tool_call_update", tool_call_id: "call-2", tool_name: "edit", status: "completed"},
+    agent_tool_lifecycle_event_schema(),
+  )
+  __io_println(!missing_mutation_status.ok)
   const bad_receipt = agent_event_report(
     {
       type: "tool_call_audit",

@@ -140,6 +140,8 @@ impl StreamingToolCallDetector {
                     duration_ms: None,
                     execution_duration_ms: None,
                     error_category: Some(ToolCallErrorCategory::ParseAborted),
+                    mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+                    changed_paths: None,
                     executor: None,
                     parsing: Some(false),
 
@@ -441,6 +443,8 @@ fn promote_event(
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: Some(false),
         raw_input: Some(args),
@@ -465,6 +469,8 @@ fn abort_event(
         duration_ms: None,
         execution_duration_ms: None,
         error_category: Some(ToolCallErrorCategory::ParseAborted),
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: Some(false),
 

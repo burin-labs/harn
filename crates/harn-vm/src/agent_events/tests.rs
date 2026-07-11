@@ -306,6 +306,8 @@ fn jsonl_sink_redacts_tool_payloads_before_write() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -364,6 +366,8 @@ fn jsonl_sink_skips_text_parsing_candidates() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: Some(ToolCallErrorCategory::ParseAborted),
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: Some(false),
         raw_input: None,
@@ -461,6 +465,8 @@ fn event_log_sink_skips_text_parsing_candidates() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -727,6 +733,8 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
         duration_ms: Some(42),
         execution_duration_ms: Some(7),
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
 
@@ -751,6 +759,8 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
 
@@ -780,6 +790,7 @@ fn tool_call_update_deserializes_without_duration_fields_for_back_compat() {
         "tool_call_id": "tc-1",
         "tool_name": "read",
         "status": "completed",
+        "mutation_status": "unknown",
         "raw_output": null,
         "error": null,
     });
@@ -815,6 +826,67 @@ fn tool_call_status_serde() {
         serde_json::to_string(&ToolCallStatus::Failed).unwrap(),
         "\"failed\""
     );
+}
+
+#[test]
+fn tool_mutation_status_serde_and_terminal_update_round_trip() {
+    for (status, expected) in [
+        (ToolMutationStatus::Applied, "applied"),
+        (ToolMutationStatus::NotApplied, "not_applied"),
+        (ToolMutationStatus::Unknown, "unknown"),
+    ] {
+        assert_eq!(status.as_str(), expected);
+        assert_eq!(
+            serde_json::to_string(&status).unwrap(),
+            format!("\"{expected}\"")
+        );
+
+        let event = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "edit".into(),
+            status: ToolCallStatus::Completed,
+            raw_output: Some(serde_json::json!({"ok": true})),
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            mutation_status: status,
+            changed_paths: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        };
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["mutation_status"], expected);
+        let recovered: AgentEvent = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            recovered,
+            AgentEvent::ToolCallUpdate {
+                mutation_status: recovered,
+                ..
+            } if recovered == status
+        ));
+    }
+}
+
+#[test]
+fn tool_call_update_rejects_missing_mutation_status() {
+    let error = serde_json::from_value::<AgentEvent>(serde_json::json!({
+        "type": "tool_call_update",
+        "session_id": "s",
+        "tool_call_id": "tc-1",
+        "tool_name": "edit",
+        "status": "completed",
+        "raw_output": null,
+        "error": null,
+    }))
+    .expect_err("mutation_status is required on every tool_call_update");
+    assert!(error
+        .to_string()
+        .contains("missing field `mutation_status`"));
 }
 
 #[test]
@@ -1007,6 +1079,8 @@ fn tool_call_update_event_omits_error_category_when_none() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
 
@@ -1031,6 +1105,8 @@ fn tool_call_update_event_serializes_error_category_when_set() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: Some(ToolCallErrorCategory::SchemaValidation),
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
 
@@ -1058,6 +1134,8 @@ fn tool_call_update_omits_executor_when_absent() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
 
@@ -1246,6 +1324,8 @@ fn tool_call_update_includes_executor_when_present() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: Some(ToolExecutor::McpServer {
             server_name: "github".into(),
         }),
@@ -1272,6 +1352,8 @@ fn tool_call_update_omits_audit_when_absent() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1301,6 +1383,8 @@ fn tool_call_update_includes_audit_when_present() {
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
+        mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+        changed_paths: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,
@@ -1322,6 +1406,7 @@ fn tool_call_update_deserializes_without_audit_field_for_back_compat() {
         "tool_call_id": "tc-1",
         "tool_name": "read",
         "status": "completed",
+        "mutation_status": "unknown",
         "raw_output": null,
         "error": null,
     });
@@ -1527,7 +1612,12 @@ fn from_host_tool_call_update_defaults_status_and_maps_executor_alias() {
     let event = AgentEvent::from_host_payload(
         "s1",
         "tool_call_update",
-        &json!({ "tool_call_id": "t1", "tool_name": "read_file", "executor": "harn" }),
+        &json!({
+            "tool_call_id": "t1",
+            "tool_name": "read_file",
+            "mutation_status": "unknown",
+            "executor": "harn",
+        }),
     )
     .expect("tool_call_update");
     match event {
@@ -1550,6 +1640,7 @@ fn from_host_tool_call_update_preserves_structured_executor() {
             "tool_call_id": "t1",
             "tool_name": "linear_create",
             "status": "completed",
+            "mutation_status": "unknown",
             "executor": { "kind": "mcp_server", "server_name": "linear" },
         }),
     )
@@ -1565,6 +1656,50 @@ fn from_host_tool_call_update_preserves_structured_executor() {
         }
         other => panic!("expected ToolCallUpdate, got {other:?}"),
     }
+}
+
+#[test]
+fn from_host_tool_call_update_preserves_structured_mutation_status() {
+    for (wire, expected) in [
+        ("applied", ToolMutationStatus::Applied),
+        ("not_applied", ToolMutationStatus::NotApplied),
+        ("unknown", ToolMutationStatus::Unknown),
+    ] {
+        let event = AgentEvent::from_host_payload(
+            "s1",
+            "tool_call_update",
+            &json!({
+                "tool_call_id": "t1",
+                "tool_name": "edit",
+                "status": "completed",
+                "mutation_status": wire,
+            }),
+        )
+        .expect("typed mutation status");
+        assert!(matches!(
+            event,
+            AgentEvent::ToolCallUpdate {
+                mutation_status: status,
+                ..
+            } if status == expected
+        ));
+    }
+}
+
+#[test]
+fn from_host_tool_call_update_rejects_unknown_mutation_status() {
+    let error = AgentEvent::from_host_payload(
+        "s1",
+        "tool_call_update",
+        &json!({
+            "tool_call_id": "t1",
+            "tool_name": "edit",
+            "status": "completed",
+            "mutation_status": "maybe",
+        }),
+    )
+    .expect_err("unknown mutation status rejected");
+    assert!(format!("{error:?}").contains("unknown variant `maybe`"));
 }
 
 #[test]

@@ -255,6 +255,16 @@ var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 	"unknown",
 }
 
+// HarnToolMutationStatus is the typed alias for the HarnToolMutationStatuses wire vocabulary.
+type HarnToolMutationStatus = string
+
+// HarnToolMutationStatuses enumerates every wire value Harn currently emits for HarnToolMutationStatus.
+var HarnToolMutationStatuses = []HarnToolMutationStatus{
+	"applied",
+	"not_applied",
+	"unknown",
+}
+
 // HarnSideEffectLevel is the typed alias for the HarnSideEffectLevels wire vocabulary.
 type HarnSideEffectLevel = string
 
@@ -400,11 +410,13 @@ var MCPLoggingLevels = []MCPLoggingLevel{
 // HarnToolLifecycleExtensionFields enumerates the wire values Harn currently emits.
 var HarnToolLifecycleExtensionFields = []string{
 	"audit",
+	"changedPaths",
 	"durationMs",
 	"error",
 	"errorCategory",
 	"executionDurationMs",
 	"executor",
+	"mutationStatus",
 	"parsing",
 	"rawInputPartial",
 }
@@ -560,14 +572,16 @@ type ACPContentBlock struct {
 // HarnToolLifecycleMeta is the Harn-specific tool-call lifecycle metadata
 // living under `_meta.harn` on tool_call / tool_call_update notifications.
 type HarnToolLifecycleMeta struct {
-	Audit               json.RawMessage `json:"audit,omitempty"`
-	DurationMs          *float64        `json:"durationMs,omitempty"`
-	Error               *string         `json:"error,omitempty"`
-	ErrorCategory       *string         `json:"errorCategory,omitempty"`
-	ExecutionDurationMs *float64        `json:"executionDurationMs,omitempty"`
-	Executor            json.RawMessage `json:"executor,omitempty"`
-	Parsing             *bool           `json:"parsing,omitempty"`
-	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`
+	Audit               json.RawMessage         `json:"audit,omitempty"`
+	ChangedPaths        []string                `json:"changedPaths,omitempty"`
+	DurationMs          *float64                `json:"durationMs,omitempty"`
+	Error               *string                 `json:"error,omitempty"`
+	ErrorCategory       *string                 `json:"errorCategory,omitempty"`
+	ExecutionDurationMs *float64                `json:"executionDurationMs,omitempty"`
+	Executor            json.RawMessage         `json:"executor,omitempty"`
+	MutationStatus      *HarnToolMutationStatus `json:"mutationStatus,omitempty"`
+	Parsing             *bool                   `json:"parsing,omitempty"`
+	RawInputPartial     *string                 `json:"rawInputPartial,omitempty"`
 }
 
 // ToolCallReceipt is the typed, privacy-preserving receipt emitted for an

@@ -90,11 +90,13 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
 
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "audit",
+    "changedPaths",
     "durationMs",
     "error",
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "mutationStatus",
     "parsing",
     "rawInputPartial",
 ];

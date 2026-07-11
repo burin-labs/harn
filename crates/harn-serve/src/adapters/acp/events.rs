@@ -318,6 +318,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 duration_ms,
                 execution_duration_ms,
                 error_category,
+                mutation_status,
+                changed_paths,
                 executor,
                 parsing,
                 raw_input,
@@ -351,6 +353,13 @@ impl AgentEventSink for AcpAgentEventSink {
                         "errorCategory".to_string(),
                         serde_json::Value::String(cat.as_str().to_string()),
                     );
+                }
+                harn_meta.insert(
+                    "mutationStatus".to_string(),
+                    serde_json::Value::String(mutation_status.as_str().to_string()),
+                );
+                if let Some(paths) = changed_paths {
+                    harn_meta.insert("changedPaths".to_string(), serde_json::json!(paths));
                 }
                 if let Some(exec) = executor {
                     harn_meta.insert("executor".to_string(), Self::executor_to_json(exec));

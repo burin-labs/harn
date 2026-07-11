@@ -145,6 +145,10 @@ pub(super) fn generate_swift() -> String {
         &tool_call_error_category_values(),
     ));
     out.push_str(&swift_enum(
+        "HarnToolMutationStatus",
+        &tool_mutation_status_values(),
+    ));
+    out.push_str(&swift_enum(
         "HarnSideEffectLevel",
         &side_effect_level_values(),
     ));
@@ -608,11 +612,13 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
 
 public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var audit: HarnACPValue?
+    public var changedPaths: [String]?
     public var durationMs: Double?
     public var error: String?
     public var errorCategory: HarnToolCallErrorCategory?
     public var executionDurationMs: Double?
     public var executor: HarnACPToolExecutor?
+    public var mutationStatus: HarnToolMutationStatus?
     public var parsing: Bool?
     public var rawInputPartial: String?
 }

@@ -1562,6 +1562,8 @@ mod tests {
                     duration_ms: None,
                     execution_duration_ms: None,
                     error_category: Some(ToolCallErrorCategory::SchemaValidation),
+                    mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
+                    changed_paths: None,
                     executor: None,
                     parsing: None,
                     raw_input: None,

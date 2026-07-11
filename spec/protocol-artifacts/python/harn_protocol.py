@@ -284,6 +284,11 @@ HARN_TOOL_CALL_ERROR_CATEGORIES: tuple = (
     "cancelled",
     "unknown",
 )
+HARN_TOOL_MUTATION_STATUSES: tuple = (
+    "applied",
+    "not_applied",
+    "unknown",
+)
 HARN_SIDE_EFFECT_LEVELS: tuple = (
     "none",
     "read_only",
@@ -317,11 +322,13 @@ HARN_TOOL_CALL_RECEIPT_EXECUTORS: tuple = (
 )
 HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: tuple = (
     "audit",
+    "changedPaths",
     "durationMs",
     "error",
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "mutationStatus",
     "parsing",
     "rawInputPartial",
 )
@@ -525,6 +532,12 @@ class HarnToolCallErrorCategory(str, Enum):
     UNKNOWN = "unknown"
 
 
+class HarnToolMutationStatus(str, Enum):
+    APPLIED = "applied"
+    NOT_APPLIED = "not_applied"
+    UNKNOWN = "unknown"
+
+
 class HarnSideEffectLevel(str, Enum):
     NONE = "none"
     READ_ONLY = "read_only"
@@ -701,11 +714,13 @@ class ACPContentBlock(_HarnDataclass):
 @dataclass
 class HarnToolLifecycleMeta(_HarnDataclass):
     audit: Optional[JsonValue] = None
+    changedPaths: Optional[List[str]] = None
     durationMs: Optional[float] = None
     error: Optional[str] = None
     errorCategory: Optional[str] = None
     executionDurationMs: Optional[float] = None
     executor: Optional[JsonValue] = None
+    mutationStatus: Optional[HarnToolMutationStatus] = None
     parsing: Optional[bool] = None
     rawInputPartial: Optional[str] = None
 

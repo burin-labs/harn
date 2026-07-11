@@ -115,11 +115,13 @@ public enum HarnProtocolConstants {
     ]
     public static let toolLifecycleExtensionFields: [String] = [
         "audit",
+        "changedPaths",
         "durationMs",
         "error",
         "errorCategory",
         "executionDurationMs",
         "executor",
+        "mutationStatus",
         "parsing",
         "rawInputPartial",
     ]
@@ -359,6 +361,18 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
         "timeout",
         "network",
         "cancelled",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnToolMutationStatus: String, Codable, Sendable, CaseIterable {
+    case applied = "applied"
+    case notApplied = "not_applied"
+    case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "applied",
+        "not_applied",
         "unknown",
     ].map { Self(rawValue: $0)! }
 }
@@ -1001,11 +1015,13 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
 
 public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var audit: HarnACPValue?
+    public var changedPaths: [String]?
     public var durationMs: Double?
     public var error: String?
     public var errorCategory: HarnToolCallErrorCategory?
     public var executionDurationMs: Double?
     public var executor: HarnACPToolExecutor?
+    public var mutationStatus: HarnToolMutationStatus?
     public var parsing: Bool?
     public var rawInputPartial: String?
 }
