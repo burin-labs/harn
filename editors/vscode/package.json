@@ -9,8 +9,10 @@
     "url": "https://github.com/burin-labs/harn"
   },
   "categories": ["Programming Languages"],
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["harn", "agents", "pipeline", "lsp"],
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.125.0"
   },
   "activationEvents": [
     "onLanguage:harn",

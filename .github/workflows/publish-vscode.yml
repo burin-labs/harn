@@ -1,0 +1,90 @@
+name: Publish VS Code extension
+
+# Packages the `editors/vscode` extension and publishes it to the VS Code
+# Marketplace (via vsce) and Open VSX (via ovsx).
+#
+# ── ACTIVATION (a human must do this once) ────────────────────────────────
+# This workflow is INERT until repo secrets are set. It never fails when a
+# secret is absent — it packages the .vsix and uploads it as a build artifact,
+# then only publishes to a registry whose token exists:
+#
+#   VSCE_PAT  Azure DevOps Personal Access Token for the `burin-labs`
+#             VS Code Marketplace publisher. Create at
+#             https://dev.azure.com → User settings → Personal access
+#             tokens, scoped to Marketplace → Manage. Then:
+#               gh secret set VSCE_PAT
+#
+#   OVSX_PAT  Open VSX access token for the `burin-labs` namespace. Create
+#             at https://open-vsx.org → user settings → Access Tokens, and
+#             claim the namespace (`npx ovsx create-namespace burin-labs`).
+#             Then:
+#               gh secret set OVSX_PAT
+#
+# With neither secret set the release path still produces an installable
+# .vsix artifact on every tag, so nothing here is a hard dependency of a
+# release. Set one or both secrets to light up the corresponding registry.
+#
+# Triggers:
+#   1. push tag vX.Y.Z — publishes the extension version from the tagged tree.
+#   2. workflow_dispatch — manual (re-)package/publish for recovery.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Lift the secrets to job-level env so the publish steps can gate on
+    # them: the `secrets` context is not available in a step-level `if:`,
+    # but `env` is, and job-level `env` may read `secrets`.
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Package .vsix
+        run: npx --no-install @vscode/vsce package --out harn-lang.vsix
+
+      # Always keep the packaged extension as a build artifact so a release
+      # is installable via "Install from VSIX" even before the marketplace
+      # secrets are configured.
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: harn-lang-vsix
+          path: editors/vscode/harn-lang.vsix
+          if-no-files-found: error
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        run: npx --no-install @vscode/vsce publish --packagePath harn-lang.vsix
+
+      - name: Publish to Open VSX
+        if: ${{ env.OVSX_PAT != '' }}
+        run: npx ovsx publish harn-lang.vsix --pat "$OVSX_PAT"
+
+      - name: Notice when unpublished
+        if: ${{ env.VSCE_PAT == '' && env.OVSX_PAT == '' }}
+        run: |
+          echo "::notice::Neither VSCE_PAT nor OVSX_PAT is set — packaged the" \
+            ".vsix as a build artifact but skipped marketplace publish." \
+            "Set the secrets (see the header of this workflow) to activate."
