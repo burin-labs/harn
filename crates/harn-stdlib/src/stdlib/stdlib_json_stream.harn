@@ -13,13 +13,18 @@ type JsonStreamValidator = {
   feed: fn(any) -> JsonStreamStatus,
   value: fn() -> any,
   status: fn() -> JsonStreamStatus,
+  partial: fn() -> any,
 }
 
 /**
  * Create an incremental validator for UTF-8 JSON string or bytes chunks.
  * `feed(chunk)` returns JsonStreamStatus.Pending, JsonStreamStatus.Valid, or
  * JsonStreamStatus.Invalid({reason, path}). `value()` returns the parsed JSON
- * value after Valid and nil otherwise.
+ * value after Valid and nil otherwise. `partial()` returns the best-effort
+ * partially-filled value from the bytes seen so far (Vercel `streamObject` /
+ * Instructor `Partial[T]`): the frontier's open string/containers are closed
+ * and any half-typed trailing member is dropped, so it grows monotonically as
+ * chunks arrive — nil until the first complete member is present.
  *
  * @effects: []
  * @errors: []
@@ -31,6 +36,67 @@ pub fn stream_validator(schema) -> JsonStreamValidator {
     feed: fn(chunk) { return __json_stream_validator_feed(handle, chunk) },
     value: fn() { return __json_stream_validator_value(handle) },
     status: fn() { return __json_stream_validator_status(handle) },
+    partial: fn() { return __json_stream_validator_partial(handle) },
+  }
+}
+
+fn __stream_object_text(chunk) -> string {
+  if type_of(chunk) == "string" {
+    return chunk
+  }
+  if type_of(chunk) == "dict" {
+    return to_string(chunk?.delta ?? chunk?.text ?? chunk?.content ?? "")
+  }
+  return to_string(chunk)
+}
+
+/**
+ * Stream partial typed objects from a chunked JSON `source` (Vercel
+ * `streamObject`). Feeds each chunk of `source` — strings, or dicts carrying a
+ * `delta`/`text`/`content` field (so an `llm_stream_call` stream composes
+ * directly) — into a `stream_validator`, and emits the current best-effort
+ * partial object every time it grows, ending with the fully parsed object.
+ *
+ * Returns a `Stream<any>`, so it composes with `for`, `.next()`, and the
+ * stream combinators. By default consecutive identical partials are
+ * de-duplicated, so a chunk that does not complete a new member emits nothing;
+ * pass `options.dedupe: false` to emit one partial per source chunk instead.
+ * `schema` (optional, default permissive) gates final validation and early
+ * invalidation exactly as `stream_validator` does; the streamed partials
+ * themselves are structural (schema is not enforced mid-stream, since a partial
+ * is legitimately incomplete). A truncated stream still yields its best-effort
+ * final partial rather than throwing — use `stream_validator` directly when you
+ * need strict completion.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub gen fn stream_object(source, schema = nil, options = nil) -> Stream<any> {
+  const dedupe = (options ?? {})?.dedupe ?? true
+  const validator = stream_validator(schema ?? {})
+  let last_emitted = nil
+  let emitted_any = false
+  for chunk in source {
+    const text = __stream_object_text(chunk)
+    if text != "" {
+      validator.feed(text)
+    }
+    const partial = validator.partial()
+    if partial != nil {
+      const key = json_stringify(partial)
+      if !dedupe || !emitted_any || key != last_emitted {
+        last_emitted = key
+        emitted_any = true
+        emit partial
+      }
+    }
+  }
+  const final_value = validator.value() ?? validator.partial()
+  if final_value != nil {
+    const final_key = json_stringify(final_value)
+    if !emitted_any || final_key != last_emitted {
+      emit final_value
+    }
   }
 }
 
