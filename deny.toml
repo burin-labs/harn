@@ -1,0 +1,70 @@
+# cargo-deny policy for the Harn Rust workspace.
+#
+# Guards the supply chain of every crate in this workspace: security
+# advisories, license posture, and dependency sourcing. Run it with
+# `cargo deny check` from the repo root; CI enforces it on `deny-scan`.
+#
+# cargo-deny reads `Cargo.lock`, so it audits the *entire* resolved graph
+# regardless of which crates any one CI lane compiles. That is intentional:
+# advisory and license exposure is about what ships, not what a lane builds.
+#
+# Schema: cargo-deny 0.19.x.
+
+[graph]
+all-features = true
+
+[advisories]
+# Vulnerabilities and yanked crates fail the gate. Every ignore below is a
+# standing exception with a concrete reason and an upstream tracking link.
+# A real, fixable vulnerability is never ignored — it fails unconditionally.
+ignore = [
+    # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained; transitive, no vuln. bincode 2.x is a breaking rewrite not yet adopted upstream. https://rustsec.org/advisories/RUSTSEC-2025-0141" },
+    { id = "RUSTSEC-2025-0068", reason = "serde_yml 0.0.13 unsound + unmaintained. Being removed in favor of serde_yaml_ng (harn PR #4428); this entry is a no-op once that lands. https://rustsec.org/advisories/RUSTSEC-2025-0068" },
+
+    # --- quick-xml DoS advisories: transitive under xcap (screen capture for
+    # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is
+    # semver-incompatible with what xcb/wayland-scanner pin, so it cannot be
+    # resolved without an upstream xcap release. The parsed XML is local
+    # X11/Wayland protocol data (not attacker-controlled network input), so the
+    # memory-exhaustion / quadratic-parse vectors are not reachable in practice.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute-check; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0194" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace alloc; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0195" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "NCSA",
+    "Unicode-3.0",
+    "Unlicense",
+    "MPL-2.0",
+]
+
+[licenses.private]
+# Our own workspace crates are never published; skip their license check.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+workspace-default-features = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

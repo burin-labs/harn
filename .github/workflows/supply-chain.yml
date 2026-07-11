@@ -1,0 +1,78 @@
+# Supply-chain gate for the Harn Rust workspace (cargo-deny).
+#
+# Policy lives in `deny.toml`; reproduce locally with `cargo deny check`.
+# cargo-deny only reads `Cargo.lock` + crate metadata, so there is no workspace
+# compile here — the job is cheap (~1 min) and needs no Rust toolchain or auth.
+#
+# Two invocations with deliberately different blocking behavior:
+#   * `check bans licenses sources` is deterministic (only changes when
+#     Cargo.lock / Cargo.toml / deny.toml change), so a failure is meaningful
+#     and actionable — it catches a new disallowed license, a duplicate-crate
+#     ban, or an unreviewed (non-crates.io) source.
+#   * `check advisories` reads the RustSec database, which updates continuously;
+#     a brand-new advisory must not red an unrelated PR, so it is advisory-only
+#     (continue-on-error). A vulnerable/yanked dependency introduced BY a PR
+#     still surfaces here for a human to act on.
+#
+# This workflow is intentionally NOT yet a required status check, so it reports
+# without blocking merges while the ignore policy settles.
+
+name: Supply chain
+
+on:
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/supply-chain.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/supply-chain.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # Install a pinned, checksum-verified cargo-deny prebuilt binary — same
+      # curl + sha256 pattern used elsewhere for actionlint. No compile (so no
+      # Rust toolchain needed). Bump VERSION + SHA256 together.
+      - name: Install cargo-deny
+        env:
+          CARGO_DENY_VERSION: "0.19.9"
+          CARGO_DENY_SHA256: "f1f8eedc2a3ac297c540873f93785d4104b102c0079506b2a6b3221b7ec956af"
+        run: |
+          set -euo pipefail
+          slug="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          archive="${RUNNER_TEMP}/${slug}.tar.gz"
+          curl -fsSL \
+            -o "${archive}" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${slug}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" -C "${RUNNER_TEMP}" "${slug}/cargo-deny"
+          mkdir -p "${HOME}/.local/bin"
+          install -m 0755 "${RUNNER_TEMP}/${slug}/cargo-deny" "${HOME}/.local/bin/cargo-deny"
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+          "${HOME}/.local/bin/cargo-deny" --version
+      - name: License / bans / sources gate (deterministic)
+        run: cargo-deny --all-features check bans licenses sources
+      - name: Security advisories (advisory-only — RustSec DB updates continuously)
+        continue-on-error: true
+        run: cargo-deny --all-features check advisories
