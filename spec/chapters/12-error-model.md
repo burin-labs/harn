@@ -9,6 +9,30 @@ throw expression
 Evaluates the expression and throws it as `HarnRuntimeError.thrownError(value)`.
 Any value can be thrown (strings, dicts, etc.).
 
+### throws (declared exception channel)
+
+A function, tool, pipeline, or `fn` closure may declare the type of value it
+throws with a `throws` clause after the return type:
+
+```harn
+fn parse(s: string) -> Doc throws ParseError { ... }
+fn load(path: string) throws (NotFound | ParseError) { ... }
+```
+
+`throws (E1 | E2)` is an ordinary union type. The clause is **optional and
+additive**: a callable with no `throws` clause keeps the historical
+unconstrained behavior, so existing code is unaffected and no callable is ever
+forced to declare one.
+
+When a callable declares `throws E`, every value it can `throw` — or surface via
+`?` — must conform to `E`. A `throw` of a type the declared set does not cover is
+a compile-time type error (`HARN-TYP-026`). A callable without the clause is not
+throw-checked.
+
+> Catch-exhaustiveness against a declared `throws` set (warning when a typed
+> `catch` fails to cover every declared thrown variant) is a separate check
+> tracked as future work.
+
 ### try/catch/finally
 
 ```harn

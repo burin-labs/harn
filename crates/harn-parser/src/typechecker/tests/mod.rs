@@ -22,6 +22,7 @@ mod repair;
 mod row_merge;
 mod soundness;
 mod strict_types;
+mod throws;
 mod typing;
 
 pub(super) fn check_source(source: &str) -> Vec<TypeDiagnostic> {

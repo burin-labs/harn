@@ -19,6 +19,7 @@ use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
+use super::super::format::format_type;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
 use super::super::union::{
@@ -94,6 +95,71 @@ impl TypeChecker {
         } else {
             Some(simplify_union(inferred))
         }
+    }
+
+    /// Enforce a callable's declared `throws E` (or `throws (E1 | E2)`) channel:
+    /// every value the body can `throw` — or surface via `?` — must conform to
+    /// the declared set. Reuses [`Self::infer_try_error_type`] (the same
+    /// collector that computes a `try` block's error type) to gather the body's
+    /// thrown-type union, then requires it to be covered by `declared`.
+    ///
+    /// Only callables that opt into a `throws` clause are checked, so this never
+    /// constrains existing unannotated code. Throw sites nested inside a local
+    /// `try {}` are conservatively counted (the reused collector can't yet tell
+    /// a caught throw from an escaping one); because `throws` is opt-in that only
+    /// affects freshly-annotated callables. Catch-exhaustiveness of the declared
+    /// set is a separate, deferred check (tracked as a follow-up).
+    pub(in crate::typechecker) fn check_declared_throws(
+        &mut self,
+        declared: &TypeExpr,
+        params: &[TypedParam],
+        body: &[SNode],
+        throws_span: Span,
+    ) {
+        let mut body_scope = TypeScope::child_of(&self.scope);
+        for param in params {
+            let param_type = if param.rest {
+                param
+                    .type_expr
+                    .clone()
+                    .map(|inner| TypeExpr::List(Box::new(inner)))
+            } else {
+                param.type_expr.clone()
+            };
+            body_scope.define_var(&param.name, param_type);
+        }
+        let Some(actual) = self.infer_try_error_type(body, &body_scope) else {
+            return;
+        };
+        if !self.types_compatible(declared, &actual, &body_scope) {
+            self.error_at(
+                Code::ThrowsTypeMismatch,
+                format!(
+                    "this callable can throw `{}`, which its declared `throws {}` does not cover",
+                    format_type(&actual),
+                    format_type(declared),
+                ),
+                throws_span,
+            );
+        }
+    }
+
+    /// Untyped-parameter variant of [`Self::check_declared_throws`] for
+    /// pipelines, whose params are bare names (`Vec<String>`) with no declared
+    /// types. The names are bound as untyped so a thrown expression that
+    /// references one still resolves to a binding rather than an unknown.
+    pub(in crate::typechecker) fn check_declared_throws_untyped_params(
+        &mut self,
+        declared: &TypeExpr,
+        param_names: &[String],
+        body: &[SNode],
+        throws_span: Span,
+    ) {
+        let params: Vec<TypedParam> = param_names
+            .iter()
+            .map(|name| TypedParam::untyped(name.as_str()))
+            .collect();
+        self.check_declared_throws(declared, &params, body, throws_span);
     }
 
     pub(in crate::typechecker) fn infer_list_literal_type(
