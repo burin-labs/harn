@@ -69,6 +69,19 @@ impl StreamWindowConfig {
                 "stream window step must be positive".to_string(),
             ));
         }
+        // A sliding window drains `step` events after each emit, but events
+        // are admitted one at a time so the buffer never exceeds `size`.
+        // A step larger than size would therefore silently collapse to
+        // tumbling (min(step, size) == size), never skipping the intended
+        // gap events. Gap-sampling is not supported by this drain design,
+        // so reject it rather than emit misleading windows.
+        if self.mode == StreamWindowMode::Sliding && self.step > self.size {
+            return Err(DispatchError::Local(format!(
+                "sliding stream window step ({}) must not exceed size ({}); \
+                 a hop larger than the window is not supported",
+                self.step, self.size
+            )));
+        }
         Ok(())
     }
 
@@ -1047,6 +1060,94 @@ pub fn local_fn(event: TriggerEvent) -> int {
                         .len();
                 }
 
+                assert_eq!(dispatched, 2);
+                assert_eq!(runtime.snapshot().emitted_windows, 2);
+                let windows = read_topic(log, TRIGGER_STREAM_WINDOWS_TOPIC).await;
+                assert_eq!(windows.len(), 2);
+            })
+            .await;
+    }
+
+    #[test]
+    fn sliding_window_rejects_step_greater_than_size() {
+        // sliding(2, 5): a hop larger than the window would silently
+        // collapse to tumbling instead of gap-sampling, so it must be
+        // rejected at validation time.
+        let error = StreamWindowConfig::sliding(2, 5)
+            .validate()
+            .expect_err("step > size must be rejected");
+        match error {
+            DispatchError::Local(message) => {
+                assert!(
+                    message.contains("must not exceed size"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("expected DispatchError::Local, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sliding_window_allows_step_up_to_size() {
+        // Overlap (step < size) and the tumbling-equivalent (step == size)
+        // remain valid; only step > size is rejected.
+        StreamWindowConfig::sliding(3, 1)
+            .validate()
+            .expect("overlap sliding window is valid");
+        StreamWindowConfig::sliding(3, 2)
+            .validate()
+            .expect("partial-overlap sliding window is valid");
+        StreamWindowConfig::sliding(2, 2)
+            .validate()
+            .expect("step == size sliding window is valid");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sliding_window_step_equal_size_emits_non_overlapping_batches() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (_dir, log, dispatcher) = stream_dispatcher_fixture(
+                    r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> int {
+  return len(event.batch ?? [])
+}
+"#,
+                )
+                .await;
+                // step == size drains the whole window after each emit, so
+                // windows tile without overlap (tumbling-equivalent).
+                let mut runtime = StreamTriggerRuntime::new(
+                    StreamTriggerConfig {
+                        stream_id: "sliding-tumbling".to_string(),
+                        window: StreamWindowConfig::sliding(2, 2),
+                        backpressure: StreamBackpressureConfig::default(),
+                        flow: StreamFlowConfig::default(),
+                        gate: None,
+                    },
+                    log.clone(),
+                    dispatcher,
+                )
+                .unwrap();
+
+                let mut dispatched = 0;
+                for offset in 1..=4 {
+                    dispatched += runtime
+                        .push_event(stream_fixture_event(
+                            "kafka",
+                            "issues.opened",
+                            "sliding-tumbling",
+                            offset,
+                            json!({"offset": offset}),
+                        ))
+                        .await
+                        .unwrap()
+                        .len();
+                }
+
+                // 4 events, size 2, step 2 -> exactly 2 non-overlapping windows.
                 assert_eq!(dispatched, 2);
                 assert_eq!(runtime.snapshot().emitted_windows, 2);
                 let windows = read_topic(log, TRIGGER_STREAM_WINDOWS_TOPIC).await;
