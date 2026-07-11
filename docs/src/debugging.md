@@ -5,11 +5,16 @@ runs. This page walks through the debugging workflow.
 
 ## Source-level debugging
 
-For step-through debugging, start the Debug Adapter Protocol server:
+For step-through debugging, start the Debug Adapter Protocol server. It speaks
+DAP over stdio and is normally launched by an editor, but any DAP client can
+drive it:
 
 ```bash
-cargo run --bin harn-dap
+harn dap
 ```
+
+(The standalone `harn-dap` binary alias and `cargo run --bin harn-dap` start the
+same server — `harn dap` just makes it reachable with only `harn` on your PATH.)
 
 In VS Code, the Harn extension contributes a `harn` debug configuration
 automatically. The equivalent `launch.json` entry is:

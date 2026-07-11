@@ -200,6 +200,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(1);
             }
         }
+        Command::Dap(_) => run_dap_adapter(),
         Command::ConformanceHelper(args) => {
             if let Err(error) = commands::conformance_helper::run(args).await {
                 eprintln!("error: {error}");
@@ -1496,6 +1497,23 @@ fn serve_subcommand_names() -> Vec<String> {
 /// Schema version for `harn version --json`. Bump when the data shape
 /// changes; new optional fields can be added freely.
 pub(crate) const VERSION_SCHEMA_VERSION: u32 = 1;
+
+/// Launch the Harn debug adapter (DAP) over stdio for `harn dap`.
+///
+/// The adapter runs its own blocking stdio read loop and builds a fresh Tokio
+/// runtime per VM step, so it must not execute inside this CLI's Tokio runtime
+/// — nesting `Runtime::new()` inside an entered runtime panics. We hand it a
+/// dedicated OS thread with no entered runtime context (the same clean footing
+/// the `harn-dap` multi-call alias gets from `main`) and block until the
+/// client disconnects. Reuses `harn_dap::run` verbatim; no duplicated server.
+fn run_dap_adapter() {
+    thread::Builder::new()
+        .name("harn-dap".to_string())
+        .spawn(harn_dap::run)
+        .expect("spawn harn-dap adapter thread")
+        .join()
+        .expect("harn-dap adapter thread panicked");
+}
 
 /// Run `harn version`. Build-time constants travel to the embedded
 /// `.harn` script via scoped env vars rather than a new builtin.
