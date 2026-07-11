@@ -15,6 +15,28 @@ type DisclosureGitTrailerOptions = {
   suppress?: bool,
 }
 
+/**
+ * Normalized disclosure config after `__config` overlays the built-in TOML,
+ * project `harn.toml`, env, and `options.config`. The nested tables stay open
+ * dict because they are keyed by arbitrary surface names and actor subjects.
+ */
+type DisclosureConfig = {defaults?: dict, surfaces?: dict, identities?: dict}
+
+/**
+ * Rendering context assembled by `__context` from an ActorChain: the resolved
+ * principal list plus the origin/current/delegated cuts every surface reads.
+ */
+type DisclosureContext = {
+  chain: any,
+  principals: list,
+  subjects: list,
+  current: dict,
+  origin: dict,
+  actors: list,
+  prior_actors: list,
+  delegated: bool,
+}
+
 const __BUILTIN_DISCLOSURE_CONFIG = """
 [defaults]
 email_domain = "actors.harn.invalid"
@@ -122,7 +144,7 @@ fn __env_config(options: dict) -> dict {
   return deep_merge(config, __parse_config_toml(text, "HARN_DISCLOSURE_CONFIG"))
 }
 
-fn __config(options) -> dict {
+fn __config(options) -> DisclosureConfig {
   const opts = __dict(options)
   let config = __parse_config_toml(__BUILTIN_DISCLOSURE_CONFIG, "built-in disclosure config")
   config = deep_merge(config, __project_config(opts))
@@ -141,20 +163,20 @@ fn __slug(value: string) -> string {
   return stripped
 }
 
-fn __profile_for(subject: string, config: dict) -> dict {
-  const identities = __dict(config?.identities)
+fn __profile_for(subject: string, config: DisclosureConfig) -> dict {
+  const identities = __dict(config.identities)
   if contains(identities.keys(), subject) {
     return __dict(identities[subject])
   }
   return {}
 }
 
-fn __principal(subject: string, config: dict, role: string, position: int) -> dict {
+fn __principal(subject: string, config: DisclosureConfig, role: string, position: int) -> dict {
   const profile = __profile_for(subject, config)
   const parts = actor_chain_subject_parts(subject)
   const name = to_string(profile?.name ?? profile?.display_name ?? profile?.label ?? parts.id ?? subject)
   const label = to_string(profile?.label ?? profile?.slack_label ?? profile?.display_name ?? name)
-  const email_domain = to_string(config?.defaults?.email_domain ?? "actors.harn.invalid")
+  const email_domain = to_string(config.defaults?.email_domain ?? "actors.harn.invalid")
   const email = to_string(profile?.email ?? (__slug(parts.kind + "+" + parts.id) + "@" + email_domain))
   let principal = {
     subject: subject,
@@ -190,7 +212,7 @@ fn __principal(subject: string, config: dict, role: string, position: int) -> di
   return principal
 }
 
-fn __context(chain, config: dict) -> dict {
+fn __context(chain, config: DisclosureConfig) -> DisclosureContext {
   const subject_entries = actor_chain_subjects(chain)
   const origin_index = len(subject_entries) - 1
   let principals = []
@@ -223,8 +245,8 @@ fn __context(chain, config: dict) -> dict {
   }
 }
 
-fn __surface_config(config: dict, surface: string) -> dict {
-  const surfaces = __dict(config?.surfaces)
+fn __surface_config(config: DisclosureConfig, surface: string) -> dict {
+  const surfaces = __dict(config.surfaces)
   if !contains(surfaces.keys(), surface) {
     throw "std/disclosure: unknown disclosure surface `" + surface + "`"
   }
@@ -235,7 +257,7 @@ fn __surface_config(config: dict, surface: string) -> dict {
   return surface_config
 }
 
-fn __select_principal(ctx: dict, selector) {
+fn __select_principal(ctx: DisclosureContext, selector) {
   const name = to_string(selector ?? "")
   if name == "origin" {
     return ctx.origin
@@ -254,13 +276,13 @@ fn __select_principal(ctx: dict, selector) {
   throw "std/disclosure: unknown principal selector `" + name + "`"
 }
 
-fn __render_text(surface_config: dict, ctx: dict) -> string {
+fn __render_text(surface_config: dict, ctx: DisclosureContext) -> string {
   const template = surface_config?.template
   require template != nil && template != "", "std/disclosure: text disclosure surfaces require a template"
   return render_string(to_string(template), ctx)
 }
 
-fn __render_optional_template(template, ctx: dict) {
+fn __render_optional_template(template, ctx: DisclosureContext) {
   if template == nil || trim(to_string(template)) == "" {
     return nil
   }
@@ -307,7 +329,7 @@ fn __github_commit_auth_identity(author_mode: string) -> string {
   return "any"
 }
 
-fn __github_trailers(config: dict, ctx: dict) -> string {
+fn __github_trailers(config: DisclosureConfig, ctx: DisclosureContext) -> string {
   const surface_config = __surface_config(config, "git")
   if !__git_trailers_switch_enabled(surface_config) {
     return ""
@@ -315,7 +337,7 @@ fn __github_trailers(config: dict, ctx: dict) -> string {
   return __safe_git_trailers(__render_text(surface_config, ctx), ctx)
 }
 
-fn __render_github(surface_config: dict, ctx: dict, config: dict) -> dict {
+fn __render_github(surface_config: dict, ctx: DisclosureContext, config: DisclosureConfig) -> dict {
   const author_mode = __github_author_mode(surface_config)
   const human_author = __select_principal(ctx, surface_config?.author ?? "origin")
   const bot_author = __select_principal(ctx, surface_config?.bot_author ?? "current")
@@ -365,7 +387,7 @@ fn __render_github(surface_config: dict, ctx: dict, config: dict) -> dict {
   }
 }
 
-fn __public_principals(ctx: dict) -> list<dict> {
+fn __public_principals(ctx: DisclosureContext) -> list<dict> {
   let principals = []
   for principal in ctx.principals {
     principals = principals
@@ -383,7 +405,7 @@ fn __public_principals(ctx: dict) -> list<dict> {
   return principals
 }
 
-fn __slack_customize(surface_config: dict, ctx: dict) -> dict {
+fn __slack_customize(surface_config: dict, ctx: DisclosureContext) -> dict {
   const username = __render_optional_template(surface_config?.customize_name_template, ctx)
   let customize = {scope: "chat:write.customize", enabled: surface_config?.customize_enabled != false}
   if username != nil {
@@ -400,7 +422,7 @@ fn __slack_customize(surface_config: dict, ctx: dict) -> dict {
   return customize
 }
 
-fn __slack_ai_mark(surface_config: dict, ctx: dict, byline: string) -> dict {
+fn __slack_ai_mark(surface_config: dict, ctx: DisclosureContext, byline: string) -> dict {
   const enabled = surface_config?.ai_mark_enabled != false
   const standard = to_string(surface_config?.ai_mark_standard ?? "eu_ai_act_article_50")
   const event_type = to_string(surface_config?.ai_mark_event_type ?? "harn.ai_disclosure.v1")
@@ -420,7 +442,7 @@ fn __slack_ai_mark(surface_config: dict, ctx: dict, byline: string) -> dict {
   }
 }
 
-fn __slack_message_disclosure(config: dict, ctx: dict) -> dict {
+fn __slack_message_disclosure(config: DisclosureConfig, ctx: DisclosureContext) -> dict {
   const surface_config = __surface_config(config, "slack")
   const byline = __render_text(surface_config, ctx)
   const principals = __public_principals(ctx)
@@ -478,7 +500,7 @@ fn __principal_matches_signature(principal: dict, signature: string) -> bool {
   return signed_email == "" && subject != "" && normalized == subject
 }
 
-fn __signed_off_by_targets_non_human(line: string, ctx: dict) -> bool {
+fn __signed_off_by_targets_non_human(line: string, ctx: DisclosureContext) -> bool {
   const trimmed = trim(line)
   if !starts_with(lowercase(trimmed), "signed-off-by:") {
     return false

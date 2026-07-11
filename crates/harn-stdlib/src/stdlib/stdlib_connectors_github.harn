@@ -55,7 +55,7 @@ type GitHubAutoMergeResult = {
   already_enabled: bool,
   requested_method: string,
   merge_method: string?,
-  pull_number: any,
+  pull_number: int | string,
   url: string?,
   strategy: string,
   error: any,
@@ -63,7 +63,7 @@ type GitHubAutoMergeResult = {
 
 type GitHubClosePrResult = {
   ok: bool,
-  pull_number: any,
+  pull_number: int | string,
   state: string,
   comment_posted: bool,
   pull_request: any,
@@ -300,7 +300,7 @@ pub fn api_call(path: string, method: string, body: any = nil, options: GitHubCa
  * @errors: []
  */
 pub fn workflow_dispatch(
-  repo: any,
+  repo: string | dict,
   workflow_id: any,
   ref: string = "main",
   inputs: dict? = nil,
@@ -320,7 +320,7 @@ pub fn workflow_dispatch(
  * @effects: []
  * @errors: []
  */
-pub fn workflow_runs(repo: any, options: GitHubCallOptions = {}) {
+pub fn workflow_runs(repo: string | dict, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
   return call("github.actions.runs", {repo: r.full_name}, options)
 }
@@ -331,7 +331,7 @@ pub fn workflow_runs(repo: any, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_run(repo: any, run_id: any, options: GitHubCallOptions = {}) {
+pub fn workflow_run(repo: string | dict, run_id: int | string, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
   return call("github.actions.run", {repo: r.full_name, run_id: run_id}, options)
 }
@@ -372,7 +372,7 @@ pub fn actions_workflow_runs(owner: string, repo: string, options: GitHubCallOpt
 pub fn actions_workflow_run(
   owner: string,
   repo: string,
-  run_id: any,
+  run_id: int | string,
   options: GitHubCallOptions = {},
 ) {
   return workflow_run(owner + "/" + repo, run_id, options)
@@ -385,7 +385,7 @@ pub fn actions_workflow_run(
  * @errors: []
  */
 pub fn read_file_at_ref(
-  repo: any,
+  repo: string | dict,
   path: string,
   ref: string? = nil,
   options: GitHubCallOptions = {},
@@ -416,7 +416,7 @@ pub fn repos_get_text(
  * @effects: []
  * @errors: []
  */
-pub fn latest_release(repo: any, options: GitHubCallOptions = {}) {
+pub fn latest_release(repo: string | dict, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
   return call("github.release.latest", {repo: r.full_name}, options)
 }
@@ -427,7 +427,7 @@ pub fn latest_release(repo: any, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn release_assets(repo: any, release_id: any = nil, options: GitHubCallOptions = {}) {
+pub fn release_assets(repo: string | dict, release_id: any = nil, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
   return call("github.release.assets", filter_nil({repo: r.full_name, release_id: release_id}), options)
 }
@@ -488,7 +488,11 @@ pub fn github_release_assets(
  * @effects: []
  * @errors: []
  */
-pub fn enable_auto_merge(repo: any, pull_number: any, options: GitHubCallOptions = {}) -> GitHubAutoMergeResult {
+pub fn enable_auto_merge(
+  repo: string | dict,
+  pull_number: int | string,
+  options: GitHubCallOptions = {},
+) -> GitHubAutoMergeResult {
   const r = __github_repo_or_throw(repo)
   const requested_method = uppercase(to_string(options.method ?? options.merge_method ?? "merge"))
   const result = try {
@@ -513,7 +517,7 @@ pub fn enable_auto_merge(repo: any, pull_number: any, options: GitHubCallOptions
 pub fn pulls_enable_auto_merge(
   owner: string,
   repo: string,
-  number: any,
+  number: int | string,
   options: GitHubCallOptions = {},
 ) {
   return enable_auto_merge(owner + "/" + repo, number, options)
@@ -528,7 +532,7 @@ pub fn pulls_enable_auto_merge(
 pub fn github_ensure_auto_merge(
   owner: string,
   repo: string,
-  pull_number: any,
+  pull_number: int | string,
   options: GitHubCallOptions = {},
 ) {
   return enable_auto_merge(owner + "/" + repo, pull_number, options)
@@ -541,8 +545,8 @@ pub fn github_ensure_auto_merge(
  * @errors: []
  */
 pub fn close_pr(
-  repo: any,
-  pull_number: any,
+  repo: string | dict,
+  pull_number: int | string,
   comment: string? = nil,
   options: GitHubCallOptions = {},
 ) -> GitHubClosePrResult {
@@ -583,7 +587,7 @@ pub fn close_pr(
 pub fn github_close_pr(
   owner: string,
   repo: string,
-  pull_number: any,
+  pull_number: int | string,
   comment: string? = nil,
   options: GitHubCallOptions = {},
 ) {
@@ -623,7 +627,7 @@ pub fn forge_writeback_comment(event, body: string, options: GitHubCallOptions =
   return git_forge_writeback_comment(event, body, options)
 }
 
-fn __github_auto_merge_failed(requested_method, pull_number, error) -> GitHubAutoMergeResult {
+fn __github_auto_merge_failed(requested_method, pull_number: int | string, error) -> GitHubAutoMergeResult {
   return {
     ok: false,
     state: "failed",
@@ -637,7 +641,7 @@ fn __github_auto_merge_failed(requested_method, pull_number, error) -> GitHubAut
   }
 }
 
-fn __github_auto_merge_success(result, requested_method, pull_number) -> GitHubAutoMergeResult {
+fn __github_auto_merge_success(result, requested_method, pull_number: int | string) -> GitHubAutoMergeResult {
   const state = result?.state ?? "enabled"
   const merge_method = result?.requested_method ?? result?.auto_merge?.merge_method
     ?? result?.pull_request?.autoMergeRequest?.mergeMethod
@@ -655,7 +659,7 @@ fn __github_auto_merge_success(result, requested_method, pull_number) -> GitHubA
   }
 }
 
-fn __github_close_pr_envelope(ok, pull_number, comment_posted, pull_request, error) -> GitHubClosePrResult {
+fn __github_close_pr_envelope(ok, pull_number: int | string, comment_posted, pull_request, error) -> GitHubClosePrResult {
   return {
     ok: ok,
     pull_number: pull_number,
@@ -755,7 +759,11 @@ pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOpti
  * @effects: []
  * @errors: []
  */
-pub fn pull_request_merged_source(repo: string, number: any, options: GitHubCallOptions = {}) {
+pub fn pull_request_merged_source(
+  repo: string,
+  number: int | string,
+  options: GitHubCallOptions = {},
+) {
   return {
     label: "github.pull_request_merged:" + repo + "#" + to_string(number),
     prefers_push: true,
@@ -838,7 +846,7 @@ pub fn wait_until_ci_green(repo: string, check_run_id: any, options: GitHubWaitO
  * @effects: []
  * @errors: []
  */
-pub fn wait_until_pr_merged(repo: string, number: any, options: GitHubWaitOptions = {}) {
+pub fn wait_until_pr_merged(repo: string, number: int | string, options: GitHubWaitOptions = {}) {
   return wait_for(
     __github_wait_options(
       options,
