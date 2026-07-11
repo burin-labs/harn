@@ -113,30 +113,56 @@ impl Compiler {
         }
     }
 
-    /// Expand a single layer of alias references. Returns the resolved
-    /// `TypeExpr` with all `Named(T)` nodes whose `T` is a known alias
-    /// replaced by the alias's body.
+    /// Fully expand alias references, inlining every `Named(T)` whose `T` is a
+    /// known alias with the alias's body. A `visiting` set breaks recursive
+    /// aliases (`type Tree = {value: int, children: [Tree]}`): once an alias is
+    /// already being expanded on the current path, the self-reference is left
+    /// as an unexpanded `Named(T)` instead of recursing forever. This mirrors
+    /// the typechecker's `resolve_alias` cycle guard so both sides agree, and
+    /// keeps schema lowering (`type_expr_to_schema_value`) finite — a
+    /// cycle-broken `Named(T)` lowers to no runtime constraint at that nested
+    /// position rather than overflowing the stack.
     pub(super) fn expand_alias(&self, ty: &TypeExpr) -> TypeExpr {
+        let mut visiting = std::collections::HashSet::new();
+        self.expand_alias_inner(ty, &mut visiting)
+    }
+
+    fn expand_alias_inner(
+        &self,
+        ty: &TypeExpr,
+        visiting: &mut std::collections::HashSet<String>,
+    ) -> TypeExpr {
         match ty {
             TypeExpr::Named(name) => {
                 if let Some(target) = self.type_aliases.get(name) {
-                    self.expand_alias(target)
+                    if !visiting.insert(name.clone()) {
+                        return TypeExpr::Named(name.clone());
+                    }
+                    let resolved = self.expand_alias_inner(target, visiting);
+                    visiting.remove(name);
+                    resolved
                 } else {
                     TypeExpr::Named(name.clone())
                 }
             }
-            TypeExpr::Union(types) => {
-                TypeExpr::Union(types.iter().map(|t| self.expand_alias(t)).collect())
-            }
-            TypeExpr::Intersection(types) => {
-                TypeExpr::Intersection(types.iter().map(|t| self.expand_alias(t)).collect())
-            }
+            TypeExpr::Union(types) => TypeExpr::Union(
+                types
+                    .iter()
+                    .map(|t| self.expand_alias_inner(t, visiting))
+                    .collect(),
+            ),
+            TypeExpr::Intersection(types) => TypeExpr::Intersection(
+                types
+                    .iter()
+                    .map(|t| self.expand_alias_inner(t, visiting))
+                    .collect(),
+            ),
             TypeExpr::Shape(fields) => TypeExpr::Shape(
                 fields
                     .iter()
                     .map(|field| ShapeField {
                         name: field.name.clone(),
-                        type_expr: self.expand_alias(&field.type_expr),
+                        type_expr: self.expand_alias_inner(&field.type_expr, visiting),
                         optional: field.optional,
                     })
                     .collect(),
@@ -146,35 +172,54 @@ impl Compiler {
                     .iter()
                     .map(|field| ShapeField {
                         name: field.name.clone(),
-                        type_expr: self.expand_alias(&field.type_expr),
+                        type_expr: self.expand_alias_inner(&field.type_expr, visiting),
                         optional: field.optional,
                     })
                     .collect(),
-                rests: rests.iter().map(|r| self.expand_alias(r)).collect(),
+                rests: rests
+                    .iter()
+                    .map(|r| self.expand_alias_inner(r, visiting))
+                    .collect(),
             },
-            TypeExpr::List(inner) => TypeExpr::List(Box::new(self.expand_alias(inner))),
-            TypeExpr::Iter(inner) => TypeExpr::Iter(Box::new(self.expand_alias(inner))),
-            TypeExpr::Generator(inner) => TypeExpr::Generator(Box::new(self.expand_alias(inner))),
-            TypeExpr::Stream(inner) => TypeExpr::Stream(Box::new(self.expand_alias(inner))),
+            TypeExpr::List(inner) => {
+                TypeExpr::List(Box::new(self.expand_alias_inner(inner, visiting)))
+            }
+            TypeExpr::Iter(inner) => {
+                TypeExpr::Iter(Box::new(self.expand_alias_inner(inner, visiting)))
+            }
+            TypeExpr::Generator(inner) => {
+                TypeExpr::Generator(Box::new(self.expand_alias_inner(inner, visiting)))
+            }
+            TypeExpr::Stream(inner) => {
+                TypeExpr::Stream(Box::new(self.expand_alias_inner(inner, visiting)))
+            }
             TypeExpr::DictType(k, v) => TypeExpr::DictType(
-                Box::new(self.expand_alias(k)),
-                Box::new(self.expand_alias(v)),
+                Box::new(self.expand_alias_inner(k, visiting)),
+                Box::new(self.expand_alias_inner(v, visiting)),
             ),
             TypeExpr::FnType {
                 params,
                 return_type,
             } => TypeExpr::FnType {
-                params: params.iter().map(|p| self.expand_alias(p)).collect(),
-                return_type: Box::new(self.expand_alias(return_type)),
+                params: params
+                    .iter()
+                    .map(|p| self.expand_alias_inner(p, visiting))
+                    .collect(),
+                return_type: Box::new(self.expand_alias_inner(return_type, visiting)),
             },
             TypeExpr::Applied { name, args } => TypeExpr::Applied {
                 name: name.clone(),
-                args: args.iter().map(|a| self.expand_alias(a)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| self.expand_alias_inner(a, visiting))
+                    .collect(),
             },
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
-            TypeExpr::Owned(inner) => TypeExpr::Owned(Box::new(self.expand_alias(inner))),
+            TypeExpr::Owned(inner) => {
+                TypeExpr::Owned(Box::new(self.expand_alias_inner(inner, visiting)))
+            }
         }
     }
 

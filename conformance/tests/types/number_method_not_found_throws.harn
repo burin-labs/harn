@@ -1,0 +1,11 @@
+// A method call on a number has no valid target; it must throw a catchable
+// error rather than silently evaluating to `nil`.
+pipeline default() {
+  const outcome = try {
+    const _ = 3.14.frobnicate()
+    "no throw"
+  } catch (e) {
+    "caught"
+  }
+  __io_println(outcome)
+}

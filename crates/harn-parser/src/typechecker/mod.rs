@@ -140,6 +140,14 @@ pub struct TypeChecker {
     /// `const` binding. Later const initializers see earlier values so
     /// expressions like `const Y = X + 1` work.
     const_env: crate::const_eval::ConstEnv,
+    /// Coinductive guard for recursive-type subtype checks. Holds the
+    /// resolved `(expected, actual)` pairs currently on the
+    /// `types_compatible_at` stack. Re-encountering a pair means the walk has
+    /// cycled through a recursive type alias (`type Tree = {children: [Tree]}`);
+    /// we then assume compatibility (greatest-fixpoint / equirecursive
+    /// subtyping) instead of recursing forever. Interior mutability because
+    /// `types_compatible_at` runs behind `&self`.
+    subtype_cycle_guard: std::cell::RefCell<Vec<(TypeExpr, TypeExpr)>>,
 }
 
 impl TypeChecker {
@@ -303,6 +311,7 @@ impl TypeChecker {
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
             const_env: crate::const_eval::ConstEnv::new(),
+            subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -324,6 +333,7 @@ impl TypeChecker {
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
             const_env: crate::const_eval::ConstEnv::new(),
+            subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
     }
 
