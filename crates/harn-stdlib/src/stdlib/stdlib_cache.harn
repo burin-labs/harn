@@ -16,6 +16,13 @@ import { agent_emit_event } from "std/agent/state"
 import { timed } from "std/timing"
 
 /**
+ * Envelope returned by `with_cache_envelope`. `value` is the cached or freshly
+ * computed result, so it stays `unknown` for callers to narrow; `metrics` is an
+ * open bag ({model_calls_avoided, ...} on hit, {compute_ms} on miss).
+ */
+type CacheEnvelope = {value: unknown, hit: bool, key: string, metrics: dict}
+
+/**
  * cache_get returns {hit: bool, value?, backend, namespace} for key.
  *
  * @effects: []
@@ -195,7 +202,7 @@ pub fn with_cache(key: string, compute, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
+pub fn with_cache_envelope(key: string, compute, options = nil) -> CacheEnvelope {
   const opts = options ?? {}
   const store_opts = __with_cache_store_opts(opts)
   const session_id = to_string(opts?.session_id ?? "")
