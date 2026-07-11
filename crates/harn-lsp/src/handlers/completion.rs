@@ -5,7 +5,9 @@ use harn_parser::{format_type, ShapeField, TypeExpr};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
-use crate::constants::{builtin_details, DICT_METHODS, KEYWORDS, LIST_METHODS, STRING_METHODS};
+use crate::constants::{
+    builtin_details, builtin_doc, keyword_doc, DICT_METHODS, KEYWORDS, LIST_METHODS, STRING_METHODS,
+};
 use crate::helpers::{
     char_before_position, infer_dot_receiver_name, infer_dot_receiver_type, lsp_position_to_offset,
     position_in_span,
@@ -89,6 +91,8 @@ impl HarnLsp {
                 label: detail.name.clone(),
                 kind: Some(CompletionItemKind::FUNCTION),
                 detail: Some(detail.signature.clone()),
+                // Documentation is attached lazily in `completion_resolve`.
+                data: Some(resolve_tag(ResolveKind::Builtin)),
                 ..Default::default()
             });
         }
@@ -97,11 +101,83 @@ impl HarnLsp {
             items.push(CompletionItem {
                 label: kw.to_string(),
                 kind: Some(CompletionItemKind::KEYWORD),
+                data: Some(resolve_tag(ResolveKind::Keyword)),
                 ..Default::default()
             });
         }
 
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    /// Lazily attach documentation to a completion item selected by the
+    /// client. Only builtin and keyword items carry docs — their markdown
+    /// is a pure function of the item label, so resolution is stateless and
+    /// needs no document context. Items already carrying documentation (or
+    /// user symbols, whose `detail` already shows the signature) pass
+    /// through unchanged.
+    pub(super) async fn handle_completion_resolve(
+        &self,
+        item: CompletionItem,
+    ) -> Result<CompletionItem> {
+        Ok(resolve_completion_documentation(item))
+    }
+}
+
+/// Attach lazily-computed documentation to a completion item. Only builtin
+/// and keyword items carry docs — their markdown is a pure function of the
+/// item label, so resolution is stateless. Items already carrying
+/// documentation (or user symbols, whose `detail` already shows the
+/// signature) pass through unchanged.
+pub(super) fn resolve_completion_documentation(mut item: CompletionItem) -> CompletionItem {
+    if item.documentation.is_some() {
+        return item;
+    }
+    let doc = match resolve_kind_of(&item) {
+        Some(ResolveKind::Builtin) => builtin_doc(&item.label),
+        Some(ResolveKind::Keyword) => keyword_doc(&item.label),
+        None => None,
+    };
+    if let Some(doc) = doc {
+        item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: doc,
+        }));
+    }
+    item
+}
+
+/// Discriminates which lazy-documentation source a completion item resolves
+/// against. Serialized into `CompletionItem.data` and read back in
+/// `completion_resolve`.
+#[derive(Clone, Copy)]
+enum ResolveKind {
+    Builtin,
+    Keyword,
+}
+
+impl ResolveKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            ResolveKind::Builtin => "builtin",
+            ResolveKind::Keyword => "keyword",
+        }
+    }
+}
+
+fn resolve_tag(kind: ResolveKind) -> serde_json::Value {
+    serde_json::json!({ "harn_resolve": kind.as_str() })
+}
+
+fn resolve_kind_of(item: &CompletionItem) -> Option<ResolveKind> {
+    match item
+        .data
+        .as_ref()
+        .and_then(|data| data.get("harn_resolve"))
+        .and_then(|value| value.as_str())?
+    {
+        "builtin" => Some(ResolveKind::Builtin),
+        "keyword" => Some(ResolveKind::Keyword),
+        _ => None,
     }
 }
 
@@ -510,9 +586,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{discriminator_value_completions, dot_completion_items};
+    use super::{
+        discriminator_value_completions, dot_completion_items, resolve_completion_documentation,
+        resolve_tag, ResolveKind,
+    };
     use crate::document::DocumentState;
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp::lsp_types::{CompletionItem, Position};
 
     fn completion_items_at(source: &str, marker: &str) -> Vec<(String, Option<String>)> {
         let state = DocumentState::new(source.to_string());
@@ -641,6 +720,62 @@ mod tests {
             .into_iter()
             .map(|item| item.label)
             .collect()
+    }
+
+    #[test]
+    fn resolve_attaches_builtin_documentation_lazily() {
+        use crate::constants::{builtin_details, builtin_doc};
+        // Pick a builtin that actually carries documentation.
+        let documented = builtin_details()
+            .iter()
+            .find(|detail| builtin_doc(&detail.name).is_some())
+            .expect("at least one builtin should have documentation");
+        // Model the item the completion list produces: label + tag, no docs.
+        let item = CompletionItem {
+            label: documented.name.clone(),
+            data: Some(resolve_tag(ResolveKind::Builtin)),
+            ..Default::default()
+        };
+        assert!(item.documentation.is_none(), "docs must start unresolved");
+        let resolved = resolve_completion_documentation(item);
+        assert!(
+            resolved.documentation.is_some(),
+            "expected resolved docs for builtin `{}`",
+            documented.name
+        );
+    }
+
+    #[test]
+    fn resolve_attaches_keyword_documentation_lazily() {
+        use crate::constants::{keyword_doc, KEYWORDS};
+        let documented = KEYWORDS
+            .iter()
+            .find(|kw| keyword_doc(kw).is_some())
+            .expect("at least one keyword should have documentation");
+        let item = CompletionItem {
+            label: (*documented).to_string(),
+            data: Some(resolve_tag(ResolveKind::Keyword)),
+            ..Default::default()
+        };
+        let resolved = resolve_completion_documentation(item);
+        assert!(
+            resolved.documentation.is_some(),
+            "expected resolved docs for keyword `{documented}`"
+        );
+    }
+
+    #[test]
+    fn resolve_leaves_untagged_items_unchanged() {
+        // A user symbol item has a detail but no resolve tag — it must pass
+        // through untouched.
+        let item = CompletionItem {
+            label: "my_local".to_string(),
+            detail: Some("variable".to_string()),
+            ..Default::default()
+        };
+        let resolved = resolve_completion_documentation(item);
+        assert!(resolved.documentation.is_none());
+        assert_eq!(resolved.detail.as_deref(), Some("variable"));
     }
 
     #[test]
