@@ -154,6 +154,35 @@ pipeline test_build_drift_reports_removal_when_provider_observed(task) {
 }
 
 @test
+pipeline test_build_drift_keys_catalog_identity_by_provider_and_model(task) {
+  const catalog = {
+    models: [
+      {
+        id: "shared-model",
+        provider: "provider-a",
+        context_window: 1000,
+        pricing: {input_per_mtok: 1.0, output_per_mtok: 2.0},
+      },
+      {
+        id: "shared-model",
+        provider: "provider-b",
+        context_window: 2000,
+        pricing: {input_per_mtok: 3.0, output_per_mtok: 4.0},
+      },
+    ],
+  }
+  const observed = observation(
+    "provider-a",
+    "shared-model",
+    {context_window: 1000, pricing: {input_per_mtok: 1.0, output_per_mtok: 2.0}},
+    {source_url: "https://provider-a.example/models", source_owner: "provider", confidence: "high"},
+  )
+  const drift = build_drift([observed], catalog)
+  assert_eq(len(drift.changed), 0)
+  assert_eq(len(drift.removed), 0)
+}
+
+@test
 pipeline test_render_markdown_report_includes_diagnostics(task) {
   const obs = provider_obs(
     "claude-haiku-4-5-20251001",
@@ -205,6 +234,15 @@ pipeline test_render_candidate_toml_emits_added_and_changed_only(task) {
 }
 
 @test
+pipeline test_render_candidate_toml_keeps_aggregator_discovery_out_of_patch(task) {
+  const discovered = aggregator_obs("claude-next-unverified", {input_per_mtok: 9.0, output_per_mtok: 45.0})
+  const drift = build_drift([discovered], SAMPLE_CATALOG)
+  const toml = render_candidate_toml(drift, {generated_at: "fixture-time", run_mode: "live"})
+  assert(!contains(toml, "[models.\"claude-next-unverified\"]"))
+  assert(contains(toml, "No provider-owned, high-confidence metadata additions or changes detected"))
+}
+
+@test
 pipeline test_render_candidate_toml_handles_no_changes(task) {
   const unchanged_obs = provider_obs(
     "claude-haiku-4-5-20251001",
@@ -219,7 +257,7 @@ pipeline test_render_candidate_toml_handles_no_changes(task) {
   )
   const drift = build_drift([unchanged_obs, unchanged_obs_2], SAMPLE_CATALOG)
   const toml = render_candidate_toml(drift, {generated_at: "fixture-time", run_mode: "fixtures"})
-  assert(contains(toml, "No additions or changes detected"))
+  assert(contains(toml, "No provider-owned, high-confidence metadata additions or changes detected"))
 }
 
 @test

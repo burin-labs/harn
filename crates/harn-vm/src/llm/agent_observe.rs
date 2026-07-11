@@ -1541,6 +1541,7 @@ pub(super) fn dump_llm_response(
         "cache_savings_usd": crate::llm::cost::cache_savings_usd_for_provider(
             &result.provider,
             &result.model,
+            result.input_tokens,
             result.cache_read_tokens,
             result.cache_write_tokens,
         ),

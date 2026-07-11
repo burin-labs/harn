@@ -432,6 +432,7 @@ preferred_tool_format = "native"
                         output_per_mtok: 2.0,
                         cache_read_per_mtok: None,
                         cache_write_per_mtok: None,
+                        input_token_bands: Vec::new(),
                     }),
                     deprecated: false,
                     deprecation_note: None,

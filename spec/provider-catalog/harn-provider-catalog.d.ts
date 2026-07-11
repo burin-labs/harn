@@ -203,6 +203,13 @@ export interface HarnModelPricing {
   output_per_mtok: number
   cache_read_per_mtok?: number | null
   cache_write_per_mtok?: number | null
+  input_token_bands?: HarnInputTokenPricingBand[]
+}
+
+export interface HarnInputTokenPricingBand {
+  minimum_input_tokens: number
+  input_multiplier: number
+  output_multiplier: number
 }
 
 export interface HarnRateLimits {

@@ -386,7 +386,20 @@ pub fn schema_value() -> Value {
                     "input_per_mtok": {"type": "number", "minimum": 0},
                     "output_per_mtok": {"type": "number", "minimum": 0},
                     "cache_read_per_mtok": {"type": ["number", "null"], "minimum": 0},
-                    "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0}
+                    "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                    "input_token_bands": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["minimum_input_tokens", "input_multiplier", "output_multiplier"],
+                            "properties": {
+                                "minimum_input_tokens": {"type": "integer", "minimum": 1},
+                                "input_multiplier": {"type": "number", "exclusiveMinimum": 0},
+                                "output_multiplier": {"type": "number", "exclusiveMinimum": 0}
+                            },
+                            "additionalProperties": false
+                        }
+                    }
                 },
                 "additionalProperties": false
             },

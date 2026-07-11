@@ -74,6 +74,7 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     let cache_savings_usd = crate::llm::cost::cache_savings_usd_for_provider(
         &result.provider,
         &result.model,
+        result.input_tokens,
         result.cache_read_tokens,
         result.cache_write_tokens,
     );

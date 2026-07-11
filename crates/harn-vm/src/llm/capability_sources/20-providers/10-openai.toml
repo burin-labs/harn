@@ -304,6 +304,30 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# OpenRouter's GPT-5.6 slugs use the OpenAI-compatible Chat transport while
+# preserving the model family's exact reasoning and sampling constraints.
+# Keep this ahead of the broad gateway GPT rule so `minimal` and temperature
+# are rejected locally for both standard and provider-managed `-pro` routes.
+[[provider.openai]]
+model_match = "openai/gpt-5.6*"
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+temperature_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 4]

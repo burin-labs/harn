@@ -449,12 +449,26 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
     public let outputPerMTok: Double
     public let cacheReadPerMTok: Double?
     public let cacheWritePerMTok: Double?
+    public let inputTokenBands: [HarnInputTokenPricingBand]?
 
     enum CodingKeys: String, CodingKey {
         case inputPerMTok = "input_per_mtok"
         case outputPerMTok = "output_per_mtok"
         case cacheReadPerMTok = "cache_read_per_mtok"
         case cacheWritePerMTok = "cache_write_per_mtok"
+        case inputTokenBands = "input_token_bands"
+    }
+}
+
+public struct HarnInputTokenPricingBand: Codable, Sendable, Equatable {
+    public let minimumInputTokens: Int
+    public let inputMultiplier: Double
+    public let outputMultiplier: Double
+
+    enum CodingKeys: String, CodingKey {
+        case minimumInputTokens = "minimum_input_tokens"
+        case inputMultiplier = "input_multiplier"
+        case outputMultiplier = "output_multiplier"
     }
 }
 

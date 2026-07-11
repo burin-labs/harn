@@ -7473,7 +7473,14 @@
         "input_per_mtok": 1.25,
         "output_per_mtok": 10.0,
         "cache_read_per_mtok": 0.125,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -7756,7 +7763,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 12.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -12591,6 +12605,276 @@
       ]
     },
     {
+      "id": "gpt-4.1",
+      "name": "GPT-4.1",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1047576,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 8.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
+      "id": "gpt-4.1-mini",
+      "name": "GPT-4.1 Mini",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1047576,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.4,
+        "output_per_mtok": 1.6,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
+      "id": "gpt-4.1-nano",
+      "name": "GPT-4.1 Nano",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1047576,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.4,
+        "cache_read_per_mtok": 0.025,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
       "id": "gpt-4o",
       "name": "GPT-4o",
       "provider": "openai",
@@ -12745,7 +13029,7 @@
       "pricing": {
         "input_per_mtok": 0.15,
         "output_per_mtok": 0.6,
-        "cache_read_per_mtok": null,
+        "cache_read_per_mtok": 0.075,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -12945,7 +13229,14 @@
         "input_per_mtok": 2.5,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.25,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -13184,6 +13475,119 @@
       ]
     },
     {
+      "id": "gpt-5.4-pro",
+      "name": "GPT-5.4 Pro",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1050000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 30.0,
+        "output_per_mtok": 180.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision",
+        "agentic"
+      ]
+    },
+    {
       "id": "gpt-5.5",
       "name": "GPT-5.5",
       "provider": "openai",
@@ -13252,7 +13656,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -13425,7 +13836,14 @@
         "input_per_mtok": 30.0,
         "output_per_mtok": 180.0,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -13469,6 +13887,8 @@
         "openai/small"
       ],
       "context_window": 1050000,
+      "logical_model": "gpt-5.6-luna",
+      "equivalence_group": "gpt-5.6-luna",
       "modalities": {
         "input": [
           "text",
@@ -13532,7 +13952,14 @@
         "input_per_mtok": 1.0,
         "output_per_mtok": 6.0,
         "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 1.25
+        "cache_write_per_mtok": 1.25,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -13633,6 +14060,8 @@
         "openai/frontier"
       ],
       "context_window": 1050000,
+      "logical_model": "gpt-5.6-sol",
+      "equivalence_group": "gpt-5.6-sol",
       "modalities": {
         "input": [
           "text",
@@ -13696,7 +14125,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -13794,6 +14230,8 @@
         "openai/mid"
       ],
       "context_window": 1050000,
+      "logical_model": "gpt-5.6-terra",
+      "equivalence_group": "gpt-5.6-terra",
       "modalities": {
         "input": [
           "text",
@@ -13857,7 +14295,14 @@
         "input_per_mtok": 2.5,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.25,
-        "cache_write_per_mtok": 3.125
+        "cache_write_per_mtok": 3.125,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -14099,9 +14544,9 @@
         ]
       },
       "pricing": {
-        "input_per_mtok": 3.0,
-        "output_per_mtok": 12.0,
-        "cache_read_per_mtok": 1.5,
+        "input_per_mtok": 1.1,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.55,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -14190,9 +14635,9 @@
         ]
       },
       "pricing": {
-        "input_per_mtok": 15.0,
-        "output_per_mtok": 60.0,
-        "cache_read_per_mtok": 7.5,
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 8.0,
+        "cache_read_per_mtok": 0.5,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -14316,6 +14761,99 @@
       "benchmarks": {
         "swe_bench_verified": 49.3
       }
+    },
+    {
+      "id": "o4-mini",
+      "name": "OpenAI o4-mini",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": true,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.1,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.275,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "vision"
+      ]
     },
     {
       "id": "Qwen/Qwen3.5-9B",
@@ -16712,6 +17250,472 @@
       "family": "openai-gpt",
       "lineage": "openai-gpt5",
       "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-luna",
+      "name": "GPT-5.6 Luna (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-5.6-luna",
+      "equivalence_group": "gpt-5.6-luna",
+      "served_variant": "openrouter",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 1.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-luna-pro",
+      "name": "GPT-5.6 Luna Pro (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-5.6-luna",
+      "equivalence_group": "gpt-5.6-luna",
+      "served_variant": "openrouter_pro",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 1.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-sol",
+      "name": "GPT-5.6 Sol (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-5.6-sol",
+      "equivalence_group": "gpt-5.6-sol",
+      "served_variant": "openrouter",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 30.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-sol-pro",
+      "name": "GPT-5.6 Sol Pro (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-5.6-sol",
+      "equivalence_group": "gpt-5.6-sol",
+      "served_variant": "openrouter_pro",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 30.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-terra",
+      "name": "GPT-5.6 Terra (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-5.6-terra",
+      "equivalence_group": "gpt-5.6-terra",
+      "served_variant": "openrouter",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.5,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": 3.125
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-terra-pro",
+      "name": "GPT-5.6 Terra Pro (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-5.6-terra",
+      "equivalence_group": "gpt-5.6-terra",
+      "served_variant": "openrouter_pro",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.5,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": 3.125
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "mid",
       "open_weight": false,
       "strengths": [
         "coding",
@@ -21835,7 +22839,7 @@
       "id": "vision-capable",
       "label": "Vision capable",
       "description": "A model route that accepts image input.",
-      "model_id": "openai/gpt-5.5-pro",
+      "model_id": "openai/gpt-5.6-terra-pro",
       "provider": "openrouter",
       "source": "catalog"
     },
@@ -21843,7 +22847,7 @@
       "id": "long-context",
       "label": "Long context",
       "description": "Largest context-window route in the checked-in catalog.",
-      "model_id": "openai/gpt-5.5-pro",
+      "model_id": "openai/gpt-5.6-terra-pro",
       "provider": "openrouter",
       "source": "catalog"
     }
@@ -24009,6 +25013,63 @@
     },
     {
       "provider": "openai",
+      "model": "gpt-4.1",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-4.1",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-4.1 Mini",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1-nano",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-4.1 Nano",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
       "model": "gpt-4o-mini",
       "base_url": "https://api.openai.com/v1",
       "secret_env": "OPENAI_API_KEY",
@@ -24102,6 +25163,29 @@
       "base_url": "https://api.openai.com/v1",
       "secret_env": "OPENAI_API_KEY",
       "label": "GPT-5.4 Nano",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-pro",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-5.4 Pro",
       "family": "openai-gpt",
       "capabilities": [
         "batch",
@@ -24230,6 +25314,28 @@
         "text_tools",
         "thinking",
         "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "o4-mini",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "OpenAI o4-mini",
+      "family": "openai-reasoning",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
         "tools",
         "vision"
       ]
@@ -24849,6 +25955,132 @@
         "text_tools",
         "thinking",
         "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.6-luna",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.6 Luna (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.6-luna-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.6 Luna Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.6-sol",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.6 Sol (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.6-sol-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.6 Sol Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.6-terra",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.6 Terra (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-5.6-terra-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-5.6 Terra Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
         "tools",
         "vision"
       ]

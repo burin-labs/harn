@@ -209,10 +209,10 @@ pub fn normalize_observations(raw: list<dict>) -> dict {
   return {observations: canonical, conflicts: conflicts}
 }
 
-fn __catalog_model_by_id(catalog) {
+fn __catalog_model_by_route(catalog) {
   let by_id: dict = {}
   for model in catalog?.models ?? [] {
-    by_id = by_id + {[model.id]: model}
+    by_id = by_id + {[model.provider + ":" + model.id]: model}
   }
   return by_id
 }
@@ -320,7 +320,7 @@ fn __observed_providers(observations) {
  * plus low-confidence and key-required diagnostics.
  */
 pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
-  const by_id = __catalog_model_by_id(catalog)
+  const by_route = __catalog_model_by_route(catalog)
   let added: list<dict> = []
   let changed: list<dict> = []
   let seen: dict = {}
@@ -328,7 +328,8 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   let low_confidence: list<dict> = []
   let requires_key: list<dict> = []
   for obs in observations {
-    seen = seen + {[obs.model_id]: true}
+    const route = __observation_key(obs)
+    seen = seen + {[route]: true}
     if __confidence_rank(obs.confidence) < __confidence_rank("high") {
       low_confidence = low_confidence + [obs]
     }
@@ -338,10 +339,10 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
     if obs.pricing == nil {
       unknown_pricing = unknown_pricing + [obs]
     }
-    if by_id[obs.model_id] == nil {
+    if by_route[route] == nil {
       added = added + [obs]
     } else {
-      const cat = by_id[obs.model_id]
+      const cat = by_route[route]
       const pricing_changes = __pricing_change(cat.pricing, obs.pricing)
       const capability_changes = __capability_changes(cat?.capabilities, obs?.capabilities)
       let ctx_change: dict? = nil
@@ -365,7 +366,8 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   const observed_providers = __observed_providers(observations)
   let removed: list<dict> = []
   for model in catalog?.models ?? [] {
-    if !seen[model.id] && observed_providers[model.provider] {
+    const route = model.provider + ":" + model.id
+    if !seen[route] && observed_providers[model.provider] {
       removed = removed + [model]
     }
   }
@@ -621,15 +623,29 @@ pub fn render_candidate_toml(drift: dict, meta: dict) -> string {
     "# This file is a review aid — diff against canonical sources before landing.",
     "",
   ]
+  let emitted = 0
   for obs in drift.added {
-    lines = lines + ["# added"] + __format_model_section(obs)
+    const has_actionable_metadata = obs.pricing != nil
+      || obs.context_window != nil
+      || obs.capabilities != nil
+    if obs.source_owner == "provider"
+      && __confidence_rank(obs.confidence) >= __confidence_rank("high")
+      && has_actionable_metadata {
+      lines = lines + ["# added"] + __format_model_section(obs)
+      emitted = emitted + 1
+    }
   }
   for entry in drift.changed {
-    lines = lines + ["# changed (was: " + entry.catalog.id + ")"]
-      + __format_model_section(entry.observation)
+    const obs = entry.observation
+    if obs.source_owner == "provider" && __confidence_rank(obs.confidence) >= __confidence_rank("high") {
+      lines = lines + ["# changed (was: " + entry.catalog.id + ")"]
+        + __format_model_section(obs)
+      emitted = emitted + 1
+    }
   }
-  if len(drift.added) == 0 && len(drift.changed) == 0 {
-    lines = lines + ["# No additions or changes detected.", ""]
+  if emitted == 0 {
+    lines = lines
+      + ["# No provider-owned, high-confidence metadata additions or changes detected.", ""]
   }
   return join(lines, "\n")
 }
