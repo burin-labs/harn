@@ -89,6 +89,64 @@ fn result_err(value: VmValue) -> VmValue {
     VmValue::enum_variant("Result", "Err", vec![value])
 }
 
+/// Canonical, stable string key for an `io::ErrorKind`.
+///
+/// These keys are a contract that `.harn` consumers branch on — e.g.
+/// `atomic-write` detecting a full disk (`"storage_full"`) or an exhausted
+/// quota (`"quota_exceeded"`) instead of substring-matching English prose in
+/// the accompanying `message`. Never rename an existing key.
+///
+/// `std::io::ErrorKind` is `#[non_exhaustive]`, so the compiler *requires* the
+/// `_ => "other"` arm; unlike the `ErrorCategory` mapping (which we own and
+/// match exhaustively), a new std variant cannot be compiler-forced here. The
+/// named arms cover the kinds Harn's fs surface can realistically surface.
+fn io_error_kind_str(error: &std::io::Error) -> &'static str {
+    use std::io::ErrorKind;
+    match error.kind() {
+        ErrorKind::NotFound => "not_found",
+        ErrorKind::PermissionDenied => "permission_denied",
+        ErrorKind::AlreadyExists => "already_exists",
+        ErrorKind::StorageFull => "storage_full",
+        ErrorKind::QuotaExceeded => "quota_exceeded",
+        ErrorKind::FileTooLarge => "file_too_large",
+        ErrorKind::ReadOnlyFilesystem => "read_only_filesystem",
+        ErrorKind::NotADirectory => "not_a_directory",
+        ErrorKind::IsADirectory => "is_a_directory",
+        ErrorKind::DirectoryNotEmpty => "directory_not_empty",
+        ErrorKind::CrossesDevices => "crosses_devices",
+        ErrorKind::TooManyLinks => "too_many_links",
+        ErrorKind::InvalidInput => "invalid_input",
+        ErrorKind::InvalidData => "invalid_data",
+        ErrorKind::TimedOut => "timed_out",
+        ErrorKind::Interrupted => "interrupted",
+        ErrorKind::UnexpectedEof => "unexpected_eof",
+        ErrorKind::WouldBlock => "would_block",
+        ErrorKind::OutOfMemory => "out_of_memory",
+        ErrorKind::ResourceBusy => "resource_busy",
+        ErrorKind::ExecutableFileBusy => "executable_file_busy",
+        _ => "other",
+    }
+}
+
+/// Build the structured value thrown when an fs builtin wraps an `io::Error`:
+/// `{error: "io_error", kind: <canonical kind>, message}`. The typed `kind`
+/// lets `.harn` consumers branch on conditions (ENOSPC, permission, not-found)
+/// rather than matching the prose in `message`, which stays intact so a
+/// stringifying `catch` still renders sensibly.
+fn io_error_value(message: impl AsRef<str>, error: &std::io::Error) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.put_str("error", "io_error");
+    dict.put_str("kind", io_error_kind_str(error));
+    dict.put_str("message", message);
+    VmValue::dict(dict)
+}
+
+/// [`VmError::Thrown`] wrapping [`io_error_value`] — the fs builtins' single
+/// io-error lowering seam.
+fn io_error_thrown(message: impl AsRef<str>, error: &std::io::Error) -> VmError {
+    VmError::Thrown(io_error_value(message, error))
+}
+
 fn bool_option(opts: &crate::value::DictMap, key: &str) -> Option<bool> {
     match opts.get(key) {
         Some(VmValue::Bool(value)) => Some(*value),
@@ -345,9 +403,10 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             write_cached_text(resolved.clone(), shared.clone());
             Ok(VmValue::String(shared))
         }
-        Err(e) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Err(e) => Err(io_error_thrown(
             format!("Failed to read file {}: {e}", resolved.display()),
-        )))),
+            &e,
+        )),
     }
 }
 
@@ -407,9 +466,10 @@ fn read_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     )?;
     match overlay::read(&resolved) {
         Ok(content) => Ok(VmValue::Bytes(std::sync::Arc::new(content))),
-        Err(e) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Err(e) => Err(io_error_thrown(
             format!("Failed to read file {}: {e}", resolved.display()),
-        )))),
+            &e,
+        )),
     }
 }
 
@@ -429,10 +489,10 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
         overlay::write_scoped("write_file", &resolved, content.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Failed to write file {}: {e}",
-                resolved.display()
-            ))))
+            io_error_thrown(
+                format!("Failed to write file {}: {e}", resolved.display()),
+                &e,
+            )
         })?;
         let bytes = content.len();
         write_cached_text(resolved.clone(), arcstr::ArcStr::from(content));
@@ -468,10 +528,10 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
         overlay::write_scoped("write_file_bytes", &resolved, content).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Failed to write file {}: {e}",
-                resolved.display()
-            ))))
+            io_error_thrown(
+                format!("Failed to write file {}: {e}", resolved.display()),
+                &e,
+            )
         })?;
         FILE_TEXT_CACHE.with(|cache| {
             cache.borrow_mut().remove(&resolved);
@@ -709,24 +769,21 @@ fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     // Overlay treats files and directories alike by recording an overlay deletion marker.
     if crate::testbench::overlay_fs::active_overlay().is_some() {
         overlay::remove_file(&resolved).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Failed to delete {}: {e}",
-                resolved.display()
-            ))))
+            io_error_thrown(format!("Failed to delete {}: {e}", resolved.display()), &e)
         })?;
     } else if resolved.is_dir() {
         std::fs::remove_dir_all(&resolved).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Failed to delete directory {}: {e}",
-                resolved.display()
-            ))))
+            io_error_thrown(
+                format!("Failed to delete directory {}: {e}", resolved.display()),
+                &e,
+            )
         })?;
     } else {
         std::fs::remove_file(&resolved).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Failed to delete file {}: {e}",
-                resolved.display()
-            ))))
+            io_error_thrown(
+                format!("Failed to delete file {}: {e}", resolved.display()),
+                &e,
+            )
         })?;
     }
     FILE_TEXT_CACHE.with(|cache| {
@@ -752,10 +809,10 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
         overlay::append_scoped("append_file", &resolved, content.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Failed to append to file {}: {e}",
-                resolved.display()
-            ))))
+            io_error_thrown(
+                format!("Failed to append to file {}: {e}", resolved.display()),
+                &e,
+            )
         })?;
         let bytes = content.len();
         FILE_TEXT_CACHE.with(|cache| {
@@ -783,10 +840,10 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
     let entries = overlay::read_dir(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "Failed to list directory {}: {e}",
-            resolved.display()
-        ))))
+        io_error_thrown(
+            format!("Failed to list directory {}: {e}", resolved.display()),
+            &e,
+        )
     })?;
     let mut result = Vec::new();
     for entry in entries {
@@ -816,10 +873,10 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     )?;
     let result = overlay::create_dir_scoped("mkdir", &resolved, recursive);
     result.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "Failed to create directory {}: {e}",
-            resolved.display()
-        ))))
+        io_error_thrown(
+            format!("Failed to create directory {}: {e}", resolved.display()),
+            &e,
+        )
     })?;
     queue_file_edited_for(&resolved, "mkdir", 0);
     Ok(VmValue::Nil)
@@ -863,11 +920,14 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         )?;
         let bytes =
             overlay::copy_scoped("copy_file", &resolved_src, &resolved_dst).map_err(|e| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                    "Failed to copy {} to {}: {e}",
-                    resolved_src.display(),
-                    resolved_dst.display()
-                ))))
+                io_error_thrown(
+                    format!(
+                        "Failed to copy {} to {}: {e}",
+                        resolved_src.display(),
+                        resolved_dst.display()
+                    ),
+                    &e,
+                )
             })?;
         FILE_TEXT_CACHE.with(|cache| {
             cache.borrow_mut().remove(&resolved_dst);
@@ -913,10 +973,10 @@ fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
     std::fs::create_dir(&path).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "mkdtemp: failed to create {}: {error}",
-            path.display()
-        ))))
+        io_error_thrown(
+            format!("mkdtemp: failed to create {}: {error}", path.display()),
+            &error,
+        )
     })?;
     Ok(VmValue::String(arcstr::ArcStr::from(
         path.to_string_lossy().into_owned(),
@@ -937,10 +997,13 @@ fn mkdtemp_in_workspace_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
     std::fs::create_dir(&path).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "mkdtemp_in_workspace: failed to create {}: {error}",
-            path.display()
-        ))))
+        io_error_thrown(
+            format!(
+                "mkdtemp_in_workspace: failed to create {}: {error}",
+                path.display()
+            ),
+            &error,
+        )
     })?;
     queue_file_edited_for(&path, "mkdtemp_in_workspace", 0);
     Ok(VmValue::String(arcstr::ArcStr::from(
@@ -966,10 +1029,13 @@ fn workspace_temp_root() -> Result<PathBuf, VmError> {
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
     std::fs::create_dir_all(&path).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "workspace_temp_dir: failed to create {}: {error}",
-            path.display()
-        ))))
+        io_error_thrown(
+            format!(
+                "workspace_temp_dir: failed to create {}: {error}",
+                path.display()
+            ),
+            &error,
+        )
     })?;
     let ignore = path.join(".gitignore");
     if !ignore.exists() {
@@ -1006,12 +1072,8 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
-    let metadata = std::fs::metadata(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "Failed to stat {}: {e}",
-            resolved.display()
-        ))))
-    })?;
+    let metadata = std::fs::metadata(&resolved)
+        .map_err(|e| io_error_thrown(format!("Failed to stat {}: {e}", resolved.display()), &e))?;
     let mut info = BTreeMap::new();
     info.insert("size".to_string(), VmValue::Int(metadata.len() as i64));
     info.insert("is_file".to_string(), VmValue::Bool(metadata.is_file()));
@@ -1066,16 +1128,10 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         queue_file_edited_for(&dst, "move", edited_byte_count(bytes));
         return Ok(VmValue::Nil);
     }
-    let bytes = overlay::copy_scoped("move_file", &src, &dst).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "move_file: copy failed: {e}"
-        ))))
-    })?;
-    overlay::remove_file(&src).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "move_file: remove src failed: {e}"
-        ))))
-    })?;
+    let bytes = overlay::copy_scoped("move_file", &src, &dst)
+        .map_err(|e| io_error_thrown(format!("move_file: copy failed: {e}"), &e))?;
+    overlay::remove_file(&src)
+        .map_err(|e| io_error_thrown(format!("move_file: remove src failed: {e}"), &e))?;
     FILE_TEXT_CACHE.with(|c| {
         let mut c = c.borrow_mut();
         c.remove(&src);
@@ -1099,12 +1155,8 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
-    let content = overlay::read_to_string(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "read_lines: {}: {e}",
-            resolved.display()
-        ))))
-    })?;
+    let content = overlay::read_to_string(&resolved)
+        .map_err(|e| io_error_thrown(format!("read_lines: {}: {e}", resolved.display()), &e))?;
     let lines: Vec<VmValue> = content
         .lines()
         .map(|l| VmValue::String(arcstr::ArcStr::from(l)))
