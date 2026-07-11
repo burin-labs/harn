@@ -278,6 +278,139 @@ async fn close_emits_signed_receipt_event() {
 }
 
 #[tokio::test]
+async fn event_signer_only_close_verifies_receipt_against_chain_root() {
+    // Regression for the receipt-signature clobber: with an event signer
+    // configured (and no separate receipt signer), `append` signs every
+    // event including the receipt minted by `close`. `close` then replaces
+    // that per-event signature with a receipt-root signature. `verify`
+    // must recognise the receipt and check it against the pre-receipt
+    // chain root — previously it applied `verify_event` to the receipt and
+    // reported a spurious `BadSignature` on a correctly closed session.
+    let signer = dummy_signer(9);
+    let hooks = StoreHooks {
+        event_signer: Some(signer.clone()),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, move |store| {
+        let signer = signer.clone();
+        async move {
+            let meta = store
+                .create(CreateSession::default())
+                .await
+                .expect("create");
+            for i in 0..3 {
+                store
+                    .append(
+                        &meta.id,
+                        AppendEvent::new(SessionEventKind::Message, json!({"i": i})),
+                    )
+                    .await
+                    .expect("append");
+            }
+            let receipt = store.close(&meta.id).await.expect("close");
+            assert!(matches!(receipt.kind, SessionEventKind::Receipt));
+
+            let report = store.verify(&meta.id).await.expect("verify");
+            assert!(
+                report.failures.is_empty(),
+                "closed signed session reported failures: {:?}",
+                report.failures
+            );
+            // 3 messages + 1 receipt, all signed and all verified.
+            assert_eq!(report.event_count, 4);
+            assert_eq!(report.signed_event_count, 4);
+
+            // The receipt's signature attests the chain root over the
+            // events that preceded it, not the receipt event's own bytes.
+            let events = store
+                .read(&meta.id, ReadRange::default())
+                .await
+                .expect("read")
+                .events;
+            let (index, receipt_event) = events
+                .iter()
+                .enumerate()
+                .find(|(_, event)| matches!(event.kind, SessionEventKind::Receipt))
+                .expect("receipt present");
+            let pre_receipt_root = chain_root_hash(&events[..index]);
+            let signature = receipt_event.signed_by.as_ref().expect("receipt signed");
+            verify_receipt_root(signature, &signer.verifying_key(), &pre_receipt_root)
+                .expect("receipt attests the pre-receipt chain root");
+
+            // close() leaves the session atomically closed.
+            let described = store.describe(&meta.id).await.expect("describe");
+            assert_eq!(described.status, SessionStatus::Closed);
+            let err = store
+                .append(
+                    &meta.id,
+                    AppendEvent::new(SessionEventKind::Message, json!({})),
+                )
+                .await
+                .expect_err("append to closed");
+            assert!(matches!(err, StoreError::Conflict(_)));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn receipt_signer_only_close_verifies_receipt() {
+    // With only a receipt signer, the receipt is the sole signed event.
+    // `verify` now actually attests it (previously it counted the receipt
+    // as signed without ever calling into the signature check).
+    let signer = dummy_signer(11);
+    let hooks = StoreHooks {
+        receipt_signer: Some(signer.clone()),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, move |store| {
+        let signer = signer.clone();
+        async move {
+            let meta = store
+                .create(CreateSession::default())
+                .await
+                .expect("create");
+            store
+                .append(
+                    &meta.id,
+                    AppendEvent::new(SessionEventKind::Message, json!({"text": "hi"})),
+                )
+                .await
+                .expect("append");
+            store.close(&meta.id).await.expect("close");
+
+            let report = store.verify(&meta.id).await.expect("verify");
+            assert!(
+                report.failures.is_empty(),
+                "receipt-signed session reported failures: {:?}",
+                report.failures
+            );
+            // Message is unsigned (no event signer); only the receipt is.
+            assert_eq!(report.signed_event_count, 1);
+
+            let events = store
+                .read(&meta.id, ReadRange::default())
+                .await
+                .expect("read")
+                .events;
+            let (index, receipt_event) = events
+                .iter()
+                .enumerate()
+                .find(|(_, event)| matches!(event.kind, SessionEventKind::Receipt))
+                .expect("receipt present");
+            let pre_receipt_root = chain_root_hash(&events[..index]);
+            verify_receipt_root(
+                receipt_event.signed_by.as_ref().expect("receipt signed"),
+                &signer.verifying_key(),
+                &pre_receipt_root,
+            )
+            .expect("receipt attests the pre-receipt chain root");
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn verify_reports_chain_hash_mismatch() {
     let hooks = StoreHooks {
         event_signer: Some(dummy_signer(2)),

@@ -13,7 +13,7 @@ use super::event::{now_ms_and_rfc3339, AppendEvent, EventId, SessionEventKind, S
 use super::memory_helpers::{meta_for_create, validate_open};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
-    verify_event,
+    verify_event_chain,
 };
 use super::store::{
     CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
@@ -81,6 +81,57 @@ fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
     event.headers = redacted_headers;
 }
 
+/// Core append logic against an already-locked session record. Both
+/// `append` and `close` call this while holding the single store lock, so
+/// `close` can read the chain state, append the receipt, and finalise it
+/// without releasing the guard in between (which previously let a
+/// concurrent append interleave and displace the receipt).
+fn append_locked(
+    record: &mut SessionRecord,
+    hooks: &StoreHooks,
+    mut event: AppendEvent,
+) -> StoreResult<StoredEvent> {
+    apply_redaction(hooks, &mut event);
+    validate_open(&record.meta)?;
+    validate_parent(record, &event)?;
+    let (ts_ms, ts) = now_ms_and_rfc3339();
+    let event_id = record.next_event_id;
+    record.next_event_id = record.next_event_id.saturating_add(1);
+    let prev_hash = record.events.last().map(|tail| tail.record_hash.clone());
+    let mut stored = StoredEvent {
+        event_id,
+        session_id: record.meta.id.clone(),
+        tenant_id: record.meta.tenant_id.clone(),
+        parent_event_id: event.parent_event_id,
+        actor: event.actor,
+        kind: event.kind,
+        payload: event.payload,
+        tags: event.tags,
+        headers: event.headers,
+        ts_ms,
+        ts,
+        record_hash: String::new(),
+        prev_hash,
+        signed_by: None,
+    };
+    stored.record_hash = compute_record_hash(&stored);
+    if let Some(signer) = hooks.event_signer.as_ref() {
+        stored.signed_by = Some(signer.sign_event(&stored));
+    }
+    let prev_root = record
+        .meta
+        .chain_root_hash
+        .clone()
+        .unwrap_or_else(chain_root_init);
+    record.events.push(stored.clone());
+    record.meta.event_count = record.events.len();
+    record.meta.last_event_id = Some(event_id);
+    record.meta.updated_at_ms = ts_ms;
+    record.meta.updated_at = stored.ts.clone();
+    record.meta.chain_root_hash = Some(chain_root_fold(&prev_root, &stored.record_hash));
+    Ok(stored)
+}
+
 #[async_trait]
 impl SessionStore for MemorySessionStore {
     fn hooks(&self) -> &StoreHooks {
@@ -129,52 +180,12 @@ impl SessionStore for MemorySessionStore {
     }
 
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent> {
-        let mut event = event;
-        apply_redaction(&self.hooks, &mut event);
         let mut guard = lock(&self.inner);
         let record = guard
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-        validate_open(&record.meta)?;
-        validate_parent(record, &event)?;
-        let (ts_ms, ts) = now_ms_and_rfc3339();
-        let event_id = record.next_event_id;
-        record.next_event_id = record.next_event_id.saturating_add(1);
-        let prev_hash = record.events.last().map(|tail| tail.record_hash.clone());
-        let mut stored = StoredEvent {
-            event_id,
-            session_id: record.meta.id.clone(),
-            tenant_id: record.meta.tenant_id.clone(),
-            parent_event_id: event.parent_event_id,
-            actor: event.actor,
-            kind: event.kind,
-            payload: event.payload,
-            tags: event.tags,
-            headers: event.headers,
-            ts_ms,
-            ts,
-            record_hash: String::new(),
-            prev_hash,
-            signed_by: None,
-        };
-        stored.record_hash = compute_record_hash(&stored);
-        if let Some(signer) = self.hooks.event_signer.as_ref() {
-            stored.signed_by = Some(signer.sign_event(&stored));
-        }
-        let prev_root = record
-            .meta
-            .chain_root_hash
-            .clone()
-            .unwrap_or_else(chain_root_init);
-        record.events.push(stored.clone());
-        record.meta.event_count = record.events.len();
-        record.meta.last_event_id = Some(event_id);
-        let (updated_ms, updated_text) = (ts_ms, stored.ts.clone());
-        record.meta.updated_at_ms = updated_ms;
-        record.meta.updated_at = updated_text;
-        record.meta.chain_root_hash = Some(chain_root_fold(&prev_root, &stored.record_hash));
-        Ok(stored)
+        append_locked(record, &self.hooks, event)
     }
 
     async fn read(&self, session_id: &str, range: ReadRange) -> StoreResult<EventPage> {
@@ -344,48 +355,49 @@ impl SessionStore for MemorySessionStore {
     }
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
-        let (record_root, last_event_id) = {
-            let guard = lock(&self.inner);
-            let record = guard
-                .sessions
-                .get(session_id)
-                .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-            validate_open(&record.meta)?;
-            (
-                record
-                    .meta
-                    .chain_root_hash
-                    .clone()
-                    .unwrap_or_else(|| chain_root_hash(&record.events)),
-                record.meta.last_event_id.unwrap_or(0),
-            )
-        };
-        let payload =
-            super::signing::canonical_receipt_payload(session_id, last_event_id, &record_root);
-        let mut append = AppendEvent::new(SessionEventKind::Receipt, payload);
-        append.actor = Some("session_store".into());
-        let mut stored = self.append(session_id, append).await?;
-        // The receipt payload binds the chain root; sign that root
-        // independently so a verifier with the public key but no access
-        // to the receipt event body can still attest.
-        let signature = self
-            .hooks
-            .receipt_signer
-            .as_ref()
-            .or(self.hooks.event_signer.as_ref())
-            .map(|signer| signer.sign_receipt(&record_root));
-        if signature.is_some() {
-            stored.signed_by = signature.clone();
-        }
-        let (ms, text) = now_ms_and_rfc3339();
+        // Hold the single store lock across read -> append receipt ->
+        // finalise so no concurrent append can interleave and move the
+        // tip off the receipt we just minted.
         let mut guard = lock(&self.inner);
         let record = guard
             .sessions
             .get_mut(session_id)
-            .expect("session must exist");
-        if let (Some(signature), Some(last)) = (signature, record.events.last_mut()) {
-            last.signed_by = Some(signature);
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        validate_open(&record.meta)?;
+        let record_root = record
+            .meta
+            .chain_root_hash
+            .clone()
+            .unwrap_or_else(|| chain_root_hash(&record.events));
+        let last_event_id = record.meta.last_event_id.unwrap_or(0);
+        let payload =
+            super::signing::canonical_receipt_payload(session_id, last_event_id, &record_root);
+        let mut append = AppendEvent::new(SessionEventKind::Receipt, payload);
+        append.actor = Some("session_store".into());
+        let mut stored = append_locked(record, &self.hooks, append)?;
+        // Intentionally replace the receipt's append-time per-event
+        // signature with a receipt-root signature: the receipt attests the
+        // chain root, so `verify()` checks it via `verify_receipt_root`
+        // against the pre-receipt root, not the event's own bytes.
+        if let Some(signer) = self
+            .hooks
+            .receipt_signer
+            .as_ref()
+            .or(self.hooks.event_signer.as_ref())
+        {
+            let signature = signer.sign_receipt(&record_root);
+            // Locate the receipt by its event id rather than `last_mut()`,
+            // so we can never sign a different event.
+            if let Some(receipt) = record
+                .events
+                .iter_mut()
+                .find(|event| event.event_id == stored.event_id)
+            {
+                receipt.signed_by = Some(signature.clone());
+            }
+            stored.signed_by = Some(signature);
         }
+        let (ms, text) = now_ms_and_rfc3339();
         record.meta.status = SessionStatus::Closed;
         record.meta.closed_at_ms = Some(ms);
         record.meta.closed_at = Some(text);
@@ -427,45 +439,31 @@ impl SessionStore for MemorySessionStore {
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
         let chain_root = chain_root_hash(&record.events);
-        let mut signed = 0usize;
-        let mut failures = Vec::new();
-        let verifier = self
+        let event_verifier = self
             .hooks
             .event_signer
             .as_ref()
             .map(|signer| signer.verifying_key());
-        for event in &record.events {
-            let recomputed = compute_record_hash(event);
-            if recomputed != event.record_hash {
-                failures.push(VerifyFailure {
-                    event_id: event.event_id,
-                    reason: format!(
-                        "record_hash mismatch: stored '{stored}' vs computed '{recomputed}'",
-                        stored = event.record_hash
-                    ),
-                });
-                continue;
-            }
-            if let Some(verifying_key) = verifier.as_ref() {
-                if event.signed_by.is_some() {
-                    match verify_event(event, verifying_key) {
-                        Ok(()) => signed += 1,
-                        Err(error) => failures.push(VerifyFailure {
-                            event_id: event.event_id,
-                            reason: error.to_string(),
-                        }),
-                    }
-                }
-            } else if event.signed_by.is_some() {
-                signed += 1;
-            }
-        }
+        let receipt_verifier = self
+            .hooks
+            .receipt_signer
+            .as_ref()
+            .or(self.hooks.event_signer.as_ref())
+            .map(|signer| signer.verifying_key());
+        let (signed, failures) = verify_event_chain(
+            &record.events,
+            event_verifier.as_ref(),
+            receipt_verifier.as_ref(),
+        );
         Ok(VerifyReport {
             session_id: session_id.to_string(),
             chain_root_hash: chain_root,
             event_count: record.events.len(),
             signed_event_count: signed,
-            failures,
+            failures: failures
+                .into_iter()
+                .map(|(event_id, reason)| VerifyFailure { event_id, reason })
+                .collect(),
         })
     }
 }

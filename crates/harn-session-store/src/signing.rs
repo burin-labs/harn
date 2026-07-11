@@ -17,7 +17,10 @@ use base64::Engine as _;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
-use super::event::{canonical_event_bytes, canonical_json_bytes, EventSignature, StoredEvent};
+use super::event::{
+    canonical_event_bytes, canonical_json_bytes, EventId, EventSignature, SessionEventKind,
+    StoredEvent,
+};
 
 pub const ALGORITHM: &str = "ed25519";
 
@@ -174,6 +177,70 @@ fn verify_signature(
     verifying_key
         .verify(bytes, &signature)
         .map_err(|_| VerifyError::BadSignature)
+}
+
+/// Verify an entire stored event chain in one pass. For each event this
+/// checks the record-hash link, then verifies its signature (when
+/// present) against the appropriate key:
+///
+/// - A [`SessionEventKind::Receipt`] event's signature attests the
+///   *pre-receipt chain root* (see [`SessionSigner::sign_receipt`]), not
+///   the receipt event's own canonical bytes. It is verified with
+///   [`verify_receipt_root`] against the chain root recomputed over every
+///   event preceding it, using `receipt_verifier`.
+/// - Every other signed event is verified with [`verify_event`] against
+///   its own canonical bytes, using `event_verifier`.
+///
+/// When the relevant verifier is `None` a present signature is counted as
+/// signed-but-unverified, matching the historical behaviour of a store
+/// that persisted signatures but was reopened without the signing key.
+///
+/// Returns `(signed_event_count, failures)` where each failure is
+/// `(event_id, reason)`. Both backends map that into their `VerifyReport`.
+pub fn verify_event_chain(
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> (usize, Vec<(EventId, String)>) {
+    let mut signed = 0usize;
+    let mut failures: Vec<(EventId, String)> = Vec::new();
+    for (index, event) in events.iter().enumerate() {
+        let recomputed = compute_record_hash(event);
+        if recomputed != event.record_hash {
+            failures.push((
+                event.event_id,
+                format!(
+                    "record_hash mismatch: stored '{stored}' vs computed '{recomputed}'",
+                    stored = event.record_hash
+                ),
+            ));
+            continue;
+        }
+        let Some(signed_by) = event.signed_by.as_ref() else {
+            continue;
+        };
+        let is_receipt = matches!(event.kind, SessionEventKind::Receipt);
+        let verifier = if is_receipt {
+            receipt_verifier
+        } else {
+            event_verifier
+        };
+        let Some(verifier) = verifier else {
+            signed += 1;
+            continue;
+        };
+        let result = if is_receipt {
+            let pre_receipt_root = chain_root_hash(&events[..index]);
+            verify_receipt_root(signed_by, verifier, &pre_receipt_root)
+        } else {
+            verify_event(event, verifier)
+        };
+        match result {
+            Ok(()) => signed += 1,
+            Err(error) => failures.push((event.event_id, error.to_string())),
+        }
+    }
+    (signed, failures)
 }
 
 /// Initial chain root before any events have been appended. The prefix

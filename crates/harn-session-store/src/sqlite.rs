@@ -19,7 +19,7 @@ use super::event::{
 };
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
-    verify_event,
+    verify_event_chain,
 };
 use super::store::{
     CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
@@ -469,6 +469,93 @@ fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
     event.headers = policy.redact_headers(&event.headers);
 }
 
+/// Core append logic, operating on a caller-owned connection (typically a
+/// transaction). Redacts, validates, links, signs (when an event signer
+/// is configured), inserts the event, and advances the session counters —
+/// but does **not** commit. `append` wraps this in its own transaction;
+/// `close` reuses it so the receipt insert, its signature, and the status
+/// flip all land in a single atomic transaction.
+fn append_in_tx(
+    conn: &Connection,
+    hooks: &StoreHooks,
+    session_id: &str,
+    mut event: AppendEvent,
+) -> StoreResult<StoredEvent> {
+    apply_redaction(hooks, &mut event);
+    let (mut meta, next_event_id) = read_session_meta(conn, session_id)?;
+    super::memory_helpers::validate_open(&meta)?;
+    if let Some(parent_event_id) = event.parent_event_id {
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM session_events WHERE session_id = ?1 AND event_id = ?2",
+                params![session_id, parent_event_id as i64],
+                |_| Ok(true),
+            )
+            .optional()
+            .map_err(map_sql)?
+            .unwrap_or(false);
+        if !exists {
+            return Err(StoreError::InvalidInput(format!(
+                "parent_event_id {parent_event_id} not present in session"
+            )));
+        }
+    }
+    let prev_hash: Option<String> = conn
+        .query_row(
+            "SELECT record_hash FROM session_events
+             WHERE session_id = ?1 ORDER BY event_id DESC LIMIT 1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sql)?;
+    let (ts_ms, ts) = now_ms_and_rfc3339();
+    let mut stored = StoredEvent {
+        event_id: next_event_id,
+        session_id: session_id.to_string(),
+        tenant_id: meta.tenant_id.clone(),
+        parent_event_id: event.parent_event_id,
+        actor: event.actor,
+        kind: event.kind,
+        payload: event.payload,
+        tags: event.tags,
+        headers: event.headers,
+        ts_ms,
+        ts: ts.clone(),
+        record_hash: String::new(),
+        prev_hash,
+        signed_by: None,
+    };
+    stored.record_hash = compute_record_hash(&stored);
+    if let Some(signer) = hooks.event_signer.as_ref() {
+        stored.signed_by = Some(signer.sign_event(&stored));
+    }
+    insert_event(conn, &stored)?;
+    let prev_root = meta.chain_root_hash.clone().unwrap_or_else(chain_root_init);
+    let chain_root = chain_root_fold(&prev_root, &stored.record_hash);
+    meta.event_count = meta.event_count.saturating_add(1);
+    meta.last_event_id = Some(next_event_id);
+    meta.chain_root_hash = Some(chain_root);
+    meta.updated_at_ms = ts_ms;
+    meta.updated_at = ts;
+    conn.execute(
+        "UPDATE sessions SET event_count = ?1, last_event_id = ?2,
+                              chain_root_hash = ?3, updated_at_ms = ?4,
+                              updated_at = ?5, next_event_id = ?6 WHERE id = ?7",
+        params![
+            meta.event_count as i64,
+            meta.last_event_id.map(|value| value as i64),
+            meta.chain_root_hash,
+            meta.updated_at_ms,
+            meta.updated_at,
+            (next_event_id + 1) as i64,
+            session_id,
+        ],
+    )
+    .map_err(map_sql)?;
+    Ok(stored)
+}
+
 #[async_trait]
 impl SessionStore for SqliteSessionStore {
     fn hooks(&self) -> &StoreHooks {
@@ -579,81 +666,9 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent> {
-        let mut event = event;
-        apply_redaction(&self.hooks, &mut event);
         let mut conn = self.lock();
         let tx = conn.transaction().map_err(map_sql)?;
-        let (mut meta, next_event_id) = read_session_meta(&tx, session_id)?;
-        super::memory_helpers::validate_open(&meta)?;
-        if let Some(parent_event_id) = event.parent_event_id {
-            let exists: bool = tx
-                .query_row(
-                    "SELECT 1 FROM session_events WHERE session_id = ?1 AND event_id = ?2",
-                    params![session_id, parent_event_id as i64],
-                    |_| Ok(true),
-                )
-                .optional()
-                .map_err(map_sql)?
-                .unwrap_or(false);
-            if !exists {
-                return Err(StoreError::InvalidInput(format!(
-                    "parent_event_id {parent_event_id} not present in session"
-                )));
-            }
-        }
-        let prev_hash: Option<String> = tx
-            .query_row(
-                "SELECT record_hash FROM session_events
-                 WHERE session_id = ?1 ORDER BY event_id DESC LIMIT 1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(map_sql)?;
-        let (ts_ms, ts) = now_ms_and_rfc3339();
-        let mut stored = StoredEvent {
-            event_id: next_event_id,
-            session_id: session_id.to_string(),
-            tenant_id: meta.tenant_id.clone(),
-            parent_event_id: event.parent_event_id,
-            actor: event.actor,
-            kind: event.kind,
-            payload: event.payload,
-            tags: event.tags,
-            headers: event.headers,
-            ts_ms,
-            ts: ts.clone(),
-            record_hash: String::new(),
-            prev_hash,
-            signed_by: None,
-        };
-        stored.record_hash = compute_record_hash(&stored);
-        if let Some(signer) = self.hooks.event_signer.as_ref() {
-            stored.signed_by = Some(signer.sign_event(&stored));
-        }
-        insert_event(&tx, &stored)?;
-        let prev_root = meta.chain_root_hash.clone().unwrap_or_else(chain_root_init);
-        let chain_root = chain_root_fold(&prev_root, &stored.record_hash);
-        meta.event_count = meta.event_count.saturating_add(1);
-        meta.last_event_id = Some(next_event_id);
-        meta.chain_root_hash = Some(chain_root);
-        meta.updated_at_ms = ts_ms;
-        meta.updated_at = ts;
-        tx.execute(
-            "UPDATE sessions SET event_count = ?1, last_event_id = ?2,
-                                  chain_root_hash = ?3, updated_at_ms = ?4,
-                                  updated_at = ?5, next_event_id = ?6 WHERE id = ?7",
-            params![
-                meta.event_count as i64,
-                meta.last_event_id.map(|value| value as i64),
-                meta.chain_root_hash,
-                meta.updated_at_ms,
-                meta.updated_at,
-                (next_event_id + 1) as i64,
-                session_id,
-            ],
-        )
-        .map_err(map_sql)?;
+        let stored = append_in_tx(&tx, &self.hooks, session_id, event)?;
         tx.commit().map_err(map_sql)?;
         Ok(stored)
     }
@@ -893,47 +908,53 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
-        let (record_root, last_event_id) = {
-            let conn = self.lock();
-            let (meta, _) = read_session_meta(&conn, session_id)?;
-            super::memory_helpers::validate_open(&meta)?;
-            let events = load_all_events(&conn, session_id)?;
-            (
-                meta.chain_root_hash
-                    .clone()
-                    .unwrap_or_else(|| chain_root_hash(&events)),
-                meta.last_event_id.unwrap_or(0),
-            )
+        let mut conn = self.lock();
+        let tx = conn.transaction().map_err(map_sql)?;
+        // Read the pre-receipt chain root inside the transaction so the
+        // root we sign is exactly the chain the receipt finalises, with
+        // no window for a concurrent append to move the tip.
+        let (meta, _) = read_session_meta(&tx, session_id)?;
+        super::memory_helpers::validate_open(&meta)?;
+        let record_root = match meta.chain_root_hash.clone() {
+            Some(root) => root,
+            None => chain_root_hash(&load_all_events(&tx, session_id)?),
         };
+        let last_event_id = meta.last_event_id.unwrap_or(0);
         let payload =
             super::signing::canonical_receipt_payload(session_id, last_event_id, &record_root);
         let mut append = AppendEvent::new(SessionEventKind::Receipt, payload);
         append.actor = Some("session_store".into());
-        let mut stored = self.append(session_id, append).await?;
-        let signature = self
+        let mut stored = append_in_tx(&tx, &self.hooks, session_id, append)?;
+        // Intentionally replace the receipt's append-time per-event
+        // signature with a receipt-root signature. The receipt's purpose
+        // is to attest the chain root, so `verify()` special-cases it via
+        // `verify_receipt_root` against the pre-receipt root rather than
+        // the receipt event's own canonical bytes.
+        if let Some(signer) = self
             .hooks
             .receipt_signer
             .as_ref()
             .or(self.hooks.event_signer.as_ref())
-            .map(|signer| signer.sign_receipt(&record_root));
-        let (ms, text) = now_ms_and_rfc3339();
-        let conn = self.lock();
-        if let Some(ref signature) = signature {
-            stored.signed_by = Some(signature.clone());
-            let signature_json = serde_json::to_string(signature).unwrap_or_else(|_| "null".into());
-            conn.execute(
+        {
+            let signature = signer.sign_receipt(&record_root);
+            let signature_json =
+                serde_json::to_string(&signature).unwrap_or_else(|_| "null".into());
+            tx.execute(
                 "UPDATE session_events SET signature_json = ?1
                  WHERE session_id = ?2 AND event_id = ?3",
                 params![signature_json, session_id, stored.event_id as i64],
             )
             .map_err(map_sql)?;
+            stored.signed_by = Some(signature);
         }
-        conn.execute(
+        let (ms, text) = now_ms_and_rfc3339();
+        tx.execute(
             "UPDATE sessions SET status = ?1, closed_at_ms = ?2, closed_at = ?3,
                                   updated_at_ms = ?2, updated_at = ?3 WHERE id = ?4",
             params![status_to_sql(SessionStatus::Closed), ms, text, session_id,],
         )
         .map_err(map_sql)?;
+        tx.commit().map_err(map_sql)?;
         Ok(stored)
     }
 
@@ -979,45 +1000,28 @@ impl SessionStore for SqliteSessionStore {
         let conn = self.lock();
         let events = load_all_events(&conn, session_id)?;
         let chain_root = chain_root_hash(&events);
-        let mut signed = 0usize;
-        let mut failures = Vec::new();
-        let verifier = self
+        let event_verifier = self
             .hooks
             .event_signer
             .as_ref()
             .map(|signer| signer.verifying_key());
-        for event in &events {
-            let recomputed = compute_record_hash(event);
-            if recomputed != event.record_hash {
-                failures.push(VerifyFailure {
-                    event_id: event.event_id,
-                    reason: format!(
-                        "record_hash mismatch: stored '{stored}' vs computed '{recomputed}'",
-                        stored = event.record_hash
-                    ),
-                });
-                continue;
-            }
-            if let Some(verifying_key) = verifier.as_ref() {
-                if event.signed_by.is_some() {
-                    match verify_event(event, verifying_key) {
-                        Ok(()) => signed += 1,
-                        Err(error) => failures.push(VerifyFailure {
-                            event_id: event.event_id,
-                            reason: error.to_string(),
-                        }),
-                    }
-                }
-            } else if event.signed_by.is_some() {
-                signed += 1;
-            }
-        }
+        let receipt_verifier = self
+            .hooks
+            .receipt_signer
+            .as_ref()
+            .or(self.hooks.event_signer.as_ref())
+            .map(|signer| signer.verifying_key());
+        let (signed, failures) =
+            verify_event_chain(&events, event_verifier.as_ref(), receipt_verifier.as_ref());
         Ok(VerifyReport {
             session_id: session_id.to_string(),
             chain_root_hash: chain_root,
             event_count: events.len(),
             signed_event_count: signed,
-            failures,
+            failures: failures
+                .into_iter()
+                .map(|(event_id, reason)| VerifyFailure { event_id, reason })
+                .collect(),
         })
     }
 }
