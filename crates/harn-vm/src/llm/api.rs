@@ -32,8 +32,8 @@ pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub use context_window::fetch_provider_max_context;
 pub(crate) use errors::{
-    classify_llm_error, classify_provider_http_error, retry_after_header, LlmErrorInfo,
-    LlmErrorKind, LlmErrorReason,
+    classify_llm_error, classify_provider_http_error, err_for_non_success, retry_after_header,
+    LlmErrorInfo, LlmErrorKind, LlmErrorReason,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;

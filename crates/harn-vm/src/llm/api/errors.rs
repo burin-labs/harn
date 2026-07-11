@@ -2,7 +2,7 @@
 //! streaming and non-streaming transports so the classification never
 //! drifts between them.
 
-use crate::value::ErrorCategory;
+use crate::value::{ErrorCategory, VmError, VmValue};
 
 const MAX_PROVIDER_ERROR_BODY_CHARS: usize = 2048;
 
@@ -117,6 +117,19 @@ pub(crate) fn classify_provider_http_error(
         reason,
         message: msg,
     }
+}
+
+/// Consume a non-2xx provider [`Response`] and build the thrown [`VmError`]
+/// every provider adapter surfaces for a failed HTTP call. Reads the
+/// `Retry-After` header before draining the body, since `Response::text`
+/// takes the response by value.
+pub(crate) async fn err_for_non_success(provider: &str, response: reqwest::Response) -> VmError {
+    let status = response.status();
+    let retry_after = retry_after_header(response.headers());
+    let body = response.text().await.unwrap_or_default();
+    let message =
+        classify_provider_http_error(provider, status, retry_after.as_deref(), &body).message;
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
 }
 
 fn sanitize_provider_error_body(body: &str) -> String {
