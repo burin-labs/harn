@@ -19,6 +19,7 @@ fn main() {
     ensure_git_hooks_installed();
     emit_cli_script_bytecode();
     emit_demo_sibling_assets();
+    emit_check_fingerprint();
 
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -55,6 +56,72 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=portal-dist");
+}
+
+/// Fingerprint the check pipeline's own sources — `harn-lint`, this crate's
+/// `commands/check` (typecheck driver, lint bridge, preflight scans, the
+/// result cache itself), and `package` (CheckConfig parsing) — and bake the
+/// digest in as `HARN_CHECK_FINGERPRINT`. The check-result cache folds it
+/// into every key, so a within-version edit to lint or preflight logic
+/// invalidates stale cached diagnostics automatically, exactly like
+/// `HARN_CODEGEN_FINGERPRINT` does for compiled bytecode (#2621). The
+/// lexer/parser/typechecker/compiler are covered separately: the cache key's
+/// import-graph hash already folds in the codegen fingerprint.
+fn emit_check_fingerprint() {
+    use sha2::{Digest, Sha256};
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let crates_dir = manifest_dir
+        .parent()
+        .expect("harn-cli sits under crates/")
+        .to_path_buf();
+    let roots = [
+        crates_dir.join("harn-lint").join("src"),
+        manifest_dir.join("src").join("commands").join("check"),
+        manifest_dir.join("src").join("package"),
+    ];
+    let mut files: Vec<PathBuf> = Vec::new();
+    for root in &roots {
+        println!("cargo:rerun-if-changed={}", root.display());
+        collect_rs_files(root, &mut files);
+    }
+    files.sort();
+    let mut hasher = Sha256::new();
+    for file in &files {
+        println!("cargo:rerun-if-changed={}", file.display());
+        let content = fs::read(file).unwrap_or_default();
+        // Fold the path relative to crates/ so a rename changes the digest
+        // but a different checkout location does not.
+        let logical = file
+            .strip_prefix(&crates_dir)
+            .unwrap_or(file)
+            .to_string_lossy()
+            .replace('\\', "/");
+        hasher.update(logical.as_bytes());
+        hasher.update([0u8]);
+        hasher.update(&content);
+        hasher.update([0u8]);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    println!("cargo:rustc-env=HARN_CHECK_FINGERPRINT={hex}");
+}
+
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
 }
 
 fn emit_rerun_if_changed_recursive(path: &Path) {

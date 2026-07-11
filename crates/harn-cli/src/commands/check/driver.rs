@@ -164,21 +164,89 @@ fn check_one(
     if let Some(severity) = overrides.preflight.as_deref() {
         config.preflight_severity = Some(severity.to_string());
     }
-    let mut text = want_text.then(CheckTextOutput::default);
-    let report = check_file_report_inner(
-        analysis,
-        file,
-        &config,
-        cross_file_imports,
-        module_graph,
-        overrides.invariants,
-        text.as_mut(),
-    );
-    CheckedFile {
+
+    // Persistent result cache (#4391): key on the file's content + import
+    // closure + check config + this file's cross-file lint exemptions, replay
+    // on hit, and record the preflight's external filesystem probes on miss
+    // so the artifact can be revalidated. Unreadable files skip the cache and
+    // report their IO error through the normal path.
+    let cache_key = super::result_cache::enabled()
+        .then(|| std::fs::read_to_string(file).ok())
+        .flatten()
+        .map(|source| {
+            let exemptions = lint_exemptions_for_file(file, module_graph, cross_file_imports);
+            super::result_cache::result_cache_key(
+                file,
+                &file.to_string_lossy(),
+                &source,
+                &config,
+                overrides.invariants,
+                &exemptions,
+            )
+        });
+    if let Some(key) = cache_key.as_ref() {
+        if let Some(hit) =
+            super::result_cache::load(key, &file.to_string_lossy(), &config, want_text)
+        {
+            return hit;
+        }
+    }
+
+    // Render text even in JSON mode when the result will be stored: cached
+    // artifacts must replay under either output mode.
+    let mut text = (want_text || cache_key.is_some()).then(CheckTextOutput::default);
+    let (report, probes) = super::result_cache::with_probe_recording(cache_key.is_some(), || {
+        check_file_report_inner(
+            analysis,
+            file,
+            &config,
+            cross_file_imports,
+            module_graph,
+            overrides.invariants,
+            text.as_mut(),
+        )
+    });
+    let checked = CheckedFile {
         report,
         strict: config.strict,
         text: text.unwrap_or_default(),
+    };
+    if let Some(key) = cache_key.as_ref() {
+        super::result_cache::store(key, &checked, probes);
     }
+    if want_text {
+        checked
+    } else {
+        CheckedFile {
+            text: CheckTextOutput::default(),
+            ..checked
+        }
+    }
+}
+
+/// The subset of the run's cross-file selective-import names that could
+/// affect this file's lint output: the linter only consults the set to
+/// exempt names *declared in this file* from unused-function findings, so
+/// only that intersection belongs in the file's cache key. An unrelated
+/// import change elsewhere in the tree leaves the subset — and the cached
+/// result — intact.
+fn lint_exemptions_for_file(
+    file: &Path,
+    module_graph: &harn_modules::ModuleGraph,
+    cross_file_imports: &HashSet<String>,
+) -> Vec<String> {
+    let Some(declared) = module_graph.declared_names_for_file(file) else {
+        // Unknown to the graph: over-approximate with the full set (sorted
+        // for stability) so the key stays conservative.
+        let mut all: Vec<String> = cross_file_imports.iter().cloned().collect();
+        all.sort_unstable();
+        return all;
+    };
+    declared
+        .into_iter()
+        .filter(|name| cross_file_imports.contains(*name))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Load the `[check]` config for `file`, memoized per parent directory for

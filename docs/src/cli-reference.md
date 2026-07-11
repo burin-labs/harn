@@ -844,6 +844,18 @@ diagnostic that depends on machine load). The module-graph build that
 precedes checking is likewise parallel per import wave; pin it independently
 with `HARN_MODULE_GRAPH_JOBS=<n>`.
 
+Check results also persist across runs: each file's diagnostics are cached
+under the shared Harn cache directory (`HARN_CACHE_DIR`, alongside the
+bytecode cache), keyed by the file's content, its transitive import closure,
+the effective `[check]` config plus CLI overrides, and the CLI build itself.
+Preflight's filesystem lookups — template and prompt-asset paths, directory
+targets — are recorded with each cached result and revalidated on every hit,
+so creating, editing, or deleting a referenced file invalidates the cache
+even though that file is not part of the import graph. A warm re-check of an
+unchanged tree replays byte-identical output without re-running the
+typechecker or linter. Set `HARN_CHECK_RESULT_CACHE=0` to disable just this
+cache; `HARN_BYTECODE_CACHE=0` disables it together with the bytecode cache.
+
 `--invariants` includes the capability-policy lattice:
 
 ```harn,ignore

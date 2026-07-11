@@ -820,6 +820,16 @@ impl ModuleGraph {
         self.definition_of_inner(file, name, &mut visited)
     }
 
+    /// Sorted names of every declaration recorded for `file` (functions,
+    /// pipelines, tools, structs, ...). Used by the check-result cache to
+    /// key the cross-file lint-exemption subset that applies to this file.
+    pub fn declared_names_for_file(&self, file: &Path) -> Option<Vec<&str>> {
+        let module = self.modules.get(&normalize_path(file))?;
+        let mut names: Vec<&str> = module.declarations.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        Some(names)
+    }
+
     fn definition_of_inner(
         &self,
         file: &Path,
