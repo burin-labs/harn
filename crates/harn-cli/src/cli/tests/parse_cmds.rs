@@ -43,6 +43,15 @@ fn test_run_rejects_deny_allow_conflict() {
 }
 
 #[test]
+fn test_parses_dap_subcommand() {
+    let cli = Cli::parse_from(["harn", "dap"]);
+
+    let Command::Dap(_) = cli.command.unwrap() else {
+        panic!("expected dap command");
+    };
+}
+
+#[test]
 fn test_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
     let cli = Cli::parse_from([
         "harn",
