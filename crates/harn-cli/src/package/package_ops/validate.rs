@@ -648,7 +648,7 @@ pub(super) fn has_windows_separator_escape(path: &str) -> bool {
 pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
     static DECL_RE: OnceLock<Regex> = OnceLock::new();
     let decl_re = DECL_RE.get_or_init(|| {
-        Regex::new(r"^\s*pub\s+(fn|pipeline|tool|skill|struct|enum|type|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b(.*)$")
+        Regex::new(r"^\s*pub\s+(fn|pipeline|tool|skill|struct|enum|type|interface|const)\s+([A-Za-z_][A-Za-z0-9_]*)\b(.*)$")
             .expect("valid declaration regex")
     });
     let mut docs: Vec<String> = Vec::new();

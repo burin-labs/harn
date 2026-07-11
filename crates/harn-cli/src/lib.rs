@@ -968,6 +968,12 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(code);
             }
         }
+        Command::Doc(args) => {
+            let code = commands::doc::run(&args.path, args.output.as_deref());
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         Command::Routes(args) => {
             let code = commands::routes::run(args).await;
             if code != 0 {
