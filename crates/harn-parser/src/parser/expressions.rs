@@ -858,6 +858,14 @@ impl Parser {
         } else {
             None
         };
+        // Mirror the return type's nested-parse so a `throws E { body }` clause
+        // stops cleanly at the closure body's `{`.
+        let throws = if self.check(&TokenKind::Throws) {
+            self.advance();
+            Some(self.parse_nested_type_expr("closure throws type")?)
+        } else {
+            None
+        };
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
@@ -865,6 +873,7 @@ impl Parser {
             Node::Closure {
                 params,
                 return_type,
+                throws,
                 body,
                 fn_syntax: true,
             },
@@ -1079,6 +1088,9 @@ impl Parser {
             Node::Closure {
                 params,
                 return_type: None,
+                // The bare `x -> expr` arrow form has no signature slot for a
+                // `throws` clause; only `fn(params) -> R throws E` can carry one.
+                throws: None,
                 body,
                 fn_syntax: false,
             },

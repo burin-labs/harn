@@ -197,6 +197,7 @@ pub const KEYWORDS: &[&str] = &[
     "spawn",
     "struct",
     "throw",
+    "throws",
     "to",
     "tool",
     "true",
@@ -231,6 +232,9 @@ pub enum TokenKind {
     Try,
     Catch,
     Throw,
+    /// `throws` — declares a callable's exception channel in its signature
+    /// (`fn f() -> R throws E`). Distinct from `Throw` (the statement).
+    Throws,
     Finally,
     Fn,
     Spawn,
@@ -355,6 +359,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Try => write!(f, "try"),
             TokenKind::Catch => write!(f, "catch"),
             TokenKind::Throw => write!(f, "throw"),
+            TokenKind::Throws => write!(f, "throws"),
             TokenKind::Finally => write!(f, "finally"),
             TokenKind::Fn => write!(f, "fn"),
             TokenKind::Spawn => write!(f, "spawn"),

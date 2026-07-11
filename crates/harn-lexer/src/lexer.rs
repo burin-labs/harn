@@ -812,6 +812,7 @@ impl Lexer {
             "try" => TokenKind::Try,
             "catch" => TokenKind::Catch,
             "throw" => TokenKind::Throw,
+            "throws" => TokenKind::Throws,
             "finally" => TokenKind::Finally,
             "fn" => TokenKind::Fn,
             "spawn" => TokenKind::Spawn,

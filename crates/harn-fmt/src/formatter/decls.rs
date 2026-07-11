@@ -1,8 +1,8 @@
 use harn_parser::{Node, ParallelMode, SNode};
 
 use crate::helpers::{
-    escape_string, format_attribute, format_catch_param, format_pattern, format_type_ann,
-    format_type_expr, format_type_expr_wrapped, format_type_params,
+    escape_string, format_attribute, format_catch_param, format_pattern, format_throws_clause,
+    format_type_ann, format_type_expr, format_type_expr_wrapped, format_type_params,
 };
 
 use super::Formatter;
@@ -15,6 +15,7 @@ impl Formatter<'_> {
                 name,
                 params,
                 return_type,
+                throws,
                 body,
                 extends,
                 is_pub,
@@ -25,6 +26,7 @@ impl Formatter<'_> {
                 } else {
                     String::new()
                 };
+                let throws_str = format_throws_clause(throws);
                 let ext = if let Some(base) = extends {
                     format!(" extends {base}")
                 } else {
@@ -33,7 +35,7 @@ impl Formatter<'_> {
                 let prefix_len = self.indent * 2 + pub_prefix.len() + 9 + name.len() + 1;
                 let params_str = self.format_string_list_wrapped(params, prefix_len, self.indent);
                 self.writeln(&format!(
-                    "{pub_prefix}pipeline {name}({params_str}){ret}{ext} {{"
+                    "{pub_prefix}pipeline {name}({params_str}){ret}{throws_str}{ext} {{"
                 ));
                 self.indent();
                 self.format_body(body, node_line);
@@ -69,6 +71,7 @@ impl Formatter<'_> {
                 type_params,
                 params,
                 return_type,
+                throws,
                 where_clauses,
                 body,
                 is_pub,
@@ -86,6 +89,7 @@ impl Formatter<'_> {
                     type_params,
                     params,
                     return_type,
+                    throws,
                     where_clauses,
                     self.indent,
                 );
@@ -100,6 +104,7 @@ impl Formatter<'_> {
                 description,
                 params,
                 return_type,
+                throws,
                 body,
                 is_pub,
             } => {
@@ -109,9 +114,12 @@ impl Formatter<'_> {
                 } else {
                     String::new()
                 };
+                let throws_str = format_throws_clause(throws);
                 let prefix_len = self.indent * 2 + pub_prefix.len() + 5 + name.len() + 1;
                 let params_str = self.format_typed_params_wrapped(params, prefix_len, self.indent);
-                self.writeln(&format!("{pub_prefix}tool {name}({params_str}){ret} {{"));
+                self.writeln(&format!(
+                    "{pub_prefix}tool {name}({params_str}){ret}{throws_str} {{"
+                ));
                 self.indent();
                 if let Some(desc) = description {
                     let escaped = escape_string(desc);

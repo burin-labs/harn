@@ -336,6 +336,7 @@ impl<'a> Formatter<'a> {
         type_params: &[harn_parser::TypeParam],
         params: &[TypedParam],
         return_type: &Option<harn_parser::TypeExpr>,
+        throws: &Option<harn_parser::TypeExpr>,
         where_clauses: &[harn_parser::WhereClause],
         indent_level: usize,
     ) -> String {
@@ -345,10 +346,11 @@ impl<'a> Formatter<'a> {
         } else {
             String::new()
         };
+        let throws_str = format_throws_clause(throws);
         let where_str = format_where_clauses(where_clauses);
         let prefix_len = indent_level * 2 + pub_prefix.len() + 3 + name.len() + generics.len() + 1;
         let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);
-        format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{where_str}")
+        format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{throws_str}{where_str}")
     }
 
     pub(crate) fn format_program(&mut self, nodes: &[SNode]) {

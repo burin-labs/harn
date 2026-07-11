@@ -37,6 +37,20 @@ fn is_attribute_key_token(token: &TokenKind) -> bool {
 }
 
 impl Parser {
+    /// Parse an optional `throws <type>` exception-channel clause that follows
+    /// a callable's return type. `throws (E1 | E2)` is just a parenthesized
+    /// [`TypeExpr::Union`] handled by [`Self::parse_type_expr`], so this needs
+    /// no special union grammar. Absent clause → `None` (unconstrained), which
+    /// keeps the annotation additive across every callable.
+    pub(super) fn parse_optional_throws(&mut self) -> Result<Option<TypeExpr>, ParserError> {
+        if self.check(&TokenKind::Throws) {
+            self.advance();
+            Ok(Some(self.parse_type_expr()?))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub(super) fn parse_pipeline_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Pipeline, "pipeline")?;
@@ -52,6 +66,8 @@ impl Parser {
         } else {
             None
         };
+
+        let throws = self.parse_optional_throws()?;
 
         let extends = if self.check(&TokenKind::Extends) {
             self.advance();
@@ -69,6 +85,7 @@ impl Parser {
                 name,
                 params,
                 return_type,
+                throws,
                 body,
                 extends,
                 is_pub,
@@ -494,6 +511,8 @@ impl Parser {
             None
         };
 
+        let throws = self.parse_optional_throws()?;
+
         let where_clauses = self.parse_where_clauses()?;
 
         self.consume(&TokenKind::LBrace, "{")?;
@@ -505,6 +524,7 @@ impl Parser {
                 type_params,
                 params,
                 return_type,
+                throws,
                 where_clauses,
                 body,
                 is_pub,
@@ -529,6 +549,8 @@ impl Parser {
         } else {
             None
         };
+
+        let throws = self.parse_optional_throws()?;
 
         self.consume(&TokenKind::LBrace, "{")?;
 
@@ -566,6 +588,7 @@ impl Parser {
                 description,
                 params,
                 return_type,
+                throws,
                 body,
                 is_pub,
             },
