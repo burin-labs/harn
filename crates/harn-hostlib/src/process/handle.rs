@@ -96,7 +96,8 @@ const SENSITIVE_ENV_PREFIXES: &[&str] = &[
 /// in the child environment so builds and tests still work.
 ///
 /// Matching is case-insensitive and covers:
-/// - suffix patterns `_API_KEY`, `_TOKEN`, `_SECRET`, `_KEY`;
+/// - suffix patterns `_API_KEY`, `_TOKEN`, `_SECRET`, `_KEY`, `_PASSWORD`,
+///   `_PASSWD`, `_CREDENTIALS`;
 /// - the provider prefixes in [`SENSITIVE_ENV_PREFIXES`];
 /// - the explicit names in [`EXPLICIT_SENSITIVE_ENV_NAMES`].
 pub fn is_sensitive_env_name(name: &str) -> bool {
@@ -111,13 +112,17 @@ pub fn is_sensitive_env_name(name: &str) -> bool {
         return true;
     }
     // Suffix patterns catch the long tail of provider/service credentials
-    // (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_KEY`) without enumerating every
-    // vendor. `_KEY` is last and broadest; it still excludes benign names
-    // like `PATH`/`HOME`/`LANG` that don't end in these suffixes.
+    // (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_KEY`, `*_PASSWORD`, `*_PASSWD`,
+    // `*_CREDENTIALS`) without enumerating every vendor. `_KEY` is the broadest;
+    // these suffixes still exclude benign names like `PATH`/`HOME`/`LANG` and
+    // `BUILD_KEYBOARD` that don't end in one of them.
     upper.ends_with("_API_KEY")
         || upper.ends_with("_TOKEN")
         || upper.ends_with("_SECRET")
         || upper.ends_with("_KEY")
+        || upper.ends_with("_PASSWORD")
+        || upper.ends_with("_PASSWD")
+        || upper.ends_with("_CREDENTIALS")
 }
 
 /// Parameters describing a single spawn. The spawner is responsible for any
@@ -345,6 +350,11 @@ mod tests {
         assert!(is_sensitive_env_name("SOME_VENDOR_TOKEN"));
         assert!(is_sensitive_env_name("MY_CLIENT_SECRET"));
         assert!(is_sensitive_env_name("RANDOM_KEY"));
+        assert!(is_sensitive_env_name("DOCKER_PASSWORD"));
+        assert!(is_sensitive_env_name("TWINE_PASSWORD"));
+        assert!(is_sensitive_env_name("DATABASE_PASSWORD"));
+        assert!(is_sensitive_env_name("MYSQL_PASSWD"));
+        assert!(is_sensitive_env_name("GCP_CREDENTIALS"));
         // Explicit names.
         assert!(is_sensitive_env_name("GITHUB_TOKEN"));
         assert!(is_sensitive_env_name("GH_TOKEN"));
@@ -372,6 +382,14 @@ mod tests {
         assert!(!is_sensitive_env_name("RUSTUP_HOME"));
         assert!(!is_sensitive_env_name("CARGO_TARGET_DIR"));
         assert!(!is_sensitive_env_name("SHELL"));
+        // `_KEY`/`_PASSWORD` suffixes match only at the end, so words that
+        // merely embed those substrings are not swept.
+        assert!(!is_sensitive_env_name("BUILD_KEYBOARD"));
+        assert!(!is_sensitive_env_name("PASSWORD_HASH_ROUNDS"));
+        // Bare names without an underscore-prefixed suffix are not caught,
+        // matching the existing convention (bare `TOKEN` is not swept either).
+        assert!(!is_sensitive_env_name("PASSWORD"));
+        assert!(!is_sensitive_env_name("TOKEN"));
     }
 
     #[test]
