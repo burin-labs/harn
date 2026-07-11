@@ -53,6 +53,12 @@ pipeline default() {
               + join(info.successful_tool_names, ",")
               + " rejected="
               + join(info.rejected_tool_names, ",")
+              + " available="
+              + join(info.available_tool_names, ",")
+              + " provider="
+              + to_string(info.provider)
+              + " format="
+              + to_string(info.tool_format)
               + " count="
               + to_string(info.tool_count),
             stop: true,
@@ -68,6 +74,9 @@ pipeline default() {
       __io_println(transcript.contains("tool_names=lookup,blocked"))
       __io_println(transcript.contains("successful=lookup"))
       __io_println(transcript.contains("rejected=blocked"))
+      __io_println(transcript.contains("available=lookup,blocked"))
+      __io_println(transcript.contains("provider=mock"))
+      __io_println(transcript.contains("format=native"))
       __io_println(transcript.contains("count=2"))
     },
   )
