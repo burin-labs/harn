@@ -1502,12 +1502,12 @@ mod tests {
             + 10_000.0 * cache_read_rate)
             / 1000.0;
         assert!((got - expected).abs() < 1e-9);
-        // Regression guard for the pre-fix bug: (200 - 10000).max(0) == 0 dropped
-        // the real input entirely.
-        let buggy = ((200_i64 - 10_000).max(0) as f64 * detail.input_per_1k
-            + 500.0 * detail.output_per_1k
-            + 10_000.0 * cache_read_rate)
-            / 1000.0;
+        // Regression guard for the pre-fix bug: the old code computed billable
+        // input as (input - cache_read - cache_write).max(0), which for
+        // input=200, cache_read=10000 clamped to 0 — dropping the real input
+        // term entirely. That buggy cost omits the 200*input_per_1k the correct
+        // cost includes, so the fixed result must exceed it.
+        let buggy = (500.0 * detail.output_per_1k + 10_000.0 * cache_read_rate) / 1000.0;
         assert!(got > buggy);
     }
 
