@@ -1,1 +1,0 @@
-- Added `std/schema` closed-object builders for fail-closed option, receipt, and structured-output schemas.

@@ -1,1 +1,0 @@
-- Added `harn models lora train --backend-recipe harn_lora_sft_v1` for typed, receipt-recorded LoRA SFT backend launches.

@@ -9,6 +9,62 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.9
+
+### Added
+
+- Added Markdown output for `harn provider tool-scorecard` plan and report
+  artifacts.
+- **LoRA promotion receipts.** `harn models lora promote` now collects the
+  adapter-loaded behavioral probe matrix into a promotion receipt, so LoRA
+  adapters can require named tool-call probes before promotion without
+  Burin- or provider-specific scripts (#4251).
+- Added `mlx_lm` as a first-class LoRA trainer contract for `harn models lora`
+  plan, train, and manifest receipts (#4251).
+- Add first-class OpenAI GPT-5.6 Sol, Terra, and Luna catalog entries, role-aware aliases, exact reasoning-effort
+  constraints, pricing, cache-write economics, and automatic Responses routing for reasoning-enabled function tools.
+- Added `harn models lora train --backend-recipe harn_lora_sft_v1` for typed, receipt-recorded LoRA SFT backend launches.
+- Added `std/schema` closed-object builders for fail-closed option, receipt, and structured-output schemas.
+- `harn provider tool-scorecard` reports catalog drift and suggested provider-catalog updates for observed tool-call behavior.
+
+### Changed
+
+- **CI macOS checks now prefer idle self-hosted runners with hosted fallback (#4217).** The Harn PR macOS
+  lane uses the org runner-availability detector to reduce queue latency when the local pool is online and
+  idle, while preserving GitHub-hosted macOS as the fallback.
+- `harn models lora` manifests now record the inference tool-catalog policy so fixed-catalog compression
+  experiments cannot reuse full-schema adapter contracts.
+
+### Fixed
+
+- Replace the last Python conformance helper with a Harn-owned raw HTTP proxy fixture.
+- Preserve provider prompt-cache token accounting in agent session totals.
+- Keep `agent_loop` output-schema enforcement on terminal answers instead of ordinary turns.
+- Label malformed text-tool wrapper denials as `malformed_tool_wrapper` instead of `tool_ceiling`.
+- Replace the bridge integration test's Python mock host with a hidden Harn CLI conformance helper.
+- Keep interactive `session/request_permission` bridge requests open until the
+  host answers, cancels, or disconnects; close the cancellation lost-wakeup
+  race; and advertise only canonical permission options Harn can honor.
+- Recover complete Harn text tool calls placed inside streamed generic
+  native-tool wrapper arguments, matching the non-streaming parser.
+- Keep text-mode parsing candidate tool calls out of durable agent-event logs.
+- Close streamed tool-call lifecycle events when a provider stream exits before dispatch.
+- Resolve hostlib filesystem paths against the active Harn execution root before applying path-scope
+  checks and disk mutations, keeping relative agent edits inside the intended workspace.
+- ACP sessions now prepare VM project-root state from the session cwd/workspace
+  anchor instead of leaking the server process working directory when clients
+  connect from another project.
+- Refresh auto-resolved agent tool-call formats when a turn switches provider/model routes without an explicit
+  `tool_format` override.
+- Avoid running the generated highlight keyword Cargo path for ordinary imported
+  Harn stdlib helper edits that cannot affect global builtin highlighting.
+- Emit explicit empty `required` arrays for JSON Schema object exports with no required properties.
+- **Release binary cache warms no longer get cancelled by no-op main pushes.**
+  Scheduled and manual warm-cache runs now keep their own concurrency lane, and
+  manual warm-cache dispatches can refresh default-branch release caches on
+  `main`, reducing the chance that tag releases cold-build the slow macOS
+  artifacts.
+
 ## v0.10.8
 
 ### Removed
