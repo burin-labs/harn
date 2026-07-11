@@ -655,6 +655,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 return;
             }
             if args.fix {
+                let mut should_fail = false;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
                     let lint_config = commands::check::load_harn_lint_config(file);
@@ -662,7 +663,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     let require_header =
                         args.require_file_header || lint_config.require_file_header;
                     let complexity_threshold = lint_config.complexity_threshold;
-                    commands::check::lint_fix_file(
+                    let outcome = commands::check::lint_fix_file(
                         &mut analysis,
                         file,
                         &config,
@@ -672,18 +673,29 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                         complexity_threshold,
                         &lint_config.persona_step_allowlist,
                     );
+                    should_fail |= outcome.should_fail(config.strict || args.strict);
                 }
                 for file in &prompt_files {
                     let lint_config = commands::check::load_harn_lint_config(file);
+                    let config = package::load_check_config(Some(file));
                     // The template lint rules don't carry autofix
                     // edits yet (intentionally — see
                     // `template_provider_identity::make_diagnostic`),
                     // so `--fix` is equivalent to a regular run.
-                    commands::check::lint_prompt_file_inner(
+                    let outcome = commands::check::lint_prompt_file_inner(
                         file,
                         lint_config.template_variant_branch_threshold,
                         &lint_config.disabled,
                     );
+                    should_fail |= outcome.should_fail(config.strict || args.strict);
+                }
+                // Autofix does not suppress residual failures: unfixable
+                // error-level diagnostics (and warnings under `--strict`) must
+                // still fail the exit code exactly like the plain lint path, so
+                // CI/pre-commit hooks running `--fix` never pass green over a
+                // real error.
+                if should_fail {
+                    process::exit(1);
                 }
             } else {
                 let mut should_fail = false;
