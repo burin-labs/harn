@@ -16,6 +16,44 @@ pub(super) fn maybe_emit_delta(delta_tx: Option<DeltaSender>, text: &str) {
     }
 }
 
+/// Canonical assistant-visible text block. `visibility` must stay `"public"`
+/// so downstream redaction keeps the text in the user-facing transcript.
+pub(super) fn output_text_block(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "output_text",
+        "text": text,
+        "visibility": "public",
+    })
+}
+
+/// Canonical reasoning/thinking block. `visibility` must stay `"private"` so
+/// the chain-of-thought is never surfaced as user-facing output.
+pub(super) fn reasoning_block(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "reasoning",
+        "text": text,
+        "visibility": "private",
+    })
+}
+
+/// Canonical tool-call block. `visibility` must stay `"internal"` so the call
+/// is routed to tool execution rather than rendered as assistant output.
+/// Provider-specific metadata (e.g. `thought_signature`, `part_index`) is
+/// layered onto the returned value by the caller.
+pub(super) fn tool_call_block(
+    id: impl Into<serde_json::Value>,
+    name: impl Into<serde_json::Value>,
+    arguments: impl Into<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "tool_call",
+        "id": id.into(),
+        "name": name.into(),
+        "arguments": arguments.into(),
+        "visibility": "internal",
+    })
+}
+
 pub(super) fn request_text_content(message: &serde_json::Value) -> String {
     let content = crate::llm::content::provider_visible_content(&message["content"]);
     if let Some(text) = content.as_str() {

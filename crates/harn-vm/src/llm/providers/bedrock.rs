@@ -420,11 +420,9 @@ fn parse_bedrock_converse_response(
         for block in content {
             if let Some(text) = block.get("text").and_then(|value| value.as_str()) {
                 result.text.push_str(text);
-                result.blocks.push(serde_json::json!({
-                    "type": "output_text",
-                    "text": text,
-                    "visibility": "public",
-                }));
+                result
+                    .blocks
+                    .push(crate::llm::providers::common::output_text_block(text));
             }
             if let Some(tool_use) = block.get("toolUse") {
                 let id = tool_use
@@ -446,13 +444,11 @@ fn parse_bedrock_converse_response(
                     "name": name,
                     "arguments": input,
                 }));
-                result.blocks.push(serde_json::json!({
-                    "type": "tool_call",
-                    "id": id,
-                    "name": name,
-                    "arguments": input,
-                    "visibility": "internal",
-                }));
+                result
+                    .blocks
+                    .push(crate::llm::providers::common::tool_call_block(
+                        id, name, input,
+                    ));
             }
         }
     }

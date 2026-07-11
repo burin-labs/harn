@@ -305,11 +305,7 @@ where
         blocks: if collector.text.is_empty() {
             Vec::new()
         } else {
-            vec![json!({
-                "type": "output_text",
-                "text": collector.text,
-                "visibility": "public",
-            })]
+            vec![super::common::output_text_block(&collector.text)]
         },
         logprobs: Vec::new(),
         telemetry: ProviderTelemetry::default(),

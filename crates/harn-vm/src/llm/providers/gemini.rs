@@ -7,6 +7,7 @@ use crate::llm::api::{
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
+    output_text_block, reasoning_block, tool_call_block,
 };
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
@@ -426,18 +427,10 @@ pub(crate) fn parse_response(
             if let Some(fragment) = part.get("text").and_then(|value| value.as_str()) {
                 if part.get("thought").and_then(|value| value.as_bool()) == Some(true) {
                     thinking.push_str(fragment);
-                    blocks.push(serde_json::json!({
-                        "type": "reasoning",
-                        "text": fragment,
-                        "visibility": "private",
-                    }));
+                    blocks.push(reasoning_block(fragment));
                 } else {
                     text.push_str(fragment);
-                    let mut block = serde_json::json!({
-                        "type": "output_text",
-                        "text": fragment,
-                        "visibility": "public",
-                    });
+                    let mut block = output_text_block(fragment);
                     if let Some(signature) = thought_signature {
                         block["provider_metadata"] = serde_json::json!({
                             "gemini": {"thought_signature": signature}
@@ -473,13 +466,7 @@ pub(crate) fn parse_response(
                     tool_call["thought_signature"] = serde_json::json!(signature);
                 }
                 tool_calls.push(tool_call.clone());
-                let mut block = serde_json::json!({
-                    "type": "tool_call",
-                    "id": tool_call["id"].clone(),
-                    "name": name,
-                    "arguments": args,
-                    "visibility": "internal",
-                });
+                let mut block = tool_call_block(tool_call["id"].clone(), name, args);
                 if let Some(signature) = thought_signature {
                     block["thought_signature"] = serde_json::json!(signature);
                 }
