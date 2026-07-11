@@ -3,6 +3,7 @@ import {
   render_probe_command_templates,
   render_required_probe_cases,
   render_tool_catalog_contract,
+  render_trainer_identity_check,
 } from "std/cli/models/lora_render"
 /**
  * `harn models lora train` renderer.
@@ -104,6 +105,7 @@ fn __render_human(harness: Harness, report: dict) {
   )
   harness.stdio.println("  dataset format: " + safe_string(request["dataset_format"], ""))
   harness.stdio.println("  trainer: " + safe_string(training["trainer"], ""))
+  render_trainer_identity_check(harness, training["trainer_identity"])
   harness.stdio
     .println(
     "  training: "

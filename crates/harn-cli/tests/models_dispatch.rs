@@ -12,7 +12,7 @@
 use std::fs;
 use std::process::{Command, Output};
 
-const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 3;
+const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 4;
 
 fn harn_binary() -> &'static str {
     env!("CARGO_BIN_EXE_harn")
@@ -4201,6 +4201,10 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
             adapter.path().to_str().expect("utf8 adapter path"),
             "--request-model",
             "burin-tools",
+            "--trainer-version",
+            "trainer-2026.7",
+            "--observed-trainer-identity",
+            "version=trainer-2026.7",
             "--json",
         ],
         &[],
@@ -4248,6 +4252,8 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
         report["contract"]["eval_dataset"],
         dataset.display().to_string()
     );
+    assert_eq!(report["contract"]["trainer_identity"]["status"], "matched");
+    assert_eq!(report["contract"]["trainer_identity"]["promotable"], true);
     assert_eq!(report["totals"]["required_cases"], 6);
     assert_eq!(report["totals"]["passed"], 4);
     assert_eq!(report["totals"]["not_applicable"], 2);
@@ -4308,6 +4314,10 @@ fn models_lora_promote_check_fails_when_probe_matrix_is_missing() {
             "burin-tools",
             "--request-model",
             "burin-tools",
+            "--trainer-version",
+            "trainer-2026.7",
+            "--observed-trainer-identity",
+            "version=trainer-2026.7",
             "--json",
         ],
         &[],

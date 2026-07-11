@@ -337,6 +337,12 @@ pub(crate) struct ModelsLoraManifestArgs {
     /// Trainer/backend version or package revision to record.
     #[arg(long = "trainer-version")]
     pub trainer_version: Option<String>,
+    /// Expected trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint.
+    #[arg(long = "trainer-identity", value_name = "KIND=VALUE")]
+    pub trainer_identity: Option<String>,
+    /// Observed trainer identity as KIND=VALUE, normally copied from the backend completion receipt.
+    #[arg(long = "observed-trainer-identity", value_name = "KIND=VALUE")]
+    pub observed_trainer_identity: Option<String>,
     /// Adapter training method (`qlora` or `lora`).
     #[arg(long, default_value = "qlora")]
     pub method: String,
@@ -405,6 +411,12 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// Canonical values: `trl_sft_trainer`, `unsloth_sft`, `mlx_lm`, or `external_sft_trainer`.
     #[arg(long, default_value = "external_sft_trainer")]
     pub trainer: String,
+    /// Trainer/backend version or package revision expected for an executed training run.
+    #[arg(long = "trainer-version")]
+    pub trainer_version: Option<String>,
+    /// Strong trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint.
+    #[arg(long = "trainer-identity", value_name = "KIND=VALUE")]
+    pub trainer_identity: Option<String>,
     /// LoRA rank to plan for training and serving.
     #[arg(long, default_value_t = 16)]
     pub rank: u32,
@@ -455,6 +467,9 @@ pub(crate) struct ModelsLoraPromoteArgs {
     /// Exit non-zero when required probe evidence is missing or failing.
     #[arg(long)]
     pub check: bool,
+    /// Typed audit exception allowing promotion despite a missing or mismatched trainer identity.
+    #[arg(long = "trainer-identity-exception", value_name = "REASON")]
+    pub trainer_identity_exception: Option<String>,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
@@ -502,6 +517,12 @@ pub(crate) struct ModelsLoraTrainArgs {
     /// Trainer/backend version or package revision to record.
     #[arg(long = "trainer-version")]
     pub trainer_version: Option<String>,
+    /// Expected trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint.
+    #[arg(long = "trainer-identity", value_name = "KIND=VALUE")]
+    pub trainer_identity: Option<String>,
+    /// Observed trainer identity as KIND=VALUE. If omitted during --execute, Harn reads OUTPUT_DIR/trainer.identity.json.
+    #[arg(long = "observed-trainer-identity", value_name = "KIND=VALUE")]
+    pub observed_trainer_identity: Option<String>,
     /// Adapter training method (`qlora` or `lora`).
     #[arg(long, default_value = "qlora")]
     pub method: String,

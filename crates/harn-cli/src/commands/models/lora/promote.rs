@@ -55,6 +55,26 @@ fn promotion_report(args: &ModelsLoraPromoteArgs) -> Result<LoraPromotionReport,
     let mut cases = Vec::new();
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
+    let trainer_identity = trainer_identity_check(payload);
+    if !trainer_identity.promotable {
+        if let Some(exception) = args
+            .trainer_identity_exception
+            .as_deref()
+            .map(str::trim)
+            .filter(|exception| !exception.is_empty())
+        {
+            warnings.push(format!(
+                "trainer identity promotion exception supplied: {exception}"
+            ));
+        } else {
+            errors.extend(
+                trainer_identity
+                    .errors
+                    .iter()
+                    .map(|error| format!("trainer identity: {error}")),
+            );
+        }
+    }
     let mut total_cost_usd = 0.0;
     for case in required_cases {
         let spec = probe_case_spec(case)?;
@@ -125,6 +145,7 @@ fn promotion_report(args: &ModelsLoraPromoteArgs) -> Result<LoraPromotionReport,
             probe_root: args.probe_root.display().to_string(),
             out: args.out.as_ref().map(|path| path.display().to_string()),
             check: args.check,
+            trainer_identity_exception: args.trainer_identity_exception.clone(),
         },
         contract: PromotionContractSummary {
             schema_version: value_u64(evidence, "schema_version"),
@@ -137,6 +158,7 @@ fn promotion_report(args: &ModelsLoraPromoteArgs) -> Result<LoraPromotionReport,
                 .get("adapter_route")
                 .cloned()
                 .unwrap_or(Value::Null),
+            trainer_identity,
         },
         totals,
         cases,
@@ -342,6 +364,60 @@ fn promotion_evidence_contract(payload: &Value) -> Option<&Value> {
         })
 }
 
+fn trainer_identity_check(payload: &Value) -> TrainerIdentityPromotionSummary {
+    let candidate = payload
+        .get("training")
+        .and_then(|training| training.get("trainer_identity"))
+        .or_else(|| {
+            payload
+                .get("promotion")
+                .and_then(|promotion| promotion.get("evidence_contract"))
+                .and_then(|evidence| evidence.get("trainer_identity"))
+        })
+        .or_else(|| {
+            payload
+                .get("evaluation")
+                .and_then(|evaluation| evaluation.get("evidence_contract"))
+                .and_then(|evidence| evidence.get("trainer_identity"))
+        });
+    let Some(candidate) = candidate else {
+        return TrainerIdentityPromotionSummary {
+            status: "missing".to_string(),
+            promotable: false,
+            expected: Value::Null,
+            observed: Value::Null,
+            errors: vec!["trainer identity check is missing".to_string()],
+        };
+    };
+    let status = value_string(candidate, "status");
+    let promotable = candidate
+        .get("promotable")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let errors = candidate
+        .get("errors")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut errors = errors;
+    if !promotable && errors.is_empty() {
+        errors.push("trainer identity is not promotable".to_string());
+    }
+    TrainerIdentityPromotionSummary {
+        status,
+        promotable,
+        expected: candidate.get("expected").cloned().unwrap_or(Value::Null),
+        observed: candidate.get("observed").cloned().unwrap_or(Value::Null),
+        errors,
+    }
+}
+
 fn unwrap_cli_envelope(value: &Value) -> &Value {
     value.get("data").unwrap_or(value)
 }
@@ -411,6 +487,7 @@ struct PromotionRequest {
     probe_root: String,
     out: Option<String>,
     check: bool,
+    trainer_identity_exception: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -422,6 +499,16 @@ struct PromotionContractSummary {
     minimum_trials: u64,
     base_route: Value,
     adapter_route: Value,
+    trainer_identity: TrainerIdentityPromotionSummary,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerIdentityPromotionSummary {
+    status: String,
+    promotable: bool,
+    expected: Value,
+    observed: Value,
+    errors: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]

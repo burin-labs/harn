@@ -16,13 +16,14 @@ use super::{
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
-    parse_target_metadata, precision_contract_for_method, render_embedded_lora_report,
-    resolve_lora_provider, serving_recipe, sha256_file, target_module_contract,
-    target_modules_args, teacher_report, template_recipe_for_route, tool_catalog_args,
-    tool_catalog_contract, trainer_contract_for_dataset, BaseModelReport, EvaluationRecipe,
+    parse_target_metadata, precision_contract_for_method, read_trainer_identity_file,
+    render_embedded_lora_report, resolve_lora_provider, serving_recipe, sha256_file,
+    target_module_contract, target_modules_args, teacher_report, template_recipe_for_route,
+    tool_catalog_args, tool_catalog_contract, trainer_contract_for_dataset, trainer_identity_args,
+    trainer_identity_check, trainer_identity_from_args, BaseModelReport, EvaluationRecipe,
     LoraContractReport, LoraContractReportInput, LoraTrainingContract, PrecisionContract,
     ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
-    ToolCatalogContract,
+    ToolCatalogContract, TrainerIdentity,
 };
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
@@ -42,6 +43,10 @@ pub(super) async fn train(args: &ModelsLoraTrainArgs) -> i32 {
     };
     if args.execute {
         if let Err(error) = execute_backend(&mut report) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+        if let Err(error) = finalize_executed_trainer_identity(&mut report) {
             eprintln!("error: {error}");
             return 1;
         }
@@ -66,6 +71,17 @@ pub(super) async fn train(args: &ModelsLoraTrainArgs) -> i32 {
 fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
     let method = normalize_lora_method(&args.method)?;
     let trainer = normalize_lora_trainer(&args.trainer)?;
+    let expected_trainer_identity = trainer_identity_from_args(
+        args.trainer_identity.as_deref(),
+        args.trainer_version.as_deref(),
+    )?;
+    let observed_trainer_identity = args
+        .observed_trainer_identity
+        .as_deref()
+        .map(super::parse_trainer_identity)
+        .transpose()?;
+    let trainer_identity =
+        trainer_identity_check(expected_trainer_identity.clone(), observed_trainer_identity);
     let rank = normalize_lora_rank(args.rank)?;
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
@@ -167,6 +183,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         chat_template: &chat_template,
         trainer: &trainer,
         trainer_version: args.trainer_version.as_deref(),
+        trainer_identity: expected_trainer_identity.as_ref(),
         method: &method,
         rank,
         alpha,
@@ -185,6 +202,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         chat_template: &chat_template,
         trainer: &trainer,
         trainer_version: args.trainer_version.as_deref(),
+        trainer_identity: expected_trainer_identity.as_ref(),
         method: &method,
         rank,
         alpha,
@@ -202,6 +220,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         &request_model,
         &decision.effective,
         &eval_dataset,
+        Some(&trainer_identity),
         vec![
             "harn".to_string(),
             "eval".to_string(),
@@ -235,11 +254,20 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
                 .to_string(),
         );
     }
+    if args.execute && expected_trainer_identity.is_none() {
+        return Err("--execute requires --trainer-identity or --trainer-version so the trainer stack is reproducible".to_string());
+    }
     let dataset_audit = dataset_audit_report(&args.dataset)?;
     let backend_argv_required = backend_plan.argv.is_empty();
     if backend_argv_required {
         warnings.push(
             "no backend argv supplied; dry-run receipt records the named trainer contract only"
+                .to_string(),
+        );
+    }
+    if !trainer_identity.promotable {
+        warnings.push(
+            "trainer identity is not promotable until expected and observed identities match"
                 .to_string(),
         );
     }
@@ -259,6 +287,9 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         } else {
             "dry_run".to_string()
         },
+        trainer_identity_path: default_trainer_identity_path(&args.output_dir)
+            .display()
+            .to_string(),
         exit_code: None,
         output_tail_bytes: BACKEND_OUTPUT_TAIL_BYTES,
         stdout_tail: None,
@@ -322,6 +353,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         training: TrainTraining {
             trainer: trainer.clone(),
             trainer_version: args.trainer_version.clone(),
+            trainer_identity,
             method,
             adapter_type: "peft_lora".to_string(),
             rank,
@@ -391,6 +423,7 @@ struct BackendPlanContext<'a> {
     chat_template: &'a str,
     trainer: &'a str,
     trainer_version: Option<&'a str>,
+    trainer_identity: Option<&'a TrainerIdentity>,
     method: &'a str,
     rank: u32,
     alpha: u32,
@@ -473,6 +506,13 @@ fn render_backend_plan(ctx: BackendPlanContext<'_>) -> Result<RenderedBackendPla
             if let Some(trainer_version) = ctx.trainer_version {
                 argv.extend(["--trainer-version".to_string(), trainer_version.to_string()]);
             }
+            argv.extend(trainer_identity_args(ctx.trainer_identity));
+            argv.extend([
+                "--trainer-identity-out".to_string(),
+                default_trainer_identity_path(&ctx.args.output_dir)
+                    .display()
+                    .to_string(),
+            ]);
             if let Some(max_seq_length) = ctx.args.max_seq_length {
                 argv.extend(["--max-seq-length".to_string(), max_seq_length.to_string()]);
             }
@@ -575,6 +615,30 @@ fn execute_backend(report: &mut LoraTrainReport) -> Result<(), String> {
     report.backend.stderr_tail = stderr.text;
     report.backend.stderr_tail_truncated = stderr.truncated;
     Ok(())
+}
+
+fn finalize_executed_trainer_identity(report: &mut LoraTrainReport) -> Result<(), String> {
+    let identity_path = Path::new(&report.backend.trainer_identity_path);
+    let observed = read_trainer_identity_file(identity_path)?;
+    report.training.trainer_identity =
+        trainer_identity_check(report.training.trainer_identity.expected.clone(), observed);
+    if !report.training.trainer_identity.promotable {
+        report.ok = false;
+        report.backend.status = "completed_non_promotable".to_string();
+        report.warnings.extend(
+            report
+                .training
+                .trainer_identity
+                .errors
+                .iter()
+                .map(|error| format!("trainer identity: {error}")),
+        );
+    }
+    Ok(())
+}
+
+fn default_trainer_identity_path(output_dir: &Path) -> std::path::PathBuf {
+    output_dir.join("trainer.identity.json")
 }
 
 fn tee_backend_stream<R: Read + Send + 'static>(
@@ -719,6 +783,7 @@ struct PostTrainingManifestCommand<'a> {
     chat_template: &'a str,
     trainer: &'a str,
     trainer_version: Option<&'a str>,
+    trainer_identity: Option<&'a TrainerIdentity>,
     method: &'a str,
     rank: u32,
     alpha: u32,
@@ -757,6 +822,7 @@ fn post_training_manifest_command(ctx: PostTrainingManifestCommand<'_>) -> Vec<S
     if let Some(trainer_version) = ctx.trainer_version {
         command.extend(["--trainer-version".to_string(), trainer_version.to_string()]);
     }
+    command.extend(trainer_identity_args(ctx.trainer_identity));
     command.extend([
         "--method".to_string(),
         ctx.method.to_string(),
@@ -1024,6 +1090,7 @@ struct TrainRequest {
 struct TrainTraining {
     trainer: String,
     trainer_version: Option<String>,
+    trainer_identity: super::TrainerIdentityCheck,
     method: String,
     adapter_type: String,
     rank: u32,
@@ -1064,6 +1131,7 @@ struct BackendInvocation {
     cwd: Option<String>,
     execute: bool,
     status: String,
+    trainer_identity_path: String,
     exit_code: Option<i32>,
     output_tail_bytes: usize,
     stdout_tail: Option<String>,
@@ -1115,6 +1183,8 @@ mod tests {
             chat_template: None,
             trainer: "unsloth_trl_sft".to_string(),
             trainer_version: Some("unsloth-2026.7".to_string()),
+            trainer_identity: None,
+            observed_trainer_identity: Some("version=unsloth-2026.7".to_string()),
             method: "qlora".to_string(),
             rank: 24,
             alpha: None,
@@ -1224,6 +1294,8 @@ mod tests {
             chat_template: None,
             trainer: "trl_sft_trainer".to_string(),
             trainer_version: None,
+            trainer_identity: None,
+            observed_trainer_identity: None,
             method: "qlora".to_string(),
             rank: 16,
             alpha: None,
@@ -1275,6 +1347,8 @@ mod tests {
             chat_template: Some("harn_text_tool_calls_json_fences".to_string()),
             trainer: "unsloth_sft".to_string(),
             trainer_version: Some("unsloth-2026.7".to_string()),
+            trainer_identity: None,
+            observed_trainer_identity: Some("version=unsloth-2026.7".to_string()),
             method: "lora".to_string(),
             rank: 32,
             alpha: Some(64),
@@ -1439,6 +1513,8 @@ mod tests {
             chat_template: None,
             trainer: "external_sft_trainer".to_string(),
             trainer_version: None,
+            trainer_identity: None,
+            observed_trainer_identity: None,
             method: "qlora".to_string(),
             rank: 16,
             alpha: None,
@@ -1484,6 +1560,8 @@ mod tests {
             chat_template: None,
             trainer: "external_sft_trainer".to_string(),
             trainer_version: None,
+            trainer_identity: None,
+            observed_trainer_identity: None,
             method: "qlora".to_string(),
             rank: 16,
             alpha: None,
@@ -1529,6 +1607,8 @@ mod tests {
             chat_template: None,
             trainer: "external_sft_trainer".to_string(),
             trainer_version: None,
+            trainer_identity: None,
+            observed_trainer_identity: None,
             method: "qlora".to_string(),
             rank: 16,
             alpha: None,

@@ -9,6 +9,7 @@
  *   HARN_MODELS_LORA_PROMOTE_PAYLOAD_PRETTY - pretty report JSON.
  *   HARN_OUTPUT_JSON                        - "1" for JSON, else human text.
  */
+import { render_trainer_identity_check } from "std/cli/models/lora_render"
 import {
   cli_json_envelope,
   print_list,
@@ -36,6 +37,7 @@ fn __render_human(harness: Harness, report: dict) {
   }
   harness.stdio.println("  promotion id: " + safe_string(contract["promotion_id"], ""))
   harness.stdio.println("  LoRA contract: " + safe_string(contract["lora_contract_id"], ""))
+  render_trainer_identity_check(harness, contract["trainer_identity"])
   harness.stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
   harness.stdio
     .println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
