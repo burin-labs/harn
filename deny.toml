@@ -21,7 +21,7 @@ ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
     { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained; transitive, no vuln. bincode 2.x is a breaking rewrite not yet adopted upstream. https://rustsec.org/advisories/RUSTSEC-2025-0141" },
-    { id = "RUSTSEC-2025-0068", reason = "serde_yml 0.0.13 unsound + unmaintained. Being removed in favor of serde_yaml_ng (harn PR #4428); this entry is a no-op once that lands. https://rustsec.org/advisories/RUSTSEC-2025-0068" },
+    { id = "RUSTSEC-2025-0068", reason = "serde_yml 0.0.13 unsound + unmaintained (informational, not an exploitable vuln). Migrating off it is a non-trivial refactor, not a rename: serde_yml's Mapping is String-keyed while the maintained serde_yaml/serde_yaml_ng model is Value-keyed, so every key-handling site in harn-vm would need reworking. https://rustsec.org/advisories/RUSTSEC-2025-0068" },
 
     # --- quick-xml DoS advisories: transitive under xcap (screen capture for
     # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is
