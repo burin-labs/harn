@@ -29,12 +29,12 @@
 //!   decision was attached to the call (model/provider selection,
 //!   fallback chain, and the considered alternatives).
 //! - `provider_call_request` core `{call_id, iteration, model, provider,
-//!   max_tokens, temperature, tool_choice, tool_format}` — slim metadata
-//!   for a single model call. No `messages`, `system`, or `tool_schemas`
-//!   fields; those are reconstructable from prior events. Also carries
-//!   diagnostics `{thinking, native_tool_count, message_count,
-//!   structural_experiment, route_policy, fallback_chain,
-//!   routing_decision}`.
+//!   max_tokens, temperature, tool_choice, tool_format,
+//!   context_token_breakdown}` — slim metadata for a single model call.
+//!   No `messages`, `system`, or `tool_schemas` fields; those are
+//!   reconstructable from prior events. Also carries diagnostics
+//!   `{thinking, native_tool_count, message_count, structural_experiment,
+//!   route_policy, fallback_chain, routing_decision}`.
 //!   Set `HARN_LLM_TRANSCRIPT_VERBOSE=1` to include a `request_snapshot`
 //!   object with the exact system prompt, message list, and tool schemas
 //!   attached to each request for debugging provider-context issues.
@@ -1396,6 +1396,16 @@ pub(super) fn dump_llm_request(
         .transpose()
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
+    let context_token_breakdown =
+        serde_json::to_value(crate::llm::cost::project_llm_call_context_breakdown(opts))
+            .unwrap_or(serde_json::Value::Null);
+    emit_context_token_breakdown_checkpoint(
+        opts,
+        iteration,
+        call_id,
+        tool_format,
+        &context_token_breakdown,
+    );
     if let Some(decision) = opts.routing_decision.as_ref() {
         append_llm_transcript_entry(&serde_json::json!({
             "type": "routing_decision",
@@ -1448,6 +1458,7 @@ pub(super) fn dump_llm_request(
         "tool_format": tool_format,
         "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": opts.messages.len(),
+        "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,
         "route_policy": opts.route_policy.as_label(),
         "fallback_chain": opts.fallback_chain.clone(),
@@ -1462,6 +1473,40 @@ pub(super) fn dump_llm_request(
         });
     }
     append_llm_transcript_entry(&request_event);
+}
+
+fn emit_context_token_breakdown_checkpoint(
+    opts: &super::api::LlmCallOptions,
+    iteration: usize,
+    call_id: &str,
+    tool_format: &str,
+    context_token_breakdown: &serde_json::Value,
+) {
+    if !should_emit_context_token_breakdown_checkpoint(opts) {
+        return;
+    }
+    let Some(session_id) = opts.session_id.as_deref().filter(|id| !id.is_empty()) else {
+        return;
+    };
+    let mut checkpoint = context_token_breakdown.clone();
+    let Some(object) = checkpoint.as_object_mut() else {
+        return;
+    };
+    object.insert("call_id".to_string(), serde_json::json!(call_id));
+    object.insert("iteration".to_string(), serde_json::json!(iteration));
+    object.insert("provider".to_string(), serde_json::json!(opts.provider));
+    object.insert("model".to_string(), serde_json::json!(opts.model));
+    object.insert("tool_format".to_string(), serde_json::json!(tool_format));
+    crate::llm::agent_runtime::emit_agent_event_sync(
+        &crate::agent_events::AgentEvent::TypedCheckpoint {
+            session_id: session_id.to_string(),
+            checkpoint,
+        },
+    );
+}
+
+fn should_emit_context_token_breakdown_checkpoint(opts: &super::api::LlmCallOptions) -> bool {
+    opts.dispatch_provenance.is_some()
 }
 
 /// Compute the merged (native OR text-parsed) tool calls for the
@@ -3189,6 +3234,100 @@ mod retry_tests {
         assert_eq!(latest, 1, "exactly one transcript event should be recorded");
 
         reset_active_event_log();
+    }
+
+    #[test]
+    fn dump_llm_request_emits_context_breakdown_typed_checkpoint_for_agent_dispatch() {
+        use crate::agent_events::{register_sink, reset_all_sinks, AgentEvent, AgentEventSink};
+        use std::sync::{Arc, Mutex};
+
+        struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+
+        impl AgentEventSink for CapturingSink {
+            fn handle_event(&self, event: &AgentEvent) {
+                self.0
+                    .lock()
+                    .expect("captured sink mutex poisoned")
+                    .push(event.clone());
+            }
+        }
+
+        reset_all_sinks();
+        let session_id = "context-breakdown-session";
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        register_sink(session_id, Arc::new(CapturingSink(captured.clone())));
+
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.session_id = Some(session_id.to_string());
+        opts.model = "gpt-4o-mini".to_string();
+        opts.system = Some("System policy".to_string());
+        opts.messages = vec![serde_json::json!({"role": "user", "content": "fix the bug"})];
+        opts.max_tokens = 64;
+
+        dump_llm_request(3, "call-context-1", "json", &opts);
+
+        assert!(
+            captured
+                .lock()
+                .expect("captured sink mutex poisoned")
+                .is_empty(),
+            "raw/session-scoped llm_call users should not receive agent-loop context checkpoints"
+        );
+
+        opts.dispatch_provenance = Some(crate::llm::resolved_dispatch::DispatchProvenance {
+            provider: Some(
+                crate::llm::resolved_dispatch::DispatchProvenance::OPERATOR_PIN.to_string(),
+            ),
+            model: Some(
+                crate::llm::resolved_dispatch::DispatchProvenance::OPERATOR_PIN.to_string(),
+            ),
+            wire_format: Some(
+                crate::llm::resolved_dispatch::DispatchProvenance::CATALOG_DEFAULT.to_string(),
+            ),
+            thinking: Some(
+                crate::llm::resolved_dispatch::DispatchProvenance::CATALOG_DEFAULT.to_string(),
+            ),
+            tool_format: Some(
+                crate::llm::resolved_dispatch::DispatchProvenance::CATALOG_DEFAULT.to_string(),
+            ),
+        });
+
+        dump_llm_request(3, "call-context-2", "json", &opts);
+
+        let events = captured.lock().expect("captured sink mutex poisoned");
+        let checkpoint = events
+            .iter()
+            .find_map(|event| match event {
+                AgentEvent::TypedCheckpoint {
+                    session_id: id,
+                    checkpoint,
+                } if id == session_id => Some(checkpoint),
+                _ => None,
+            })
+            .expect("context breakdown typed checkpoint");
+
+        assert_eq!(
+            checkpoint["schema"],
+            serde_json::json!("harn.llm.context_token_breakdown.v1")
+        );
+        assert_eq!(checkpoint["call_id"], serde_json::json!("call-context-2"));
+        assert_eq!(checkpoint["iteration"], serde_json::json!(3));
+        assert_eq!(checkpoint["provider"], serde_json::json!("openai"));
+        assert_eq!(checkpoint["model"], serde_json::json!("gpt-4o-mini"));
+        assert_eq!(checkpoint["tool_format"], serde_json::json!("json"));
+        assert!(
+            checkpoint["segments"]
+                .as_array()
+                .is_some_and(|segments| !segments.is_empty()),
+            "typed checkpoint should carry per-segment token accounting"
+        );
+        assert!(
+            checkpoint["context_tokens"].as_i64().unwrap_or_default() > 0,
+            "typed checkpoint should carry the projected request total"
+        );
+
+        drop(events);
+        reset_all_sinks();
     }
 
     #[test]
