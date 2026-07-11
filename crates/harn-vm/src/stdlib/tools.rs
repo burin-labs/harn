@@ -522,7 +522,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 // capability-gated system-prompt fragment, so a tool's instruction and the
 // tool itself share one source of truth and cannot drift.
 #[harn_builtin(
-    sig = "tool_define(registry: dict | closure, name: string, description: string, config: dict) -> dict",
+    sig = "tool_define(registry: dict | closure, name: string, description: string, config: dict) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
 fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

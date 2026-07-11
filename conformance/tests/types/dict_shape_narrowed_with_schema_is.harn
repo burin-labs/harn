@@ -1,0 +1,13 @@
+// After `schema_is` confirms the shape, the dict narrows to it — so the sound
+// path (validate, then use) keeps working.
+type User = {name: string}
+
+pipeline default() {
+  const d: dict = {name: "Ada"}
+  if schema_is(d, User) {
+    const u: User = d
+    __io_println(u.name)
+  } else {
+    __io_println("not a user")
+  }
+}

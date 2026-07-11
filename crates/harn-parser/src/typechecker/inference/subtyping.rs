@@ -568,7 +568,13 @@ impl TypeChecker {
             (expected_type, TypeExpr::Intersection(members)) => members
                 .iter()
                 .any(|m| self.types_compatible(expected_type, m, scope)),
-            (TypeExpr::Shape(_), TypeExpr::Named(n)) if n == "dict" => true,
+            // A shape widens to the opaque `dict` (a shape *is* a dict with
+            // known fields). The reverse is NOT sound: a bare `dict` carries no
+            // field guarantees, so flowing it into a specific shape without a
+            // narrow (`schema_is` / `.has()`) is exactly the hole that let
+            // unvalidated `json_parse` output masquerade as a typed record.
+            // `dict` now behaves like `unknown` here — the shape target requires
+            // narrowing first.
             (TypeExpr::Named(n), TypeExpr::Shape(_)) if n == "dict" => true,
             // Open records. Subtyping verifies only the EXPECTED side's
             // explicit fields against the actual's known fields — Harn shapes
@@ -588,7 +594,13 @@ impl TypeChecker {
             (TypeExpr::OpenShape { fields: ef, .. }, TypeExpr::OpenShape { fields: af, rests }) => {
                 self.shape_fields_satisfied(ef, af, open_shape_tail_is_gradual(rests), scope)
             }
-            // Gradual map interop, mirroring the `Shape`/`dict` arms.
+            // Gradual map interop. An open record widens to `dict`, and — unlike
+            // the closed-`Shape` case — a bare `dict` DOES satisfy an open record:
+            // an open record's row tail already absorbs unknown fields, so it
+            // imposes no closed-field obligation the way a `Shape` does. Removing
+            // this arm breaks row-polymorphism (open-record `dict` tails), so both
+            // directions stay `true` here; only the closed `Shape`/`dict`
+            // direction is tightened above.
             (TypeExpr::OpenShape { .. }, TypeExpr::Named(n)) if n == "dict" => true,
             (TypeExpr::Named(n), TypeExpr::OpenShape { .. }) if n == "dict" => true,
             (TypeExpr::OpenShape { .. }, TypeExpr::DictType(..)) => true,

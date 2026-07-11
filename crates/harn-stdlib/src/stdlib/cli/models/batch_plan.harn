@@ -4241,7 +4241,7 @@ fn __download_openai_compatible_files(
   dry_run: bool,
   max_bytes: int,
 ) -> dict {
-  let state = {artifacts: [], errors: []}
+  let state: dict = {artifacts: [], errors: []}
   state = __append_download_result(
     state,
     __download_openai_file(
@@ -4286,7 +4286,7 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
       ],
     }
   }
-  let state = {artifacts: [], errors: []}
+  let state: dict = {artifacts: [], errors: []}
   const adapter = __live_batch_adapter_key(provider, wire)
   if __is_openai_compatible_live_adapter(adapter) {
     state = __download_openai_compatible_files(harness, job, adapter, out_dir, dry_run, max_bytes)
