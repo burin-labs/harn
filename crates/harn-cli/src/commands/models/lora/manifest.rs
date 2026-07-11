@@ -11,10 +11,10 @@ use super::{
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
     parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, serving_recipe,
-    sha256_file, target_modules_for_route, teacher_report, template_recipe_for_route,
+    sha256_file, target_module_contract, teacher_report, template_recipe_for_route,
     tool_catalog_contract, BaseModelReport, EvaluationRecipe, LoraContractReport,
-    LoraTrainingContract, PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport,
-    TemplateRecipe, ToolCallingReport,
+    LoraContractReportInput, LoraTrainingContract, PrecisionContract, ServingRecipe,
+    ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -60,6 +60,13 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         args.tool_catalog_hash.as_deref(),
     )?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
+    let target_modules = target_module_contract(
+        &args.target_modules,
+        &method,
+        &resolved.id,
+        &resolved.family,
+        &resolved.lineage,
+    )?;
     let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
@@ -109,19 +116,21 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         &decision.effective,
         dataset_format,
         Some(&chat_template),
+        &target_modules,
         &modules_to_save,
         &tool_catalog,
     )?;
-    let contract = lora_contract_report(
-        contract_id.clone(),
-        &resolved.id,
-        &provider,
-        &decision.effective,
+    let contract = lora_contract_report(LoraContractReportInput {
+        contract_id: contract_id.clone(),
+        base_model: &resolved.id,
+        provider: &provider,
+        harn_tool_format: &decision.effective,
         dataset_format,
-        Some(chat_template.clone()),
-        &modules_to_save,
-        &tool_catalog,
-    );
+        chat_template: Some(chat_template.clone()),
+        target_modules: &target_modules,
+        modules_to_save: &modules_to_save,
+        tool_catalog: &tool_catalog,
+    });
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
     let provider_supports_lora_launch = local_runtime
@@ -169,8 +178,6 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         .as_ref()
         .map(|selector| teacher_report(selector));
     let precision = super::precision_contract_for_method(&method);
-    let target_modules =
-        target_modules_for_route(&method, &resolved.id, &resolved.family, &resolved.lineage);
     let mut warnings = Vec::new();
     let mut metadata = parse_target_metadata(&args.target_metadata)?;
     merge_serving_target_metadata(&mut metadata, &serving, &mut warnings);
@@ -427,7 +434,7 @@ struct ManifestTraining {
     rank: u32,
     alpha: u32,
     dropout: f64,
-    target_modules: Vec<String>,
+    target_modules: super::TargetModuleContract,
     precision: PrecisionContract,
     template: TemplateRecipe,
     contract: LoraTrainingContract,
@@ -486,6 +493,7 @@ mod tests {
             tool_catalog_id: None,
             tool_catalog_hash: None,
             modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
             json: true,
         }
     }

@@ -15,7 +15,7 @@ pub(crate) enum ModelsCommand {
     /// Print resolved metadata for a model alias or model id as JSON.
     Info(ModelInfoArgs),
     /// Inspect LoRA adapter metadata and compatibility with a Harn model route.
-    Lora(ModelsLoraArgs),
+    Lora(Box<ModelsLoraArgs>),
     /// List models grouped by provider.
     List(ModelsListArgs),
     /// Pull an Ollama model or print setup steps for a known local runtime.
@@ -221,6 +221,9 @@ pub(crate) struct ModelsLoraExportArgs {
     /// Tool-call format to export for (`auto`, `native`, `text`, or `json`).
     #[arg(long = "tool-format", default_value = "auto")]
     pub tool_format: String,
+    /// Adapter training method used to derive the target-module default (`qlora` or `lora`).
+    #[arg(long, default_value = "qlora")]
+    pub method: String,
     /// Corpus JSONL file, or a directory containing a conventional corpus JSONL.
     #[arg(long, value_name = "PATH")]
     pub corpus: String,
@@ -260,6 +263,9 @@ pub(crate) struct ModelsLoraExportArgs {
     /// PEFT modules_to_save entries to include in the LoRA contract.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
+    /// LoRA target modules. Repeat or comma-delimit; omitted values use the route default.
+    #[arg(long = "target-modules", value_delimiter = ',', value_name = "MODULE")]
+    pub target_modules: Vec<String>,
     /// Emit structured JSON report.
     #[arg(long)]
     pub json: bool,
@@ -364,6 +370,9 @@ pub(crate) struct ModelsLoraManifestArgs {
     /// PEFT modules_to_save entries used by the trainer.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
+    /// LoRA target modules used by the trainer. Repeat or comma-delimit.
+    #[arg(long = "target-modules", value_delimiter = ',', value_name = "MODULE")]
+    pub target_modules: Vec<String>,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
@@ -408,6 +417,9 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// PEFT modules_to_save entries to plan for.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
+    /// LoRA target modules to plan for. Repeat or comma-delimit.
+    #[arg(long = "target-modules", value_delimiter = ',', value_name = "MODULE")]
+    pub target_modules: Vec<String>,
     /// Inference tool-catalog policy (`full_schema`, `compressed_names`, or `fixed_catalog_internalized`).
     #[arg(long = "tool-catalog-policy", default_value = "full_schema")]
     pub tool_catalog_policy: String,
@@ -523,6 +535,9 @@ pub(crate) struct ModelsLoraTrainArgs {
     /// PEFT modules_to_save entries used by the backend trainer.
     #[arg(long = "modules-to-save", value_delimiter = ',', value_name = "MODULE")]
     pub modules_to_save: Vec<String>,
+    /// LoRA target modules used by the backend trainer. Repeat or comma-delimit.
+    #[arg(long = "target-modules", value_delimiter = ',', value_name = "MODULE")]
+    pub target_modules: Vec<String>,
     /// Backend launch recipe (`explicit_argv` or `harn_lora_sft_v1`).
     #[arg(long = "backend-recipe", default_value = "explicit_argv")]
     pub backend_recipe: String,

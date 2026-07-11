@@ -17,7 +17,7 @@ pub(crate) async fn run(args: ModelsArgs) {
                 std::process::exit(1);
             }
         }
-        ModelsCommand::Lora(args) => lora::run(args).await,
+        ModelsCommand::Lora(args) => lora::run(*args).await,
         ModelsCommand::List(args) => list::run(args).await,
         ModelsCommand::Install(args) => install::run(args).await,
         ModelsCommand::Recommend(args) => recommend::run(&args).await,

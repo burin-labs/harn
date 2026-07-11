@@ -123,12 +123,15 @@ fn __render_human(harness: Harness, report: dict) {
       + " dropout="
       + safe_number_string(training["dropout"], ""),
   )
-  const target_modules = safe_list(training["target_modules"])
+  const target_module_contract = safe_dict(training["target_modules"])
+  const target_modules = safe_list(target_module_contract["modules"])
   if len(target_modules) > 0 {
     harness.stdio
       .println(
       "  target modules: " + join(target_modules.map({ item -> safe_string(item, "") }), ", "),
     )
+    harness.stdio
+      .println("  target module policy: " + safe_string(target_module_contract["policy"], ""))
   }
   harness.stdio
     .println("  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""))

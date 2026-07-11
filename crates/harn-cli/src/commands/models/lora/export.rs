@@ -12,11 +12,11 @@ use crate::cli::ModelsLoraExportArgs;
 
 use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
-    lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
+    lora_contract_report, lora_evaluation_recipe, lora_modules_value_format, normalize_lora_method,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
     parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, sha256_file,
-    tool_catalog_contract, BaseModelReport, EvaluationRecipe, LoraContractReport,
-    ToolCallingReport, ToolCatalogContract,
+    target_module_contract, tool_catalog_contract, BaseModelReport, EvaluationRecipe,
+    LoraContractReport, LoraContractReportInput, ToolCallingReport, ToolCatalogContract,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -77,7 +77,15 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         )
     };
     let dataset_format = dataset_format_for_tool_format(&decision.effective).to_string();
+    let method = normalize_lora_method(&args.method)?;
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
+    let target_modules = target_module_contract(
+        &args.target_modules,
+        &method,
+        &resolved.id,
+        &resolved.family,
+        &resolved.lineage,
+    )?;
     let tool_catalog_policy = normalize_tool_catalog_policy(&args.tool_catalog_policy)?;
     let tool_catalog = tool_catalog_contract(
         &tool_catalog_policy,
@@ -91,6 +99,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &decision.effective,
         &dataset_format,
         args.chat_template.as_deref(),
+        &target_modules,
         &modules_to_save,
         &tool_catalog,
     )?;
@@ -106,16 +115,17 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         metadata: parse_target_metadata(&args.target_metadata)?,
         tool_catalog,
     };
-    let contract = lora_contract_report(
-        contract_id.clone(),
-        &target.base_model,
-        &target.provider,
-        &target.harn_tool_format,
-        &dataset_format,
-        target.chat_template.clone(),
-        &modules_to_save,
-        &target.tool_catalog,
-    );
+    let contract = lora_contract_report(LoraContractReportInput {
+        contract_id: contract_id.clone(),
+        base_model: &target.base_model,
+        provider: &target.provider,
+        harn_tool_format: &target.harn_tool_format,
+        dataset_format: &dataset_format,
+        chat_template: target.chat_template.clone(),
+        target_modules: &target_modules,
+        modules_to_save: &modules_to_save,
+        tool_catalog: &target.tool_catalog,
+    });
     let mut writer = if args.check {
         None
     } else {
