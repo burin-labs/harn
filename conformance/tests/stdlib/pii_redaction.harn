@@ -1,0 +1,43 @@
+import { pii_detect, pii_redact, pii_restore, pii_types } from "std/pii"
+
+/**
+ * Structured PII detection + reversible redaction. Assertions check behavior
+ * (entity types, checksum validation, round-trip equality, deterministic
+ * tokens, non-overlap invariant) rather than exact rendered strings.
+ */
+pipeline default() {
+  const text = "Email a@b.com call +14155551234 or 555-123-4567 ssn 123-45-6789 "
+    + "card 4111 1111 1111 1111 iban GB82WEST12345698765432 "
+    + "ipv4 192.168.0.1 ipv6 2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+  const detected = pii_detect(text)
+  const type_set = detected.map({ e -> e.type })
+  // 1. Every supported entity type is found in the mixed sample.
+  for entity_type in pii_types() {
+    __io_println(entity_type + ":" + to_string(contains(type_set, entity_type)))
+  }
+  // 2. Non-overlap invariant: detected spans are strictly ordered, no overlaps.
+  let prev_end = -1
+  let non_overlapping = true
+  for entity in detected {
+    if entity.start < prev_end {
+      non_overlapping = false
+    }
+    prev_end = entity.end
+  }
+  __io_println("non_overlapping:" + to_string(non_overlapping))
+  // 3. Checksum validation rejects bad values: Luhn for cards, mod-97 for IBAN.
+  __io_println("valid_card:" + to_string(len(pii_detect("card 4111111111111111"))))
+  __io_println("invalid_card:" + to_string(len(pii_detect("card 4111111111111112"))))
+  __io_println("valid_iban:" + to_string(len(pii_detect("iban DE89370400440532013000"))))
+  __io_println("invalid_iban:" + to_string(len(pii_detect("iban GB00WEST12345698765432"))))
+  // 4. Reversible round-trip is exact.
+  const redacted = pii_redact(text)
+  __io_println("roundtrip:" + to_string(pii_restore(redacted.clean, redacted.restore) == text))
+  __io_println("email_scrubbed:" + to_string(index_of(redacted.clean, "a@b.com") == -1))
+  // 5. Deterministic tokens: the same entity value maps to one stable token.
+  const dup = pii_redact("from a@b.com to a@b.com")
+  __io_println("dup_tokens:" + to_string(len(dup.restore.keys())))
+  __io_println("dup_clean:" + dup.clean)
+  // 6. Adjacent (non-overlapping) entities are both kept.
+  __io_println("adjacent:" + to_string(len(pii_detect("a@b.com 192.168.0.1"))))
+}
