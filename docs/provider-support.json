@@ -1760,7 +1760,7 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
         "serving_tiers": [

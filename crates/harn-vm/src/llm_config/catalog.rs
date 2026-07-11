@@ -490,6 +490,12 @@ pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
         .and_then(|model| model.pricing.clone())
 }
 
+/// Per-MTok whole-request pricing selected for the provider-reported input
+/// usage. Models without input-token bands retain their base rates.
+pub fn model_pricing_for_input_tokens(model_id: &str, input_tokens: i64) -> Option<ModelPricing> {
+    model_pricing_per_mtok(model_id).map(|pricing| pricing.for_input_tokens(input_tokens))
+}
+
 /// Per-MTok pricing for a named serving tier, when the catalog declares one.
 /// Returns `None` for models with no matching tier or a tier that omits
 /// explicit pricing — callers fall back to standard pricing in that case.

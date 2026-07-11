@@ -189,6 +189,48 @@ pub struct ModelPricing {
     pub cache_read_per_mtok: Option<f64>,
     #[serde(default)]
     pub cache_write_per_mtok: Option<f64>,
+    /// Whole-request pricing that activates once provider-reported input usage
+    /// reaches a threshold. Providers such as OpenAI and Gemini charge every
+    /// token in a long-context request at the selected band's rates rather
+    /// than applying marginal pricing only above the boundary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_token_bands: Vec<InputTokenPricingBand>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct InputTokenPricingBand {
+    /// Inclusive lower bound for this whole-request rate.
+    pub minimum_input_tokens: u64,
+    pub input_multiplier: f64,
+    pub output_multiplier: f64,
+}
+
+impl ModelPricing {
+    /// Resolve the whole-request rates for provider-reported input usage.
+    /// `max_by_key` keeps runtime selection correct even before catalog
+    /// validation reports an authoring-order mistake.
+    pub fn for_input_tokens(&self, input_tokens: i64) -> Self {
+        let input_tokens = u64::try_from(input_tokens).unwrap_or(0);
+        let Some(band) = self
+            .input_token_bands
+            .iter()
+            .filter(|band| band.minimum_input_tokens <= input_tokens)
+            .max_by_key(|band| band.minimum_input_tokens)
+        else {
+            return self.clone();
+        };
+        Self {
+            input_per_mtok: self.input_per_mtok * band.input_multiplier,
+            output_per_mtok: self.output_per_mtok * band.output_multiplier,
+            cache_read_per_mtok: self
+                .cache_read_per_mtok
+                .map(|rate| rate * band.input_multiplier),
+            cache_write_per_mtok: self
+                .cache_write_per_mtok
+                .map(|rate| rate * band.input_multiplier),
+            input_token_bands: self.input_token_bands.clone(),
+        }
+    }
 }
 
 /// Provider or model quota metadata. Providers publish these along several

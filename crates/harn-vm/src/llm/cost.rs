@@ -513,6 +513,23 @@ pub(crate) fn pricing_detail_for(provider: &str, model: &str) -> Option<PricingD
     }
 }
 
+fn pricing_detail_for_usage(
+    provider: &str,
+    model: &str,
+    input_tokens: i64,
+) -> Option<PricingDetail> {
+    if let Some(pricing) = crate::llm_config::model_pricing_for_input_tokens(model, input_tokens) {
+        return Some(PricingDetail {
+            input_per_1k: pricing.input_per_mtok / 1000.0,
+            output_per_1k: pricing.output_per_mtok / 1000.0,
+            cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
+            cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
+            source: PricingSource::CatalogModel,
+        });
+    }
+    pricing_detail_for(provider, model)
+}
+
 pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f64)> {
     pricing_detail_for(provider, model).map(|p| (p.input_per_1k, p.output_per_1k))
 }
@@ -526,12 +543,17 @@ pub(crate) fn pricing_detail_for_tier(
     provider: &str,
     model: &str,
     served_fast: bool,
+    input_tokens: i64,
 ) -> Option<PricingDetail> {
     if served_fast {
-        if let Some(pricing) = crate::llm_config::model_serving_tier_pricing_per_mtok(
+        if let Some(mut pricing) = crate::llm_config::model_serving_tier_pricing_per_mtok(
             model,
             crate::llm::serving_tiers::FAST_TIER_ID,
         ) {
+            if let Some(model_pricing) = crate::llm_config::model_pricing_per_mtok(model) {
+                pricing.input_token_bands = model_pricing.input_token_bands;
+            }
+            let pricing = pricing.for_input_tokens(input_tokens);
             return Some(PricingDetail {
                 input_per_1k: pricing.input_per_mtok / 1000.0,
                 output_per_1k: pricing.output_per_mtok / 1000.0,
@@ -541,7 +563,7 @@ pub(crate) fn pricing_detail_for_tier(
             });
         }
     }
-    pricing_detail_for(provider, model)
+    pricing_detail_for_usage(provider, model, input_tokens)
 }
 
 pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
@@ -576,7 +598,8 @@ fn authored_rate_decimal(rate: f64) -> Decimal {
 /// base-10 rescale, so the result carries no representational error.
 /// Returns `Decimal::ZERO` when the model has no catalog entry.
 pub fn calculate_cost_decimal(model: &str, input_tokens: i64, output_tokens: i64) -> Decimal {
-    let Some(pricing) = crate::llm_config::model_pricing_per_mtok(model) else {
+    let Some(pricing) = crate::llm_config::model_pricing_for_input_tokens(model, input_tokens)
+    else {
         return Decimal::ZERO;
     };
     let gross = Decimal::from(input_tokens) * authored_rate_decimal(pricing.input_per_mtok)
@@ -593,7 +616,7 @@ pub fn calculate_cost_for_provider(
     input_tokens: i64,
     output_tokens: i64,
 ) -> f64 {
-    let Some(detail) = pricing_detail_for(provider, model) else {
+    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens) else {
         return 0.0;
     };
     (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
@@ -610,7 +633,7 @@ pub(crate) fn calculate_cost_for_provider_with_cache(
     cache_read_tokens: i64,
     cache_write_tokens: i64,
 ) -> f64 {
-    let Some(detail) = pricing_detail_for(provider, model) else {
+    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens) else {
         return 0.0;
     };
     project_call_cost(
@@ -635,7 +658,7 @@ pub fn pricing_aware_call_cost(
     input_tokens: i64,
     output_tokens: i64,
 ) -> Option<f64> {
-    let detail = pricing_detail_for(provider, model)?;
+    let detail = pricing_detail_for_usage(provider, model, input_tokens)?;
     Some(
         (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
             / 1000.0,
@@ -666,10 +689,11 @@ pub(crate) fn cache_hit_ratio(
 pub(crate) fn cache_savings_usd_for_provider(
     provider: &str,
     model: &str,
+    input_tokens: i64,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
 ) -> f64 {
-    let Some(detail) = pricing_detail_for(provider, model) else {
+    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens) else {
         return 0.0;
     };
     let input_rate = detail.input_per_1k;
@@ -689,7 +713,7 @@ pub(crate) fn accumulate_cost_for_provider(
     output_tokens: i64,
     served_fast: bool,
 ) -> Result<(), VmError> {
-    let cost = pricing_detail_for_tier(provider, model, served_fast)
+    let cost = pricing_detail_for_tier(provider, model, served_fast, input_tokens)
         .map(|detail| {
             (input_tokens as f64 * detail.input_per_1k
                 + output_tokens as f64 * detail.output_per_1k)
@@ -1102,7 +1126,7 @@ fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
                 )))
             }
         };
-        let detail = pricing_detail_for(&provider, &model);
+        let detail = pricing_detail_for_usage(&provider, &model, input_tokens);
         let projection = detail.map(|d| {
             project_call_cost(
                 &d,
@@ -1195,6 +1219,56 @@ fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerIn
 mod tests {
     use super::*;
 
+    fn install_banded_pricing_model() {
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        let mut model = crate::llm_config::embedded_config(None)
+            .models
+            .get("gpt-4o-mini")
+            .expect("embedded fixture model")
+            .clone();
+        model.name = "Banded pricing fixture".to_string();
+        model.pricing = Some(crate::llm_config::ModelPricing {
+            input_per_mtok: 1.0,
+            output_per_mtok: 10.0,
+            cache_read_per_mtok: Some(0.1),
+            cache_write_per_mtok: Some(1.25),
+            input_token_bands: vec![crate::llm_config::InputTokenPricingBand {
+                minimum_input_tokens: 1_000,
+                input_multiplier: 2.0,
+                output_multiplier: 1.5,
+            }],
+        });
+        overlay
+            .models
+            .insert("test/banded-pricing".to_string(), model);
+        crate::llm_config::set_user_overrides(Some(overlay));
+    }
+
+    #[test]
+    fn whole_request_pricing_band_drives_cost_and_cache_accounting() {
+        let _guard = crate::llm::env_guard();
+        install_banded_pricing_model();
+
+        let below = calculate_cost_for_provider("openai", "test/banded-pricing", 999, 100);
+        let at_band = calculate_cost_for_provider("openai", "test/banded-pricing", 1_000, 100);
+        assert!((below - 0.001999).abs() < 1e-12);
+        assert!((at_band - 0.0035).abs() < 1e-12);
+
+        // Cached input remains part of the threshold decision, then each token
+        // class bills once at the selected whole-request rates.
+        let cached = calculate_cost_for_provider_with_cache(
+            "openai",
+            "test/banded-pricing",
+            1_000,
+            100,
+            800,
+            0,
+        );
+        assert!((cached - 0.00206).abs() < 1e-12);
+
+        crate::llm_config::clear_user_overrides();
+    }
+
     #[test]
     fn calculate_cost_uses_catalog_model_pricing() {
         let _guard = crate::llm::env_guard();
@@ -1222,6 +1296,7 @@ mod tests {
                     output_per_mtok: 20.0,
                     cache_read_per_mtok: None,
                     cache_write_per_mtok: None,
+                    input_token_bands: Vec::new(),
                 }),
                 deprecated: false,
                 deprecation_note: None,
@@ -1317,6 +1392,7 @@ mod tests {
                     output_per_mtok: 0.60,
                     cache_read_per_mtok: None,
                     cache_write_per_mtok: None,
+                    input_token_bands: Vec::new(),
                 }),
                 deprecated: false,
                 deprecation_note: None,
@@ -1452,8 +1528,8 @@ mod tests {
         crate::llm_config::clear_user_overrides();
 
         // Opus 4.8 fast mode is 2x standard ($5/$25 -> $10/$50 per MTok).
-        let standard = pricing_detail_for_tier("anthropic", "claude-opus-4-8", false).unwrap();
-        let fast = pricing_detail_for_tier("anthropic", "claude-opus-4-8", true).unwrap();
+        let standard = pricing_detail_for_tier("anthropic", "claude-opus-4-8", false, 0).unwrap();
+        let fast = pricing_detail_for_tier("anthropic", "claude-opus-4-8", true, 0).unwrap();
         assert_eq!(standard.source, PricingSource::CatalogModel);
         assert_eq!(fast.source, PricingSource::CatalogServingTier);
         assert!((fast.input_per_1k - 2.0 * standard.input_per_1k).abs() < 1e-9);
@@ -1461,7 +1537,7 @@ mod tests {
 
         // A model with no fast tier ignores the flag and bills standard.
         let no_fast =
-            pricing_detail_for_tier("anthropic", "claude-sonnet-4-20250514", true).unwrap();
+            pricing_detail_for_tier("anthropic", "claude-sonnet-4-20250514", true, 0).unwrap();
         assert_eq!(no_fast.source, PricingSource::CatalogModel);
     }
 
@@ -1517,11 +1593,11 @@ mod tests {
         crate::llm_config::clear_user_overrides();
 
         let savings =
-            cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 1000, 0);
+            cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 1000, 1000, 0);
         assert!((savings - 0.0027).abs() < 0.0000001);
 
         let write_delta =
-            cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 0, 1000);
+            cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 1000, 0, 1000);
         assert!((write_delta + 0.00075).abs() < 0.0000001);
 
         crate::llm_config::clear_user_overrides();

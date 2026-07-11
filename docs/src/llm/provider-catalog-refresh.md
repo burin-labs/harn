@@ -22,6 +22,14 @@ normal post-promotion rate in the catalog source fragments and capture
 the promotion only in human review notes unless the catalog schema grows
 an explicit promotion-period field.
 
+The markdown report includes aggregator discoveries for awareness, but the
+candidate TOML contains only provider-owned, high-confidence changes and
+additions with actionable pricing, context-window, or capability metadata. This
+keeps broad discovery APIs such as OpenRouter's useful without turning bare
+model IDs or uncurated mirrors into apparent review-ready catalog rows.
+Catalog identity is always the `(provider, model id)` pair; equal model ids on
+different providers are compared independently.
+
 ## Running the workflow
 
 ```bash

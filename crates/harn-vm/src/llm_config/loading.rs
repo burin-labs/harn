@@ -259,6 +259,7 @@ const fn pricing_patch_schema() -> PatchSchema {
             "output_per_mtok",
             "cache_read_per_mtok",
             "cache_write_per_mtok",
+            "input_token_bands",
         ],
         freeform: &[],
         nested: &[],

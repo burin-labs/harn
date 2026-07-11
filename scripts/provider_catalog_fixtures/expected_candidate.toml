@@ -14,16 +14,6 @@ output_per_mtok = 2.5
 cache_read_per_mtok = 0.05
 cache_write_per_mtok = 0.625
 
-# added
-[models."x-ai/grok-4-fast"]
-name = "Grok 4 Fast"
-provider = "x-ai"
-context_window = 131072
-
-[models."x-ai/grok-4-fast".pricing]
-input_per_mtok = 0.2
-output_per_mtok = 0.8
-
 # changed (was: claude-opus-4-7-20260301)
 [models."claude-opus-4-7-20260301"]
 provider = "anthropic"

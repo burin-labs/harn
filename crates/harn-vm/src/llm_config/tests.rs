@@ -1426,6 +1426,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
                 output_per_mtok: 2.5,
                 cache_read_per_mtok: Some(0.25),
                 cache_write_per_mtok: None,
+                input_token_bands: Vec::new(),
             }),
             deprecated: false,
             deprecation_note: None,

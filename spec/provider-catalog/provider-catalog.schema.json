@@ -798,6 +798,32 @@
           "minimum": 0,
           "type": "number"
         },
+        "input_token_bands": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "input_multiplier": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "minimum_input_tokens": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "output_multiplier": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "minimum_input_tokens",
+              "input_multiplier",
+              "output_multiplier"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "output_per_mtok": {
           "minimum": 0,
           "type": "number"

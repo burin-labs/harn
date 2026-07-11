@@ -839,6 +839,33 @@ fn validate_pricing(
             ));
         }
     }
+    let mut previous_minimum = 0;
+    for band in &pricing.input_token_bands {
+        if band.minimum_input_tokens == 0 {
+            result.errors.push(format!(
+                "model {} pricing.input_token_bands minimum_input_tokens must be positive",
+                model.id
+            ));
+        }
+        if band.minimum_input_tokens <= previous_minimum {
+            result.errors.push(format!(
+                "model {} pricing.input_token_bands must be ordered by unique ascending minimum_input_tokens",
+                model.id
+            ));
+        }
+        previous_minimum = band.minimum_input_tokens;
+        for (field, value) in [
+            ("input_multiplier", band.input_multiplier),
+            ("output_multiplier", band.output_multiplier),
+        ] {
+            if value <= 0.0 {
+                result.errors.push(format!(
+                    "model {} pricing.input_token_bands.{} must be positive",
+                    model.id, field
+                ));
+            }
+        }
+    }
 }
 
 fn validate_batch_support(

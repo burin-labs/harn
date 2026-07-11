@@ -18,8 +18,10 @@
 name = "GPT-5.6 Sol"
 provider = "openai"
 context_window = 1050000
+logical_model = "gpt-5.6-sol"
+equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -33,8 +35,10 @@ serving_tiers = [
 name = "GPT-5.6 Terra"
 provider = "openai"
 context_window = 1050000
+logical_model = "gpt-5.6-terra"
+equivalence_group = "gpt-5.6-terra"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 3.125 }
+pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 3.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -48,8 +52,10 @@ serving_tiers = [
 name = "GPT-5.6 Luna"
 provider = "openai"
 context_window = 1050000
+logical_model = "gpt-5.6-luna"
+equivalence_group = "gpt-5.6-luna"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+pricing = { input_per_mtok = 1.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -74,7 +80,7 @@ name = "GPT-5.5"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -90,7 +96,7 @@ name = "GPT-5.5 Pro"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00 }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -105,10 +111,20 @@ name = "GPT-5.4"
 provider = "openai"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25 }
+pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+[models."gpt-5.4-pro"]
+name = "GPT-5.4 Pro"
+provider = "openai"
+context_window = 1050000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 [models."gpt-5.4-mini"]
 name = "GPT-5.4 Mini"
@@ -161,7 +177,7 @@ name = "GPT-4o Mini"
 provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
 # No individually announced sunset as of 2026-07-02, but the GPT-4-era
 # legacy exits by 2026-10-23 per the 2026-04-22 deprecations
 # announcement. The `mid` tier default moved to gpt-5.4-mini.
@@ -170,6 +186,33 @@ tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+[models."gpt-4.1"]
+name = "GPT-4.1"
+provider = "openai"
+context_window = 1047576
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 8.00, cache_read_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "tool_use", "long_context", "vision"]
+[models."gpt-4.1-mini"]
+name = "GPT-4.1 Mini"
+provider = "openai"
+context_window = 1047576
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.40, output_per_mtok = 1.60, cache_read_per_mtok = 0.10 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "long_context", "vision"]
+[models."gpt-4.1-nano"]
+name = "GPT-4.1 Nano"
+provider = "openai"
+context_window = 1047576
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "tool_use", "long_context", "vision"]
 [models."gpt-4-turbo"]
 name = "GPT-4 Turbo"
 provider = "openai"
@@ -198,7 +241,7 @@ name = "OpenAI o1-mini"
 provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 12.00, cache_read_per_mtok = 1.50 }
+pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.55 }
 deprecated = true
 deprecation_note = "Legacy o-series; the GPT-4/o-series legacy exits by 2026-10-23 per OpenAI deprecations page. Use gpt-5.4-mini."
 superseded_by = "gpt-5.4-mini"
@@ -210,7 +253,7 @@ name = "OpenAI o3"
 provider = "openai"
 context_window = 200000
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 8.00, cache_read_per_mtok = 0.50 }
 deprecated = true
 deprecation_note = "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Use gpt-5.5."
 superseded_by = "gpt-5.5"
@@ -218,6 +261,15 @@ tier = "reasoning"
 open_weight = false
 strengths = ["reasoning", "coding"]
 benchmarks = { swe_bench_verified = 69.1 }
+[models."o4-mini"]
+name = "OpenAI o4-mini"
+provider = "openai"
+context_window = 200000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.275 }
+tier = "mid"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "vision"]
 [models."o3-mini"]
 name = "OpenAI o3-mini"
 provider = "openai"
@@ -299,7 +351,7 @@ name = "Gemini 3.1 Pro (Preview)"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "vision", "agentic"]
@@ -356,7 +408,7 @@ name = "Gemini 2.5 Pro"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 1.25, output_per_mtok = 10.00, cache_read_per_mtok = 0.125 }
+pricing = { input_per_mtok = 1.25, output_per_mtok = 10.00, cache_read_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["long_context", "vision", "reasoning", "coding"]
