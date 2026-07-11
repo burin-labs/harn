@@ -17,11 +17,12 @@ use super::{
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
     parse_target_metadata, precision_contract_for_method, render_embedded_lora_report,
-    resolve_lora_provider, serving_recipe, sha256_file, target_modules_for_route, teacher_report,
-    template_recipe_for_route, tool_catalog_args, tool_catalog_contract,
-    trainer_contract_for_dataset, BaseModelReport, EvaluationRecipe, LoraContractReport,
-    LoraTrainingContract, PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport,
-    TemplateRecipe, ToolCallingReport, ToolCatalogContract,
+    resolve_lora_provider, serving_recipe, sha256_file, target_module_contract,
+    target_modules_args, teacher_report, template_recipe_for_route, tool_catalog_args,
+    tool_catalog_contract, trainer_contract_for_dataset, BaseModelReport, EvaluationRecipe,
+    LoraContractReport, LoraContractReportInput, LoraTrainingContract, PrecisionContract,
+    ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
+    ToolCatalogContract,
 };
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
@@ -77,6 +78,13 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         args.tool_catalog_hash.as_deref(),
     )?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
+    let target_modules = target_module_contract(
+        &args.target_modules,
+        &method,
+        &resolved.id,
+        &resolved.family,
+        &resolved.lineage,
+    )?;
     let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
@@ -120,6 +128,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         &decision.effective,
         dataset_format,
         Some(&chat_template),
+        &target_modules,
         &modules_to_save,
         &tool_catalog,
     )?;
@@ -142,8 +151,6 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         tool_catalog: &tool_catalog,
     });
     let precision = precision_contract_for_method(&method);
-    let target_modules =
-        target_modules_for_route(&method, &resolved.id, &resolved.family, &resolved.lineage);
     let mut warnings = Vec::new();
     let mut metadata = parse_target_metadata(&args.target_metadata)?;
     merge_serving_target_metadata(&mut metadata, &serving, &mut warnings);
@@ -166,6 +173,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         dropout,
         metadata: &metadata,
         modules_to_save: &modules_to_save,
+        target_modules: &target_modules,
         tool_catalog: &tool_catalog,
     })?;
     let manifest_command = post_training_manifest_command(PostTrainingManifestCommand {
@@ -183,6 +191,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         dropout,
         metadata: &metadata,
         modules_to_save: &modules_to_save,
+        target_modules: &target_modules,
         tool_catalog: &tool_catalog,
     });
     let eval_dataset = args.dataset.display().to_string();
@@ -299,16 +308,17 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             structured_output_mode: capabilities.structured_output_mode,
             recommended_endpoint: capabilities.recommended_endpoint,
         },
-        contract: lora_contract_report(
+        contract: lora_contract_report(LoraContractReportInput {
             contract_id,
-            &resolved.id,
-            &provider,
-            &decision.effective,
+            base_model: &resolved.id,
+            provider: &provider,
+            harn_tool_format: &decision.effective,
             dataset_format,
-            Some(chat_template.clone()),
-            &modules_to_save,
-            &tool_catalog,
-        ),
+            chat_template: Some(chat_template.clone()),
+            target_modules: &target_modules,
+            modules_to_save: &modules_to_save,
+            tool_catalog: &tool_catalog,
+        }),
         training: TrainTraining {
             trainer: trainer.clone(),
             trainer_version: args.trainer_version.clone(),
@@ -387,6 +397,7 @@ struct BackendPlanContext<'a> {
     dropout: f64,
     metadata: &'a BTreeMap<String, String>,
     modules_to_save: &'a [String],
+    target_modules: &'a super::TargetModuleContract,
     tool_catalog: &'a ToolCatalogContract,
 }
 
@@ -480,6 +491,7 @@ fn render_backend_plan(ctx: BackendPlanContext<'_>) -> Result<RenderedBackendPla
             for module in ctx.modules_to_save {
                 argv.extend(["--modules-to-save".to_string(), module.clone()]);
             }
+            argv.extend(target_modules_args(ctx.target_modules));
             argv.extend(tool_catalog_args(ctx.tool_catalog));
             for (key, value) in ctx.metadata {
                 argv.extend(["--target-metadata".to_string(), format!("{key}={value}")]);
@@ -713,6 +725,7 @@ struct PostTrainingManifestCommand<'a> {
     dropout: f64,
     metadata: &'a BTreeMap<String, String>,
     modules_to_save: &'a [String],
+    target_modules: &'a super::TargetModuleContract,
     tool_catalog: &'a ToolCatalogContract,
 }
 
@@ -769,6 +782,7 @@ fn post_training_manifest_command(ctx: PostTrainingManifestCommand<'_>) -> Vec<S
     for module in ctx.modules_to_save {
         command.extend(["--modules-to-save".to_string(), module.clone()]);
     }
+    command.extend(target_modules_args(ctx.target_modules));
     command.extend(tool_catalog_args(ctx.tool_catalog));
     for (key, value) in ctx.metadata {
         command.extend(["--target-metadata".to_string(), format!("{key}={value}")]);
@@ -1015,7 +1029,7 @@ struct TrainTraining {
     rank: u32,
     alpha: u32,
     dropout: f64,
-    target_modules: Vec<String>,
+    target_modules: super::TargetModuleContract,
     precision: PrecisionContract,
     template: TemplateRecipe,
     contract: LoraTrainingContract,
@@ -1112,6 +1126,7 @@ mod tests {
             tool_catalog_id: None,
             tool_catalog_hash: None,
             modules_to_save: vec!["embed_tokens".to_string()],
+            target_modules: Vec::new(),
             backend_recipe: "explicit_argv".to_string(),
             backend_runner: Vec::new(),
             backend_script: None,
@@ -1220,6 +1235,7 @@ mod tests {
             tool_catalog_id: None,
             tool_catalog_hash: None,
             modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
             backend_recipe: "explicit_argv".to_string(),
             backend_runner: Vec::new(),
             backend_script: None,
@@ -1270,6 +1286,7 @@ mod tests {
             tool_catalog_id: Some("burin-tools-v1".to_string()),
             tool_catalog_hash: Some("sha256:burin-tool-catalog".to_string()),
             modules_to_save: vec!["embed_tokens".to_string(), "lm_head".to_string()],
+            target_modules: vec!["q_proj".to_string(), "v_proj".to_string()],
             backend_recipe: "harn_lora_sft_v1".to_string(),
             backend_runner: vec!["uv".to_string(), "run".to_string(), "python".to_string()],
             backend_script: Some("train.py".into()),
@@ -1376,6 +1393,31 @@ mod tests {
                 .count(),
             1
         );
+        assert_eq!(report.training.target_modules.policy, "explicit");
+        assert_eq!(
+            report.training.target_modules.modules,
+            vec!["q_proj".to_string(), "v_proj".to_string()]
+        );
+        for module in ["q_proj", "v_proj"] {
+            assert_eq!(
+                report
+                    .backend
+                    .argv
+                    .windows(2)
+                    .filter(|pair| *pair == ["--target-modules", module])
+                    .count(),
+                1
+            );
+            assert_eq!(
+                report
+                    .post_training
+                    .manifest_command
+                    .windows(2)
+                    .filter(|pair| *pair == ["--target-modules", module])
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]
@@ -1408,6 +1450,7 @@ mod tests {
             tool_catalog_id: None,
             tool_catalog_hash: None,
             modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
             backend_recipe: "explicit_argv".to_string(),
             backend_runner: vec!["uv".to_string()],
             backend_script: None,
@@ -1452,6 +1495,7 @@ mod tests {
             tool_catalog_id: None,
             tool_catalog_hash: None,
             modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
             backend_recipe: "harn-lora-sft-v1".to_string(),
             backend_runner: Vec::new(),
             backend_script: None,
@@ -1496,6 +1540,7 @@ mod tests {
             tool_catalog_id: None,
             tool_catalog_hash: None,
             modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
             backend_recipe: "harn_lora_sft_v1".to_string(),
             backend_runner: Vec::new(),
             backend_script: Some("train.py".into()),

@@ -296,6 +296,7 @@ fn inspect_contract_report(
     let manifest_tool_format = manifest_string_from_object(contract, "harn_tool_format");
     let manifest_dataset_format = manifest_string_from_object(contract, "dataset_format");
     let manifest_chat_template = manifest_string_from_object(contract, "chat_template");
+    let manifest_target_modules = manifest_target_modules_from_contract(contract);
     let manifest_modules_to_save = manifest_modules_to_save_from_contract(contract);
     let target_adapter_name = manifest
         .get("target")
@@ -332,6 +333,11 @@ fn inspect_contract_report(
         _ => None,
     };
     let adapter_modules_to_save = normalize_modules_to_save_lossy(adapter.modules_to_save.clone());
+    let adapter_target_modules = normalize_target_modules(&adapter.target_modules)
+        .unwrap_or_else(|_| adapter.target_modules.clone());
+    let target_modules_match = manifest_target_modules
+        .as_ref()
+        .map(|manifest_target| manifest_target.modules == adapter_target_modules);
     let modules_to_save_matches = manifest_modules_to_save
         .as_ref()
         .map(|manifest_modules| manifest_modules == &adapter_modules_to_save);
@@ -386,6 +392,19 @@ fn inspect_contract_report(
             manifest_modules_to_save.as_deref().unwrap_or(&[])
         ));
     }
+    if manifest_target_modules.is_none() {
+        warnings
+            .push("LoRA contract mismatch: manifest target-module contract is missing".to_string());
+    } else if target_modules_match == Some(false) {
+        warnings.push(format!(
+            "LoRA contract mismatch: adapter target_modules {:?} does not match manifest target_modules {:?}",
+            adapter_target_modules,
+            manifest_target_modules
+                .as_ref()
+                .map(|contract| contract.modules.as_slice())
+                .unwrap_or(&[])
+        ));
+    }
     if adapter.contract_id.is_none() {
         let prefix = if require_adapter_contract_id {
             "LoRA contract missing"
@@ -417,6 +436,7 @@ fn inspect_contract_report(
         provider_matches,
         tool_format_matches,
         adapter_name_matches,
+        target_modules_match,
         modules_to_save_matches,
         require_adapter_contract_id,
         manifest: InspectContractManifest {
@@ -425,12 +445,22 @@ fn inspect_contract_report(
             harn_tool_format: manifest_tool_format,
             dataset_format: manifest_dataset_format,
             chat_template: manifest_chat_template,
+            target_modules: manifest_target_modules,
             modules_to_save: manifest_modules_to_save,
             adapter_name: target_adapter_name,
             request_model: serving_request_model,
         },
         warnings,
     }))
+}
+
+fn manifest_target_modules_from_contract(
+    contract: &serde_json::Map<String, serde_json::Value>,
+) -> Option<TargetModuleContract> {
+    let target = contract.get("target_modules")?.as_object()?;
+    let policy = manifest_string_from_object(target, "policy")?;
+    let modules = normalize_target_modules(&value_string_list(target.get("modules")?)).ok()?;
+    Some(TargetModuleContract { policy, modules })
 }
 
 fn manifest_modules_to_save_from_contract(
@@ -472,8 +502,13 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     )?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
-    let target_modules =
-        target_modules_for_route(&method, &resolved.id, &resolved.family, &resolved.lineage);
+    let target_modules = target_module_contract(
+        &args.target_modules,
+        &method,
+        &resolved.id,
+        &resolved.family,
+        &resolved.lineage,
+    )?;
     let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
@@ -524,6 +559,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         &decision.effective,
         dataset_format,
         Some(&template.name),
+        &target_modules,
         &modules_to_save,
         &tool_catalog,
     )?;
@@ -638,6 +674,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     ];
     export_command.extend(precision_target_metadata(&precision));
     export_command.extend(modules_to_save_args(&modules_to_save));
+    export_command.extend(target_modules_args(&target_modules));
     export_command.extend(tool_catalog_args(&tool_catalog));
     let mut train_command = vec![
         "harn".to_string(),
@@ -680,6 +717,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     }
     train_command.extend(precision_target_metadata(&precision));
     train_command.extend(modules_to_save_args(&modules_to_save));
+    train_command.extend(target_modules_args(&target_modules));
     train_command.extend(tool_catalog_args(&tool_catalog));
     train_command.extend(target_metadata_args_from_map(&serving_target_metadata(
         &serving,
@@ -727,6 +765,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     }
     manifest_command.extend(precision_target_metadata(&precision));
     manifest_command.extend(modules_to_save_args(&modules_to_save));
+    manifest_command.extend(target_modules_args(&target_modules));
     manifest_command.extend(tool_catalog_args(&tool_catalog));
     manifest_command.extend(target_metadata_args_from_map(&serving_target_metadata(
         &serving,
@@ -1112,18 +1151,60 @@ fn target_modules_for_route(
     }
 }
 
+pub(super) fn target_module_contract(
+    raw: &[String],
+    method: &str,
+    model_id: &str,
+    family: &str,
+    lineage: &str,
+) -> Result<TargetModuleContract, String> {
+    let modules = normalize_target_modules(raw)?;
+    if !modules.is_empty() {
+        return Ok(TargetModuleContract {
+            policy: "explicit".to_string(),
+            modules,
+        });
+    }
+    let modules = target_modules_for_route(method, model_id, family, lineage);
+    Ok(TargetModuleContract {
+        policy: if modules == ["all-linear"] {
+            "all_linear"
+        } else {
+            "route_default"
+        }
+        .to_string(),
+        modules,
+    })
+}
+
+fn normalize_target_modules(raw: &[String]) -> Result<Vec<String>, String> {
+    normalize_module_list(raw, "--target-modules")
+}
+
 pub(super) fn normalize_modules_to_save(raw: &[String]) -> Result<Vec<String>, String> {
+    normalize_module_list(raw, "--modules-to-save")
+}
+
+fn normalize_module_list(raw: &[String], flag: &str) -> Result<Vec<String>, String> {
     let mut seen = BTreeSet::new();
     for item in raw {
         for piece in item.split(',') {
             let module = piece.trim();
             if module.is_empty() {
-                return Err("--modules-to-save entries must not be empty".to_string());
+                return Err(format!("{flag} entries must not be empty"));
             }
             seen.insert(module.to_string());
         }
     }
     Ok(seen.into_iter().collect())
+}
+
+pub(super) fn target_modules_args(contract: &TargetModuleContract) -> Vec<String> {
+    contract
+        .modules
+        .iter()
+        .flat_map(|module| ["--target-modules".to_string(), module.clone()])
+        .collect()
 }
 
 fn normalize_modules_to_save_lossy(raw: Vec<String>) -> Vec<String> {
@@ -1693,6 +1774,7 @@ fn lora_contract_id(
     harn_tool_format: &str,
     dataset_format: &str,
     chat_template: Option<&str>,
+    target_modules: &TargetModuleContract,
     modules_to_save: &[String],
     tool_catalog: &ToolCatalogContract,
 ) -> Result<String, String> {
@@ -1703,6 +1785,8 @@ fn lora_contract_id(
         harn_tool_format,
         dataset_format,
         chat_template,
+        target_module_policy: &target_modules.policy,
+        target_modules: &target_modules.modules,
         modules_to_save,
         tool_catalog_policy: &tool_catalog.policy,
         tool_catalog_id: tool_catalog.catalog_id.as_deref(),
@@ -1713,29 +1797,33 @@ fn lora_contract_id(
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 
-fn lora_contract_report(
+pub(super) struct LoraContractReportInput<'a> {
     contract_id: String,
-    base_model: &str,
-    provider: &str,
-    harn_tool_format: &str,
-    dataset_format: &str,
+    base_model: &'a str,
+    provider: &'a str,
+    harn_tool_format: &'a str,
+    dataset_format: &'a str,
     chat_template: Option<String>,
-    modules_to_save: &[String],
-    tool_catalog: &ToolCatalogContract,
-) -> LoraContractReport {
+    target_modules: &'a TargetModuleContract,
+    modules_to_save: &'a [String],
+    tool_catalog: &'a ToolCatalogContract,
+}
+
+fn lora_contract_report(input: LoraContractReportInput<'_>) -> LoraContractReport {
     LoraContractReport {
         schema_version: LORA_CONTRACT_SCHEMA_VERSION,
-        id: contract_id,
-        base_model: base_model.to_string(),
-        provider: provider.to_string(),
-        harn_tool_format: harn_tool_format.to_string(),
-        dataset_format: dataset_format.to_string(),
-        chat_template,
+        id: input.contract_id,
+        base_model: input.base_model.to_string(),
+        provider: input.provider.to_string(),
+        harn_tool_format: input.harn_tool_format.to_string(),
+        dataset_format: input.dataset_format.to_string(),
+        chat_template: input.chat_template,
+        target_modules: input.target_modules.clone(),
         training_contract: lora_training_contract(
-            dataset_format,
-            harn_tool_format,
-            modules_to_save,
-            tool_catalog,
+            input.dataset_format,
+            input.harn_tool_format,
+            input.modules_to_save,
+            input.tool_catalog,
         ),
     }
 }
@@ -2716,6 +2804,7 @@ struct InspectContractReport {
     provider_matches: bool,
     tool_format_matches: bool,
     adapter_name_matches: Option<bool>,
+    target_modules_match: Option<bool>,
     modules_to_save_matches: Option<bool>,
     require_adapter_contract_id: bool,
     manifest: InspectContractManifest,
@@ -2729,6 +2818,7 @@ struct InspectContractManifest {
     harn_tool_format: Option<String>,
     dataset_format: Option<String>,
     chat_template: Option<String>,
+    target_modules: Option<TargetModuleContract>,
     modules_to_save: Option<Vec<String>>,
     adapter_name: Option<String>,
     request_model: Option<String>,
@@ -2818,7 +2908,7 @@ struct TrainingRecipe {
     quantization: String,
     loss_scope: String,
     packing: String,
-    target_modules: Vec<String>,
+    target_modules: TargetModuleContract,
     contract: LoraTrainingContract,
     trainer_contract: Vec<String>,
     notes: Vec<String>,
@@ -2883,7 +2973,14 @@ pub(super) struct LoraContractReport {
     harn_tool_format: String,
     dataset_format: String,
     chat_template: Option<String>,
+    target_modules: TargetModuleContract,
     training_contract: LoraTrainingContract,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(super) struct TargetModuleContract {
+    policy: String,
+    modules: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -2894,6 +2991,8 @@ struct LoraContractHashInput<'a> {
     harn_tool_format: &'a str,
     dataset_format: &'a str,
     chat_template: Option<&'a str>,
+    target_module_policy: &'a str,
+    target_modules: &'a [String],
     modules_to_save: &'a [String],
     tool_catalog_policy: &'a str,
     tool_catalog_id: Option<&'a str>,
@@ -3100,6 +3199,7 @@ mod tests {
             alpha: None,
             dropout: 0.1,
             modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
             tool_catalog_policy: "full_schema".to_string(),
             tool_catalog_id: None,
             tool_catalog_hash: None,
@@ -3405,12 +3505,17 @@ mod tests {
     fn lora_tool_catalog_policy_is_part_of_contract_identity() {
         let default_catalog = default_tool_catalog_contract();
         let fixed_catalog = fixed_tool_catalog_contract();
+        let target_modules = TargetModuleContract {
+            policy: "all_linear".to_string(),
+            modules: vec!["all-linear".to_string()],
+        };
         let full_id = lora_contract_id(
             "gemma-4-e4b-it",
             "vllm",
             "json",
             "harn_text_tool_calls_json_fences",
             Some("harn_text_tool_calls_json_fences"),
+            &target_modules,
             &[],
             &default_catalog,
         )
@@ -3421,6 +3526,7 @@ mod tests {
             "json",
             "harn_text_tool_calls_json_fences",
             Some("harn_text_tool_calls_json_fences"),
+            &target_modules,
             &[],
             &fixed_catalog,
         )
@@ -3443,6 +3549,55 @@ mod tests {
             .required_example_metadata
             .iter()
             .any(|field| field == "tool_catalog_hash"));
+    }
+
+    #[test]
+    fn lora_target_modules_are_normalized_and_part_of_contract_identity() {
+        let catalog = default_tool_catalog_contract();
+        let first = target_module_contract(
+            &["v_proj,q_proj".to_string(), "q_proj".to_string()],
+            "lora",
+            "gemma-4-e4b-it",
+            "gemma4",
+            "gemma4",
+        )
+        .expect("explicit target modules");
+        let second = target_module_contract(
+            &["q_proj".to_string(), "k_proj".to_string()],
+            "lora",
+            "gemma-4-e4b-it",
+            "gemma4",
+            "gemma4",
+        )
+        .expect("different target modules");
+
+        assert_eq!(first.policy, "explicit");
+        assert_eq!(first.modules, vec!["q_proj", "v_proj"]);
+        assert_ne!(first.modules, second.modules);
+
+        let first_id = lora_contract_id(
+            "gemma-4-e4b-it",
+            "vllm",
+            "json",
+            "harn_text_tool_calls_json_fences",
+            Some("harn_text_tool_calls_json_fences"),
+            &first,
+            &[],
+            &catalog,
+        )
+        .expect("first contract id");
+        let second_id = lora_contract_id(
+            "gemma-4-e4b-it",
+            "vllm",
+            "json",
+            "harn_text_tool_calls_json_fences",
+            Some("harn_text_tool_calls_json_fences"),
+            &second,
+            &[],
+            &catalog,
+        )
+        .expect("second contract id");
+        assert_ne!(first_id, second_id);
     }
 
     #[test]

@@ -2789,7 +2789,11 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(report["training"]["alpha"], 32);
     assert_eq!(report["training"]["dropout"], 0.05);
     assert_eq!(report["training"]["quantization"], "base_model_precision");
-    let target_modules = report["training"]["target_modules"]
+    assert_eq!(
+        report["training"]["target_modules"]["policy"],
+        "route_default"
+    );
+    let target_modules = report["training"]["target_modules"]["modules"]
         .as_array()
         .expect("target modules");
     assert_eq!(
@@ -3810,6 +3814,8 @@ fn models_lora_manifest_json_writes_training_manifest() {
             "lane=structured",
             "--modules-to-save",
             "embed_tokens,lm_head",
+            "--target-modules",
+            "q_proj,v_proj",
             "--json",
         ],
         &[],
@@ -4524,6 +4530,10 @@ fn write_lora_manifest_fixture(root: &std::path::Path, contract_id: &str) -> std
             "harn_tool_format": "json",
             "dataset_format": "harn_text_tool_calls_json_fences",
             "chat_template": "harn_text_tool_calls_json_fences",
+            "target_modules": {
+                "policy": "explicit",
+                "modules": ["q_proj", "v_proj"]
+            },
             "training_contract": {
                 "schema_version": 3,
                 "loss_scope": "assistant_tool_calls",
