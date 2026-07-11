@@ -76,7 +76,7 @@ jobs:
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: filter
         with:
           predicate-quantifier: every
@@ -86,7 +86,7 @@ jobs:
               - '!docs/**'
               - '!website/**'
               - '!**/*.md'
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: surface_filter
         with:
           filters: |
@@ -241,7 +241,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
+      - uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
 
   # The long Linux Rust lanes are intentionally one matrix job with
   # fail-fast enabled: if any required Rust lane fails, GitHub cancels the
@@ -334,7 +334,7 @@ jobs:
           cache-bin: false
       - name: Install cargo-nextest
         if: matrix.kind == 'test'
-        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2.82.6
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         continue-on-error: true
         with:
           tool: nextest@0.9.133
@@ -630,7 +630,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2.82.6
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         continue-on-error: true
         with:
           tool: nextest@0.9.133
@@ -1002,7 +1002,7 @@ jobs:
           shared-key: e2e
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2.82.6
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
           tool: nextest@0.9.133
       - run: make test-e2e
