@@ -956,11 +956,10 @@ fn test_resolve_tier_model_prefers_provider_scoped_aliases() {
     let (model, provider) =
         resolve_tier_model("mid", Some("openai")).expect("mid tier scoped to openai must resolve");
     assert_eq!(provider, "openai");
-    assert_eq!(model, "gpt-5.4-mini");
-    assert!(
-        model_catalog_entry(&model).is_some(),
-        "mid/openai alias must point at a registered model (got {model})"
-    );
+    let entry = model_catalog_entry(&model).unwrap_or_else(|| {
+        panic!("mid/openai alias must point at a registered model (got {model})")
+    });
+    assert_eq!(entry.tier.as_deref(), Some("mid"));
 }
 
 #[test]
