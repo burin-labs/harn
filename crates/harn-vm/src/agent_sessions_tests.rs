@@ -419,6 +419,45 @@ fn transcript_budget_compaction_uses_llm_summary_when_available() {
 }
 
 #[test]
+fn fork_rejected_by_budget_does_not_leave_dangling_child_id() {
+    reset_session_store();
+    let parent = open_or_create(Some("fork-budget-reject-parent".into()));
+    inject_message(&parent, make_msg("user", "one")).unwrap();
+    inject_message(&parent, make_msg("assistant", "two")).unwrap();
+
+    // Pin the byte cap to the parent's exact current usage (computed the
+    // same way the budget code does). The parent itself is valid, but the
+    // fork inflates the copy with the `parent_session_id` lineage
+    // metadata, tipping it over the cap so the post-fork budget check
+    // rejects it.
+    let usage_bytes = SESSIONS.with(|s| {
+        let map = s.borrow();
+        let transcript = &map.get(&parent).expect("parent session").transcript;
+        serde_json::to_vec(&crate::llm::helpers::vm_value_to_json(transcript))
+            .expect("serialize transcript")
+            .len()
+    });
+    set_transcript_budget_policy(
+        &parent,
+        SessionTranscriptBudgetPolicy::reject(64, 64).with_max_approx_bytes(Some(usage_bytes)),
+    )
+    .unwrap();
+
+    let dst = "fork-budget-reject-dst".to_string();
+    let result = fork(&parent, Some(dst.clone()));
+
+    assert_eq!(result, None, "fork should be rejected by the byte budget");
+    assert!(!exists(&dst), "rejected fork must not leave a dst session");
+    assert!(
+        !child_ids(&parent).contains(&dst),
+        "rejected fork must not leave a dangling child_id on the parent: {:?}",
+        child_ids(&parent)
+    );
+
+    reset_session_store();
+}
+
+#[test]
 fn fork_preserves_transcript_budget_metadata() {
     reset_session_store();
     let _mock = install_budget_fallback_mock();
