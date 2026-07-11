@@ -632,6 +632,8 @@ fn test_parses_models_lora_train_args() {
         "embed_tokens,lm_head",
         "--backend-cwd",
         "./scripts/train-lora-gemma4",
+        "--backend-result-out",
+        "./adapters/backend.result.json",
         "--execute",
         "--json",
         "--",
@@ -703,6 +705,13 @@ fn test_parses_models_lora_train_args() {
     assert!(args.backend_runner.is_empty());
     assert!(args.backend_script.is_none());
     assert!(args.backend_config.is_none());
+    assert_eq!(
+        args.backend_result_out
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./adapters/backend.result.json")
+    );
     assert_eq!(
         args.backend_cwd
             .as_ref()

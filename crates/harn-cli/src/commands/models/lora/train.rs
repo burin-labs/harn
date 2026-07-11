@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::cli::ModelsLoraTrainArgs;
@@ -290,6 +290,11 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         trainer_identity_path: default_trainer_identity_path(&args.output_dir)
             .display()
             .to_string(),
+        result_path: backend_plan
+            .result_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        result: None,
         exit_code: None,
         output_tail_bytes: BACKEND_OUTPUT_TAIL_BYTES,
         stdout_tail: None,
@@ -438,6 +443,7 @@ struct RenderedBackendPlan {
     recipe: String,
     argv_source: String,
     argv: Vec<String>,
+    result_path: Option<std::path::PathBuf>,
 }
 
 fn render_backend_plan(ctx: BackendPlanContext<'_>) -> Result<RenderedBackendPlan, String> {
@@ -456,6 +462,7 @@ fn render_backend_plan(ctx: BackendPlanContext<'_>) -> Result<RenderedBackendPla
                 recipe,
                 argv_source: "explicit".to_string(),
                 argv: ctx.args.backend_argv.clone(),
+                result_path: ctx.args.backend_result_out.clone(),
             })
         }
         BACKEND_RECIPE_HARN_LORA_SFT_V1 => {
@@ -513,6 +520,15 @@ fn render_backend_plan(ctx: BackendPlanContext<'_>) -> Result<RenderedBackendPla
                     .display()
                     .to_string(),
             ]);
+            let result_path = ctx
+                .args
+                .backend_result_out
+                .clone()
+                .unwrap_or_else(|| default_backend_result_path(&ctx.args.output_dir));
+            argv.extend([
+                "--backend-result-out".to_string(),
+                result_path.display().to_string(),
+            ]);
             if let Some(max_seq_length) = ctx.args.max_seq_length {
                 argv.extend(["--max-seq-length".to_string(), max_seq_length.to_string()]);
             }
@@ -543,6 +559,7 @@ fn render_backend_plan(ctx: BackendPlanContext<'_>) -> Result<RenderedBackendPla
                 recipe,
                 argv_source: "recipe".to_string(),
                 argv,
+                result_path: Some(result_path),
             })
         }
         _ => unreachable!("normalize_backend_recipe returned an unsupported recipe"),
@@ -614,12 +631,120 @@ fn execute_backend(report: &mut LoraTrainReport) -> Result<(), String> {
     let stderr = output_tail(stderr_tail, "stderr");
     report.backend.stderr_tail = stderr.text;
     report.backend.stderr_tail_truncated = stderr.truncated;
+    finalize_backend_result(report, status.success())?;
+    Ok(())
+}
+
+fn finalize_backend_result(
+    report: &mut LoraTrainReport,
+    backend_succeeded: bool,
+) -> Result<(), String> {
+    let Some(result_path) = report.backend.result_path.clone() else {
+        return Ok(());
+    };
+    let path = Path::new(&result_path);
+    if !path.exists() {
+        if backend_succeeded {
+            report.ok = false;
+            report.backend.status = "completed_missing_backend_result".to_string();
+            report.warnings.push(format!(
+                "backend completed but did not write typed result: {}",
+                path.display()
+            ));
+        }
+        return Ok(());
+    }
+    let result = read_backend_result(path)?;
+    match apply_backend_result(report, result) {
+        Ok(()) => Ok(()),
+        Err(error) if report.backend.status == "completed_metadata_conflict" => {
+            report.warnings.push(error);
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn read_backend_result(path: &Path) -> Result<BackendResult, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("failed to read backend result {}: {error}", path.display()))?;
+    let result: BackendResult = serde_json::from_str(&text)
+        .map_err(|error| format!("failed to parse backend result {}: {error}", path.display()))?;
+    if result.schema_version != 1 {
+        return Err(format!(
+            "unsupported backend result schema_version {} in {}; expected 1",
+            result.schema_version,
+            path.display()
+        ));
+    }
+    Ok(result)
+}
+
+fn apply_backend_result(report: &mut LoraTrainReport, result: BackendResult) -> Result<(), String> {
+    for (key, value) in &result.target_metadata {
+        if let Some(existing) = report.target.metadata.get(key) {
+            if existing != value {
+                report.ok = false;
+                report.backend.status = "completed_metadata_conflict".to_string();
+                return Err(format!(
+                    "backend result target metadata conflict for `{key}`: Harn planned `{existing}` but backend reported `{value}`"
+                ));
+            }
+        }
+    }
+    for (key, value) in &result.target_metadata {
+        if report
+            .target
+            .metadata
+            .insert(key.clone(), value.clone())
+            .is_none()
+        {
+            report
+                .post_training
+                .manifest_command
+                .extend(["--target-metadata".to_string(), format!("{key}={value}")]);
+        }
+    }
+    if let Some(observed) = result.trainer_identity.clone() {
+        report.training.trainer_identity = trainer_identity_check(
+            report.training.trainer_identity.expected.clone(),
+            Some(observed),
+        );
+    }
+    report.warnings.extend(
+        result
+            .warnings
+            .iter()
+            .map(|warning| format!("backend result: {warning}")),
+    );
+    report.backend.result = Some(result);
     Ok(())
 }
 
 fn finalize_executed_trainer_identity(report: &mut LoraTrainReport) -> Result<(), String> {
     let identity_path = Path::new(&report.backend.trainer_identity_path);
-    let observed = read_trainer_identity_file(identity_path)?;
+    let observed = if identity_path.exists() {
+        let file_observed = read_trainer_identity_file(identity_path)?;
+        if let (Some(existing), Some(from_file)) =
+            (&report.training.trainer_identity.observed, &file_observed)
+        {
+            if existing != from_file {
+                report.ok = false;
+                report.backend.status = "completed_trainer_identity_conflict".to_string();
+                return Err(format!(
+                    "backend result trainer identity {}={} conflicts with {} identity sidecar {}={}",
+                    existing.kind,
+                    existing.value,
+                    identity_path.display(),
+                    from_file.kind,
+                    from_file.value
+                ));
+            }
+        }
+        file_observed
+    } else {
+        report.training.trainer_identity.observed.clone()
+    };
     report.training.trainer_identity =
         trainer_identity_check(report.training.trainer_identity.expected.clone(), observed);
     if !report.training.trainer_identity.promotable {
@@ -639,6 +764,10 @@ fn finalize_executed_trainer_identity(report: &mut LoraTrainReport) -> Result<()
 
 fn default_trainer_identity_path(output_dir: &Path) -> std::path::PathBuf {
     output_dir.join("trainer.identity.json")
+}
+
+fn default_backend_result_path(output_dir: &Path) -> std::path::PathBuf {
+    output_dir.join("backend.result.json")
 }
 
 fn tee_backend_stream<R: Read + Send + 'static>(
@@ -1132,12 +1261,33 @@ struct BackendInvocation {
     execute: bool,
     status: String,
     trainer_identity_path: String,
+    result_path: Option<String>,
+    result: Option<BackendResult>,
     exit_code: Option<i32>,
     output_tail_bytes: usize,
     stdout_tail: Option<String>,
     stderr_tail: Option<String>,
     stdout_tail_truncated: bool,
     stderr_tail_truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct BackendResult {
+    schema_version: u64,
+    rendered_records: Option<u64>,
+    trainable_records: Option<u64>,
+    retention_ratio: Option<f64>,
+    trainer_identity: Option<TrainerIdentity>,
+    #[serde(default)]
+    runtime: BTreeMap<String, Value>,
+    #[serde(default)]
+    tokenizer: BTreeMap<String, Value>,
+    #[serde(default)]
+    artifacts: BTreeMap<String, String>,
+    #[serde(default)]
+    target_metadata: BTreeMap<String, String>,
+    #[serde(default)]
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1201,6 +1351,7 @@ mod tests {
             backend_runner: Vec::new(),
             backend_script: None,
             backend_config: None,
+            backend_result_out: None,
             execute: false,
             backend_cwd: None,
             json: true,
@@ -1312,6 +1463,7 @@ mod tests {
             backend_runner: Vec::new(),
             backend_script: None,
             backend_config: None,
+            backend_result_out: None,
             execute: false,
             backend_cwd: None,
             json: true,
@@ -1365,6 +1517,7 @@ mod tests {
             backend_runner: vec!["uv".to_string(), "run".to_string(), "python".to_string()],
             backend_script: Some("train.py".into()),
             backend_config: Some("config/e4b.yaml".into()),
+            backend_result_out: Some(tmp.path().join("backend-result.json")),
             execute: false,
             backend_cwd: Some(tmp.path().join("trainer")),
             json: true,
@@ -1437,6 +1590,10 @@ mod tests {
                 "--target-metadata".to_string(),
                 "lane=structured".to_string(),
             ),
+            (
+                "--backend-result-out".to_string(),
+                tmp.path().join("backend-result.json").display().to_string(),
+            ),
             ("--config".to_string(), "config/e4b.yaml".to_string()),
         ];
         for (flag, value) in expected_pairs {
@@ -1468,6 +1625,11 @@ mod tests {
             1
         );
         assert_eq!(report.training.target_modules.policy, "explicit");
+        let expected_result_path = tmp.path().join("backend-result.json").display().to_string();
+        assert_eq!(
+            report.backend.result_path.as_deref(),
+            Some(expected_result_path.as_str())
+        );
         assert_eq!(
             report.training.target_modules.modules,
             vec!["q_proj".to_string(), "v_proj".to_string()]
@@ -1492,6 +1654,178 @@ mod tests {
                 1
             );
         }
+    }
+
+    #[test]
+    fn backend_result_merges_runtime_metadata_into_harn_manifest_receipt() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dataset = tmp.path().join("dataset.jsonl");
+        std::fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+        let args = ModelsLoraTrainArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            dataset,
+            corpus: None,
+            export_manifest: None,
+            output_dir: tmp.path().join("adapter"),
+            receipt_out: None,
+            adapter_name: Some("burin-tools".to_string()),
+            request_model: None,
+            chat_template: None,
+            trainer: "unsloth_sft".to_string(),
+            trainer_version: Some("unsloth-2026.7".to_string()),
+            trainer_identity: None,
+            observed_trainer_identity: None,
+            method: "qlora".to_string(),
+            rank: 16,
+            alpha: None,
+            dropout: 0.05,
+            max_seq_length: None,
+            teacher: None,
+            target_metadata: vec!["lane=structured".to_string()],
+            tool_catalog_policy: "full_schema".to_string(),
+            tool_catalog_id: None,
+            tool_catalog_hash: None,
+            modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
+            backend_recipe: "explicit_argv".to_string(),
+            backend_runner: Vec::new(),
+            backend_script: None,
+            backend_config: None,
+            backend_result_out: Some(tmp.path().join("backend.result.json")),
+            execute: false,
+            backend_cwd: None,
+            json: true,
+            backend_argv: Vec::new(),
+        };
+        let mut report = train_report(&args).expect("report");
+        let result = BackendResult {
+            schema_version: 1,
+            rendered_records: Some(197),
+            trainable_records: Some(190),
+            retention_ratio: Some(0.964),
+            trainer_identity: Some(TrainerIdentity {
+                schema_version: 1,
+                kind: "version".to_string(),
+                value: "unsloth-2026.7".to_string(),
+            }),
+            runtime: std::collections::BTreeMap::from([(
+                "torch_version".to_string(),
+                serde_json::Value::String("2.9.0".to_string()),
+            )]),
+            tokenizer: std::collections::BTreeMap::from([(
+                "class".to_string(),
+                serde_json::Value::String("GemmaTokenizerFast".to_string()),
+            )]),
+            artifacts: std::collections::BTreeMap::from([(
+                "adapter_dir".to_string(),
+                tmp.path().join("adapter").display().to_string(),
+            )]),
+            target_metadata: std::collections::BTreeMap::from([
+                ("lane".to_string(), "structured".to_string()),
+                ("rendered_records".to_string(), "197".to_string()),
+                ("trainable_records".to_string(), "190".to_string()),
+                ("retention_ratio".to_string(), "0.964".to_string()),
+            ]),
+            warnings: vec!["tokenizer added a pad token".to_string()],
+        };
+
+        apply_backend_result(&mut report, result).expect("backend result");
+
+        assert_eq!(
+            report
+                .target
+                .metadata
+                .get("trainable_records")
+                .map(String::as_str),
+            Some("190")
+        );
+        assert!(report
+            .post_training
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--target-metadata", "retention_ratio=0.964"]));
+        assert_eq!(
+            report
+                .backend
+                .result
+                .as_ref()
+                .and_then(|result| result.trainable_records),
+            Some(190)
+        );
+        assert_eq!(report.training.trainer_identity.status, "matched");
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning == "backend result: tokenizer added a pad token"));
+    }
+
+    #[test]
+    fn backend_result_rejects_conflicting_harn_planned_metadata() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dataset = tmp.path().join("dataset.jsonl");
+        std::fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+        let args = ModelsLoraTrainArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            dataset,
+            corpus: None,
+            export_manifest: None,
+            output_dir: tmp.path().join("adapter"),
+            receipt_out: None,
+            adapter_name: None,
+            request_model: None,
+            chat_template: None,
+            trainer: "unsloth_sft".to_string(),
+            trainer_version: Some("unsloth-2026.7".to_string()),
+            trainer_identity: None,
+            observed_trainer_identity: None,
+            method: "qlora".to_string(),
+            rank: 16,
+            alpha: None,
+            dropout: 0.05,
+            max_seq_length: None,
+            teacher: None,
+            target_metadata: vec!["lane=structured".to_string()],
+            tool_catalog_policy: "full_schema".to_string(),
+            tool_catalog_id: None,
+            tool_catalog_hash: None,
+            modules_to_save: Vec::new(),
+            target_modules: Vec::new(),
+            backend_recipe: "explicit_argv".to_string(),
+            backend_runner: Vec::new(),
+            backend_script: None,
+            backend_config: None,
+            backend_result_out: None,
+            execute: false,
+            backend_cwd: None,
+            json: true,
+            backend_argv: Vec::new(),
+        };
+        let mut report = train_report(&args).expect("report");
+        let result = BackendResult {
+            schema_version: 1,
+            rendered_records: None,
+            trainable_records: None,
+            retention_ratio: None,
+            trainer_identity: None,
+            runtime: std::collections::BTreeMap::new(),
+            tokenizer: std::collections::BTreeMap::new(),
+            artifacts: std::collections::BTreeMap::new(),
+            target_metadata: std::collections::BTreeMap::from([(
+                "lane".to_string(),
+                "backend-overrode-harn".to_string(),
+            )]),
+            warnings: Vec::new(),
+        };
+
+        let error = apply_backend_result(&mut report, result).expect_err("metadata conflict");
+
+        assert!(error.contains("target metadata conflict"));
+        assert!(!report.ok);
+        assert_eq!(report.backend.status, "completed_metadata_conflict");
     }
 
     #[test]
@@ -1531,6 +1865,7 @@ mod tests {
             backend_runner: vec!["uv".to_string()],
             backend_script: None,
             backend_config: None,
+            backend_result_out: None,
             execute: false,
             backend_cwd: None,
             json: true,
@@ -1578,6 +1913,7 @@ mod tests {
             backend_runner: Vec::new(),
             backend_script: None,
             backend_config: None,
+            backend_result_out: None,
             execute: false,
             backend_cwd: None,
             json: true,
@@ -1625,6 +1961,7 @@ mod tests {
             backend_runner: Vec::new(),
             backend_script: Some("train.py".into()),
             backend_config: None,
+            backend_result_out: None,
             execute: false,
             backend_cwd: None,
             json: true,

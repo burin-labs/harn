@@ -138,9 +138,28 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio
     .println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
   harness.stdio.println("  backend status: " + safe_string(backend["status"], ""))
+  const backend_result_path = safe_string(backend["result_path"], "")
+  if backend_result_path != "" {
+    harness.stdio.println("  backend result: " + backend_result_path)
+  }
   const exit_code = safe_int_string(backend["exit_code"], "")
   if exit_code != "" {
     harness.stdio.println("  backend exit code: " + exit_code)
+  }
+  const backend_result = safe_dict(backend["result"])
+  const backend_rendered = safe_int_string(backend_result["rendered_records"], "")
+  const backend_trainable = safe_int_string(backend_result["trainable_records"], "")
+  const backend_retention = safe_number_string(backend_result["retention_ratio"], "")
+  if backend_rendered != "" || backend_trainable != "" || backend_retention != "" {
+    harness.stdio
+      .println(
+      "  backend realized rows: rendered="
+        + backend_rendered
+        + " trainable="
+        + backend_trainable
+        + " retention="
+        + backend_retention,
+    )
   }
   if safe_bool(backend["argv_required"], false) {
     harness.stdio.println("  backend argv: required")
@@ -194,6 +213,7 @@ fn __render_human(harness: Harness, report: dict) {
   render_required_probe_cases(harness, evidence["required_probe_cases"])
   render_probe_command_templates(harness, evidence["probe_command_templates"])
   print_list(harness, "warnings", warnings)
+  print_list(harness, "backend warnings", safe_list(backend_result["warnings"]))
   if len(backend_argv) > 0 {
     render_command(harness, "backend", backend_argv)
   }
