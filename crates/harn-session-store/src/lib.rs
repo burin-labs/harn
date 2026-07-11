@@ -33,7 +33,7 @@ pub use memory::MemorySessionStore;
 pub use retention::{ArchiveSink, RetentionPolicy, SharedArchiveSink, Tombstone};
 pub use signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
-    verify_event, verify_receipt_root, SessionSigner, VerifyError,
+    verify_event, verify_event_chain, verify_receipt_root, SessionSigner, VerifyError,
     ALGORITHM as SIGNATURE_ALGORITHM,
 };
 pub use sqlite::SqliteSessionStore;
