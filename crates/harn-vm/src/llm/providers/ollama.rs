@@ -531,20 +531,13 @@ async fn parse_raw_generate_stream(
 }
 
 fn blocks_from_text_and_thinking(text: &str, thinking: &str) -> Vec<serde_json::Value> {
+    use crate::llm::providers::common::{output_text_block, reasoning_block};
     let mut blocks = Vec::new();
     if !thinking.is_empty() {
-        blocks.push(serde_json::json!({
-            "type": "reasoning",
-            "text": thinking,
-            "visibility": "private",
-        }));
+        blocks.push(reasoning_block(thinking));
     }
     if !text.is_empty() {
-        blocks.push(serde_json::json!({
-            "type": "output_text",
-            "text": text,
-            "visibility": "public",
-        }));
+        blocks.push(output_text_block(text));
     }
     blocks
 }
