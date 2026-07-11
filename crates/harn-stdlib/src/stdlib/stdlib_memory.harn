@@ -118,3 +118,23 @@ pub fn memory_reminders(namespace, options = nil) {
   const flag = (options ?? {})?.flag ?? "auto_surface"
   return memory_list(namespace, (options ?? {}) + {flag: flag})
 }
+
+/**
+ * Embed `text` into a dense vector via the host `memory.embed` capability.
+ *
+ * Returns `{vector: list<float>, model: string, dim: int}`. Embeddings are
+ * content-addressed and cached on disk per `(model_hint, sha256(text))`, so
+ * embedding the same text twice is a cache-only replay — deterministic under
+ * a recorded event log. This is the raw primitive behind semantic recall and
+ * semantic response caching (see `std/llm/handlers` `with_semantic_cache`);
+ * reach for `memory_recall` when you want ranked document search instead.
+ *
+ * `options.embed_model_hint` (alias `options.model_hint`) selects the host
+ * embedding model; `options.root` overrides the on-disk cache root.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn embed(text, options = nil) -> dict {
+  return __embed(text, options)
+}

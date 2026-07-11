@@ -1,0 +1,190 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/faithfulness — RAG groundedness scoring (RAGAS `faithfulness`-style).
+//
+// `faithfulness_guard(answer, contexts, opts?)` decomposes an answer into
+// atomic claims, judges each claim's support against the retrieved contexts,
+// and returns `{score, supported, unsupported, ...}`. Every model call goes
+// through `safe_structured_call` (std/llm/safe) — the same schema-validated,
+// auto-repairing structured caller the judges and routers use — so this module
+// never hand-rolls a provider request.
+import { safe_structured_call } from "std/llm/safe"
+
+const __CLAIM_SCHEMA = {
+  type: "object",
+  required: ["claims"],
+  properties: {
+    claims: {
+      type: "array",
+      description: "Each standalone factual assertion made by the answer.",
+      items: {type: "string"},
+    },
+  },
+}
+
+const __VERDICT_SCHEMA = {
+  type: "object",
+  required: ["supported"],
+  properties: {
+    supported: {type: "boolean", description: "true only if the claim is fully entailed by the provided context."},
+    reason: {type: "string"},
+  },
+}
+
+fn __contexts_text(contexts) -> string {
+  const list = if type_of(contexts) == "list" {
+    contexts
+  } else if contexts == nil {
+    []
+  } else {
+    [contexts]
+  }
+  let parts = []
+  let idx = 1
+  for context in list {
+    parts = parts.push("[" + to_string(idx) + "] " + to_string(context))
+    idx = idx + 1
+  }
+  return join(parts, "\n\n")
+}
+
+fn __decompose_prompt(answer) -> string {
+  return join(
+    [
+      "Break the following ANSWER into its atomic factual claims — one simple,",
+      "self-contained assertion per claim. Do not add information the answer does",
+      "not state. If the answer makes no factual claim, return an empty list.",
+      "",
+      "ANSWER:",
+      to_string(answer),
+    ],
+    "\n",
+  )
+}
+
+fn __verdict_prompt(claim, contexts_text) -> string {
+  return join(
+    [
+      "You are checking whether a CLAIM is supported by the CONTEXT.",
+      "Answer supported=true ONLY if the CONTEXT directly entails the CLAIM.",
+      "If the CONTEXT is silent on the claim or contradicts it, answer supported=false.",
+      "",
+      "CONTEXT:",
+      contexts_text,
+      "",
+      "CLAIM:",
+      to_string(claim),
+    ],
+    "\n",
+  )
+}
+
+fn __structured_value(prompt, schema, llm_opts) -> dict {
+  const envelope = safe_structured_call(prompt, schema, llm_opts)
+  if !(envelope?.ok ?? false) {
+    throw {
+      kind: "faithfulness",
+      message: "faithfulness_guard: structured call failed (" + to_string(envelope?.status ?? "error") + ")",
+      error: envelope?.error,
+    }
+  }
+  if type_of(envelope?.value) == "dict" {
+    return envelope.value
+  }
+  return {}
+}
+
+fn __decompose_claims(answer, llm_opts) -> list {
+  const value = __structured_value(__decompose_prompt(answer), __CLAIM_SCHEMA, llm_opts)
+  const raw = value?.claims ?? []
+  if type_of(raw) != "list" {
+    return []
+  }
+  let claims = []
+  for claim in raw {
+    const text = to_string(claim)
+    if text != "" {
+      claims = claims.push(text)
+    }
+  }
+  return claims
+}
+
+fn __judge_claim(claim, contexts_text, llm_opts) -> dict {
+  const value = __structured_value(__verdict_prompt(claim, contexts_text), __VERDICT_SCHEMA, llm_opts)
+  return {
+    claim: claim,
+    supported: value?.supported ?? false ? true : false,
+    reason: to_string(value?.reason ?? ""),
+  }
+}
+
+/**
+ * faithfulness_guard(answer, contexts, opts?) -> dict
+ *
+ * RAG groundedness score. Decomposes `answer` into atomic claims, then judges
+ * each claim's support against `contexts` (a string or list of context
+ * strings) with an LLM. Returns:
+ *
+ *   {
+ *     score:       float,          // supported_claims / total_claims (1.0 if none)
+ *     supported:   list<string>,   // claims entailed by the contexts
+ *     unsupported: list<string>,   // claims not entailed (hallucination risk)
+ *     claims:      list<string>,   // every extracted atomic claim
+ *     verdicts:    list<dict>,     // per-claim {claim, supported, reason}
+ *   }
+ *
+ * A `score` below 1.0 means at least one claim is unsupported by the retrieved
+ * context — the RAGAS faithfulness signal for hallucination. An answer with no
+ * factual claims scores 1.0 (vacuously grounded).
+ *
+ * Options:
+ *   - Any `safe_structured_call` option (provider, model, temperature, …) is
+ *     forwarded to both the decomposition and per-claim judge calls. Pass them
+ *     directly on `opts`, or nested under `opts.llm` to keep them separate from
+ *     the control keys below.
+ *   - max_concurrent : int — bound on parallel per-claim judge calls.
+ *
+ * All model calls reuse `safe_structured_call`; this function performs no raw
+ * provider I/O of its own.
+ *
+ * @effects: [llm.call]
+ * @errors: [faithfulness]
+ */
+pub fn faithfulness_guard(answer, contexts, opts = nil) -> dict {
+  const cfg = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  const llm_opts = if type_of(cfg?.llm) == "dict" {
+    cfg.llm
+  } else {
+    cfg
+  }
+  const max_concurrent = cfg?.max_concurrent
+  const contexts_text = __contexts_text(contexts)
+  const claims = __decompose_claims(answer, llm_opts)
+  if len(claims) == 0 {
+    return {score: 1.0, supported: [], unsupported: [], claims: [], verdicts: []}
+  }
+  const verdicts = parallel each claims with { max_concurrent: max_concurrent } { claim ->
+    __judge_claim(claim, contexts_text, llm_opts)
+  }
+  let supported = []
+  let unsupported = []
+  for verdict in verdicts {
+    if verdict.supported {
+      supported = supported.push(verdict.claim)
+    } else {
+      unsupported = unsupported.push(verdict.claim)
+    }
+  }
+  return {
+    score: len(supported) / (len(claims) * 1.0),
+    supported: supported,
+    unsupported: unsupported,
+    claims: claims,
+    verdicts: verdicts,
+  }
+}
