@@ -57,11 +57,13 @@ pub const COMPRESSION_MIN_SIZE_BYTES: u16 = 512;
 pub struct CorsConfig {
     /// Explicit allowed origins. Matched as literal strings against
     /// `Origin`. Use `["*"]` (or set `allow_any_origin`) for the
-    /// wildcard.
+    /// wildcard. A `"*"` entry is treated exactly like `allow_any_origin`,
+    /// so per the CORS spec it also forces `allow_credentials` off.
     pub allow_origins: Vec<String>,
     /// Send `Access-Control-Allow-Origin: *`. Per the CORS spec this
     /// is mutually exclusive with credentials, so `allow_credentials`
-    /// is ignored when this is true.
+    /// is ignored when this is true (or when `allow_origins` contains
+    /// `"*"`).
     pub allow_any_origin: bool,
     /// Methods echoed in preflight responses. Defaults to the common
     /// safe verbs when empty.
@@ -196,7 +198,14 @@ async fn strip_compression_marker(
 fn build_cors_layer(config: &CorsConfig) -> CorsLayer {
     let mut layer = CorsLayer::new();
 
-    if config.allow_any_origin || config.allow_origins.iter().any(|origin| origin == "*") {
+    // Both `allow_any_origin` and a literal `"*"` in `allow_origins` request the
+    // wildcard. Decide once so the origin and credentials branches below cannot
+    // diverge: tower-http panics at build time if credentials accompany the
+    // wildcard, so the same predicate must gate both.
+    let wildcard_origin =
+        config.allow_any_origin || config.allow_origins.iter().any(|origin| origin == "*");
+
+    if wildcard_origin {
         layer = layer.allow_origin(AllowOrigin::any());
     } else if !config.allow_origins.is_empty() {
         let origins: Vec<HeaderValue> = config
@@ -244,7 +253,7 @@ fn build_cors_layer(config: &CorsConfig) -> CorsLayer {
         layer = layer.expose_headers(exposed);
     }
 
-    if config.allow_credentials && !config.allow_any_origin {
+    if config.allow_credentials && !wildcard_origin {
         layer = layer.allow_credentials(true);
     }
 
@@ -366,6 +375,47 @@ mod tests {
         assert!(!response
             .headers()
             .contains_key("access-control-allow-origin"));
+    }
+
+    #[tokio::test]
+    async fn cors_list_wildcard_with_credentials_does_not_panic_or_set_credentials() {
+        // `allow_origins: ["*"]` is the documented equivalent of `allow_any_origin`,
+        // so pairing it with credentials must degrade to a credential-less wildcard
+        // rather than panicking in tower-http's `ensure_usable_cors_rules` at
+        // router-build time.
+        let config = TransportConfig {
+            compression: false,
+            etag: false,
+            cors: Some(CorsConfig {
+                allow_origins: vec!["*".into()],
+                allow_credentials: true,
+                ..Default::default()
+            }),
+        };
+        let app = apply_transport_layers(sample_router(), &config);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/json")
+                    .header(header::ORIGIN, "https://app.example.com")
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "*"
+        );
+        assert!(!response
+            .headers()
+            .contains_key("access-control-allow-credentials"));
     }
 
     #[tokio::test]
