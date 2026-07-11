@@ -31,6 +31,22 @@ impl HarnLsp {
         Ok(format_whole_document_edit(&source).map(|edit| vec![edit]))
     }
 
+    pub(super) async fn handle_range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+        let source = {
+            let docs = self.documents.lock().unwrap();
+            match docs.get(uri) {
+                Some(s) => s.source.clone(),
+                None => return Ok(None),
+            }
+        };
+
+        Ok(range_format_edit(&source, params.range).map(|edit| vec![edit]))
+    }
+
     pub(super) async fn handle_on_type_formatting(
         &self,
         params: DocumentOnTypeFormattingParams,
@@ -364,6 +380,86 @@ fn format_whole_document_edit(source: &str) -> Option<TextEdit> {
     })
 }
 
+/// Compute a "format selection" edit that confines its changes to the
+/// requested `range`, reusing the whole-document formatter.
+///
+/// Harn's formatter (`harn_fmt::format_source`) only formats a complete
+/// program, so there is no native partial formatter to call. Instead we
+/// format the whole document, trim the common leading/trailing lines to
+/// isolate the region the formatter actually changed, and emit an edit
+/// for that region **only when it lies entirely within the selected
+/// lines**. If the formatter's changes spill outside the selection we
+/// return `None` rather than reformat code the user didn't select — this
+/// keeps "Format Selection" from silently rewriting the whole file while
+/// still handling the common cases (a whole-file selection, or a
+/// selection that fully contains the messy region).
+fn range_format_edit(source: &str, range: Range) -> Option<TextEdit> {
+    let formatted = harn_fmt::format_source(source).ok()?;
+    if formatted == source {
+        return None;
+    }
+
+    let orig: Vec<&str> = source.split('\n').collect();
+    let fmt: Vec<&str> = formatted.split('\n').collect();
+
+    // Longest common line-prefix and line-suffix, without overlapping.
+    let mut prefix = 0;
+    while prefix < orig.len() && prefix < fmt.len() && orig[prefix] == fmt[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < orig.len() - prefix
+        && suffix < fmt.len() - prefix
+        && orig[orig.len() - 1 - suffix] == fmt[fmt.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+
+    // Original lines `[prefix, orig.len() - suffix)` are what changed; the
+    // replacement is formatted lines `[prefix, fmt.len() - suffix)`.
+    let orig_end_line = orig.len() - suffix;
+
+    // The last document line the selection covers. A selection that ends at
+    // column 0 of a line does not actually include that line's text, so we
+    // drop it (standard editor convention).
+    let start_line = range.start.line as usize;
+    let last_selected_line = if range.end.character == 0 && range.end.line > range.start.line {
+        (range.end.line - 1) as usize
+    } else {
+        range.end.line as usize
+    };
+
+    // Require the changed region's lines to sit within the selection.
+    if prefix < start_line || orig_end_line > last_selected_line + 1 {
+        return None;
+    }
+
+    let start_offset = lsp_position_to_offset(source, Position::new(prefix as u32, 0));
+    let new_lines = &fmt[prefix..fmt.len() - suffix];
+    let (end_offset, new_text) = if orig_end_line < orig.len() {
+        // The region ends before the final line, so it is replaced up to the
+        // start of the next line — include each replacement line's newline.
+        let end = lsp_position_to_offset(source, Position::new(orig_end_line as u32, 0));
+        let mut text = new_lines.join("\n");
+        if !new_lines.is_empty() {
+            text.push('\n');
+        }
+        (end, text)
+    } else {
+        // The region runs to the end of the document (no trailing newline to
+        // account for).
+        (source.len(), new_lines.join("\n"))
+    };
+
+    Some(TextEdit {
+        range: Range {
+            start: offset_to_position(source, start_offset),
+            end: offset_to_position(source, end_offset),
+        },
+        new_text,
+    })
+}
+
 /// Returns `true` when the editor's `CodeActionContext.only` filter
 /// explicitly asks for a fix-all kind. We deliberately do NOT opt in
 /// when `only` is `None` so the bulk action does not pollute the regular
@@ -446,10 +542,14 @@ pub(super) fn build_missing_arms_edit(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_code_actions, build_missing_arms_edit, format_whole_document_edit};
+    use super::{
+        build_code_actions, build_missing_arms_edit, format_whole_document_edit, range_format_edit,
+    };
     use crate::document::DocumentState;
     use harn_lexer::Span;
-    use tower_lsp::lsp_types::{CodeActionContext, CodeActionOrCommand, NumberOrString, Url};
+    use tower_lsp::lsp_types::{
+        CodeActionContext, CodeActionOrCommand, NumberOrString, Position, Range, Url,
+    };
 
     #[test]
     fn repair_quickfix_actions_carry_safety_kind_and_flat_data() {
@@ -564,6 +664,51 @@ mod tests {
         };
         let edit = build_missing_arms_edit(source, &span, &["\"x\"".to_string()]);
         assert!(edit.is_none());
+    }
+
+    #[test]
+    fn range_format_selecting_whole_document_formats_everything() {
+        let source = "fn main(){\nconst x=1\n}\n";
+        // Selection spanning the entire document.
+        let edit = range_format_edit(source, Range::new(Position::new(0, 0), Position::new(3, 0)))
+            .expect("expected an edit for a messy document");
+        assert!(edit.new_text.contains("fn main() {"), "{}", edit.new_text);
+        assert!(edit.new_text.contains("const x = 1"), "{}", edit.new_text);
+        assert_eq!(edit.range.start, Position::new(0, 0));
+    }
+
+    #[test]
+    fn range_format_confines_edit_to_selected_lines() {
+        let source = "fn main(){\nconst x=1\n}\n";
+        // Selection covering just the two messy lines (0 and 1).
+        let edit = range_format_edit(source, Range::new(Position::new(0, 0), Position::new(2, 0)))
+            .expect("expected an edit for the selected messy region");
+        // The edit must not reach past line 1 into the closing brace on line 2.
+        assert!(
+            edit.range.end.line <= 2,
+            "edit should stay within the selection, got {:?}",
+            edit.range
+        );
+        assert!(edit.new_text.contains("const x = 1"), "{}", edit.new_text);
+    }
+
+    #[test]
+    fn range_format_returns_none_when_selection_misses_changes() {
+        let source = "fn main(){\nconst x=1\n}\n";
+        // Selecting only the already-well-formatted closing brace line: the
+        // formatter's changes lie outside the selection, so no edit.
+        let edit = range_format_edit(source, Range::new(Position::new(2, 0), Position::new(3, 0)));
+        assert!(
+            edit.is_none(),
+            "expected no edit when the selection excludes the changed region: {edit:?}"
+        );
+    }
+
+    #[test]
+    fn range_format_returns_none_for_already_formatted_source() {
+        let source = "fn main() {\n  const x = 1\n}\n";
+        let edit = range_format_edit(source, Range::new(Position::new(0, 0), Position::new(3, 0)));
+        assert!(edit.is_none(), "already-formatted source needs no edit");
     }
 
     #[test]

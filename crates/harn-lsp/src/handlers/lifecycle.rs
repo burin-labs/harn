@@ -17,6 +17,18 @@ impl HarnLsp {
     ) -> Result<InitializeResult> {
         *self.rule_workspace.lock().unwrap() =
             crate::rules::RuleWorkspace::from_initialize(&params);
+        // Remember whether the client can dynamically register the
+        // `workspace/didChangeWatchedFiles` capability; we act on it in
+        // `initialized`.
+        let supports_watched_files = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.did_change_watched_files.as_ref())
+            .and_then(|d| d.dynamic_registration)
+            .unwrap_or(false);
+        self.watched_files_dynamic_registration
+            .store(supports_watched_files, std::sync::atomic::Ordering::Relaxed);
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -24,6 +36,10 @@ impl HarnLsp {
                 )),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![".".to_string()]),
+                    // Completion items carry only a label/detail up front;
+                    // the (potentially large) builtin/keyword documentation
+                    // markdown is attached lazily via `completionItem/resolve`.
+                    resolve_provider: Some(true),
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
@@ -78,6 +94,7 @@ impl HarnLsp {
                 }),
                 rename_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
                     first_trigger_character: ";".to_string(),
                     more_trigger_character: Some(vec!["}".to_string()]),
@@ -97,6 +114,35 @@ impl HarnLsp {
     }
 
     pub(super) async fn handle_initialized(&self, _params: InitializedParams) {
+        // Register a workspace file watcher for `.harn` sources so external
+        // changes (git checkout, another editor, a codegen step) re-validate
+        // the open documents that may depend on them. Only attempted when the
+        // client advertised dynamic-registration support during `initialize`.
+        if self
+            .watched_files_dynamic_registration
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            let options = DidChangeWatchedFilesRegistrationOptions {
+                watchers: vec![FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.harn".to_string()),
+                    kind: None,
+                }],
+            };
+            let registration = Registration {
+                id: "harn-watch-harn-files".to_string(),
+                method: "workspace/didChangeWatchedFiles".to_string(),
+                register_options: serde_json::to_value(options).ok(),
+            };
+            if let Err(err) = self.client.register_capability(vec![registration]).await {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Harn LSP: failed to register file watcher: {err}"),
+                    )
+                    .await;
+            }
+        }
+
         self.client
             .log_message(MessageType::INFO, "Harn LSP initialized")
             .await;
@@ -185,6 +231,42 @@ impl HarnLsp {
 
         let updates = {
             let mut docs = self.documents.lock().unwrap();
+            docs.iter_mut()
+                .map(|(uri, state)| {
+                    state.dirty = true;
+                    state.reparse_if_dirty_with_rules(Some(uri), Some(&rule_workspace));
+                    (uri.clone(), state.diagnostics.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for (uri, diagnostics) in updates {
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
+        }
+    }
+
+    pub(super) async fn handle_did_change_watched_files(
+        &self,
+        params: DidChangeWatchedFilesParams,
+    ) {
+        // An external change to a `.harn` file (git checkout, another editor,
+        // a codegen step) can invalidate the diagnostics of open documents
+        // that import it. We don't own the on-disk buffer for open documents
+        // — the editor's text is authoritative — so we don't re-read files
+        // here; instead we mark every open document dirty and re-run its
+        // analysis so cross-file diagnostics stop being stale. Ignore the
+        // notification entirely when nothing is open.
+        if params.changes.is_empty() {
+            return;
+        }
+        let rule_workspace = self.rule_workspace.lock().unwrap().clone();
+        let updates = {
+            let mut docs = self.documents.lock().unwrap();
+            if docs.is_empty() {
+                return;
+            }
             docs.iter_mut()
                 .map(|(uri, state)| {
                     state.dirty = true;

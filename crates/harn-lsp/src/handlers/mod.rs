@@ -56,8 +56,16 @@ impl tower_lsp::LanguageServer for HarnLsp {
         self.handle_did_change_configuration(params).await;
     }
 
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        self.handle_did_change_watched_files(params).await;
+    }
+
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         self.handle_completion(params).await
+    }
+
+    async fn completion_resolve(&self, params: CompletionItem) -> Result<CompletionItem> {
+        self.handle_completion_resolve(params).await
     }
 
     async fn goto_definition(
@@ -142,6 +150,13 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         self.handle_formatting(params).await
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        self.handle_range_formatting(params).await
     }
 
     async fn execute_command(

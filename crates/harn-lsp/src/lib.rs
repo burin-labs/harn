@@ -18,6 +18,7 @@ mod semantic_tokens;
 mod symbols;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 use document::DocumentState;
@@ -29,6 +30,11 @@ pub(crate) struct HarnLsp {
     documents: Mutex<HashMap<Url, DocumentState>>,
     pending_reparse_versions: Mutex<HashMap<Url, u64>>,
     rule_workspace: Mutex<rules::RuleWorkspace>,
+    /// Whether the client advertised dynamic-registration support for
+    /// `workspace/didChangeWatchedFiles` in its `initialize` capabilities.
+    /// When true we register a `**/*.harn` file watcher in `initialized`
+    /// so external edits (git checkout, another tool) re-validate open docs.
+    watched_files_dynamic_registration: AtomicBool,
 }
 
 impl HarnLsp {
@@ -38,6 +44,7 @@ impl HarnLsp {
             documents: Mutex::new(HashMap::new()),
             pending_reparse_versions: Mutex::new(HashMap::new()),
             rule_workspace: Mutex::new(rules::RuleWorkspace::default()),
+            watched_files_dynamic_registration: AtomicBool::new(false),
         }
     }
 }
