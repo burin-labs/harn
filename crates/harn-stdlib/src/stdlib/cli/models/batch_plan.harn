@@ -56,6 +56,72 @@ const BATCH_ROW_META_FIELDS: list = [
   "request",
 ]
 
+/**
+ * Internal record shapes this planner constructs and threads. Only the
+ * shapes Harn builds itself are typed here; provider HTTP response bodies
+ * and user-supplied request/metadata JSON stay `dict` (open boundary
+ * data). The per-job lifecycle shape is deliberately left `dict`: it is
+ * merged with provider-native response fields across submit/status/cancel
+ * and is not a single fixed record.
+ */
+type BatchLiveAdapter = {submit: bool, status: bool, cancel: bool, download: bool}
+
+type BatchModelCapability = {
+  api: bool,
+  wire_format: string,
+  input_mode: string,
+  discount_percent: int?,
+  turnaround_hours: int?,
+  max_requests: int?,
+  max_input_bytes: int?,
+  result_retention_days: int?,
+  result_ordering: string,
+  partial_failure: string,
+  cancellation: string,
+  security_notes: list,
+  operational_notes: list,
+  harn_live_adapter: BatchLiveAdapter,
+}
+
+type BatchCandidate = {
+  provider: string,
+  id: string,
+  name: string,
+  capabilities: list,
+  batch: BatchModelCapability,
+  workload: string,
+  recommended: bool,
+  recommendation: string,
+  constraints: list,
+}
+
+/**
+ * A parsed input row lifted into a request entry. `metadata` and
+ * `request` carry the caller's opaque JSON, so they stay `dict`.
+ */
+type BatchRequestEntry = {
+  custom_id: string,
+  source_line: int,
+  source_sha256: string,
+  metadata: dict,
+  request: dict,
+}
+
+type BatchGroupSummary = {
+  id: string,
+  provider: string,
+  model: string,
+  tool_format: string,
+  endpoint: string,
+  request_count: int,
+}
+
+/**
+ * Either-shaped resolution result. `candidate` is a BatchCandidate lifted
+ * back through `safe_dict`, so it is threaded as an open `dict`.
+ */
+type BatchCandidateResolution = {ok: bool, error?: string, candidate?: dict}
+
 fn __safe_int(value) -> int? {
   if type_of(value) == "int" {
     return value
@@ -187,7 +253,7 @@ fn __live_batch_adapter_key(provider: string, wire: string) -> string {
   return ""
 }
 
-fn __live_batch_adapter(provider: string, wire: string) -> dict {
+fn __live_batch_adapter(provider: string, wire: string) -> BatchLiveAdapter {
   const adapter = __live_batch_adapter_key(provider, wire)
   const supported = adapter != ""
   return {
@@ -240,7 +306,7 @@ fn __provider_group(models: list) -> dict {
   return groups
 }
 
-fn __candidate(entry: dict, workload: string) -> dict {
+fn __candidate(entry: dict, workload: string) -> BatchCandidate {
   const provider = safe_string(entry["provider"], "")
   const id = safe_string(entry["id"], "")
   const batch_entry = safe_dict(entry["batch"])
@@ -426,7 +492,7 @@ fn __resolve_candidate(
   provider_filter: string,
   model_filter: string,
   workload: string,
-) -> dict {
+) -> BatchCandidateResolution {
   const matches = __collect(catalog, provider_filter, model_filter, workload, nil, nil)
   if len(matches) == 0 {
     return {
@@ -460,7 +526,7 @@ fn __custom_id(row: dict, line_no: int, id_prefix: string) -> string {
   return id_prefix + "-" + to_string(line_no) + "-" + sha256(json_stringify(row)).substring(0, 12)
 }
 
-fn __request_entry(row: dict, line_no: int, id_prefix: string) -> dict {
+fn __request_entry(row: dict, line_no: int, id_prefix: string) -> BatchRequestEntry {
   const custom_id = __custom_id(row, line_no, id_prefix)
   return {
     custom_id: custom_id,
@@ -485,7 +551,7 @@ fn __group_key(provider: string, model: string, batch: dict, tool_format: string
     + endpoint
 }
 
-fn __group_summary(group: dict) -> dict {
+fn __group_summary(group: dict) -> BatchGroupSummary {
   return {
     id: safe_string(group["id"], ""),
     provider: safe_string(group["provider"], ""),
