@@ -229,7 +229,7 @@ pub fn agent_sitrep(input, opts = nil) {
     stream: false,
   }
   const system = opts?.system ?? __SITREP_SYSTEM_PROMPT
-  const response = llm_call(user_prompt, system, llm_opts)
+  const response: {text: string?} = llm_call(user_prompt, system, llm_opts)
   const text = trim(response.text ?? "")
   return {
     summary: text,
