@@ -12,9 +12,10 @@ use super::{
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
     parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, serving_recipe,
     sha256_file, target_module_contract, teacher_report, template_recipe_for_route,
-    tool_catalog_contract, BaseModelReport, EvaluationRecipe, LoraContractReport,
-    LoraContractReportInput, LoraTrainingContract, PrecisionContract, ServingRecipe,
-    ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
+    tool_catalog_contract, trainer_identity_check, trainer_identity_from_args, BaseModelReport,
+    EvaluationRecipe, LoraContractReport, LoraContractReportInput, LoraTrainingContract,
+    PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe,
+    ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -48,6 +49,17 @@ pub(super) async fn manifest(args: &ModelsLoraManifestArgs) -> i32 {
 fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, String> {
     let method = normalize_lora_method(&args.method)?;
     let trainer = normalize_lora_trainer(&args.trainer)?;
+    let expected_trainer_identity = trainer_identity_from_args(
+        args.trainer_identity.as_deref(),
+        args.trainer_version.as_deref(),
+    )?;
+    let observed_trainer_identity = args
+        .observed_trainer_identity
+        .as_deref()
+        .map(super::parse_trainer_identity)
+        .transpose()?;
+    let trainer_identity =
+        trainer_identity_check(expected_trainer_identity, observed_trainer_identity);
     let rank = normalize_lora_rank(args.rank)?;
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
@@ -161,6 +173,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         &request_model,
         &decision.effective,
         &eval_dataset,
+        Some(&trainer_identity),
         vec![
             "harn".to_string(),
             "eval".to_string(),
@@ -207,6 +220,12 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
     }
     if args.out.is_none() {
         warnings.push("no --out supplied; manifest report was not written to disk".to_string());
+    }
+    if !trainer_identity.promotable {
+        warnings.push(
+            "trainer identity is not promotable until expected and observed identities match"
+                .to_string(),
+        );
     }
     Ok(LoraManifestReport {
         schema_version: 1,
@@ -257,6 +276,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
             run_id: args.training_run_id.clone(),
             trainer,
             trainer_version: args.trainer_version.clone(),
+            trainer_identity,
             method,
             adapter_type: "peft_lora".to_string(),
             rank,
@@ -429,6 +449,7 @@ struct ManifestTraining {
     run_id: Option<String>,
     trainer: String,
     trainer_version: Option<String>,
+    trainer_identity: super::TrainerIdentityCheck,
     method: String,
     adapter_type: String,
     rank: u32,
@@ -482,6 +503,8 @@ mod tests {
             chat_template: None,
             trainer: trainer.to_string(),
             trainer_version: Some("trainer-2026.7".to_string()),
+            trainer_identity: None,
+            observed_trainer_identity: Some("version=trainer-2026.7".to_string()),
             method: "qlora".to_string(),
             rank: 16,
             alpha: None,

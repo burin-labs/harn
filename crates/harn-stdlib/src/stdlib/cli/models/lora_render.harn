@@ -1,5 +1,12 @@
 /** Shared render helpers for `harn models lora *` commands. */
-import { print_list, render_command, safe_dict, safe_list, safe_string } from "std/cli/render"
+import {
+  print_list,
+  render_command,
+  safe_bool,
+  safe_dict,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
 
 /**
  * Render the PEFT save policy carried by a LoRA training contract.
@@ -52,6 +59,45 @@ pub fn render_tool_catalog_contract(harness: Harness, contract: dict) {
     .println("  prompt catalog: " + safe_string(contract["prompt_catalog_requirement"], ""))
   print_list(harness, "tool catalog notes", safe_list(contract["notes"]))
   print_list(harness, "tool catalog gates", safe_list(contract["promotion_gates"]))
+}
+
+fn __trainer_identity_line(value: unknown) -> string {
+  const identity = safe_dict(value)
+  const kind = safe_string(identity["kind"], "")
+  const fingerprint = safe_string(identity["value"], "")
+  if kind == "" || fingerprint == "" {
+    return ""
+  }
+  return kind + "=" + fingerprint
+}
+
+/**
+ * Render the trainer-stack identity gate carried by LoRA receipts.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_trainer_identity_check(harness: Harness, value: unknown) {
+  const check = safe_dict(value)
+  const status = safe_string(check["status"], "")
+  if status == "" {
+    return
+  }
+  const promotable = if safe_bool(check["promotable"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  harness.stdio.println("  trainer identity: " + status + " promotable=" + promotable)
+  const expected = __trainer_identity_line(check["expected"])
+  if expected != "" {
+    harness.stdio.println("  expected trainer identity: " + expected)
+  }
+  const observed = __trainer_identity_line(check["observed"])
+  if observed != "" {
+    harness.stdio.println("  observed trainer identity: " + observed)
+  }
+  print_list(harness, "trainer identity errors", safe_list(check["errors"]))
 }
 
 fn __probe_case_line(value: unknown) -> string {
