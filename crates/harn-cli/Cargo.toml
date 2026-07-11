@@ -147,6 +147,7 @@ libc = "0.2"
 [build-dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.10", features = ["otel"] }
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.10" }
+sha2 = "0.11"
 
 [features]
 default = ["hostlib", "mimalloc"]

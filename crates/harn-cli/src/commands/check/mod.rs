@@ -13,6 +13,7 @@ mod mock_host;
 mod outcome;
 mod preflight;
 pub(crate) mod provider_matrix;
+mod result_cache;
 mod script_rules;
 mod source;
 mod template_lint;

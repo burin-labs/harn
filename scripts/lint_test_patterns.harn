@@ -119,6 +119,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/attributed_decl_cli.rs",
   "crates/harn-cli/tests/acp_server_cli.rs",
   "crates/harn-cli/tests/burin_mini_playground.rs",
+  "crates/harn-cli/tests/check_result_cache.rs",
   "crates/harn-cli/tests/flow_ship_cli.rs",
   "crates/harn-cli/tests/harn_serve_mcp_cli.rs",
   "crates/harn-cli/tests/llm_mock_cli.rs",

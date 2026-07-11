@@ -376,10 +376,13 @@ fn scan_static_tool_surface_preflight(
             harn_vm::stdlib_modules::get_stdlib_prompt_asset(&prompt_target).map(str::to_string)
         } else {
             let candidates = resolve_preflight_target(file_path, &prompt_target, config);
-            let Some(existing) = candidates.iter().find(|path| path.exists()) else {
+            let Some(existing) = candidates
+                .iter()
+                .find(|path| super::result_cache::probe_exists(path))
+            else {
                 continue;
             };
-            std::fs::read_to_string(existing).ok()
+            super::result_cache::probe_read_to_string(existing).ok()
         };
         let Some(body) = body else { continue };
         for reference in harn_vm::tool_surface::prompt_tool_references(&body) {
@@ -1057,8 +1060,11 @@ fn scan_node_preflight(
                     }
                 }
                 let resolved = resolve_preflight_target(file_path, &template_path, config);
-                if let Some(existing) = resolved.iter().find(|path| path.exists()) {
-                    if let Ok(body) = std::fs::read_to_string(existing) {
+                if let Some(existing) = resolved
+                    .iter()
+                    .find(|path| super::result_cache::probe_exists(path))
+                {
+                    if let Ok(body) = super::result_cache::probe_read_to_string(existing) {
                         if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(&body)
                         {
                             diagnostics.push(PreflightDiagnostic {
@@ -1097,7 +1103,7 @@ fn scan_node_preflight(
         Node::FunctionCall { name, args, .. } if name == "exec_at" || name == "shell_at" => {
             if let Some(dir) = args.first().and_then(literal_string) {
                 let resolved = resolve_source_relative(file_path, &dir);
-                if !resolved.is_dir() {
+                if !super::result_cache::probe_is_dir(&resolved) {
                     diagnostics.push(PreflightDiagnostic {
                         code: Code::ExecutionTargetMissing,
                         path: file_path.display().to_string(),
@@ -1230,7 +1236,10 @@ fn scan_node_preflight(
                             }
                             let resolved =
                                 resolve_preflight_target(file_path, &template_path, config);
-                            if !resolved.iter().any(|path| path.exists()) {
+                            if !resolved
+                                .iter()
+                                .any(|path| super::result_cache::probe_exists(path))
+                            {
                                 diagnostics.push(PreflightDiagnostic {
                                     code: Code::PromptTargetMissing,
                                     path: file_path.display().to_string(),
@@ -2092,10 +2101,12 @@ pub(super) fn resolve_preflight_target(
     // caller's diagnostic explains why the target was unreachable.
     if let Some(asset_ref) = harn_modules::asset_paths::parse(target) {
         let anchor = current_file.parent().unwrap_or(Path::new("."));
-        return match harn_modules::asset_paths::resolve(&asset_ref, anchor) {
+        let candidates = match harn_modules::asset_paths::resolve(&asset_ref, anchor) {
             Ok(path) => vec![path],
             Err(_) => vec![PathBuf::from(target)],
         };
+        super::result_cache::record_resolve_target(current_file, target, &candidates);
+        return candidates;
     }
     let mut candidates = vec![resolve_source_relative(current_file, target)];
     if let Some(bundle_root) = config.bundle_root.as_deref() {
@@ -2107,6 +2118,7 @@ pub(super) fn resolve_preflight_target(
         });
     }
     candidates.dedup();
+    super::result_cache::record_resolve_target(current_file, target, &candidates);
     candidates
 }
 
@@ -2244,10 +2256,12 @@ fn render_target_miss_help(file_path: &Path, template_path: &str) -> String {
 /// when the search finds zero or multiple matches. Skips standard
 /// build/dependency directories so a misfiled prompt is not lost in
 /// vendor noise.
-fn find_unique_basename(root: &Path, basename: &str) -> Option<PathBuf> {
+pub(super) fn find_unique_basename(root: &Path, basename: &str) -> Option<PathBuf> {
     let mut matches: Vec<PathBuf> = Vec::with_capacity(2);
     walk_for_basename(root, basename, 0, 8, &mut matches);
-    (matches.len() == 1).then(|| matches.into_iter().next().expect("len == 1"))
+    let result = (matches.len() == 1).then(|| matches.into_iter().next().expect("len == 1"));
+    super::result_cache::record_walk_unique(root, basename, result.as_deref());
+    result
 }
 
 fn walk_for_basename(
@@ -2434,7 +2448,7 @@ fn scan_spawn_agent_preflight(
     };
     if let Some(cwd) = dict_literal_field(execution, "cwd").and_then(literal_string) {
         let resolved = resolve_source_relative(file_path, &cwd);
-        if !resolved.is_dir() {
+        if !super::result_cache::probe_is_dir(&resolved) {
             diagnostics.push(PreflightDiagnostic {
                 code: Code::ExecutionTargetMissing,
                 path: file_path.display().to_string(),
@@ -2458,7 +2472,7 @@ fn scan_spawn_agent_preflight(
     };
     if let Some(repo) = dict_literal_field(worktree, "repo").and_then(literal_string) {
         let resolved = resolve_source_relative(file_path, &repo);
-        if !resolved.is_dir() {
+        if !super::result_cache::probe_is_dir(&resolved) {
             diagnostics.push(PreflightDiagnostic {
                 code: Code::ExecutionTargetMissing,
                 path: file_path.display().to_string(),
