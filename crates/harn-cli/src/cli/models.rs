@@ -571,6 +571,9 @@ pub(crate) struct ModelsLoraTrainArgs {
     /// Trainer config passed to recipe-rendered backend launches as `--config`.
     #[arg(long = "backend-config", value_name = "PATH")]
     pub backend_config: Option<std::path::PathBuf>,
+    /// Typed backend-result JSON path. Recipe backends default to OUTPUT_DIR/backend.result.json.
+    #[arg(long = "backend-result-out", value_name = "PATH")]
+    pub backend_result_out: Option<std::path::PathBuf>,
     /// Execute the backend argv after rendering the receipt plan. Omit for deterministic dry-run.
     #[arg(long)]
     pub execute: bool,
