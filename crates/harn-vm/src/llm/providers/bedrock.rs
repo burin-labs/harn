@@ -50,25 +50,39 @@ impl BedrockProvider {
             }
         }
         for message in &request.messages {
-            let role = match message.get("role").and_then(|value| value.as_str()) {
-                Some("assistant") => "assistant",
+            match message.get("role").and_then(|value| value.as_str()) {
                 Some("system") => {
                     let text = request_text_content(message);
                     if !text.is_empty() {
                         system.push(serde_json::json!({ "text": text }));
                     }
-                    continue;
                 }
-                _ => "user",
-            };
-            let text = request_text_content(message);
-            if text.is_empty() {
-                continue;
+                Some("tool") | Some("tool_result") => {
+                    // A tool-result turn is a `user`-role message carrying a
+                    // `toolResult` block. It never has provider-visible text, so
+                    // the old text-only path dropped it entirely and broke the
+                    // Converse alternation after the first tool call.
+                    messages.push(bedrock_tool_result_message(message));
+                }
+                role => {
+                    let role = if role == Some("assistant") {
+                        "assistant"
+                    } else {
+                        "user"
+                    };
+                    let content = bedrock_content_blocks(message);
+                    // Genuinely empty messages (no text, no tool blocks) are
+                    // still skipped; a message that carries only tool_use/tool
+                    // history is not, because `content` now includes those
+                    // blocks.
+                    if !content.is_empty() {
+                        messages.push(serde_json::json!({
+                            "role": role,
+                            "content": content,
+                        }));
+                    }
+                }
             }
-            messages.push(serde_json::json!({
-                "role": role,
-                "content": [{ "text": text }],
-            }));
         }
         if let Some(prefill) = request.prefill.as_deref() {
             if !prefill.is_empty() {
@@ -206,6 +220,166 @@ impl LlmProviderChat for BedrockProvider {
         delta_tx: Option<DeltaSender>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
         Box::pin(self.chat_impl(request, delta_tx))
+    }
+}
+
+/// Build the Converse `content` block list for a `user`/`assistant` message.
+///
+/// Emits a text block for the message's provider-visible text, then a `toolUse`
+/// block per tool call. Tool calls arrive in two internal dialects and both are
+/// covered: Anthropic-native `tool_use` blocks inlined in `content` (how a
+/// Claude-on-Bedrock assistant turn is recorded), and the OpenAI/Ollama-style
+/// top-level `tool_calls` array (how a non-Claude Bedrock model records its
+/// calls). Blocks the adapter can't represent (e.g. images) degrade to the old
+/// text-flattening behavior — the block is dropped, but the rest of the message
+/// (text + tool history) is preserved rather than the whole message vanishing.
+fn bedrock_content_blocks(message: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut blocks = Vec::new();
+    let content = crate::llm::content::provider_visible_content(&message["content"]);
+    match &content {
+        serde_json::Value::String(text) => {
+            if !text.is_empty() {
+                blocks.push(serde_json::json!({ "text": text }));
+            }
+        }
+        serde_json::Value::Array(parts) => {
+            for part in parts {
+                if let Some(block) = bedrock_content_block_from_part(part) {
+                    blocks.push(block);
+                }
+            }
+        }
+        serde_json::Value::Null => {}
+        other => blocks.push(serde_json::json!({ "text": other.to_string() })),
+    }
+    if let Some(calls) = message.get("tool_calls").and_then(|value| value.as_array()) {
+        for call in calls {
+            if let Some(block) = bedrock_tool_use_block_from_call(call) {
+                blocks.push(block);
+            }
+        }
+    }
+    blocks
+}
+
+/// Map one content-array part to a Converse block. Text parts become `text`
+/// blocks; inline Anthropic `tool_use` blocks become `toolUse` blocks. Anything
+/// else (images, audio) is not representable in this text+tools-only adapter and
+/// returns `None` so the caller drops just that block.
+fn bedrock_content_block_from_part(part: &serde_json::Value) -> Option<serde_json::Value> {
+    if part.get("type").and_then(|value| value.as_str()) == Some("tool_use") {
+        return bedrock_tool_use_block(
+            part.get("id"),
+            part.get("name"),
+            part.get("input").cloned(),
+        );
+    }
+    if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
+        return Some(serde_json::json!({ "text": text }));
+    }
+    None
+}
+
+/// Map an OpenAI/Ollama-style tool call (`{ id, function: { name, arguments } }`,
+/// with a top-level `name`/`arguments` fallback) to a Converse `toolUse` block.
+/// The OpenAI `arguments` field is a JSON *string*; Converse `input` is a JSON
+/// *object*, so it is parsed (tolerating an already-object form, falling back to
+/// an empty object on non-JSON). Returns `None` when no tool name is present.
+fn bedrock_tool_use_block_from_call(call: &serde_json::Value) -> Option<serde_json::Value> {
+    let function = call.get("function").unwrap_or(call);
+    let input = match function.get("arguments") {
+        Some(serde_json::Value::String(raw)) => {
+            serde_json::from_str::<serde_json::Value>(raw).unwrap_or_else(|_| serde_json::json!({}))
+        }
+        Some(other) if other.is_object() => other.clone(),
+        _ => call
+            .get("arguments")
+            .filter(|value| value.is_object())
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+    };
+    bedrock_tool_use_block(
+        call.get("id").or_else(|| function.get("id")),
+        function.get("name").or_else(|| call.get("name")),
+        Some(input),
+    )
+}
+
+/// Assemble a Converse `toolUse` block from an id/name/input triple, defaulting a
+/// missing id to the empty string and a missing/non-object input to `{}`.
+/// Returns `None` when the name is missing or empty (a call with no name can't be
+/// represented and would be rejected by Bedrock).
+fn bedrock_tool_use_block(
+    id: Option<&serde_json::Value>,
+    name: Option<&serde_json::Value>,
+    input: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let name = name
+        .and_then(|value| value.as_str())
+        .filter(|name| !name.is_empty())?;
+    let id = id.and_then(|value| value.as_str()).unwrap_or("");
+    let input = input
+        .filter(|value| value.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    Some(serde_json::json!({
+        "toolUse": {
+            "toolUseId": id,
+            "name": name,
+            "input": input,
+        }
+    }))
+}
+
+/// Build the `user`-role message that carries a tool result as a Converse
+/// `toolResult` block. The internal tool-result id lives in `tool_call_id`
+/// (OpenAI dialect) or `tool_use_id` (Anthropic dialect); the result payload is
+/// the message `content`. A `status` is emitted only when the internal shape
+/// distinguishes an error via `is_error`, so ordinary results stay minimal.
+fn bedrock_tool_result_message(message: &serde_json::Value) -> serde_json::Value {
+    let tool_use_id = message
+        .get("tool_call_id")
+        .or_else(|| message.get("tool_use_id"))
+        .or_else(|| message.get("call_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let mut tool_result = serde_json::json!({
+        "toolUseId": tool_use_id,
+        "content": bedrock_tool_result_content(&message["content"]),
+    });
+    if let Some(is_error) = message.get("is_error").and_then(|value| value.as_bool()) {
+        tool_result["status"] = serde_json::json!(if is_error { "error" } else { "success" });
+    }
+    serde_json::json!({
+        "role": "user",
+        "content": [{ "toolResult": tool_result }],
+    })
+}
+
+/// Build the Converse `toolResult.content` list from a tool-result payload. A
+/// plain string becomes a `text` block, a JSON object becomes a `json` block,
+/// and an array is walked into `text` blocks (non-text parts, e.g. images,
+/// degrade away). The list is always non-empty because Converse rejects an empty
+/// `toolResult.content`.
+fn bedrock_tool_result_content(content: &serde_json::Value) -> Vec<serde_json::Value> {
+    let visible = crate::llm::content::provider_visible_content(content);
+    let blocks = match &visible {
+        serde_json::Value::String(text) => vec![serde_json::json!({ "text": text })],
+        serde_json::Value::Object(_) => vec![serde_json::json!({ "json": visible.clone() })],
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(|value| value.as_str())
+                    .map(|text| serde_json::json!({ "text": text }))
+            })
+            .collect(),
+        serde_json::Value::Null => Vec::new(),
+        other => vec![serde_json::json!({ "text": other.to_string() })],
+    };
+    if blocks.is_empty() {
+        vec![serde_json::json!({ "text": "" })]
+    } else {
+        blocks
     }
 }
 
@@ -528,6 +702,144 @@ mod tests {
         assert_eq!(schema["additionalProperties"], false);
         assert!(schema["properties"]["query"].get("pattern").is_none());
         assert!(schema["properties"]["query"].get("default").is_none());
+    }
+
+    #[test]
+    fn converse_body_round_trips_assistant_tool_use_and_tool_result() {
+        // Anthropic-native dialect (Claude on Bedrock): the assistant turn
+        // records its call as an inline `tool_use` content block, and the result
+        // comes back as a top-level `role:"tool_result"` message. Before the fix
+        // both were dropped (no provider-visible text), producing consecutive
+        // user turns that Bedrock 400s on.
+        let mut request = base_request();
+        request.messages = vec![
+            json!({"role": "user", "content": "look it up"}),
+            json!({"role": "assistant", "content": [
+                {"type": "text", "text": "on it"},
+                {"type": "tool_use", "id": "t1", "name": "lookup", "input": {"q": "x"}}
+            ]}),
+            json!({"role": "tool_result", "tool_use_id": "t1", "content": "found it"}),
+        ];
+
+        let body = BedrockProvider::build_request_body(&request);
+        let messages = body["messages"].as_array().expect("messages");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][0]["text"], "on it");
+        assert_eq!(messages[1]["content"][1]["toolUse"]["toolUseId"], "t1");
+        assert_eq!(messages[1]["content"][1]["toolUse"]["name"], "lookup");
+        assert_eq!(messages[1]["content"][1]["toolUse"]["input"]["q"], "x");
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"][0]["toolResult"]["toolUseId"], "t1");
+        assert_eq!(
+            messages[2]["content"][0]["toolResult"]["content"][0]["text"],
+            "found it"
+        );
+        // Roles alternate user/assistant/user — no consecutive same-role turns.
+        assert_ne!(messages[0]["role"], messages[1]["role"]);
+        assert_ne!(messages[1]["role"], messages[2]["role"]);
+    }
+
+    #[test]
+    fn converse_body_maps_openai_dialect_tool_calls_and_tool_role() {
+        // Non-Claude Bedrock model dialect: assistant carries a top-level
+        // `tool_calls` array (arguments as a JSON string) and the result is a
+        // top-level `role:"tool"` message keyed by `tool_call_id`.
+        let mut request = base_request();
+        request.model = "meta.llama3-70b-instruct-v1:0".to_string();
+        request.messages = vec![
+            json!({"role": "user", "content": "look it up"}),
+            json!({"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call_1", "type": "function",
+                 "function": {"name": "lookup", "arguments": "{\"q\":\"x\"}"}}
+            ]}),
+            json!({"role": "tool", "tool_call_id": "call_1", "name": "lookup",
+                   "content": "boom", "is_error": true}),
+        ];
+
+        let body = BedrockProvider::build_request_body(&request);
+        let messages = body["messages"].as_array().expect("messages");
+
+        assert_eq!(messages.len(), 3);
+        // Empty assistant text yields a tool_use-only content list (no stray
+        // empty text block).
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"].as_array().map(Vec::len), Some(1));
+        assert_eq!(messages[1]["content"][0]["toolUse"]["toolUseId"], "call_1");
+        assert_eq!(messages[1]["content"][0]["toolUse"]["name"], "lookup");
+        assert_eq!(messages[1]["content"][0]["toolUse"]["input"]["q"], "x");
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(
+            messages[2]["content"][0]["toolResult"]["toolUseId"],
+            "call_1"
+        );
+        assert_eq!(
+            messages[2]["content"][0]["toolResult"]["content"][0]["text"],
+            "boom"
+        );
+        assert_eq!(messages[2]["content"][0]["toolResult"]["status"], "error");
+    }
+
+    #[test]
+    fn converse_body_preserves_plain_text_conversation() {
+        let mut request = base_request();
+        request.messages = vec![
+            json!({"role": "user", "content": "hi"}),
+            json!({"role": "assistant", "content": "hello there"}),
+            json!({"role": "user", "content": "thanks"}),
+        ];
+
+        let body = BedrockProvider::build_request_body(&request);
+        let messages = body["messages"].as_array().expect("messages");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"][0]["text"], "hi");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][0]["text"], "hello there");
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"][0]["text"], "thanks");
+        // No stray toolUse/toolResult blocks in a plain conversation.
+        assert!(messages[1]["content"][0].get("toolUse").is_none());
+    }
+
+    #[test]
+    fn converse_body_emits_both_text_and_tool_use_for_mixed_assistant() {
+        let mut request = base_request();
+        request.messages = vec![json!({
+            "role": "assistant",
+            "content": "let me check",
+            "tool_calls": [
+                {"id": "call_1", "type": "function",
+                 "function": {"name": "lookup", "arguments": "{\"q\":\"x\"}"}}
+            ]
+        })];
+
+        let body = BedrockProvider::build_request_body(&request);
+        let content = body["messages"][0]["content"].as_array().expect("content");
+
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["text"], "let me check");
+        assert_eq!(content[1]["toolUse"]["name"], "lookup");
+        assert_eq!(content[1]["toolUse"]["input"]["q"], "x");
+    }
+
+    #[test]
+    fn converse_body_skips_genuinely_empty_messages() {
+        let mut request = base_request();
+        request.messages = vec![
+            json!({"role": "user", "content": "hi"}),
+            json!({"role": "assistant", "content": ""}),
+        ];
+
+        let body = BedrockProvider::build_request_body(&request);
+        let messages = body["messages"].as_array().expect("messages");
+
+        // The empty assistant message (no text, no tool blocks) is dropped.
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["content"][0]["text"], "hi");
     }
 
     #[test]
