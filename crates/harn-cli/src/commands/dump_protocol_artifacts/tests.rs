@@ -1,4 +1,6 @@
 use std::collections::BTreeSet;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use serde_json::json;
 
@@ -415,6 +417,58 @@ fn generated_go_includes_harn_wire_vocabularies() {
     for value in worker_status_values() {
         assert!(go.contains(&value), "Go artifact missing {value}");
     }
+}
+
+#[test]
+fn go_struct_field_formatter_aligns_long_generated_fields() {
+    let raw = "\
+type Example struct {
+\tA string `json:\"a\"`
+\tMutationStatus *HarnToolMutationStatus `json:\"mutationStatus,omitempty\"`
+\tRaw json.RawMessage `json:\"raw\"`
+}
+";
+    let formatted = "\
+type Example struct {
+\tA              string                  `json:\"a\"`
+\tMutationStatus *HarnToolMutationStatus `json:\"mutationStatus,omitempty\"`
+\tRaw            json.RawMessage         `json:\"raw\"`
+}
+";
+    assert_eq!(format_go_struct_fields(raw), formatted);
+}
+
+#[test]
+fn generated_go_is_gofmt_stable_when_gofmt_is_available() {
+    let go = generate_go();
+    let mut child = match Command::new("gofmt")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to spawn gofmt: {error}"),
+    };
+
+    child
+        .stdin
+        .as_mut()
+        .expect("gofmt stdin")
+        .write_all(go.as_bytes())
+        .expect("write generated Go to gofmt");
+    let output = child.wait_with_output().expect("wait for gofmt");
+    assert!(
+        output.status.success(),
+        "gofmt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("gofmt stdout utf8"),
+        go,
+        "generated Go protocol artifact must be gofmt-stable before it is written"
+    );
 }
 
 #[test]

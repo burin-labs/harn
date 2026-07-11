@@ -1612,7 +1612,12 @@ fn from_host_tool_call_update_defaults_status_and_maps_executor_alias() {
     let event = AgentEvent::from_host_payload(
         "s1",
         "tool_call_update",
-        &json!({ "tool_call_id": "t1", "tool_name": "read_file", "executor": "harn" }),
+        &json!({
+            "tool_call_id": "t1",
+            "tool_name": "read_file",
+            "mutation_status": "unknown",
+            "executor": "harn",
+        }),
     )
     .expect("tool_call_update");
     match event {
@@ -1635,6 +1640,7 @@ fn from_host_tool_call_update_preserves_structured_executor() {
             "tool_call_id": "t1",
             "tool_name": "linear_create",
             "status": "completed",
+            "mutation_status": "unknown",
             "executor": { "kind": "mcp_server", "server_name": "linear" },
         }),
     )

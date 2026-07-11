@@ -1752,7 +1752,8 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
         assert!(payload["params"]["update"].get("executor").is_none());
     }
 
-    // `executor: None` must not surface Harn metadata.
+    // `executor: None` must not surface executor metadata. The typed
+    // mutation outcome is still mandatory for every tool_call_update.
     sink.handle_event(&AgentEvent::ToolCallUpdate {
         session_id: "session-1".to_string(),
         tool_call_id: "tool-2".to_string(),
@@ -1774,7 +1775,9 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
     });
     let line = rx.recv().await.expect("acp tool_call_update notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert!(payload["params"]["update"].get("_meta").is_none());
+    let harn_meta = update_harn_meta(&payload);
+    assert_eq!(harn_meta["mutationStatus"], "unknown");
+    assert!(harn_meta.get("executor").is_none());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1807,7 +1810,9 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
     let line = rx.recv().await.expect("acp tool_call_update notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
     assert_eq!(payload["params"]["update"]["rawInput"]["q"], "hello");
-    assert!(payload["params"]["update"].get("_meta").is_none());
+    let harn_meta = update_harn_meta(&payload);
+    assert_eq!(harn_meta["mutationStatus"], "unknown");
+    assert!(harn_meta.get("rawInputPartial").is_none());
 
     // Unparseable partial bytes → `rawInputPartial` populated, `rawInput` absent.
     sink.handle_event(&AgentEvent::ToolCallUpdate {
@@ -1981,7 +1986,7 @@ async fn tool_call_update_includes_audit_when_mutation_session_is_active() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn tool_call_update_omits_audit_when_no_mutation_session() {
+async fn tool_call_update_omits_audit_but_keeps_typed_mutation_status() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
     sink.handle_event(&AgentEvent::ToolCallUpdate {
@@ -2004,10 +2009,11 @@ async fn tool_call_update_omits_audit_when_no_mutation_session() {
     });
     let line = rx.recv().await.expect("acp tool_call_update notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert!(
-        payload["params"]["update"].get("_meta").is_none(),
-        "got: {payload}"
-    );
+    let update = &payload["params"]["update"];
+    let harn_meta = update_harn_meta(&payload);
+    assert_eq!(harn_meta["mutationStatus"], "unknown");
+    assert!(update.get("audit").is_none());
+    assert!(update.get("mutationStatus").is_none());
 }
 
 /// harn#905 conformance: vendor-extension session-update fields

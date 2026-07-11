@@ -228,7 +228,7 @@ pub(super) fn generate_go() -> String {
         MCP_CACHE_RESULT_FIELDS,
     ));
 
-    out.push_str(GO_TYPE_DEFINITIONS);
+    out.push_str(&format_go_struct_fields(GO_TYPE_DEFINITIONS));
     out
 }
 
@@ -647,4 +647,108 @@ pub(super) fn go_string_array(name: &str, values: &[&str]) -> String {
     }
     out.push_str("}\n\n");
     out
+}
+
+pub(super) fn format_go_struct_fields(input: &str) -> String {
+    // This is intentionally a tiny formatter for this generator's simple
+    // named-field struct literals. It is not a general Go parser.
+    let mut out = String::new();
+    let mut lines = input.lines();
+
+    while let Some(line) = lines.next() {
+        out.push_str(line);
+        out.push('\n');
+
+        if !(line.starts_with("type ") && line.ends_with(" struct {")) {
+            continue;
+        }
+
+        let mut struct_lines = Vec::new();
+        let mut closed_struct = false;
+        for struct_line in lines.by_ref() {
+            if struct_line == "}" {
+                out.push_str(&format_go_struct_field_block(&struct_lines));
+                out.push_str("}\n");
+                closed_struct = true;
+                break;
+            }
+            struct_lines.push(struct_line.to_string());
+        }
+        if !closed_struct {
+            for struct_line in struct_lines {
+                out.push_str(&struct_line);
+                out.push('\n');
+            }
+        }
+    }
+
+    out
+}
+
+fn format_go_struct_field_block(lines: &[String]) -> String {
+    let mut parsed = Vec::new();
+    let mut max_name_len = 0usize;
+    let mut max_type_len = 0usize;
+
+    for line in lines {
+        let parsed_line = parse_go_struct_field(line);
+        if let Some(field) = &parsed_line {
+            max_name_len = max_name_len.max(field.name.len());
+            max_type_len = max_type_len.max(field.ty.len());
+        }
+        parsed.push(parsed_line);
+    }
+
+    let mut out = String::new();
+    for (line, parsed_line) in lines.iter().zip(parsed) {
+        match parsed_line {
+            Some(field) => {
+                out.push('\t');
+                out.push_str(&field.name);
+                out.push_str(&" ".repeat(max_name_len - field.name.len() + 1));
+                out.push_str(&field.ty);
+                if let Some(tag) = field.tag {
+                    out.push_str(&" ".repeat(max_type_len - field.ty.len() + 1));
+                    out.push_str(&tag);
+                }
+                out.push('\n');
+            }
+            None => {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GoStructField {
+    name: String,
+    ty: String,
+    tag: Option<String>,
+}
+
+fn parse_go_struct_field(line: &str) -> Option<GoStructField> {
+    let trimmed = line.strip_prefix('\t')?;
+    if trimmed.is_empty() || trimmed.starts_with("//") {
+        return None;
+    }
+
+    let (before_tag, tag) = match trimmed.split_once(" `") {
+        Some((before_tag, tag)) => (before_tag, Some(format!("`{tag}"))),
+        None => (trimmed, None),
+    };
+    let mut parts = before_tag.split_whitespace();
+    let name = parts.next()?;
+    let ty = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+
+    Some(GoStructField {
+        name: name.to_string(),
+        ty: ty.to_string(),
+        tag,
+    })
 }
