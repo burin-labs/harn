@@ -572,16 +572,16 @@ type ACPContentBlock struct {
 // HarnToolLifecycleMeta is the Harn-specific tool-call lifecycle metadata
 // living under `_meta.harn` on tool_call / tool_call_update notifications.
 type HarnToolLifecycleMeta struct {
-	Audit               json.RawMessage `json:"audit,omitempty"`
-	ChangedPaths        []string        `json:"changedPaths,omitempty"`
-	DurationMs          *float64        `json:"durationMs,omitempty"`
-	Error               *string         `json:"error,omitempty"`
-	ErrorCategory       *string         `json:"errorCategory,omitempty"`
-	ExecutionDurationMs *float64        `json:"executionDurationMs,omitempty"`
-	Executor            json.RawMessage `json:"executor,omitempty"`
+	Audit               json.RawMessage         `json:"audit,omitempty"`
+	ChangedPaths        []string                `json:"changedPaths,omitempty"`
+	DurationMs          *float64                `json:"durationMs,omitempty"`
+	Error               *string                 `json:"error,omitempty"`
+	ErrorCategory       *string                 `json:"errorCategory,omitempty"`
+	ExecutionDurationMs *float64                `json:"executionDurationMs,omitempty"`
+	Executor            json.RawMessage         `json:"executor,omitempty"`
 	MutationStatus      *HarnToolMutationStatus `json:"mutationStatus,omitempty"`
-	Parsing             *bool           `json:"parsing,omitempty"`
-	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`
+	Parsing             *bool                   `json:"parsing,omitempty"`
+	RawInputPartial     *string                 `json:"rawInputPartial,omitempty"`
 }
 
 // ToolCallReceipt is the typed, privacy-preserving receipt emitted for an
