@@ -250,7 +250,18 @@ pipeline default() {
     missing_tool_call_classifier({confidence_threshold: 2.0})
   }
   __io_println("invalid_threshold=" + to_string(is_err(invalid_threshold)))
-  __io_println(contains(to_string(unwrap_err(invalid_threshold)), "confidence_threshold"))
+  const threshold_error = unwrap_err(invalid_threshold)
+  __io_println(
+    "invalid_threshold.code="
+      + to_string(threshold_error.error == "missing_tool_call.invalid_confidence_threshold"),
+  )
+  __io_println(
+    "invalid_threshold.field=" + to_string(threshold_error.field == "confidence_threshold"),
+  )
+  __io_println(
+    "invalid_threshold.bounds="
+      + to_string(threshold_error.min == 0.0 && threshold_error.max == 1.0),
+  )
 }
 // Successful tool on turn 1 → no streak nudge on turn 2.
 // By a later turn (>= 2 consecutive toolless turns) the streak nudge fired.

@@ -394,7 +394,7 @@ impl TypeChecker {
                 let has_schema = (name == "llm_call" || name == "llm_completion")
                     && Self::llm_call_has_typed_schema_option(args, scope);
                 if !has_schema {
-                    self.warning_at_with_help(Code::BoundaryValueUnvalidated,
+                    self.error_at_with_help(Code::BoundaryValueUnvalidated,
                         format!("{} on unvalidated `{}()` result", kind.direct_label(), name),
                         span,
                         "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
@@ -404,7 +404,7 @@ impl TypeChecker {
         }
         if let Node::Identifier(name) = &object.node {
             if let Some(source) = scope.is_untyped_source(name) {
-                self.warning_at_with_help(Code::BoundaryValueUnvalidated,
+                self.error_at_with_help(Code::BoundaryValueUnvalidated,
                     format!(
                         "{} on unvalidated value '{}' from `{}`",
                         kind.variable_label(),

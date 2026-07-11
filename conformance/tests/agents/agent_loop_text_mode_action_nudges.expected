@@ -21,4 +21,6 @@ true
 invalid_options=true
 true
 invalid_threshold=true
-true
+invalid_threshold.code=true
+invalid_threshold.field=true
+invalid_threshold.bounds=true
