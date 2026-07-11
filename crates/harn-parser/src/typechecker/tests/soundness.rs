@@ -654,3 +654,136 @@ fn test_compound_assignment_to_list_element_type_checks() {
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
+
+// --- HARN-NAM-005: method existence on concrete receivers -----------------
+
+/// Diagnostics carrying the method-existence code, by message, for the given
+/// source. Asserting on `Code::UnknownMethod` keeps these deterministic and
+/// free of line-number / prose coupling.
+fn nam_005(source: &str) -> Vec<String> {
+    check_source(source)
+        .into_iter()
+        .filter(|d| d.code == crate::diagnostic_codes::Code::UnknownMethod)
+        .map(|d| d.message)
+        .collect()
+}
+
+#[test]
+fn unknown_method_on_annotated_float_is_rejected() {
+    let diags = nam_005(
+        r"fn f() {
+  const x: float = 3.14
+  x.frobnicate()
+}",
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert!(diags[0].contains("frobnicate"), "{diags:?}");
+}
+
+#[test]
+fn unknown_method_on_int_field_is_rejected() {
+    let diags = nam_005(
+        r"struct User { age: int }
+fn f(u: User) {
+  u.age.frobnicate()
+}",
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+}
+
+#[test]
+fn unknown_method_on_string_is_rejected_with_suggestion() {
+    let diags = nam_005(
+        r#"fn f() {
+  const s: string = "hi"
+  s.uppercas()
+}"#,
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert!(diags[0].contains("did you mean `uppercase`"), "{diags:?}");
+}
+
+#[test]
+fn unknown_method_on_list_is_rejected() {
+    let diags = nam_005(
+        r"fn f() {
+  const xs: list<int> = [1, 2]
+  xs.frobnicate()
+}",
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+}
+
+#[test]
+fn unknown_method_on_struct_is_rejected_with_suggestion() {
+    let diags = nam_005(
+        r"struct Point { x: int, y: int }
+impl Point {
+  fn distance(self) -> int { return self.x }
+}
+fn f(p: Point) {
+  p.distanse()
+}",
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert!(diags[0].contains("did you mean `distance`"), "{diags:?}");
+}
+
+#[test]
+fn valid_methods_on_concrete_receivers_do_not_error() {
+    let errs = errors(
+        r#"struct Point { x: int }
+impl Point {
+  fn render(self) -> string { return "p" }
+}
+fn f(p: Point) {
+  const s: string = "hi"
+  s.uppercase()
+  const xs: list<int> = [1, 2]
+  xs.reverse()
+  xs.count()
+  xs.iter()
+  p.render()
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
+fn method_on_gradual_receiver_defers_to_runtime() {
+    // Unannotated / unknown receivers stay gradual: no static rejection.
+    let diags = nam_005(
+        r"fn f(x) {
+  x.frobnicate()
+}",
+    );
+    assert!(diags.is_empty(), "gradual receiver should defer: {diags:?}");
+}
+
+#[test]
+fn method_on_dict_receiver_defers_to_runtime() {
+    // A dict can hold a callable under a key and be invoked as `d.field()`,
+    // so dict receivers are never statically rejected.
+    let diags = nam_005(
+        r"fn f(d: dict<string, string>) {
+  d.frobnicate()
+}",
+    );
+    assert!(diags.is_empty(), "dict receiver should defer: {diags:?}");
+}
+
+#[test]
+fn recognized_method_name_on_number_is_not_flagged() {
+    // The permissive number tier only rejects names unknown on every builtin;
+    // a real builtin method name (even if odd on a number) is tolerated.
+    let diags = nam_005(
+        r"fn f() {
+  const n: int = 5
+  n.to_string()
+}",
+    );
+    assert!(
+        diags.is_empty(),
+        "known method name should defer: {diags:?}"
+    );
+}

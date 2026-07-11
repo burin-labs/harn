@@ -1085,6 +1085,7 @@ impl TypeChecker {
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
+                self.check_method_existence(object, method, scope, span);
                 self.check_method_args_with_expected(object, method, args, scope);
                 self.check_generic_method_bound(object, method, scope, span);
             }
@@ -1100,6 +1101,7 @@ impl TypeChecker {
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
+                self.check_method_existence(object, method, scope, span);
                 self.check_method_args_with_expected(object, method, args, scope);
                 self.check_generic_method_bound(object, method, scope, span);
             }

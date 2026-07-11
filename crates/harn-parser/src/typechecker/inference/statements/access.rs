@@ -379,6 +379,123 @@ impl TypeChecker {
         }
     }
 
+    /// Diagnose a method call (`obj.method()` / `obj?.method()`) whose
+    /// receiver has a *provably concrete* builtin or struct type but names a
+    /// method that does not exist on it. Mirrors the field-typo check
+    /// ([`check_property_access`]): fields on a known shape/struct are already
+    /// validated (HARN-NAM-004); this closes the parallel hole for methods,
+    /// which the VM would otherwise surface late as a `has no method` runtime
+    /// crash (strings/lists/sets/ranges) or a silent `nil` (numbers/structs).
+    ///
+    /// Only fires for receivers whose type is known and closed. Anything
+    /// gradual — `unknown`/`any`, an unconstrained generic parameter, a
+    /// `dict`/shape (which can carry a callable field invoked as
+    /// `d.field()`), an `enum`, a union, an iterator, or a harness handle —
+    /// defers to runtime so a valid program is never rejected. Harness
+    /// methods are dispatched (and returned) earlier in `check_node`, so they
+    /// never reach here.
+    pub(super) fn check_method_existence(
+        &mut self,
+        object: &SNode,
+        method: &str,
+        scope: &TypeScope,
+        span: Span,
+    ) {
+        use crate::typechecker::method_registry as reg;
+
+        let Some(raw) = self.infer_type(object, scope) else {
+            return;
+        };
+        // Same gate as the field-typo check: only hold annotated variables and
+        // named-contract receivers to the strict path; a bare inferred value
+        // stays gradual.
+        if !self.is_strict_access_source(object, &raw, scope) {
+            return;
+        }
+        let resolved = self.resolve_alias(&raw, scope);
+
+        // Struct receivers: the valid set is exactly the impl-block methods.
+        // Only check when an impl block is actually in scope — a struct with
+        // its impl in a not-yet-registered module leaves `get_impl_methods`
+        // empty, and we defer rather than risk a cross-module false positive.
+        let struct_name = match &resolved {
+            TypeExpr::Named(name) => Some(name.as_str()),
+            TypeExpr::Applied { name, .. } => Some(name.as_str()),
+            _ => None,
+        }
+        .filter(|name| scope.get_struct(name).is_some());
+        if let Some(name) = struct_name {
+            if let Some(methods) = scope.get_impl_methods(name) {
+                if !methods.iter().any(|m| m.name == method) {
+                    let names: Vec<&str> = methods.iter().map(|m| m.name.as_str()).collect();
+                    self.emit_unknown_method(
+                        method,
+                        &format!("struct `{name}`"),
+                        &names,
+                        true,
+                        span,
+                    );
+                }
+            }
+            return;
+        }
+
+        // Concrete builtin receivers with a closed method set.
+        let closed: Option<(&str, &[&str])> = match &resolved {
+            TypeExpr::List(_) => Some(("list", reg::LIST_METHODS)),
+            TypeExpr::Named(name) => match name.as_str() {
+                "string" => Some(("string", reg::STRING_METHODS)),
+                "list" => Some(("list", reg::LIST_METHODS)),
+                "set" => Some(("set", reg::SET_METHODS)),
+                // Permissive tier: numbers dispatch to `nil` for every name and
+                // bool has no methods, so there is no closed set. Reject only
+                // names unknown on every builtin — enough to catch typos.
+                "int" | "float" | "bool" => {
+                    if !reg::is_any_known_builtin_method(method) {
+                        self.emit_unknown_method(method, &format!("`{name}`"), &[], false, span);
+                    }
+                    return;
+                }
+                _ => None,
+            },
+            TypeExpr::Applied { name, .. } if name == "set" => Some(("set", reg::SET_METHODS)),
+            _ => None,
+        };
+        if let Some((label, valid)) = closed {
+            if !valid.contains(&method) {
+                self.emit_unknown_method(method, &format!("`{label}`"), valid, true, span);
+            }
+        }
+    }
+
+    /// Emit a HARN-NAM-005 with the same "did you mean" + "available"
+    /// affordances as the field-typo diagnostic. `list_available` controls
+    /// whether the help enumerates the candidate set (omitted for the
+    /// permissive number/bool tier, whose candidate set is the whole builtin
+    /// universe).
+    fn emit_unknown_method(
+        &mut self,
+        method: &str,
+        receiver_desc: &str,
+        candidates: &[&str],
+        list_available: bool,
+        span: Span,
+    ) {
+        let max_dist = if method.len() <= 4 { 1 } else { 2 };
+        let suggestion =
+            crate::diagnostic::find_closest_match(method, candidates.iter().copied(), max_dist);
+        let mut msg = format!("method `{method}` does not exist on {receiver_desc}");
+        if let Some(close) = suggestion {
+            msg.push_str(&format!(" — did you mean `{close}`?"));
+        }
+        if list_available && !candidates.is_empty() {
+            let help = format!("available methods: {}", candidates.join(", "));
+            self.error_at_with_help(Code::UnknownMethod, msg, span, help);
+        } else {
+            self.error_at(Code::UnknownMethod, msg, span);
+        }
+    }
+
     pub(super) fn check_strict_untyped_access(
         &mut self,
         object: &SNode,
