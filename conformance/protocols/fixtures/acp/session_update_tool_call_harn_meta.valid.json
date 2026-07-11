@@ -50,6 +50,7 @@
               "errorCategory": "parse_aborted",
               "executionDurationMs": 7,
               "executor": "host_bridge",
+              "mutationStatus": "not_applied",
               "parsing": false,
               "rawInputPartial": "{\"path\":\"src"
             }
