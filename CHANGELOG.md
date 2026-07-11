@@ -9,6 +9,108 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.10
+
+### Added
+
+- Added a CI ratchet (`make check-stdlib-strict-types`) that fails when any
+  stdlib `.harn` field-accesses an unvalidated boundary value (HARN-OWN-004)
+  outside a documented frontier exclusion list.
+
+### Changed
+
+- `harn check` over a directory now checks files on a parallel worker pool
+  (override with `HARN_CHECK_JOBS=<n>`; `1` restores the serial driver) and
+  memoizes resolved-module parsing across the preflight/mock-host/import/bundle
+  scans, so the shared import closure is parsed once per run instead of once
+  per importing file. Whole-tree check on a 616-file pipeline tree drops from
+  ~137s to ~4s with byte-identical diagnostics. A lex/parse failure in one
+  file no longer stops text-mode `harn check` from checking the remaining
+  files (the run still exits non-zero).
+- Typed the internal record shapes the `harn models batch` planner
+  constructs and threads (`BatchCandidate`, `BatchModelCapability`,
+  `BatchLiveAdapter`, `BatchRequestEntry`, `BatchGroupSummary`,
+  `BatchCandidateResolution`). Provider HTTP response bodies and
+  user-supplied request/metadata JSON stay open `dict` boundary data.
+- Refresh the Cargo lockfile to the latest semver-compatible dependency versions.
+- Upgrade npm dependencies across the root tooling, portal, website,
+  tree-sitter, and VS Code packages to latest (portal/website on Vite 8 and
+  Vitest 4.1.10; website on react-router 8; VS Code extension on TypeScript 7),
+  and bump pinned GitHub Actions to their latest tags.
+- Migrate the three `harn-cli` date parsers off the deprecated
+  `time::format_description::parse` to `parse_borrowed::<1>` (behavior-preserving
+  version 1), letting the `time` crate float forward to 0.3.53 instead of being
+  pinned back to 0.3.47 to dodge the deprecation warning under `-D warnings`.
+- Make model cost projections, cache accounting, traces, and budget enforcement
+  honor provider-published whole-request long-context pricing bands; refresh
+  stale OpenAI o-series pricing and current direct model rows.
+- Add GPT-5.6 Sol, Terra, and Luna standard and Pro routes through OpenRouter
+  with shared logical-model lineage and exact reasoning constraints.
+- `std/disclosure` now threads typed `DisclosureConfig` / `DisclosureContext`
+  records through its internal render helpers instead of bare `dict`, while the
+  raw TOML/env boundary parsers stay open. `std/connectors/github` narrows the
+  `repo` (`string | dict`), `run_id`, and pull-number params (`int | string`)
+  on its workflow, release, and PR helpers. No behavior change.
+- **Annotate stdlib return types in `std/math` and `std/cache`.** `std/math` helpers and public
+  functions with provably concrete returns now carry `int` / `float` / `bool` / `list` / record
+  annotations (including a named `KMeansResult`), and `std/cache`'s `with_cache_envelope` returns a
+  named `CacheEnvelope` shape (its cached `value` stays `unknown`). Genuinely polymorphic numeric
+  pass-throughs are left unannotated. No behavior change; `harn check --strict-types` over the stdlib
+  stays at its pre-existing error count.
+
+### Fixed
+
+- Stop undercounting Anthropic session cost: `project_call_cost` now detects
+  whether `input_tokens` includes cached tokens (OpenAI) or excludes them
+  (Anthropic) before subtracting cache counts, so real non-cached input is no
+  longer billed at zero.
+- Preserve Bedrock Converse tool-call history: assistant `tool_use` turns and
+  structured tool results now render as `toolUse`/`toolResult` content blocks
+  instead of being dropped as empty text, so agentic tool loops on Bedrock no
+  longer 400 with "messages must alternate".
+- Stop `code_index` `read_range` from over-reporting line totals by one and
+  returning a phantom empty last line for newline-terminated files, matching
+  the canonical `count_lines` semantics.
+- Stop `harn serve` panicking at router build when a CORS config pairs
+  `allow_origins: ["*"]` with `allow_credentials: true`. The `"*"` list
+  wildcard now suppresses credentials just like `allow_any_origin`.
+- Strip `*_PASSWORD`, `*_PASSWD`, and `*_CREDENTIALS` parent environment
+  variables from `run`/`command_run` child processes, so secrets like
+  `DOCKER_PASSWORD` no longer leak into the tool-result stdout the model sees.
+- Fixed `agent_sessions::fork` leaving a dangling `child_id` on the parent when
+  the post-fork transcript budget check rejected the fork. The lineage edge is
+  now unlinked before the destination session is closed.
+- Decode staged rename/copy records in the `tools.git` `status` operation
+  instead of mis-parsing the NUL-separated original-path field as a garbage
+  entry, and expose the source path as `orig_path`.
+- Keep non-ASCII tracked-file and churn paths literal in the git-backed
+  scanner by passing `core.quotepath=false` (and NUL-delimiting `ls-files`),
+  so paths like `src/café.rs` match their real on-disk names.
+- Make `harn lint --fix` exit non-zero when unfixable error-level diagnostics
+  remain (and print them), matching the plain and `--json` lint paths so `--fix`
+  in CI/pre-commit no longer passes green over real errors.
+- Vertex now delegates Gemini `generateContent` response parsing to the shared Gemini parser, so
+  Gemini 2.5 thinking + function-calling over Vertex keeps the `thoughtSignature` it must replay next
+  turn, skips empty-name function calls, and reports usage telemetry — matching the direct Gemini path.
+- OpenAI-compatible parallel tool-call history splitting now attaches each tool result by the call's own
+  id instead of by position, so a batch where some calls lack an id no longer misattaches a result to the
+  wrong assistant call.
+- Redact `*_PASSWORD`, `*_PASSWD`, and `*_CREDENTIALS` environment variables in
+  spawned child processes, alongside the existing `*_API_KEY`/`*_TOKEN`/
+  `*_SECRET`/`*_KEY` suffix redaction.
+- Fixed session-store `close()` so a correctly closed, fully signed session verifies cleanly: `verify()`
+  now attests the `Receipt` event against the pre-receipt chain root (via `verify_receipt_root`) instead of
+  reporting a spurious `BadSignature`.
+- Made SQLite `close()` atomic: the receipt insert, its signature, and the `status='closed'` flip now commit
+  in a single transaction, so a crash mid-close can no longer leave a receipt behind an `open` session.
+- Fixed the in-memory backend `close()` to sign the receipt it appended by event id under one lock, instead
+  of signing `last_mut()` after releasing the guard where a concurrent append could displace it.
+- Reject a sliding stream window whose `step` exceeds its `size`. Such a
+  config silently collapsed to tumbling (the intended gap events were
+  never skipped); it is now rejected at validation time with a clear
+  error. Overlap (`step < size`) and the tumbling-equivalent
+  (`step == size`) are unchanged.
+
 ## v0.10.9
 
 ### Added
