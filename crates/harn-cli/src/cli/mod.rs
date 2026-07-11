@@ -21,6 +21,7 @@ mod connect;
 mod connector;
 mod contracts;
 mod crystallize;
+mod dap;
 mod demo;
 mod dev;
 mod doc;
@@ -103,6 +104,7 @@ pub(crate) use crystallize::{
     CrystallizeArgs, CrystallizeCommand, CrystallizeIngestArgs, CrystallizeShadowArgs,
     CrystallizeValidateArgs,
 };
+pub(crate) use dap::DapArgs;
 pub(crate) use demo::DemoArgs;
 pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
@@ -369,6 +371,13 @@ SCRIPTING
     Serve(ServeArgs),
     /// Manage remote MCP OAuth credentials and status.
     Mcp(McpArgs),
+    /// Launch the Harn debug adapter (DAP) over stdio.
+    ///
+    /// Speaks the Debug Adapter Protocol on stdin/stdout so an editor — or a
+    /// scripted DAP client — can set breakpoints, step, and inspect variables
+    /// in a `.harn` program. This is the same server the `harn-dap` binary
+    /// alias runs; the subcommand makes it reachable with just `harn` on PATH.
+    Dap(DapArgs),
     /// Watch a .harn file and re-run it on changes.
     Watch(WatchArgs),
     /// Watch a Harn project and re-typecheck only the modules whose
