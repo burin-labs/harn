@@ -572,10 +572,18 @@ fn split_parallel_native_tool_call_history(
 
         for (idx, call) in tool_calls.into_iter().enumerate() {
             let mut assistant = message.clone();
+            // Read the id from this call directly, not by positional index into
+            // `ids`: `ids` was compacted with filter_map (calls lacking an id are
+            // dropped), so `ids.get(idx)` misaligns once any call has no id and
+            // would attach a tool result to the wrong assistant call.
+            let call_id = call
+                .get("id")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string);
             if let Some(object) = assistant.as_object_mut() {
                 object.insert(
                     "tool_calls".to_string(),
-                    serde_json::Value::Array(vec![call.clone()]),
+                    serde_json::Value::Array(vec![call]),
                 );
                 if idx > 0 {
                     object.insert(
@@ -585,8 +593,8 @@ fn split_parallel_native_tool_call_history(
                 }
             }
             normalized.push(assistant);
-            if let Some(id) = ids.get(idx) {
-                if let Some(results) = results_by_id.remove(id) {
+            if let Some(id) = call_id {
+                if let Some(results) = results_by_id.remove(&id) {
                     normalized.extend(results);
                 }
             }
@@ -3380,5 +3388,54 @@ thinking_modes = ["enabled"]
             "image must be stripped off the tool result: {}",
             out[1]
         );
+    }
+
+    #[test]
+    fn split_parallel_tool_calls_attaches_results_by_id_not_position() {
+        // Regression: a parallel assistant batch whose MIDDLE call lacks an id.
+        // Tool results must stay keyed by id — a positional index into the
+        // id-compacted `ids` vec would misattach the third call's result to the
+        // id-less middle call.
+        let msgs = vec![
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
+                    {"type": "function", "function": {"name": "b", "arguments": "{}"}},
+                    {"id": "c3", "type": "function", "function": {"name": "c", "arguments": "{}"}},
+                ],
+            }),
+            json!({"role": "tool", "tool_call_id": "c1", "content": "result-a"}),
+            json!({"role": "tool", "tool_call_id": "c3", "content": "result-c"}),
+        ];
+
+        let out = split_parallel_native_tool_call_history(msgs);
+
+        // Every tool result must immediately follow the single-call assistant
+        // message whose id it answers.
+        let mut seen_a = false;
+        let mut seen_c = false;
+        for pair in out.windows(2) {
+            let (first, second) = (&pair[0], &pair[1]);
+            if second["role"] == "tool" {
+                let result_id = second["tool_call_id"].as_str().expect("tool_call_id");
+                let call_id = first["tool_calls"][0]["id"].as_str().unwrap_or("");
+                assert_eq!(
+                    call_id, result_id,
+                    "tool result {result_id} attached to wrong call {call_id}: {out:?}"
+                );
+                seen_a |= result_id == "c1";
+                seen_c |= result_id == "c3";
+            }
+        }
+        assert!(seen_a && seen_c, "both results must be present: {out:?}");
+
+        // The id-less middle call gets its own assistant message with no result.
+        let middle = out
+            .iter()
+            .find(|m| m["tool_calls"][0]["function"]["name"] == "b")
+            .expect("middle call present");
+        assert!(middle["tool_calls"][0].get("id").is_none());
     }
 }
