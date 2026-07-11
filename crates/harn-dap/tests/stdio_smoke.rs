@@ -12,18 +12,52 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
 const BIN: &str = env!("CARGO_BIN_EXE_harn-dap");
 
+/// Per-message read bound. Generous — this catches a *wedged* adapter (the
+/// failure mode this smoke test exists to detect), not slow-but-working
+/// responses. A dedicated reader thread feeds an mpsc channel so we block on
+/// `recv_timeout` rather than polling a wall clock (which the flaky-test lint
+/// forbids, and rightly so).
+const RECV_BUDGET: Duration = Duration::from_secs(30);
+
 /// A DAP client speaking to a spawned `harn-dap` over its stdio pipes.
 struct DapClient {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    rx: Receiver<Value>,
     seq: i64,
+}
+
+/// Read exactly one `Content-Length`-framed DAP message from `stdout`.
+/// Returns `None` at EOF or on a malformed frame so the reader thread can
+/// exit cleanly (closing the channel).
+fn read_message(stdout: &mut BufReader<ChildStdout>) -> Option<Value> {
+    let mut content_length = 0usize;
+    loop {
+        let mut line = String::new();
+        if stdout.read_line(&mut line).ok()? == 0 {
+            return None; // EOF
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, val)) = trimmed.split_once(':') {
+            if name.eq_ignore_ascii_case("Content-Length") {
+                content_length = val.trim().parse().ok()?;
+            }
+        }
+    }
+    let mut body = vec![0u8; content_length];
+    stdout.read_exact(&mut body).ok()?;
+    serde_json::from_slice(&body).ok()
 }
 
 impl DapClient {
@@ -35,11 +69,19 @@ impl DapClient {
             .spawn()
             .expect("spawn harn-dap binary");
         let stdin = child.stdin.take().expect("child stdin");
-        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            while let Some(msg) = read_message(&mut stdout) {
+                if tx.send(msg).is_err() {
+                    break; // client dropped
+                }
+            }
+        });
         DapClient {
             child,
             stdin,
-            stdout,
+            rx,
             seq: 0,
         }
     }
@@ -56,41 +98,21 @@ impl DapClient {
         self.stdin.flush().unwrap();
     }
 
-    /// Read exactly one `Content-Length`-framed DAP message.
-    fn read_message(&mut self) -> Value {
-        let mut content_length = 0usize;
-        loop {
-            let mut line = String::new();
-            let n = self.stdout.read_line(&mut line).expect("read header line");
-            assert!(n > 0, "adapter closed stdout mid-header");
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            if let Some((name, val)) = trimmed.split_once(':') {
-                if name.eq_ignore_ascii_case("Content-Length") {
-                    content_length = val.trim().parse().expect("numeric Content-Length");
-                }
-            }
-        }
-        let mut body = vec![0u8; content_length];
-        self.stdout.read_exact(&mut body).expect("read body");
-        serde_json::from_slice(&body).expect("parse DAP JSON")
-    }
-
-    /// Read messages until `pred` matches, returning that message. Fails the
-    /// test (rather than hanging forever) if the deadline passes — a wedged
-    /// handshake is exactly the failure mode this smoke test must catch.
+    /// Block for messages until `pred` matches, returning that message. Fails
+    /// the test (rather than hanging forever) if no message arrives within the
+    /// budget or the adapter closes its stdout first — a wedged handshake is
+    /// exactly the failure mode this smoke test must catch.
     fn read_until(&mut self, what: &str, pred: impl Fn(&Value) -> bool) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {what}; adapter produced no matching message"
-            );
-            let msg = self.read_message();
-            if pred(&msg) {
-                return msg;
+            match self.rx.recv_timeout(RECV_BUDGET) {
+                Ok(msg) if pred(&msg) => return msg,
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!("timed out waiting for {what}; adapter produced no matching message")
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("adapter closed stdout before producing {what}")
+                }
             }
         }
     }
