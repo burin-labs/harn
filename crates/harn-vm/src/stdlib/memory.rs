@@ -229,7 +229,48 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &MEMORY_FORGET_IMPL_DEF,
     &MEMORY_UPDATE_IMPL_DEF,
     &MEMORY_LIST_IMPL_DEF,
+    &EMBED_IMPL_DEF,
 ];
+
+/// Reserved cache namespace for standalone `__embed` calls. Keeps the
+/// content-addressed embedding cache for ad-hoc embeds (e.g. the semantic
+/// response cache) separate from per-memory-namespace record embeddings.
+const EMBED_CACHE_NAMESPACE: &str = "__embed";
+
+#[harn_builtin(
+    sig = "__embed(text: string, options?: dict) -> dict",
+    kind = "async",
+    category = "memory"
+)]
+async fn embed_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let text = required_string(&args, 0, "__embed", "text")?;
+    let options = args.get(1).and_then(VmValue::as_dict);
+    let root = memory_root(options);
+    let model_hint = option_string(options, "embed_model_hint")
+        .or_else(|| option_string(options, "model_hint"))
+        .unwrap_or_else(|| DEFAULT_EMBED_MODEL_HINT.to_string());
+    let embedding = embed_cached(&root, EMBED_CACHE_NAMESPACE, &text, &model_hint).await?;
+    let mut map = crate::value::DictMap::new();
+    map.insert(
+        crate::value::intern_key("vector"),
+        VmValue::List(std::sync::Arc::new(
+            embedding
+                .vector
+                .iter()
+                .map(|value| VmValue::Float(*value))
+                .collect(),
+        )),
+    );
+    map.put_str("model", embedding.model.as_str());
+    map.insert(
+        crate::value::intern_key("dim"),
+        VmValue::Int(embedding.dim as i64),
+    );
+    Ok(VmValue::dict(map))
+}
 
 #[harn_builtin(
     sig = "__memory_store(namespace: string, key: string, value: any, tags?: any, options?: dict) -> dict",
@@ -1117,6 +1158,22 @@ async fn ensure_embedding(
     text: &str,
     model_hint: &str,
 ) -> Result<Vec<f64>, VmError> {
+    Ok(embed_cached(root, namespace, text, model_hint)
+        .await?
+        .vector)
+}
+
+/// Embed `text` via the `memory.embed` host capability, returning the full
+/// `{vector, model, dim}` envelope. Reuses the per-`(model_hint, content_hash)`
+/// on-disk cache so a repeated text embeds once and replays deterministically.
+/// This is the shared substrate behind both `memory_recall`'s semantic scoring
+/// and the standalone `__embed` builtin.
+async fn embed_cached(
+    root: &Path,
+    namespace: &str,
+    text: &str,
+    model_hint: &str,
+) -> Result<CachedEmbedding, VmError> {
     let hint = if model_hint.trim().is_empty() {
         DEFAULT_EMBED_MODEL_HINT
     } else {
@@ -1125,7 +1182,7 @@ async fn ensure_embedding(
     let content_hash = sha256_hex(text);
     let path = vector_cache_path(root, namespace, hint, &content_hash)?;
     if let Some(cached) = read_cached_embedding(&path)? {
-        return Ok(cached.vector);
+        return Ok(cached);
     }
     let mut params = crate::value::DictMap::new();
     params.put_str("text", text);
@@ -1133,7 +1190,7 @@ async fn ensure_embedding(
     let result = dispatch_host_operation("memory", "embed", &params).await?;
     let cached = parse_embedding_response(result, hint)?;
     write_cached_embedding(&path, &cached)?;
-    Ok(cached.vector)
+    Ok(cached)
 }
 
 fn read_cached_embedding(path: &Path) -> Result<Option<CachedEmbedding>, VmError> {

@@ -1,0 +1,40 @@
+import { faithfulness_guard } from "std/llm/faithfulness"
+import { with_llm_mocks } from "std/testing"
+
+/**
+ * RAGAS-style groundedness: the answer decomposes into two atomic claims; one
+ * is entailed by the context and one is not, so the faithfulness score is 0.5
+ * and the unsupported claim is surfaced. Mocks are matched on prompt content
+ * so the parallel per-claim judges resolve deterministically.
+ */
+pipeline default() {
+  with_llm_mocks(
+    [
+      {
+        match: "*atomic factual claims*",
+        text: "{\"claims\": [\"Paris is the capital of France.\", \"Paris has 10 million residents.\"]}",
+      },
+      {
+        match: "*capital of France*",
+        text: "{\"supported\": true, \"reason\": \"the context states this\"}",
+      },
+      {
+        match: "*10 million residents*",
+        text: "{\"supported\": false, \"reason\": \"population is not in the context\"}",
+      },
+    ],
+    { ->
+      const result = faithfulness_guard(
+        "Paris is the capital of France and has 10 million residents.",
+        ["France's capital is Paris."],
+        {provider: "mock", max_concurrent: 1},
+      )
+      __io_println(result.score)
+      __io_println(len(result.claims))
+      __io_println(len(result.supported))
+      __io_println(result.supported[0])
+      __io_println(len(result.unsupported))
+      __io_println(result.unsupported[0])
+    },
+  )
+}

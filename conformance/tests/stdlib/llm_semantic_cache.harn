@@ -1,0 +1,73 @@
+import { mem_cache } from "std/cache"
+import { with_semantic_cache } from "std/llm/handlers"
+
+/**
+ * Semantic response cache: a paraphrase whose prompt embedding is within the
+ * cosine threshold of an earlier prompt is served from cache WITHOUT calling
+ * `next` again; an unrelated prompt misses and calls through.
+ */
+pipeline default() {
+  const root = path_join(harness.fs.temp_dir(), "harn-semcache-" + uuid())
+  host_mock_clear()
+  // Per-prompt embedding vectors (matched by the `text` param). The paraphrase
+  // sits ~0.99 cosine from the original; the unrelated prompt is orthogonal.
+  host_mock(
+    "memory",
+    "embed",
+    {
+      result: {vector: [1.0, 0.0, 0.0], dim: 3, model: "t"},
+      params: {text: "What is the capital of France?"},
+    },
+  )
+  host_mock(
+    "memory",
+    "embed",
+    {result: {vector: [0.99, 0.14, 0.0], dim: 3, model: "t"}, params: {text: "France's capital city?"}},
+  )
+  host_mock(
+    "memory",
+    "embed",
+    {
+      result: {vector: [0.0, 1.0, 0.0], dim: 3, model: "t"},
+      params: {text: "What is the boiling point of water?"},
+    },
+  )
+  const calls = atomic(0)
+  const next = { call ->
+    const _ = atomic_add(calls, 1)
+    return {ok: true, value: {text: "answer:" + call.prompt, usage: {input_tokens: 10, output_tokens: 5}}}
+  }
+  const caller = with_semantic_cache(
+    next,
+    {store: mem_cache({namespace: "semtest"}), threshold: 0.95, embed_model_hint: "t", root: root},
+  )
+  const base = {system: nil, opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}}
+  const r1 = caller(base + {prompt: "What is the capital of France?"})
+  __io_println(r1.semantic_cache.hit)
+  const r2 = caller(base + {prompt: "France's capital city?"})
+  __io_println(r2.semantic_cache.hit)
+  __io_println(r2.semantic_cache.similarity >= 0.95)
+  __io_println(r2.value.text)
+  const r3 = caller(base + {prompt: "What is the boiling point of water?"})
+  __io_println(r3.semantic_cache.hit)
+  // `next` ran only for the two misses (r1, r3); the paraphrase r2 was served.
+  __io_println(atomic_get(calls))
+  // Bounded index: with `max_entries: 1` each store evicts the prior entry, so
+  // the France embedding is gone by the time its paraphrase arrives — proving
+  // the index cannot grow without limit (an unbounded index would hit here).
+  const bounded = with_semantic_cache(
+    next,
+    {
+      store: mem_cache({namespace: "bounded"}),
+      threshold: 0.95,
+      embed_model_hint: "t",
+      root: root,
+      max_entries: 1,
+    },
+  )
+  const _ = bounded(base + {prompt: "What is the capital of France?"})
+  const _ = bounded(base + {prompt: "What is the boiling point of water?"})
+  const b3 = bounded(base + {prompt: "France's capital city?"})
+  __io_println(b3.semantic_cache.hit)
+  harness.fs.delete(root)
+}

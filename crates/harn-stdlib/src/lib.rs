@@ -406,6 +406,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/judge.harn"),
     },
     StdlibSource {
+        module: "llm/faithfulness",
+        source: include_str!("stdlib/llm/faithfulness.harn"),
+    },
+    StdlibSource {
         module: "llm/optimize",
         source: include_str!("stdlib/llm/optimize.harn"),
     },
@@ -1488,6 +1492,7 @@ mod tests {
             "cli/models/lora_render",
             "llm/optimize",
             "llm/judge",
+            "llm/faithfulness",
             "llm/refine",
             "connectors/shared",
             "connectors/github",

@@ -1,0 +1,45 @@
+import { with_result_schema } from "std/llm/handlers"
+
+/**
+ * Instructor-style validation + bounded repair of a caller's structured RETURN
+ * value: the first attempt is missing a required field, the repair attempt is
+ * valid; a permanently-invalid caller throws after exhausting its attempts.
+ */
+pipeline default() {
+  const schema = {
+    type: "object",
+    required: ["verdict", "score"],
+    properties: {verdict: {type: "string"}, score: {type: "number"}},
+  }
+  const call = {
+    prompt: "grade the answer",
+    system: nil,
+    opts: {},
+    turn: {iteration: 0, session_id: "", attempt: 1},
+  }
+  // Case 1 — repair-then-succeed. Attempt 1 omits `score` (invalid); attempt 2
+  // returns a valid object.
+  const seen = atomic(0)
+  const flaky = { _ ->
+    const prior = atomic_get(seen)
+    const _ = atomic_add(seen, 1)
+    if prior == 0 {
+      return {ok: true, value: {data: {verdict: "pass"}}}
+    }
+    return {ok: true, value: {data: {verdict: "pass", score: 0.9}}}
+  }
+  const caller1 = with_result_schema(flaky, schema, {max_attempts: 3})
+  const r1 = caller1(call)
+  __io_println(r1.result_schema.valid)
+  __io_println(r1.result_schema.attempts)
+  __io_println(r1.value.data.score)
+  // Case 2 — always invalid → throws `result_schema` after max_attempts.
+  const broken = { _ -> {ok: true, value: {data: {verdict: "pass"}}} }
+  const caller2 = with_result_schema(broken, schema, {max_attempts: 2})
+  const thrown = try {
+    caller2(call)
+  }
+  __io_println(is_err(thrown))
+  __io_println(unwrap_err(thrown).kind)
+  __io_println(unwrap_err(thrown).attempts)
+}

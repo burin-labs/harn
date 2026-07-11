@@ -19,7 +19,15 @@
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
 import { llm_call_options } from "std/llm/options"
-import { __wrap_llm_result, repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
+import {
+  __wrap_llm_result,
+  parse_first_json,
+  repair_min_max_tokens,
+  with_case_insensitive_keys,
+} from "std/llm/safe"
+import { cosine_similarity } from "std/math"
+import { embed } from "std/memory"
+import { get_typed_issues } from "std/schema"
 
 /**
  * default_llm_caller returns a closure with the canonical (call) -> result
@@ -120,10 +128,10 @@ fn __llm_handler_should_skip_cache(prompt, system, opts) -> bool {
   return predicate ? true : false
 }
 
-fn __llm_handler_cache_options(opts) -> dict {
+fn __llm_handler_cache_options(opts, default_store = "llm.with_cache") -> dict {
   // LLM caches default to a 10-minute TTL when the caller has not supplied
   // any TTL-equivalent. Deterministic builtins set their own.
-  let cache_opts = {store: opts?.store ?? "llm.with_cache"}
+  let cache_opts = {store: opts?.store ?? default_store}
   if opts?.ttl != nil {
     cache_opts = cache_opts + {ttl: opts.ttl}
   } else if opts?.ttl_seconds == nil && opts?.max_age_seconds == nil {
@@ -324,7 +332,7 @@ pub fn with_retry(next, opts = nil) {
       const envelope = __safe_invoke(next, attempt_call)
       last_envelope = envelope
       const should_retry = if predicate != nil {
-        let r = try {
+        const r = try {
           predicate(envelope)
         }
         if is_err(r) {
@@ -444,13 +452,13 @@ pub fn with_shadow(primary, shadow, opts = nil) {
   const diff_when = cfg?.diff_when ?? "any"
   return { call ->
     const sample = if sampler != nil {
-      let r = try {
+      const r = try {
         sampler(call)
       }
       if is_err(r) {
         false
       } else {
-        let v = unwrap(r)
+        const v = unwrap(r)
         if v == nil {
           false
         } else {
@@ -882,6 +890,341 @@ fn __with_cache_emit_miss(session_id, key, cached, compute_ms) {
 }
 
 // -------------------------------------------------------------------------------------------------
+// with_semantic_cache
+// -------------------------------------------------------------------------------------------------
+
+// One std/cache entry holds the whole {embedding -> response} index for a
+// namespace (a list of entries), so nearest-neighbour scan is a single
+// point-lookup + cosine sweep. std/cache is point-lookup, not enumerable, so
+// the index cannot be one-key-per-entry; keeping it as a single list value is
+// what lets the semantic sweep reuse the SAME durable backend as `with_cache`.
+const __SEMANTIC_CACHE_INDEX_KEY = "__semantic_cache_index__"
+
+const __SEMANTIC_CACHE_DEFAULT_THRESHOLD = 0.95
+
+const __SEMANTIC_CACHE_DEFAULT_MAX_ENTRIES = 512
+
+fn __semantic_cache_text(prompt, system) -> string {
+  const user = to_string(prompt ?? "")
+  const sys = to_string(system ?? "")
+  if sys == "" {
+    return user
+  }
+  return sys + "\n\n" + user
+}
+
+fn __semantic_embed_options(opts) -> dict {
+  let embed_opts = {}
+  const model_hint = opts?.embed_model_hint ?? opts?.model_hint
+  if model_hint != nil {
+    embed_opts = embed_opts + {embed_model_hint: model_hint}
+  }
+  if opts?.root != nil {
+    embed_opts = embed_opts + {root: opts.root}
+  }
+  return embed_opts
+}
+
+fn __semantic_index_load(cache_opts) -> list {
+  const cached = cache_get(__SEMANTIC_CACHE_INDEX_KEY, cache_opts)
+  if (cached?.hit ?? false) && type_of(cached?.value) == "list" {
+    return cached.value
+  }
+  return []
+}
+
+fn __semantic_similarity(query_vector, entry_vector) -> float {
+  if type_of(entry_vector) != "list" || len(entry_vector) != len(query_vector)
+    || len(query_vector) == 0 {
+    return 0.0
+  }
+  const scored = try {
+    cosine_similarity(query_vector, entry_vector)
+  }
+  if is_err(scored) {
+    return 0.0
+  }
+  return to_float(unwrap(scored))
+}
+
+fn __semantic_nearest(index, query_vector) -> dict {
+  let best_index = -1
+  let best_similarity = 0.0
+  let i = 0
+  while i < len(index) {
+    const similarity = __semantic_similarity(query_vector, index[i]?.embedding)
+    if similarity > best_similarity {
+      best_similarity = similarity
+      best_index = i
+    }
+    i = i + 1
+  }
+  return {index: best_index, similarity: best_similarity}
+}
+
+fn __semantic_index_store(cache_opts, index, query_vector, response, query_text, opts) {
+  const entry = {embedding: query_vector, response: response, prompt: query_text}
+  let appended = index.push(entry)
+  const max_entries = to_int(opts?.max_entries ?? __SEMANTIC_CACHE_DEFAULT_MAX_ENTRIES)
+  if max_entries > 0 && len(appended) > max_entries {
+    appended = appended.slice(len(appended) - max_entries, len(appended))
+  }
+  cache_put(__SEMANTIC_CACHE_INDEX_KEY, appended, cache_opts)
+}
+
+fn __semantic_emit_hit(session_id, entry, similarity, opts) {
+  if session_id == "" {
+    return
+  }
+  __emit_event(
+    session_id,
+    "semantic_cache_hit",
+    {
+      similarity: similarity,
+      provider: opts?.provider ?? "",
+      model: opts?.model ?? "",
+      metrics: __with_cache_hit_metrics_from_envelope(entry?.response),
+    },
+  )
+}
+
+fn __semantic_emit_miss(session_id, similarity, compute_ms) {
+  if session_id == "" {
+    return
+  }
+  __emit_event(
+    session_id,
+    "semantic_cache_miss",
+    {nearest_similarity: similarity, metrics: {compute_ms: compute_ms}},
+  )
+}
+
+/**
+ * with_semantic_cache(next, opts?) -> caller
+ *
+ * Embedding-similarity response cache (GPTCache-style). Wraps an llm caller:
+ * each call embeds its prompt (via the host `memory.embed` capability, reused
+ * through `std/memory` `embed`), scans the previously-cached
+ * {embedding -> response} entries for the nearest neighbour by cosine
+ * similarity (`std/math` `cosine_similarity`), and short-circuits with the
+ * cached envelope when the best similarity is `>= opts.threshold`. On a miss
+ * it calls `next`, then appends `{embedding, response}` to the index. The
+ * index and its receipts share the SAME durable backend and metrics as the
+ * exact-match `with_cache` — only the lookup is fuzzy.
+ *
+ * Options:
+ *   - threshold        : float in [0, 1] (default 0.95). Cosine-similarity gate.
+ *   - store            : std/cache store dict (mem_cache/fs_cache/sqlite_cache)
+ *                        or a bare namespace string. Defaults to the durable
+ *                        `llm.semantic_cache` namespace.
+ *   - embed_model_hint : host embedding model hint (alias `model_hint`).
+ *   - max_entries      : bounded cap on retained entries (default 512). The
+ *                        index is a single durable list; on store it is
+ *                        truncated to the newest `max_entries` (FIFO evict-
+ *                        oldest), so it never grows without limit.
+ *   - root             : override the on-disk embedding cache root.
+ *   - session_id       : falls back to `call.turn.session_id`; when set, hits
+ *                        and misses emit `semantic_cache_hit` /
+ *                        `semantic_cache_miss` events carrying the cost receipt
+ *                        (`model_calls_avoided` + `tokens_saved` +
+ *                        `latency_saved_ms`) read back off the cached envelope.
+ *
+ * Never breaks the call: when embedding is unavailable (no host capability),
+ * the wrapper transparently falls through to `next` with no caching. Skips the
+ * cache for tool-call requests and only stores successful envelopes, exactly
+ * like `with_cache`. Successful envelopes are returned augmented with
+ * `semantic_cache: {hit, similarity}`.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn with_semantic_cache(next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial(with_semantic_cache, next)
+  }
+  const cfg = __opts_dict(opts)
+  return { call ->
+    const call_opts = __opts_dict(call?.opts)
+    if __llm_handler_should_skip_cache(call?.prompt, call?.system, call_opts) {
+      return __safe_invoke(next, call)
+    }
+    const merged = call_opts + cfg
+    const session_id = to_string(call?.turn?.session_id ?? merged?.session_id ?? "")
+    const threshold = to_float(merged?.threshold ?? __SEMANTIC_CACHE_DEFAULT_THRESHOLD)
+    const query_text = __semantic_cache_text(call?.prompt, call?.system)
+    const embedded = try {
+      embed(query_text, __semantic_embed_options(merged))
+    }
+    if is_err(embedded) {
+      return __safe_invoke(next, call)
+    }
+    const query_vector = unwrap(embedded)?.vector ?? []
+    const cache_opts = __llm_handler_cache_options(merged, "llm.semantic_cache")
+    const index = __semantic_index_load(cache_opts)
+    const nearest = __semantic_nearest(index, query_vector)
+    if nearest.index >= 0 && nearest.similarity >= threshold {
+      const entry = index[nearest.index]
+      __semantic_emit_hit(session_id, entry, nearest.similarity, merged)
+      return entry.response + {semantic_cache: {hit: true, similarity: nearest.similarity}}
+    }
+    const started_ms = harness.clock.monotonic_ms()
+    const result = __safe_invoke(next, call)
+    const compute_ms = harness.clock.monotonic_ms() - started_ms
+    if __llm_handler_should_store_result(result) {
+      __semantic_index_store(cache_opts, index, query_vector, result, query_text, merged)
+      __semantic_emit_miss(session_id, nearest.similarity, compute_ms)
+    }
+    return result + {semantic_cache: {hit: false, similarity: nearest.similarity}}
+  }
+}
+
+// No host embedding capability: degrade to a transparent passthrough
+// rather than failing the call. The caller still gets a live response.
+
+// -------------------------------------------------------------------------------------------------
+// with_result_schema
+// -------------------------------------------------------------------------------------------------
+
+fn __result_schema_extract(envelope) -> dict {
+  const value = if type_of(envelope?.value) == "dict" {
+    envelope.value
+  } else {
+    {}
+  }
+  const data = value?.data
+  if type_of(data) == "dict" || type_of(data) == "list" {
+    return {present: true, value: data}
+  }
+  const text = to_string(value?.text ?? "")
+  if text != "" {
+    const parsed = parse_first_json(text)
+    if !is_err(parsed) {
+      const decoded = unwrap(parsed)
+      if type_of(decoded) == "dict" || type_of(decoded) == "list" {
+        return {present: true, value: decoded}
+      }
+    }
+  }
+  return {present: false, value: nil}
+}
+
+fn __result_schema_issue_text(candidate, schema) -> string {
+  const issues = try {
+    get_typed_issues(candidate, schema)
+  }
+  if is_err(issues) || type_of(unwrap(issues)) != "list" {
+    return "the returned value did not match the required schema"
+  }
+  let lines = []
+  for issue in unwrap(issues) {
+    const path = to_string(issue?.path ?? "")
+    const message = to_string(issue?.message ?? issue ?? "")
+    if path == "" {
+      lines = lines.push("- " + message)
+    } else {
+      lines = lines.push("- " + path + ": " + message)
+    }
+  }
+  if len(lines) == 0 {
+    return "the returned value did not match the required schema"
+  }
+  return join(lines, "\n")
+}
+
+/**
+ * with_result_schema(next, schema, opts?) -> caller
+ *
+ * Instructor-style validation + bounded auto-repair of a caller's structured
+ * RETURN value. After `next(call)` succeeds, the structured payload
+ * (`value.data`, else the first JSON value parsed from `value.text`) is
+ * validated against `schema` with `std/schema` `schema_is`. On a mismatch the
+ * wrapper appends the concrete validation issues as a corrective repair turn —
+ * reusing the SAME repair-prompt builder as `with_repair`
+ * (`__repair_apply_strategy`) — and re-asks `next`, up to `opts.max_attempts`
+ * total attempts. Transport failures (`{ok: false}`) short-circuit untouched;
+ * compose `with_retry` beneath this handler for those.
+ *
+ * On success the validated value is surfaced at `value.data` and the envelope
+ * carries `result_schema: {valid: true, attempts}`. On exhaustion the behaviour
+ * follows `opts.on_exhaust`:
+ *   - "throw" (default): throws `{kind: "result_schema", message, issues,
+ *     attempts}` — the Instructor contract.
+ *   - "return": returns the last envelope with
+ *     `result_schema: {valid: false, attempts, issues}`.
+ *
+ * Options:
+ *   - max_attempts : int (default 3) — total tries, i.e. up to 2 repairs.
+ *   - strategy     : string | closure(prompt, system, opts, envelope) -> string
+ *                    overriding the corrective nudge (as in `with_repair`).
+ *   - max_tokens   : int (default 600) repair-pass budget, reasoning-aware floored.
+ *   - temperature  : float (default 0.0) repair-pass temperature.
+ *   - on_exhaust   : "throw" | "return" (default "throw").
+ *
+ * @effects: [llm.call]
+ * @errors: [result_schema]
+ */
+pub fn with_result_schema(next, schema = nil, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return { inner -> with_result_schema(inner, next, schema) }
+  }
+  const cfg = __opts_dict(opts)
+  const max_attempts = to_int(cfg?.max_attempts ?? 3)
+  const strategy = cfg?.strategy
+  const {max_tokens = 600, temperature = 0.0} = cfg ?? {}
+  const on_exhaust = to_string(cfg?.on_exhaust ?? "throw")
+  return { call ->
+    let attempt = 1
+    let current_call = call
+    let last_envelope = {ok: false, status: "exception", error: "with_result_schema: no attempts"}
+    let last_issue_text = ""
+    while attempt <= max_attempts {
+      const envelope = __safe_invoke(next, current_call)
+      last_envelope = envelope
+      if !(envelope?.ok ?? false) {
+        return envelope
+      }
+      const extracted = __result_schema_extract(envelope)
+      if extracted.present && schema_is(extracted.value, schema) {
+        const value = if type_of(envelope?.value) == "dict" {
+          envelope.value
+        } else {
+          {}
+        }
+        return envelope
+          + {value: value + {data: extracted.value}, result_schema: {valid: true, attempts: attempt}}
+      }
+      last_issue_text = if extracted.present {
+        __result_schema_issue_text(extracted.value, schema)
+      } else {
+        "no structured JSON value was returned; emit a single JSON value matching the schema"
+      }
+      if attempt >= max_attempts {
+        if on_exhaust == "return" {
+          return last_envelope
+            + {result_schema: {valid: false, attempts: attempt, issues: last_issue_text}}
+        }
+        throw {
+          kind: "result_schema",
+          message: "with_result_schema: value failed schema validation after " + to_string(attempt)
+            + " attempts",
+          issues: last_issue_text,
+          attempts: attempt,
+        }
+      }
+      current_call = __repair_apply_strategy(
+        call,
+        {error: {message: last_issue_text}},
+        strategy,
+        max_tokens,
+        temperature,
+      )
+      attempt = attempt + 1
+    }
+    return last_envelope + {result_schema: {valid: false, attempts: max_attempts, issues: last_issue_text}}
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // with_circuit_breaker
 // -------------------------------------------------------------------------------------------------
 
@@ -949,13 +1292,13 @@ fn __repair_default_nudge(error_dict) {
 
 fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
   const nudge = if __llm_handler_is_callable(strategy) {
-    let r = try {
+    const r = try {
       strategy(call?.prompt, call?.system, call?.opts, envelope)
     }
     if is_err(r) {
       __repair_default_nudge(envelope?.error)
     } else {
-      let v = unwrap(r)
+      const v = unwrap(r)
       if type_of(v) == "string" && v != "" {
         v
       } else {
@@ -1235,17 +1578,17 @@ fn __routing_resolve(routes, call) {
   while idx < total {
     const route = routes[idx]
     const matched = if type_of(route) == "dict" {
-      let predicate = route?.when
+      const predicate = route?.when
       if predicate == nil {
         true
       } else if __llm_handler_is_callable(predicate) {
-        let r = try {
+        const r = try {
           predicate(call)
         }
         if is_err(r) {
           false
         } else {
-          let v = unwrap(r)
+          const v = unwrap(r)
           if v == nil {
             false
           } else {
