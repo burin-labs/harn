@@ -23,7 +23,7 @@ pub(super) async fn version() -> Response {
 }
 
 pub(super) async fn openapi_json() -> Response {
-    match serde_yml::from_str::<Value>(OPENAPI_YAML) {
+    match serde_yaml_ng::from_str::<Value>(OPENAPI_YAML) {
         Ok(value) => Json(value).into_response(),
         Err(error) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,

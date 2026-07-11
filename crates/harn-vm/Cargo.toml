@@ -103,7 +103,7 @@ grep-regex = "0.1"
 grep-searcher = "0.1"
 walkdir = "2"
 toml = "1.1"
-serde_yml = "0.0.13"
+serde_yaml_ng = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_ignored = "0.1"
 serde_path_to_error = "0.1"

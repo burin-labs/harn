@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_yml::Value as YamlValue;
+use serde_yaml_ng::Value as YamlValue;
 
 /// Recognized SKILL.md frontmatter fields.
 ///
@@ -184,7 +184,7 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
         });
     }
     let raw: YamlValue =
-        serde_yml::from_str(yaml).map_err(|e| format!("invalid SKILL.md YAML: {e}"))?;
+        serde_yaml_ng::from_str(yaml).map_err(|e| format!("invalid SKILL.md YAML: {e}"))?;
     let map = match raw {
         YamlValue::Mapping(m) => m,
         YamlValue::Null => {
@@ -202,7 +202,7 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
     };
 
     // Normalize keys: hyphens -> underscores, strip surrounding whitespace.
-    let mut normalized = serde_yml::Mapping::new();
+    let mut normalized = serde_yaml_ng::Mapping::new();
     let mut unknown_fields = Vec::new();
     for (key_str, v) in map {
         let canonical = key_str.trim().replace('-', "_");
@@ -216,7 +216,7 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
     // Hooks sometimes arrive as a list of `{event: "...", command: "..."}`
     // entries rather than a map. Normalize both into a BTreeMap.
     if let Some(YamlValue::Sequence(seq)) = normalized.get("hooks").cloned() {
-        let mut flat = serde_yml::Mapping::new();
+        let mut flat = serde_yaml_ng::Mapping::new();
         for item in seq {
             if let YamlValue::Mapping(entry) = item {
                 let event = entry
@@ -238,7 +238,7 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
     }
 
     let manifest: SkillManifest =
-        serde_yml::from_value(YamlValue::Mapping(normalized)).map_err(|e| {
+        serde_yaml_ng::from_value(YamlValue::Mapping(normalized)).map_err(|e| {
             format!(
                 "SKILL.md frontmatter is well-formed YAML but doesn't match the expected field \
                  shapes: {e}"
