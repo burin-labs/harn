@@ -29,14 +29,20 @@ impl GitCapabilities for CliGitCapabilities {
 
         let mut cmd = Command::new("git");
         super::strip_ambient_git_env(&mut cmd);
+        // `-c core.quotepath=false` keeps non-ASCII paths as literal UTF-8
+        // instead of C-quoted (`"src/caf\303\251.rs"`); `-z` NUL-delimits the
+        // list so paths containing embedded newlines still round-trip.
         let output = cmd
             .args([
+                "-c",
+                "core.quotepath=false",
                 "-C",
                 root.to_str()?,
                 "ls-files",
                 "--cached",
                 "--others",
                 "--exclude-standard",
+                "-z",
             ])
             .output()
             .ok()?;
@@ -45,8 +51,8 @@ impl GitCapabilities for CliGitCapabilities {
         }
         let stdout = String::from_utf8(output.stdout).ok()?;
         let entries: Vec<String> = stdout
-            .lines()
-            .filter(|line| !line.is_empty())
+            .split('\0')
+            .filter(|entry| !entry.is_empty())
             .map(str::to_string)
             .collect();
         if entries.is_empty() {
@@ -63,8 +69,13 @@ impl GitCapabilities for CliGitCapabilities {
 
         let mut cmd = Command::new("git");
         super::strip_ambient_git_env(&mut cmd);
+        // `-c core.quotepath=false` keeps non-ASCII paths literal so they match
+        // the tracked-file paths instead of coming back C-quoted. `--name-only`
+        // is newline-framed, so `-z` is not used here.
         let output = cmd
             .args([
+                "-c",
+                "core.quotepath=false",
                 "-C",
                 match root.to_str() {
                     Some(s) => s,
@@ -148,5 +159,73 @@ mod tests {
         fs::write(root.join(".git"), "gitdir: /tmp/example\n").unwrap();
         assert!(has_git_repository_marker(root));
         assert!(has_git_repository_marker(&root.join("nested")));
+    }
+
+    /// Run a git command with a hermetic identity so tests do not depend on or
+    /// mutate ambient user config.
+    fn git_in(repo: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args([
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "init.defaultBranch=main",
+                "-C",
+            ])
+            .arg(repo)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    #[test]
+    fn list_files_returns_literal_non_ascii_paths() {
+        let tmp = tempdir_outside_ambient_repo();
+        let root = tmp.path();
+        git_in(root, &["init"]);
+        // A tracked path with non-ASCII bytes would come back C-quoted
+        // (`"src/caf\303\251.rs"`) without `core.quotepath=false`, so it would
+        // never match the real on-disk path.
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/café.rs"), b"fn main() {}\n").unwrap();
+        git_in(root, &["add", "."]);
+
+        let files = CliGitCapabilities.list_files(root).expect("some files");
+        assert!(
+            files.iter().any(|f| f == "src/café.rs"),
+            "expected literal UTF-8 path, got {files:?}"
+        );
+        // No entry should carry surrounding quotes or backslash escapes.
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.starts_with('"') && !f.contains('\\')),
+            "found C-quoted path in {files:?}"
+        );
+    }
+
+    #[test]
+    fn churn_scores_key_literal_non_ascii_paths() {
+        let tmp = tempdir_outside_ambient_repo();
+        let root = tmp.path();
+        git_in(root, &["init"]);
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/café.rs"), b"fn main() {}\n").unwrap();
+        git_in(root, &["add", "."]);
+        git_in(root, &["commit", "-m", "seed"]);
+
+        let scores = CliGitCapabilities.churn_scores(root);
+        assert!(
+            scores.contains_key("src/café.rs"),
+            "expected literal UTF-8 key, got {:?}",
+            scores.keys().collect::<Vec<_>>()
+        );
     }
 }

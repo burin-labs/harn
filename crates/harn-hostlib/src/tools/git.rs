@@ -115,7 +115,13 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 fn run_status(repo: &PathBuf) -> Result<VmValue, HostlibError> {
     let stdout = run_git(repo, &["status", "--porcelain=v1", "-z"])?;
     let mut entries: Vec<VmValue> = Vec::new();
-    for raw_entry in stdout.split('\0') {
+    // In `-z` porcelain output records are NUL-terminated. A rename or copy
+    // record spans TWO NUL-separated fields: `XY <new-path>\0<orig-path>`.
+    // Iterate the fields explicitly so the trailing original-path field is
+    // consumed with its record instead of being mis-decoded as its own bogus
+    // entry (index='o', worktree='r', path="ig-path").
+    let mut fields = stdout.split('\0');
+    while let Some(raw_entry) = fields.next() {
         if raw_entry.len() < 3 {
             continue;
         }
@@ -124,11 +130,20 @@ fn run_status(repo: &PathBuf) -> Result<VmValue, HostlibError> {
         let index_status = bytes[0] as char;
         let worktree_status = bytes[1] as char;
         let path = String::from_utf8_lossy(&bytes[3..]).into_owned();
-        entries.push(build_dict([
+        let mut entry = vec![
             ("index", str_value(index_status.to_string())),
             ("worktree", str_value(worktree_status.to_string())),
             ("path", str_value(path)),
-        ]));
+        ];
+        // Rename ('R') and copy ('C') records carry the source path in the
+        // following NUL-separated field; attach it as `orig_path` rather than
+        // letting it decode into a garbage record on the next iteration.
+        if matches!(index_status, 'R' | 'C') || matches!(worktree_status, 'R' | 'C') {
+            if let Some(orig) = fields.next() {
+                entry.push(("orig_path", str_value(orig)));
+            }
+        }
+        entries.push(build_dict(entry));
     }
     Ok(VmValue::List(Arc::new(entries)))
 }
@@ -404,5 +419,87 @@ mod tests {
     fn operation_parse_is_total() {
         assert!(Operation::parse("status").is_ok());
         assert!(Operation::parse("nope").is_err());
+    }
+
+    /// Run a git command in `repo` with a hermetic identity/config so tests do
+    /// not depend on (or mutate) the ambient user config or signing setup.
+    fn git_in(repo: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args([
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "init.defaultBranch=main",
+                "-C",
+            ])
+            .arg(repo)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn status_entries(value: &VmValue) -> Vec<VmValue> {
+        match value {
+            VmValue::List(list) => list.as_ref().clone(),
+            other => panic!("expected list, got {other:?}"),
+        }
+    }
+
+    fn dict_field(value: &VmValue, key: &str) -> Option<String> {
+        let VmValue::Dict(dict) = value else {
+            panic!("expected dict, got {value:?}");
+        };
+        dict.get(key).map(|v| match v {
+            VmValue::String(s) => s.to_string(),
+            other => panic!("expected string for `{key}`, got {other:?}"),
+        })
+    }
+
+    #[test]
+    fn run_status_decodes_staged_rename_without_garbage_entry() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path();
+        git_in(repo, &["init"]);
+        std::fs::write(repo.join("old_name.rs"), b"fn main() {}\n").expect("write");
+        git_in(repo, &["add", "old_name.rs"]);
+        git_in(repo, &["commit", "-m", "seed"]);
+        git_in(repo, &["mv", "old_name.rs", "new_name.rs"]);
+
+        let entries = status_entries(&run_status(&repo.to_path_buf()).expect("status"));
+
+        // Exactly one record: the rename. The original-path field must not
+        // surface as its own bogus `o`/`l` entry with path `d_name.rs`.
+        assert_eq!(entries.len(), 1, "entries: {entries:?}");
+        let rename = &entries[0];
+        assert_eq!(dict_field(rename, "index").as_deref(), Some("R"));
+        assert_eq!(dict_field(rename, "path").as_deref(), Some("new_name.rs"));
+        assert_eq!(
+            dict_field(rename, "orig_path").as_deref(),
+            Some("old_name.rs")
+        );
+    }
+
+    #[test]
+    fn run_status_reports_plain_modification() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path();
+        git_in(repo, &["init"]);
+        std::fs::write(repo.join("file.rs"), b"a\n").expect("write");
+        git_in(repo, &["add", "file.rs"]);
+        git_in(repo, &["commit", "-m", "seed"]);
+        std::fs::write(repo.join("file.rs"), b"b\n").expect("write");
+
+        let entries = status_entries(&run_status(&repo.to_path_buf()).expect("status"));
+        assert_eq!(entries.len(), 1, "entries: {entries:?}");
+        assert_eq!(dict_field(&entries[0], "path").as_deref(), Some("file.rs"));
+        assert_eq!(dict_field(&entries[0], "worktree").as_deref(), Some("M"));
+        assert_eq!(dict_field(&entries[0], "orig_path"), None);
     }
 }
