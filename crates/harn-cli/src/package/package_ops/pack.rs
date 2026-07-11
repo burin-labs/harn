@@ -169,14 +169,7 @@ pub(crate) fn render_package_api_docs(report: &PackageCheckReport) -> String {
             export.name, export.path
         ));
         for symbol in &export.symbols {
-            out.push_str(&format!("\n### {} `{}`\n\n", symbol.kind, symbol.name));
-            if let Some(docs) = symbol.docs.as_deref() {
-                out.push_str(docs);
-                out.push_str("\n\n");
-            }
-            out.push_str("```harn\n");
-            out.push_str(&symbol.signature);
-            out.push_str("\n```\n");
+            push_api_symbol(&mut out, symbol);
         }
     }
     if !report.tools.is_empty() {
@@ -207,6 +200,22 @@ pub(crate) fn render_package_api_docs(report: &PackageCheckReport) -> String {
         }
     }
     out
+}
+
+/// Render one public symbol as a Markdown section: a `### <kind> `<name>``
+/// heading, its HarnDoc description (which already carries any `@effects` /
+/// `@errors` / parameter lines the author wrote), and a fenced `harn`
+/// signature block. Shared by `harn package docs` and the top-level
+/// `harn doc` command so both emit byte-identical symbol entries.
+pub(crate) fn push_api_symbol(out: &mut String, symbol: &PackageApiSymbol) {
+    out.push_str(&format!("\n### {} `{}`\n\n", symbol.kind, symbol.name));
+    if let Some(docs) = symbol.docs.as_deref() {
+        out.push_str(docs);
+        out.push_str("\n\n");
+    }
+    out.push_str("```harn\n");
+    out.push_str(&symbol.signature);
+    out.push_str("\n```\n");
 }
 
 pub(crate) fn normalize_newlines(input: &str) -> String {

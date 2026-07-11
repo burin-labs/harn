@@ -23,6 +23,7 @@ mod contracts;
 mod crystallize;
 mod demo;
 mod dev;
+mod doc;
 mod doctor;
 mod dump;
 mod eval;
@@ -104,6 +105,7 @@ pub(crate) use crystallize::{
 };
 pub(crate) use demo::DemoArgs;
 pub(crate) use dev::DevArgs;
+pub(crate) use doc::DocArgs;
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
     ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs,
@@ -399,6 +401,12 @@ SCRIPTING
     Usage(UsageArgs),
     /// Statically enumerate modules, symbols, imports, capabilities, effects, and host calls.
     Graph(GraphArgs),
+    /// Render Markdown API reference docs for a Harn file or project's `pub`
+    /// symbols (functions, consts, types, enums, structs), drawn from their
+    /// HarnDoc comments: signature, description, parameters, `@effects`,
+    /// `@errors`, and return type. Prints to stdout by default; pass
+    /// `--output <file>` to write a file (e.g. `docs/api.md`).
+    Doc(DocArgs),
     /// Inspect Harn Flow atom, slice, and predicate audit state.
     Flow(FlowArgs),
     /// Evaluate harn-canon invariant packs against changed files.
