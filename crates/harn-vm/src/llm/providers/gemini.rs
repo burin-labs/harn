@@ -400,7 +400,18 @@ fn gemini_tool_config(tool_choice: Option<&serde_json::Value>) -> Option<serde_j
     Some(config)
 }
 
-fn parse_response(
+/// Parse a Gemini `generateContent` response envelope into an `LlmResult`.
+///
+/// The Vertex provider delegates here too: Vertex serves the same Gemini
+/// models over the same `candidates[].content.parts` / `usageMetadata` shape,
+/// so response parsing is single-sourced exactly as request building is
+/// (`VertexProvider::build_request_body` delegates to
+/// `GeminiProvider::build_request_body`). Keeping one parser is what prevents
+/// the two paths from drifting — e.g. losing `thoughtSignature` capture or
+/// emitting empty-name tool calls on one path but not the other. The error
+/// label and result `provider`/`model` come from `request`, so a Vertex call
+/// still surfaces as a Vertex error.
+pub(crate) fn parse_response(
     json: &serde_json::Value,
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
@@ -410,7 +421,7 @@ fn parse_response(
         .and_then(|value| value.as_str())
     {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("gemini API error: {message}"),
+            format!("{} API error: {message}", request.provider),
         ))));
     }
     let mut text = String::new();

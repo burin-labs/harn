@@ -195,7 +195,7 @@ impl VertexProvider {
             .json()
             .await
             .map_err(|error| vm_err(format!("vertex response parse error: {error}")))?;
-        let result = parse_vertex_response(&json, &request.model)?;
+        let result = crate::llm::providers::parse_gemini_response(&json, request)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
     }
@@ -215,65 +215,6 @@ impl LlmProviderChat for VertexProvider {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
-}
-
-fn parse_vertex_response(json: &serde_json::Value, model: &str) -> Result<LlmResult, VmError> {
-    if let Some(error) = json["error"]["message"].as_str() {
-        return Err(vm_err(format!("vertex API error: {error}")));
-    }
-    let mut result = crate::llm::providers::common::empty_result("vertex", model);
-    if let Some(parts) = json["candidates"][0]["content"]["parts"].as_array() {
-        for part in parts {
-            if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
-                result.text.push_str(text);
-                result.blocks.push(serde_json::json!({
-                    "type": "output_text",
-                    "text": text,
-                    "visibility": "public",
-                }));
-            }
-            if let Some(call) = part.get("functionCall") {
-                let name = call
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let args = call
-                    .get("args")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({}));
-                let id = format!("vertex_tool_{}", result.tool_calls.len());
-                result.tool_calls.push(serde_json::json!({
-                    "id": id,
-                    "name": name,
-                    "arguments": args,
-                }));
-                result.blocks.push(serde_json::json!({
-                    "type": "tool_call",
-                    "id": id,
-                    "name": name,
-                    "arguments": args,
-                    "visibility": "internal",
-                }));
-            }
-        }
-    }
-    result.input_tokens = json["usageMetadata"]["promptTokenCount"]
-        .as_i64()
-        .unwrap_or(0);
-    result.output_tokens = json["usageMetadata"]["candidatesTokenCount"]
-        .as_i64()
-        .unwrap_or(0)
-        + json["usageMetadata"]["thoughtsTokenCount"]
-            .as_i64()
-            .unwrap_or(0);
-    result.cache_read_tokens = json["usageMetadata"]["cachedContentTokenCount"]
-        .as_i64()
-        .unwrap_or(0);
-    result.stop_reason = json["candidates"][0]["finishReason"]
-        .as_str()
-        .map(str::to_string);
-    Ok(result)
 }
 
 fn service_account_project() -> Result<String, VmError> {
@@ -480,6 +421,8 @@ mod tests {
 
     #[test]
     fn parse_response_extracts_text_usage_and_function_calls() {
+        // Vertex delegates parsing to the shared Gemini parser; the result
+        // still carries the Vertex provider identity from the request.
         let response = json!({
             "candidates": [{
                 "content": {"parts": [
@@ -490,11 +433,19 @@ mod tests {
             }],
             "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 4}
         });
-        let result = parse_vertex_response(&response, "gemini-1.5-pro-002").expect("result");
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
+        assert_eq!(result.provider, "vertex");
         assert_eq!(result.text, "hi");
         assert_eq!(result.input_tokens, 3);
         assert_eq!(result.output_tokens, 4);
         assert_eq!(result.tool_calls[0]["name"], "lookup");
+        // Telemetry is populated from usageMetadata via the shared parser
+        // (the old hand-rolled Vertex parser left it defaulted).
+        assert_eq!(
+            result.telemetry.source,
+            crate::llm::api::telemetry_source::GEMINI_USAGE
+        );
     }
 
     #[test]
@@ -511,11 +462,74 @@ mod tests {
                 "cachedContentTokenCount": 6
             }
         });
-        let result = parse_vertex_response(&response, "gemini-2.5-pro").expect("result");
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
         assert_eq!(result.input_tokens, 12);
         // candidates(4) + thoughts(9) so thinking tokens are billed as output.
         assert_eq!(result.output_tokens, 13);
         assert_eq!(result.cache_read_tokens, 6);
+    }
+
+    #[test]
+    fn parse_response_skips_empty_name_function_calls() {
+        // Regression: the hand-rolled Vertex parser used `unwrap_or("")`, which
+        // emitted a tool call with an empty name. The shared Gemini parser
+        // skips it, matching the Gemini path.
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [
+                    {"functionCall": {"name": "", "args": {}}},
+                    {"functionCall": {"name": "lookup", "args": {"q": "x"}}}
+                ]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1}
+        });
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "lookup");
+    }
+
+    #[test]
+    fn function_call_thought_signature_round_trips_through_request_build() {
+        // Regression: the hand-rolled Vertex parser dropped `thoughtSignature`
+        // from functionCall parts, so Gemini 2.5 thinking + function-calling
+        // over Vertex lost the signature it must replay next turn. Delegating
+        // to the Gemini parser captures it; the shared Gemini request builder
+        // (which Vertex also delegates to) echoes it back on the wire.
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [
+                    {
+                        "functionCall": {"name": "lookup", "args": {"q": "harn"}},
+                        "thoughtSignature": "sig-vertex"
+                    }
+                ]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 4}
+        });
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
+        assert_eq!(result.tool_calls[0]["thought_signature"], "sig-vertex");
+
+        // Feed the parsed tool call back as assistant history and confirm the
+        // Vertex request builder replays the signature on the next-turn body.
+        let mut request = base_request();
+        request.messages = vec![json!({
+            "role": "assistant",
+            "tool_calls": [result.tool_calls[0].clone()],
+        })];
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(
+            body["contents"][0]["parts"][0]["functionCall"]["name"],
+            "lookup"
+        );
+        assert_eq!(
+            body["contents"][0]["parts"][0]["thoughtSignature"],
+            "sig-vertex"
+        );
     }
 
     fn base_request() -> LlmRequestPayload {
