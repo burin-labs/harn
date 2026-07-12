@@ -39,7 +39,9 @@ pub mod fs;
 pub mod fs_snapshot;
 pub mod fs_watch;
 pub mod host_env_custody;
+pub mod host_lease;
 pub mod process;
+mod process_liveness;
 pub mod sandbox;
 pub mod scanner;
 pub mod schemas;
@@ -54,6 +56,11 @@ mod text;
 mod value_args;
 
 pub use error::HostlibError;
+pub use host_lease::{
+    HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseDeferReason, HostLeaseDeferReceipt,
+    HostLeaseError, HostLeaseHandle, HostLeasePriorityClass, HostLeaseReleaseReceipt,
+    HostLeaseRenewReceipt, HostLeaseRequest, HostLeaseState, HostLeaseStore, HOST_LEASE_ROOT_ENV,
+};
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 
 /// Convenience: build a `HostlibRegistry` populated with every capability

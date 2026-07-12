@@ -33,6 +33,7 @@ mod fix;
 mod flow;
 mod graph;
 mod guard;
+mod host;
 mod init;
 mod lint_fmt;
 mod local;
@@ -127,6 +128,10 @@ pub(crate) use flow::{
 pub(crate) use graph::GraphArgs;
 pub(crate) use guard::{
     GuardArgs, GuardCommand, GuardInstallArgs, GuardListArgs, GuardRemoveArgs, GuardStatusArgs,
+};
+pub(crate) use host::{
+    HostArgs, HostCommand, HostLeaseAcquireArgs, HostLeaseArgs, HostLeaseCommand,
+    HostLeasePriorityArg, HostLeaseReleaseArgs, HostLeaseRenewArgs, HostLeaseStatusArgs,
 };
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
@@ -358,6 +363,8 @@ SCRIPTING
     /// permissions on `~/.harn`, and project manifest health. Reports
     /// each check as ok/warn/fail with a suggested fix.
     Doctor(DoctorArgs),
+    /// Coordinate scarce machine resources through typed host leases.
+    Host(HostArgs),
     /// Configure a starter Harn project and LLM provider settings.
     Quickstart(QuickstartArgs),
     /// Run a bundled offline demo scenario to see Harn in action without

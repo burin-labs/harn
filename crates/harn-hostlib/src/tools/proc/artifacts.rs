@@ -371,7 +371,9 @@ fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
     {
         return true;
     }
-    dir.pid != std::process::id() && process_is_alive(dir.pid)
+    dir.pid != std::process::id()
+        && crate::process_liveness::process_liveness(dir.pid)
+            != crate::process_liveness::ProcessLiveness::Dead
 }
 
 fn parse_command_artifact_dir_name(name: &str) -> Option<u32> {
@@ -384,64 +386,6 @@ fn parse_command_artifact_dir_name(name: &str) -> Option<u32> {
         return None;
     }
     Some(pid)
-}
-
-#[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
-    if pid == 0 || pid > i32::MAX as u32 {
-        return true;
-    }
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    let result = unsafe { kill(pid as i32, 0) };
-    result == 0
-        || std::io::Error::last_os_error()
-            .raw_os_error()
-            .map(|code| code != 3)
-            .unwrap_or(true)
-}
-
-#[cfg(windows)]
-fn process_is_alive(pid: u32) -> bool {
-    use std::ffi::c_void;
-
-    if pid == 0 {
-        return true;
-    }
-
-    const ERROR_ACCESS_DENIED: i32 = 5;
-    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-    const STILL_ACTIVE: u32 = 259;
-
-    type Handle = *mut c_void;
-
-    extern "system" {
-        fn CloseHandle(hObject: Handle) -> i32;
-        fn GetExitCodeProcess(hProcess: Handle, lpExitCode: *mut u32) -> i32;
-        fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> Handle;
-    }
-
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle.is_null() {
-        return std::io::Error::last_os_error()
-            .raw_os_error()
-            .map(|code| code == ERROR_ACCESS_DENIED)
-            .unwrap_or(true);
-    }
-
-    let mut exit_code = 0;
-    let alive =
-        unsafe { GetExitCodeProcess(handle, &mut exit_code) } != 0 && exit_code == STILL_ACTIVE;
-    let _ = unsafe { CloseHandle(handle) };
-    alive
-}
-
-#[cfg(not(any(unix, windows)))]
-fn process_is_alive(pid: u32) -> bool {
-    // Without a portable liveness probe, be conservative for this safety check.
-    let _ = pid;
-    true
 }
 
 #[cfg(test)]
@@ -468,7 +412,10 @@ mod tests {
 
     fn dead_pid() -> u32 {
         (900_000..=999_999)
-            .find(|pid| !process_is_alive(*pid))
+            .find(|pid| {
+                crate::process_liveness::process_liveness(*pid)
+                    == crate::process_liveness::ProcessLiveness::Dead
+            })
             .expect("test host should have an unused high pid")
     }
 

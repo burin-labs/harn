@@ -138,6 +138,49 @@ view to the authoritative runtime receipt. Do not mirror claim renewal with
 fleet messages when WorkerQueue or persona runtime already owns it. Manual or
 externally executed work can use the fleet claim lease directly.
 
+## Reserving a host
+
+Fleet claims describe work ownership. They do not reserve CPU, GPU, or another
+exclusive machine resource. Use `harn host lease` when independent Harn
+processes must serialize work on one host:
+
+```bash
+harn host lease acquire \
+    --host build-01 \
+    --owner eval-runner \
+    --priority-class measurement \
+    --no-expiry \
+    --owner-pid "$runner_pid" \
+    --json
+```
+
+Acquisition is an atomic cross-process operation. A successful receipt carries
+the `lease_id` required by `renew` and `release`. A contended immediate acquire
+returns a typed `host_lease_contended` receipt and exit status 75. Add
+`--wait-ms <milliseconds>` to wait on lease-change notifications, the current
+lease's expiry, or a bounded owner-liveness recheck instead of a fixed polling
+loop.
+
+Finite leases default to 15 minutes and should be renewed by long-running work.
+`--no-expiry` requires the PID of the process that owns the work. Harn records
+that process's start identity and recovers the lease after a confirmed crash
+without mistaking unavailable process visibility for death. This is the
+appropriate lifetime for an authoritative measurement that must not expire
+mid-run.
+
+Inspect and release the same host explicitly:
+
+```bash
+harn host lease status --host build-01 --json
+harn host lease release --host build-01 --lease-id "$lease_id" --json
+```
+
+State defaults to `~/.harn/host-leases`. Set `HARN_HOST_LEASE_ROOT` to isolate
+tests or relocate state for processes running under the same OS account. A
+cross-user registry requires a privileged host service and is not provided by
+this local capability. Priority class is preserved in receipts in this
+registry slice; queue ordering remains owned by Harn's worker scheduler.
+
 ## Forward compatibility
 
 The coordination envelope allows additional properties. A projector that sees

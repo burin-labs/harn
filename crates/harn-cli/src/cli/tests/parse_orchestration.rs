@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn test_parses_host_lease_acquire_contract() {
+    let cli = Cli::parse_from([
+        "harn",
+        "host",
+        "lease",
+        "acquire",
+        "--host",
+        "build-01",
+        "--owner",
+        "eval-runner",
+        "--priority-class",
+        "measurement",
+        "--no-expiry",
+        "--owner-pid",
+        "42",
+        "--wait-ms",
+        "30000",
+        "--json",
+    ]);
+
+    let Command::Host(args) = cli.command.unwrap() else {
+        panic!("expected host command");
+    };
+    let HostCommand::Lease(lease) = args.command;
+    let HostLeaseCommand::Acquire(acquire) = lease.command else {
+        panic!("expected host lease acquire command");
+    };
+    assert_eq!(acquire.host.as_deref(), Some("build-01"));
+    assert_eq!(acquire.owner, "eval-runner");
+    assert!(matches!(
+        acquire.priority_class,
+        HostLeasePriorityArg::Measurement
+    ));
+    assert!(acquire.no_expiry);
+    assert_eq!(acquire.owner_pid, Some(42));
+    assert_eq!(acquire.wait_ms, 30_000);
+    assert!(acquire.json);
+}
+
+#[test]
 fn test_parses_routes_json() {
     let cli = Cli::parse_from(["harn", "routes", "fixtures/project", "--json"]);
 
