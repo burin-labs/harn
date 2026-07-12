@@ -1410,6 +1410,7 @@ impl TypeChecker {
                 let saved_stream_emit_types = self.stream_emit_types.clone();
                 self.stream_fn_depth = 0;
                 self.stream_emit_types.clear();
+                Self::mark_closure_mutated_captures(&mut closure_scope, body);
                 self.expected_return_types.push(return_type.clone());
                 self.check_block_with_expected_tail(body, return_type.as_ref(), &mut closure_scope);
                 self.expected_return_types.pop();

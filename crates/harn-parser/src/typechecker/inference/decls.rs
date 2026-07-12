@@ -475,6 +475,7 @@ impl TypeChecker {
                 self.check_node_with_expected(default, param_type.as_ref(), &mut body_scope);
             }
         }
+        Self::mark_closure_mutated_captures(&mut body_scope, body);
         self.expected_return_types.push(return_type.clone());
         self.check_block_with_expected_tail(body, return_type.as_ref(), &mut body_scope);
         self.expected_return_types.pop();
@@ -557,6 +558,7 @@ impl TypeChecker {
                 self.check_node_with_expected(default, param_type.as_ref(), &mut fn_scope);
             }
         }
+        Self::mark_closure_mutated_captures(&mut fn_scope, body);
         self.expected_return_types.push(return_type.clone());
         self.check_block_with_expected_tail(body, return_type.as_ref(), &mut fn_scope);
         self.expected_return_types.pop();

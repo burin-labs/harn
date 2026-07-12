@@ -533,7 +533,46 @@ log(square(4))     // 16
 log(add(2, 3))     // 5
 ```
 
-Closures capture their lexical environment at definition time. Parameters are immutable.
+Closures capture the enclosing bindings they reference.
+
+### Capture semantics
+
+Closures capture the enclosing bindings they reference, by reference. A closure
+that reassigns a captured `let` (a rebind like `n = n + 1`, a compound
+assignment, or an in-place container write such as `xs[i] = ...` or
+`d.field = ...`) mutates the same binding the enclosing scope holds, and later
+calls see the running value. This is how JavaScript and Python behave.
+
+```harn
+let n = 0
+const bump = { -> n = n + 1 }
+bump()
+bump()
+log(n)   // 2
+```
+
+Capture shares bindings, not values. Distinct variables stay independent:
+`let b = a` copies, so mutating `b` leaves `a` untouched. Parameters and `const`
+bindings are immutable, so a closure can read them but never rebind them.
+
+A captured variable can change whenever a closure runs, so the type checker does
+not narrow (by `!= nil`, `type_of`, and the like) any variable that a nested
+closure reassigns. TypeScript and Flow use the same rule. Reach for optional
+chaining or a non-null assertion on such a variable instead of a guard:
+
+```harn
+let x: string? = "config"
+const clear = { -> x = nil }
+if x != nil {
+  clear()          // x may be nil again after this call
+  log(x?.len())    // x is not narrowed here; use ?. (or x!) rather than x.len()
+}
+```
+
+Reassigning a captured variable from concurrent `parallel` or `spawn` branches
+writes through one shared cell, so the branches race on it. The
+`mutable-capture-across-parallel` lint (`HARN-LNT-064`) flags this. Return each
+branch's result and combine after the fan-out instead.
 
 ### Higher-order functions
 

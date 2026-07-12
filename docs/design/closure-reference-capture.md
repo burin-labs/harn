@@ -134,3 +134,26 @@ what guardrail #2's lint surfaces.
    a user-facing diagnostic documenting its lost-write behavior, so there is
    nothing to rewrite. (`HARN-OWN-005` on this branch is the unrelated
    ownership-*leak* lint — value escaping its owning scope — and is untouched.)
+
+## Follow-up: flow-narrowing soundness (harn#4523)
+
+Making capture effective exposed a latent typechecker imprecision as a real
+soundness hole. The checker kept a `!= nil` (or `type_of`) narrowing across a
+closure call that reassigned the narrowed variable. Under by-value capture that
+call was a no-op, so the retained narrowing was accidentally sound; under
+reference capture the call resets the variable, so `harn check` accepted code
+that its own runtime type check then rejected — a check/run divergence the
+soundness program forbids.
+
+The fix suppresses narrowing for any variable a nested closure *captures and*
+reassigns, the rule TypeScript and Flow apply. It is a per-callable pre-pass
+(`vars_reassigned_in_nested_closures`) that marks those variables on the body
+scope, consulted at the single `apply_refinements` choke point; a callable with
+no capture-reassigning closure is byte-identical. The pre-pass excludes names a
+closure declares locally (its params and its own `let`/`const`): reassigning a
+closure-local is not a capture, so its narrowing inside that closure stays
+sound. Missing that exclusion produced a false positive on a real closure that
+declared and guarded its own `let error` — caught by an A/B `harn check` sweep
+across the downstream `~/projects/*harn*` repos, and pinned by a regression
+test. The full corpus stays green (1834/0), so the conservative scope-wide rule
+costs no real code the more precise call-site variant would have preserved.
