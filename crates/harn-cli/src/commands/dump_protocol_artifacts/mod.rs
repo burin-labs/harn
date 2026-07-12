@@ -104,6 +104,7 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
 }
 
 fn generate_artifacts() -> Result<Vec<Artifact>, String> {
+    let go_artifact = generate_go_artifact()?;
     let mut artifacts = vec![
         Artifact::new("README.md", generate_readme()),
         Artifact::new("manifest.json", generate_manifest()?),
@@ -112,7 +113,7 @@ fn generate_artifacts() -> Result<Vec<Artifact>, String> {
         Artifact::new("harn-protocol.rs", generate_rust()),
         Artifact::new("python/harn_protocol.py", generate_python()),
         Artifact::new("python/__init__.py", PYTHON_INIT_STUB.to_string()),
-        Artifact::new("go/harnprotocol/harnprotocol.go", generate_go()),
+        Artifact::new("go/harnprotocol/harnprotocol.go", go_artifact),
         Artifact::new("go/harnprotocol/go.mod", generate_go_mod()),
         Artifact::new("fixtures/round_trip.json", generate_round_trip_fixture()?),
         Artifact::new(

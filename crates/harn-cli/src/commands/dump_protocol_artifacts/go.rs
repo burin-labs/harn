@@ -1,3 +1,6 @@
+use std::io::Write;
+use std::process::{Command, Stdio};
+
 use harn_serve::adapters::acp::{
     ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
     HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
@@ -9,6 +12,10 @@ use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STAT
 use super::constants::*;
 use super::support::*;
 use super::values::*;
+
+pub(super) fn generate_go_artifact() -> Result<String, String> {
+    format_go_source(generate_go())
+}
 
 pub(super) fn generate_go() -> String {
     let mut out = String::new();
@@ -609,6 +616,40 @@ func IsNotification(envelope map[string]json.RawMessage) bool {
 	return !hasID && hasMethod
 }
 "#;
+
+fn format_go_source(source: String) -> Result<String, String> {
+    let mut child = match Command::new("gofmt")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(source),
+        Err(error) => return Err(format!("failed to spawn gofmt: {error}")),
+    };
+
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| "failed to open gofmt stdin".to_string())?
+        .write_all(source.as_bytes())
+        .map_err(|error| format!("failed to write generated Go to gofmt: {error}"))?;
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("failed to wait for gofmt: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gofmt failed on generated Go protocol artifact: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    String::from_utf8(output.stdout).map_err(|error| {
+        format!("gofmt returned non-UTF-8 output for generated Go protocol artifact: {error}")
+    })
+}
 
 pub(super) fn generate_go_mod() -> String {
     "module github.com/burin-labs/harn/spec/protocol-artifacts/go/harnprotocol\n\n\
