@@ -1,6 +1,31 @@
 use super::*;
 
 impl AcpServer {
+    pub(super) fn handle_session_inject_host_event(
+        &self,
+        id: &serde_json::Value,
+        params: serde_json::Value,
+    ) {
+        let params: AcpSessionInjectHostEventParams = match serde_json::from_value(params) {
+            Ok(params) => params,
+            Err(error) => {
+                self.send_error(
+                    id,
+                    -32602,
+                    &format!("{ACP_METHOD_SESSION_INJECT_HOST_EVENT}: invalid params: {error}"),
+                );
+                return;
+            }
+        };
+        match harn_vm::agent_sessions::inject_host_event_request(&params.session_id, params.event) {
+            Ok(result) => self.send_response(id, result),
+            Err(error) if error.contains("unknown session id") => {
+                self.send_error(id, -32004, &error);
+            }
+            Err(error) => self.send_error(id, -32602, &error),
+        }
+    }
+
     pub(super) fn handle_session_cancel(
         &mut self,
         id: &serde_json::Value,

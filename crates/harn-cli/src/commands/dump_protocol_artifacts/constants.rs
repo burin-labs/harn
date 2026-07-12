@@ -9,6 +9,7 @@ use harn_vm::session_timeline::{
 pub(super) const ACP_AGENT_METHODS: &[&str] = &[
     "initialize",
     "session/inject",
+    "session/inject_host_event",
     "session/new",
     "session/load",
     "session/replace_inject",
@@ -79,6 +80,7 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/close",
     "session/stop",
     "session/inject",
+    "session/inject_host_event",
     "session/revoke_inject",
     "session/replace_inject",
     "session/remind",

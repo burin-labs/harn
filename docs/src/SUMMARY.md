@@ -288,6 +288,7 @@
 - [Protocol contribution RFCs](./protocol-contributions/README.md)
   - [Filing status ledger](./protocol-contributions/status-ledger.md)
   - [ACP: `session/inject_reminder`](./protocol-contributions/acp-session-inject-reminder.md)
+  - [ACP: typed host-event injection](./protocol-contributions/acp-session-inject-host-event.md)
   - [A2A: `InjectTaskReminder`](./protocol-contributions/a2a-message-kind-reminder.md)
   - [MCP: `notifications/reminder`](./protocol-contributions/mcp-notifications-reminder.md)
   - [ACP: `session/suspend`](./protocol-contributions/acp-session-suspend.md)

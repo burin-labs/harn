@@ -133,6 +133,7 @@ MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = -32004
 ACP_AGENT_METHODS: tuple = (
     "initialize",
     "session/inject",
+    "session/inject_host_event",
     "session/new",
     "session/load",
     "session/replace_inject",
@@ -435,6 +436,7 @@ MCP_LOGGING_LEVELS: tuple = (
 class ACPAgentMethod(str, Enum):
     INITIALIZE = "initialize"
     SESSION_INJECT = "session/inject"
+    SESSION_INJECT_HOST_EVENT = "session/inject_host_event"
     SESSION_NEW = "session/new"
     SESSION_LOAD = "session/load"
     SESSION_REPLACE_INJECT = "session/replace_inject"
@@ -661,6 +663,28 @@ class ACPError(_HarnDataclass):
     code: int
     message: str
     data: Optional[JsonValue] = None
+
+
+@dataclass
+class HarnHostInjectionProvenance(_HarnDataclass):
+    initiator: str
+    source: str
+    ts_ms: int
+    host: Optional[str] = None
+
+
+@dataclass
+class HarnHostInjectionEvent(_HarnDataclass):
+    kind: str
+    payload: JsonObject
+    provenance: HarnHostInjectionProvenance
+    delivery: str = "immediate"
+
+
+@dataclass
+class ACPSessionInjectHostEventParams(_HarnDataclass):
+    sessionId: str
+    event: HarnHostInjectionEvent
 
 
 @dataclass

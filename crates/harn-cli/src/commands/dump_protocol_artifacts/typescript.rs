@@ -231,6 +231,31 @@ export interface ACPNotification {
 
 export type ACPMessage = ACPRequest | ACPResponse | ACPNotification
 
+export type HarnHostInjectionKind = "host_tool_result" | "host_attachment"
+export type HarnHostInjectionDelivery =
+  | "turn_boundary"
+  | "immediate"
+  | "after_next_tool_call"
+
+export interface HarnHostInjectionProvenance {
+  initiator: string
+  source: string
+  host?: string
+  ts_ms: number
+}
+
+export interface HarnHostInjectionEvent {
+  kind: HarnHostInjectionKind
+  delivery?: HarnHostInjectionDelivery
+  payload: ACPObject
+  provenance: HarnHostInjectionProvenance
+}
+
+export interface ACPSessionInjectHostEventParams {
+  sessionId: string
+  event: HarnHostInjectionEvent
+}
+
 export interface ACPExtensionMeta<T extends object = ACPObject> {
   harn?: T
 }

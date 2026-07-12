@@ -14,6 +14,7 @@ export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32004, message: "
 export const ACP_AGENT_METHODS = [
   "initialize",
   "session/inject",
+  "session/inject_host_event",
   "session/new",
   "session/load",
   "session/replace_inject",
@@ -35,6 +36,7 @@ export type ACPAgentMethod = (typeof ACP_AGENT_METHODS)[number]
 export const ACP_AGENT_METHOD = {
   initialize: "initialize",
   sessionInject: "session/inject",
+  sessionInjectHostEvent: "session/inject_host_event",
   sessionNew: "session/new",
   sessionLoad: "session/load",
   sessionReplaceInject: "session/replace_inject",
@@ -412,6 +414,31 @@ export interface ACPNotification {
 }
 
 export type ACPMessage = ACPRequest | ACPResponse | ACPNotification
+
+export type HarnHostInjectionKind = "host_tool_result" | "host_attachment"
+export type HarnHostInjectionDelivery =
+  | "turn_boundary"
+  | "immediate"
+  | "after_next_tool_call"
+
+export interface HarnHostInjectionProvenance {
+  initiator: string
+  source: string
+  host?: string
+  ts_ms: number
+}
+
+export interface HarnHostInjectionEvent {
+  kind: HarnHostInjectionKind
+  delivery?: HarnHostInjectionDelivery
+  payload: ACPObject
+  provenance: HarnHostInjectionProvenance
+}
+
+export interface ACPSessionInjectHostEventParams {
+  sessionId: string
+  event: HarnHostInjectionEvent
+}
 
 export interface ACPExtensionMeta<T extends object = ACPObject> {
   harn?: T

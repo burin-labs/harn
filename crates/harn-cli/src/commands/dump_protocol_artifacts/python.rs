@@ -259,6 +259,28 @@ class ACPError(_HarnDataclass):
 
 
 @dataclass
+class HarnHostInjectionProvenance(_HarnDataclass):
+    initiator: str
+    source: str
+    ts_ms: int
+    host: Optional[str] = None
+
+
+@dataclass
+class HarnHostInjectionEvent(_HarnDataclass):
+    kind: str
+    payload: JsonObject
+    provenance: HarnHostInjectionProvenance
+    delivery: str = "immediate"
+
+
+@dataclass
+class ACPSessionInjectHostEventParams(_HarnDataclass):
+    sessionId: str
+    event: HarnHostInjectionEvent
+
+
+@dataclass
 class ACPRequest(_HarnDataclass):
     id: JsonRpcId
     method: str

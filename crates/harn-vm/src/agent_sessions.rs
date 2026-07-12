@@ -1763,9 +1763,9 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
     })
 }
 
-#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-enum HostInjectionKind {
+pub enum HostInjectionKind {
     HostToolResult,
     HostAttachment,
 }
@@ -1779,13 +1779,14 @@ impl HostInjectionKind {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
-struct HostInjectionRequest {
-    kind: HostInjectionKind,
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostInjectionRequest {
+    pub kind: HostInjectionKind,
     #[serde(default)]
-    delivery: InjectionDelivery,
-    payload: serde_json::Value,
-    provenance: HostInjectionProvenance,
+    pub delivery: InjectionDelivery,
+    pub payload: serde_json::Value,
+    pub provenance: HostInjectionProvenance,
 }
 
 #[derive(serde::Deserialize)]
@@ -1832,6 +1833,17 @@ pub fn inject_host_event(id: &str, injection: VmValue) -> Result<serde_json::Val
     let injection_json = crate::llm::helpers::vm_value_to_json(&injection);
     let request: HostInjectionRequest = serde_json::from_value(injection_json)
         .map_err(|error| format!("agent_inject_host_event: invalid injection: {error}"))?;
+    inject_host_event_request(id, request)
+}
+
+/// Inject a validated host event without crossing the dynamic VM-value boundary.
+///
+/// Protocol adapters and Rust embedders should use this entry point. Harn code
+/// continues to use [`inject_host_event`], which parses into the same contract.
+pub fn inject_host_event_request(
+    id: &str,
+    request: HostInjectionRequest,
+) -> Result<serde_json::Value, String> {
     if !exists(id) {
         return Err(format!(
             "agent_inject_host_event: unknown session id '{id}'"
