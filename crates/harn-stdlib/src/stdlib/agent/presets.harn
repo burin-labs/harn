@@ -509,6 +509,7 @@ fn __tool_using_defaults(kind) {
       no_net_progress_hard_cap_after: 16,
       reserved_terminal_verify: false,
       reserved_terminal_verify_iterations: 2,
+      zero_write_terminal_verify: false,
     },
   }
 }
@@ -711,7 +712,7 @@ fn __apply_captain_llm_caller(opts, kind) {
     return opts
   }
   const base = if cheap != nil {
-    let routes = if frontier != nil && escalate != nil {
+    const routes = if frontier != nil && escalate != nil {
       [{name: "frontier", when: escalate, caller: frontier}]
     } else {
       []
@@ -721,7 +722,7 @@ fn __apply_captain_llm_caller(opts, kind) {
     default_llm_caller()
   }
   const composed = if len(logging_layers) > 0 {
-    let wrap = compose(logging_layers)
+    const wrap = compose(logging_layers)
     wrap(base)
   } else {
     base
