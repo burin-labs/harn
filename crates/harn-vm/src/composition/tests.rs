@@ -300,7 +300,7 @@ pipeline default(task) {
 
     assert_eq!(report["ok"], true);
     assert_eq!(report["run"]["result"]["binding"], "look");
-    assert_eq!(report["run"]["result"]["has_runtime_result"], false);
+    assert_eq!(report["run"]["result"]["has_runtime_result"], true);
     assert_eq!(report["run"]["result"]["path"], "README.md");
     assert_eq!(report["child_results"][0]["status"], "completed");
 }

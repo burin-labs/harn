@@ -34,11 +34,15 @@ pub fn clear_host_mocks() {
  * @effects: []
  * @errors: []
  */
-pub fn mock_host_result(cap: string, op: string, result, params) {
-  if params == nil {
-    return host_mock(cap, op, result)
+pub fn mock_host_result(cap: string, op: string, result, params = nil, unregistered_ok = false) {
+  let config = {result: result}
+  if params != nil {
+    config = config + {params: params}
   }
-  return host_mock(cap, op, result, params)
+  if unregistered_ok {
+    config = config + {unregistered_ok: true}
+  }
+  return host_mock(cap, op, config)
 }
 
 /**
@@ -47,8 +51,17 @@ pub fn mock_host_result(cap: string, op: string, result, params) {
  * @effects: []
  * @errors: []
  */
-pub fn mock_host_error(cap: string, op: string, message: string, params) {
-  const config = {error: message}
+pub fn mock_host_error(
+  cap: string,
+  op: string,
+  message: string,
+  params = nil,
+  unregistered_ok = false,
+) {
+  let config = {error: message}
+  if unregistered_ok {
+    config = config + {unregistered_ok: true}
+  }
   if params == nil {
     return host_mock(cap, op, config)
   }
@@ -167,7 +180,7 @@ pub fn assert_no_host_calls(message = nil) {
 
 /**
  * Apply a single host-mock fixture entry. Each entry is a dict with:
- *   { capability, operation, result?, error?, params? }
+ *   { capability, operation, result?, error?, params?, unregistered_ok? }
  *
  * Hostlib builtins that take a request dict also honor the same mock registry
  * by module/method, for example `{capability: "tools", operation:
@@ -187,10 +200,19 @@ fn apply_host_mock_entry(entry) {
   if cap == nil || op == nil {
     throw "with_host_mocks: each entry must include 'capability' and 'operation'"
   }
+  let config = {}
   if entry?.error != nil {
-    return mock_host_error(cap, op, entry.error, entry?.params)
+    config = config + {error: entry.error}
+  } else {
+    config = config + {result: entry?.result}
   }
-  return mock_host_result(cap, op, entry?.result, entry?.params)
+  if entry?.params != nil {
+    config = config + {params: entry.params}
+  }
+  if entry?.unregistered_ok {
+    config = config + {unregistered_ok: true}
+  }
+  return mock_host_response(cap, op, config)
 }
 
 /**

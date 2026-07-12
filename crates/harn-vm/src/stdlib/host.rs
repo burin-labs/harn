@@ -40,6 +40,7 @@ struct HostMock {
     params: Option<crate::value::DictMap>,
     result: Option<VmValue>,
     error: Option<String>,
+    unregistered_ok: bool,
 }
 
 #[derive(Clone)]
@@ -54,6 +55,8 @@ thread_local! {
     static HOST_MOCK_CALLS: RefCell<Vec<HostMockCall>> = const { RefCell::new(Vec::new()) };
     static HOST_MOCK_SCOPES: RefCell<Vec<(Vec<HostMock>, Vec<HostMockCall>)>> =
         const { RefCell::new(Vec::new()) };
+    static REGISTERED_HOST_OPERATIONS: RefCell<BTreeMap<String, BTreeMap<String, String>>> =
+        const { RefCell::new(BTreeMap::new()) };
 }
 
 pub(crate) fn reset_host_state() {
@@ -163,6 +166,100 @@ fn capability_manifest_map() -> crate::value::DictMap {
             )],
         ),
     );
+    root.insert(
+        crate::value::intern_key("project"),
+        capability(
+            "Project metadata and durable project facts.",
+            &[
+                op("metadata_get", "Read project metadata."),
+                op("metadata_inspect", "Inspect project metadata provenance."),
+                op("metadata_set", "Write project metadata."),
+                op("metadata_save", "Persist pending project metadata changes."),
+                op("metadata_stale", "Check whether project metadata is stale."),
+                op(
+                    "metadata_refresh_hashes",
+                    "Refresh project metadata content hashes.",
+                ),
+            ],
+        ),
+    );
+    root.insert(
+        crate::value::intern_key("runtime"),
+        capability(
+            "Runtime task context and run metadata supplied by the active host.",
+            &[
+                op("task", "Read the current runtime task."),
+                op("pipeline_input", "Read the active pipeline input payload."),
+                op("dry_run", "Read whether the runtime is in dry-run mode."),
+                op("approved_plan", "Read the approved plan text."),
+                op("record_run", "Record run metadata with the host."),
+                op("set_result", "Write the runtime result payload."),
+            ],
+        ),
+    );
+    root.insert(
+        crate::value::intern_key("workspace"),
+        capability(
+            "Workspace facts and file access supplied by the active host.",
+            &[
+                op("project_root", "Return the active project root."),
+                op("cwd", "Return the active current working directory."),
+                op("read_text", "Read a workspace text file."),
+                op("list", "List workspace files or directories."),
+                op("exists", "Check whether a workspace path exists."),
+            ],
+        ),
+    );
+    root.insert(
+        crate::value::intern_key("oauth_storage"),
+        capability(
+            "Host-managed OAuth token storage.",
+            &[
+                op("cloud_get", "Read a cloud-managed token set."),
+                op("cloud_set", "Write a cloud-managed token set."),
+                op("cloud_delete", "Delete a cloud-managed token set."),
+                op(
+                    "cloud_acquire_refresh_lock",
+                    "Acquire an OAuth refresh lock.",
+                ),
+                op(
+                    "cloud_release_refresh_lock",
+                    "Release an OAuth refresh lock.",
+                ),
+            ],
+        ),
+    );
+    root.insert(
+        crate::value::intern_key("mcp"),
+        capability(
+            "MCP host interactions.",
+            &[op("elicit", "Ask the connected MCP client for input.")],
+        ),
+    );
+    root.insert(
+        crate::value::intern_key("hitl"),
+        capability(
+            "Human-in-the-loop host interactions.",
+            &[
+                op(
+                    "question",
+                    "Ask a human a question through the active host.",
+                ),
+                op(
+                    "approval",
+                    "Request a human approval through the active host.",
+                ),
+                op(
+                    "dual_control",
+                    "Request quorum approval from multiple human reviewers.",
+                ),
+                op(
+                    "escalation",
+                    "Escalate a task to a human role through the active host.",
+                ),
+            ],
+        ),
+    );
     root
 }
 
@@ -230,14 +327,179 @@ fn ensure_mocked_capability(
     );
 }
 
+fn ensure_registered_operation(
+    root: &mut crate::value::DictMap,
+    capability_name: &str,
+    operation_name: &str,
+    description: &str,
+) {
+    let operation = op(operation_name, description);
+    let Some(existing) = root.get(capability_name).cloned() else {
+        root.insert(
+            crate::value::intern_key(capability_name),
+            capability(description, &[operation]),
+        );
+        return;
+    };
+
+    let Some(existing_dict) = existing.as_dict() else {
+        return;
+    };
+    let mut entry = (*existing_dict).clone();
+    let mut ops = entry
+        .get("ops")
+        .and_then(|value| match value {
+            VmValue::List(list) => Some((**list).clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if !ops.iter().any(|value| value.display() == operation_name) {
+        ops.push(VmValue::String(arcstr::ArcStr::from(
+            operation_name.to_string(),
+        )));
+    }
+
+    let mut operations = entry
+        .get("operations")
+        .and_then(|value| value.as_dict())
+        .map(|dict| (*dict).clone())
+        .unwrap_or_default();
+    operations
+        .entry(crate::value::intern_key(operation_name))
+        .or_insert(operation.1);
+
+    entry.insert(
+        crate::value::intern_key("ops"),
+        VmValue::List(std::sync::Arc::new(ops)),
+    );
+    entry.insert(
+        crate::value::intern_key("operations"),
+        VmValue::dict(operations),
+    );
+    root.insert(
+        crate::value::intern_key(capability_name),
+        VmValue::dict(entry),
+    );
+}
+
+pub fn register_mockable_host_operation(
+    capability_name: impl AsRef<str>,
+    operation_name: impl AsRef<str>,
+    description: impl AsRef<str>,
+) {
+    let capability_name = capability_name.as_ref().to_string();
+    let operation_name = operation_name.as_ref().to_string();
+    let description = description.as_ref().to_string();
+    REGISTERED_HOST_OPERATIONS.with(|registered| {
+        registered
+            .borrow_mut()
+            .entry(capability_name)
+            .or_default()
+            .insert(operation_name, description);
+    });
+}
+
+fn apply_registered_operations(root: &mut crate::value::DictMap) {
+    REGISTERED_HOST_OPERATIONS.with(|registered| {
+        for (capability_name, operations) in registered.borrow().iter() {
+            for (operation_name, description) in operations {
+                ensure_registered_operation(root, capability_name, operation_name, description);
+            }
+        }
+    });
+}
+
 fn capability_manifest_with_mocks() -> VmValue {
     let mut root = capability_manifest_map();
+    apply_registered_operations(&mut root);
     HOST_MOCKS.with(|mocks| {
         for host_mock in mocks.borrow().iter() {
             ensure_mocked_capability(&mut root, &host_mock.capability, &host_mock.operation);
         }
     });
     VmValue::dict(root)
+}
+
+fn known_host_operations() -> Vec<(String, String)> {
+    let mut root = capability_manifest_map();
+    apply_registered_operations(&mut root);
+    root.into_iter()
+        .flat_map(|(capability_name, capability)| {
+            let capability_name = capability_name.to_string();
+            capability
+                .as_dict()
+                .and_then(|dict| dict.get("ops"))
+                .and_then(|value| match value {
+                    VmValue::List(list) => Some((**list).clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |operation| (capability_name.clone(), operation.display()))
+        })
+        .collect()
+}
+
+fn host_operation_is_registered(capability: &str, operation: &str) -> bool {
+    known_host_operations()
+        .iter()
+        .any(|(known_capability, known_operation)| {
+            known_capability == capability && known_operation == operation
+        })
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let mut previous: Vec<usize> = (0..=b.chars().count()).collect();
+    let mut current = vec![0; previous.len()];
+    for (i, ca) in a.chars().enumerate() {
+        current[0] = i + 1;
+        for (j, cb) in b.chars().enumerate() {
+            let substitution = previous[j] + usize::from(ca != cb);
+            let insertion = current[j] + 1;
+            let deletion = previous[j + 1] + 1;
+            current[j + 1] = substitution.min(insertion).min(deletion);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[b.chars().count()]
+}
+
+fn closest_host_operation(capability: &str, operation: &str) -> Option<(String, String)> {
+    let requested = format!("{capability}.{operation}");
+    known_host_operations()
+        .into_iter()
+        .map(|(candidate_capability, candidate_operation)| {
+            let candidate = format!("{candidate_capability}.{candidate_operation}");
+            let distance = edit_distance(&requested, &candidate);
+            (distance, candidate_capability, candidate_operation)
+        })
+        .filter(|(distance, _, _)| *distance <= 4)
+        .min_by_key(|(distance, _, _)| *distance)
+        .map(|(_, candidate_capability, candidate_operation)| {
+            (candidate_capability, candidate_operation)
+        })
+}
+
+fn validate_host_mock_registration(host_mock: &HostMock) -> Result<(), VmError> {
+    if host_mock.unregistered_ok
+        || host_operation_is_registered(&host_mock.capability, &host_mock.operation)
+    {
+        return Ok(());
+    }
+
+    let mut message = format!(
+        "host_mock: unregistered host operation {}.{}; register the capability/operation on \
+         the host or pass {{unregistered_ok: true}} for a test-local mock",
+        host_mock.capability, host_mock.operation
+    );
+    if let Some((capability, operation)) =
+        closest_host_operation(&host_mock.capability, &host_mock.operation)
+    {
+        message.push_str(&format!(". Did you mean {capability}.{operation}?"));
+    }
+    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        message,
+    ))))
 }
 
 fn op(name: &str, description: &str) -> (String, VmValue) {
@@ -321,11 +583,13 @@ fn parse_host_mock(args: &[VmValue]) -> Result<HostMock, VmError> {
         .map(|dict| (*dict).clone());
     let mut result = args.get(2).cloned().or(Some(VmValue::Nil));
     let mut error = None;
+    let mut unregistered_ok = false;
 
     if let Some(config) = args.get(2).and_then(|value| value.as_dict()) {
         if config.contains_key("result")
             || config.contains_key("params")
             || config.contains_key("error")
+            || config.contains_key("unregistered_ok")
         {
             params = config
                 .get("params")
@@ -336,6 +600,7 @@ fn parse_host_mock(args: &[VmValue]) -> Result<HostMock, VmError> {
                 .get("error")
                 .map(|value| value.display())
                 .filter(|value| !value.is_empty());
+            unregistered_ok = matches!(config.get("unregistered_ok"), Some(VmValue::Bool(true)));
         }
     }
 
@@ -345,6 +610,7 @@ fn parse_host_mock(args: &[VmValue]) -> Result<HostMock, VmError> {
         params,
         result,
         error,
+        unregistered_ok,
     })
 }
 
@@ -1328,6 +1594,7 @@ pub(crate) fn register_missing_host_builtins(vm: &mut Vm) {
 )]
 fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let host_mock = parse_host_mock(args)?;
+    validate_host_mock_registration(&host_mock)?;
     push_host_mock(host_mock);
     Ok(VmValue::Nil)
 }
@@ -1455,8 +1722,9 @@ mod tests {
     use super::{
         build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
         dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
-        dispatch_mock_host_call, dispatch_mock_hostlib_call, push_host_mock, reset_host_state,
-        resolve_process_exec_cwd, set_host_call_bridge, HostCallBridge, HostMock,
+        dispatch_mock_host_call, dispatch_mock_hostlib_call, parse_host_mock, push_host_mock,
+        register_mockable_host_operation, reset_host_state, resolve_process_exec_cwd,
+        set_host_call_bridge, validate_host_mock_registration, HostCallBridge, HostMock,
     };
     use crate::value::VmDictExt;
 
@@ -1640,6 +1908,7 @@ mod tests {
             params: None,
             result: Some(VmValue::dict(crate::value::DictMap::new())),
             error: None,
+            unregistered_ok: false,
         });
         let manifest = capability_manifest_with_mocks();
         let project = manifest
@@ -1666,6 +1935,7 @@ mod tests {
             params: None,
             result: Some(VmValue::String(arcstr::ArcStr::from("fallback"))),
             error: None,
+            unregistered_ok: false,
         });
         push_host_mock(HostMock {
             capability: "project".to_string(),
@@ -1673,6 +1943,7 @@ mod tests {
             params: Some(exact_params),
             result: Some(VmValue::String(arcstr::ArcStr::from("facts"))),
             error: None,
+            unregistered_ok: false,
         });
 
         let mut call_params = crate::value::DictMap::new();
@@ -1700,6 +1971,7 @@ mod tests {
             params: None,
             result: None,
             error: Some("boom".to_string()),
+            unregistered_ok: false,
         });
         let params = crate::value::DictMap::new();
         let result = dispatch_mock_host_call("project", "metadata_get", &params)
@@ -1709,6 +1981,76 @@ mod tests {
             other => panic!("unexpected result: {other:?}"),
         }
         reset_host_state();
+    }
+
+    #[test]
+    fn host_mock_registration_rejects_unknown_operations_by_default() {
+        let host_mock = HostMock {
+            capability: "runtime".to_string(),
+            operation: "tas".to_string(),
+            params: None,
+            result: Some(VmValue::Nil),
+            error: None,
+            unregistered_ok: false,
+        };
+        let error = validate_host_mock_registration(&host_mock)
+            .expect_err("unknown host operation should fail at registration");
+        match error {
+            VmError::Thrown(VmValue::String(message)) => {
+                assert!(message.contains("runtime.tas"));
+                assert!(message.contains("unregistered_ok"));
+                assert!(message.contains("runtime.task"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_mock_registration_allows_explicit_test_local_operations() {
+        let host_mock = HostMock {
+            capability: "synthetic".to_string(),
+            operation: "op".to_string(),
+            params: None,
+            result: Some(VmValue::Nil),
+            error: None,
+            unregistered_ok: true,
+        };
+        validate_host_mock_registration(&host_mock)
+            .expect("explicit unregistered_ok should permit synthetic mocks");
+    }
+
+    #[test]
+    fn host_mock_registration_accepts_runtime_registered_operations() {
+        register_mockable_host_operation(
+            "code_index",
+            "stats",
+            "Hostlib schema-backed operation registered at runtime.",
+        );
+        let host_mock = HostMock {
+            capability: "code_index".to_string(),
+            operation: "stats".to_string(),
+            params: None,
+            result: Some(VmValue::Nil),
+            error: None,
+            unregistered_ok: false,
+        };
+        validate_host_mock_registration(&host_mock)
+            .expect("registered hostlib operations should be mockable");
+    }
+
+    #[test]
+    fn host_mock_parse_preserves_unregistered_ok_config() {
+        let config = VmValue::dict(crate::value::DictMap::from_iter([
+            (crate::value::intern_key("result"), VmValue::string("ok")),
+            (
+                crate::value::intern_key("unregistered_ok"),
+                VmValue::Bool(true),
+            ),
+        ]));
+        let host_mock =
+            parse_host_mock(&[VmValue::string("synthetic"), VmValue::string("op"), config])
+                .expect("parse host mock config");
+        assert!(host_mock.unregistered_ok);
     }
 
     #[test]
@@ -1725,6 +2067,7 @@ mod tests {
             params: Some(mock_params),
             result: Some(VmValue::String(arcstr::ArcStr::from("direct"))),
             error: None,
+            unregistered_ok: false,
         });
 
         let mut call_params = crate::value::DictMap::new();
@@ -1757,6 +2100,7 @@ mod tests {
             params: Some(mock_params),
             result: Some(VmValue::String(arcstr::ArcStr::from("legacy"))),
             error: None,
+            unregistered_ok: false,
         });
 
         let mut call_params = crate::value::DictMap::new();
@@ -1792,6 +2136,7 @@ mod tests {
             params: Some(params.clone()),
             result: Some(VmValue::String(arcstr::ArcStr::from("legacy"))),
             error: None,
+            unregistered_ok: false,
         });
         push_host_mock(HostMock {
             capability: "tools".to_string(),
@@ -1799,6 +2144,7 @@ mod tests {
             params: Some(params.clone()),
             result: Some(VmValue::String(arcstr::ArcStr::from("direct"))),
             error: None,
+            unregistered_ok: false,
         });
 
         let value = dispatch_mock_hostlib_call("tools", "run_command", &params)

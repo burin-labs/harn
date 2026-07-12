@@ -1576,11 +1576,15 @@ tool at runtime and then call it by name without hard-coding it into the
 initial prompt. Import `std/host` when you want small helpers such as
 `host_tool_lookup(name)` or `host_tool_available(name)`.
 
-`host_mock(...)` is intended for tests and local conformance runs. The third
-argument may be either a direct result value or a config dict containing
-`result`, `params`, and/or `error`. Mock matching is last-write-wins and only
-requires the declared `params` subset to match the actual host call
-call. Matched calls are recorded in `host_mock_calls()` as
+`host_mock(...)` is intended for tests and local conformance runs. Mock
+registration is strict by default: the capability/operation must be part of
+Harn's first-party host surface or a hostlib operation registered by the active
+embedder. For a deliberately synthetic test-only operation, pass
+`unregistered_ok: true` in the config dict. The third argument may be either a
+direct result value or a config dict containing `result`, `params`, `error`,
+and/or `unregistered_ok`. Mock matching is last-write-wins and only requires
+the declared `params` subset to match the actual host call. Matched calls are
+recorded in `host_mock_calls()` as
 `{capability, operation, params}` dictionaries.
 
 Hostlib builtins that take a request dict also consult this registry by their
@@ -1606,9 +1610,11 @@ mock_host_result("project", "metadata_get", "hello", {dir: ".", namespace: "fact
 assert_eq(host_call("project.metadata_get", {dir: ".", namespace: "facts"}), "hello")
 assert_host_called("project", "metadata_get", {dir: ".", namespace: "facts"}, nil)
 
-mock_host_error("project", "scan", "scan failed", nil)
-const result = try { host_call("project.scan", {}) }
+mock_host_error("project", "metadata_set", "write denied", nil)
+const result = try { host_call("project.metadata_set", {}) }
 assert(is_err(result))
+
+host_mock("test_only", "op", {result: "ok", unregistered_ok: true})
 ```
 
 `std/testing` also includes persona steel-thread assertions:
