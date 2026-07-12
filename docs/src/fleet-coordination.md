@@ -1,0 +1,147 @@
+# Fleet coordination
+
+`std/fleet/coordination` adds a typed fleet vocabulary and a deterministic
+status projection on top of Harn's existing durable coordination ledger. It is
+an explicit-import library: importing it registers no trigger, timer, reminder,
+supervisor, or reassignment behavior.
+
+Use the lower-level [`std/coordination`](./agent-channels.md#coordination-ledger)
+helpers for general agent messages. Use this module when a host or workflow
+needs stable records for work ownership, acknowledgements, premise-changing
+findings, liveness, completion receipts, or structured check-ins.
+
+## Existing substrate
+
+The module does not create another mailbox or claim engine:
+
+- agent channels own durable append-only storage, cursors, idempotency, signed
+  emit timestamps, and replay receipts;
+- `std/coordination` owns scoped rooms, actor/ref metadata, addressing, replies,
+  and consumer acknowledgements;
+- `worker://` queues remain authoritative for queue-dispatched work claims;
+- persona leases remain authoritative for persona work.
+
+A fleet claim can reference a queue claim or persona lease. It does not replace
+either state machine.
+
+## Posting records
+
+```harn
+import {
+  fleet_ack,
+  fleet_claim,
+  fleet_finding,
+  fleet_heartbeat,
+} from "std/fleet/coordination"
+
+const claim = fleet_claim("workspace", "release", "repo:release", {
+  id: "release-claim-17",
+  workspace_id: "sdk-workspace",
+  from: {agent: "release-worker"},
+  requires_ack: true,
+  lease_ms: 300000,
+  refs: [{kind: "pull_request", url: "https://example.invalid/pr/17"}],
+})
+
+fleet_ack("workspace", "release", claim.id, "accepted", {
+  id: "release-claim-17-ack",
+  workspace_id: "sdk-workspace",
+  from: {agent: "controller"},
+})
+
+fleet_heartbeat("workspace", "release", "busy", {
+  id: "release-worker-heartbeat-1",
+  workspace_id: "sdk-workspace",
+  from: {agent: "release-worker"},
+  current_claim_ids: [claim.id],
+  lease_ms: 300000,
+  expected_silence_ms: 600000,
+})
+
+fleet_finding("workspace", "release", "overturned", {
+  id: "release-finding-1",
+  workspace_id: "sdk-workspace",
+  from: {agent: "release-worker"},
+  subject: "The target artifact is generated elsewhere",
+  refs: [{kind: "source", ref: "generator/README.md"}],
+})
+```
+
+The public helpers are:
+
+| Helper | Coordination kind | Data schema |
+|---|---|---|
+| `fleet_claim` | `claim` | `harn.fleet.claim.v1` |
+| `fleet_ack` | `ack` | `harn.fleet.ack.v1` |
+| `fleet_done` | `done` | `harn.fleet.done.v1` |
+| `fleet_finding` | `finding` | `harn.fleet.finding.v1` |
+| `fleet_heartbeat` | `heartbeat` | `harn.fleet.heartbeat.v1` |
+| `fleet_checkin` | `checkin` | `harn.fleet.checkin.v1` |
+
+Every helper returns the normal `harn.coordination.receipt.v1` value. References
+stay on the coordination envelope so hosts can render them without parsing body
+text.
+
+### Runtime-owned time
+
+The fleet helpers reject `created_at` and `ts` options. Event order and liveness
+use the channel event's signed `emitted_at.at_ms`, not a caller timestamp. A
+source timestamp imported from another system is metadata and must not become
+the authoritative fleet clock.
+
+Actor fields are attribution, not cryptographic identity. Hosts must not treat
+an `agent` string alone as authentication.
+
+## Projecting a snapshot
+
+Read coordination rows with their channel event wrappers, then inject the clock
+used for the projection:
+
+```harn
+import { coord_read } from "std/coordination"
+import { fleet_project } from "std/fleet/coordination"
+
+const rows = coord_read("workspace", "release", {
+  workspace_id: "sdk-workspace",
+  include_events: true,
+})
+
+const snapshot = fleet_project(rows, {
+  now_ms: harness.clock.timestamp() * 1000,
+  grace_ms: 60000,
+})
+```
+
+`fleet_project` returns `harn.fleet.snapshot.v1` with:
+
+- actors and `active`, `late`, `unresponsive`, or `unknown` liveness;
+- claims in `proposed`, `active`, `completed`, `failed`, `abandoned`,
+  `rejected`, `needs_changes`, `stale`, or `conflicted` state;
+- conflicts when more than one live claim names the same work key;
+- premise-changing findings still waiting for an acknowledgement;
+- the latest structured check-in for each actor;
+- generic summaries of messages whose fleet data schema is newer or unknown.
+
+An expected-silence window extends the heartbeat deadline and any current claim
+ids named by that heartbeat. This lets a worker declare a long non-chatty build
+without being mistaken for an unresponsive lane.
+
+The projector never chooses a winning claim, acknowledges a finding, releases
+a resource, or reassigns work. Those are controller decisions and require
+separate explicit receipts. A completion receipt changes claim state only when
+both its claim id and work key match the original claim.
+
+## Queue and persona claims
+
+Use `queue_claim_id` or `persona_lease_id` on `fleet_claim` to link an operator
+view to the authoritative runtime receipt. Do not mirror claim renewal with
+fleet messages when WorkerQueue or persona runtime already owns it. Manual or
+externally executed work can use the fleet claim lease directly.
+
+## Forward compatibility
+
+The coordination envelope allows additional properties. A projector that sees
+an unknown fleet data schema includes a generic entry in `unknown_messages`
+instead of treating it as a known lifecycle transition. This keeps newer
+producers visible to older read surfaces without letting an unknown record
+change claim or liveness state.

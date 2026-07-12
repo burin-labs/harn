@@ -212,6 +212,7 @@
 - [Trigger registry](./triggers/registry.md)
 - [Webhook intake substrate](./triggers/webhook-intake.md)
 - [Agent channels](./agent-channels.md)
+- [Fleet coordination](./fleet-coordination.md)
 - [Agent pools](./agent-pools.md)
 - [Orchestrator](./orchestrator.md)
 - [Hot reload](./orchestrator/hot-reload.md)

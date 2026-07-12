@@ -16,7 +16,20 @@ const __COORD_DIR_LOCK_SCHEMA = "harn.coordination.dir_lock.v1"
 
 const __COORD_CHANNEL_PREFIX = "coord"
 
-const __COORD_KINDS = ["status", "claim", "handoff", "blocker", "decision", "request", "fact"]
+const __COORD_KINDS = [
+  "status",
+  "claim",
+  "ack",
+  "done",
+  "finding",
+  "checkin",
+  "heartbeat",
+  "handoff",
+  "blocker",
+  "decision",
+  "request",
+  "fact",
+]
 
 const __COORD_DIR_LOCK_TTL_MS = 10 * 60 * 1000
 
