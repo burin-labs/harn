@@ -1,3 +1,5 @@
+import "std/collections"
+
 /**
  * Multi-task routing_policy v2 eval.
  *
@@ -117,21 +119,21 @@ fn grade_outcome(code: string) -> string {
     },
   )
   const outcome = try {
-    let validation = llm_call("validate", nil, {routing: policy, max_tokens: 1})
-    let attempts = validation.routing.attempts
+    const validation = llm_call("validate", nil, {routing: policy, max_tokens: 1})
+    const attempts = validation.routing.attempts
     if len(attempts) > 0 {
       attempts[0]?.verifier_outcome ?? "escalate"
     } else {
       "escalate"
     }
   } catch (err) {
-    let err_text = to_string(err)
-    let reason = if type_of(err) == "dict" {
+    const err_text = to_string(err)
+    const reason = if type_of(err) == "dict" {
       to_string(err?.reason ?? "")
     } else {
       ""
     }
-    let is_routing_shape = reason != ""
+    const is_routing_shape = reason != ""
       || contains(err_text, "routing")
       || contains(err_text, "budget")
       || contains(err_text, "verifier")
@@ -199,7 +201,7 @@ fn run_one_routed(task: dict, system: dict) -> dict {
   const attempts = result.routing.attempts
   const selected = result.routing.selected ?? 0
   const final_model = attempts[selected].model
-  const total_cost = attempts.map({ a -> attempt_cost(a) }).reduce(0.0, { acc, x -> acc + x })
+  const total_cost = sum_by(attempts, { a -> attempt_cost(a) })
   const escalated = len(attempts) > 1
   return {
     task_id: task.id,
@@ -256,18 +258,8 @@ fn run_task_quartet(task: dict, skill_body: string) -> dict {
 }
 
 fn col_totals(rows: list, key: string) -> dict {
-  const cost = rows.map({ row -> to_float(row[key].cost_usd) }).reduce(0.0, { acc, x -> acc + x })
-  const valid = rows
-    .map(
-    { row ->
-      if row[key].looks_valid {
-        1
-      } else {
-        0
-      }
-    },
-  )
-    .reduce(0, { acc, x -> acc + x })
+  const cost = sum_by(rows, { row -> to_float(row[key].cost_usd) })
+  const valid = count_where(rows, { row -> row[key].looks_valid })
   return {cost_usd: cost, valid: valid}
 }
 

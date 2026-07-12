@@ -1,5 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_session_messages } from "std/agent/state"
+import "std/collections"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -80,7 +81,7 @@ pipeline default() {
       __io_println(len(repair_stalls))
       __io_println(repair_stalls[0].warning.pattern)
       __io_println(repair_stalls[0].warning.count)
-      __io_println(len(stalls.filter({ s -> s.warning.pattern == "repeated_error" })))
+      __io_println(count_where(stalls, { s -> s.warning.pattern == "repeated_error" }))
       const messages = json_stringify(agent_session_messages(session))
       __io_println(contains(messages, "AssertionError: expected 5 got 4"))
       __io_println(contains(messages, "Repair diagnostic"))
