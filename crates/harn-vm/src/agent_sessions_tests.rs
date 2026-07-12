@@ -910,7 +910,7 @@ fn inject_host_tool_result_appends_typed_transcript_event_and_agent_event() {
         } => {
             assert_eq!(injection_id, result["injection_id"].as_str().unwrap());
             assert_eq!(tool_name, "web_fetch");
-            assert_eq!(*sequence, 0);
+            assert_eq!(*sequence, 1);
             assert_eq!(delivered_at_seam.as_deref(), Some("immediate"));
             assert_eq!(sanitization.trust, crate::security::TrustLevel::Untrusted);
         }
@@ -949,7 +949,7 @@ fn inject_host_attachment_records_pointer_event_without_inline_bytes() {
     )
     .expect("host attachment injects");
 
-    assert_eq!(result["sequence"], 0);
+    assert_eq!(result["sequence"], 1);
     let transcript_events = events_by_kind_json(&id, "host_attachment");
     assert_eq!(transcript_events.len(), 1);
     assert_eq!(
@@ -968,11 +968,15 @@ fn inject_host_attachment_records_pointer_event_without_inline_bytes() {
 }
 
 #[test]
-fn inject_host_event_rejects_queued_delivery_until_h2() {
+fn inject_host_event_queues_and_drains_after_next_tool_call_delivery() {
+    reset_all_sinks();
     reset_session_store();
-    let id = open_or_create(Some("host-queued-reject-session".into()));
+    crate::orchestration::agent_inbox::reset();
+    let id = open_or_create(Some("host-queued-after-tool-session".into()));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    register_sink(&id, Arc::new(CapturingSink(captured.clone())));
 
-    let error = inject_host_event(
+    let result = inject_host_event(
         &id,
         crate::stdlib::json_to_vm_value(&serde_json::json!({
             "kind": "host_tool_result",
@@ -988,11 +992,50 @@ fn inject_host_event_rejects_queued_delivery_until_h2() {
             }
         })),
     )
-    .expect_err("queued delivery is not implemented in H1");
+    .expect("queued delivery is accepted");
 
-    assert!(error.contains("H1 only supports 'immediate'"));
+    assert_eq!(result["status"], "queued");
+    assert_eq!(result["sequence"], 1);
     assert_eq!(message_count(&id), 0);
     assert_eq!(event_count_by_kind(&id, "host_tool_result"), 0);
+    assert_eq!(crate::orchestration::agent_inbox::pending_count(&id), 1);
+
+    let drained = drain_queued_host_injections(
+        &id,
+        crate::agent_events::InjectionDelivery::AfterNextToolCall,
+        "post_tool_dispatch",
+    )
+    .expect("queued host injection drains");
+    assert_eq!(drained.len(), 1);
+    assert_eq!(drained[0]["injection_id"], result["injection_id"]);
+    assert_eq!(drained[0]["delivered_at_seam"], "post_tool_dispatch");
+    assert_eq!(message_count(&id), 1);
+    assert_eq!(crate::orchestration::agent_inbox::pending_count(&id), 0);
+
+    let transcript_events = events_by_kind_json(&id, "host_tool_result");
+    assert_eq!(transcript_events.len(), 1);
+    assert_eq!(
+        transcript_events[0]["metadata"]["injection_id"],
+        result["injection_id"]
+    );
+
+    let events = captured.lock().expect("capture sink poisoned");
+    match events
+        .iter()
+        .find(|event| matches!(event, AgentEvent::HostToolResult { .. }))
+        .expect("host tool result event emitted")
+    {
+        AgentEvent::HostToolResult {
+            sequence,
+            delivered_at_seam,
+            ..
+        } => {
+            assert_eq!(*sequence, 1);
+            assert_eq!(delivered_at_seam.as_deref(), Some("post_tool_dispatch"));
+        }
+        event => panic!("expected HostToolResult event, got {event:?}"),
+    }
+    reset_all_sinks();
 }
 
 #[test]

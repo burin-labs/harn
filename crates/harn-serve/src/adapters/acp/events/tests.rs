@@ -755,6 +755,31 @@ async fn feedback_injected_streak_reaches_acp_payload() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn loop_checkpoint_surfaces_typed_host_injection_delivery_count() {
+    let actual = collect_notifications(vec![AgentEvent::LoopCheckpoint {
+        session_id: "session-1".to_string(),
+        iteration: 3,
+        kind: "post_tool_dispatch".to_string(),
+        delivered: 1,
+        inbox_delivered: 2,
+        typed_delivered: 4,
+        dispatch_skipped: true,
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "loop_checkpoint");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["iteration"], 3);
+    assert_eq!(params["delivered"], 1);
+    assert_eq!(params["inboxDelivered"], 2);
+    assert_eq!(params["typedDelivered"], 4);
+    assert_eq!(params["dispatchSkipped"], true);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn step_judge_decision_agent_event_marks_skipped_reason() {
     let actual = collect_notifications(vec![AgentEvent::StepJudgeDecision {
         session_id: "session-1".to_string(),

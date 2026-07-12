@@ -159,6 +159,18 @@ pub fn agent_session_drain_feedback(session_id) {
 }
 
 /**
+ * agent_session_drain_host_injections.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_drain_host_injections(session_id, "turn_boundary", "iteration_start")
+ */
+pub fn agent_session_drain_host_injections(session_id, delivery, seam) {
+  return __host_agent_session_drain_host_injections(session_id, delivery, seam)
+}
+
+/**
  * agent_session_drain_bridge_injections.
  *
  * @effects: [host]

@@ -1783,6 +1783,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 kind,
                 delivered,
                 inbox_delivered,
+                typed_delivered,
                 dispatch_skipped,
             } => {
                 let mut payload = serde_json::json!({
@@ -1793,6 +1794,10 @@ impl AgentEventSink for AcpAgentEventSink {
                 if *inbox_delivered > 0 {
                     payload["inboxDelivered"] =
                         serde_json::Value::Number(serde_json::Number::from(*inbox_delivered));
+                }
+                if *typed_delivered > 0 {
+                    payload["typedDelivered"] =
+                        serde_json::Value::Number(serde_json::Number::from(*typed_delivered));
                 }
                 if *dispatch_skipped {
                     payload["dispatchSkipped"] = serde_json::Value::Bool(true);
