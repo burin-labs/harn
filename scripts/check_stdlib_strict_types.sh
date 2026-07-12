@@ -30,13 +30,10 @@ EXCLUDE=(
   "crates/harn-stdlib/src/stdlib/stdlib_agents.harn"
 )
 
-# Resolve the checker: prefer a pre-built binary in $HARN_BIN (CI warms one),
-# else fall back to `cargo run` so the gate works from a bare checkout.
-if [[ -n "${HARN_BIN:-}" ]]; then
-  harn=("$HARN_BIN")
-else
-  harn=(cargo run --quiet --bin harn --)
-fi
+# Resolve the checker through the shared fresh-binary wrapper. It reuses a
+# current worktree binary without walking Cargo's graph for stdlib-only edits,
+# and rebuilds or fails loudly when executable inputs are stale.
+harn=(./scripts/harn_bin.sh --)
 
 # The check exits non-zero on pre-existing HARN-TYP errors in the tree; those
 # are not this gate's concern, so capture output and drive the verdict off the

@@ -114,13 +114,14 @@ fi
 
 make_no_bin="$tmp_root/make-no-bin.txt"
 make_with_bin="$tmp_root/make-with-bin.txt"
+make_fmt_with_bin="$tmp_root/make-fmt-with-bin.txt"
 make -C "$repo_root" -n check-highlight check-protocol-artifacts > "$make_no_bin"
 for expected in \
-  './scripts/cargo_with_worktree_build_dir.sh run --quiet -p harn-cli -- dump-highlight-keywords --check' \
-  './scripts/cargo_with_worktree_build_dir.sh run --quiet -p harn-cli -- dump-protocol-artifacts --check'
+  './scripts/harn_bin.sh -- dump-highlight-keywords --check' \
+  './scripts/harn_bin.sh -- dump-protocol-artifacts --check'
 do
   if ! grep -Fq "$expected" "$make_no_bin"; then
-    echo "Makefile HARN_CLI_CMD did not use the Cargo env wrapper without HARN_BIN: $expected" >&2
+    echo "Makefile HARN_CLI_CMD did not use the fresh harn-bin wrapper without HARN_BIN: $expected" >&2
     cat "$make_no_bin" >&2
     exit 1
   fi
@@ -157,8 +158,8 @@ touch "$fake_harn"
 chmod +x "$fake_harn"
 make -C "$repo_root" -n check-highlight check-protocol-artifacts HARN_BIN="$fake_harn" > "$make_with_bin"
 for expected in \
-  "\"$fake_harn\" dump-highlight-keywords --check" \
-  "\"$fake_harn\" dump-protocol-artifacts --check"
+  "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- dump-highlight-keywords --check" \
+  "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- dump-protocol-artifacts --check"
 do
   if ! grep -Fq "$expected" "$make_with_bin"; then
     echo "Makefile HARN_CLI_CMD did not preserve HARN_BIN fast path: $expected" >&2
@@ -166,9 +167,16 @@ do
     exit 1
   fi
 done
-if grep -Fq './scripts/cargo_with_worktree_build_dir.sh' "$make_with_bin"; then
+if grep -Fq './scripts/cargo_with_worktree_build_dir.sh run' "$make_with_bin"; then
   echo "Makefile used wrapper despite HARN_BIN being set" >&2
   cat "$make_with_bin" >&2
+  exit 1
+fi
+
+make -C "$repo_root" -n fmt-harn HARN_BIN="$fake_harn" > "$make_fmt_with_bin"
+if ! grep -Fq "xargs -0 env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- fmt --check" "$make_fmt_with_bin"; then
+  echo "fmt-harn is not xargs-safe when HARN_BIN is set" >&2
+  cat "$make_fmt_with_bin" >&2
   exit 1
 fi
 

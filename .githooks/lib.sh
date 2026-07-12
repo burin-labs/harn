@@ -19,8 +19,9 @@ HOOK_TREESITTER_PATTERN='(^crates/harn-lexer/src/token\.rs$|^tree-sitter-harn/gr
 # The generated-artifact registry and the consumers its audit cross-checks:
 # Makefile target/recipe lists, the CI workflow that references generated
 # artifact checks, and the hook logic. Other workflows (for example release
-# binary packaging) do not change generated-artifact coverage and should not
-# pay the full Harn compile needed by check-generated-registry.
+# binary packaging) do not change generated-artifact coverage. When the guard
+# does run, it must use a fresh worktree Harn binary because registry coverage
+# is computed by Harn source from this checkout.
 HOOK_GENREGISTRY_PATTERN='(^scripts/generated_artifacts\.toml$|^scripts/check_generated_registry\.harn$|^Makefile$|^\.github/workflows/ci\.yml$|^\.githooks/)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
 
@@ -240,6 +241,11 @@ hook_export_harn_bin() {
     return 0
   fi
   HARN_BIN=$(hook_ensure_harn)
+  export HARN_BIN
+}
+
+hook_export_fresh_worktree_harn_bin() {
+  HARN_BIN=$(unset HARN_BIN; ./scripts/harn_bin.sh --print)
   export HARN_BIN
 }
 

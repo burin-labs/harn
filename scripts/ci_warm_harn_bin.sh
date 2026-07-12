@@ -5,6 +5,8 @@ github_env="${GITHUB_ENV:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=scripts/lib/cargo_env.sh
 source "$script_dir/lib/cargo_env.sh"
+# shellcheck source=scripts/lib/harn_bin.sh
+source "$script_dir/lib/harn_bin.sh"
 
 usage() {
   cat <<'EOF'
@@ -38,34 +40,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-debug_harn_binary() {
-  local target_dir="${CARGO_TARGET_DIR:-}"
-  if [[ -z "$target_dir" ]]; then
-    target_dir="$(cargo metadata --format-version=1 --no-deps \
-      | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-  fi
-
-  local suffix=""
-  case "${OS:-$(uname -s)}" in
-    Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
-  esac
-  printf '%s/debug/harn%s\n' "$target_dir" "$suffix"
-}
-
 if [[ -n "${HARN_BIN:-}" ]]; then
-  if [[ ! -x "$HARN_BIN" ]]; then
-    echo "error: HARN_BIN is not executable: $HARN_BIN" >&2
-    exit 1
-  fi
+  harn_require_fresh_bin "$HARN_BIN"
 else
   echo "=== Warming Harn CLI binary ==="
   harn_export_cargo_build_dir_under_target "${CARGO_TARGET_DIR:-}" || true
   cargo build --quiet --bin harn
-  HARN_BIN="$(debug_harn_binary)"
-  if [[ ! -x "$HARN_BIN" ]]; then
-    echo "error: warm build completed but HARN_BIN is not executable: $HARN_BIN" >&2
-    exit 1
-  fi
+  HARN_BIN="$(harn_debug_binary_path)"
+  harn_require_fresh_bin "$HARN_BIN"
 fi
 
 export HARN_BIN

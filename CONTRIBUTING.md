@@ -187,6 +187,13 @@ bootstrap the portal frontend dependencies through
 `./scripts/ensure_portal_deps.sh` before running portal lint, and the repo-root
 `npm run portal:*` commands reuse the same bootstrap path.
 
+Harn-authored checks run through `scripts/harn_bin.sh`, which reuses
+`$HARN_BIN` or the worktree `target/debug/harn` when that binary is newer than
+the Rust/Cargo inputs that relink the executable. If the binary is missing or
+stale, the wrapper rebuilds it once and every Make/hook Harn command shares the
+fresh path. To prewarm explicitly, run `scripts/ci_warm_harn_bin.sh`; to force a
+fresh executable, remove `target/debug/harn` or unset `HARN_BIN`.
+
 ## Demo gate
 
 Every PR that introduces a new public Harn primitive must also register

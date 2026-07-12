@@ -2,9 +2,10 @@
 
 HARN_BIN ?=
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
-HARN_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",$(HARN_CARGO_CMD) run --quiet --bin harn --)
-HARN_CMD_VERBOSE = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",$(HARN_CARGO_CMD) run --bin harn --)
-HARN_CLI_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",$(HARN_CARGO_CMD) run --quiet -p harn-cli --)
+HARN_BIN_CMD = ./scripts/harn_bin.sh
+HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
+HARN_CMD_VERBOSE = $(HARN_CMD)
+HARN_CLI_CMD = $(HARN_CMD)
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -347,6 +348,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
+	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh

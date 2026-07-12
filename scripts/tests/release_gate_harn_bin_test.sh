@@ -102,25 +102,28 @@ make -n -C "$repo_root" \
   check-docs-links \
   HARN_BIN="$fake_harn" > "$tmp_root/make-dry-run.txt"
 
-if ! grep -Fq "\"$fake_harn\" test conformance" "$tmp_root/make-dry-run.txt"; then
+if ! grep -Fq "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- test conformance" "$tmp_root/make-dry-run.txt"; then
   echo "make conformance did not route through HARN_BIN" >&2
+  cat "$tmp_root/make-dry-run.txt" >&2
   exit 1
 fi
 
-if ! grep -Fq "\"$fake_harn\" dump-highlight-keywords --check" "$tmp_root/make-dry-run.txt"; then
+if ! grep -Fq "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- dump-highlight-keywords --check" "$tmp_root/make-dry-run.txt"; then
   echo "make check-highlight did not route Harn CLI commands through HARN_BIN" >&2
+  cat "$tmp_root/make-dry-run.txt" >&2
   exit 1
 fi
 
 for expected in \
-  "\"$fake_harn\" run scripts/lint_test_patterns.harn" \
-  "\"$fake_harn\" run scripts/check_protocol_bindings.harn" \
-  "\"$fake_harn\" run scripts/check_diagnostic_codes.harn" \
-  "\"$fake_harn\" run scripts/check_receipt_struct_duplication.harn" \
-  "\"$fake_harn\" run scripts/check_docs_links.harn"
+  "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- run scripts/lint_test_patterns.harn" \
+  "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- run scripts/check_protocol_bindings.harn" \
+  "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- run scripts/check_diagnostic_codes.harn" \
+  "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- run scripts/check_receipt_struct_duplication.harn" \
+  "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- run scripts/check_docs_links.harn"
 do
   if ! grep -Fq "$expected" "$tmp_root/make-dry-run.txt"; then
     echo "make dry-run did not route through HARN_BIN: $expected" >&2
+    cat "$tmp_root/make-dry-run.txt" >&2
     exit 1
   fi
 done

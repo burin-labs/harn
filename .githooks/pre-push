@@ -145,7 +145,8 @@ if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
     :
   else
     echo "=== Pre-push: checking generated-artifact registry ==="
-    make -s check-generated-registry
+    hook_export_fresh_worktree_harn_bin
+    make -s check-generated-registry HARN_BIN="$HARN_BIN"
     echo "    Generated-artifact registry OK."
   fi
 else
@@ -285,9 +286,11 @@ fi
 if hook_paths_need_highlight "$changed" "${validation_base}...HEAD"; then
   echo "=== Pre-push: checking generated highlight keywords ==="
   # Highlight keywords mirror the branch lexer plus globally-registered
-  # builtins. Do not reuse an installed HARN_BIN here; pre-commit also forces
-  # branch-source generation for relevant changes.
-  HARN_BIN= make -s check-highlight
+  # builtins. Use a freshness-checked worktree binary rather than an installed
+  # harn or broad cargo run so branch-source drift is strict without making
+  # stdlib-only pushes pay Cargo's graph walk.
+  hook_export_fresh_worktree_harn_bin
+  make -s check-highlight HARN_BIN="$HARN_BIN"
   echo "    Highlight keywords OK."
 else
   echo "=== Pre-push: skipping highlight check (no lexer/global-builtin changes) ==="
