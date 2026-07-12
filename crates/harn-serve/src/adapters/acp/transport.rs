@@ -499,7 +499,7 @@ async fn run_acp_channel_server_inner(
                         }
                     }
                     msg = routed_rx.recv() => match msg {
-                        Some(msg) => server.handle_incoming_message(msg).await,
+                        Some(msg) => dispatch_incoming(&mut server, msg).await,
                         None => break,
                     },
                 }
@@ -592,13 +592,21 @@ pub async fn run_acp_server(config: AcpServerConfig) {
             });
 
             while let Some(msg) = request_rx.recv().await {
-                server.handle_incoming_message(msg).await;
+                dispatch_incoming(&mut server, msg).await;
             }
         })
         .await;
     if profile_enabled {
         harn_vm::tracing::set_tracing_enabled(false);
     }
+}
+
+/// Keep the large method-dispatch future off transport task stacks.
+///
+/// This boundary is shared by stdio and channel transports so adding a large
+/// handler cannot silently reintroduce platform-dependent stack exhaustion.
+async fn dispatch_incoming(server: &mut AcpServer, message: serde_json::Value) {
+    Box::pin(server.handle_incoming_message(message)).await;
 }
 
 #[cfg(test)]
