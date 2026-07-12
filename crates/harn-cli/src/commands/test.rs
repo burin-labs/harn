@@ -119,6 +119,7 @@ fn run_protocols_command(args: TestArgs, shard_requested: bool) {
         || args.agents_workspace_id.is_some()
         || args.agents_session_id.is_some()
         || args.parallel
+        || args.fail_fast
         || shard_requested
         || !args.skill_dir.is_empty()
     {
@@ -223,6 +224,7 @@ async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[Pat
         max_test_ms: args.max_test_ms,
         max_execute_ms: args.max_execute_ms,
         parallel: args.parallel,
+        fail_fast: args.fail_fast,
         jobs: args.jobs,
         shard: resolve_user_test_shard(args.shard_index, args.shard_total),
         verbose: args.verbose,
@@ -310,6 +312,7 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub max_test_ms: Option<u64>,
     pub max_execute_ms: Option<u64>,
     pub parallel: bool,
+    pub fail_fast: bool,
     pub jobs: Option<usize>,
     pub shard: Option<test_runner::TestShard>,
     pub verbose: bool,
@@ -2170,6 +2173,7 @@ async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_run
         max_test_ms: args.max_test_ms,
         max_execute_ms: args.max_execute_ms,
         parallel: args.parallel,
+        fail_fast: args.fail_fast,
         jobs: args.jobs,
         shard: args.shard,
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),

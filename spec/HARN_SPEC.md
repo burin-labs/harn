@@ -7308,6 +7308,7 @@ that call `llm`, `llm_stream`, or `llm_stream_call` to run without API keys.
 | `--timing` | Show per-test timing and summary statistics |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default 30000) |
 | `--parallel` | Run test files concurrently |
+| `--fail-fast` | Stop scheduling new tests after the first failure; already-running parallel tests finish |
 | `--junit <path>` | Write JUnit XML report to `<path>` |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay LLM responses from `.harn-fixtures/` |
