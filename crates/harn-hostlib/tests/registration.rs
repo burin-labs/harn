@@ -61,6 +61,9 @@ fn harn_string_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+// Only the unix-gated terminal-session live test calls this; carry the same
+// cfg so Windows and feature-lean builds do not trip dead_code.
+#[cfg(all(unix, feature = "terminal-session"))]
 fn assert_response_schema(module: &str, method: &str, value: &VmValue) {
     let schema = schemas::lookup(module, method, schemas::SchemaKind::Response)
         .unwrap_or_else(|| panic!("missing response schema for {module}.{method}"));
