@@ -519,8 +519,9 @@ PY
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"
   echo "  2. Commit on a release/v$next branch: git commit -am 'Release v$next'"
-  echo "  3. Open a PR into main and let it land through the merge queue"
-  echo "  4. Walk away — the publish-release workflow auto-fires on tag drift"
+  echo "  3. Push the signed v$next tag at the pinned release commit"
+  echo "  4. Open the Release v$next PR and enable auto-merge"
+  echo "  5. Let the tag-triggered publish and binary workflows finish"
 }
 
 cmd_publish() {

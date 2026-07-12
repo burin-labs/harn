@@ -363,7 +363,7 @@ chooses the strategy.
 
 ## Source-of-truth references
 
-- `CLAUDE.md` / `AGENTS.md` — repo conventions and command surface
+- `AGENTS.md` / `CLAUDE.md` — repo conventions and command surface
 - `docs/src/dev/testing.md` — deflake patterns and bans
 - `docs/llm/harn-quickref.md` — Harn scripting reference
 - `spec/HARN_SPEC.md` — language spec source of truth

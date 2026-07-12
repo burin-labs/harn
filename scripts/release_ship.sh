@@ -81,7 +81,9 @@ DEFAULT FLOW (one human PR, then bot finalizes)
   3. Run prepare-here, which audits, dry-run-publishes, bumps
      Cargo.toml/Cargo.lock, regenerates derived files, and stages
      everything ready for a single commit:
-       harn run --no-sandbox ~/projects/harn-bump-fleet/release_harn.harn -- --mode ship-pr --agent --yes-live-release
+       cd ~/projects/harn-bump-fleet
+       harn run --no-sandbox release_harn.harn -- \
+         --repo ~/projects/harn --mode ship-pr --agent --yes-live-release
 
   4. The release_harn.harn harness commits, pushes, tags, pushes the tag,
      and opens the PR in that order so the tag is on origin BEFORE the PR
@@ -398,7 +400,9 @@ require_release_harness_prepare() {
     return 0
   fi
   echo "error: release_ship.sh --prepare is only supported through release_harn.harn"
-  echo "hint: run: harn run --no-sandbox ~/projects/harn-bump-fleet/release_harn.harn -- --mode ship-pr --agent --yes-live-release"
+  echo "hint: run from ~/projects/harn-bump-fleet:"
+  echo "      harn run --no-sandbox release_harn.harn -- \\"
+  echo "        --repo ~/projects/harn --mode ship-pr --agent --yes-live-release"
   echo "hint: tag-first is mandatory; standalone prepare can open a racy Release PR without a pre-pushed tag"
   exit 1
 }
@@ -682,10 +686,13 @@ prepare_here() {
   echo "  git status                                # review staged changes"
   echo "  git commit -m \"Release v$next\""
   echo "  git push -u origin $branch"
+  echo "  git tag -s v$next HEAD -m \"Release v$next\""
+  echo "  git push origin v$next"
   echo "  gh pr create --title \"Release v$next\" --body \"...\""
+  echo "  gh pr merge --auto"
   echo ""
-  echo "After the PR lands through the merge queue, the publish-release"
-  echo "workflow auto-fires on tag drift and ships v$next."
+  echo "The tag push ships v$next from the pinned commit. The PR is the"
+  echo "review and merge-queue artifact, not the publishing trigger."
 }
 
 tag_exists() {
