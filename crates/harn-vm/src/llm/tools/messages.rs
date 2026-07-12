@@ -156,10 +156,10 @@ pub(crate) fn build_assistant_response_message(
 /// is purely driven by pipeline declarations — the VM has no hardcoded
 /// tool-name branches. If a tool isn't annotated, no aliases are rewritten.
 ///
-/// When `tools` (the registered tool schemas) is provided, string values are
-/// also coerced onto unambiguous schema expectations — `"True"` → `true` for
-/// a bool param, a JSON-array string → list for a list param — via
-/// [`super::compat::coerce_args_to_schema`]. This is the single chokepoint
+/// When `tools` (the registered tool schemas) is provided, schema-declared
+/// tagged argument envelopes are flattened and string values are coerced onto
+/// unambiguous schema expectations — `"True"` → `true` for a bool param, a
+/// JSON-array string → list for a list param. This is the single chokepoint
 /// every dispatched call passes through, so it covers the native and text
 /// channels alike.
 pub(crate) fn normalize_tool_args(
@@ -167,6 +167,10 @@ pub(crate) fn normalize_tool_args(
     args: serde_json::Value,
     tools: Option<&crate::value::VmValue>,
 ) -> serde_json::Value {
+    let schema = super::collect_tool_schemas(tools, None)
+        .into_iter()
+        .find(|schema| schema.name == name);
+    let args = super::compat::unwrap_single_key_discriminator_envelope(args, schema.as_ref());
     let mut obj = match args {
         serde_json::Value::Object(obj) => obj,
         other => return other,
@@ -200,7 +204,7 @@ pub(crate) fn normalize_tool_args(
 
     let mut normalized = serde_json::Value::Object(obj);
     coerce_integer_like_tool_args(&mut normalized);
-    super::compat::coerce_args_to_schema(name, normalized, tools)
+    super::compat::coerce_args_to_schema(normalized, schema.as_ref())
 }
 
 /// Recursively unwrap a leaked, fully-wrapping `<<TAG\n...\nTAG` heredoc from

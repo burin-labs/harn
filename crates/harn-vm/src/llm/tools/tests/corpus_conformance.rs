@@ -29,14 +29,23 @@ fn corpus_tool_registry() -> VmValue {
     ]);
 
     let mut edit_params = BTreeMap::new();
-    for key in [
-        "action",
-        "path",
-        "old_string",
-        "new_string",
-        "content",
-        "anchor",
-    ] {
+    edit_params.insert(
+        "action".to_string(),
+        vm_dict(&[
+            ("type", vm_str("string")),
+            (
+                "enum",
+                vm_list(vec![
+                    vm_str("create"),
+                    vm_str("replace_range"),
+                    vm_str("delete_range"),
+                    vm_str("exact_patch"),
+                ]),
+            ),
+            ("required", vm_bool(false)),
+        ]),
+    );
+    for key in ["path", "old_string", "new_string", "content", "anchor"] {
         edit_params.insert(
             key.to_string(),
             vm_dict(&[("type", vm_str("string")), ("required", vm_bool(false))]),
@@ -433,4 +442,49 @@ fn corpus_malformed_array_string_is_not_coerced() {
     let malformed = "[{\"call_id\": \"1\",tool\": \"look\"";
     let normalized = normalize_tool_args("edit", json!({"ops": malformed}), Some(&tools));
     assert_eq!(normalized["ops"], json!(malformed));
+}
+
+/// A live cpp-storage failure emitted an externally tagged edit action through
+/// the native tool channel. The registered enum is the authority for the fold;
+/// no edit action names live in runtime compatibility code.
+#[test]
+fn corpus_known_nested_action_object_flattens_before_dispatch() {
+    let tools = corpus_tool_registry();
+    let normalized = normalize_tool_args(
+        "edit",
+        json!({
+            "delete_range": {
+                "path": "include/cache.hpp",
+                "range_start": 71,
+                "range_end": 85
+            }
+        }),
+        Some(&tools),
+    );
+    assert_eq!(
+        normalized,
+        json!({
+            "action": "delete_range",
+            "path": "include/cache.hpp",
+            "range_start": 71,
+            "range_end": 85
+        })
+    );
+}
+
+#[test]
+fn corpus_nested_action_normalization_rejects_ambiguous_shapes() {
+    let tools = corpus_tool_registry();
+    for arguments in [
+        json!({"invent_action": {"path": "a.cpp"}}),
+        json!({"delete_range": {"path": "a.cpp"}, "path": "outer.cpp"}),
+        json!({"delete_range": "a.cpp"}),
+        json!({"delete_range": {"action": "create", "path": "a.cpp"}}),
+    ] {
+        let normalized = normalize_tool_args("edit", arguments.clone(), Some(&tools));
+        assert_eq!(
+            normalized, arguments,
+            "unknown, multi-key, non-object, and conflicting envelopes must remain precise validation failures"
+        );
+    }
 }
