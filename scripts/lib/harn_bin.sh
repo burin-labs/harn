@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # Shared Harn CLI binary resolution for hooks, Make targets, and CI helper
-# scripts. The freshness check tracks every file under `crates/` because Rust
-# crates embed Harn, Markdown, schema, prompt, and fixture assets at compile
-# time in addition to ordinary Rust/Cargo inputs.
+# scripts. Cargo's binary depfile is the authority for crate inputs: it
+# includes embedded assets while excluding integration tests that do not
+# relink the production executable.
 
 harn_repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || pwd
@@ -48,31 +48,101 @@ try:
 except subprocess.CalledProcessError:
     sys.exit(0)
 
-pathspecs = [
+global_pathspecs = [
     "Cargo.lock",
     "Cargo.toml",
     "rust-toolchain",
     "rust-toolchain.toml",
     ".cargo/config",
     ".cargo/config.toml",
-    "crates",
 ]
 proc = subprocess.run(
-    ["git", "-C", root, "ls-files", "-z", "--", *pathspecs],
+    ["git", "-C", root, "ls-files", "-z", "--", *global_pathspecs],
     check=True,
     stdout=subprocess.PIPE,
 )
-newer = []
+
+
+def makefile_words(value):
+    words = []
+    current = []
+    escaped = False
+    for char in value:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char.isspace():
+            if current:
+                words.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+    if escaped:
+        current.append("\\")
+    if current:
+        words.append("".join(current))
+    return words
+
+
+depfile_name = os.path.basename(bin_path)
+if depfile_name.lower().endswith(".exe"):
+    depfile_name = depfile_name[:-4]
+depfile = os.path.join(os.path.dirname(bin_path), depfile_name + ".d")
+dependencies = []
+try:
+    with open(depfile, encoding="utf-8", errors="surrogateescape") as handle:
+        depfile_text = handle.read().replace("\\\n", "")
+    separator = next(
+        (index for index in range(len(depfile_text) - 1)
+         if depfile_text[index] == ":" and depfile_text[index + 1].isspace()),
+        -1,
+    )
+    if separator >= 0:
+        dependencies = makefile_words(depfile_text[separator + 1:])
+except FileNotFoundError:
+    # Copied/custom binaries lack Cargo metadata. Keep their fallback
+    # conservative, but exclude source trees Cargo never links into `harn`.
+    fallback = subprocess.run(
+        [
+            "git", "-C", root, "ls-files", "-z", "--", "crates",
+            ":(exclude,glob)crates/**/tests/**",
+            ":(exclude,glob)crates/**/benches/**",
+            ":(exclude,glob)crates/**/examples/**",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    dependencies = [
+        os.path.join(root, raw.decode("utf-8", "surrogateescape"))
+        for raw in fallback.stdout.split(b"\0") if raw
+    ]
+
 for raw in proc.stdout.split(b"\0"):
-    if not raw:
+    if raw:
+        dependencies.append(os.path.join(root, raw.decode("utf-8", "surrogateescape")))
+
+newer = []
+seen = set()
+root_real = os.path.realpath(root)
+for dependency in dependencies:
+    path = dependency if os.path.isabs(dependency) else os.path.join(root, dependency)
+    path = os.path.normpath(path)
+    if path in seen:
         continue
-    rel = raw.decode("utf-8", "surrogateescape")
-    path = os.path.join(root, rel)
+    seen.add(path)
+    path_real = os.path.realpath(path)
+    try:
+        inside_root = os.path.commonpath([root_real, path_real]) == root_real
+    except ValueError:
+        inside_root = False
+    rel = os.path.relpath(path_real, root_real) if inside_root else path
     try:
         if os.stat(path).st_mtime_ns > bin_mtime:
             newer.append(rel)
     except FileNotFoundError:
-        continue
+        newer.append(rel + " (missing)")
 
 if newer:
     for rel in newer[:12]:
