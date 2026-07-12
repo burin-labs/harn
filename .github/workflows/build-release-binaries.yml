@@ -77,6 +77,11 @@ on:
         required: false
         type: boolean
         default: false
+      targets:
+        description: 'Optional comma/space-separated Rust target triples to rebuild/re-publish for tag recovery. Leave empty for missing-asset detection.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -131,6 +136,7 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
+          INPUT_TARGETS: ${{ inputs.targets }}
           FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
@@ -194,6 +200,62 @@ jobs:
             done
           }
 
+          requested_targets_json() {
+            local raw="$1"
+            if [[ -z "$raw" ]]; then
+              echo '[]'
+              return 0
+            fi
+            printf '%s\n' "$raw" \
+              | tr ',[:space:]' '\n' \
+              | sed '/^$/d' \
+              | LC_ALL=C sort -u \
+              | jq -R . \
+              | jq -sc 'unique'
+          }
+
+          matrix_for_targets() {
+            local targets_json="$1"
+            jq -c --argjson targets "$targets_json" \
+              '[.[] | select(.target as $target | $targets | index($target))]' \
+              <<<"$FULL_BUILD_MATRIX"
+          }
+
+          validate_requested_targets() {
+            local targets_json="$1"
+            local known_json unknown
+            known_json="$(jq -c '[.[].target]' <<<"$FULL_BUILD_MATRIX")"
+            unknown="$(jq -nr --argjson requested "$targets_json" --argjson known "$known_json" '$requested - $known | .[]')"
+            if [[ -n "$unknown" ]]; then
+              echo "::error::Unknown release target(s) in targets input:"
+              while IFS= read -r target; do
+                [[ -n "$target" ]] || continue
+                echo "::error::  $target"
+              done <<<"$unknown"
+              echo "::error::Known targets: $(jq -r '.[].target' <<<"$FULL_BUILD_MATRIX" | paste -sd ' ' -)"
+              exit 1
+            fi
+          }
+
+          release_container_tags_missing() {
+            local version="$1"
+            local major_minor="$2"
+            local anonymous_docker_config
+            anonymous_docker_config="${RUNNER_TEMP}/anonymous-docker-config"
+            rm -rf "$anonymous_docker_config"
+            mkdir -p "$anonymous_docker_config"
+            MISSING_PUBLIC_CONTAINER_TAGS=()
+            for TAG in "$version" "$major_minor" latest; do
+              IMAGE="ghcr.io/burin-labs/harn:${TAG}"
+              if docker --config "$anonymous_docker_config" manifest inspect "$IMAGE" >/dev/null 2>&1; then
+                echo "::notice::Container image $IMAGE is already publicly pullable."
+              else
+                MISSING_PUBLIC_CONTAINER_TAGS+=("$TAG")
+              fi
+            done
+            (( ${#MISSING_PUBLIC_CONTAINER_TAGS[@]} > 0 ))
+          }
+
           skip_warm_cache_if_release_active() {
             local active_runs
             active_runs="$(active_release_binary_runs || true)"
@@ -220,6 +282,11 @@ jobs:
           }
 
           BUILD_MATRIX="[]"
+          REQUESTED_TARGETS_JSON="$(requested_targets_json "$INPUT_TARGETS")"
+          REQUESTED_TARGET_COUNT="$(jq 'length' <<<"$REQUESTED_TARGETS_JSON")"
+          if (( REQUESTED_TARGET_COUNT > 0 )); then
+            validate_requested_targets "$REQUESTED_TARGETS_JSON"
+          fi
           if [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::warm_cache_only is only valid for workflow_dispatch"
@@ -227,6 +294,10 @@ jobs:
             fi
             if [[ -n "$INPUT_TAG" ]]; then
               echo "::error::warm_cache_only cannot be combined with a release tag"
+              exit 1
+            fi
+            if (( REQUESTED_TARGET_COUNT > 0 )); then
+              echo "::error::targets is only valid for release tag recovery, not warm_cache_only"
               exit 1
             fi
             if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
@@ -245,6 +316,14 @@ jobs:
             IS_RELEASE=true
             if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::expected tag of form vX.Y.Z, got '$REF'"
+              exit 1
+            fi
+            if [[ "$EVENT_NAME" != "workflow_dispatch" ]] && (( REQUESTED_TARGET_COUNT > 0 )); then
+              echo "::error::targets is only valid on workflow_dispatch tag recovery"
+              exit 1
+            fi
+            if [[ "$FORCE_REBUILD" == "true" ]] && (( REQUESTED_TARGET_COUNT > 0 )); then
+              echo "::error::force_rebuild=true cannot be combined with targets; either rebuild every target or request an explicit target subset"
               exit 1
             fi
             VERSION="${REF#v}"
@@ -315,7 +394,21 @@ jobs:
               esac
             }
 
-            if [[ "$FORCE_REBUILD" == "true" ]]; then
+            if (( REQUESTED_TARGET_COUNT > 0 )); then
+              SHOULD_BUILD_BINARIES=true
+              SHOULD_FINALIZE_RELEASE=true
+              BUILD_MATRIX="$(matrix_for_targets "$REQUESTED_TARGETS_JSON")"
+              echo "::notice::Explicit release-recovery target subset requested for $REF: $(jq -r '.[]' <<<"$REQUESTED_TARGETS_JSON" | paste -sd ' ' -)"
+              echo "::notice::Selected build matrix: $BUILD_MATRIX"
+              if jq -e 'index("x86_64-unknown-linux-gnu") or index("aarch64-unknown-linux-gnu")' <<<"$REQUESTED_TARGETS_JSON" >/dev/null; then
+                if release_container_tags_missing "$VERSION" "$MAJOR_MINOR"; then
+                  SHOULD_PUBLISH_CONTAINER=true
+                  echo "::notice::Linux release target is being rebuilt and container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Publishing container tags after release finalization."
+                else
+                  echo "::notice::Linux release target is being rebuilt, but all release container tags are already publicly pullable; skipping container publish."
+                fi
+              fi
+            elif [[ "$FORCE_REBUILD" == "true" ]]; then
               SHOULD_BUILD_BINARIES=true
               SHOULD_FINALIZE_RELEASE=true
               SHOULD_PUBLISH_CONTAINER=true
@@ -367,23 +460,11 @@ jobs:
                 echo "::notice::Release $REF has all assets but is still marked prerelease; finalizing without rebuilding."
               fi
 
-              anonymous_docker_config="${RUNNER_TEMP}/anonymous-docker-config"
-              rm -rf "$anonymous_docker_config"
-              mkdir -p "$anonymous_docker_config"
-              MISSING_PUBLIC_CONTAINER_TAGS=()
-              for TAG in "$VERSION" "$MAJOR_MINOR" latest; do
-                IMAGE="ghcr.io/burin-labs/harn:${TAG}"
-                if docker --config "$anonymous_docker_config" manifest inspect "$IMAGE" >/dev/null 2>&1; then
-                  echo "::notice::Container image $IMAGE is already publicly pullable."
-                else
-                  MISSING_PUBLIC_CONTAINER_TAGS+=("$TAG")
-                fi
-              done
-              if (( ${#MISSING_PUBLIC_CONTAINER_TAGS[@]} == 0 )); then
-                echo "::notice::All release container tags are publicly pullable; skipping container publish."
-              else
+              if release_container_tags_missing "$VERSION" "$MAJOR_MINOR"; then
                 SHOULD_PUBLISH_CONTAINER=true
                 echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Publishing container tags."
+              else
+                echo "::notice::All release container tags are publicly pullable; skipping container publish."
               fi
             fi
           fi
@@ -412,6 +493,7 @@ jobs:
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
             echo "| Finalize release | $SHOULD_FINALIZE_RELEASE |"
             echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
+            echo "| Requested targets | \`$REQUESTED_TARGETS_JSON\` |"
             echo "| Build matrix | \`$BUILD_MATRIX\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -496,10 +578,6 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
-        with:
-          toolchain: stable
-
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         if: matrix.use_sccache == 'true'
         # sccache is a build-cache optimization, not a build requirement. The
@@ -570,11 +648,13 @@ jobs:
         with:
           tool: cargo-bloat
 
-      - name: Add cross-compile target to pinned toolchain
+      - name: Install repo-pinned Rust toolchain and target
         run: |
           # rust-toolchain.toml pins the channel; `rustup show` triggers install
-          # of the pinned toolchain, then we add the matrix target to it.
+          # of that exact toolchain instead of first installing floating stable.
           rustup show active-toolchain || rustup show
+          rustc --version
+          cargo --version
           rustup target add ${{ matrix.target }}
 
       # Cross gcc/linker is ONLY needed when building arm64 Linux on an x86
@@ -646,9 +726,11 @@ jobs:
         shell: bash
         env:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
         run: |
           set -euo pipefail
           sccache_bin="${SCCACHE_PATH:-sccache}"
+          stats_file="$RUNNER_TEMP/sccache-${HARN_RELEASE_TARGET}.txt"
           {
             echo "### Release sccache stats"
             echo
@@ -656,12 +738,39 @@ jobs:
             echo
             echo '```text'
             if command -v "$sccache_bin" >/dev/null 2>&1; then
-              "$sccache_bin" --show-stats || true
+              "$sccache_bin" --show-stats | tee "$stats_file" || true
             else
               echo "sccache binary not found: $sccache_bin"
+              : > "$stats_file"
             fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+          compile_requests="$(awk '/^Compile requests[[:space:]]/ {print $NF; found=1} END {if (!found) print 0}' "$stats_file")"
+          cache_hits="$(awk '/^Cache hits[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          cache_misses="$(awk '/^Cache misses[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          cache_write_errors="$(awk '/^Cache write errors[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          hit_rate="0.00"
+          if (( compile_requests > 0 )); then
+            hit_rate="$(awk -v hits="$cache_hits" -v total="$compile_requests" 'BEGIN { printf "%.2f", (hits * 100.0) / total }')"
+          fi
+          {
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Compile requests | $compile_requests |"
+            echo "| Cache hits | $cache_hits |"
+            echo "| Cache misses | $cache_misses |"
+            echo "| Cache write errors | $cache_write_errors |"
+            echo "| Cache hit rate | ${hit_rate}% |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if (( compile_requests >= 100 )) && awk -v rate="$hit_rate" 'BEGIN { exit !(rate < 5.0) }'; then
+            echo "::warning title=Release sccache is effectively cold::${HARN_RELEASE_TARGET} had ${cache_hits}/${compile_requests} hits (${hit_rate}%). Release latency likely came from cold compile cache."
+          fi
+          if (( cache_write_errors > 0 )); then
+            echo "::warning title=Release sccache write errors::${HARN_RELEASE_TARGET} reported ${cache_write_errors} cache write error(s). Warm-cache recovery may remain slow until cache writes succeed."
+          fi
 
       # Sign the single `harn` Mach-O binary with the Developer ID Application
       # identity (hardened runtime + secure timestamp), then submit it to
