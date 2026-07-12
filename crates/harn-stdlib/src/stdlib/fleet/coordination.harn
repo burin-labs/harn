@@ -1,0 +1,809 @@
+// std/fleet/coordination — explicit, inert fleet coordination vocabulary.
+//
+// Durable transport, cursors, and receipts remain owned by std/coordination.
+// This module adds fleet-domain data schemas and a pure state projection; it
+// registers no trigger, timer, reminder, reassignment, or background behavior.
+import { filter_nil } from "std/collections"
+import { coord_post } from "std/coordination"
+import "std/schema"
+
+const __FLEET_CLAIM_SCHEMA = "harn.fleet.claim.v1"
+
+const __FLEET_ACK_SCHEMA = "harn.fleet.ack.v1"
+
+const __FLEET_DONE_SCHEMA = "harn.fleet.done.v1"
+
+const __FLEET_FINDING_SCHEMA = "harn.fleet.finding.v1"
+
+const __FLEET_HEARTBEAT_SCHEMA = "harn.fleet.heartbeat.v1"
+
+const __FLEET_CHECKIN_SCHEMA = "harn.fleet.checkin.v1"
+
+const __FLEET_SNAPSHOT_SCHEMA = "harn.fleet.snapshot.v1"
+
+const __FLEET_DEFAULT_LEASE_MS = 5 * 60 * 1000
+
+const __FLEET_DEFAULT_GRACE_MS = 60 * 1000
+
+fn __fleet_dict(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __fleet_list(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  return [value]
+}
+
+fn __fleet_text(value) -> string {
+  if value == nil {
+    return ""
+  }
+  if type_of(value) == "string" {
+    return value
+  }
+  return to_string(value)
+}
+
+fn __fleet_required_text(value, label) -> string {
+  const text = trim(__fleet_text(value))
+  if text == "" {
+    throw "std/fleet/coordination: " + label + " is required"
+  }
+  return text
+}
+
+fn __fleet_nonnegative_int(value, fallback, label) -> int {
+  if value == nil {
+    return fallback
+  }
+  const parsed = to_int(value)
+  if parsed == nil || parsed < 0 {
+    throw "std/fleet/coordination: " + label + " must be a non-negative int"
+  }
+  return parsed
+}
+
+fn __fleet_required_nonnegative_int(value, label) -> int {
+  if value == nil {
+    throw "std/fleet/coordination: " + label + " is required"
+  }
+  return __fleet_nonnegative_int(value, 0, label)
+}
+
+fn __fleet_options(options) {
+  const opts = __fleet_dict(options)
+  if opts?.created_at != nil || opts?.ts != nil {
+    throw "std/fleet/coordination: authoritative timestamps are runtime-owned"
+  }
+  return opts
+}
+
+fn __fleet_typed_data(value, schema, label) {
+  const report = get_typed_report(value, schema)
+  if !report.ok {
+    throw "std/fleet/coordination: invalid " + label + ": " + join(report.errors, "; ")
+  }
+  return get_typed_value(value, schema)
+}
+
+fn __fleet_post(scope, room, kind, subject, data, options) {
+  const opts = __fleet_options(options)
+  return coord_post(
+    scope,
+    room,
+    {
+      kind: kind,
+      subject: subject,
+      body: opts?.body ?? subject,
+      data: data,
+      from: opts?.from,
+      to: opts?.to,
+      refs: __fleet_list(opts?.refs),
+    },
+    opts + {kind: kind, data: data},
+  )
+}
+
+/**
+ * Typed data schema for a manual or externally-owned work claim.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_claim_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__FLEET_CLAIM_SCHEMA),
+      work_key: schema_string(),
+      requires_ack: schema_bool(),
+      lease_ms: schema_int(),
+      worktree: schema_field(schema_string(), false),
+      branch: schema_field(schema_string(), false),
+      queue_claim_id: schema_field(schema_string(), false),
+      persona_lease_id: schema_field(schema_string(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Typed data schema for an acknowledgement of another fleet message.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_ack_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__FLEET_ACK_SCHEMA),
+      target_id: schema_string(),
+      decision: schema_enum(["accepted", "rejected", "needs_changes"]),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Typed data schema for a terminal work receipt.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_done_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__FLEET_DONE_SCHEMA),
+      claim_id: schema_string(),
+      work_key: schema_string(),
+      outcome: schema_enum(["completed", "failed", "abandoned"]),
+      counts: schema_field(schema_dict(schema_any()), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Typed data schema for a premise-confirming or premise-overturning finding.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_finding_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__FLEET_FINDING_SCHEMA),
+      premise: schema_enum(["confirmed", "overturned"]),
+      recommended_action: schema_enum(["pause", "continue", "reroute"]),
+      requires_ack: schema_bool(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Typed data schema for one explicit lane heartbeat.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_heartbeat_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__FLEET_HEARTBEAT_SCHEMA),
+      state: schema_enum(["available", "busy", "waiting", "draining"]),
+      lease_ms: schema_int(),
+      expected_silence_ms: schema_int(),
+      current_claim_ids: schema_list(schema_string()),
+      resource_ids: schema_list(schema_string()),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Typed data schema for a structured fleet check-in.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_checkin_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(__FLEET_CHECKIN_SCHEMA),
+      shipped: schema_string(),
+      grade: schema_string(),
+      next: schema_string(),
+      learnings: schema_string(),
+      ideas: schema_field(schema_string(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __fleet_liveness_schema() {
+  return schema_object(
+    {
+      status: schema_enum(["active", "late", "unresponsive", "unknown"]),
+      lane_state: schema_field(schema_string(), false),
+      last_heartbeat_at_ms: schema_field(schema_int(), false),
+      deadline_ms: schema_field(schema_int(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __fleet_projected_claim_schema() {
+  return schema_object(
+    {
+      id: schema_string(),
+      work_key: schema_string(),
+      actor_id: schema_string(),
+      state: schema_enum(
+        [
+          "proposed",
+          "active",
+          "completed",
+          "failed",
+          "abandoned",
+          "rejected",
+          "needs_changes",
+          "stale",
+          "conflicted",
+        ],
+      ),
+      proposed_at_ms: schema_int(),
+      expires_at_ms: schema_int(),
+      requires_ack: schema_bool(),
+      ack_id: schema_field(schema_string(), false),
+      done_id: schema_field(schema_string(), false),
+      refs: schema_list(schema_any()),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for the stable read model returned by `fleet_project`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_snapshot_schema() {
+  const actor = schema_object(
+    {
+      actor_id: schema_string(),
+      actor: schema_field(schema_any(), false),
+      liveness: __fleet_liveness_schema(),
+      current_claim_ids: schema_list(schema_string()),
+    },
+    {additional_properties: schema_any()},
+  )
+  const conflict = schema_object(
+    {work_key: schema_string(), claim_ids: schema_list(schema_string())},
+    {additional_properties: schema_any()},
+  )
+  const pending_finding = schema_object(
+    {
+      id: schema_string(),
+      actor_id: schema_string(),
+      subject: schema_string(),
+      premise: schema_enum(["confirmed", "overturned"]),
+      recommended_action: schema_enum(["pause", "continue", "reroute"]),
+      at_ms: schema_int(),
+      refs: schema_list(schema_any()),
+    },
+    {additional_properties: schema_any()},
+  )
+  const checkin = schema_object(
+    {
+      id: schema_string(),
+      actor_id: schema_string(),
+      at_ms: schema_int(),
+      sections: fleet_checkin_schema(),
+      refs: schema_list(schema_any()),
+      verification: schema_enum(["unverified", "verified"]),
+    },
+    {additional_properties: schema_any()},
+  )
+  const unknown = schema_object(
+    {
+      id: schema_field(schema_string(), false),
+      kind: schema_field(schema_string(), false),
+      subject: schema_field(schema_string(), false),
+      actor_id: schema_string(),
+    },
+    {additional_properties: schema_any()},
+  )
+  return schema_object(
+    {
+      schema: schema_literal(__FLEET_SNAPSHOT_SCHEMA),
+      generated_at_ms: schema_int(),
+      actors: schema_list(actor),
+      claims: schema_list(__fleet_projected_claim_schema()),
+      conflicts: schema_list(conflict),
+      pending_findings: schema_list(pending_finding),
+      latest_checkins: schema_list(checkin),
+      unknown_messages: schema_list(unknown),
+      summary: schema_object(
+        {
+          actors: schema_int(),
+          claims: schema_int(),
+          conflicts: schema_int(),
+          pending_findings: schema_int(),
+          unknown_messages: schema_int(),
+        },
+        {additional_properties: schema_any()},
+      ),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Validate a fleet snapshot and return a structured schema report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fleet_snapshot_report(value) {
+  return get_typed_report(value, fleet_snapshot_schema())
+}
+
+/**
+ * Declare ownership of manual/external work.
+ *
+ * Queue-dispatched work should keep using its WorkerQueue claim and pass that
+ * receipt id as `queue_claim_id`; this helper does not replace queue claims.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn fleet_claim(scope, room, work_key, options = nil) {
+  const opts = __fleet_options(options)
+  const key = __fleet_required_text(work_key, "work_key")
+  const data = __fleet_typed_data(
+    filter_nil(
+      {
+        schema: __FLEET_CLAIM_SCHEMA,
+        work_key: key,
+        requires_ack: opts?.requires_ack ?? false,
+        lease_ms: __fleet_nonnegative_int(opts?.lease_ms, __FLEET_DEFAULT_LEASE_MS, "lease_ms"),
+        worktree: opts?.worktree,
+        branch: opts?.branch,
+        queue_claim_id: opts?.queue_claim_id,
+        persona_lease_id: opts?.persona_lease_id,
+      },
+    ),
+    fleet_claim_schema(),
+    "claim",
+  )
+  return __fleet_post(scope, room, "claim", opts?.subject ?? ("Claim " + key), data, opts)
+}
+
+/**
+ * Acknowledge a claim, finding, or other addressed fleet message.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn fleet_ack(scope, room, target_id, decision = "accepted", options = nil) {
+  const opts = __fleet_options(options)
+  const target = __fleet_required_text(target_id, "target_id")
+  const data = __fleet_typed_data(
+    {schema: __FLEET_ACK_SCHEMA, target_id: target, decision: lowercase(trim(decision))},
+    fleet_ack_schema(),
+    "ack",
+  )
+  return __fleet_post(
+    scope,
+    room,
+    "ack",
+    opts?.subject ?? ("Acknowledge " + target),
+    data,
+    opts + {reply_to: target},
+  )
+}
+
+/**
+ * Append a terminal receipt for a claim.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn fleet_done(scope, room, claim_id, work_key, outcome = "completed", options = nil) {
+  const opts = __fleet_options(options)
+  const claim = __fleet_required_text(claim_id, "claim_id")
+  const key = __fleet_required_text(work_key, "work_key")
+  const data = __fleet_typed_data(
+    filter_nil(
+      {
+        schema: __FLEET_DONE_SCHEMA,
+        claim_id: claim,
+        work_key: key,
+        outcome: lowercase(trim(outcome)),
+        counts: opts?.counts,
+      },
+    ),
+    fleet_done_schema(),
+    "done receipt",
+  )
+  return __fleet_post(
+    scope,
+    room,
+    "done",
+    opts?.subject ?? ("Complete " + key),
+    data,
+    opts + {reply_to: claim},
+  )
+}
+
+/**
+ * Report evidence that confirms or overturns the current work premise.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn fleet_finding(scope, room, premise, options = nil) {
+  const opts = __fleet_options(options)
+  const normalized = lowercase(trim(__fleet_required_text(premise, "premise")))
+  const data = __fleet_typed_data(
+    {
+      schema: __FLEET_FINDING_SCHEMA,
+      premise: normalized,
+      recommended_action: lowercase(
+        trim(
+          opts?.recommended_action
+            ?? if normalized == "overturned" {
+            "pause"
+          } else {
+            "continue"
+          },
+        ),
+      ),
+      requires_ack: opts?.requires_ack ?? (normalized == "overturned"),
+    },
+    fleet_finding_schema(),
+    "finding",
+  )
+  return __fleet_post(scope, room, "finding", opts?.subject ?? ("Premise " + normalized), data, opts)
+}
+
+/**
+ * Append an explicit liveness heartbeat for one actor/lane.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn fleet_heartbeat(scope, room, state = "busy", options = nil) {
+  const opts = __fleet_options(options)
+  const data = __fleet_typed_data(
+    {
+      schema: __FLEET_HEARTBEAT_SCHEMA,
+      state: lowercase(trim(state)),
+      lease_ms: __fleet_nonnegative_int(opts?.lease_ms, __FLEET_DEFAULT_LEASE_MS, "lease_ms"),
+      expected_silence_ms: __fleet_nonnegative_int(opts?.expected_silence_ms, 0, "expected_silence_ms"),
+      current_claim_ids: __fleet_list(opts?.current_claim_ids),
+      resource_ids: __fleet_list(opts?.resource_ids),
+    },
+    fleet_heartbeat_schema(),
+    "heartbeat",
+  )
+  return __fleet_post(scope, room, "heartbeat", opts?.subject ?? ("Heartbeat " + data.state), data, opts)
+}
+
+/**
+ * Append the structured sections used by a control/meta-review check-in.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn fleet_checkin(scope, room, sections, options = nil) {
+  const opts = __fleet_options(options)
+  const input = __fleet_dict(sections)
+  const data = __fleet_typed_data(
+    filter_nil(
+      {
+        schema: __FLEET_CHECKIN_SCHEMA,
+        shipped: __fleet_required_text(input?.shipped, "checkin.shipped"),
+        grade: __fleet_required_text(input?.grade, "checkin.grade"),
+        next: __fleet_required_text(input?.next, "checkin.next"),
+        learnings: __fleet_required_text(input?.learnings, "checkin.learnings"),
+        ideas: input?.ideas,
+      },
+    ),
+    fleet_checkin_schema(),
+    "checkin",
+  )
+  return __fleet_post(scope, room, "checkin", opts?.subject ?? "Fleet check-in", data, opts)
+}
+
+fn __fleet_row(item) {
+  const value = __fleet_dict(item)
+  const message = __fleet_dict(value?.message ?? value?.event?.payload ?? value?.payload ?? value)
+  const event = __fleet_dict(value?.event ?? value?.channel ?? value)
+  const at_ms = to_int(event?.emitted_at?.at_ms ?? value?.channel?.emitted_at?.at_ms ?? 0) ?? 0
+  return {message: message, event: event, at_ms: at_ms}
+}
+
+fn __fleet_actor_id(message) -> string {
+  const actor = __fleet_dict(message?.from)
+  const id = actor?.session_id
+    ?? actor?.worker_id
+    ?? actor?.run_id
+    ?? actor?.agent
+    ?? actor?.task_id
+    ?? actor?.root_session_id
+  if id == nil || trim(__fleet_text(id)) == "" {
+    return "unknown:" + __fleet_text(message?.id)
+  }
+  return trim(__fleet_text(id))
+}
+
+fn __fleet_known_data(message) -> bool {
+  const data = message?.data
+  if message?.kind == "claim" {
+    return get_typed_report(data, fleet_claim_schema()).ok
+  }
+  if message?.kind == "ack" {
+    return get_typed_report(data, fleet_ack_schema()).ok
+  }
+  if message?.kind == "done" {
+    return get_typed_report(data, fleet_done_schema()).ok
+  }
+  if message?.kind == "finding" {
+    return get_typed_report(data, fleet_finding_schema()).ok
+  }
+  if message?.kind == "heartbeat" {
+    return get_typed_report(data, fleet_heartbeat_schema()).ok
+  }
+  if message?.kind == "checkin" {
+    return get_typed_report(data, fleet_checkin_schema()).ok
+  }
+  return false
+}
+
+fn __fleet_contains(items, needle) -> bool {
+  for item in __fleet_list(items) {
+    if item == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn __fleet_claim_state(claim, ack, done, heartbeat, now_ms) {
+  const data = claim.message.data
+  let state = "active"
+  if done != nil && done.message.data.work_key == data.work_key {
+    state = done.message.data.outcome
+  } else if ack?.message?.data?.decision == "rejected" {
+    state = "rejected"
+  } else if ack?.message?.data?.decision == "needs_changes" {
+    state = "needs_changes"
+  } else if (data?.requires_ack ?? false) && ack == nil {
+    state = "proposed"
+  }
+  let expires_at_ms = if claim.at_ms > 0 {
+    claim.at_ms + __fleet_nonnegative_int(data?.lease_ms, __FLEET_DEFAULT_LEASE_MS, "lease_ms")
+  } else {
+    0
+  }
+  if heartbeat != nil && __fleet_contains(heartbeat.message.data.current_claim_ids, claim.message.id) {
+    const heartbeat_expiry = heartbeat.at_ms
+      + max(heartbeat.message.data.lease_ms, heartbeat.message.data.expected_silence_ms)
+    if heartbeat_expiry > expires_at_ms {
+      expires_at_ms = heartbeat_expiry
+    }
+  }
+  if state == "active" && expires_at_ms > 0 && now_ms > expires_at_ms {
+    state = "stale"
+  }
+  return {state: state, expires_at_ms: expires_at_ms}
+}
+
+fn __fleet_liveness(heartbeat, now_ms, grace_ms) {
+  if heartbeat == nil || heartbeat.at_ms <= 0 {
+    return {status: "unknown"}
+  }
+  const data = heartbeat.message.data
+  const live_ms = max(data.lease_ms, data.expected_silence_ms)
+  const deadline_ms = heartbeat.at_ms + live_ms
+  const status = if now_ms <= deadline_ms {
+    "active"
+  } else if now_ms <= deadline_ms + grace_ms {
+    "late"
+  } else {
+    "unresponsive"
+  }
+  return {
+    status: status,
+    lane_state: data.state,
+    last_heartbeat_at_ms: heartbeat.at_ms,
+    deadline_ms: deadline_ms,
+  }
+}
+
+/**
+ * Project oldest-first coordination rows into a deterministic fleet snapshot.
+ *
+ * Pass rows from `coord_read(..., {include_events:true})` so liveness uses the
+ * signed channel timestamp. Raw messages without an event receipt remain
+ * visible but receive `unknown` liveness. `now_ms` and `grace_ms` are injected
+ * options; `now_ms` is required. This function never mutates, acknowledges,
+ * releases, or reassigns.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn fleet_project(messages, options = nil) {
+  if type_of(messages) != "list" {
+    throw "std/fleet/coordination: fleet_project messages must be a list"
+  }
+  const opts = __fleet_dict(options)
+  const now_ms = __fleet_required_nonnegative_int(opts?.now_ms, "now_ms")
+  const grace_ms = __fleet_nonnegative_int(opts?.grace_ms, __FLEET_DEFAULT_GRACE_MS, "grace_ms")
+  let actors = {}
+  let claims = {}
+  let acks = {}
+  let dones = {}
+  let heartbeats = {}
+  let findings = []
+  let checkins = {}
+  let unknown_messages = []
+  for item in messages {
+    const row = __fleet_row(item)
+    const message = row.message
+    const actor_id = __fleet_actor_id(message)
+    actors[actor_id] = filter_nil({actor_id: actor_id, actor: message.from})
+    if !__fleet_known_data(message) {
+      unknown_messages = unknown_messages
+        + [filter_nil({id: message?.id, kind: message?.kind, subject: message?.subject, actor_id: actor_id})]
+    } else if message.kind == "claim" {
+      claims[message.id] = row + {actor_id: actor_id}
+    } else if message.kind == "ack" {
+      acks[message.data.target_id] = row + {actor_id: actor_id}
+    } else if message.kind == "done" {
+      dones[message.data.claim_id] = row + {actor_id: actor_id}
+    } else if message.kind == "heartbeat" {
+      heartbeats[actor_id] = row + {actor_id: actor_id}
+    } else if message.kind == "finding" {
+      findings = findings + [row + {actor_id: actor_id}]
+    } else if message.kind == "checkin" {
+      checkins[actor_id] = row + {actor_id: actor_id}
+    }
+  }
+  let projected_by_id = {}
+  let work_groups = {}
+  for claim_id in claims.keys().sort() {
+    const claim = claims[claim_id] ?? {}
+    const heartbeat = heartbeats[claim.actor_id]
+    const state = __fleet_claim_state(claim, acks[claim_id], dones[claim_id], heartbeat, now_ms)
+    const work_key = claim.message.data.work_key
+    projected_by_id[claim_id] = filter_nil(
+      {
+        id: claim_id,
+        work_key: work_key,
+        actor_id: claim.actor_id,
+        state: state.state,
+        proposed_at_ms: claim.at_ms,
+        expires_at_ms: state.expires_at_ms,
+        requires_ack: claim.message.data.requires_ack,
+        ack_id: acks[claim_id]?.message?.id,
+        done_id: dones[claim_id]?.message?.id,
+        refs: claim.message.refs ?? [],
+      },
+    )
+    if state.state == "active" {
+      work_groups[work_key] = __fleet_list(work_groups[work_key]) + [claim_id]
+    }
+  }
+  let conflicts = []
+  let conflicted_ids = {}
+  for work_key in work_groups.keys().sort() {
+    const ids = work_groups[work_key] ?? []
+    if len(ids) > 1 {
+      conflicts = conflicts + [{work_key: work_key, claim_ids: ids}]
+      for claim_id in ids {
+        conflicted_ids[claim_id] = true
+      }
+    }
+  }
+  let projected_claims = []
+  for claim_id in projected_by_id.keys().sort() {
+    let projected = projected_by_id[claim_id] ?? {}
+    if conflicted_ids[claim_id] ?? false {
+      projected = projected + {state: "conflicted"}
+    }
+    projected_claims = projected_claims + [projected]
+  }
+  let projected_actors = []
+  for actor_id in actors.keys().sort() {
+    let actor_claim_ids = []
+    for claim in projected_claims {
+      if claim.actor_id == actor_id && contains(["active", "proposed", "conflicted"], claim.state) {
+        actor_claim_ids = actor_claim_ids + [claim.id]
+      }
+    }
+    projected_actors = projected_actors
+      + [
+      (actors[actor_id] ?? {})
+        + {
+        liveness: __fleet_liveness(heartbeats[actor_id], now_ms, grace_ms),
+        current_claim_ids: actor_claim_ids,
+      },
+    ]
+  }
+  let pending_findings = []
+  for finding in findings {
+    if (finding.message.data.requires_ack ?? false) && acks[finding.message.id] == nil {
+      pending_findings = pending_findings
+        + [
+        {
+          id: finding.message.id,
+          actor_id: finding.actor_id,
+          subject: finding.message.subject,
+          premise: finding.message.data.premise,
+          recommended_action: finding.message.data.recommended_action,
+          at_ms: finding.at_ms,
+          refs: finding.message.refs ?? [],
+        },
+      ]
+    }
+  }
+  let latest_checkins = []
+  for actor_id in checkins.keys().sort() {
+    const checkin = checkins[actor_id] ?? {}
+    latest_checkins = latest_checkins
+      + [
+      {
+        id: checkin.message.id,
+        actor_id: actor_id,
+        at_ms: checkin.at_ms,
+        sections: checkin.message.data,
+        refs: checkin.message.refs ?? [],
+        verification: "unverified",
+      },
+    ]
+  }
+  const snapshot = {
+    schema: __FLEET_SNAPSHOT_SCHEMA,
+    generated_at_ms: now_ms,
+    actors: projected_actors,
+    claims: projected_claims,
+    conflicts: conflicts,
+    pending_findings: pending_findings,
+    latest_checkins: latest_checkins,
+    unknown_messages: unknown_messages,
+    summary: {
+      actors: len(projected_actors),
+      claims: len(projected_claims),
+      conflicts: len(conflicts),
+      pending_findings: len(pending_findings),
+      unknown_messages: len(unknown_messages),
+    },
+  }
+  return get_typed_value(snapshot, fleet_snapshot_schema())
+}

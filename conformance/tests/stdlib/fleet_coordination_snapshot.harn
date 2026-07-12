@@ -1,0 +1,103 @@
+import { coord_read } from "std/coordination"
+import {
+  fleet_ack,
+  fleet_checkin,
+  fleet_claim,
+  fleet_done,
+  fleet_finding,
+  fleet_heartbeat,
+  fleet_project,
+  fleet_snapshot_report,
+  fleet_snapshot_schema,
+} from "std/fleet/coordination"
+import { is_type } from "std/schema"
+
+pipeline default() {
+  mock_time(1000)
+  const opts = {session_id: "fleet-test", from: {agent: "lane-a"}}
+  const claim = fleet_claim(
+    "session",
+    "ops",
+    "repo#1",
+    opts + {id: "claim-1", requires_ack: true, lease_ms: 100, worktree: "/tmp/work"},
+  )
+  const proposed = fleet_project(
+    coord_read("session", "ops", {session_id: "fleet-test", include_events: true}),
+    {now_ms: 1000, grace_ms: 20},
+  )
+  __io_println(proposed.schema)
+  __io_println(is_type(proposed, fleet_snapshot_schema()))
+  __io_println(fleet_snapshot_report(proposed).ok)
+  __io_println(proposed.claims[0]?.state)
+  const _ = fleet_ack(
+    "session",
+    "ops",
+    claim.id,
+    "accepted",
+    {id: "ack-1", session_id: "fleet-test", from: {agent: "control"}},
+  )
+  advance_time(50)
+  const _ = fleet_heartbeat(
+    "session",
+    "ops",
+    "busy",
+    opts
+      + {id: "heartbeat-1", lease_ms: 100, expected_silence_ms: 300, current_claim_ids: [claim.id]},
+  )
+  const _ = fleet_finding(
+    "session",
+    "ops",
+    "overturned",
+    opts + {id: "finding-1", subject: "Premise changed", refs: [{kind: "log", ref: "receipt-1"}]},
+  )
+  const _ = fleet_checkin(
+    "session",
+    "ops",
+    {shipped: "typed records", grade: "A", next: "project", learnings: "reuse channels"},
+    opts + {id: "checkin-1"},
+  )
+  const active = fleet_project(
+    coord_read("session", "ops", {session_id: "fleet-test", include_events: true}),
+    {now_ms: 1200, grace_ms: 20},
+  )
+  __io_println(active.claims[0]?.state)
+  __io_println(active.actors[1]?.liveness?.status)
+  __io_println(len(active.pending_findings))
+  __io_println(active.latest_checkins[0]?.verification)
+  const _ = fleet_ack(
+    "session",
+    "ops",
+    "finding-1",
+    "accepted",
+    {id: "ack-finding", session_id: "fleet-test", from: {agent: "control"}},
+  )
+  const cleared = fleet_project(
+    coord_read("session", "ops", {session_id: "fleet-test", include_events: true}),
+    {now_ms: 1360, grace_ms: 20},
+  )
+  __io_println(cleared.actors[1]?.liveness?.status)
+  __io_println(len(cleared.pending_findings))
+  const _ = fleet_done(
+    "session",
+    "ops",
+    claim.id,
+    "repo#1",
+    "completed",
+    opts + {id: "done-1", counts: {tests: 7}},
+  )
+  const finished = fleet_project(
+    coord_read("session", "ops", {session_id: "fleet-test", include_events: true}),
+    {now_ms: 1360, grace_ms: 20},
+  )
+  __io_println(finished.claims[0]?.state)
+  __io_println(finished.summary.pending_findings)
+  const bad_time = try {
+    fleet_heartbeat("session", "ops", "busy", opts + {created_at: "2099-01-01T00:00:00Z"})
+  }
+  __io_println(!is_ok(bad_time))
+  const missing_projection_time = try {
+    fleet_project(coord_read("session", "ops", {session_id: "fleet-test", include_events: true}))
+  }
+  __io_println(!is_ok(missing_projection_time))
+  unmock_time()
+}
