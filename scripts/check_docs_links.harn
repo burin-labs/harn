@@ -445,7 +445,7 @@ pipeline main(task) {
       if ok {
         continue
       }
-      const expected_abs = normalize_path(join_path(repo_root, candidates[0]))
+      const expected_abs = normalize_path(join_path(repo_root, candidates[0] ?? ""))
       let expected = expected_abs
       if within_repo(repo_root, expected_abs) {
         expected = expected_abs.substring(repo_root.len() + 1, expected_abs.len())

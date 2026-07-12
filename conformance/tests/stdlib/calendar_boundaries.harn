@@ -12,7 +12,7 @@ pipeline default() {
   const range_options: CalendarDateRangeOptions = {max_items: 10}
   const range: list<CalendarTimestamp> = date_range("2024-02-27", "2024-03-02", "day", "UTC", range_options)
   __io_println(len(range))
-  __io_println(date_format(range[2], "%Y-%m-%d", "UTC"))
+  __io_println(date_format(range[2] ?? jan1, "%Y-%m-%d", "UTC"))
   __io_println(date_format(next_weekday("2024-02-29", "monday", "UTC"), "%Y-%m-%d", "UTC"))
   __io_println(date_format(previous_weekday("2024-02-29", 1, "UTC"), "%Y-%m-%d", "UTC"))
 }

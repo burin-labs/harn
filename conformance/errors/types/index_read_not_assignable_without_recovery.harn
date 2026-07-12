@@ -1,0 +1,6 @@
+// An index read is `T | nil` (out-of-bounds is `nil`), so binding it straight
+// into a non-optional slot is rejected — recover with `?? default` first.
+pipeline test(task) {
+  const xs: list<int> = [1, 2, 3]
+  const n: int = xs[0]
+}

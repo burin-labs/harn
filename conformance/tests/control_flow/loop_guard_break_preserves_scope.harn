@@ -16,7 +16,7 @@ pipeline test(_task) {
   const tokens = ["abc"]
   let index = 0
   while index < len(tokens) {
-    const token = tokens[index]
+    const token = tokens[index] ?? ""
     const name = maybe_name(token) ?? ""
     if name == "" {
       break
@@ -27,7 +27,7 @@ pipeline test(_task) {
   }
   index = 0
   while index < len(tokens) {
-    const parsed = parse_env_assignment(tokens[index])
+    const parsed = parse_env_assignment(tokens[index] ?? "")
     if parsed == nil {
       break
     }

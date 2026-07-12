@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::typechecker::inference::expressions::SubscriptMode;
+
 impl TypeChecker {
     pub(super) fn check_generic_method_bound(
         &mut self,
@@ -72,8 +74,18 @@ impl TypeChecker {
         scope: &TypeScope,
         span: Span,
         optional: bool,
+        write_target: bool,
     ) {
-        let Some(raw) = self.infer_type(object, scope) else {
+        // On a write target the object is navigated through, not read, so
+        // intermediate index hops are present (see
+        // [`Self::infer_write_target_object_type`]); a spurious `T | nil` from
+        // index optionality must not masquerade as a nilable receiver here.
+        let raw = if write_target {
+            self.infer_write_target_object_type(object, scope)
+        } else {
+            self.infer_type(object, scope)
+        };
+        let Some(raw) = raw else {
             return;
         };
         let resolved = self.resolve_alias(&raw, scope);
@@ -332,8 +344,18 @@ impl TypeChecker {
         scope: &TypeScope,
         span: Span,
         optional: bool,
+        write_target: bool,
     ) {
-        let Some(raw) = self.infer_type(object, scope) else {
+        // A write target navigates through the object, so its intermediate
+        // index hops are present (`xs[0][1] = v` reaches a live inner list);
+        // read the object in write mode so index optionality does not make it
+        // look like a nilable receiver. A genuinely nilable base still shows.
+        let raw = if write_target {
+            self.infer_write_target_object_type(object, scope)
+        } else {
+            self.infer_type(object, scope)
+        };
+        let Some(raw) = raw else {
             return;
         };
         let resolved = self.resolve_alias(&raw, scope);
@@ -548,6 +570,43 @@ impl TypeChecker {
     /// Returns `None` — skipping the value check — when the receiver is
     /// gradual, lenient (the unannotated dict-literal idiom, per
     /// [`Self::is_strict_access_source`]), or the slot type is unknown.
+    /// Type of an assignment-target *object* — the receiver a write navigates
+    /// through — with every index hop treated as present (`SubscriptMode::Write`).
+    ///
+    /// A nested write like `xs[0][1] = v` or `p[0].x = v` cannot be rewritten
+    /// as extract-mutate-reassign under Harn's value semantics (the extracted
+    /// inner value is an independent copy), so the write must thread through the
+    /// live path. The intermediate index hops therefore assume presence, exactly
+    /// as the final `xs[i] = v` slot does — index-read optionality (`T | nil`)
+    /// applies to reads, not to the containers a write passes through. A
+    /// genuinely nilable *base* (e.g. a `list<T>?`-typed binding) still surfaces
+    /// its `nil` through the fallback to [`Self::infer_type`].
+    pub(super) fn infer_write_target_object_type(
+        &self,
+        object: &SNode,
+        scope: &TypeScope,
+    ) -> Option<TypeExpr> {
+        match &object.node {
+            Node::SubscriptAccess {
+                object: inner,
+                index,
+            } => {
+                let inner_ty = self.infer_write_target_object_type(inner, scope)?;
+                let resolved = self.resolve_alias(&inner_ty, scope);
+                self.subscript_slot_type(&resolved, index, scope, false, SubscriptMode::Write)
+            }
+            Node::PropertyAccess {
+                object: inner,
+                property,
+            } => {
+                let inner_ty = self.infer_write_target_object_type(inner, scope)?;
+                let resolved = self.resolve_alias(&inner_ty, scope);
+                self.infer_property_type_from_type(&resolved, property, scope, false)
+            }
+            _ => self.infer_type(object, scope),
+        }
+    }
+
     pub(in crate::typechecker) fn assignment_path_slot_type(
         &mut self,
         target: &SNode,
@@ -557,8 +616,8 @@ impl TypeChecker {
             Node::PropertyAccess { object, property }
             | Node::OptionalPropertyAccess { object, property } => {
                 let optional = matches!(&target.node, Node::OptionalPropertyAccess { .. });
-                self.check_property_access(object, property, scope, target.span, optional);
-                let raw = self.infer_type(object, scope)?;
+                self.check_property_access(object, property, scope, target.span, optional, true);
+                let raw = self.infer_write_target_object_type(object, scope)?;
                 if !self.is_strict_access_source(object, &raw, scope) {
                     return None;
                 }
@@ -567,8 +626,8 @@ impl TypeChecker {
             Node::SubscriptAccess { object, index }
             | Node::OptionalSubscriptAccess { object, index } => {
                 let optional = matches!(&target.node, Node::OptionalSubscriptAccess { .. });
-                self.check_subscript_access(object, scope, target.span, optional);
-                let raw = self.infer_type(object, scope)?;
+                self.check_subscript_access(object, scope, target.span, optional, true);
+                let raw = self.infer_write_target_object_type(object, scope)?;
                 if !self.is_strict_access_source(object, &raw, scope) {
                     return None;
                 }
@@ -593,7 +652,9 @@ impl TypeChecker {
                         );
                     }
                 }
-                self.infer_subscript_type_from_type(&resolved, index, scope, false)
+                // Write target: `xs[i] = v` stores a present element, so the
+                // slot type is the bare `T`, not the read-side `T | nil`.
+                self.subscript_slot_type(&resolved, index, scope, false, SubscriptMode::Write)
             }
             _ => None,
         }

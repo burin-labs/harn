@@ -13,7 +13,7 @@ pipeline default() {
   __io_println(missing?.[0])
   // Mixed chain: optional property + optional subscript + optional property.
   const payload = {commits: [{timestamp: "2026-01-01T00:00:00Z"}]}
-  __io_println(payload.commits[0].timestamp)
+  __io_println(payload.commits[0]?.timestamp)
   // Same chain when an intermediate hop is nil.
   const empty = {}
   __io_println(empty?.commits?.[0]?.timestamp)

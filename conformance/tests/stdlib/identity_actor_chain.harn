@@ -21,8 +21,8 @@ pipeline default() {
   __io_println(current.subject)
   __io_println(current.role)
   __io_println(join(current.scopes, ","))
-  __io_println(report.prior_actors[0].subject)
-  __io_println(join(report.prior_actors[0].scopes, ","))
+  __io_println(report.prior_actors[0]?.subject)
+  __io_println(join(report.prior_actors[0]?.scopes ?? [], ","))
   const origin = report.origin
   require origin != nil, "report should expose origin"
   __io_println(origin.subject)
@@ -38,10 +38,10 @@ pipeline default() {
   __io_println(solo.current.subject)
   const invalid = actor_chain_report({sub: "user:owner", act: {sub: 42, scopes: "repo:read"}})
   __io_println(invalid.ok)
-  __io_println(invalid.issues[0].code)
-  __io_println(invalid.issues[0].path)
+  __io_println(invalid.issues[0]?.code)
+  __io_println(invalid.issues[0]?.path)
   const bad_scope = actor_chain_report({sub: "user:owner", scopes: [1]})
   __io_println(bad_scope.ok)
-  __io_println(bad_scope.issues[0].code)
-  __io_println(bad_scope.issues[0].path)
+  __io_println(bad_scope.issues[0]?.code)
+  __io_println(bad_scope.issues[0]?.path)
 }

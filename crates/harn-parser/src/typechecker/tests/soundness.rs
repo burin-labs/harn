@@ -645,11 +645,15 @@ fn test_unannotated_dict_literal_writes_stay_lenient() {
 
 #[test]
 fn test_compound_assignment_to_list_element_type_checks() {
+    // `xs[0] += 1` type-checks: the read/modify/write lands back in the `int`
+    // element slot. The bare `return xs[0]` would be `int?` under index
+    // soundness (an out-of-bounds read is `nil`), so the sound form coalesces
+    // the possibly-absent element before returning it.
     let errs = errors(
         r"fn f() -> int {
   const xs: list<int> = [1, 2]
   xs[0] += 1
-  return xs[0]
+  return xs[0] ?? 0
 }",
     );
     assert!(errs.is_empty(), "got: {errs:?}");

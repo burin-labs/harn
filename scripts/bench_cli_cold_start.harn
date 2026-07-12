@@ -204,7 +204,7 @@ fn reset_cache_dir(cache_dir: string) -> nil {
 
 fn median(values: list<float>) -> float {
   const sorted = values.sort()
-  return sorted[sorted.count / 2]
+  return sorted[sorted.count / 2] ?? 0.0
 }
 
 fn measure_with_hyperfine(

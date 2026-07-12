@@ -377,7 +377,7 @@ fn inspect_step_transcript(task_dir: string, input_findings: list, print_lines: 
     )
   }
   if len(terminal) == 1 {
-    return record(findings, "OK", "step transcript terminal tool is " + terminal[0], print_lines)
+    return record(findings, "OK", "step transcript terminal tool is " + (terminal[0] ?? ""), print_lines)
   }
   return record(findings, "WARN", "step transcript has no terminal tool", print_lines)
 }

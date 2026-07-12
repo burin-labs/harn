@@ -4848,6 +4848,30 @@ reassigned, since the reference may then point at a different value. A
 never narrowed: it is not a stable reference, so a later `xs[i]` may
 read a different element.
 
+#### Index reads are optional
+
+An index read into a `list<T>`, a `dict<K, V>`, or a `string` yields
+`T | nil` (respectively `V | nil` and `string | nil`): an out-of-bounds
+index or an absent key is `nil` at runtime, so typing the read as a bare
+`T` would be unsound. This mirrors TypeScript's `noUncheckedIndexedAccess`.
+
+```harn,ignore
+const xs: list<int> = []
+const n: int = xs[0]   // error: expected int, found int? (xs[0] may be nil)
+```
+
+Recover the non-nil element in one of three ways:
+
+- `?? default` — coalesce the absent case: `const n: int = xs[0] ?? 0`.
+- A `for x in xs` loop — the loop variable binds the element type `T`
+  directly, never `T?`, because iteration never visits an absent slot.
+- `.first()` / `.last()` — these accessors already return `T?`.
+
+An honest element accessor therefore returns the optional element type:
+`fn first<T>(xs: list<T>) -> T? { return xs[0] }`. Index *writes*
+(`xs[i] = v`) are unaffected: the assigned slot keeps its bare element
+type `T`, since a write stores a present value.
+
 #### Truthiness
 
 A bare identifier in condition position narrows by removing `nil`:

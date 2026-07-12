@@ -1,0 +1,23 @@
+// Index reads are optional: `list[i]` / `dict[k]` yield `T | nil` because an
+// out-of-bounds index or a missing key is `nil` at runtime (TypeScript's
+// `noUncheckedIndexedAccess`). This fixture exercises the three ways to recover
+// the non-nil element: `?? default`, a `for` loop (which binds the element type
+// directly, never optional), and the `.first()` / `.last()` accessors.
+pipeline main() {
+  const xs: list<int> = [10, 20, 30]
+  // `?? default` recovers the element type on both a present and an absent index.
+  const head: int = xs[0] ?? 0
+  const past_end: int = xs[9] ?? -1
+  __io_println("head " + to_string(head))
+  __io_println("past_end " + to_string(past_end))
+  // A `for` loop binds `int`, never `int?`, so the sum stays fully typed.
+  let total = 0
+  for x in xs {
+    total = total + x
+  }
+  __io_println("total " + to_string(total))
+  // `dict[k]` is `V | nil`; coalesce to recover the value type.
+  const scores: dict<string, int> = {a: 1, b: 2}
+  __io_println("a " + to_string(scores["a"] ?? 0))
+  __io_println("z " + to_string(scores["z"] ?? 0))
+}

@@ -21,9 +21,9 @@ pipeline test(task) {
   const report: TrustChainReport = trust_graph_verify_chain()
   const records: list<TrustRecord> = trust_query({agent: agent_id, action: "deploy.prod"})
   __io_println(len(records) == 1)
-  __io_println(entry_id == records[0].record_id)
-  __io_println(records[0].chain_index > 0 && records[0].entry_hash != "")
-  __io_println(records[0].previous_hash == nil || records[0].previous_hash != "")
+  __io_println(entry_id == records[0]?.record_id)
+  __io_println(records[0]?.chain_index > 0 && records[0]?.entry_hash != "")
+  __io_println(records[0]?.previous_hash == nil || records[0]?.previous_hash != "")
   __io_println(score.total == 1 && score.successes == 1 && score.success_rate == 1.0)
   // A fresh agent resolves to the default `act_auto` (full-autonomy) tier, whose
   // ceiling is the TOP of the side-effect ladder — now `desktop_control` (added

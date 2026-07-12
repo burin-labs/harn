@@ -53,6 +53,6 @@ pipeline test(task) {
   // The trust graph captures the act_auto -> act_with_approval transition.
   const transitions: list<TrustRecord> = trust_query({agent: trigger_id, action: "autonomy.tier_transition"})
   __io_println(len(transitions) == 1)
-  __io_println(transitions[0].autonomy_tier)
-  __io_println(transitions[0].outcome)
+  __io_println(transitions[0]?.autonomy_tier)
+  __io_println(transitions[0]?.outcome)
 }

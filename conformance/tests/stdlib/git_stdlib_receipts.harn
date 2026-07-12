@@ -30,7 +30,7 @@ pipeline default() {
   __io_println(status.operation == "git.status" && status.success)
   __io_println(status.data.dirty && status.data.entries[0].path == "README.md")
   __io_println(status_fn.operation == "git.status" && status_fn.data.dirty)
-  __io_println(len(records) >= 1 && records[len(records) - 1].action == "git.status")
+  __io_println(len(records) >= 1 && records[len(records) - 1]?.action == "git.status")
   __io_println(remove.status == "no_op" && remove.data.idempotent)
   run_git(root, ["git", "checkout", "--", "README.md"])
   const branch = git_current_branch(root)

@@ -1758,7 +1758,7 @@ fn __agent_stall_apply_repair(
       iteration,
       "turns_since_clean_verify_floor",
       tripped.turns_since_clean_verify,
-      config.turns_since_clean_verify,
+      config.turns_since_clean_verify ?? 0,
       defer_feedback,
     )
   }

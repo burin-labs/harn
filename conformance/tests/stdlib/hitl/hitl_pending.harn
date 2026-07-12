@@ -9,8 +9,8 @@ pipeline test(task) {
   const rows: list<HitlPendingRequest> = hitl_pending({})
     .filter({ row -> row.prompt == prompt }).to_list()
   __io_println(len(rows))
-  __io_println(rows[0].request_kind)
-  __io_println(starts_with(rows[0].prompt, "Need a human "))
-  __io_println(len(rows[0].approvers))
+  __io_println(rows[0]?.request_kind)
+  __io_println(starts_with(rows[0]?.prompt, "Need a human "))
+  __io_println(len(rows[0]?.approvers))
   cancel(handle)
 }

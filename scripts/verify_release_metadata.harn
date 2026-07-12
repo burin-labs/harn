@@ -252,7 +252,9 @@ pub fn check_metadata(cargo_text: string, changelog_text: string) -> string {
   if versions.count == 0 {
     throw "error: CHANGELOG.md does not contain any version headings"
   }
-  const top = versions[0]
+  // `versions` is non-empty (guarded above), so `versions[0]` is present; the
+  // `?? ""` satisfies index soundness without changing behavior.
+  const top = versions[0] ?? ""
   const body = changelog_section_body(changelog_text, top)
   if body == "" {
     throw "error: CHANGELOG.md '## v" + top + "' section has no body content; release "

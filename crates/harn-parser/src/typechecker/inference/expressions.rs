@@ -36,6 +36,14 @@ enum SafeNavigationKind<'a> {
     Method,
 }
 
+/// Whether a subscript slot is being read or written. Governs the
+/// `list`/`dict` index optionality rule in [`TypeChecker::subscript_slot_type`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::typechecker) enum SubscriptMode {
+    Read,
+    Write,
+}
+
 impl TypeChecker {
     pub(in crate::typechecker) fn infer_try_error_type(
         &self,
@@ -1489,6 +1497,27 @@ impl TypeChecker {
         scope: &TypeScope,
         optional: bool,
     ) -> InferredType {
+        self.subscript_slot_type(ty, index, scope, optional, SubscriptMode::Read)
+    }
+
+    /// Slot type of a subscript access, distinguishing a *read* (`v = xs[i]`)
+    /// from a *write* target (`xs[i] = v`).
+    ///
+    /// In `Read` mode a `list`/`dict` index yields `T | nil`: an out-of-bounds
+    /// index or an absent key is `nil` at runtime, so the read is unsound if
+    /// typed as bare `T` (TypeScript's `noUncheckedIndexedAccess`). In `Write`
+    /// mode it yields the bare element/value type `T`, because an assignment
+    /// stores a present `T` — the absent-slot `nil` never reaches the RHS. A
+    /// nilable element type such as `list<int?>` still admits `nil` on write,
+    /// because that `nil` comes from `T` itself, not from the absent case.
+    pub(super) fn subscript_slot_type(
+        &self,
+        ty: &TypeExpr,
+        index: &SNode,
+        scope: &TypeScope,
+        optional: bool,
+        mode: SubscriptMode,
+    ) -> InferredType {
         let ty = self.resolve_alias(ty, scope);
         match &ty {
             TypeExpr::Named(name) if name == "nil" => {
@@ -1509,7 +1538,7 @@ impl TypeChecker {
                             return None;
                         }
                     } else if let Some(member_type) =
-                        self.infer_subscript_type_from_type(member, index, scope, optional)
+                        self.subscript_slot_type(member, index, scope, optional, mode)
                     {
                         inferred.push(member_type);
                     } else {
@@ -1523,15 +1552,15 @@ impl TypeChecker {
             TypeExpr::Intersection(members) => {
                 for member in members {
                     if let Some(member_type) =
-                        self.infer_subscript_type_from_type(member, index, scope, optional)
+                        self.subscript_slot_type(member, index, scope, optional, mode)
                     {
                         return Some(member_type);
                     }
                 }
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
-            TypeExpr::List(inner) => Some(*inner.clone()),
-            TypeExpr::DictType(_, value) => Some(*value.clone()),
+            TypeExpr::List(inner) => Some(Self::index_slot_type((**inner).clone(), mode)),
+            TypeExpr::DictType(_, value) => Some(Self::index_slot_type((**value).clone(), mode)),
             TypeExpr::Shape(fields) => {
                 if let Node::StringLiteral(key) = &index.node {
                     Self::shape_property_type(fields, key, optional)
@@ -1539,8 +1568,23 @@ impl TypeChecker {
                     None
                 }
             }
-            TypeExpr::Named(name) if name == "string" => Some(TypeExpr::Named("string".into())),
+            // A `string` index is a one-character `string`, absent (`nil`) when
+            // the index is out of bounds — the same optionality rule as `list`.
+            TypeExpr::Named(name) if name == "string" => Some(Self::index_slot_type(
+                TypeExpr::Named("string".into()),
+                mode,
+            )),
             _ => None,
+        }
+    }
+
+    /// Apply the read/write optionality rule for a `list`/`dict` index: reads
+    /// widen the element type `T` to `T | nil` (the slot may be absent); writes
+    /// keep the bare `T` (see [`Self::subscript_slot_type`]).
+    fn index_slot_type(element: TypeExpr, mode: SubscriptMode) -> TypeExpr {
+        match mode {
+            SubscriptMode::Read => simplify_union(vec![element, TypeExpr::Named("nil".into())]),
+            SubscriptMode::Write => element,
         }
     }
 

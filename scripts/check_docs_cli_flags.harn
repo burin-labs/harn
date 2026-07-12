@@ -267,7 +267,7 @@ pub fn find_harn_segment(segment: list<string>) -> list<string>? {
   if index < segment.count && segment[index] == "env" {
     index = index + 1
   }
-  while index < segment.count && is_assignment(segment[index]) {
+  while index < segment.count && is_assignment(segment[index] ?? "") {
     index = index + 1
   }
   if index < segment.count && segment[index] == "harn" {
@@ -418,7 +418,7 @@ pub fn analyze_harn_args(state, args: list<string>, fetch: fn(list<string>) -> s
       if eq
         < 0
         && index + 1 < args.count
-        && !args[index + 1].starts_with("-")
+        && !(args[index + 1] ?? "").starts_with("-")
         && (takes_value || !accepted.contains(flag)) {
         index = index + 2
       } else {

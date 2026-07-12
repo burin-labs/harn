@@ -9,5 +9,5 @@ pipeline default() {
   ys = ys.push(3.5)
   __io_println("xs len " + to_string(len(xs)))
   __io_println("ys len " + to_string(len(ys)))
-  __io_println("xs still all int: " + to_string(xs[0] + xs[1] + xs[2]))
+  __io_println("xs still all int: " + to_string((xs[0] ?? 0) + (xs[1] ?? 0) + (xs[2] ?? 0)))
 }

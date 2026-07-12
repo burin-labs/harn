@@ -53,11 +53,11 @@ type CompletionPolicy = {
   remote_models_allowed: bool,
   codebase_context_allowed: bool,
   max_latency_ms: int,
-  max_cost_per_1k_usd?: float,
+  max_cost_per_1k_usd: float?,
   max_prompt_chars: int,
   prompt_recording: CompletionPromptRecordingMode,
   emit_trust_events: bool,
-  min_confidence?: float,
+  min_confidence: float?,
   retention_days: int,
   metadata: dict,
 }
@@ -71,8 +71,8 @@ type CompletionPolicyDecision = {
 
 type CompletionRoute = {
   schema: string,
-  provider?: string,
-  model_id?: string,
+  provider: string?,
+  model_id: string?,
   local: bool,
   source: string,
   query: dict,
@@ -173,7 +173,7 @@ type CompletionUsageRecord = {
   context_hash?: string,
 }
 
-fn __dict(value) {
+fn __dict(value) -> dict {
   if type_of(value) == "dict" {
     return value
   }
@@ -267,7 +267,7 @@ fn __allow_list_allows(values, value) -> bool {
   return normalized.contains(__lower(value))
 }
 
-fn __recording_mode(value) -> string {
+fn __recording_mode(value) -> CompletionPromptRecordingMode {
   const mode = __lower(value)
   if mode == "full" {
     return "full"
@@ -553,7 +553,7 @@ pub fn completion_model_route(opts = {}) -> CompletionRoute {
       model_id: __text_or_nil(raw?.model ?? raw?.model_id),
       local: __local_provider(raw?.provider),
       source: "explicit_or_empty",
-      query: query,
+      query: __dict(query),
     }
   }
   return {
@@ -562,7 +562,7 @@ pub fn completion_model_route(opts = {}) -> CompletionRoute {
     model_id: selected.id ?? selected.model ?? selected.name,
     local: __local_provider(selected.provider),
     source: "catalog",
-    query: query,
+    query: __dict(query),
     catalog: selected,
   }
 }

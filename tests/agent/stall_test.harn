@@ -826,8 +826,8 @@ pipeline test_action_signal_repeated_flailing_escalates_to_hard_stop(task) {
   assert(!o2.hard_stop)
   assert_eq(o2.state.action_flail_trips, 2)
   const o3 = _observe_signal(o2.state, cfg, {})
-  assert(o3.warning.pattern == "flailing_action")
-  assert_eq(o3.warning.count, 3)
+  assert(o3.warning?.pattern == "flailing_action")
+  assert_eq(o3.warning?.count, 3)
   assert(o3.hard_stop)
 }
 
@@ -847,7 +847,7 @@ pipeline test_action_signal_non_flailing_turn_resets_streak(task) {
     ping_pong_cycles: 99,
   }
   const o1 = _observe_signal(agent_stall_initial_state(), cfg, {flail: true})
-  assert(o1.warning.pattern == "flailing_action")
+  assert(o1.warning?.pattern == "flailing_action")
   assert_eq(o1.state.action_flail_trips, 1)
   const o2 = _observe_signal(o1.state, cfg, {flail: false})
   assert(o2.warning == nil)
@@ -872,8 +872,8 @@ pipeline test_action_flail_does_not_contaminate_core_trip_axis(task) {
     threshold: 99,
   }
   const o1 = _observe_signal(agent_stall_initial_state(), cfg, {})
-  assert(o1.warning.pattern == "flailing_action")
-  assert_eq(o1.warning.count, 1)
+  assert(o1.warning?.pattern == "flailing_action")
+  assert_eq(o1.warning?.count, 1)
   assert_eq(o1.state.action_flail_trips, 1)
   assert_eq(o1.state.consecutive_trips, 0)
 }

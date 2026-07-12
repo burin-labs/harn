@@ -65,9 +65,9 @@ pipeline test_acp_agent_manifest_version(task) {
 @test
 pipeline test_acp_agent_manifest_archive_versions(task) {
   const versions = acp_agent_manifest_archive_versions(ACP_MANIFEST)
-  assert_eq(versions[0].version, "0.8.71")
+  assert_eq(versions[0]?.version, "0.8.71")
   assert_eq(
-    versions[0].archive,
+    versions[0]?.archive,
     "https://github.com/burin-labs/harn/releases/download/v0.8.71/harn-x86_64-unknown-linux-gnu.tar.gz",
   )
 }

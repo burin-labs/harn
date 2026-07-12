@@ -38,7 +38,7 @@ pipeline default() {
   // 4) who_calls returns the CallSite list for the target symbol.
   const callers: list<LibrarianCallSite> = code_librarian_who_calls("alpha")
   __io_println(len(callers) >= 1)
-  __io_println(callers[0].path == "src/a.rs" && callers[0].symbol == "alpha")
+  __io_println(callers[0]?.path == "src/a.rs" && callers[0]?.symbol == "alpha")
   // 5) what_imports returns a list (empty here — corpus has no imports).
   const imps: list<LibrarianImport> = code_librarian_what_imports("src/a.rs")
   __io_println(type_of(imps) == "list")

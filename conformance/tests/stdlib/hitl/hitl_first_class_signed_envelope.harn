@@ -26,5 +26,5 @@ pipeline test(task) {
   // hosts to verify provenance.
   __io_println(len(real_record.signatures))
   __io_println(len(forged_record.signatures))
-  __io_println(starts_with(real_record.signatures[0].signature, "sha256:"))
+  __io_println(starts_with(real_record.signatures[0]?.signature, "sha256:"))
 }
