@@ -217,9 +217,8 @@ same way) lives in
 
 ## Release
 
-- Default live release:
-  `cd ~/projects/harn-bump-fleet && harn run --no-sandbox release_harn.harn -- \
-  --repo ~/projects/harn --mode ship-pr --agent --yes-live-release`
+- Default live release from a `harn-bump-fleet` checkout:
+  `harn run --no-sandbox release_harn.harn -- --repo <harn-checkout> --mode ship-pr --agent --yes-live-release`
 - The release harness prepares, commits, pushes, tags, opens the PR, and enables
   auto-merge. It pushes the signed `vX.Y.Z` tag at the pinned release commit
   before the PR merges; the tag push drives publishing and binary builds.
