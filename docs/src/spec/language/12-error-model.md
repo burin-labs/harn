@@ -16,7 +16,7 @@ Any value can be thrown (strings, dicts, etc.).
 A function, tool, pipeline, or `fn` closure may declare the type of value it
 throws with a `throws` clause after the return type:
 
-```harn
+```harn,ignore
 fn parse(s: string) -> Doc throws ParseError { ... }
 fn load(path: string) throws NotFound | ParseError { ... }
 ```
