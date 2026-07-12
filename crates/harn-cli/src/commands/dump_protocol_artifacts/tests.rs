@@ -439,8 +439,8 @@ type Example struct {
 }
 
 #[test]
-fn generated_go_is_gofmt_stable_when_gofmt_is_available() {
-    let go = generate_go();
+fn generated_go_artifact_is_gofmt_stable_when_gofmt_is_available() {
+    let go = generate_go_artifact().expect("generate Go artifact");
     let mut child = match Command::new("gofmt")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -467,7 +467,7 @@ fn generated_go_is_gofmt_stable_when_gofmt_is_available() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("gofmt stdout utf8"),
         go,
-        "generated Go protocol artifact must be gofmt-stable before it is written"
+        "generated Go protocol artifact must be gofmt-stable before it is written or checked"
     );
 }
 
