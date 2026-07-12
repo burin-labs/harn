@@ -158,7 +158,7 @@ fn trigger_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
-    sig = "trigger_register(...args: any) -> dict",
+    sig = "trigger_register(...args: any) -> TriggerHandle",
     kind = "async",
     category = "triggers"
 )]
@@ -177,7 +177,7 @@ async fn trigger_register_impl(
 }
 
 #[harn_builtin(
-    sig = "trigger_fire(...args: any) -> dict",
+    sig = "trigger_fire(...args: any) -> DispatchHandle",
     kind = "async",
     category = "triggers"
 )]
@@ -194,7 +194,7 @@ async fn trigger_fire_impl(
 }
 
 #[harn_builtin(
-    sig = "trigger_replay(...args: any) -> dict",
+    sig = "trigger_replay(...args: any) -> DispatchHandle",
     kind = "async",
     category = "triggers"
 )]
@@ -277,7 +277,7 @@ async fn trigger_inspect_action_graph_impl(
 }
 
 #[harn_builtin(
-    sig = "trust_record(...args: any) -> dict",
+    sig = "trust_record(...args: any) -> TrustRecord",
     kind = "async",
     category = "triggers"
 )]
@@ -336,7 +336,7 @@ async fn trust_query_impl(
 }
 
 #[harn_builtin(
-    sig = "trust_graph_query(...args: any) -> dict",
+    sig = "trust_graph_query(...args: any) -> TrustScore",
     kind = "async",
     category = "triggers"
 )]
@@ -354,7 +354,7 @@ async fn trust_graph_query_impl(
 }
 
 #[harn_builtin(
-    sig = "trust_graph_policy_for(...args: any) -> dict",
+    sig = "trust_graph_policy_for(...args: any) -> CapabilityPolicy",
     kind = "async",
     category = "triggers"
 )]
@@ -371,7 +371,7 @@ async fn trust_graph_policy_for_impl(
 }
 
 #[harn_builtin(
-    sig = "trust_graph_verify_chain(...args: any) -> dict",
+    sig = "trust_graph_verify_chain(...args: any) -> TrustChainReport",
     kind = "async",
     category = "triggers"
 )]

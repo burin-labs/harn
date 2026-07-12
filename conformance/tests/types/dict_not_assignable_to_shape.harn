@@ -1,0 +1,9 @@
+// A bare `dict` carries no field guarantees, so assigning it into a specific
+// shape without a narrow (`schema_is` / `.has()`) is now a type error — the
+// hole that let unvalidated `json_parse`-style dicts masquerade as typed
+// records. `dict` behaves like `unknown` here.
+pipeline default() {
+  const d: dict = {}
+  const bad: {name: string} = d
+  __io_println(bad.name)
+}

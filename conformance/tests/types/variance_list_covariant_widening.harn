@@ -1,0 +1,13 @@
+// `list<int>` widens to `list<float>`: list is covariant in its element type.
+// This is sound under Harn's value semantics — binding `xs` into the
+// `list<float>` slot hands over an independent copy, so pushing a float into
+// `ys` cannot corrupt the original `list<int>` that `xs` still names. Covariance
+// only breaks under *shared* mutable aliasing, which Harn does not have.
+pipeline default() {
+  let xs: list<int> = [1, 2, 3]
+  let ys: list<float> = xs
+  ys = ys.push(3.5)
+  __io_println("xs len " + to_string(len(xs)))
+  __io_println("ys len " + to_string(len(ys)))
+  __io_println("xs still all int: " + to_string(xs[0] + xs[1] + xs[2]))
+}

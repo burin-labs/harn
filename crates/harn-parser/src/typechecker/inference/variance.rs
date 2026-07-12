@@ -205,18 +205,19 @@ impl TypeChecker {
             | TypeExpr::Iter(inner)
             | TypeExpr::Generator(inner)
             | TypeExpr::Stream(inner) => {
-                // `list<T>` is invariant; iter/generator/stream are covariant.
-                let sub = match ty {
-                    TypeExpr::List(_) => Polarity::Invariant,
-                    TypeExpr::Iter(_) | TypeExpr::Generator(_) | TypeExpr::Stream(_) => polarity,
-                    _ => unreachable!(),
-                };
-                self.walk_variance(decl_kind, inner, sub, declared, span);
+                // All four sequence types are covariant in their element type, so
+                // the element is walked at the current polarity. `list` earns
+                // covariance the same way the read-only iter/generator/stream do:
+                // Harn values have copy semantics, so a list is never
+                // shared-mutable-aliased and a widening read is sound (see the
+                // matching `list` arm in `subtyping.rs`).
+                self.walk_variance(decl_kind, inner, polarity, declared, span);
             }
             TypeExpr::DictType(k, v) => {
-                // dict<K, V> is invariant in both.
+                // dict<K, V> is covariant in its value V (value semantics, as
+                // above) and invariant in its key K.
                 self.walk_variance(decl_kind, k, Polarity::Invariant, declared, span);
-                self.walk_variance(decl_kind, v, Polarity::Invariant, declared, span);
+                self.walk_variance(decl_kind, v, polarity, declared, span);
             }
             TypeExpr::Shape(fields) => {
                 for f in fields {

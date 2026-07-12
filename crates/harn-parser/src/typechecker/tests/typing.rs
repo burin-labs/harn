@@ -1798,9 +1798,12 @@ fn test_fn_param_contravariance_negative() {
 }
 
 #[test]
-fn test_list_invariant_int_to_float_rejected() {
-    // `list<int>` must not flow into `list<float>` — lists are
-    // mutable, so a covariant assignment is unsound.
+fn test_list_covariant_int_to_float_accepted() {
+    // `list<int>` flows into `list<float>`: `list` is covariant in its element
+    // type. The classic covariance-with-mutation hole needs shared mutable
+    // aliasing, which Harn does not have — values have copy semantics, so the
+    // `list<float>` binding gets an independent copy and nothing the original
+    // `list<int>` observes can change. (See the `list` arm in `subtyping.rs`.)
     let errs = errors(
         r"pipeline t(task) {
             let xs: list<int> = [1, 2, 3]
@@ -1808,8 +1811,8 @@ fn test_list_invariant_int_to_float_rejected() {
         }",
     );
     assert!(
-        !errs.is_empty(),
-        "expected list<int> NOT to flow into list<float>, but type-check passed"
+        errs.is_empty(),
+        "expected list<int> to flow into list<float> under value semantics, got: {errs:?}"
     );
 }
 
@@ -1875,7 +1878,9 @@ fn test_decl_site_out_in_covariant_position_ok() {
 }
 
 #[test]
-fn test_dict_invariant_int_to_float_rejected() {
+fn test_dict_covariant_value_int_to_float_accepted() {
+    // dict<K, V> is covariant in its value type V for the same value-semantics
+    // reason as `list`: no shared mutable aliasing, so a widening read is sound.
     let errs = errors(
         r#"pipeline t(task) {
             let d: dict<string, int> = {"a": 1}
@@ -1883,8 +1888,26 @@ fn test_dict_invariant_int_to_float_rejected() {
         }"#,
     );
     assert!(
+        errs.is_empty(),
+        "expected dict<string, int> value to widen into dict<string, float>, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_dict_key_stays_invariant() {
+    // The value type widens (covariant) but the key type does not: a
+    // `dict<string, int>` must not flow into a `dict<int, int>`. Key variance
+    // interacts with lookup in ways plain width-subtyping does not, so keys stay
+    // exact.
+    let errs = errors(
+        r#"pipeline t(task) {
+            let d: dict<string, int> = {"a": 1}
+            let e: dict<int, int> = d
+        }"#,
+    );
+    assert!(
         !errs.is_empty(),
-        "expected dict<string, int> NOT to flow into dict<string, float>"
+        "expected dict<string, int> NOT to flow into dict<int, int> (keys invariant)"
     );
 }
 

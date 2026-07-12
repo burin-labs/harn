@@ -913,15 +913,18 @@ pipeline default(task) {
     {path: path, content: read_or_empty(path)}
   }
 
-  let context = {task: task, files: {}}
+  // Accumulate into an explicitly-typed `dict<string, string>`. An untyped
+  // `{}` is the opaque top object type, so annotating the dict keeps `.merge`
+  // and the key/value iteration below well-typed.
+  let files: dict<string, string> = {}
   for item in contents {
     if item.content != "" {
-      context = context.merge({files: context.files.merge({[item.path]: item.content})})
+      files = files.merge({[item.path]: item.content})
     }
   }
 
   let prompt = "Task: ${task}\n\n"
-  for entry in context.files {
+  for entry in files {
     prompt += "=== ${entry.key} ===\n${entry.value}\n\n"
   }
 

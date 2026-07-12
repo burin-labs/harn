@@ -568,8 +568,20 @@ impl TypeChecker {
             (expected_type, TypeExpr::Intersection(members)) => members
                 .iter()
                 .any(|m| self.types_compatible(expected_type, m, scope)),
-            (TypeExpr::Shape(_), TypeExpr::Named(n)) if n == "dict" => true,
+            // A shape widens to the opaque `dict` (a shape *is* a dict with
+            // known fields). The reverse is NOT sound: a bare `dict` carries no
+            // field guarantees, so flowing it into a specific shape without a
+            // narrow (`schema_is` / `.has()`) is exactly the hole that let
+            // unvalidated `json_parse` output masquerade as a typed record.
+            // `dict` now behaves like `unknown` here — the shape target requires
+            // narrowing first.
             (TypeExpr::Named(n), TypeExpr::Shape(_)) if n == "dict" => true,
+            // The *empty* shape `{}` is the top object type (TS/Flow `{}`): it
+            // carries no field obligations, so any `dict` — indeed any object —
+            // satisfies it. This is the one shape a bare `dict` may flow into
+            // without narrowing, and it is what lets `let m = {}` accept a later
+            // `m = json_parse(...)`. A non-empty shape still requires narrowing.
+            (TypeExpr::Shape(ef), TypeExpr::Named(n)) if n == "dict" && ef.is_empty() => true,
             // Open records. Subtyping verifies only the EXPECTED side's
             // explicit fields against the actual's known fields — Harn shapes
             // are already width-subtyped, so extra actual fields (and the
@@ -588,7 +600,13 @@ impl TypeChecker {
             (TypeExpr::OpenShape { fields: ef, .. }, TypeExpr::OpenShape { fields: af, rests }) => {
                 self.shape_fields_satisfied(ef, af, open_shape_tail_is_gradual(rests), scope)
             }
-            // Gradual map interop, mirroring the `Shape`/`dict` arms.
+            // Gradual map interop. An open record widens to `dict`, and — unlike
+            // the closed-`Shape` case — a bare `dict` DOES satisfy an open record:
+            // an open record's row tail already absorbs unknown fields, so it
+            // imposes no closed-field obligation the way a `Shape` does. Removing
+            // this arm breaks row-polymorphism (open-record `dict` tails), so both
+            // directions stay `true` here; only the closed `Shape`/`dict`
+            // direction is tightened above.
             (TypeExpr::OpenShape { .. }, TypeExpr::Named(n)) if n == "dict" => true,
             (TypeExpr::Named(n), TypeExpr::OpenShape { .. }) if n == "dict" => true,
             (TypeExpr::OpenShape { .. }, TypeExpr::DictType(..)) => true,
@@ -638,14 +656,17 @@ impl TypeChecker {
             }
             // Shape expected, dict<K, V> actual → gradual: allow since dict may have the fields
             (TypeExpr::Shape(_), TypeExpr::DictType(_, _)) => true,
-            // list<T> is invariant: the element type must match exactly
-            // (no int→float widening) because lists are mutable
-            // (`push`, index assignment). Covariant lists are unsound
-            // on write — a `list<int>` flowing into a `list<float>`
-            // slot would let a `float` be pushed and later observed
-            // as an `int`.
+            // list<T> is covariant in T. The classic covariance-with-mutation
+            // hole — push a `float` through a `list<float>` alias, then read it
+            // back as `int` through the original `list<int>` — requires *shared*
+            // mutable aliasing, which Harn does not have: values have copy
+            // semantics, so binding or passing a list hands over an independent
+            // copy (`let b = a; b[0] = x` leaves `a` untouched) and `push` is a
+            // functional operation that yields a new list. With no aliasing a
+            // widening read is always sound, so `list` widens exactly like the
+            // read-only `iter`/`generator`/`stream` sequences below.
             (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
-                self.types_compatible_at(Polarity::Invariant, expected_inner, actual_inner, scope)
+                self.types_compatible(expected_inner, actual_inner, scope)
             }
             (TypeExpr::Named(n), TypeExpr::List(_)) if n == "list" => true,
             (TypeExpr::List(_), TypeExpr::Named(n)) if n == "list" => true,
@@ -675,12 +696,15 @@ impl TypeChecker {
             }
             (TypeExpr::Named(n), TypeExpr::Stream(_)) if n == "stream" || n == "Stream" => true,
             (TypeExpr::Stream(_), TypeExpr::Named(n)) if n == "stream" || n == "Stream" => true,
-            // dict<K, V> is invariant in both K and V: dicts are
-            // mutable (key/value assignment). See the `list` comment
-            // above for the soundness argument.
+            // dict<K, V> is covariant in its value type V, for the same
+            // value-semantics reason as `list` above: there is no shared mutable
+            // aliasing, so a widening read is sound. The key type K stays
+            // invariant — Harn map keys are `string` in practice, and key
+            // variance interacts with lookup in ways plain width-subtyping does
+            // not, so keeping K exact costs nothing real and avoids that corner.
             (TypeExpr::DictType(ek, ev), TypeExpr::DictType(ak, av)) => {
                 self.types_compatible_at(Polarity::Invariant, ek, ak, scope)
-                    && self.types_compatible_at(Polarity::Invariant, ev, av, scope)
+                    && self.types_compatible(ev, av, scope)
             }
             (TypeExpr::Named(n), TypeExpr::DictType(_, _)) if n == "dict" => true,
             (TypeExpr::DictType(_, _), TypeExpr::Named(n)) if n == "dict" => true,
