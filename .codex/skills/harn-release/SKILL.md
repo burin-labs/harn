@@ -1,216 +1,110 @@
 ---
 name: harn-release
-description: Use this skill for Harn release prep, version bumps, publishing, tagging, and release notes.
+description: Use for Harn release prep, version bumps, publishing, tags, and release notes.
 ---
 
-# Harn release gate
+# Harn release
 
-The release is **one** human PR titled `Release vX.Y.Z`. It carries the
-changelog, code, docs, AND the `Cargo.toml`/`Cargo.lock` bump together.
-After it lands through the merge queue, push the `vX.Y.Z` **tag** at the
-release commit — *that tag push* (not the merge to `main`) triggers the
-**publish-release** workflow to `cargo publish`, and then the
-**build-release-binaries** workflow for binary tarballs and a multi-arch
-container.
+Use the tag-first release flow. The canonical driver is
+`~/projects/harn-bump-fleet/release_harn.harn`; local scripts in this repo are
+building blocks and recovery tools.
 
-> **`publish-release.yml` does NOT tag `main` HEAD for you** (changed with the
-> release-pipeline modernization, #2971–#2973). A missing tag makes the
-> post-merge run fail: `Cargo.toml=X is ahead of latest tag vY, but vX does not
-> exist. Push vX at the release commit`. The canonical orchestrator
-> (`release_harn.harn --mode ship-pr`) pushes the tag for you; otherwise push it
-> by hand (step 9 / 10).
-
-```text
-human/agent: write & land "Release vX.Y.Z" PR
-        │  ↓ merge queue runs full audit set in CI
-human/agent: push signed vX.Y.Z tag at the release commit
-        │   (orchestrator ship-pr does this; or push it by hand)
-        │  ↓ the TAG push (not the main push) triggers publish-release
-bot:    publish-release runs cargo publish, creates GH release notes
-        │  ↓ tag push cascades
-bot:    build-release-binaries workflow assembles binaries + container
-        │  ↓
-        v0.8.X is shipped (binaries, container, crates.io, release notes)
+```bash
+cd ~/projects/harn-bump-fleet
+harn run --no-sandbox release_harn.harn -- \
+  --repo ~/projects/harn --mode ship-pr --agent --yes-live-release
 ```
 
-The bot workflows live at:
+`ship-pr` prepares the release content, commits it, pushes the branch, pushes
+the signed `vX.Y.Z` tag at the pinned release commit, opens the `Release
+vX.Y.Z` PR, and enables auto-merge. The tag is pushed before the PR merges so
+crates.io, release notes, binaries, and the container are built from the pinned
+tag commit, not from whatever is on `main` later.
 
-- `.github/workflows/publish-release.yml` (display name: "Publish release")
-- `.github/workflows/build-release-binaries.yml` (display name: "Build release binaries")
-- `.github/workflows/bump-release.yml` (display name: "Open version bump PR (recovery)" — workflow_dispatch only)
+## Flow
+
+```text
+release_harn.harn --mode ship-pr
+  -> prepare release content and version bump
+  -> commit "Release vX.Y.Z"
+  -> push branch
+  -> push signed vX.Y.Z tag at the pinned commit
+  -> open Release vX.Y.Z PR and enable auto-merge
+  -> tag push triggers publish-release and build-release-binaries
+```
+
+The Release PR remains the review and merge-queue artifact. Publishing is keyed
+to the tag. The later push to `main` is a guard/self-heal path; it must not be
+treated as the publishing trigger.
 
 ## Source of truth
 
-All bot workflows invoke the same scripts you'd run locally:
+- `~/projects/harn-bump-fleet/release_harn.harn` owns the live release
+  orchestration. Run it from the `harn-bump-fleet` checkout so its prompt
+  assets resolve from that repo.
+- `scripts/release_ship.sh --prepare` is an implementation detail for the
+  release harness and refuses standalone use.
+- `scripts/release_ship.sh --finalize` is run by
+  `.github/workflows/publish-release.yml` on a tag push. Run it locally only for
+  recovery.
+- `scripts/release_ship.sh --bump <patch|minor|major>` and
+  `.github/workflows/bump-release.yml` are recovery paths for historical
+  two-step releases.
+- `scripts/release_gate.sh <audit|prepare|publish|notes|full>` provides local
+  audit, dry-run, notes, and recovery helpers.
 
-```bash
-./scripts/release_ship.sh --prepare --bump <patch|minor|major>   # default flow
-./scripts/release_ship.sh --finalize                              # recovery
-./scripts/release_ship.sh --bump <patch|minor|major>              # legacy recovery
-./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...
-```
+## Before shipping
 
-Do not re-invent the release ritual from memory if the script can do it.
+1. Start from a clean harn worktree and fetch `origin/main`.
+2. Inspect pending release content with `git status --short`,
+   `git diff --stat`, and enough diff context to summarize it accurately.
+3. Audit the changed behavior. Add Rust tests or `.harn` + `.expected`
+   conformance pairs for new user-visible behavior.
+4. Run targeted tests while fixing issues. Before live release mechanics, run
+   the gates that cover the touched surface; broad releases normally need
+   `make test` and `cargo run --bin harn -- test conformance`.
+5. Update release-facing docs when the behavior changed: `README.md`,
+   `AGENTS.md` / `CLAUDE.md`, `CONTRIBUTING.md`, `docs/src/`,
+   `spec/chapters/*.md`, and generated mirrors through their generators.
 
-## Single-PR mode
+## Workflows
 
-A real release has exactly one release commit on `main`, landed via
-PR/merge queue: `Release vX.Y.Z`. It contains code, docs,
-`CHANGELOG.md`, `Cargo.toml` / `Cargo.lock` and per-crate manifest
-bumps, and regenerated derived files (highlight keywords,
-language-spec mirror).
+- `.github/workflows/publish-release.yml` ("Publish release") fires on
+  `v*` tag pushes, checks out the tag, and runs
+  `./scripts/release_ship.sh --finalize` under the release App identity. Its
+  `push: main` trigger is a guard; it does not tag `main` for you.
+- `.github/workflows/build-release-binaries.yml` ("Build release binaries")
+  fires on the tag push and produces binary tarballs plus the GHCR container.
+  Use `workflow_dispatch` with `tag=vX.Y.Z` to recover an existing tag.
+- `.github/workflows/bump-release.yml` ("Open version bump PR (recovery)") is
+  manual-only recovery for accidental historical release states.
+- `.github/workflows/release-pr-drift-check.yml` can ask you to rerun
+  `release_harn.harn` when a release PR's pin diverges from `origin/main`.
 
-After the release PR lands, **push the `vX.Y.Z` tag at the release commit**
-(step 10) — the publish and binary-build workflows fire off the *tag push*, not
-the merge. Wall-clock ~3-5 min for crates.io publish + ~10-15 min for binary
-tarballs.
+## Recovery
 
-Failure modes, roughly in frequency order, with recovery:
-
-- `release_gate.sh audit` clippy / test failure during `--prepare`:
-  fix the code on the same release branch, re-run `--prepare
-  --skip-audit` if you've already run audit successfully once.
-- `cargo publish` rate-limit / transient network during the publish
-  workflow: re-trigger via `gh workflow run publish-release.yml --ref main`.
-  The script falls back to per-crate publish and treats `already
-  exists on crates.io index` as success.
-- Binary build needs to re-emit for an already-tagged version:
+- Finalize failed after the tag exists: rerun `publish-release.yml` from the
+  Actions UI or with `gh workflow run publish-release.yml --ref main`.
+- Binary assets failed for an existing tag:
   `gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z`.
+- Historical prepare landed without the consolidated bump:
+  `gh workflow run bump-release.yml`.
+- Local recovery only: use `scripts/release_ship.sh --finalize` from the
+  correct tag checkout or updated `main` after reading the script help.
 
-## Cross-repo iteration does not wait on releases
+## Rules
 
-Downstream repos (notably `burin-code`) can consume in-progress Harn
-changes without a release via `./scripts/fetch-harn.sh --local` in the
-consumer repo — it builds Harn from `~/projects/harn` in release mode
-and installs the binaries directly. Release batching exists to control
-the *published* version surface; it never blocks cross-repo iteration.
+- Do not hand-run `release_ship.sh --prepare` for the default release path; use
+  `release_harn.harn --mode ship-pr`.
+- Do not push to a PR already in the merge queue. The pre-push hook checks this
+  because GitHub snapshots queued PRs.
+- Do not pass `--squash`, `--merge`, or `--rebase` to `gh pr merge --auto`;
+  branch protection chooses the strategy.
+- Do not hand-edit generated files. Edit sources and regenerate.
+- Cross-repo consumers do not wait on a release. For `burin-code`, use
+  `./scripts/fetch-harn.sh --local` in that repo to build from
+  `~/projects/harn` during iteration.
 
-## What you actually do for a release
-
-Steps 1-10 are the only ones requiring judgment. Step 10 (pushing the `vX.Y.Z`
-tag) is the step that actually ships — the merge alone publishes nothing. After
-step 10 you are done — do **not** run `release_ship.sh --finalize` locally as a
-default step.
-
-1. Branch off main: `git checkout -b release/vX.Y.Z`.
-2. Inspect the worktree first with `git status --short` and
-   `git diff --stat`. Treat tracked and untracked changes as candidate
-   release content unless the user scopes the release more narrowly.
-3. Read enough diff context to summarize the pending work accurately.
-4. Audit pending changes for correctness and test coverage. Add Rust
-   tests or conformance pairs for new or changed user-visible behavior;
-   fix bugs discovered during the audit instead of shipping them.
-   - Targeted crate tests during the inner loop (`cargo nextest run -p harn-vm`).
-   - `make test` and `cargo run --bin harn -- test conformance` before
-     proceeding with release mechanics.
-5. Repo-consistency sweep before shipping. Update release-facing docs
-   and operator guidance as needed: `README.md`, `CLAUDE.md`,
-   `docs/src/`, `spec/HARN_SPEC.md`, `CHANGELOG.md`, and developer-setup
-   surfaces (`scripts/dev_setup.sh`, `Makefile`, `.githooks/`,
-   `docs/src/portal.md`).
-6. If syntax / parser / lexer / tree-sitter changed, update
-   `spec/HARN_SPEC.md` first — formal language-spec source of truth.
-   The pre-commit hook regenerates `docs/src/language-spec.md`
-   automatically; CI gates on it via `make check-language-spec`.
-7. Update `CHANGELOG.md` with a new top entry `## vX.Y.Z` describing
-   the actual pending code changes that will ship. The version chosen
-   here drives what `--prepare` will bump to.
-8. Run the consolidated prep:
-
-   ```bash
-   ./scripts/release_ship.sh --prepare --bump patch
-   ```
-
-   This audits, dry-run-publishes, bumps `Cargo.toml`/`Cargo.lock`/per-crate
-   manifests, regenerates derived files, and `git add`s everything.
-9. Commit, rebase onto latest `origin/main`, push, open the PR titled
-   `Release vX.Y.Z`, then `gh pr merge --auto`.
-
-   ```bash
-   git commit -m "Release vX.Y.Z"
-   git fetch origin main && git rebase origin/main
-   # Resolve any CHANGELOG.md conflicts: bullets that landed on main
-   # while --prepare was running may need to move from v(X.Y.Z-1) → vX.Y.Z,
-   # or a bullet may end up duplicated across both sections. Verify with:
-   #   diff <(git show v(X.Y.Z-1):CHANGELOG.md | awk '/^## v(X.Y.Z-1)/,/^## /') \
-   #        <(awk '/^## v(X.Y.Z-1)/,/^## /' CHANGELOG.md)
-   git push -u origin release/vX.Y.Z
-   gh pr create --title "Release vX.Y.Z" --body "..."
-   gh pr merge --auto         # branch protection picks the strategy; do
-                              # NOT pass --squash/--merge/--rebase
-   ```
-
-   Rebase right before push because `--prepare` takes 1-15 min depending
-   on cache state, and main may have moved while it ran. Auto-merge means
-   the PR lands as soon as CI is green so you don't have to babysit the
-   ~10-15 min cold-cache merge-queue CI.
-
-10. **Push the `vX.Y.Z` tag at the release commit — this is what ships.**
-    `publish-release.yml` will not tag `main` HEAD; until the tag exists nothing
-    publishes. After the `Release vX.Y.Z` PR squash-merges:
-
-    ```bash
-    git fetch origin main --tags
-    REL=$(git rev-parse origin/main)   # the squashed "Release vX.Y.Z (#N)" commit
-    git tag -s vX.Y.Z "$REL" -m "Release vX.Y.Z"   # signed (org rulesets); -a also works
-    git push origin vX.Y.Z
-    ```
-
-    The tag push triggers `publish-release.yml` (`tags: ['v*']`), which skips
-    drift detection and publishes from the tag. `release_harn.harn --mode
-    ship-pr` does this for you. A transient red `publish-release` run on the
-    `main` push is expected (the "tag missing" guard) — the tag push is the real
-    ship signal.
-
-## Expectations
-
-- Stop on the first failed gate during `--prepare`. Do not paper over.
-- Once the release PR lands and you push the `vX.Y.Z` tag (step 10), watch the
-  Actions UI. The publish → binary-build cascade (off the tag push) should
-  complete in ~12-18 min wall-clock total. Each workflow has
-  `workflow_dispatch` for manual recovery.
-- Treat repo consistency as part of the release PR, not an optional
-  cleanup pass. If behavior changes, update human-facing docs in the
-  same PR.
-- The grammar / spec audit includes `scripts/verify_language_spec.py`
-  (extracts ` ```harn ` fences from `spec/HARN_SPEC.md` and runs `harn
-  check`) and `scripts/verify_tree_sitter_parse.py` (sweeps positive
-  `.harn` programs through the executable tree-sitter grammar). Treat
-  failures as spec drift, not just docs drift.
-- **Never push to a PR that's already in the merge queue** —
-  GitHub silently snapshots the PR at enqueue time and ignores
-  subsequent pushes. The pre-push hook detects this and aborts.
-
-## Notes
-
-- `scripts/publish.sh` remains the crates.io publisher. It tries
-  `cargo publish --workspace` first with retries, then falls back to
-  per-crate publish where `already exists on crates.io index` is
-  treated as success.
-- `CHANGELOG.md` is the release-language source of truth. Notes are
-  rendered from it by `scripts/render_release_notes.py`. CI runs
-  `verify_release_metadata.py` to reject malformed headings, empty
-  section bodies, or out-of-order entries.
-- GitHub release artifacts (binary tarballs + GHCR container) are
-  produced by `build-release-binaries.yml` once the tag is pushed (step 10).
-  Push the tag with the App identity (`release_harn.harn --mode ship-pr`) or
-  your own credentials — a `GITHUB_TOKEN`-pushed tag would NOT trigger the
-  downstream workflows.
-- The tag is pushed in **step 10** (by `release_harn.harn --mode ship-pr`, or by
-  hand), *before* `publish-release.yml` runs `cargo publish`, so the binary-build
-  workflow and downstream fetchers (e.g. `burin-code`'s `fetch-harn`) start in
-  parallel with crates.io publication. `release_ship.sh --finalize` no longer
-  pushes the tag — it publishes from the existing tag.
-- `release_ship.sh --finalize` skips the audit by default
-  (`RELEASE_FINALIZE_REAUDIT=0`); merge-queue CI of the just-landed
-  Release PR proved the same gates a few minutes ago. Pass
-  `--reaudit` to opt back in for paranoid local recovery.
-- `release_gate.sh audit` (called by `--prepare`) starts with a
-  serial `cargo build -p harn-cli --bin harn` warm prebuild before
-  spawning the seven parallel lanes. Cold wall-clock is dominated by
-  `rust-audit` clippy/nextest plus package verification; warm wall-clock
-  should be a few minutes.
-- The release-bot App needs `Contents: write`, `Pull requests: write`,
-  `Actions: write`, `Metadata: read` installed on this repo. Required
-  repo secrets: `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`,
-  `CARGO_REGISTRY_TOKEN`.
+Required release infrastructure: release App permissions `Contents: write`,
+`Pull requests: write`, `Actions: write`, `Metadata: read`; repo secrets
+`RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`, and `CARGO_REGISTRY_TOKEN`.

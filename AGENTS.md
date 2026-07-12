@@ -217,10 +217,17 @@ same way) lives in
 
 ## Release
 
-- Open version-bump PR after release content lands:
-  `./scripts/release_ship.sh --bump patch`
-- Finalize after the bump PR lands: `./scripts/release_ship.sh --finalize`
-- Audit: `./scripts/release_gate.sh audit`
+- Default live release:
+  `cd ~/projects/harn-bump-fleet && harn run --no-sandbox release_harn.harn -- \
+  --repo ~/projects/harn --mode ship-pr --agent --yes-live-release`
+- The release harness prepares, commits, pushes, tags, opens the PR, and enables
+  auto-merge. It pushes the signed `vX.Y.Z` tag at the pinned release commit
+  before the PR merges; the tag push drives publishing and binary builds.
+- Do not run `./scripts/release_ship.sh --prepare` directly for normal releases;
+  it is an implementation detail of `release_harn.harn`.
+- Recovery helpers: `./scripts/release_ship.sh --finalize`,
+  `./scripts/release_ship.sh --bump patch`, and
+  `./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...`.
 - Dry-run release gate:
   `./scripts/release_gate.sh full --bump patch --dry-run`
 - Crate publishing dry run: `./scripts/publish.sh --dry-run`
