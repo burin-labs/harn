@@ -16,10 +16,11 @@ throws with a `throws` clause after the return type:
 
 ```harn
 fn parse(s: string) -> Doc throws ParseError { ... }
-fn load(path: string) throws (NotFound | ParseError) { ... }
+fn load(path: string) throws NotFound | ParseError { ... }
 ```
 
-`throws (E1 | E2)` is an ordinary union type. The clause is **optional and
+`throws E1 | E2` is an ordinary union type (the same bare `A | B` union syntax
+used everywhere else — Harn types are not parenthesized). The clause is **optional and
 additive**: a callable with no `throws` clause keeps the historical
 unconstrained behavior, so existing code is unaffected and no callable is ever
 forced to declare one.

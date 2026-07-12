@@ -51,7 +51,7 @@ fn throwing_an_undeclared_type_errors() {
 #[test]
 fn union_throws_set_covers_each_member() {
     let diags = throws_mismatches(
-        r#"fn parse(s: string) throws (string | int) {
+        r#"fn parse(s: string) throws string | int {
   if s == "" {
     throw 42
   }
@@ -97,9 +97,9 @@ fn pipeline_throws_clause_is_enforced() {
 
 #[test]
 fn caught_error_is_excluded_from_the_declared_channel() {
-    // The body throws `Parse::Bad`, which the `catch (e: Parse)` handles, so it
+    // The body throws `Parse.Bad`, which the `catch (e: Parse)` handles, so it
     // does NOT count against the declared channel. The catch body then throws
-    // `Net::Down`, which IS declared — so the callable checks clean. If the
+    // `Net.Down`, which IS declared — so the callable checks clean. If the
     // caught `Parse` error leaked into the thrown set this would raise TYP-026
     // (Parse is not <: Net).
     let diags = throws_mismatches(
@@ -107,9 +107,9 @@ fn caught_error_is_excluded_from_the_declared_channel() {
 enum Net { Down }
 fn f() throws Net {
   try {
-    throw Parse::Bad
+    throw Parse.Bad
   } catch (e: Parse) {
-    throw Net::Down
+    throw Net.Down
   }
 }"#,
     );
@@ -121,15 +121,15 @@ fn f() throws Net {
 
 #[test]
 fn uncaught_error_escapes_and_must_be_declared() {
-    // The body throws `Net::Down` but the catch only handles `Parse`, so
-    // `Net::Down` is rethrown and escapes. The declared channel is `Parse`,
+    // The body throws `Net.Down` but the catch only handles `Parse`, so
+    // `Net.Down` is rethrown and escapes. The declared channel is `Parse`,
     // which does not cover it → exactly one TYP-026.
     let diags = throws_mismatches(
         r#"enum Parse { Bad }
 enum Net { Down }
 fn f() throws Parse {
   try {
-    throw Net::Down
+    throw Net.Down
   } catch (e: Parse) {
   }
 }"#,
@@ -150,7 +150,7 @@ fn catch_all_absorbs_every_body_error() {
         r#"enum Net { Down }
 fn f() throws Net {
   try {
-    throw Net::Down
+    throw Net.Down
   } catch {
   }
 }"#,
@@ -164,16 +164,16 @@ fn f() throws Net {
 #[test]
 fn finally_body_throw_escapes() {
     // A `throw` in the `finally` block always escapes, regardless of the catch.
-    // Here it is `Net::Down` against a declared `Parse` channel → TYP-026.
+    // Here it is `Net.Down` against a declared `Parse` channel → TYP-026.
     let diags = throws_mismatches(
         r#"enum Parse { Bad }
 enum Net { Down }
 fn f() throws Parse {
   try {
-    throw Parse::Bad
+    throw Parse.Bad
   } catch (e: Parse) {
   } finally {
-    throw Net::Down
+    throw Net.Down
   }
 }"#,
     );

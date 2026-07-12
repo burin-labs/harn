@@ -81,6 +81,7 @@ impl Compiler {
                             rest: false,
                         }],
                         return_type: None,
+                        throws: None,
                         body: vec![replaced],
                         fn_syntax: false,
                     });

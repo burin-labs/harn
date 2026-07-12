@@ -4,7 +4,7 @@
     {
       "id": "TYP",
       "title": "Type checker",
-      "count": 25
+      "count": 26
     },
     {
       "id": "PAR",
@@ -439,6 +439,15 @@
       "code": "HARN-TYP-025",
       "category": "TYP",
       "summary": "optional access is invalid for the receiver type",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-026",
+      "category": "TYP",
+      "summary": "thrown value type is not covered by the callable's declared throws set",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

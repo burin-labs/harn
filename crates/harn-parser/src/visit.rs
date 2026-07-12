@@ -439,6 +439,7 @@ mod tests {
                 rest: false,
             }],
             return_type: None,
+            throws: None,
             where_clauses: Vec::new(),
             body: Vec::new(),
             is_pub: false,

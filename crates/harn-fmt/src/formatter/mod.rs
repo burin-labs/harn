@@ -329,6 +329,7 @@ impl<'a> Formatter<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn format_fn_signature(
         &self,
         pub_prefix: &str,

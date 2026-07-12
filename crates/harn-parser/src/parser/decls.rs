@@ -38,10 +38,11 @@ fn is_attribute_key_token(token: &TokenKind) -> bool {
 
 impl Parser {
     /// Parse an optional `throws <type>` exception-channel clause that follows
-    /// a callable's return type. `throws (E1 | E2)` is just a parenthesized
-    /// [`TypeExpr::Union`] handled by [`Self::parse_type_expr`], so this needs
-    /// no special union grammar. Absent clause → `None` (unconstrained), which
-    /// keeps the annotation additive across every callable.
+    /// a callable's return type. A multi-type channel is written as the ordinary
+    /// bare union `throws E1 | E2` (Harn types are never parenthesized), which
+    /// [`Self::parse_type_expr`] already handles, so this needs no special union
+    /// grammar. Absent clause → `None` (unconstrained), which keeps the
+    /// annotation additive across every callable.
     pub(super) fn parse_optional_throws(&mut self) -> Result<Option<TypeExpr>, ParserError> {
         if self.check(&TokenKind::Throws) {
             self.advance();

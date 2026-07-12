@@ -66,6 +66,7 @@ The following identifiers are reserved:
 | `try` | `.tryKw` |
 | `catch` | `.catchKw` |
 | `throw` | `.throwKw` |
+| `throws` | `.throwsKw` |
 | `finally` | `.finally` |
 | `fn` | `.fnKw` |
 | `emit` | `.emit` |

@@ -66,6 +66,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Try
         | TokenKind::Catch
         | TokenKind::Throw
+        | TokenKind::Throws
         | TokenKind::Finally
         | TokenKind::Select
         | TokenKind::Fn
