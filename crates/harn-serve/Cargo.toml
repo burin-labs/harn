@@ -16,16 +16,16 @@ base64 = "0.22"
 bytes = "1"
 futures = "0.3"
 globset = "0.4"
-harn-clock = { path = "../harn-clock", version = "=0.10.12" }
-harn-parser = { path = "../harn-parser", version = "=0.10.12" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.12" }
+harn-clock = { path = "../harn-clock", version = "=0.10.13" }
+harn-parser = { path = "../harn-parser", version = "=0.10.13" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.13" }
 # `default-features = false` keeps the in-process embedding surface lean:
 # Postgres (sqlx) and the hostlib grammars are opt-in via this crate's
 # feature flags rather than dragged in unconditionally. harn-cli re-enables
 # the full set for CLI parity; Cargo's feature unification means any build
 # that includes harn-cli still gets everything.
-harn-vm = { path = "../harn-vm", version = "=0.10.12", default-features = false }
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.12", optional = true, default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.13", default-features = false }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.13", optional = true, default-features = false }
 hex = "0.4"
 hmac = "0.13"
 ipnet = "2"
@@ -95,7 +95,7 @@ filetime = "0.2"
 # makes `cargo nextest run -p harn-serve` green in isolation without the test
 # silently relying on workspace-wide feature unification (which masked the gap:
 # it passed under `--workspace` but failed under `-p harn-serve`).
-harn-vm = { path = "../harn-vm", version = "=0.10.12", default-features = false, features = ["postgres"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.13", default-features = false, features = ["postgres"] }
 futures-util = "0.3"
 hex = "0.4"
 tempfile = "3"
