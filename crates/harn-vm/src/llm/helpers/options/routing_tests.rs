@@ -91,6 +91,7 @@ fn test_equivalent_model_with_context(
 ) -> ModelDef {
     ModelDef {
         name: format!("{provider} equivalent model"),
+        blurb: None,
         provider: provider.to_string(),
         context_window,
         logical_model: None,

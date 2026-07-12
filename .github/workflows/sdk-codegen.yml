@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/sdk-codegen.yml"
       - "scripts/generate_sdk_clients.sh"
+      - "scripts/tests/generate_sdk_clients_test.sh"
       - "spec/openapi.yaml"
       - "spec/openapi.snapshot"
       - "spec/openapi-sdk-surface.md"
@@ -14,6 +15,7 @@ on:
     paths:
       - ".github/workflows/sdk-codegen.yml"
       - "scripts/generate_sdk_clients.sh"
+      - "scripts/tests/generate_sdk_clients_test.sh"
       - "spec/openapi.yaml"
       - "spec/openapi.snapshot"
       - "spec/openapi-sdk-surface.md"

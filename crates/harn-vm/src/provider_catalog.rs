@@ -14,9 +14,9 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 4;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 5;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v4.json";
+    "https://harnlang.com/schemas/provider-catalog.v5.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog export";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -82,6 +82,46 @@ fn config_from_artifact(artifact: &ProviderCatalogArtifact) -> llm_config::Provi
             .map(|model| (model.id.clone(), model_def_from_catalog(model)))
             .collect(),
         qc_defaults: artifact.qc_defaults.clone(),
+        presentation: llm_config::PresentationConfig {
+            // A remote artifact already resolved every recommendation. Preserve
+            // that exact choice as a fixed model selector when installing the
+            // runtime overlay instead of re-running a dynamic selector against
+            // a potentially different local catalog.
+            variants: artifact
+                .variants
+                .iter()
+                .enumerate()
+                .map(|(index, variant)| {
+                    (
+                        variant.id.clone(),
+                        llm_config::PresentationVariantDef {
+                            order: u16::try_from(index).unwrap_or(u16::MAX),
+                            label: variant.label.clone(),
+                            description: variant.description.clone(),
+                            selector: llm_config::PresentationVariantSelector::Model {
+                                model_id: variant.model_id.clone(),
+                            },
+                        },
+                    )
+                })
+                .collect(),
+            families: artifact
+                .families
+                .iter()
+                .map(|family| {
+                    (
+                        family.id.clone(),
+                        llm_config::ModelFamilyDef {
+                            label: family.label.clone(),
+                            plain_description: family.plain_description.clone(),
+                            model_id: family.model_id.clone(),
+                            dimensions: family.dimensions.clone(),
+                            presets: family.presets.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        },
         ..llm_config::ProvidersConfig::default()
     }
 }
@@ -138,6 +178,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
 fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
     llm_config::ModelDef {
         name: model.name.clone(),
+        blurb: model.blurb.clone(),
         provider: model.provider.clone(),
         context_window: model.context_window,
         logical_model: model.logical_model.clone(),
@@ -268,7 +309,8 @@ fn artifact_from_config(
             catalog_alias(name, alias, config.alias_tool_calling.get(name).cloned())
         })
         .collect::<Vec<_>>();
-    let variants = catalog_variants(&models, &aliases);
+    let variants = catalog_variants(&models, &aliases, &config.presentation.variants);
+    let families = catalog_families(config, &models, &suppressed);
     let routing_routes = catalog_routing_routes(&models, &providers);
 
     ProviderCatalogArtifact {
@@ -279,6 +321,7 @@ fn artifact_from_config(
         models,
         aliases,
         variants,
+        families,
         routing_routes,
         qc_defaults: config.qc_defaults.clone(),
     }
@@ -520,6 +563,7 @@ fn catalog_model(
     let batch = catalog_batch_support(batch_api, &caps);
     CatalogModel {
         aliases,
+        blurb: model.blurb.clone(),
         logical_model: model.logical_model.clone(),
         equivalence_group: model.equivalence_group.clone(),
         served_variant: model.served_variant.clone(),
@@ -565,6 +609,7 @@ fn catalog_model(
         reasoning: ModelReasoning {
             modes: caps.thinking_modes.clone(),
             effort_supported: caps.reasoning_effort_supported,
+            effort_levels: caps.reasoning_effort_levels.clone(),
             none_supported: caps.reasoning_none_supported,
             interleaved_supported: caps.interleaved_thinking_supported,
             preserve_thinking: caps.preserve_thinking,
@@ -717,100 +762,143 @@ fn modalities_from_caps(caps: &llm::capabilities::Capabilities) -> ModelModaliti
     }
 }
 
-fn catalog_variants(models: &[CatalogModel], aliases: &[CatalogAlias]) -> Vec<CatalogVariant> {
-    let mut variants = Vec::new();
-    for (id, label, description, alias_name) in [
-        (
-            "fast",
-            "Fast",
-            "Lowest-latency general coding-agent route.",
-            "small",
-        ),
-        (
-            "balanced",
-            "Balanced",
-            "Default cost/quality tradeoff for routine coding-agent work.",
-            "mid",
-        ),
-        (
-            "high-reasoning",
-            "High reasoning",
-            "Frontier route for hard planning, repair, and review tasks.",
-            "frontier",
-        ),
-    ] {
-        if let Some(alias) = aliases.iter().find(|alias| alias.name == alias_name) {
-            variants.push(CatalogVariant {
-                id: id.to_string(),
-                label: label.to_string(),
-                description: description.to_string(),
-                model_id: alias.model_id.clone(),
-                provider: alias.provider.clone(),
-                source: format!("alias:{alias_name}"),
-            });
-        }
-    }
-    push_variant_from_model(
-        &mut variants,
-        "local",
-        "Local",
-        "Best local/offline model route in the checked-in catalog.",
-        models
-            .iter()
-            .filter(|model| is_local_provider(&model.provider))
-            .max_by_key(|model| model.context_window),
-    );
-    push_variant_from_model(
-        &mut variants,
-        "cheap",
-        "Cheap",
-        "Lowest known hosted input+output token price.",
-        models
-            .iter()
-            .filter(|model| !is_local_provider(&model.provider))
-            .min_by(|left, right| {
-                pricing_total(left)
-                    .partial_cmp(&pricing_total(right))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }),
-    );
-    push_variant_from_model(
-        &mut variants,
-        "vision-capable",
-        "Vision capable",
-        "A model route that accepts image input.",
-        models
-            .iter()
-            .filter(|model| model.modalities.input.iter().any(|mode| mode == "image"))
-            .max_by_key(|model| model.context_window),
-    );
-    push_variant_from_model(
-        &mut variants,
-        "long-context",
-        "Long context",
-        "Largest context-window route in the checked-in catalog.",
-        models.iter().max_by_key(|model| model.context_window),
-    );
-    variants
+fn catalog_variants(
+    models: &[CatalogModel],
+    aliases: &[CatalogAlias],
+    definitions: &BTreeMap<String, llm_config::PresentationVariantDef>,
+) -> Vec<CatalogVariant> {
+    let mut ordered_definitions = definitions.iter().collect::<Vec<_>>();
+    ordered_definitions.sort_by(|(left_id, left), (right_id, right)| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left_id.cmp(right_id))
+    });
+    ordered_definitions
+        .into_iter()
+        .filter_map(|(id, definition)| {
+            let (model_id, provider, source) =
+                resolve_presentation_variant(&definition.selector, models, aliases)?;
+            Some(CatalogVariant {
+                id: id.clone(),
+                label: definition.label.clone(),
+                description: definition.description.clone(),
+                model_id,
+                provider,
+                source,
+            })
+        })
+        .collect()
 }
 
-fn push_variant_from_model(
-    variants: &mut Vec<CatalogVariant>,
-    id: &str,
-    label: &str,
-    description: &str,
-    model: Option<&CatalogModel>,
-) {
-    if let Some(model) = model {
-        variants.push(CatalogVariant {
-            id: id.to_string(),
-            label: label.to_string(),
-            description: description.to_string(),
-            model_id: model.id.clone(),
-            provider: model.provider.clone(),
-            source: "catalog".to_string(),
-        });
-    }
+fn resolve_presentation_variant(
+    selector: &llm_config::PresentationVariantSelector,
+    models: &[CatalogModel],
+    aliases: &[CatalogAlias],
+) -> Option<(String, String, String)> {
+    use llm_config::PresentationVariantSelector;
+
+    let (model, source) = match selector {
+        PresentationVariantSelector::Alias { name } => {
+            let alias = aliases.iter().find(|alias| alias.name == *name)?;
+            return Some((
+                alias.model_id.clone(),
+                alias.provider.clone(),
+                format!("alias:{name}"),
+            ));
+        }
+        PresentationVariantSelector::Model { model_id } => (
+            models.iter().find(|model| model.id == *model_id),
+            format!("model:{model_id}"),
+        ),
+        PresentationVariantSelector::BestLocal => (
+            models
+                .iter()
+                .filter(|model| is_local_provider(&model.provider))
+                .max_by_key(|model| model.context_window),
+            "selector:best_local".to_string(),
+        ),
+        PresentationVariantSelector::CheapestHosted => (
+            models
+                .iter()
+                .filter(|model| !is_local_provider(&model.provider))
+                .min_by(|left, right| {
+                    pricing_total(left)
+                        .partial_cmp(&pricing_total(right))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }),
+            "selector:cheapest_hosted".to_string(),
+        ),
+        PresentationVariantSelector::LargestVisionContext => (
+            models
+                .iter()
+                .filter(|model| model.modalities.input.iter().any(|mode| mode == "image"))
+                .max_by_key(|model| model.context_window),
+            "selector:largest_vision_context".to_string(),
+        ),
+        PresentationVariantSelector::LargestContext => (
+            models.iter().max_by_key(|model| model.context_window),
+            "selector:largest_context".to_string(),
+        ),
+    };
+    model.map(|model| (model.id.clone(), model.provider.clone(), source))
+}
+
+fn catalog_families(
+    config: &llm_config::ProvidersConfig,
+    models: &[CatalogModel],
+    suppressed: &[(String, String)],
+) -> Vec<CatalogModelFamily> {
+    config
+        .presentation
+        .families
+        .iter()
+        .filter_map(|(id, family)| {
+            let referenced_models = family_model_ids(family);
+            let references_suppressed_model = referenced_models.iter().any(|model_id| {
+                config
+                    .models
+                    .get(*model_id)
+                    .is_some_and(|model| is_suppressed(suppressed, &model.provider, model_id))
+            });
+            if references_suppressed_model {
+                return None;
+            }
+            let provider = referenced_models
+                .iter()
+                .find_map(|model_id| {
+                    models
+                        .iter()
+                        .find(|model| model.id == **model_id)
+                        .map(|model| model.provider.clone())
+                })
+                .unwrap_or_default();
+            Some(CatalogModelFamily {
+                id: id.clone(),
+                label: family.label.clone(),
+                plain_description: family.plain_description.clone(),
+                provider,
+                model_id: family.model_id.clone(),
+                dimensions: family.dimensions.clone(),
+                presets: family.presets.clone(),
+            })
+        })
+        .collect()
+}
+
+fn family_model_ids(family: &llm_config::ModelFamilyDef) -> Vec<&str> {
+    family
+        .model_id
+        .iter()
+        .map(String::as_str)
+        .chain(
+            family
+                .dimensions
+                .iter()
+                .filter(|dimension| dimension.kind == llm_config::ModelFamilyDimensionKind::Model)
+                .flat_map(|dimension| dimension.ordered_values.iter())
+                .filter_map(|value| value.model_id.as_deref()),
+        )
+        .collect()
 }
 
 fn pricing_total(model: &CatalogModel) -> f64 {

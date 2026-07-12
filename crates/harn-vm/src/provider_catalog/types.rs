@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm_config::{
     self, AliasToolCallingDef, LocalMemoryDef, ModelArchitectureDef, ModelAvailability,
-    ModelPricing, RateLimitsDef, ServingPerformanceDef,
+    ModelFamilyDimensionDef, ModelFamilyPresetDef, ModelPricing, RateLimitsDef,
+    ServingPerformanceDef,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +18,7 @@ pub struct ProviderCatalogArtifact {
     pub models: Vec<CatalogModel>,
     pub aliases: Vec<CatalogAlias>,
     pub variants: Vec<CatalogVariant>,
+    pub families: Vec<CatalogModelFamily>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routing_routes: Vec<CatalogRoutingRoute>,
     pub qc_defaults: BTreeMap<String, String>,
@@ -121,6 +123,8 @@ pub struct CatalogAlias {
 pub struct CatalogModel {
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blurb: Option<String>,
     pub provider: String,
     pub aliases: Vec<String>,
     pub context_window: u64,
@@ -304,6 +308,7 @@ pub struct ModelFormatPreferences {
 pub struct ModelReasoning {
     pub modes: Vec<String>,
     pub effort_supported: bool,
+    pub effort_levels: Vec<String>,
     pub none_supported: bool,
     pub interleaved_supported: bool,
     pub preserve_thinking: bool,
@@ -336,6 +341,19 @@ pub struct CatalogVariant {
     pub model_id: String,
     pub provider: String,
     pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogModelFamily {
+    pub id: String,
+    pub label: String,
+    pub plain_description: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub dimensions: Vec<ModelFamilyDimensionDef>,
+    pub presets: Vec<ModelFamilyPresetDef>,
 }
 
 /// Provider/model route-decision row derived from the catalog.

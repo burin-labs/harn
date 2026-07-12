@@ -112,6 +112,78 @@ max_lora_rank_arg = "--max-lora-rank"
 }
 
 #[test]
+fn presentation_rows_replace_whole_same_id_records_across_overlays() {
+    let mut base = parse_config_toml(
+        r#"
+[presentation.variants.fast]
+order = 10
+label = "Old fast"
+description = "Old description"
+selector = { kind = "alias", name = "small" }
+
+[presentation.families.demo]
+label = "Old family"
+plain_description = "Old description"
+model_id = "demo-model"
+dimensions = []
+presets = []
+"#,
+    )
+    .expect("base parses");
+    let overlay = parse_config_toml(
+        r#"
+[presentation.variants.fast]
+order = 10
+label = "New fast"
+description = "New description"
+selector = { kind = "model", model_id = "new-model" }
+
+[presentation.families.demo]
+label = "New family"
+plain_description = "New description"
+model_id = "new-model"
+dimensions = []
+presets = []
+"#,
+    )
+    .expect("overlay parses");
+
+    base.merge_from(&overlay);
+
+    let variant = base.presentation.variants.get("fast").expect("variant");
+    assert_eq!(variant.label, "New fast");
+    assert!(matches!(
+        &variant.selector,
+        PresentationVariantSelector::Model { model_id } if model_id == "new-model"
+    ));
+    let family = base.presentation.families.get("demo").expect("family");
+    assert_eq!(family.label, "New family");
+    assert_eq!(family.model_id.as_deref(), Some("new-model"));
+}
+
+#[test]
+fn parse_config_warns_on_unknown_presentation_field() {
+    let diagnostics = diagnostic_texts(
+        r#"
+[presentation.families.demo]
+label = "Demo"
+plain_description = "Demo family"
+model_id = "demo-model"
+dimensions = []
+presets = []
+surprise_knob = true
+"#,
+    );
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.contains("presentation.families.demo.surprise_knob")
+                && diagnostic.contains("unknown providers.toml field")
+        }),
+        "expected presentation unknown-field diagnostic, got {diagnostics:?}"
+    );
+}
+
+#[test]
 fn resolve_model_info_guards_bad_native_pin_on_unreliable_route() {
     reset_overrides();
     // An alias that pins tool_format = "native" for DeepSeek V3.2 on
@@ -635,6 +707,7 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
         "gpt-4o".to_string(),
         ModelDef {
             name: "GPT-4o via OpenRouter".to_string(),
+            blurb: None,
             provider: "openrouter".to_string(),
             context_window: 128_000,
             logical_model: None,
@@ -1407,6 +1480,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
         "acme/model-fast".to_string(),
         ModelDef {
             name: "Acme Fast".to_string(),
+            blurb: None,
             provider: "acme".to_string(),
             context_window: 65_536,
             logical_model: None,

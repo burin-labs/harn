@@ -48,6 +48,8 @@ published release. Release runs upload generated Python and TypeScript client
 artifacts for `burin-labs/harn-sdk-python` and
 `burin-labs/harn-sdk-typescript` to consume.
 
-The generated artifact manifest includes both the exact Harn release version
-and the SDK package version. SDK package versions follow Harn's minor line:
-Harn `X.Y.Z` produces SDK version `X.Y.0`.
+The generator pins its complete toolchain, including the TypeScript compiler
+peer used by `@hey-api/openapi-ts`. The generated artifact manifest records the
+toolchain versions alongside the exact Harn release and SDK package versions.
+SDK package versions follow Harn's minor line: Harn `X.Y.Z` produces SDK
+version `X.Y.0`.

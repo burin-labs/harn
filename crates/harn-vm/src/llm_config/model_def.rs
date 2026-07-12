@@ -556,6 +556,9 @@ pub struct ModelLadderStepDef {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelDef {
     pub name: String,
+    /// One-sentence, plain-language trade-off description for model pickers.
+    #[serde(default)]
+    pub blurb: Option<String>,
     pub provider: String,
     pub context_window: u64,
     /// Provider-independent logical model id, when multiple serving routes map

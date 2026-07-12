@@ -32,13 +32,14 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 4
+  schema_version: 5
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
   models: HarnCatalogModel[]
   aliases: HarnCatalogAlias[]
   variants: HarnCatalogVariant[]
+  families: HarnCatalogModelFamily[]
   routing_routes?: HarnCatalogRoutingRoute[]
   qc_defaults: Record<string, string>
 }
@@ -141,6 +142,7 @@ export interface HarnAliasToolCalling {
 export interface HarnCatalogModel {
   id: string
   name: string
+  blurb?: string
   provider: string
   aliases: string[]
   context_window: number
@@ -179,6 +181,7 @@ export interface HarnCatalogModel {
   reasoning: {
     modes: string[]
     effort_supported: boolean
+    effort_levels: string[]
     none_supported: boolean
     interleaved_supported: boolean
     preserve_thinking: boolean
@@ -330,6 +333,40 @@ export interface HarnCatalogVariant {
   source: string
 }
 
+export interface HarnCatalogModelFamily {
+  id: string
+  label: string
+  plain_description: string
+  provider: string
+  model_id?: string
+  dimensions: HarnModelFamilyDimension[]
+  presets: HarnModelFamilyPreset[]
+}
+
+export interface HarnModelFamilyDimension {
+  key: string
+  label: string
+  plain_description: string
+  kind: "model" | "reasoning_effort"
+  ordered_values: HarnModelFamilyValue[]
+}
+
+export interface HarnModelFamilyValue {
+  value: string
+  label: string
+  plain_description: string
+  relative_cost_hint: number
+  relative_speed_hint: number
+  model_id?: string
+}
+
+export interface HarnModelFamilyPreset {
+  id: string
+  label: string
+  plain_blurb: string
+  coordinates: Record<string, string>
+}
+
 export interface HarnCatalogRoutingRoute {
   provider: string
   model: string
@@ -351,6 +388,7 @@ const SWIFT_TYPES: &str = r#"public struct HarnProviderCatalog: Codable, Sendabl
     public let models: [HarnCatalogModel]
     public let aliases: [HarnCatalogAlias]
     public let variants: [HarnCatalogVariant]
+    public let families: [HarnCatalogModelFamily]
     public let routingRoutes: [HarnCatalogRoutingRoute]?
     public let qcDefaults: [String: String]
 
@@ -362,6 +400,7 @@ const SWIFT_TYPES: &str = r#"public struct HarnProviderCatalog: Codable, Sendabl
         case models
         case aliases
         case variants
+        case families
         case routingRoutes = "routing_routes"
         case qcDefaults = "qc_defaults"
     }
@@ -546,6 +585,7 @@ public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
 public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
+    public let blurb: String?
     public let provider: String
     public let aliases: [String]
     public let contextWindow: Int
@@ -591,6 +631,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case blurb
         case provider
         case aliases
         case contextWindow = "context_window"
@@ -632,6 +673,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
         provider = try container.decode(String.self, forKey: .provider)
         aliases = try container.decode([String].self, forKey: .aliases)
         contextWindow = try container.decode(Int.self, forKey: .contextWindow)
@@ -772,6 +814,7 @@ public struct HarnModelFormatPreferences: Codable, Sendable, Equatable {
 public struct HarnModelReasoning: Codable, Sendable, Equatable {
     public let modes: [String]
     public let effortSupported: Bool
+    public let effortLevels: [String]
     public let noneSupported: Bool
     public let interleavedSupported: Bool
     public let preserveThinking: Bool
@@ -779,6 +822,7 @@ public struct HarnModelReasoning: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case modes
         case effortSupported = "effort_supported"
+        case effortLevels = "effort_levels"
         case noneSupported = "none_supported"
         case interleavedSupported = "interleaved_supported"
         case preserveThinking = "preserve_thinking"
@@ -1020,6 +1064,74 @@ public struct HarnCatalogVariant: Codable, Sendable, Equatable {
         case modelID = "model_id"
         case provider
         case source
+    }
+}
+
+public struct HarnCatalogModelFamily: Codable, Sendable, Equatable {
+    public let id: String
+    public let label: String
+    public let plainDescription: String
+    public let provider: String
+    public let modelID: String?
+    public let dimensions: [HarnModelFamilyDimension]
+    public let presets: [HarnModelFamilyPreset]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case plainDescription = "plain_description"
+        case provider
+        case modelID = "model_id"
+        case dimensions
+        case presets
+    }
+}
+
+public struct HarnModelFamilyDimension: Codable, Sendable, Equatable {
+    public let key: String
+    public let label: String
+    public let plainDescription: String
+    public let kind: String
+    public let orderedValues: [HarnModelFamilyValue]
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case label
+        case plainDescription = "plain_description"
+        case kind
+        case orderedValues = "ordered_values"
+    }
+}
+
+public struct HarnModelFamilyValue: Codable, Sendable, Equatable {
+    public let value: String
+    public let label: String
+    public let plainDescription: String
+    public let relativeCostHint: Int
+    public let relativeSpeedHint: Int
+    public let modelID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case value
+        case label
+        case plainDescription = "plain_description"
+        case relativeCostHint = "relative_cost_hint"
+        case relativeSpeedHint = "relative_speed_hint"
+        case modelID = "model_id"
+    }
+}
+
+public struct HarnModelFamilyPreset: Codable, Sendable, Equatable {
+    public let id: String
+    public let label: String
+    public let plainBlurb: String
+    public let coordinates: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case plainBlurb = "plain_blurb"
+        case coordinates
     }
 }
 

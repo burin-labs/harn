@@ -16,6 +16,7 @@
 # projections remain correct when usage reports cache_write_tokens.
 [models."gpt-5.6-sol"]
 name = "GPT-5.6 Sol"
+blurb = "Most capable GPT-5.6 option for difficult planning, coding, and review, with the highest cost."
 provider = "openai"
 context_window = 1050000
 logical_model = "gpt-5.6-sol"
@@ -33,6 +34,7 @@ serving_tiers = [
 
 [models."gpt-5.6-terra"]
 name = "GPT-5.6 Terra"
+blurb = "Balanced GPT-5.6 option for everyday coding work, with lower cost and latency than Sol."
 provider = "openai"
 context_window = 1050000
 logical_model = "gpt-5.6-terra"
@@ -50,6 +52,7 @@ serving_tiers = [
 
 [models."gpt-5.6-luna"]
 name = "GPT-5.6 Luna"
+blurb = "Fastest and lowest-cost GPT-5.6 option for routine edits, summaries, and quick iterations."
 provider = "openai"
 context_window = 1050000
 logical_model = "gpt-5.6-luna"

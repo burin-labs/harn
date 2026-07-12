@@ -589,11 +589,11 @@ fn remote_catalog_rejects_stale_v2_schema() {
         Err(error) => error,
     };
     assert!(
-        error.contains("schema_version must be 4, got 2"),
+        error.contains("schema_version must be 5, got 2"),
         "unexpected stale-catalog rejection: {error}"
     );
     assert!(
-        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v4.json"),
+        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v5.json"),
         "unexpected stale-catalog rejection: {error}"
     );
 }
@@ -1238,6 +1238,13 @@ fn generated_schema_accepts_generated_artifact_shape() {
     assert!(schema["$defs"]["model"]["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|field| field == "lineage")));
+    assert!(schema["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|field| field == "families")));
+    assert_eq!(
+        schema["properties"]["families"]["items"]["$ref"],
+        "#/$defs/model_family"
+    );
     assert_eq!(
         schema["$defs"]["endpoint"]["properties"]["regions"]["additionalProperties"]["$ref"],
         "#/$defs/endpoint_region"
@@ -1255,6 +1262,9 @@ fn generated_schema_accepts_generated_artifact_shape() {
         .is_some_and(|v| !v.is_empty()));
     assert!(artifact_value["models"][0]["family"].is_string());
     assert!(artifact_value["models"][0]["lineage"].is_string());
+    assert!(artifact_value["families"]
+        .as_array()
+        .is_some_and(|families| !families.is_empty()));
 }
 
 #[test]
@@ -1263,12 +1273,155 @@ fn downstream_bindings_include_empirical_tool_parity_shape() {
     assert!(typescript.contains("empirical_parity?: HarnToolEmpiricalParity"));
     assert!(typescript.contains("export interface HarnToolEmpiricalParity"));
     assert!(typescript.contains("regions?: Record<string, HarnProviderEndpointRegion>"));
+    assert!(typescript.contains("families: HarnCatalogModelFamily[]"));
+    assert!(typescript.contains("effort_levels: string[]"));
+    assert!(typescript.contains("plain_description: string"));
 
     let swift = swift_binding().expect("swift binding renders");
     assert!(swift.contains("public let empiricalParity: HarnToolEmpiricalParity?"));
     assert!(swift.contains("public struct HarnToolEmpiricalParity"));
     assert!(swift.contains("public let regions: [String: HarnProviderEndpointRegion]?"));
     assert!(swift.contains("public struct HarnProviderEndpointRegion"));
+    assert!(swift.contains("public let families: [HarnCatalogModelFamily]"));
+    assert!(swift.contains("public let effortLevels: [String]"));
+    assert!(swift.contains("public struct HarnModelFamilyPreset"));
+}
+
+#[test]
+fn generated_catalog_exports_gpt_5_6_presentation_family() {
+    let catalog = artifact();
+    assert_eq!(
+        catalog
+            .variants
+            .iter()
+            .map(|variant| variant.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "fast",
+            "balanced",
+            "high-reasoning",
+            "local",
+            "cheap",
+            "vision-capable",
+            "long-context",
+        ]
+    );
+    let family = catalog
+        .families
+        .iter()
+        .find(|family| family.id == "openai-gpt-5-6")
+        .expect("GPT-5.6 presentation family");
+    assert_eq!(family.provider, "openai");
+    assert_eq!(family.dimensions.len(), 2);
+    assert_eq!(family.dimensions[0].key, "variant");
+    assert_eq!(family.dimensions[1].key, "effort");
+    assert_eq!(
+        family.dimensions[0]
+            .ordered_values
+            .iter()
+            .map(|value| value.model_id.as_deref().expect("model binding"))
+            .collect::<Vec<_>>(),
+        vec!["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
+    );
+    assert_eq!(
+        family.dimensions[1]
+            .ordered_values
+            .iter()
+            .map(|value| value.value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["none", "low", "medium", "high", "xhigh", "max"]
+    );
+    assert_eq!(
+        family
+            .presets
+            .iter()
+            .map(|preset| preset.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["fast", "balanced", "deep"]
+    );
+
+    for model_id in ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] {
+        let model = catalog
+            .models
+            .iter()
+            .find(|model| model.id == model_id)
+            .expect("family model exists");
+        assert!(model
+            .blurb
+            .as_deref()
+            .is_some_and(|blurb| !blurb.is_empty()));
+        assert_eq!(
+            model.reasoning.effort_levels,
+            ["none", "low", "medium", "high", "xhigh", "max"]
+        );
+    }
+}
+
+#[test]
+fn catalog_roundtrips_presentation_metadata_into_runtime_config() {
+    let catalog = artifact();
+    let expected_family = catalog
+        .families
+        .iter()
+        .find(|family| family.id == "openai-gpt-5-6")
+        .expect("family exists");
+    let config = config_from_artifact(&catalog);
+    let family = config
+        .presentation
+        .families
+        .get("openai-gpt-5-6")
+        .expect("family roundtrips");
+    assert_eq!(family.dimensions, expected_family.dimensions);
+    assert_eq!(family.presets, expected_family.presets);
+    assert_eq!(
+        config
+            .models
+            .get("gpt-5.6-sol")
+            .and_then(|model| model.blurb.as_deref()),
+        catalog
+            .models
+            .iter()
+            .find(|model| model.id == "gpt-5.6-sol")
+            .and_then(|model| model.blurb.as_deref())
+    );
+    assert!(matches!(
+        config
+            .presentation
+            .variants
+            .get("fast")
+            .map(|variant| &variant.selector),
+        Some(llm_config::PresentationVariantSelector::Model { .. })
+    ));
+}
+
+#[test]
+fn validation_rejects_malformed_model_family_presentation() {
+    let mut catalog = artifact();
+    let family = catalog
+        .families
+        .iter_mut()
+        .find(|family| family.id == "openai-gpt-5-6")
+        .expect("family exists");
+    family.dimensions[0].ordered_values[0].relative_cost_hint = 0;
+    family.presets[0].coordinates.remove("effort");
+
+    let report = validate_artifact(&catalog);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|error| error.contains("relative_cost_hint must be between 1 and 5")),
+        "expected hint validation error, got {:?}",
+        report.errors
+    );
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|error| error.contains("coordinates must name every dimension exactly once")),
+        "expected coordinate validation error, got {:?}",
+        report.errors
+    );
 }
 
 #[test]
@@ -1463,6 +1616,24 @@ routes = ["together:Qwen/Qwen3-Coder-Next-FP8"]
             .any(|variant| variant.provider == "together"
                 && variant.model_id == "Qwen/Qwen3-Coder-Next-FP8"),
         "recommendation variants must re-derive from surviving routes"
+    );
+}
+
+#[test]
+fn overlay_suppress_hides_families_that_reference_the_route() {
+    let _guard = install_overlay(
+        r#"
+[suppress]
+routes = ["openai:gpt-5.6-luna"]
+"#,
+    );
+    let catalog = artifact();
+    assert!(
+        !catalog
+            .families
+            .iter()
+            .any(|family| family.id == "openai-gpt-5-6"),
+        "a family must not export a grid containing a suppressed model"
     );
 }
 

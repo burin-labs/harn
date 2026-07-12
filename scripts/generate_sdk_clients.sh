@@ -8,6 +8,7 @@ LANGUAGE="all"
 
 PYTHON_GENERATOR_VERSION="${PYTHON_GENERATOR_VERSION:-0.28.3}"
 TYPESCRIPT_GENERATOR_VERSION="${TYPESCRIPT_GENERATOR_VERSION:-0.97.0}"
+TYPESCRIPT_VERSION="${TYPESCRIPT_VERSION:-6.0.3}"
 
 usage() {
   cat <<'USAGE'
@@ -18,6 +19,7 @@ Regenerates Harn Agents API SDK clients from spec/openapi.yaml.
 Environment overrides:
   PYTHON_GENERATOR_VERSION      openapi-python-client version
   TYPESCRIPT_GENERATOR_VERSION  @hey-api/openapi-ts version
+  TYPESCRIPT_VERSION            TypeScript compiler version used by the generator
 USAGE
 }
 
@@ -89,7 +91,10 @@ write_manifest() {
     echo "openapi_sha256=$(shasum -a 256 "$SPEC_PATH" | awk '{print $1}')"
     case "$language" in
       python) echo "generator=openapi-python-client@${PYTHON_GENERATOR_VERSION}" ;;
-      typescript) echo "generator=@hey-api/openapi-ts@${TYPESCRIPT_GENERATOR_VERSION}" ;;
+      typescript)
+        echo "generator=@hey-api/openapi-ts@${TYPESCRIPT_GENERATOR_VERSION}"
+        echo "typescript=typescript@${TYPESCRIPT_VERSION}"
+        ;;
     esac
   } > "${dir}/harn-sdk-generation.txt"
 }
@@ -136,7 +141,10 @@ generate_typescript() {
 
   (
     cd "$ROOT"
-    npx --yes "@hey-api/openapi-ts@${TYPESCRIPT_GENERATOR_VERSION}" \
+    npx --yes \
+      --package "@hey-api/openapi-ts@${TYPESCRIPT_GENERATOR_VERSION}" \
+      --package "typescript@${TYPESCRIPT_VERSION}" \
+      openapi-ts \
       -i ./spec/openapi.yaml \
       -o "$out" \
       -p @hey-api/typescript @hey-api/sdk @hey-api/client-fetch \

@@ -41,6 +41,10 @@ pub struct ProvidersConfig {
     /// routing chain. Keyed by ladder name.
     #[serde(default)]
     pub model_ladders: BTreeMap<String, ModelLadderDef>,
+    /// Host-facing model-selection metadata. This never changes routing by
+    /// itself; it only describes how clients may present catalog choices.
+    #[serde(default)]
+    pub presentation: PresentationConfig,
 }
 
 /// Field-wise catalog patches applied on top of merged model rows.
@@ -122,6 +126,7 @@ impl ProvidersConfig {
             && self.suppress.routes.is_empty()
             && self.patch.models.is_empty()
             && self.model_ladders.is_empty()
+            && self.presentation.is_empty()
             && self.tier_defaults.default == default_mid()
     }
 
@@ -224,6 +229,17 @@ impl ProvidersConfig {
         // wholesale (a ladder is an ordered list; per-step merge has no
         // sensible meaning), matching `[models]` whole-row replace semantics.
         self.model_ladders.extend(overlay.model_ladders.clone());
+
+        // Presentation rows are stable-id records. A later layer owns and
+        // replaces the complete same-id row, just like `[models]` and named
+        // model ladders; ordered dimensions/presets have no useful field-wise
+        // merge semantics.
+        self.presentation
+            .variants
+            .extend(overlay.presentation.variants.clone());
+        self.presentation
+            .families
+            .extend(overlay.presentation.families.clone());
     }
 }
 

@@ -15,7 +15,7 @@ pub fn schema_value() -> Value {
         "$id": PROVIDER_CATALOG_SCHEMA_ID,
         "title": "Harn provider catalog",
         "type": "object",
-        "required": ["schema_version", "schema", "generated_by", "providers", "models", "aliases", "variants", "qc_defaults"],
+        "required": ["schema_version", "schema", "generated_by", "providers", "models", "aliases", "variants", "families", "qc_defaults"],
         "properties": {
             "schema_version": {"const": PROVIDER_CATALOG_SCHEMA_VERSION},
             "schema": {"const": PROVIDER_CATALOG_SCHEMA_ID},
@@ -24,6 +24,7 @@ pub fn schema_value() -> Value {
             "models": {"type": "array", "items": {"$ref": "#/$defs/model"}},
             "aliases": {"type": "array", "items": {"$ref": "#/$defs/alias"}},
             "variants": {"type": "array", "items": {"$ref": "#/$defs/variant"}},
+            "families": {"type": "array", "items": {"$ref": "#/$defs/model_family"}},
             "routing_routes": {"type": "array", "items": {"$ref": "#/$defs/routing_route"}},
             "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}}
         },
@@ -204,6 +205,7 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
                     "name": {"type": "string", "minLength": 1},
+                    "blurb": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
                     "aliases": {"type": "array", "items": {"type": "string"}},
                     "context_window": {"type": "integer", "minimum": 1},
@@ -369,10 +371,11 @@ pub fn schema_value() -> Value {
             },
             "reasoning": {
                 "type": "object",
-                "required": ["modes", "effort_supported", "none_supported", "interleaved_supported", "preserve_thinking"],
+                "required": ["modes", "effort_supported", "effort_levels", "none_supported", "interleaved_supported", "preserve_thinking"],
                 "properties": {
                     "modes": {"type": "array", "items": {"type": "string"}},
                     "effort_supported": {"type": "boolean"},
+                    "effort_levels": {"type": "array", "items": {"type": "string", "minLength": 1}},
                     "none_supported": {"type": "boolean"},
                     "interleaved_supported": {"type": "boolean"},
                     "preserve_thinking": {"type": "boolean"}
@@ -505,6 +508,72 @@ pub fn schema_value() -> Value {
                     "model_id": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
                     "source": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
+            "model_family": {
+                "type": "object",
+                "required": ["id", "label", "plain_description", "provider", "dimensions", "presets"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+                    "label": {"type": "string", "minLength": 1},
+                    "plain_description": {"type": "string", "minLength": 1},
+                    "provider": {"type": "string", "minLength": 1},
+                    "model_id": {"type": "string", "minLength": 1},
+                    "dimensions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 2,
+                        "items": {"$ref": "#/$defs/model_family_dimension"}
+                    },
+                    "presets": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"$ref": "#/$defs/model_family_preset"}
+                    }
+                },
+                "additionalProperties": false
+            },
+            "model_family_dimension": {
+                "type": "object",
+                "required": ["key", "label", "plain_description", "kind", "ordered_values"],
+                "properties": {
+                    "key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+                    "label": {"type": "string", "minLength": 1},
+                    "plain_description": {"type": "string", "minLength": 1},
+                    "kind": {"enum": ["model", "reasoning_effort"]},
+                    "ordered_values": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"$ref": "#/$defs/model_family_value"}
+                    }
+                },
+                "additionalProperties": false
+            },
+            "model_family_value": {
+                "type": "object",
+                "required": ["value", "label", "plain_description", "relative_cost_hint", "relative_speed_hint"],
+                "properties": {
+                    "value": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+                    "label": {"type": "string", "minLength": 1},
+                    "plain_description": {"type": "string", "minLength": 1},
+                    "relative_cost_hint": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "relative_speed_hint": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "model_id": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
+            "model_family_preset": {
+                "type": "object",
+                "required": ["id", "label", "plain_blurb", "coordinates"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+                    "label": {"type": "string", "minLength": 1},
+                    "plain_blurb": {"type": "string", "minLength": 1},
+                    "coordinates": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string", "minLength": 1}
+                    }
                 },
                 "additionalProperties": false
             },

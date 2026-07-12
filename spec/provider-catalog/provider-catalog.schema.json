@@ -507,6 +507,10 @@
           },
           "type": "object"
         },
+        "blurb": {
+          "minLength": 1,
+          "type": "string"
+        },
         "capability_tags": {
           "items": {
             "type": "string"
@@ -736,6 +740,163 @@
         "result_ordering",
         "partial_failure",
         "cancellation"
+      ],
+      "type": "object"
+    },
+    "model_family": {
+      "additionalProperties": false,
+      "properties": {
+        "dimensions": {
+          "items": {
+            "$ref": "#/$defs/model_family_dimension"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "plain_description": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "presets": {
+          "items": {
+            "$ref": "#/$defs/model_family_preset"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "provider": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "plain_description",
+        "provider",
+        "dimensions",
+        "presets"
+      ],
+      "type": "object"
+    },
+    "model_family_dimension": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "model",
+            "reasoning_effort"
+          ]
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "ordered_values": {
+          "items": {
+            "$ref": "#/$defs/model_family_value"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "plain_description": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "plain_description",
+        "kind",
+        "ordered_values"
+      ],
+      "type": "object"
+    },
+    "model_family_preset": {
+      "additionalProperties": false,
+      "properties": {
+        "coordinates": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "plain_blurb": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "plain_blurb",
+        "coordinates"
+      ],
+      "type": "object"
+    },
+    "model_family_value": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "plain_description": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "relative_cost_hint": {
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "relative_speed_hint": {
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "value": {
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label",
+        "plain_description",
+        "relative_cost_hint",
+        "relative_speed_hint"
       ],
       "type": "object"
     },
@@ -979,6 +1140,13 @@
     "reasoning": {
       "additionalProperties": false,
       "properties": {
+        "effort_levels": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
         "effort_supported": {
           "type": "boolean"
         },
@@ -1001,6 +1169,7 @@
       "required": [
         "modes",
         "effort_supported",
+        "effort_levels",
         "none_supported",
         "interleaved_supported",
         "preserve_thinking"
@@ -1281,13 +1450,19 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v4.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v5.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "aliases": {
       "items": {
         "$ref": "#/$defs/alias"
+      },
+      "type": "array"
+    },
+    "families": {
+      "items": {
+        "$ref": "#/$defs/model_family"
       },
       "type": "array"
     },
@@ -1319,10 +1494,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v4.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v5.json"
     },
     "schema_version": {
-      "const": 4
+      "const": 5
     },
     "variants": {
       "items": {
@@ -1339,6 +1514,7 @@
     "models",
     "aliases",
     "variants",
+    "families",
     "qc_defaults"
   ],
   "title": "Harn provider catalog",
