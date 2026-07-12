@@ -338,7 +338,13 @@ impl Formatter<'_> {
                 fn_syntax,
             } => {
                 if *fn_syntax || return_type.is_some() || throws.is_some() {
-                    self.format_fn_closure(params, return_type.as_ref(), throws.as_ref(), body, indent)
+                    self.format_fn_closure(
+                        params,
+                        return_type.as_ref(),
+                        throws.as_ref(),
+                        body,
+                        indent,
+                    )
                 } else {
                     self.format_arrow_closure(params, body, indent)
                 }

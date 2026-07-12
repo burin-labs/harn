@@ -37,9 +37,9 @@ fn throwing_the_declared_type_checks_clean() {
 #[test]
 fn throwing_an_undeclared_type_errors() {
     let diags = throws_mismatches(
-        r#"fn parse(s: string) throws string {
+        r"fn parse(s: string) throws string {
   throw 42
-}"#,
+}",
     );
     assert_eq!(
         diags.len(),
@@ -69,9 +69,9 @@ fn missing_throws_clause_is_unconstrained() {
     // No `throws` clause → the historical unconstrained behavior; the throw of
     // an int must not be flagged. This is what keeps the feature additive.
     let diags = throws_mismatches(
-        r#"fn parse(s: string) {
+        r"fn parse(s: string) {
   throw 42
-}"#,
+}",
     );
     assert!(
         diags.is_empty(),
@@ -82,9 +82,9 @@ fn missing_throws_clause_is_unconstrained() {
 #[test]
 fn pipeline_throws_clause_is_enforced() {
     let diags = throws_mismatches(
-        r#"pipeline run(task) throws string {
+        r"pipeline run(task) throws string {
   throw 42
-}"#,
+}",
     );
     assert_eq!(
         diags.len(),
@@ -103,7 +103,7 @@ fn caught_error_is_excluded_from_the_declared_channel() {
     // caught `Parse` error leaked into the thrown set this would raise TYP-026
     // (Parse is not <: Net).
     let diags = throws_mismatches(
-        r#"enum Parse { Bad }
+        r"enum Parse { Bad }
 enum Net { Down }
 fn f() throws Net {
   try {
@@ -111,7 +111,7 @@ fn f() throws Net {
   } catch (e: Parse) {
     throw Net.Down
   }
-}"#,
+}",
     );
     assert!(
         diags.is_empty(),
@@ -125,14 +125,14 @@ fn uncaught_error_escapes_and_must_be_declared() {
     // `Net.Down` is rethrown and escapes. The declared channel is `Parse`,
     // which does not cover it → exactly one TYP-026.
     let diags = throws_mismatches(
-        r#"enum Parse { Bad }
+        r"enum Parse { Bad }
 enum Net { Down }
 fn f() throws Parse {
   try {
     throw Net.Down
   } catch (e: Parse) {
   }
-}"#,
+}",
     );
     assert_eq!(
         diags.len(),
@@ -147,13 +147,13 @@ fn catch_all_absorbs_every_body_error() {
     // handled, so nothing escapes and the (over-broad) declared channel is not
     // violated.
     let diags = throws_mismatches(
-        r#"enum Net { Down }
+        r"enum Net { Down }
 fn f() throws Net {
   try {
     throw Net.Down
   } catch {
   }
-}"#,
+}",
     );
     assert!(
         diags.is_empty(),
@@ -166,7 +166,7 @@ fn finally_body_throw_escapes() {
     // A `throw` in the `finally` block always escapes, regardless of the catch.
     // Here it is `Net.Down` against a declared `Parse` channel → TYP-026.
     let diags = throws_mismatches(
-        r#"enum Parse { Bad }
+        r"enum Parse { Bad }
 enum Net { Down }
 fn f() throws Parse {
   try {
@@ -175,7 +175,7 @@ fn f() throws Parse {
   } finally {
     throw Net.Down
   }
-}"#,
+}",
     );
     assert_eq!(
         diags.len(),
