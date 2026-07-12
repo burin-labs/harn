@@ -108,7 +108,8 @@ if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
     :
   else
     echo "=== Pre-commit: checking generated-artifact registry ==="
-    make -s check-generated-registry
+    hook_export_fresh_worktree_harn_bin
+    make -s check-generated-registry HARN_BIN="$HARN_BIN"
     echo "    Generated-artifact registry OK."
   fi
 else
@@ -231,10 +232,11 @@ fi
 if hook_paths_need_highlight "$changed" --cached; then
   echo "=== Pre-commit: syncing generated highlight keywords ==="
   # Highlight keywords mirror the branch lexer plus globally-registered
-  # builtins. Do not reuse an installed HARN_BIN here: relevant stdlib/VM
-  # changes can otherwise generate a mirror from stale installed builtins and
-  # fail CI's branch-source check-highlight.
-  HARN_BIN= make gen-highlight
+  # builtins. Use a freshness-checked worktree binary rather than an installed
+  # harn or broad cargo run so branch-source drift is strict without making
+  # stdlib-only commits pay Cargo's graph walk.
+  hook_export_fresh_worktree_harn_bin
+  make gen-highlight HARN_BIN="$HARN_BIN"
   git add docs/theme/harn-keywords.js
   echo "    Highlight keywords OK."
 else

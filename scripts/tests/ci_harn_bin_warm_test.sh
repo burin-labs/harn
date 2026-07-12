@@ -98,6 +98,7 @@ fi
 : > "$record"
 : > "$github_env"
 HARN_BIN="$expected_bin" \
+  HARN_BIN_ASSUME_FRESH=1 \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   GITHUB_ENV="$github_env" \
