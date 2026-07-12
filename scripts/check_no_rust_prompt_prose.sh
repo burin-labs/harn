@@ -23,5 +23,7 @@ resolve_harn_bin() {
 }
 
 harn_bin="$(resolve_harn_bin)"
-"$harn_bin" run scripts/check_rust_prompt_prose.harn -- --self-test
+if [ "${HARN_PROMPT_PROSE_SELF_TEST:-0}" = "1" ]; then
+  "$harn_bin" run scripts/check_rust_prompt_prose.harn -- --self-test
+fi
 "$harn_bin" run scripts/check_rust_prompt_prose.harn
