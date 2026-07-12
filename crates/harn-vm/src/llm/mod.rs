@@ -13,7 +13,7 @@ mod agent_config;
 mod agent_host_primitives;
 pub(crate) mod agent_observe;
 mod agent_runtime;
-mod agent_session_host;
+pub(crate) mod agent_session_host;
 mod agent_tools;
 pub mod api;
 pub(crate) mod autonomy_budget;

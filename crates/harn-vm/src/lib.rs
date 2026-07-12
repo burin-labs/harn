@@ -56,6 +56,7 @@ pub(crate) mod harness_crypto;
 pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
+pub mod host_attachments;
 mod http;
 pub mod jsonrpc;
 pub(crate) mod limits;
