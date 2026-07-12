@@ -100,11 +100,14 @@ fn mock_flow_for_provider(harness: Harness, name) {
 
 pipeline test(task) {
   const names = provider_names()
-  assert_eq(len(names), 10, "ten named providers")
+  // Required providers must be present; the exact catalogue size is not pinned
+  // (adding a provider is not a regression). The catalogue and the name list
+  // must stay in lockstep — exactly one record per named provider, no orphans
+  // in either direction.
   assert(names.contains("github"), "github named provider")
   assert(names.contains("bitbucket"), "bitbucket named provider")
   const catalog = provider_catalog()
-  assert_eq(len(catalog.keys()), 10, "catalogue contains ten provider records")
+  assert_eq(len(catalog.keys()), len(names), "one catalog record per named provider")
   for name in names {
     assert_eq(missing_core_fields(catalog[name]), [], name + " carries core fields")
     assert_eq(catalog[name].id, name, name + " id")
