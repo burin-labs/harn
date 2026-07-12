@@ -7,7 +7,7 @@ site. This file is the short list of conventions to hold to when editing the sit
 ## Setup and checks
 
 ```bash
-npm install        # once
+npm ci             # once or when package-lock.json changes
 npm run dev        # live dev server (reads ../docs/src live)
 npm run typecheck  # tsc -b --noEmit
 npm run test       # vitest
@@ -41,5 +41,6 @@ fails there even when dev looks fine.
 ## Content
 
 Docs content is Markdown under `../docs/src` (not in this app). Edit the source
-there; this app only renders it. The `language-spec.md` mirror is generated, so
-edit `spec/HARN_SPEC.md` instead.
+there; this app only renders it. For language-spec changes, edit the relevant
+`../spec/chapters/*.md` source and run `make sync-language-spec` from the repo
+root. `../spec/HARN_SPEC.md` and `../docs/src/language-spec.md` are generated.
