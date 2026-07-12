@@ -463,6 +463,7 @@ fn collect_symbols(
             pattern,
             type_ann,
             value,
+            ..
         } => {
             for name in binding_pattern_names(pattern) {
                 symbols.push(simple_sym!(
@@ -482,6 +483,7 @@ fn collect_symbols(
             pattern,
             type_ann,
             value,
+            ..
         } => {
             for name in binding_pattern_names(pattern) {
                 symbols.push(simple_sym!(

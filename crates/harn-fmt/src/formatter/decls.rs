@@ -44,21 +44,25 @@ impl Formatter<'_> {
                 pattern,
                 type_ann,
                 value,
+                is_pub,
             } => {
+                let vis = if *is_pub { "pub " } else { "" };
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value, self.indent);
-                self.writeln(&format!("let {pat}{type_str} = {val}"));
+                self.writeln(&format!("{vis}let {pat}{type_str} = {val}"));
             }
             Node::ConstBinding {
                 pattern,
                 type_ann,
                 value,
+                is_pub,
             } => {
+                let vis = if *is_pub { "pub " } else { "" };
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value, self.indent);
-                self.writeln(&format!("const {pat}{type_str} = {val}"));
+                self.writeln(&format!("{vis}const {pat}{type_str} = {val}"));
             }
             Node::FnDecl {
                 name,

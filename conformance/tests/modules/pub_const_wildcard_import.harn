@@ -1,0 +1,9 @@
+// Whole-module (wildcard) import brings in the library's `pub` value surface:
+// `pub const` / `pub let` bindings become available by name, same as `pub fn`.
+import "pub_const_lib"
+
+pipeline test(task) {
+  log(MAX_RETRIES)
+  log(GREETING)
+  log(scaled())
+}

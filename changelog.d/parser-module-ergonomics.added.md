@@ -1,0 +1,4 @@
+Top-level `pub const` and `pub let` are now exportable: their values join a
+module's public surface and can be imported both by wildcard (`import "m"`) and
+selectively (`import { MAX } from "m"`), on the same `pub`-visibility footing as
+`pub fn`. Cross-module values are bound by value.

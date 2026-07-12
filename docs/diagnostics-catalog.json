@@ -44,7 +44,7 @@
     {
       "id": "MOD",
       "title": "Modules and exports",
-      "count": 6
+      "count": 7
     },
     {
       "id": "RMD",
@@ -1205,6 +1205,15 @@
       "code": "HARN-MOD-006",
       "category": "MOD",
       "summary": "module re-exports conflict",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MOD-007",
+      "category": "MOD",
+      "summary": "imported module failed to compile",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

@@ -345,3 +345,26 @@ type Private = int
     name: (identifier)
     type: (type_annotation
       (identifier))))
+
+==================
+Public const and let bindings
+==================
+
+pub const MAX = 3
+
+pub let seed = 7
+
+const private_c = 9
+
+---
+
+(source_file
+  (const_binding
+    name: (identifier)
+    value: (integer_literal))
+  (let_binding
+    name: (identifier)
+    value: (integer_literal))
+  (const_binding
+    name: (identifier)
+    value: (integer_literal)))

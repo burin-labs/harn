@@ -467,11 +467,19 @@ for {key, value} in {a: 1, b: 2}.entries() {
 }
 ```
 
-`for` heads currently accept a bare name, a list pattern `[a, b]`, or a dict
-pattern `{name1, name2}`. Tuple patterns written with parentheses
-(`for (a, b) in ...`) are not yet supported — use the list pattern when the
-iterable yields pair-lists (`zip`), and the dict pattern when the iterable
-yields shaped dicts (`enumerate`, `entries`).
+`for` heads accept a bare name or one of three destructuring patterns, each
+matching the *shape* the iterable yields:
+
+- a **pair** pattern `(a, b)` — for iterables that yield `Pair` values:
+  `iter(x).enumerate()`, `iter(x).zip(...)`, and `dict.iter()`;
+- a **list** pattern `[a, b]` — for `list.zip(other)`, which yields `[a, b]`
+  lists;
+- a **dict** pattern `{index, value}` — for `list.enumerate()` (yields
+  `{index, value}`) and `entries()` (yields `{key, value}`).
+
+Using a pair pattern over a non-`Pair` item (e.g. `for (i, x) in
+list.enumerate()`, whose items are `{index, value}` dicts) now fails loudly
+instead of silently binding both names to `nil`.
 
 ## Functions and closures
 

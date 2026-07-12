@@ -1051,10 +1051,18 @@ declared file inside the installed `acme` package.
 
 A module's **export surface** — the set of names other modules can import,
 whether by wildcard (`import "m"`) or selectively (`import { x } from "m"`) —
-is exactly the functions it marks `pub`, plus any `pub import` re-exports.
-Non-`pub` functions are private to the module: usable by the module's own
-functions, but not importable by name or by wildcard. A module that marks
-nothing `pub` exports nothing.
+is exactly the declarations it marks `pub`, plus any `pub import` re-exports.
+`pub` may prefix any top-level declaration: `fn`, `tool`, `skill`, `eval_pack`,
+`struct`, `enum`, `type`, `pipeline`, and — for shared configuration and prompt
+constants — top-level `const` and `let` value bindings. Non-`pub` declarations
+are private to the module: usable by the module's own functions, but not
+importable by name or by wildcard. A module that marks nothing `pub` exports
+nothing.
+
+A `pub const` / `pub let` is exported **by value**: the binding's value is
+computed once when the module is instantiated, then bound into each importer.
+Later mutation of a `pub let` in its defining module is not observed by
+importers (cross-module values are by-value, like every other imported value).
 
 This is the explicit-visibility model of Rust, Go, and TypeScript. Harn does
 **not** have a "public-by-default until the first `pub`" rule: such a rule

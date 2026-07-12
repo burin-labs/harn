@@ -12,6 +12,19 @@ pub enum LexerError {
     IntegerLiteralOutOfRange(String, Span),
 }
 
+impl LexerError {
+    /// The source span the error points at.
+    #[must_use]
+    pub fn span(&self) -> Span {
+        match self {
+            LexerError::UnexpectedCharacter(_, span)
+            | LexerError::UnterminatedString(span)
+            | LexerError::UnterminatedBlockComment(span)
+            | LexerError::IntegerLiteralOutOfRange(_, span) => *span,
+        }
+    }
+}
+
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

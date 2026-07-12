@@ -668,6 +668,7 @@ impl Formatter<'_> {
                 pattern,
                 type_ann,
                 value,
+                ..
             } => {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
@@ -678,6 +679,7 @@ impl Formatter<'_> {
                 pattern,
                 type_ann,
                 value,
+                ..
             } => {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);

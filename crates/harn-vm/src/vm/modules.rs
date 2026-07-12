@@ -38,6 +38,11 @@ fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize>
 pub(crate) struct LoadedModule {
     pub(crate) functions: BTreeMap<String, Arc<VmClosure>>,
     pub(crate) public_names: HashSet<String>,
+    /// Evaluated values of exported `pub const` / `pub let` bindings, read out
+    /// of the instantiated module env after the init chunk ran. Importers bind
+    /// these by value (like every other cross-module value). Disjoint from
+    /// `functions` and `public_type_names`.
+    pub(crate) public_values: BTreeMap<String, VmValue>,
     /// Names of `pub type` aliases (and re-exported ones). Erased at runtime:
     /// selective imports may name them, but they bind no value of their own.
     pub(crate) public_type_names: HashSet<String>,
@@ -230,6 +235,21 @@ impl Vm {
             Arc::new(crate::value::VmMutex::new(BTreeMap::new()));
         let mut functions: BTreeMap<String, Arc<VmClosure>> = BTreeMap::new();
         let mut public_names = artifact.public_names.clone();
+        // `pub const` / `pub let`: the init chunk already ran into `module_state`,
+        // so the bound values are live there. Read each exported value name out
+        // and publish it so importers can bind it. Add the names to
+        // `public_names` too, so the selective/wildcard export machinery treats
+        // them as part of the public surface (validation, re-export lists).
+        let mut public_values: BTreeMap<String, VmValue> = BTreeMap::new();
+        {
+            let state = module_state.lock();
+            for name in &artifact.public_value_names {
+                if let Some(value) = state.get(name) {
+                    public_values.insert(name.clone(), value);
+                    public_names.insert(name.clone());
+                }
+            }
+        }
         let mut public_type_names = artifact.public_type_names.clone();
         let mut public_type_schemas: BTreeMap<String, VmValue> = artifact
             .public_type_schemas
@@ -295,6 +315,13 @@ impl Vm {
             };
             for name in names_to_reexport {
                 let Some(closure) = loaded.functions.get(&name) else {
+                    // `pub const` / `pub let` values carry no closure: re-export
+                    // the value directly.
+                    if let Some(value) = loaded.public_values.get(&name) {
+                        public_values.insert(name.clone(), value.clone());
+                        public_names.insert(name);
+                        continue;
+                    }
                     // `pub type` aliases are erased at runtime: re-export the
                     // name (and its schema lowering, when present) for
                     // importers, with no closure to bind.
@@ -330,6 +357,7 @@ impl Vm {
         Ok(LoadedModule {
             functions,
             public_names,
+            public_values,
             public_type_names,
             public_type_schemas,
             _module_functions: registry,
@@ -384,6 +412,18 @@ impl Vm {
                 if let Some(schema) = loaded.public_type_schemas.get(&name) {
                     self.env.define(&name, schema.clone(), false)?;
                 }
+                continue;
+            }
+            // `pub const` / `pub let` values: bind by value.
+            if let Some(value) = loaded.public_values.get(&name) {
+                if self.env.get(&name).is_some() {
+                    return Err(VmError::Runtime(format!(
+                        "Import collision: '{name}' is already defined when importing \
+                         {module_name}. Use selective imports to disambiguate: \
+                         import {{ {name} }} from \"...\""
+                    )));
+                }
+                self.env.define(&name, value.clone(), false)?;
                 continue;
             }
             let Some(closure) = loaded.functions.get(&name) else {
@@ -552,16 +592,21 @@ impl Vm {
 
             let mut module_state = importer._module_state.lock();
             for name in export_names {
-                let Some(closure) = target.functions.get(&name) else {
+                // A real local declaration (or an already-bound non-cyclic
+                // import) wins over the cyclic re-binding.
+                if module_state.get(&name).is_some() {
+                    continue;
+                }
+                if let Some(closure) = target.functions.get(&name) {
+                    module_state.define(&name, VmValue::Closure(Arc::clone(closure)), false)?;
+                } else if let Some(value) = target.public_values.get(&name) {
+                    // `pub const` / `pub let` imported across a cycle.
+                    module_state.define(&name, value.clone(), false)?;
+                } else {
                     return Err(VmError::Runtime(format!(
                         "Import error: '{name}' is not defined in {}",
                         import.target.display()
                     )));
-                };
-                // A real local declaration (or an already-bound non-cyclic
-                // import) wins over the cyclic re-binding.
-                if module_state.get(&name).is_none() {
-                    module_state.define(&name, VmValue::Closure(Arc::clone(closure)), false)?;
                 }
             }
         }

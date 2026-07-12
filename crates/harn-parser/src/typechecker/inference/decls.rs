@@ -200,6 +200,7 @@ impl TypeChecker {
                 pattern,
                 type_ann,
                 value,
+                ..
             } => match pattern {
                 BindingPattern::Identifier(name) => {
                     let ty = type_ann.clone().or_else(|| self.infer_type(value, scope));

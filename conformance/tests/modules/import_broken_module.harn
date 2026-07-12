@@ -1,0 +1,8 @@
+// The consumer is 100% valid. The imported module has one bad line, so the
+// reported error must point at THAT module — not mislabel `slugify_title` as
+// undefined here.
+import { slugify_title } from "import_broken_module_lib"
+
+pipeline test(task) {
+  log(slugify_title("Hello World"))
+}

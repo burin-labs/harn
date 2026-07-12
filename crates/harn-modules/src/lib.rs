@@ -101,6 +101,39 @@ struct ModuleInfo {
     /// Top-level callable declarations whose signatures can be imported into
     /// a caller's static type environment.
     callable_declarations: Vec<SNode>,
+    /// Set when this module's own source failed to lex or parse. The module is
+    /// still recorded in the graph (with an otherwise-empty surface) so that
+    /// importers can be told their target is broken — instead of silently
+    /// seeing zero exports and mislabeling the imported symbol as "undefined"
+    /// at the call site.
+    load_error: Option<ModuleLoadError>,
+}
+
+/// A lex/parse failure captured while loading a module into the graph.
+///
+/// Retained so that `harn check <consumer>` can surface the real error in an
+/// imported file rather than downgrading its exports to "undefined" at the
+/// consumer's call site.
+#[derive(Debug, Clone)]
+pub struct ModuleLoadError {
+    /// Rendered lex/parse error message (includes the failing line:column).
+    pub message: String,
+    /// Span of the failure within the imported module's own source.
+    pub span: Span,
+}
+
+/// A consumer import whose resolved target module failed to compile. Reported
+/// by [`ModuleGraph::import_compile_failures`].
+#[derive(Debug, Clone)]
+pub struct ImportCompileFailure {
+    /// The import path exactly as written in the consumer.
+    pub import_raw_path: String,
+    /// Span of the consumer's `import` statement.
+    pub import_span: Span,
+    /// Canonical path of the broken imported module.
+    pub module_path: PathBuf,
+    /// The imported module's real lex/parse error.
+    pub error: ModuleLoadError,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +141,7 @@ struct ImportRef {
     raw_path: String,
     path: Option<PathBuf>,
     selective_names: Option<HashSet<String>>,
+    import_span: Span,
 }
 
 /// Public import edge summary for static module graph consumers.
@@ -611,6 +645,41 @@ impl ModuleGraph {
     ///   (its `pub` surface or re-exports) — matching what the VM accepts at
     ///   runtime. A name that exists only privately in the target is NOT
     ///   importable.
+    ///
+    /// Every import in `file` whose resolved target module failed to lex or
+    /// parse. Lets `harn check <file>` surface the real error inside the
+    /// imported module (anchored at the consumer's `import` statement) instead
+    /// of downgrading the imported symbols to "undefined" at their call sites.
+    #[must_use]
+    pub fn import_compile_failures(&self, file: &Path) -> Vec<ImportCompileFailure> {
+        let file = normalize_path(file);
+        let Some(module) = self.modules.get(&file) else {
+            return Vec::new();
+        };
+        let mut failures = Vec::new();
+        for import in &module.imports {
+            let Some(import_path) = &import.path else {
+                continue;
+            };
+            let Some(target) = self
+                .modules
+                .get(import_path)
+                .or_else(|| self.modules.get(&normalize_path(import_path)))
+            else {
+                continue;
+            };
+            if let Some(error) = &target.load_error {
+                failures.push(ImportCompileFailure {
+                    import_raw_path: import.raw_path.clone(),
+                    import_span: import.import_span,
+                    module_path: normalize_path(import_path),
+                    error: error.clone(),
+                });
+            }
+        }
+        failures
+    }
+
     pub fn imported_names_for_file(&self, file: &Path) -> Option<HashSet<String>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
@@ -625,6 +694,14 @@ impl ModuleGraph {
                 .modules
                 .get(import_path)
                 .or_else(|| self.modules.get(&normalize_path(import_path)))?;
+            // The target parsed nothing (lex/parse failure). Fall back to the
+            // conservative `None` answer so the cross-module undefined-name
+            // check stays silent — the real error is surfaced separately by
+            // `import_compile_failures`, not mislabeled as an undefined symbol
+            // at this consumer's call site.
+            if imported.load_error.is_some() {
+                return None;
+            }
             match &import.selective_names {
                 None => {
                     names.extend(imported.exports.iter().cloned());
@@ -668,6 +745,14 @@ impl ModuleGraph {
                 .modules
                 .get(import_path)
                 .or_else(|| self.modules.get(&normalize_path(import_path)))?;
+            // The target parsed nothing (lex/parse failure). Fall back to the
+            // conservative `None` answer so the cross-module undefined-name
+            // check stays silent — the real error is surfaced separately by
+            // `import_compile_failures`, not mislabeled as an undefined symbol
+            // at this consumer's call site.
+            if imported.load_error.is_some() {
+                return None;
+            }
             let names_to_collect: Vec<String> = match &import.selective_names {
                 None => imported.exports.iter().cloned().collect(),
                 Some(selective) => selective.iter().cloned().collect(),
@@ -713,6 +798,14 @@ impl ModuleGraph {
                 .modules
                 .get(import_path)
                 .or_else(|| self.modules.get(&normalize_path(import_path)))?;
+            // The target parsed nothing (lex/parse failure). Fall back to the
+            // conservative `None` answer so the cross-module undefined-name
+            // check stays silent — the real error is surfaced separately by
+            // `import_compile_failures`, not mislabeled as an undefined symbol
+            // at this consumer's call site.
+            if imported.load_error.is_some() {
+                return None;
+            }
             let selective_import = import.selective_names.is_some();
             let names_to_collect: Vec<String> = match &import.selective_names {
                 None => imported.exports.iter().cloned().collect(),
@@ -1031,12 +1124,30 @@ fn load_module(path: &Path) -> (ModuleInfo, Option<ParsedModuleSource>) {
     let mut lexer = harn_lexer::Lexer::new(&source);
     let tokens = match lexer.tokenize() {
         Ok(tokens) => tokens,
-        Err(_) => return (ModuleInfo::default(), None),
+        Err(error) => {
+            let module = ModuleInfo {
+                load_error: Some(ModuleLoadError {
+                    message: error.to_string(),
+                    span: error.span(),
+                }),
+                ..ModuleInfo::default()
+            };
+            return (module, None);
+        }
     };
     let mut parser = Parser::new(tokens);
     let program = match parser.parse() {
         Ok(program) => program,
-        Err(_) => return (ModuleInfo::default(), None),
+        Err(error) => {
+            let module = ModuleInfo {
+                load_error: Some(ModuleLoadError {
+                    message: error.to_string(),
+                    span: error.span(),
+                }),
+                ..ModuleInfo::default()
+            };
+            return (module, None);
+        }
     };
 
     let mut module = ModuleInfo::default();
@@ -1146,8 +1257,19 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
                 decl_site(file, snode.span, name, DefKind::Type),
             );
         }
-        Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
+        Node::LetBinding {
+            pattern, is_pub, ..
+        }
+        | Node::ConstBinding {
+            pattern, is_pub, ..
+        } => {
             for name in pattern_names(pattern) {
+                // A top-level `pub const`/`pub let` exports its (identifier)
+                // binding as part of the module's public value surface, on the
+                // same footing as `pub fn`.
+                if *is_pub {
+                    module.own_exports.insert(name.clone());
+                }
                 module.declarations.insert(
                     name.clone(),
                     decl_site(file, snode.span, &name, DefKind::Variable),
@@ -1170,6 +1292,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
                 raw_path: path.clone(),
                 path: import_path,
                 selective_names: None,
+                import_span: snode.span,
             });
         }
         Node::SelectiveImport {
@@ -1199,6 +1322,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
                 raw_path: path.clone(),
                 path: import_path,
                 selective_names: Some(names),
+                import_span: snode.span,
             });
         }
         Node::AttributedDecl { inner, .. } => {
@@ -1356,6 +1480,70 @@ mod tests {
         }
         let importers = graph.importers_of(&root.join("shared.harn"));
         assert_eq!(importers.len(), seeds.len());
+    }
+
+    #[test]
+    fn pub_const_and_let_are_exported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(
+            root,
+            "consts.harn",
+            "pub const MAX = 3\npub let SEED = 7\nconst PRIVATE = 9\n",
+        );
+        let consumer = write_file(
+            root,
+            "use.harn",
+            "import { MAX, SEED } from \"./consts\"\nMAX\n",
+        );
+
+        let graph = build(std::slice::from_ref(&consumer));
+        let names = graph
+            .imported_names_for_file(&consumer)
+            .expect("imports resolve");
+        assert!(names.contains("MAX"), "pub const should be importable");
+        assert!(names.contains("SEED"), "pub let should be importable");
+        // A private const stays out of the export surface.
+        let consts_exports = graph.exports_for_module(&root.join("consts.harn"));
+        assert!(consts_exports.contains(&"MAX".to_string()));
+        assert!(consts_exports.contains(&"SEED".to_string()));
+        assert!(!consts_exports.contains(&"PRIVATE".to_string()));
+    }
+
+    #[test]
+    fn import_compile_failures_point_at_broken_module() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // A syntax error makes the whole library fail to parse.
+        write_file(
+            root,
+            "lib.harn",
+            "pub fn ok() { 1 }\npub fn broken( {\n  2\n}\n",
+        );
+        let consumer = write_file(
+            root,
+            "main.harn",
+            "import { ok } from \"./lib\"\npipeline test(task) { ok() }\n",
+        );
+
+        let graph = build(std::slice::from_ref(&consumer));
+        let failures = graph.import_compile_failures(&consumer);
+        assert_eq!(failures.len(), 1, "the broken import should be reported");
+        assert_eq!(failures[0].import_raw_path, "./lib");
+        assert!(
+            failures[0]
+                .module_path
+                .to_string_lossy()
+                .ends_with("lib.harn"),
+            "failure must name the imported module, not the consumer"
+        );
+
+        // The consumer's undefined-name check falls back to conservative
+        // `None` rather than flagging `ok` as undefined at its call site.
+        assert!(
+            graph.imported_names_for_file(&consumer).is_none(),
+            "a broken import target should suppress the call-site undefined check"
+        );
     }
 
     #[test]

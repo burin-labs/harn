@@ -43,6 +43,7 @@ impl TypeChecker {
                 pattern,
                 type_ann,
                 value,
+                ..
             } => {
                 let context_checked =
                     self.check_node_with_expected(value, type_ann.as_ref(), scope);
@@ -113,6 +114,7 @@ impl TypeChecker {
                 pattern,
                 type_ann,
                 value,
+                ..
             } => {
                 let context_checked =
                     self.check_node_with_expected(value, type_ann.as_ref(), scope);

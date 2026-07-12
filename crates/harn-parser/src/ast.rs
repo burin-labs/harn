@@ -114,6 +114,11 @@ pub enum Node {
         pattern: BindingPattern,
         type_ann: Option<TypeExpr>,
         value: Box<SNode>,
+        /// `true` for a top-level `pub let` — the binding's value is exported
+        /// as part of the module's public surface (bound by value in
+        /// importers, like every other cross-module value). Always `false` for
+        /// block-scoped bindings.
+        is_pub: bool,
     },
     /// `const PATTERN [: Type] = EXPR` — an **immutable** binding.
     ///
@@ -132,6 +137,10 @@ pub enum Node {
         pattern: BindingPattern,
         type_ann: Option<TypeExpr>,
         value: Box<SNode>,
+        /// `true` for a top-level `pub const` — the (compile-time-folded or
+        /// runtime) value is exported as part of the module's public surface.
+        /// Always `false` for block-scoped bindings.
+        is_pub: bool,
     },
     OverrideDecl {
         name: String,

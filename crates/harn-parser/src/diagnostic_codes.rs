@@ -266,6 +266,7 @@ diagnostic_codes! {
     ModuleExportInvalid, "HARN-MOD-004", Mod, "module export is invalid";
     ModuleImportCollision, "HARN-MOD-005", Mod, "module imports expose colliding names";
     ModuleReExportConflict, "HARN-MOD-006", Mod, "module re-exports conflict";
+    ModuleImportCompileFailed, "HARN-MOD-007", Mod, "imported module failed to compile";
     ReminderUnknownOption, "HARN-RMD-001", Rmd, "reminder lifecycle option key is not recognized";
     ReminderInvalidShape, "HARN-RMD-002", Rmd, "reminder payload shape is invalid";
     ReminderUnsupportedUserBlockRoleHint, "HARN-RMD-003", Rmd, "user_block reminder role hint is not supported by the selected provider";

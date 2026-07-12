@@ -278,7 +278,7 @@ lint-harn:
 
 # Check harn formatting on canonical stdlib sources and repo test fixtures.
 # Skip syntax cases the formatter intentionally normalizes.
-FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn
+FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn import_broken_module_lib.harn
 EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
 STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # Extra repo-root directories that contain user-facing .harn fixtures
