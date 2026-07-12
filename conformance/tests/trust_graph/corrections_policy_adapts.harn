@@ -22,7 +22,7 @@ pipeline test(task) {
   const policy: CapabilityPolicy = trust.policy_for(actor_id)
   __io_println(correction_id != "")
   __io_println(len(records) == 1)
-  __io_println(records[0].scope == "this_persona" && records[0].from_decision.outcome == "success")
+  __io_println(records[0]?.scope == "this_persona" && records[0]?.from_decision?.outcome == "success")
   __io_println(policy.side_effect_level == "read_only")
   __io_println(event_log.latest("corrections.records") != nil)
 }

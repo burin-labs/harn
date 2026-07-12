@@ -599,7 +599,7 @@ import "std/vision"
 const structured = ocr("fixtures/ui.png")
 log(structured.text)
 log(structured.lines[0]?.text)
-log(structured.tokens[0]?.bbox.left)
+log(structured.tokens[0]?.bbox?.left)
 ```
 
 ### std/json

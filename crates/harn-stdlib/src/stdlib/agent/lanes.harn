@@ -496,7 +496,7 @@ fn __stage_gate_prefix(options) -> string {
   }
   for delimiter in [__STAGE_GATE_DELIMITERS[1], __STAGE_GATE_DELIMITERS[2], __STAGE_GATE_DELIMITERS[3]] {
     if prefix.index_of(delimiter) >= 0 {
-      throw "stage_gate: `prefix` may not contain the marker delimiter '" + delimiter
+      throw "stage_gate: `prefix` may not contain the marker delimiter '" + (delimiter ?? "")
         + "' (it would corrupt the stage_gate_parse round-trip); got: \""
         + prefix
         + "\""

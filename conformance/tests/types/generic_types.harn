@@ -7,7 +7,7 @@ pipeline default() {
   __io_println(ages["alice"])
   // Nested: list of dicts
   const people: list<dict> = [{name: "Alice"}, {name: "Bob"}]
-  __io_println(people[0]["name"])
+  __io_println(people[0]?.["name"])
   // Type annotation on function params
   fn sum(items: list<int>) -> int {
     return items.sum()

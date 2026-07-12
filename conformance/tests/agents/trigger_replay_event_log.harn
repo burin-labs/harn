@@ -44,9 +44,10 @@ pipeline test(task) {
   __io_println(fired.status == "dlq" && contains(fired.error ?? "", "replay-fail:issue.opened"))
   const before: list<DlqEntry> = trigger_inspect_dlq()
   const pending_before = before.filter({ entry -> entry.binding_id == handle.id })
-  __io_println(len(pending_before) == 1 && pending_before[0].event_id == fired.event_id)
+  __io_println(len(pending_before) == 1 && pending_before[0]?.event_id == fired.event_id)
   __io_println(
-    len(pending_before[0].retry_history) == 1 && pending_before[0].retry_history[0].status == "dlq",
+    len(pending_before[0]?.retry_history) == 1
+      && pending_before[0]?.retry_history?.[0]?.status == "dlq",
   )
   const replay: DispatchHandle = trigger_replay(fired.event_id)
   __io_println(replay.status == "dispatched" && replay.replay_of_event_id == fired.event_id)

@@ -4,7 +4,7 @@ pipeline default() {
   }
   __io_println(identity(42))
   __io_println(identity("hello"))
-  fn first<T>(items: list<T>) -> T {
+  fn first<T>(items: list<T>) -> T? {
     return items[0]
   }
   __io_println(first([10, 20, 30]))

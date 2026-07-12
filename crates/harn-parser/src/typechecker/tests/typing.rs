@@ -1104,12 +1104,14 @@ fn test_type_inference_propagation() {
 
 #[test]
 fn test_generic_return_type_instantiates_from_callsite() {
+    // `items[0]` is `T?` under index soundness, so an honest element accessor
+    // is declared `-> T?`; the instantiated call then yields `string?`.
     let errs = errors(
         r#"pipeline t(task) {
   fn identity<T>(x: T) -> T { return x }
-  fn first<T>(items: list<T>) -> T { return items[0] }
+  fn first<T>(items: list<T>) -> T? { return items[0] }
   let n: int = identity(42)
-  let s: string = first(["a", "b"])
+  let s: string? = first(["a", "b"])
 }"#,
     );
     assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
@@ -1179,9 +1181,11 @@ fn test_generic_type_param_conflicting_candidates_join_to_union() {
 
 #[test]
 fn test_generic_list_binding_propagates_element_type() {
+    // The element accessor is `-> T?` (index soundness): instantiating `T` to
+    // `int` still surfaces the callsite mismatch against `string`.
     let errs = errors(
         r"pipeline t(task) {
-  fn first<T>(items: list<T>) -> T { return items[0] }
+  fn first<T>(items: list<T>) -> T? { return items[0] }
   let bad: string = first([1, 2, 3])
 }",
     );

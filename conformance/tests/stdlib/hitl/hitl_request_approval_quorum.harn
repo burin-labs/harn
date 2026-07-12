@@ -17,6 +17,6 @@ pipeline test(task) {
   __io_println(record.reviewers[0])
   __io_println(record.reviewers[1])
   __io_println(len(record.signatures))
-  __io_println(record.signatures[0].reviewer)
-  __io_println(starts_with(record.signatures[0].signature, "sha256:"))
+  __io_println(record.signatures[0]?.reviewer)
+  __io_println(starts_with(record.signatures[0]?.signature, "sha256:"))
 }

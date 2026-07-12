@@ -274,7 +274,7 @@ fn __job_source_clock(timestamp, input, payload, options) {
   return {kind: explicit ?? fallback, timestamp: timestamp}
 }
 
-fn __job_id(input, payload, options) {
+fn __job_id(input, payload, options) -> string {
   const id = __job_first(
     [
       options?.job_id,

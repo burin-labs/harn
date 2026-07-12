@@ -43,7 +43,8 @@ pipeline test(task) {
   const shadow_records: list<TrustRecord> = trust_query({agent: shadow_agent, action: "fs.write", tier: "shadow"})
   __io_println(shadow.status == "dispatched" && shadow.result?.tier == "shadow")
   __io_println(
-    !shadow.result?.file_exists && len(shadow_records) == 1 && shadow_records[0].outcome == "denied",
+    !shadow.result?.file_exists && len(shadow_records) == 1
+      && shadow_records[0]?.outcome == "denied",
   )
   const suggest_agent = "autonomy-suggest-" + unique
   const suggest = fire_tier(register_tier_agent(suggest_agent, "suggest"), "suggest-" + unique)
@@ -58,7 +59,7 @@ pipeline test(task) {
   __io_println(approved.status == "dispatched" && approved.result?.tier == "act_with_approval")
   __io_println(
     approved.result?.file_exists && len(approved_records) == 1
-      && approved_records[0].outcome == "success",
+      && approved_records[0]?.outcome == "success",
   )
   clear_host_mocks()
   const auto_agent = "autonomy-auto-" + unique
@@ -75,7 +76,7 @@ pipeline test(task) {
   const scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write", tier: "shadow"})
   __io_println(
     !harness.fs.exists(scoped_path) && len(scoped_records) == 1
-      && scoped_records[0].outcome == "denied",
+      && scoped_records[0]?.outcome == "denied",
   )
   for path in [
     shadow.result?.file_path,

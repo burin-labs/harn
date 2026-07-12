@@ -45,7 +45,7 @@ pub fn parse_env_int(name: string, raw: string, fallback: int) -> dict {
 
 /** Smallest element of a non-empty int list. */
 pub fn list_min(xs: list<int>) -> int {
-  let m = xs[0]
+  let m = xs[0] ?? 0
   for x in xs {
     if x < m {
       m = x

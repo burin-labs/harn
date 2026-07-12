@@ -101,7 +101,7 @@ fn write_fake_artifacts(root: string, binding_version: string, fixture_version: 
 pipeline test_probe_args_pass_artifact_root_to_python(task) {
   const args = python_binding_probe_args("/tmp/artifacts")
   assert_eq(args[0], "-c")
-  assert(args[1].contains("python bindings: OK"))
+  assert(args[1]?.contains("python bindings: OK"))
   assert_eq(args[2], "/tmp/artifacts")
 }
 

@@ -19,7 +19,7 @@ pipeline main() {
   )
   require artifact.schema_version == "harn.plan.v1", "plan artifact schema should be stable"
   require len(artifact.steps) == 2, "plan steps should normalize"
-  require artifact.steps[0].status == "completed", "step status should normalize"
+  require artifact.steps[0]?.status == "completed", "step status should normalize"
   require len(plan_acp_entries(artifact)) == 2, "ACP entries should derive from steps"
   clear_host_mocks()
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})

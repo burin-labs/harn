@@ -20,10 +20,10 @@ pipeline test(task) {
   const namespaced: list<TrustGraphRecord> = trust
     .query({actor_id: actor_id, since: "2000-01-01T00:00:00Z"})
   __io_println(len(records) == 1)
-  __io_println(records[0].actor_id == actor_id)
-  __io_println(records[0].autonomy_tier_at_time == "act_with_approval")
-  __io_println(records[0].evidence_refs[0].uri == "https://example.invalid/pr/927")
-  __io_println(len(namespaced) == 1 && namespaced[0].trace_id == trace_id)
+  __io_println(records[0]?.actor_id == actor_id)
+  __io_println(records[0]?.autonomy_tier_at_time == "act_with_approval")
+  __io_println(records[0]?.evidence_refs?.[0].uri == "https://example.invalid/pr/927")
+  __io_println(len(namespaced) == 1 && namespaced[0]?.trace_id == trace_id)
   __io_println(entry_id != "")
   __io_println(event_log.latest("trust_graph.records") != nil)
 }

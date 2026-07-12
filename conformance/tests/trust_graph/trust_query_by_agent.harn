@@ -16,7 +16,7 @@ pipeline test(task) {
   __io_println(second.outcome == "failure")
   __io_println(third.autonomy_tier == "shadow")
   __io_println(len(alpha_records) == 2)
-  __io_println(len(failures) == 1 && failures[0].action == "deploy.prod")
-  __io_println(len(denied) == 1 && denied[0].agent == agent_b)
-  __io_println(len(suggest_records) == 1 && suggest_records[0].agent == agent_a)
+  __io_println(len(failures) == 1 && failures[0]?.action == "deploy.prod")
+  __io_println(len(denied) == 1 && denied[0]?.agent == agent_b)
+  __io_println(len(suggest_records) == 1 && suggest_records[0]?.agent == agent_a)
 }

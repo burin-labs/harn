@@ -42,10 +42,10 @@ pipeline test(task) {
   assert_eq(fact.targets[1].target_names[1], "test")
   assert_eq(fact.targets[2].id, "plugin:a")
   assert_eq(fact.targets[2].kind, "plugin-check")
-  assert_eq(fact.adapters[0].ok, true)
-  assert_eq(fact.adapters[0].target_count, 1)
-  assert_eq(fact.adapters[1].parser_id, "js.workspace_graph.v1")
-  assert_eq(fact.adapters[2].target_count, 1)
+  assert_eq(fact.adapters[0]?.ok, true)
+  assert_eq(fact.adapters[0]?.target_count, 1)
+  assert_eq(fact.adapters[1]?.parser_id, "js.workspace_graph.v1")
+  assert_eq(fact.adapters[2]?.target_count, 1)
   assert_eq(fact.fallback.enabled, false)
   const templated = verification_affected_targets(
     ["x/a.txt", "y/b.txt"],

@@ -721,7 +721,7 @@ pipeline default(task) {
   ]
 
   const results = parallel(prompts.count) { i ->
-    llm_call(prompts[i], "You are a poet.")
+    llm_call(prompts[i] ?? "", "You are a poet.")
   }
 
   for r in results {

@@ -26,9 +26,9 @@ pipeline test(task) {
   const report: TrustChainReport = trust_graph_verify_chain()
   const records: list<TrustRecord> = trust_query({agent: agent_id})
   __io_println(report.verified)
-  __io_println(records[0].schema == "opentrustgraph/v0.1")
+  __io_println(records[0]?.schema == "opentrustgraph/v0.1")
   // The new metadata keys are optional: when omitted they don't surface
   // as record fields. parent_record_id was set to nil above so it MUST
   // round-trip as nil (not the empty string).
-  __io_println(records[0].metadata?.parent_record_id == nil)
+  __io_println(records[0]?.metadata?.parent_record_id == nil)
 }

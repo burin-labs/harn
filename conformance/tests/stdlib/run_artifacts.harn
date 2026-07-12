@@ -37,7 +37,7 @@ pipeline test(task) {
   run_artifact_write_json(run_b, "facts.json", {status: "ok"})
   const listed: list<RunArtifactsRun> = run_artifacts_list("eval", {root: root, limit: 10})
   __io_println(len(listed))
-  __io_println(listed[0].modified >= listed[1].modified)
+  __io_println(listed[0]?.modified >= listed[1]?.modified)
   __io_println(len(run_artifacts_list("eval", {root: root, limit: 1})))
   __io_println(len(run_artifacts_list("eval", {root: root, limit: 0})))
   const namespaced = run_artifacts_open("eval", {root: root, namespace: "fleet", run_id: "run-c"})

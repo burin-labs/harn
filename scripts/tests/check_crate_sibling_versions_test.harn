@@ -29,7 +29,7 @@ pipeline test_rejects_loose_path_dependency(task) {
   const text = "harn-modules = { path = \"../harn-modules\", version = \"0.9\" }\n"
   const errors = sibling_dep_errors_from_text("crates/harn-vm/Cargo.toml", text, "0.9.18")
   assert_eq(errors.count, 1)
-  assert_eq(errors[0].contains("harn-modules path dependency version is \"0.9\""), true)
+  assert_eq(errors[0]?.contains("harn-modules path dependency version is \"0.9\""), true)
 }
 
 @test
@@ -37,7 +37,7 @@ pipeline test_rejects_missing_version(task) {
   const text = "harn-parser = { path = \"../harn-parser\" }\n"
   const errors = sibling_dep_errors_from_text("crates/harn-fmt/Cargo.toml", text, "0.9.18")
   assert_eq(errors.count, 1)
-  assert_eq(errors[0].contains("must set version = \"=0.9.18\""), true)
+  assert_eq(errors[0]?.contains("must set version = \"=0.9.18\""), true)
 }
 
 @test
@@ -45,7 +45,7 @@ pipeline test_checks_tree_sitter_workspace_sibling(task) {
   const text = "tree-sitter-harn = { path = \"../../tree-sitter-harn\", version = \"0.9\" }\n"
   const errors = sibling_dep_errors_from_text("crates/harn-hostlib/Cargo.toml", text, "0.9.18")
   assert_eq(errors.count, 1)
-  assert_eq(errors[0].contains("tree-sitter-harn"), true)
+  assert_eq(errors[0]?.contains("tree-sitter-harn"), true)
 }
 
 @test
@@ -78,7 +78,7 @@ pipeline test_rejects_private_harness_crate_as_publish_dependency(task) {
     true,
   )
   assert_eq(errors.count, 1)
-  assert_eq(errors[0].contains("publish = false"), true)
+  assert_eq(errors[0]?.contains("publish = false"), true)
 }
 
 @test

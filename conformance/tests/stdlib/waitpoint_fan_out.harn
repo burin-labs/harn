@@ -1,23 +1,22 @@
 import "std/waitpoint"
 
 pipeline test(task) {
-  const points: list<Waitpoint> = [
-    create("fan-out-1"),
-    create("fan-out-2"),
-    create("fan-out-3"),
-    create("fan-out-4"),
-    create("fan-out-5"),
-  ]
+  const p0: Waitpoint = create("fan-out-1")
+  const p1: Waitpoint = create("fan-out-2")
+  const p2: Waitpoint = create("fan-out-3")
+  const p3: Waitpoint = create("fan-out-4")
+  const p4: Waitpoint = create("fan-out-5")
+  const points: list<Waitpoint> = [p0, p1, p2, p3, p4]
   const waiter = spawn {
     let resolved = wait(points)
     return {count: len(resolved), first: resolved[0].value, last: resolved[4].value}
   }
   sleep(10ms)
-  complete(points[0], "a")
-  complete(points[1], "b")
-  complete(points[2], "c")
-  complete(points[3], "d")
-  complete(points[4], "e")
+  complete(p0, "a")
+  complete(p1, "b")
+  complete(p2, "c")
+  complete(p3, "d")
+  complete(p4, "e")
   const result = await(waiter)
   __io_println(result.count)
   __io_println(result.first)

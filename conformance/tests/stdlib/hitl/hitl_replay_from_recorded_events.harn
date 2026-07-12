@@ -8,9 +8,9 @@ pub fn hitl_handler(event: TriggerEvent) -> dict {
   return {
     verdict: answer.verdict,
     event_id: event.id,
-    first_reviewer: approval.signatures[0].reviewer,
-    first_signed_at: approval.signatures[0].signed_at,
-    first_signature: approval.signatures[0].signature,
+    first_reviewer: approval.signatures[0]?.reviewer,
+    first_signed_at: approval.signatures[0]?.signed_at,
+    first_signature: approval.signatures[0]?.signature,
   }
 }
 

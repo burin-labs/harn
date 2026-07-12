@@ -16,15 +16,15 @@ pipeline test(task) {
   // Nested list-of-lists
   let xs = [[1, 2], [3, 4]]
   xs[0][1] = 99
-  assert_eq(xs[0][1], 99, "nested list assignment writes the inner cell")
-  assert_eq(xs[1][0], 3, "nested list assignment leaves siblings alone")
+  assert_eq(xs[0]?.[1], 99, "nested list assignment writes the inner cell")
+  assert_eq(xs[1]?.[0], 3, "nested list assignment leaves siblings alone")
   // Mixed property + subscript
   let m = {list: [1, 2]}
   m.list[0] = 7
   assert_eq(m.list[0], 7, "property-then-subscript writes through the path")
   let p = [{x: 1}]
   p[0].x = 8
-  assert_eq(p[0].x, 8, "subscript-then-property writes through the path")
+  assert_eq(p[0]?.x, 8, "subscript-then-property writes through the path")
   // Deep chain
   let deep = {l1: {l2: {l3: {v: 1}}}}
   deep.l1.l2.l3.v = 42

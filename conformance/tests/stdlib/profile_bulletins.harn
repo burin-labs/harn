@@ -84,7 +84,7 @@ pipeline default() {
   __io_println(decision_event.kind)
   __io_println(decision_event.headers.action)
   const updated = bulletin_apply_decisions([proposed], [accept_receipt.decision])
-  __io_println(updated[0].status)
+  __io_println(updated[0]?.status)
   const partitioned = bulletin_partition(updated)
   __io_println(len(partitioned.accepted))
   __io_println(len(partitioned.proposed))

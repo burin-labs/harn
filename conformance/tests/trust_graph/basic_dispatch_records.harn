@@ -43,7 +43,7 @@ pipeline test(task) {
   __io_println(fired.result?.action == "github.issue.opened")
   __io_println(fired.result?.autonomy_tier == "act_auto")
   __io_println(len(records) == 1)
-  __io_println(records[0].schema == "opentrustgraph/v0.1")
-  __io_println(records[0].outcome == "success" && records[0].autonomy_tier == "act_auto")
-  __io_println(records[0].trace_id == fired.result?.trace_id)
+  __io_println(records[0]?.schema == "opentrustgraph/v0.1")
+  __io_println(records[0]?.outcome == "success" && records[0]?.autonomy_tier == "act_auto")
+  __io_println(records[0]?.trace_id == fired.result?.trace_id)
 }
