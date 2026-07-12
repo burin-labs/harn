@@ -52,12 +52,6 @@ if command -v tagref >/dev/null 2>&1; then
   fi
 fi
 
-# Track whether the python prompt-prose ratchet has already run in this
-# hook, so the ratchet and clippy blocks don't pay for it twice when both
-# patterns match (the common case for a Rust crate edit that also
-# touches scripts). Whichever block runs first sets the flag.
-prompt_prose_done=0
-
 # ---------------------------------------------------------------------------
 # Phase 1 — fast, read-only validators (fail-fast).
 #
@@ -79,12 +73,13 @@ if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
     :
   else
     echo "=== Pre-commit: checking CI ratchets ==="
-    if [ "$prompt_prose_done" -eq 0 ]; then
+    if hook_paths_match "$changed" "$HOOK_PROMPT_PROSE_PATTERN"; then
       hook_export_harn_bin
       make lint-no-rust-prompt-prose
-      prompt_prose_done=1
     fi
-    make lint-no-xfail-regression
+    if hook_paths_match "$changed" "$HOOK_XFAIL_RATCHET_PATTERN"; then
+      make lint-no-xfail-regression
+    fi
     echo "    CI ratchets OK."
   fi
 else
@@ -210,13 +205,6 @@ if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   # `--all-targets` clippy is still enforced by the `Rust lint` CI job
   # and by `make lint` for ad-hoc local runs; pre-push catches
   # test-target compile errors via `cargo check --tests`.
-  if [ "$prompt_prose_done" -eq 0 ]; then
-    echo "=== Pre-commit: lint-no-rust-prompt-prose ==="
-    hook_export_harn_bin
-    make lint-no-rust-prompt-prose
-    prompt_prose_done=1
-  fi
-
   hook_write_changed_cargo_packages "$changed" "$changed_packages"
   if hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$)'; then
     echo "=== Pre-commit: running clippy on full workspace (workspace-scope change) ==="

@@ -11,7 +11,9 @@ HOOK_HIGHLIGHT_ENTRYPOINT_MARKER='@harn-entrypoint-category'
 HOOK_LANGSPEC_PATTERN='(^spec/chapters/.*\.md$|^spec/HARN_SPEC\.md$|^docs/src/language-spec\.md$|^docs/src/spec/language/.*\.md$|^docs/src/SUMMARY\.md$)'
 HOOK_DIAGCATALOG_PATTERN='(^crates/harn-parser/src/diagnostic_codes(\.rs|/)|^docs/src/diagnostics\.md$|^docs/diagnostics-catalog\.json$)'
 HOOK_SESSION_BUNDLE_SCHEMA_PATTERN='(^crates/harn-vm/src/session_bundle\.rs$|^crates/harn-vm/src/session_bundle/|^crates/harn-cli/src/commands/session\.rs$|^spec/schemas/session-bundle\.v1\.schema\.json$)'
-HOOK_RATCHET_PATTERN='(^crates/harn-vm/src/(llm/|orchestration/(workflow|artifacts|compaction)\.rs$)|^conformance/|^scripts/(allowed_long_strings\.txt|check_no_rust_prompt_prose\.sh|check_rust_prompt_prose\.harn|check_xfail_count\.harn|xfail_threshold\.txt)$)'
+HOOK_PROMPT_PROSE_PATTERN='(^crates/harn-vm/src/(llm/|orchestration/(workflow|artifacts|compaction)\.rs$)|^conformance/|^scripts/(allowed_long_strings\.txt|check_no_rust_prompt_prose\.sh|check_rust_prompt_prose\.harn)$)'
+HOOK_XFAIL_RATCHET_PATTERN='(^conformance/|^scripts/(check_xfail_count\.harn|xfail_threshold\.txt)$)'
+HOOK_RATCHET_PATTERN="($HOOK_PROMPT_PROSE_PATTERN|$HOOK_XFAIL_RATCHET_PATTERN)"
 # Lexer KEYWORDS const <-> tree-sitter keyword mirror.
 HOOK_TREESITTER_PATTERN='(^crates/harn-lexer/src/token\.rs$|^tree-sitter-harn/grammar/keywords\.js$)'
 # The generated-artifact registry and the consumers its audit cross-checks:
