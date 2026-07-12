@@ -206,3 +206,49 @@ pipeline test(task) {
         value: (try_star_expression
           operand: (call_expression
             function: (identifier)))))))
+
+==================
+Throws Clauses
+==================
+
+fn parse(raw: str) -> dict throws AppError {
+  return {}
+}
+
+pipeline run(task) throws AppError {
+  return parse("{}")
+}
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    (type_annotation
+      (identifier))
+    throws: (type_annotation
+      (identifier))
+    body: (block
+      (return_statement
+        (dict_literal))))
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    throws: (type_annotation
+      (identifier))
+    (block
+      (return_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))))))))
