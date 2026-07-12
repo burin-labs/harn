@@ -128,6 +128,14 @@ impl Formatter<'_> {
                     format!("{expr}?")
                 }
             }
+            Node::NonNullAssert { operand } => {
+                let expr = self.format_expr(operand, indent);
+                if needs_parens_as_postfix_object(&operand.node) {
+                    format!("({expr})!")
+                } else {
+                    format!("{expr}!")
+                }
+            }
             Node::TryStar { operand } => {
                 let expr = self.format_expr(operand, indent);
                 if needs_parens_as_unary_operand(&operand.node) {

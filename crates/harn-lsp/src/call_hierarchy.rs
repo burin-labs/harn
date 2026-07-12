@@ -620,6 +620,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
         }
         Node::UnaryOp { operand, .. }
         | Node::TryOperator { operand }
+        | Node::NonNullAssert { operand }
         | Node::TryStar { operand }
         | Node::Spread(operand) => collect_calls(operand, calls),
         Node::Ternary {

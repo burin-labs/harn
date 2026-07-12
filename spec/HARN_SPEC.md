@@ -724,7 +724,13 @@ From lowest to highest binding:
 | 9 | `*` `/` `%` | Left | Multiplicative |
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
 | 11 | `**` | Right | Exponentiation |
-| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` | Left | Postfix |
+| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+
+`!` appears at two precedence levels with two distinct meanings: a **prefix**
+`!` (level 10) is logical negation (`!ok`), while a **postfix** `!` (level 12)
+is the non-null assertion (`value!`). They never collide — a `!` before an
+operand is negation, a `!` after one is the assertion — and `!=` is a single
+token, so neither reading is ambiguous.
 
 Exponentiation binds more tightly than a unary prefix on its **left** operand,
 so `-2 ** 2` parses as `-(2 ** 2)` (`-4`), matching Python, Ruby, and ordinary
@@ -4799,6 +4805,27 @@ fn greet(name: string | nil) -> string {
   return "hello stranger"
 }
 ```
+
+#### Non-null assertion (`expr!`)
+
+When you know a value is non-nil but the type system cannot prove it — an
+optional field you have already validated, or an index read established as
+in-bounds by an earlier guard — the postfix `!` operator asserts it. Statically
+it strips the `nil` arm from the operand's type (`T | nil` -> `T`):
+
+```harn
+fn label(cfg: {name: string?}) -> string {
+  // The caller guarantees `name` is set for this code path.
+  return cfg.name!   // `cfg.name` is `string?`; `!` recovers `string`
+}
+```
+
+At runtime `expr!` is identity when the value is present and throws a catchable
+`unwrap_nil` error when it is `nil` — unlike `?? default`, which supplies a
+fallback, `!` fails loudly. Prefer a `!= nil` guard, a `?? default`, or a
+`for`-loop where one applies; reach for `!` only when the invariant is real but
+not expressible. Asserting a value that is already non-nil is reported as
+unnecessary (`HARN-LNT-063`).
 
 #### `type_of()` checks
 

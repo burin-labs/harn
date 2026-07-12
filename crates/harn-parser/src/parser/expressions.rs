@@ -575,6 +575,19 @@ impl Parser {
                     },
                     Span::merge(start, self.prev_span()),
                 );
+            } else if self.check(&TokenKind::Not) {
+                // Postfix `!` is the non-null assertion. A `!` following a
+                // primary can only be this: `!=` is a single `Neq` token and
+                // prefix `!` (logical not) is parsed at the start of a unary,
+                // never reached here.
+                let start = expr.span;
+                self.advance();
+                expr = spanned(
+                    Node::NonNullAssert {
+                        operand: Box::new(expr),
+                    },
+                    Span::merge(start, self.prev_span()),
+                );
             } else {
                 break;
             }

@@ -711,6 +711,7 @@ module.exports = grammar({
         $.property_access,
         $.slice_expression,
         $.try_unwrap_expression,
+        $.non_null_expression,
         $.parenthesized_expression,
         $.spawn_expression,
         $.try_expression,
@@ -896,6 +897,9 @@ module.exports = grammar({
 
     try_unwrap_expression: ($) =>
       prec.left(13, seq($._expression, token.immediate("?"))),
+
+    non_null_expression: ($) =>
+      prec.left(13, seq($._expression, token.immediate("!"))),
 
     parenthesized_expression: ($) => seq("(", $._expression, ")"),
 

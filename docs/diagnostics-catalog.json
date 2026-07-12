@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 62
+      "count": 63
     },
     {
       "id": "FMT",
@@ -2327,6 +2327,21 @@
       "category": "LNT",
       "summary": "nil coalesce fallback is unreachable",
       "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-063",
+      "category": "LNT",
+      "summary": "non-null assertion `!` on an already-non-nil value",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

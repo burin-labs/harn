@@ -482,6 +482,13 @@ pub enum Node {
     TryOperator {
         operand: Box<SNode>,
     },
+    /// Non-null assertion: `expr!` — asserts the operand is not `nil`.
+    /// Statically strips `nil` from the operand's type (`T | nil` -> `T`);
+    /// at runtime it is identity when the value is present and throws a
+    /// structured `unwrap_nil` error when it is `nil`.
+    NonNullAssert {
+        operand: Box<SNode>,
+    },
     /// Try-star operator: `try* EXPR` — evaluates EXPR; on throw, runs
     /// pending finally blocks up to the enclosing catch and rethrows
     /// the original value. On success, evaluates to EXPR's value.

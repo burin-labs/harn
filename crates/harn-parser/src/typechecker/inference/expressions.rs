@@ -24,11 +24,12 @@ use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
 use super::super::union::{
     intersect_types, narrow_to_single, reference_path_key, reference_path_key_for_subscript,
-    remove_from_union, simplify_union, subtract_type,
+    remove_from_union, simplify_union, subtract_type, without_nil,
 };
 use super::super::{is_gradual_type_name, TypeChecker};
 
 const UNNECESSARY_SAFE_NAVIGATION_RULE: &str = "unnecessary-safe-navigation";
+const UNNECESSARY_NON_NULL_ASSERT_RULE: &str = "unnecessary-non-null-assert";
 
 enum SafeNavigationKind<'a> {
     Subscript,
@@ -815,6 +816,14 @@ impl TypeChecker {
                     "-" => t, // negation preserves type
                     _ => None,
                 }
+            }
+
+            // `expr!` asserts the operand is non-nil, so its static type is the
+            // operand type with every `nil` arm removed (`T | nil` -> `T`). When
+            // the operand is already non-nil, `without_nil` returns it unchanged.
+            Node::NonNullAssert { operand } => {
+                let t = self.infer_type(operand, scope)?;
+                without_nil(&t).or(Some(t))
             }
 
             Node::Ternary {
@@ -1725,6 +1734,52 @@ impl TypeChecker {
         if self.type_is_provably_non_nil(&receiver_type, scope) {
             self.emit_unnecessary_safe_navigation(snode, object, SafeNavigationKind::Subscript);
         }
+    }
+
+    /// Warn when `expr!` is applied to a value that is already provably
+    /// non-nil — the assertion is dead and can be dropped. Mirrors the
+    /// unnecessary-safe-navigation lint.
+    pub(in crate::typechecker) fn check_unnecessary_non_null_assert(
+        &mut self,
+        snode: &SNode,
+        operand: &SNode,
+        scope: &TypeScope,
+    ) {
+        let Some(t) = self.infer_type(operand, scope) else {
+            return;
+        };
+        if !self.type_is_provably_non_nil(&t, scope) {
+            return;
+        }
+        let fix = self.non_null_assert_removal_fix(snode.span, operand);
+        self.lint_warning_at_with_fix(
+            Code::LintUnnecessaryNonNullAssert,
+            UNNECESSARY_NON_NULL_ASSERT_RULE,
+            "`!` is unnecessary because the value is already non-nil".to_string(),
+            snode.span,
+            "remove the `!`".to_string(),
+            fix,
+        );
+    }
+
+    /// Fix edit that deletes the trailing `!` of a non-null assertion.
+    fn non_null_assert_removal_fix(&self, span: Span, operand: &SNode) -> Vec<FixEdit> {
+        let Some(source) = self.source.as_deref() else {
+            return Vec::new();
+        };
+        let search_start = operand.span.end.min(span.end);
+        let search_end = span.end.min(source.len());
+        let Some(region) = source.get(search_start..search_end) else {
+            return Vec::new();
+        };
+        let Some(rel) = region.find('!') else {
+            return Vec::new();
+        };
+        let start = search_start + rel;
+        vec![FixEdit {
+            span: Self::source_span_for_offsets(source, start, start + 1),
+            replacement: String::new(),
+        }]
     }
 
     fn emit_unnecessary_safe_navigation(

@@ -737,6 +737,27 @@ fn greet(name: string | nil) -> string {
 }
 ```
 
+#### Non-null assertion (`expr!`)
+
+When you know a value is non-nil but the type system cannot prove it — an
+optional field you have already validated, or an index read established as
+in-bounds by an earlier guard — the postfix `!` operator asserts it. Statically
+it strips the `nil` arm from the operand's type (`T | nil` -> `T`):
+
+```harn
+fn label(cfg: {name: string?}) -> string {
+  // The caller guarantees `name` is set for this code path.
+  return cfg.name!   // `cfg.name` is `string?`; `!` recovers `string`
+}
+```
+
+At runtime `expr!` is identity when the value is present and throws a catchable
+`unwrap_nil` error when it is `nil` — unlike `?? default`, which supplies a
+fallback, `!` fails loudly. Prefer a `!= nil` guard, a `?? default`, or a
+`for`-loop where one applies; reach for `!` only when the invariant is real but
+not expressible. Asserting a value that is already non-nil is reported as
+unnecessary (`HARN-LNT-063`).
+
 #### `type_of()` checks
 
 `type_of(x) == "typename"` narrows to that type in the then-branch and

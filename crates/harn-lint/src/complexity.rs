@@ -135,6 +135,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                 operand: object, ..
             }
             | Node::TryOperator { operand: object }
+            | Node::NonNullAssert { operand: object }
             | Node::TryStar { operand: object }
             | Node::Spread(object) => node_complexity(object),
             Node::SubscriptAccess { object, index }

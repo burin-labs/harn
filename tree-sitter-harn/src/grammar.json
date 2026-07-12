@@ -5197,6 +5197,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "non_null_expression"
+        },
+        {
+          "type": "SYMBOL",
           "name": "parenthesized_expression"
         },
         {
@@ -6488,6 +6492,26 @@
             "content": {
               "type": "STRING",
               "value": "?"
+            }
+          }
+        ]
+      }
+    },
+    "non_null_expression": {
+      "type": "PREC_LEFT",
+      "value": 13,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "_expression"
+          },
+          {
+            "type": "IMMEDIATE_TOKEN",
+            "content": {
+              "type": "STRING",
+              "value": "!"
             }
           }
         ]
