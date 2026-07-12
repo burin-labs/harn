@@ -646,77 +646,96 @@ pub(super) fn has_windows_separator_escape(path: &str) -> bool {
 }
 
 pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
-    static DECL_RE: OnceLock<Regex> = OnceLock::new();
-    let decl_re = DECL_RE.get_or_init(|| {
-        Regex::new(r"^\s*pub\s+(fn|pipeline|tool|skill|struct|enum|type|interface|const)\s+([A-Za-z_][A-Za-z0-9_]*)\b(.*)$")
-            .expect("valid declaration regex")
-    });
-    let mut docs: Vec<String> = Vec::new();
-    let mut symbols = Vec::new();
-    let mut in_block_doc = false;
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if in_block_doc {
-            // Collect content between /** and */, stripping the conventional
-            // ` * ` continuation marker so docs render the same regardless of
-            // which form (`///` or `/** */`) authors picked.
-            let (content, closes) = match trimmed.split_once("*/") {
-                Some((before, _)) => (before, true),
-                None => (trimmed, false),
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let Ok(tokens) = lexer.tokenize_with_comments() else {
+        return Vec::new();
+    };
+    let lines: Vec<&str> = source.lines().collect();
+
+    tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(index, token)| {
+            if !matches!(token.kind, harn_lexer::TokenKind::Pub) {
+                return None;
+            }
+            let kind_index = next_code_token(&tokens, index + 1)?;
+            let kind = api_symbol_kind(&tokens[kind_index].kind)?;
+            let name_index = next_code_token(&tokens, kind_index + 1)?;
+            let harn_lexer::TokenKind::Identifier(name) = &tokens[name_index].kind else {
+                return None;
             };
-            let stripped = content
-                .strip_prefix("* ")
-                .or_else(|| content.strip_prefix('*'))
-                .unwrap_or(content)
-                .trim();
-            if !stripped.is_empty() {
-                docs.push(stripped.to_string());
-            }
-            if closes {
-                in_block_doc = false;
-            }
-            continue;
-        }
-        if let Some(doc) = trimmed.strip_prefix("///") {
-            docs.push(doc.trim().to_string());
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("/**") {
-            // `/** … */` on a single line collapses to one doc line; the
-            // multi-line opener `/**` (with no `*/` on the same line) flips
-            // the block-doc flag so subsequent lines are absorbed above.
-            if let Some((inner, _)) = rest.split_once("*/") {
-                let stripped = inner.trim();
-                if !stripped.is_empty() {
-                    docs.push(stripped.to_string());
-                }
-            } else {
-                let stripped = rest.trim();
-                if !stripped.is_empty() {
-                    docs.push(stripped.to_string());
-                }
-                in_block_doc = true;
-            }
-            continue;
-        }
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(captures) = decl_re.captures(line) {
-            let kind = captures.get(1).expect("kind").as_str().to_string();
-            let name = captures.get(2).expect("name").as_str().to_string();
-            let signature = trim_signature(line);
-            let doc_text = (!docs.is_empty()).then(|| docs.join("\n"));
-            symbols.push(PackageApiSymbol {
-                kind,
-                name,
-                signature,
-                docs: doc_text,
-            });
-        }
-        docs.clear();
+            let line = lines.get(token.span.line.saturating_sub(1))?;
+
+            Some(PackageApiSymbol {
+                kind: kind.to_string(),
+                name: name.clone(),
+                signature: trim_signature(line),
+                docs: docs_before(&tokens, index),
+            })
+        })
+        .collect()
+}
+
+fn next_code_token(tokens: &[harn_lexer::Token], start: usize) -> Option<usize> {
+    tokens
+        .iter()
+        .enumerate()
+        .skip(start)
+        .find_map(|(index, token)| {
+            (!matches!(
+                token.kind,
+                harn_lexer::TokenKind::LineComment { .. }
+                    | harn_lexer::TokenKind::BlockComment { .. }
+            ))
+            .then_some(index)
+        })
+}
+
+fn api_symbol_kind(kind: &harn_lexer::TokenKind) -> Option<&'static str> {
+    match kind {
+        harn_lexer::TokenKind::Fn => Some("fn"),
+        harn_lexer::TokenKind::Pipeline => Some("pipeline"),
+        harn_lexer::TokenKind::Tool => Some("tool"),
+        harn_lexer::TokenKind::Skill => Some("skill"),
+        harn_lexer::TokenKind::Struct => Some("struct"),
+        harn_lexer::TokenKind::Enum => Some("enum"),
+        harn_lexer::TokenKind::TypeKw => Some("type"),
+        harn_lexer::TokenKind::Interface => Some("interface"),
+        harn_lexer::TokenKind::Const => Some("const"),
+        _ => None,
     }
-    symbols
+}
+
+fn docs_before(tokens: &[harn_lexer::Token], pub_index: usize) -> Option<String> {
+    let mut docs = Vec::new();
+    for token in tokens[..pub_index].iter().rev() {
+        match &token.kind {
+            harn_lexer::TokenKind::Newline => continue,
+            harn_lexer::TokenKind::LineComment { text, is_doc } if *is_doc => {
+                let text = text.trim();
+                if !text.is_empty() {
+                    docs.push(text.to_string());
+                }
+            }
+            harn_lexer::TokenKind::BlockComment { text, is_doc } if *is_doc => {
+                let text = text
+                    .lines()
+                    .map(|line| line.trim().strip_prefix('*').unwrap_or(line.trim()).trim())
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !text.is_empty() {
+                    docs.push(text);
+                }
+            }
+            _ => break,
+        }
+    }
+    (!docs.is_empty()).then(|| {
+        docs.reverse();
+        docs.join("\n")
+    })
 }
 
 pub(crate) fn trim_signature(line: &str) -> String {
