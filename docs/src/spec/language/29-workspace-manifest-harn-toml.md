@@ -456,10 +456,10 @@ registry index again.
 url = "https://packages.harnlang.com/harn-package-index.toml"
 ```
 
-The default URL points at the free-tier GitHub-Pages-hosted index in
-`burin-labs/harn-cloud`; the deployed `harn-cloud-gateway` mirrors the same
-content at `/index.toml`. Override per-project via `[registry] url = ...`
-in `harn.toml`, or globally via `HARN_PACKAGE_REGISTRY`.
+The default URL points at the GitHub-Pages-hosted public index in
+`burin-labs/harn-packages`. A Harn Cloud deployment can serve a separately
+configured mirror at `/index.toml`. Override per-project via `[registry] url =
+...` in `harn.toml`, or globally via `HARN_PACKAGE_REGISTRY`.
 
 Registry index format:
 
@@ -827,4 +827,3 @@ persona_step_allowlist = ["legacy_helper"]
 - `persona_step_allowlist` lists non-stdlib helper functions that
   `@persona` bodies may call directly without a matching `@step`
   declaration.
-
