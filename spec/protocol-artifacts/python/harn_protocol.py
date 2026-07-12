@@ -228,6 +228,8 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",
+    "host_attachment",
+    "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
     "iteration_start",

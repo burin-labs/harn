@@ -849,6 +849,153 @@ fn inject_identified_user_message_emits_replayable_user_event() {
 }
 
 #[test]
+fn inject_host_tool_result_appends_typed_transcript_event_and_agent_event() {
+    reset_all_sinks();
+    reset_session_store();
+    let id = open_or_create(Some("host-tool-result-session".into()));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    register_sink(&id, Arc::new(CapturingSink(captured.clone())));
+
+    let result = inject_host_event(
+        &id,
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "kind": "host_tool_result",
+            "delivery": "immediate",
+            "payload": {
+                "tool_name": "web_fetch",
+                "kind": "fetch",
+                "raw_input": {"url": "https://example.test"},
+                "raw_output": {"text": "Example payload"},
+                "duration_ms": 12
+            },
+            "provenance": {
+                "initiator": "user",
+                "source": "user_invoked_tool",
+                "host": "tui",
+                "ts_ms": 1782000000000i64
+            }
+        })),
+    )
+    .expect("host tool result injects");
+
+    assert_eq!(result["status"], "injected");
+    assert_eq!(result["delivery"], "immediate");
+    assert_eq!(message_count(&id), 1);
+    let transcript_events = events_by_kind_json(&id, "host_tool_result");
+    assert_eq!(transcript_events.len(), 1);
+    assert_eq!(
+        transcript_events[0]["metadata"]["injection_id"],
+        result["injection_id"]
+    );
+    assert_eq!(
+        transcript_events[0]["metadata"]["sanitization"]["trust"],
+        "untrusted"
+    );
+    assert!(transcript_events[0]["text"]
+        .as_str()
+        .expect("text")
+        .contains("<host_tool_result"));
+
+    let events = captured.lock().expect("capture sink poisoned");
+    assert_eq!(events.len(), 2);
+    assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+    match &events[1] {
+        AgentEvent::HostToolResult {
+            injection_id,
+            tool_name,
+            sequence,
+            delivered_at_seam,
+            sanitization,
+            ..
+        } => {
+            assert_eq!(injection_id, result["injection_id"].as_str().unwrap());
+            assert_eq!(tool_name, "web_fetch");
+            assert_eq!(*sequence, 0);
+            assert_eq!(delivered_at_seam.as_deref(), Some("immediate"));
+            assert_eq!(sanitization.trust, crate::security::TrustLevel::Untrusted);
+        }
+        event => panic!("expected HostToolResult event, got {event:?}"),
+    }
+    reset_all_sinks();
+}
+
+#[test]
+fn inject_host_attachment_records_pointer_event_without_inline_bytes() {
+    reset_all_sinks();
+    reset_session_store();
+    let id = open_or_create(Some("host-attachment-session".into()));
+
+    let result = inject_host_event(
+        &id,
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "kind": "host_attachment",
+            "delivery": "immediate",
+            "payload": {
+                "media_type": "text/plain",
+                "flavor": "text_frame",
+                "artifact_pointer": ".burin/chat-assets/frame.txt",
+                "sha256": "b".repeat(64),
+                "size_bytes": 21,
+                "rendered": "inline_text",
+                "description": "visible terminal frame"
+            },
+            "provenance": {
+                "initiator": "host_auto",
+                "source": "auto_frame_capture",
+                "host": "tui",
+                "ts_ms": 1782000000001i64
+            }
+        })),
+    )
+    .expect("host attachment injects");
+
+    assert_eq!(result["sequence"], 0);
+    let transcript_events = events_by_kind_json(&id, "host_attachment");
+    assert_eq!(transcript_events.len(), 1);
+    assert_eq!(
+        transcript_events[0]["metadata"]["artifact_pointer"],
+        ".burin/chat-assets/frame.txt"
+    );
+    assert_eq!(
+        transcript_events[0]["metadata"]["sanitization"]["trust"],
+        "semi_trusted"
+    );
+    assert!(transcript_events[0]["text"]
+        .as_str()
+        .expect("text")
+        .contains("visible terminal frame"));
+    reset_all_sinks();
+}
+
+#[test]
+fn inject_host_event_rejects_queued_delivery_until_h2() {
+    reset_session_store();
+    let id = open_or_create(Some("host-queued-reject-session".into()));
+
+    let error = inject_host_event(
+        &id,
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "kind": "host_tool_result",
+            "delivery": "after_next_tool_call",
+            "payload": {
+                "tool_name": "web_fetch",
+                "raw_output": "late"
+            },
+            "provenance": {
+                "initiator": "user",
+                "source": "user_invoked_tool",
+                "ts_ms": 1782000000002i64
+            }
+        })),
+    )
+    .expect_err("queued delivery is not implemented in H1");
+
+    assert!(error.contains("H1 only supports 'immediate'"));
+    assert_eq!(message_count(&id), 0);
+    assert_eq!(event_count_by_kind(&id, "host_tool_result"), 0);
+}
+
+#[test]
 fn close_drops_pending_inbox_entries_for_reused_session_ids() {
     // Regression: before close() cleared the inbox, a pending
     // notification could survive past close() and get delivered to a

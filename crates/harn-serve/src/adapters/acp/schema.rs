@@ -68,6 +68,8 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",
+    "host_attachment",
+    "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
     "iteration_start",
@@ -117,7 +119,7 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
             // version-check before subscribing.
             "extensionMethods": {
                 HARN_AGENT_EVENT_METHOD: {
-                    "description": "Pipeline-loop milestones that have no \
+                    "description": "Harn agent events that have no \
                                     canonical ACP session/update mapping.",
                     "kinds": HARN_AGENT_EVENT_KINDS,
                     "schema": "https://harnlang.com/spec/harn-extensions/agent-event/v1",
