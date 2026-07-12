@@ -374,17 +374,13 @@ fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<Strin
 ///   parses cleanly as a JSON array. A string that fails to parse rides
 ///   through unchanged so the precise type error still surfaces.
 pub(crate) fn coerce_args_to_schema(
-    name: &str,
     arguments: serde_json::Value,
-    tools_val: Option<&crate::value::VmValue>,
+    schema: Option<&super::ToolSchema>,
 ) -> serde_json::Value {
     let serde_json::Value::Object(mut map) = arguments else {
         return arguments;
     };
-    let Some(schema) = super::collect_tool_schemas(tools_val, None)
-        .into_iter()
-        .find(|schema| schema.name == name)
-    else {
+    let Some(schema) = schema else {
         return serde_json::Value::Object(map);
     };
     for param in &schema.params {
@@ -412,6 +408,73 @@ pub(crate) fn coerce_args_to_schema(
         }
     }
     serde_json::Value::Object(map)
+}
+
+/// Flatten a model-emitted externally tagged argument object onto the tool's
+/// declared discriminator parameter.
+///
+/// For a schema such as `action: "replace" | "delete"`, cheap models can
+/// emit `{"delete": {"path": "a"}}` instead of the canonical
+/// `{"action": "delete", "path": "a"}`. The schema itself is the
+/// authority: no tool names or discriminator values are hardcoded here.
+/// Normalization is deliberately fail-closed when the wrapper key is also a
+/// real parameter, matches multiple enum parameters, carries a non-object
+/// value, or conflicts with a nested discriminator.
+pub(crate) fn unwrap_single_key_discriminator_envelope(
+    arguments: serde_json::Value,
+    schema: Option<&super::ToolSchema>,
+) -> serde_json::Value {
+    let serde_json::Value::Object(mut map) = arguments else {
+        return arguments;
+    };
+    let Some(schema) = schema else {
+        return serde_json::Value::Object(map);
+    };
+    if map.len() != 1 {
+        return serde_json::Value::Object(map);
+    }
+
+    let wrapper_key = map.keys().next().expect("single-key map");
+    if schema.params.iter().any(|param| param.name == *wrapper_key) {
+        return serde_json::Value::Object(map);
+    }
+    let mut matching_params = schema
+        .params
+        .iter()
+        .filter(|param| type_expr_admits_string_literal(&param.ty, wrapper_key));
+    let Some(discriminator) = matching_params.next() else {
+        return serde_json::Value::Object(map);
+    };
+    if matching_params.next().is_some() {
+        return serde_json::Value::Object(map);
+    }
+
+    let wrapper_key = wrapper_key.clone();
+    let wrapped = map.remove(&wrapper_key).expect("single-key map");
+    let serde_json::Value::Object(mut nested) = wrapped else {
+        map.insert(wrapper_key, wrapped);
+        return serde_json::Value::Object(map);
+    };
+    if nested.contains_key(&discriminator.name) {
+        map.insert(wrapper_key, serde_json::Value::Object(nested));
+        return serde_json::Value::Object(map);
+    }
+    nested.insert(
+        discriminator.name.clone(),
+        serde_json::Value::String(wrapper_key),
+    );
+    serde_json::Value::Object(nested)
+}
+
+fn type_expr_admits_string_literal(ty: &super::type_expr::TypeExpr, candidate: &str) -> bool {
+    use super::type_expr::TypeExpr;
+    match ty {
+        TypeExpr::Literal(serde_json::Value::String(value)) => value == candidate,
+        TypeExpr::Union(items) => items
+            .iter()
+            .any(|item| type_expr_admits_string_literal(item, candidate)),
+        _ => false,
+    }
 }
 
 /// True when the schema type UNAMBIGUOUSLY expects a boolean: a bare bool
