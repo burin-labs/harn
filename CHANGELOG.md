@@ -9,6 +9,191 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.12
+
+### Breaking
+
+- Bump the strict provider catalog contract from v4 to v5. The new contract
+  adds catalog-authored model-selection families, dimensions, presets,
+  plain-language model blurbs, and exact reasoning-effort levels so hosts can
+  render progressive pickers without hardcoded family rules.
+- **A bare `dict` no longer satisfies a specific shape type without narrowing.**
+  Assigning a `dict` (or passing it) where a shape like `{name: string}` is
+  expected used to be accepted silently — the hole that let unvalidated
+  `json_parse` output flow into a typed record and fail only at runtime. `dict`
+  now behaves like `unknown` at a shape boundary: narrow it first with
+  `schema_is` / `schema_expect` / `.has(...)`, exactly as you already narrow
+  `unknown`. A shape still widens to `dict` (a shape *is* a dict), which is
+  sound and unchanged.
+
+  The empty literal `{}` is the sole exception: it is the top object type
+  (matching TS/Flow `{}`), so it satisfies an all-optional shape and a
+  `let m = {}` still accepts a later `m = some_dict()`. A dict literal is
+  otherwise typed by its precise fields, checked structurally against the
+  target shape.
+- **`harn check` now rejects calls to methods that do not exist on a concrete
+  receiver (HARN-NAM-005).** Calling an unknown method on a value whose static
+  type is a `string`, `list`, `set`, `int`, `float`, `bool`, or a `struct` — for
+  example `(3.14).frobnicate()` or `user.age.frobnicate()` — is now a check
+  error with a "did you mean" suggestion, closing the soundness hole where such
+  calls passed `harn check` and then crashed (`has no method`) or silently
+  returned `nil` at runtime. Fields were already checked (HARN-NAM-004); methods
+  now are too. Gradual receivers (`unknown`/`any`, unconstrained generics,
+  `dict`/shape values that may hold a callable field, iterators, harness
+  handles) still defer to runtime, so dynamic code is unaffected.
+- **Calling an unknown method on a number now throws instead of returning `nil`.**
+  Every method call on an `int` or `float` (e.g. `(3.14).round(2)`) used to
+  evaluate to `nil` because the numeric method dispatcher returned `nil` for all
+  names, silently swallowing typos and unsupported calls. It now throws a
+  catchable "value of type … has no method" error, matching string / list / dict
+  / set dispatch.
+
+### Added
+
+- **Typed terminal sessions for trusted harnesses (burin-code#4443).** A new
+  `harn-terminal` crate and default-off `terminal_session` hostlib capability
+  provide cross-platform PTY lifecycle, typed key input, resize and
+  change-driven idle waits, plus text/cursor/style/cell VT capture. Starts
+  fail closed with `sandbox_unsupported` when Harn's restricted process
+  sandbox cannot be preserved.
+- Added the first Harn-owned typed host injection lane with `agent_inject_host_event`
+  for immediate host tool-result and attachment events.
+- **Non-null assertion operator `expr!`.** Postfix `!` asserts that a value is
+  not `nil`: statically it strips the `nil` arm from the operand's type
+  (`T | nil` -> `T`), and at runtime it is identity when the value is present
+  and throws a catchable `unwrap_nil` error when it is `nil`. It is the
+  ergonomic escape hatch for cases the type system cannot prove non-nil —
+  e.g. an index read known to be in bounds (`items[i]!`) or an optional field
+  established by an earlier guard. A `!` applied to an already-non-nil value is
+  reported as unnecessary (`HARN-LNT-063`).
+- Added the typed ACP `session/inject_host_event` extension so hosts can inject
+  provenance-bearing tool results and attachments through Harn's deterministic
+  queue, sanitization, transcript, and replay pipeline.
+- Queued host-injection delivery through deterministic agent-loop seams.
+- Add explicit fleet coordination records and a deterministic, read-only
+  roster and claim projection on top of durable agent channels.
+- Top-level `pub const` and `pub let` are now exportable: their values join a
+  module's public surface and can be imported both by wildcard (`import "m"`) and
+  selectively (`import { MAX } from "m"`), on the same `pub`-visibility footing as
+  `pub fn`. Cross-module values are bound by value.
+- Added partial typed-object streaming to `std/json/stream` (Vercel `streamObject` / Instructor `Partial[T]`).
+  The incremental validator now exposes `partial()` — the best-effort partially-filled value from the bytes seen
+  so far, closing the open string/containers at the frontier and dropping any half-typed trailing member — and a
+  new `stream_object(source, schema?, opts?)` generator streams those partial objects as a `Stream<T>` that grows
+  monotonically and ends with the fully parsed object, so progressive extraction no longer requires buffering to
+  completion.
+- Functions, tools, pipelines, and `fn` closures can now declare a typed
+  exception channel with a `throws E` (or `throws E1 | E2`) clause after the
+  return type — e.g. `fn parse(s: string) -> Doc throws ParseError`. The clause is
+  optional and additive: a callable with no `throws` clause keeps today's
+  unconstrained behavior, so no existing code needs to change. A `throw` whose
+  value's type is not covered by the enclosing callable's declared `throws` set is
+  a type error (`HARN-TYP-026`). The check is catch-exhaustive: an error handled by
+  a `try`/`catch` is subtracted from the callable's thrown set (a typed `catch (e:
+  E)` handles enum errors of type `E`, an untyped `catch` handles everything), while
+  errors raised in a `catch`/`finally` body still escape — so a `try`/`catch` that
+  leaves an error uncovered must declare (or handle) it.
+
+### Changed
+
+- Emit typed per-request context token breakdowns on LLM provider-call transcript events.
+- `host_mock` now validates capability/operation names at registration time and requires explicit
+  `unregistered_ok` for synthetic test-only host mocks.
+- Host-originated tool results and attachments now pass through the same mandatory security ingress as ordinary untrusted
+  tool output. Harn selects attachment rendering from the active model's capabilities and a host-neutral resolver, with
+  deterministic recorded descriptions and a non-blocking pointer-only fallback. Typed `std/agent/host_injection` wrappers
+  replace freeform request dictionaries.
+- **Index reads are now optional (`list<T>[i]` / `dict<K, V>[k]` / `string[i]`
+  yield `T | nil`).** An out-of-bounds index or an absent key is `nil` at
+  runtime, so the static type now reflects that — matching TypeScript's
+  `noUncheckedIndexedAccess`. Binding a bare index read into a non-optional slot
+  (`const n: int = xs[0]`) is rejected; recover the element with `?? default`, a
+  `for x in xs` loop (which binds the element type directly, never optional), or
+  `.first()` / `.last()`. Index *writes* (`xs[i] = v`) are unaffected — the slot
+  keeps its bare element type. An honest element accessor is now written
+  `fn first<T>(xs: list<T>) -> T?`.
+- Stamp agent-loop terminal failures with a structured `terminal_class` in run
+  results and transcript metadata so hosts can classify stops without parsing
+  rendered error prose.
+- Updated agent-facing release guidance to match the tag-first release harness flow.
+- Two module/loop ergonomics gaps where `harn check` passed but behavior was
+  silently wrong are now loud and correct: (1) a `for (a, b)` pair pattern over a
+  non-`Pair` item (e.g. `for (i, x) in list.enumerate()`, whose items are
+  `{index, value}` dicts) previously bound both names to `nil` -- it now fails
+  loudly, naming the supported forms (`for {index, value} in list.enumerate()`,
+  `for [a, b] in list.zip(...)`, or wrap with `iter(...)`); (2) when an imported
+  module fails to lex/parse, `harn check` on a consumer now surfaces that module's
+  real error anchored at the `import` (`HARN-MOD-007`) instead of mislabeling every
+  imported symbol as "undefined" at the consumer's call site.
+- **`list<T>` and `dict<K, V>` are now covariant** in their element / value type
+  (they were invariant). `list<int>` flows into `list<float>`, and a
+  `list<{name: string}>` into a `list<dict>`. This is sound because Harn values
+  have copy semantics — a widened binding is an independent copy, so there is no
+  shared-mutable-aliasing hole. The `dict` key type stays invariant. The same
+  classification applies to the `in`/`out` declaration-site variance checker.
+
+- **Several trigger / trust-graph / project builtins now declare their real
+  return type** instead of an opaque `dict`: `trigger_register` / `trigger_fire`
+  / `trigger_replay` return `TriggerHandle` / `DispatchHandle`, `trust_record`
+  returns `TrustRecord`, `trust_graph_query` returns `TrustScore`,
+  `trust_graph_policy_for` returns `CapabilityPolicy`,
+  `trust_graph_verify_chain` returns `TrustChainReport`, and
+  `project_fingerprint` returns `ProjectFingerprint`. Code that consumed their
+  results as a bare `dict` and reached for arbitrary keys should switch to the
+  named fields (or narrow with `schema_is`).
+
+### Fixed
+
+- Refresh `harn models recommend` and provider-support seed data to current
+  catalog routes, and validate recommendation rows against Harn's model catalog
+  so stale local-model selectors fail before they ship.
+- Make `harn dump-protocol-artifacts` write and check gofmt-normalized Go protocol artifacts when
+  `gofmt` is available, so protocol artifact drift checks catch Go formatting drift before binding
+  validation.
+- Covered the protocol artifact drift check's warmed Harn binary reuse path in the Makefile cargo environment test.
+- Recursive functions can traverse values annotated with recursive type aliases
+  without hanging during type checking or runtime validation.
+- Harden release binary recovery by using the repo-pinned Rust toolchain
+  directly, surfacing sccache hit/write-error health in the run summary, and
+  allowing workflow-dispatch recovery to rebuild an explicit target subset
+  without a full release matrix.
+- Bound command artifact cleanup so completed `harn-command-cmd_*` directories from long-lived Harn
+  processes no longer accumulate indefinitely.
+- **`harn test` now avoids incidental SQLite event-log contention (#4482).**
+  User test cases default to an in-process memory event log unless an event-log
+  backend is explicitly configured, while SQLite/file-backed coverage remains
+  available for persistence and replay tests.
+- Local Harn-only checks now reuse a freshness-checked worktree `harn` binary
+  instead of falling back to repeated broad Cargo graph walks.
+- Warn when Harn code uses redundant nil-coalescing fallbacks, including `?? nil`
+  and type-proven unreachable fallbacks, and offer local fixes to remove them.
+- **Tree-sitter Harn now parses and highlights `throws` clauses (#4493).**
+  The generated parser artifacts include the `throws` token again, and the
+  bundled highlight query marks it as an exception keyword.
+- Reduced ACP transport future stack pressure by heap-allocating the dispatch
+  boundary, and removed a dead process-environment project-root fallback whose
+  tests were not portable across canonical macOS paths.
+- Isolate persistent store, metadata, and checkpoint state between `harn test`
+  cases so sequential and parallel tests cannot leak runtime state into one
+  another or the project root.
+- Serialized dependency materialization under `.harn/packages/` so concurrent
+  Harn commands do not race while removing and copying the same installed
+  package tree.
+- Kept the prompt-prose ratchet out of the generic Rust pre-commit path so
+  package-only edits do not build `harn` just to commit.
+- Narrowed the Rust prompt-prose ratchet so CI and hooks avoid redundant
+  Harn-script runs when protected prompt paths are unchanged.
+- **Recursive type aliases used as annotations no longer crash the compiler.**
+  A self-referential type such as `type Tree = {value: int, children: [Tree]}`
+  used as a parameter or binding annotation previously overflowed the stack and
+  aborted `harn check` / `harn run` (SIGABRT). The subtype checker now closes the
+  recursion coinductively (reflexive short-circuit plus a guard on the
+  pre-resolution `(expected, actual)` pair, matching how the parser's
+  `resolve_alias` already guards), and the compiler's alias expansion carries the
+  same cycle cutoff. Recursive shapes are now usable as type annotations.
+  (Known follow-up: a *recursive function* that traverses a recursive-typed
+  parameter can still hang at runtime — tracked in #4451.)
+
 ## v0.10.11
 
 ### Breaking
