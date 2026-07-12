@@ -185,7 +185,7 @@ impl HostlibRegistry {
         for builtin in self.builtins.iter().cloned() {
             let module = builtin.module;
             let method = builtin.method;
-            harn_vm::stdlib::host::register_mockable_host_operation(
+            harn_vm::stdlib::host::register_callable_host_operation(
                 module,
                 method,
                 "Hostlib schema-backed operation registered at runtime.",

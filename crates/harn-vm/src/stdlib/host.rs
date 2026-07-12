@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Instant;
 
 use serde_json::Value as JsonValue;
@@ -55,9 +55,15 @@ thread_local! {
     static HOST_MOCK_CALLS: RefCell<Vec<HostMockCall>> = const { RefCell::new(Vec::new()) };
     static HOST_MOCK_SCOPES: RefCell<Vec<(Vec<HostMock>, Vec<HostMockCall>)>> =
         const { RefCell::new(Vec::new()) };
-    static REGISTERED_HOST_OPERATIONS: RefCell<BTreeMap<String, BTreeMap<String, String>>> =
-        const { RefCell::new(BTreeMap::new()) };
 }
+
+// Mock-validation declarations describe the embedding process, not one test
+// worker. They intentionally do not make `host_has` report an operation as
+// callable; only installed hostlib handlers and live mocks do that.
+static MOCKABLE_HOST_OPERATIONS: LazyLock<RwLock<BTreeMap<String, BTreeMap<String, String>>>> =
+    LazyLock::new(|| RwLock::new(BTreeMap::new()));
+static CALLABLE_HOST_OPERATIONS: LazyLock<RwLock<BTreeMap<String, BTreeMap<String, String>>>> =
+    LazyLock::new(|| RwLock::new(BTreeMap::new()));
 
 pub(crate) fn reset_host_state() {
     HOST_MOCKS.with(|mocks| mocks.borrow_mut().clear());
@@ -390,23 +396,50 @@ pub fn register_mockable_host_operation(
     let capability_name = capability_name.as_ref().to_string();
     let operation_name = operation_name.as_ref().to_string();
     let description = description.as_ref().to_string();
-    REGISTERED_HOST_OPERATIONS.with(|registered| {
-        registered
-            .borrow_mut()
-            .entry(capability_name)
-            .or_default()
-            .insert(operation_name, description);
-    });
+    MOCKABLE_HOST_OPERATIONS
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(capability_name)
+        .or_default()
+        .insert(operation_name, description);
+}
+
+pub fn register_callable_host_operation(
+    capability_name: impl AsRef<str>,
+    operation_name: impl AsRef<str>,
+    description: impl AsRef<str>,
+) {
+    let capability_name = capability_name.as_ref().to_string();
+    let operation_name = operation_name.as_ref().to_string();
+    let description = description.as_ref().to_string();
+    CALLABLE_HOST_OPERATIONS
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(capability_name)
+        .or_default()
+        .insert(operation_name, description);
 }
 
 fn apply_registered_operations(root: &mut crate::value::DictMap) {
-    REGISTERED_HOST_OPERATIONS.with(|registered| {
-        for (capability_name, operations) in registered.borrow().iter() {
-            for (operation_name, description) in operations {
-                ensure_registered_operation(root, capability_name, operation_name, description);
-            }
+    let registered = CALLABLE_HOST_OPERATIONS
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (capability_name, operations) in registered.iter() {
+        for (operation_name, description) in operations {
+            ensure_registered_operation(root, capability_name, operation_name, description);
         }
-    });
+    }
+}
+
+fn apply_mockable_operations(root: &mut crate::value::DictMap) {
+    let registered = MOCKABLE_HOST_OPERATIONS
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (capability_name, operations) in registered.iter() {
+        for (operation_name, description) in operations {
+            ensure_registered_operation(root, capability_name, operation_name, description);
+        }
+    }
 }
 
 fn capability_manifest_with_mocks() -> VmValue {
@@ -423,6 +456,7 @@ fn capability_manifest_with_mocks() -> VmValue {
 fn known_host_operations() -> Vec<(String, String)> {
     let mut root = capability_manifest_map();
     apply_registered_operations(&mut root);
+    apply_mockable_operations(&mut root);
     root.into_iter()
         .flat_map(|(capability_name, capability)| {
             let capability_name = capability_name.to_string();
@@ -1722,9 +1756,10 @@ mod tests {
     use super::{
         build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
         dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
-        dispatch_mock_host_call, dispatch_mock_hostlib_call, parse_host_mock, push_host_mock,
-        register_mockable_host_operation, reset_host_state, resolve_process_exec_cwd,
-        set_host_call_bridge, validate_host_mock_registration, HostCallBridge, HostMock,
+        dispatch_mock_host_call, dispatch_mock_hostlib_call, host_has_builtin, parse_host_mock,
+        push_host_mock, register_mockable_host_operation, reset_host_state,
+        resolve_process_exec_cwd, set_host_call_bridge, validate_host_mock_registration,
+        HostCallBridge, HostMock,
     };
     use crate::value::VmDictExt;
 
@@ -2036,6 +2071,60 @@ mod tests {
         };
         validate_host_mock_registration(&host_mock)
             .expect("registered hostlib operations should be mockable");
+    }
+
+    #[tokio::test]
+    async fn declared_mockable_operation_is_not_reported_as_callable() {
+        std::thread::spawn(|| {
+            register_mockable_host_operation(
+                "async_host_registration",
+                "cross_thread",
+                "Embedding operation registered before async worker migration.",
+            );
+        })
+        .join()
+        .expect("registration worker should finish");
+
+        std::thread::spawn(|| {
+            let host_mock = HostMock {
+                capability: "async_host_registration".to_string(),
+                operation: "cross_thread".to_string(),
+                params: None,
+                result: Some(VmValue::Nil),
+                error: None,
+                unregistered_ok: false,
+            };
+            validate_host_mock_registration(&host_mock)
+                .expect("process host registration should be visible after worker migration");
+
+            let typo = HostMock {
+                operation: "cross_tread".to_string(),
+                ..host_mock
+            };
+            validate_host_mock_registration(&typo)
+                .expect_err("an undeclared operation should still fail closed");
+        })
+        .join()
+        .expect("validation worker should finish");
+
+        assert!(matches!(
+            host_has_builtin(
+                &[
+                    VmValue::string("async_host_registration"),
+                    VmValue::string("cross_thread"),
+                ],
+                &mut String::new(),
+            )
+            .expect("host_has should succeed"),
+            VmValue::Bool(false)
+        ));
+        dispatch_host_operation(
+            "async_host_registration",
+            "cross_thread",
+            &crate::value::DictMap::new(),
+        )
+        .await
+        .expect_err("an unmocked declaration must remain unsupported at dispatch");
     }
 
     #[test]

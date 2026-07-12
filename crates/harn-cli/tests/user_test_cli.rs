@@ -86,9 +86,13 @@ fn user_tests_register_project_host_capability_manifest_for_mocks() {
 import { with_host_mocks } from "std/testing"
 
 pipeline test_manifest_mock(task) {
+  assert(!host_has("synthetic_fixture", "answer"))
   with_host_mocks(
     [{capability: "synthetic_fixture", operation: "answer", result: 42}],
-    { _ -> assert_eq(host_call("synthetic_fixture.answer", {}), 42) },
+    { _ ->
+      assert(host_has("synthetic_fixture", "answer"))
+      assert_eq(host_call("synthetic_fixture.answer", {}), 42)
+    },
   )
 }
 "#,
