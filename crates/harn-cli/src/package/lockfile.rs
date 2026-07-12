@@ -954,6 +954,7 @@ pub(crate) fn materialize_dependencies_from_lock(
     refetch: Option<&str>,
     offline: bool,
 ) -> Result<usize, PackageError> {
+    let _guard = acquire_package_install_lock(ctx)?;
     let packages_dir = ctx.packages_dir();
     fs::create_dir_all(&packages_dir)
         .map_err(|error| format!("failed to create {}: {error}", packages_dir.display()))?;
@@ -1014,6 +1015,19 @@ pub(crate) fn materialize_dependencies_from_lock(
         installed += 1;
     }
     Ok(installed)
+}
+
+fn acquire_package_install_lock(ctx: &ManifestContext) -> Result<File, PackageError> {
+    let path = ctx.dir.join(".harn").join("package-install.lock");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let file = File::create(&path)
+        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+    file.lock_exclusive()
+        .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
+    Ok(file)
 }
 
 pub(crate) fn validate_lock_matches_manifest(
@@ -1407,6 +1421,7 @@ pub(crate) fn remove_package_in(
     let mut lock = LockFile::load(&ctx.lock_path())?.unwrap_or_default();
     lock.remove(alias);
     lock.save(&ctx.lock_path())?;
+    let _guard = acquire_package_install_lock(&ctx)?;
     remove_materialized_package(&ctx.packages_dir(), alias)?;
     Ok(true)
 }
@@ -1840,6 +1855,59 @@ mod tests {
             .join("acme-lib")
             .join("lib.harn")
             .is_file());
+    }
+
+    #[test]
+    fn concurrent_materialization_serializes_package_tree_updates() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let workspace = TestWorkspace::new(root);
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+
+    [dependencies]
+    acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
+    "#
+            ),
+        )
+        .unwrap();
+
+        install_packages_in(workspace.env(), false, None, false).unwrap();
+        fs::write(
+            root.join(PKG_DIR).join("acme-lib").join("lib.harn"),
+            "pub fn value() -> string { return \"stale\" }\n",
+        )
+        .unwrap();
+
+        let ctx = workspace.env().load_manifest_context().unwrap();
+        let lock = LockFile::load(&ctx.lock_path()).unwrap().unwrap();
+        let workspace_env = workspace.env().clone();
+        let handles = (0..8)
+            .map(|_| {
+                let workspace_env = workspace_env.clone();
+                let ctx = ctx.clone();
+                let lock = lock.clone();
+                std::thread::spawn(move || {
+                    materialize_dependencies_from_lock(&workspace_env, &ctx, &lock, None, false)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+
+        let materialized =
+            fs::read_to_string(root.join(PKG_DIR).join("acme-lib").join("lib.harn")).unwrap();
+        assert!(materialized.contains("return \"v1\""));
     }
 
     #[test]
