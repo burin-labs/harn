@@ -151,7 +151,7 @@ fn command_creation_pressure_sweeps_completed_siblings_from_current_process() {
     std::fs::write(old_completed.join("combined.txt"), "old").unwrap();
     let old = FileTime::from_system_time(
         std::time::SystemTime::now()
-            .checked_sub(Duration::from_secs(60))
+            .checked_sub(Duration::from_mins(1))
             .expect("system clock before epoch"),
     );
     filetime::set_file_mtime(&old_completed, old).unwrap();
