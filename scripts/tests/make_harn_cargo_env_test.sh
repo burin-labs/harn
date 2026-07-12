@@ -114,12 +114,17 @@ fi
 
 make_no_bin="$tmp_root/make-no-bin.txt"
 make_with_bin="$tmp_root/make-with-bin.txt"
-make -C "$repo_root" -n check-highlight > "$make_no_bin"
-if ! grep -Fq './scripts/cargo_with_worktree_build_dir.sh run --quiet -p harn-cli -- dump-highlight-keywords --check' "$make_no_bin"; then
-  echo "Makefile HARN_CLI_CMD did not use the Cargo env wrapper without HARN_BIN" >&2
-  cat "$make_no_bin" >&2
-  exit 1
-fi
+make -C "$repo_root" -n check-highlight check-protocol-artifacts > "$make_no_bin"
+for expected in \
+  './scripts/cargo_with_worktree_build_dir.sh run --quiet -p harn-cli -- dump-highlight-keywords --check' \
+  './scripts/cargo_with_worktree_build_dir.sh run --quiet -p harn-cli -- dump-protocol-artifacts --check'
+do
+  if ! grep -Fq "$expected" "$make_no_bin"; then
+    echo "Makefile HARN_CLI_CMD did not use the Cargo env wrapper without HARN_BIN: $expected" >&2
+    cat "$make_no_bin" >&2
+    exit 1
+  fi
+done
 
 make_targets="$tmp_root/make-cargo-targets.txt"
 make -C "$repo_root" -n \
@@ -150,12 +155,17 @@ done
 fake_harn="$tmp_root/fake harn"
 touch "$fake_harn"
 chmod +x "$fake_harn"
-make -C "$repo_root" -n check-highlight HARN_BIN="$fake_harn" > "$make_with_bin"
-if ! grep -Fq "\"$fake_harn\" dump-highlight-keywords --check" "$make_with_bin"; then
-  echo "Makefile HARN_CLI_CMD did not preserve HARN_BIN fast path" >&2
-  cat "$make_with_bin" >&2
-  exit 1
-fi
+make -C "$repo_root" -n check-highlight check-protocol-artifacts HARN_BIN="$fake_harn" > "$make_with_bin"
+for expected in \
+  "\"$fake_harn\" dump-highlight-keywords --check" \
+  "\"$fake_harn\" dump-protocol-artifacts --check"
+do
+  if ! grep -Fq "$expected" "$make_with_bin"; then
+    echo "Makefile HARN_CLI_CMD did not preserve HARN_BIN fast path: $expected" >&2
+    cat "$make_with_bin" >&2
+    exit 1
+  fi
+done
 if grep -Fq './scripts/cargo_with_worktree_build_dir.sh' "$make_with_bin"; then
   echo "Makefile used wrapper despite HARN_BIN being set" >&2
   cat "$make_with_bin" >&2
