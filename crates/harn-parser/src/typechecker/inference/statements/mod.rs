@@ -9,7 +9,7 @@
 //! `check_pattern_defaults`) and `check_attributes` live here because
 //! they are only called from `check_node`'s arms.
 
-use harn_lexer::Span;
+use harn_lexer::{FixEdit, Span};
 mod access;
 mod attributes;
 mod blocks;

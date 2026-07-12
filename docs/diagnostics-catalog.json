@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 60
+      "count": 62
     },
     {
       "id": "FMT",
@@ -2301,6 +2301,24 @@
         "HARN-LNT-050",
         "HARN-LNT-029"
       ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-061",
+      "category": "LNT",
+      "summary": "nil coalesce fallback is nil",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-062",
+      "category": "LNT",
+      "summary": "nil coalesce fallback is unreachable",
+      "repairs": [],
+      "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
     },

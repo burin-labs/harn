@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 60 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 62 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -309,6 +309,8 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-058`](#harn-lnt-058) | if / while / guard condition is statically known to always succeed or always fail | — | — |
 | [`HARN-LNT-059`](#harn-lnt-059) | project rule-engine or native lint rule | — | — |
 | [`HARN-LNT-060`](#harn-lnt-060) | inline options dict bypasses the typed option constructors | `types/add-shape-annotation` | `surface-changing` |
+| [`HARN-LNT-061`](#harn-lnt-061) | nil coalesce fallback is nil | — | — |
+| [`HARN-LNT-062`](#harn-lnt-062) | nil coalesce fallback is unreachable | — | — |
 
 ## FMT — Formatter
 
@@ -3327,6 +3329,72 @@ nudge toward the single documented path.
   `std/workflow/options`.
 - Suppress the lint only for throwaway probes and fixtures where the inline
   dict is the point.
+
+### `HARN-LNT-061`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+nil coalesce fallback is nil
+
+#### What it means
+
+`expr ?? nil` is equivalent to `expr`: when the left side is absent, the
+nil-coalescing expression already evaluates to `nil`. The fallback does not
+make the value safer or more explicit; it only adds a redundant branch that can
+hide real defaulting logic.
+
+This lint is warning-level because the code still behaves the same way.
+
+#### How to fix
+
+Remove the `?? nil` fallback:
+
+```harn
+const value = task?.flag
+```
+
+Use a real fallback value when the expression needs a concrete default, such as
+`false`, `0`, an empty list, or a typed record.
+
+### `HARN-LNT-062`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+nil coalesce fallback is unreachable
+
+#### What it means
+
+The left side of a `??` expression has a statically non-nil type, so the
+fallback branch can never run. This often happens after a typed conversion or
+producer already returns a concrete value:
+
+```harn
+fn parse_number(raw: string) -> int {
+  return 0
+}
+
+const raw: string? = nil
+const value = parse_number(raw ?? "0") ?? 0
+```
+
+The outer fallback is redundant when `parse_number(...)` has a non-nil result
+type.
+
+#### How to fix
+
+Remove the unreachable fallback:
+
+```harn
+fn parse_number(raw: string) -> int {
+  return 0
+}
+
+const raw: string? = nil
+const value = parse_number(raw ?? "0")
+```
+
+If the fallback really is needed, change the left expression or annotation so
+its type accurately includes `nil`.
 
 ### `HARN-FMT-001`
 
