@@ -5,6 +5,10 @@ use crate::llm::receipts::ToolCallReceipt;
 use crate::orchestration::{HandoffArtifact, MutationSessionRecord};
 use crate::tool_annotations::ToolKind;
 
+use super::host_injection::{
+    AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
+    SanitizationVerdict,
+};
 use super::tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus};
 use super::worker::{FsWatchEvent, WorkerEvent};
 
@@ -367,6 +371,50 @@ pub enum AgentEvent {
         content: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         streak: Option<usize>,
+    },
+    HostToolResult {
+        session_id: String,
+        injection_id: String,
+        tool_call_id: String,
+        tool_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<ToolKind>,
+        raw_input: serde_json::Value,
+        status: ToolCallStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_output: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result_pointer: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        delivery: InjectionDelivery,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivered_at_seam: Option<String>,
+        sequence: u64,
+        provenance: HostInjectionProvenance,
+        sanitization: SanitizationVerdict,
+    },
+    HostAttachment {
+        session_id: String,
+        injection_id: String,
+        media_type: String,
+        flavor: AttachmentFlavor,
+        artifact_pointer: String,
+        sha256: String,
+        size_bytes: u64,
+        rendered: AttachmentRendering,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description_model: Option<String>,
+        delivery: InjectionDelivery,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivered_at_seam: Option<String>,
+        sequence: u64,
+        provenance: HostInjectionProvenance,
+        sanitization: SanitizationVerdict,
     },
     /// Emitted when the agent loop exhausts `max_iterations` without any
     /// explicit break condition firing. Distinct from a natural "done" or
@@ -898,6 +946,8 @@ impl AgentEvent {
             | Self::MissingToolCallVerdict { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
+            | Self::HostToolResult { session_id, .. }
+            | Self::HostAttachment { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
             | Self::BudgetCircuitBreaker { session_id, .. }
             | Self::LoopStuck { session_id, .. }

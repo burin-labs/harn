@@ -22,6 +22,7 @@ const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
 const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SUBSCRIBE_BUILTIN_DEF,
     &AGENT_INJECT_FEEDBACK_BUILTIN_DEF,
+    &AGENT_INJECT_HOST_EVENT_BUILTIN_DEF,
     &PROMPT_EXPLAIN_BUILTIN_DEF,
 ];
 
@@ -354,6 +355,37 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
     crate::agent_sessions::inject_message(&session_id, agent_feedback_message(&kind, &content))
         .map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
+}
+
+/// Inject a typed host-originated event into an agent session.
+#[harn_builtin(
+    sig = "agent_inject_host_event(session_id: string, injection: dict) -> dict",
+    category = "agent.host"
+)]
+fn agent_inject_host_event_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_host_event(session_id, injection): session_id must be a string"
+                    .into(),
+            ))
+        }
+    };
+    let injection = match args.get(1) {
+        Some(VmValue::Dict(_)) => args[1].clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_host_event(session_id, injection): injection must be a dict".into(),
+            ))
+        }
+    };
+    let result = crate::agent_sessions::inject_host_event(&session_id, injection)
+        .map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
 /// Assemble the system prompt from the given agent options and return the

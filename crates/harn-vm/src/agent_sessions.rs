@@ -25,11 +25,17 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use crate::actor_chain::ActorChain;
+use crate::agent_events::{
+    AgentEvent, AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
+    SanitizationAction, SanitizationVerdict, ToolCallStatus,
+};
 use crate::agent_transcript_budget::{
     apply_transcript_with_budget, transcript_budget_policy_json, transcript_budget_usage_json,
     transcript_message_count, transcript_usage,
 };
 use crate::runtime_limits::RuntimeLimits;
+use crate::security::TrustLevel;
+use crate::tool_annotations::ToolKind;
 use crate::value::VmValue;
 use crate::workspace_anchor::{
     MountMode, MountedRoot, WorkspaceAnchor, WorkspacePolicy, WORKSPACE_ANCHOR_METADATA_KEY,
@@ -1728,6 +1734,444 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         emit_llm_message_event(id, message_index, &persisted_message);
         Ok(())
     })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum HostInjectionKind {
+    HostToolResult,
+    HostAttachment,
+}
+
+#[derive(serde::Deserialize)]
+struct HostInjectionRequest {
+    kind: HostInjectionKind,
+    #[serde(default)]
+    delivery: InjectionDelivery,
+    payload: serde_json::Value,
+    provenance: HostInjectionProvenance,
+}
+
+#[derive(serde::Deserialize)]
+struct HostToolResultPayload {
+    #[serde(default)]
+    tool_call_id: Option<String>,
+    tool_name: String,
+    #[serde(default)]
+    kind: Option<ToolKind>,
+    #[serde(default)]
+    raw_input: serde_json::Value,
+    #[serde(default = "default_completed_tool_status")]
+    status: ToolCallStatus,
+    #[serde(default)]
+    raw_output: Option<serde_json::Value>,
+    #[serde(default)]
+    result_pointer: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    duration_ms: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+struct HostAttachmentPayload {
+    media_type: String,
+    flavor: AttachmentFlavor,
+    artifact_pointer: String,
+    sha256: String,
+    size_bytes: u64,
+    rendered: AttachmentRendering,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    description_model: Option<String>,
+}
+
+fn default_completed_tool_status() -> ToolCallStatus {
+    ToolCallStatus::Completed
+}
+
+pub fn inject_host_event(id: &str, injection: VmValue) -> Result<serde_json::Value, String> {
+    let injection_json = crate::llm::helpers::vm_value_to_json(&injection);
+    let request: HostInjectionRequest = serde_json::from_value(injection_json)
+        .map_err(|error| format!("agent_inject_host_event: invalid injection: {error}"))?;
+    if request.delivery != InjectionDelivery::Immediate {
+        return Err(format!(
+            "agent_inject_host_event: delivery '{}' is reserved for queued injection in H2; H1 only supports 'immediate'",
+            request.delivery.as_str()
+        ));
+    }
+    let injection_id = uuid::Uuid::now_v7().to_string();
+    let sequence = next_host_injection_sequence(id)?;
+    let (message, transcript_event, agent_event) = match request.kind {
+        HostInjectionKind::HostToolResult => {
+            let payload: HostToolResultPayload =
+                serde_json::from_value(request.payload).map_err(|error| {
+                    format!("agent_inject_host_event: invalid host_tool_result payload: {error}")
+                })?;
+            build_host_tool_result_injection(
+                id,
+                injection_id.clone(),
+                sequence,
+                request.delivery,
+                request.provenance,
+                payload,
+            )
+        }
+        HostInjectionKind::HostAttachment => {
+            let payload: HostAttachmentPayload =
+                serde_json::from_value(request.payload).map_err(|error| {
+                    format!("agent_inject_host_event: invalid host_attachment payload: {error}")
+                })?;
+            build_host_attachment_injection(
+                id,
+                injection_id.clone(),
+                sequence,
+                request.delivery,
+                request.provenance,
+                payload,
+            )
+        }
+    };
+    inject_typed_message(id, message, transcript_event, agent_event)?;
+    Ok(serde_json::json!({
+        "injection_id": injection_id,
+        "sequence": sequence,
+        "delivery": request.delivery.as_str(),
+        "status": "injected",
+    }))
+}
+
+fn next_host_injection_sequence(id: &str) -> Result<u64, String> {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let Some(state) = map.get(id) else {
+            return Err(format!(
+                "agent_inject_host_event: unknown session id '{id}'"
+            ));
+        };
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(crate::value::DictMap::new);
+        let count = match dict.get("events") {
+            Some(VmValue::List(events)) => events
+                .iter()
+                .filter(|event| {
+                    event
+                        .as_dict()
+                        .and_then(|event| event.get("kind"))
+                        .map(VmValue::display)
+                        .is_some_and(|kind| kind == "host_tool_result" || kind == "host_attachment")
+                })
+                .count(),
+            _ => 0,
+        };
+        Ok(count as u64)
+    })
+}
+
+fn build_host_tool_result_injection(
+    session_id: &str,
+    injection_id: String,
+    sequence: u64,
+    delivery: InjectionDelivery,
+    provenance: HostInjectionProvenance,
+    payload: HostToolResultPayload,
+) -> (VmValue, VmValue, AgentEvent) {
+    let tool_call_id = payload
+        .tool_call_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("hosttc_{}", injection_id.replace('-', "")));
+    let body = host_tool_result_body(&payload);
+    let text =
+        host_injection_envelope("host_tool_result", &payload.tool_name, &injection_id, &body);
+    let sanitization = h1_sanitization_verdict(
+        trust_for_tool(payload.kind, &provenance),
+        &serde_json::json!({
+            "raw_output": payload.raw_output,
+            "result_pointer": payload.result_pointer,
+            "error": payload.error,
+        }),
+        &text,
+    );
+    let metadata = serde_json::json!({
+        "injection_id": injection_id,
+        "sequence": sequence,
+        "provenance": provenance,
+        "sanitization": sanitization,
+        "tool_call_id": tool_call_id,
+        "tool_name": payload.tool_name,
+        "result_pointer": payload.result_pointer,
+    });
+    let message = host_injection_user_message(&injection_id, &text, &metadata);
+    let transcript_event = crate::llm::helpers::transcript_event(
+        "host_tool_result",
+        "user",
+        "public",
+        &text,
+        Some(metadata),
+    );
+    let event = AgentEvent::HostToolResult {
+        session_id: session_id.to_string(),
+        injection_id,
+        tool_call_id,
+        tool_name: payload.tool_name,
+        kind: payload.kind,
+        raw_input: payload.raw_input,
+        status: payload.status,
+        raw_output: payload.raw_output,
+        result_pointer: payload.result_pointer,
+        error: payload.error,
+        duration_ms: payload.duration_ms,
+        delivery,
+        delivered_at_seam: Some("immediate".to_string()),
+        sequence,
+        provenance,
+        sanitization,
+    };
+    (message, transcript_event, event)
+}
+
+fn build_host_attachment_injection(
+    session_id: &str,
+    injection_id: String,
+    sequence: u64,
+    delivery: InjectionDelivery,
+    provenance: HostInjectionProvenance,
+    payload: HostAttachmentPayload,
+) -> (VmValue, VmValue, AgentEvent) {
+    let body = host_attachment_body(&payload);
+    let text =
+        host_injection_envelope("host_attachment", &payload.media_type, &injection_id, &body);
+    let sanitization = h1_sanitization_verdict(
+        trust_for_attachment(payload.flavor, &provenance),
+        &serde_json::json!({
+            "artifact_pointer": payload.artifact_pointer,
+            "sha256": payload.sha256,
+            "size_bytes": payload.size_bytes,
+            "description": payload.description,
+        }),
+        &text,
+    );
+    let metadata = serde_json::json!({
+        "injection_id": injection_id,
+        "sequence": sequence,
+        "provenance": provenance,
+        "sanitization": sanitization,
+        "artifact_pointer": payload.artifact_pointer,
+        "sha256": payload.sha256,
+        "media_type": payload.media_type,
+        "flavor": payload.flavor,
+    });
+    let message = host_injection_user_message(&injection_id, &text, &metadata);
+    let transcript_event = crate::llm::helpers::transcript_event(
+        "host_attachment",
+        "user",
+        "public",
+        &text,
+        Some(metadata),
+    );
+    let event = AgentEvent::HostAttachment {
+        session_id: session_id.to_string(),
+        injection_id,
+        media_type: payload.media_type,
+        flavor: payload.flavor,
+        artifact_pointer: payload.artifact_pointer,
+        sha256: payload.sha256,
+        size_bytes: payload.size_bytes,
+        rendered: payload.rendered,
+        description: payload.description,
+        description_model: payload.description_model,
+        delivery,
+        delivered_at_seam: Some("immediate".to_string()),
+        sequence,
+        provenance,
+        sanitization,
+    };
+    (message, transcript_event, event)
+}
+
+fn inject_typed_message(
+    id: &str,
+    message: VmValue,
+    transcript_event: VmValue,
+    agent_event: AgentEvent,
+) -> Result<(), String> {
+    let Some(msg_dict) = message.as_dict().cloned() else {
+        return Err("agent_inject_host_event: materialized message must be a dict".into());
+    };
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!(
+                "agent_inject_host_event: unknown session id '{id}'"
+            ));
+        };
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(crate::value::DictMap::new);
+        let mut messages: Vec<VmValue> = match dict.get("messages") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => Vec::new(),
+        };
+        let mut events: Vec<VmValue> = match dict.get("events") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => crate::llm::helpers::transcript_events_from_messages(&messages),
+        };
+        let new_message = VmValue::dict(msg_dict);
+        let message_index = messages.len();
+        events.push(transcript_event);
+        messages.push(new_message);
+        let mut next = dict;
+        next.insert(
+            crate::value::intern_key("events"),
+            VmValue::List(std::sync::Arc::new(events)),
+        );
+        next.insert(
+            crate::value::intern_key("messages"),
+            VmValue::List(std::sync::Arc::new(messages)),
+        );
+        let persisted_message = next
+            .get("messages")
+            .and_then(|value| match value {
+                VmValue::List(list) => list.get(message_index).cloned(),
+                _ => None,
+            })
+            .unwrap_or(VmValue::Nil);
+        apply_transcript_with_budget(state, VmValue::dict(next), "inject_host_event")?;
+        emit_identified_user_message_event(id, &persisted_message);
+        emit_llm_message_event(id, message_index, &persisted_message);
+        crate::agent_events::emit_event(&agent_event);
+        Ok(())
+    })
+}
+
+fn host_injection_user_message(
+    injection_id: &str,
+    text: &str,
+    metadata: &serde_json::Value,
+) -> VmValue {
+    let mut message = BTreeMap::new();
+    message.put_str("role", "user");
+    message.put_str(
+        "messageId",
+        format!("hostinj_{}", injection_id.replace('-', "")),
+    );
+    message.insert(
+        "content".to_string(),
+        crate::stdlib::json_to_vm_value(&serde_json::json!([
+            {"type": "text", "text": text}
+        ])),
+    );
+    message.insert(
+        "metadata".to_string(),
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "host_injection": metadata,
+        })),
+    );
+    VmValue::dict(message)
+}
+
+fn host_tool_result_body(payload: &HostToolResultPayload) -> String {
+    if let Some(output) = payload.raw_output.as_ref() {
+        if let Some(text) = output.as_str() {
+            return text.to_string();
+        }
+        return serde_json::to_string_pretty(output).unwrap_or_else(|_| output.to_string());
+    }
+    if let Some(pointer) = payload.result_pointer.as_deref() {
+        return format!("Result artifact: {pointer}");
+    }
+    if let Some(error) = payload.error.as_deref() {
+        return format!("Error: {error}");
+    }
+    String::new()
+}
+
+fn host_attachment_body(payload: &HostAttachmentPayload) -> String {
+    match payload.rendered {
+        AttachmentRendering::InlineText => payload
+            .description
+            .clone()
+            .unwrap_or_else(|| format!("Attachment: {}", payload.artifact_pointer)),
+        AttachmentRendering::DescriptionPlusPointer => format!(
+            "{}\nArtifact: {}",
+            payload.description.clone().unwrap_or_default(),
+            payload.artifact_pointer
+        ),
+        AttachmentRendering::ImageBlock | AttachmentRendering::PointerOnly => {
+            format!("Attachment: {}", payload.artifact_pointer)
+        }
+    }
+}
+
+fn host_injection_envelope(kind: &str, subject: &str, injection_id: &str, body: &str) -> String {
+    format!(
+        "<{kind} subject=\"{}\" injection_id=\"{}\">\n{}\n</{kind}>",
+        escape_attr(subject),
+        escape_attr(injection_id),
+        body
+    )
+}
+
+fn escape_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn h1_sanitization_verdict(
+    trust: TrustLevel,
+    original: &serde_json::Value,
+    delivered: &str,
+) -> SanitizationVerdict {
+    SanitizationVerdict {
+        trust,
+        detector: None,
+        action: SanitizationAction::Passed,
+        original_bytes: serde_json::to_vec(original)
+            .map(|bytes| bytes.len() as u64)
+            .unwrap_or(0),
+        delivered_bytes: delivered.len() as u64,
+        summary_model: None,
+        labels: Vec::new(),
+    }
+}
+
+fn trust_for_tool(kind: Option<ToolKind>, provenance: &HostInjectionProvenance) -> TrustLevel {
+    if provenance.source == "user_attachment" {
+        return TrustLevel::Untrusted;
+    }
+    match kind {
+        Some(ToolKind::Fetch) | Some(ToolKind::Search) => TrustLevel::Untrusted,
+        Some(ToolKind::Read) => TrustLevel::SemiTrusted,
+        Some(ToolKind::Execute)
+        | Some(ToolKind::Edit)
+        | Some(ToolKind::Delete)
+        | Some(ToolKind::Move) => TrustLevel::SemiTrusted,
+        _ => TrustLevel::Trusted,
+    }
+}
+
+fn trust_for_attachment(
+    flavor: AttachmentFlavor,
+    provenance: &HostInjectionProvenance,
+) -> TrustLevel {
+    if provenance.source == "user_attachment" {
+        return TrustLevel::Untrusted;
+    }
+    match flavor {
+        AttachmentFlavor::TextFrame | AttachmentFlavor::FrameRing => TrustLevel::SemiTrusted,
+        AttachmentFlavor::Image | AttachmentFlavor::File => TrustLevel::Untrusted,
+    }
 }
 
 fn emit_identified_user_message_event(session_id: &str, message: &VmValue) {

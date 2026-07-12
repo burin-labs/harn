@@ -309,6 +309,77 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "deliveredAtSeam": "immediate",
+        "delivery": "immediate",
+        "durationMs": 17,
+        "error": null,
+        "injectionId": "inj-tool-1",
+        "kind": "host_tool_result",
+        "provenance": {
+          "host": "tui",
+          "initiator": "user",
+          "source": "user_invoked_tool",
+          "ts_ms": 1782000000000
+        },
+        "rawInput": {
+          "url": "https://example.test"
+        },
+        "rawOutput": {
+          "text": "payload"
+        },
+        "resultPointer": null,
+        "sanitization": {
+          "action": "passed",
+          "delivered_bytes": 7,
+          "labels": [
+            "web_content"
+          ],
+          "original_bytes": 31,
+          "trust": "untrusted"
+        },
+        "sequence": 2,
+        "sessionId": "session-1",
+        "status": "completed",
+        "toolCallId": "hosttc-1",
+        "toolName": "web_fetch"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "artifactPointer": ".burin/chat-assets/a.png",
+        "deliveredAtSeam": "immediate",
+        "delivery": "immediate",
+        "description": "screenshot",
+        "descriptionModel": "vision-model",
+        "flavor": "image",
+        "injectionId": "inj-attachment-1",
+        "kind": "host_attachment",
+        "mediaType": "image/png",
+        "provenance": {
+          "host": "tui",
+          "initiator": "user",
+          "source": "user_attachment",
+          "ts_ms": 1782000000001
+        },
+        "rendered": "pointer_only",
+        "sanitization": {
+          "action": "pointerized",
+          "delivered_bytes": 22,
+          "original_bytes": 42,
+          "trust": "untrusted"
+        },
+        "sequence": 3,
+        "sessionId": "session-1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sizeBytes": 42
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
         "content": "missed required tool call; reissuing",
         "feedbackKind": "protocol_violation",
         "kind": "feedback_injected",

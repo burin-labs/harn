@@ -1459,6 +1459,116 @@ fn tool_call_audit_session_id_routes_correctly() {
 }
 
 #[test]
+fn host_tool_result_event_round_trips_with_sanitization_metadata() {
+    let event = AgentEvent::HostToolResult {
+        session_id: "s".into(),
+        injection_id: "inj-1".into(),
+        tool_call_id: "hosttc-1".into(),
+        tool_name: "web_fetch".into(),
+        kind: Some(crate::tool_annotations::ToolKind::Fetch),
+        raw_input: serde_json::json!({"url": "https://example.test"}),
+        status: ToolCallStatus::Completed,
+        raw_output: Some(serde_json::json!({"text": "payload"})),
+        result_pointer: None,
+        error: None,
+        duration_ms: Some(17),
+        delivery: InjectionDelivery::Immediate,
+        delivered_at_seam: Some("immediate".into()),
+        sequence: 2,
+        provenance: HostInjectionProvenance {
+            initiator: "user".into(),
+            source: "user_invoked_tool".into(),
+            host: Some("tui".into()),
+            ts_ms: 1_782_000_000_000,
+        },
+        sanitization: SanitizationVerdict {
+            trust: crate::security::TrustLevel::Untrusted,
+            detector: None,
+            action: SanitizationAction::Passed,
+            original_bytes: 31,
+            delivered_bytes: 7,
+            summary_model: None,
+            labels: vec!["web_content".into()],
+        },
+    };
+
+    let json = serde_json::to_value(&event).expect("serialize");
+    assert_eq!(json["type"], "host_tool_result");
+    assert_eq!(json["delivery"], "immediate");
+    assert_eq!(json["sanitization"]["trust"], "untrusted");
+    assert_eq!(json["provenance"]["source"], "user_invoked_tool");
+
+    let recovered: AgentEvent = serde_json::from_value(json).expect("deserialize");
+    assert_eq!(recovered.session_id(), "s");
+    match recovered {
+        AgentEvent::HostToolResult {
+            sequence,
+            kind,
+            sanitization,
+            ..
+        } => {
+            assert_eq!(sequence, 2);
+            assert_eq!(kind, Some(crate::tool_annotations::ToolKind::Fetch));
+            assert_eq!(sanitization.trust, crate::security::TrustLevel::Untrusted);
+        }
+        other => panic!("expected HostToolResult, got {other:?}"),
+    }
+}
+
+#[test]
+fn host_attachment_event_round_trips_without_optional_description() {
+    let event = AgentEvent::HostAttachment {
+        session_id: "s".into(),
+        injection_id: "inj-2".into(),
+        media_type: "image/png".into(),
+        flavor: AttachmentFlavor::Image,
+        artifact_pointer: ".burin/chat-assets/a.png".into(),
+        sha256: "a".repeat(64),
+        size_bytes: 42,
+        rendered: AttachmentRendering::PointerOnly,
+        description: None,
+        description_model: None,
+        delivery: InjectionDelivery::Immediate,
+        delivered_at_seam: Some("immediate".into()),
+        sequence: 0,
+        provenance: HostInjectionProvenance {
+            initiator: "user".into(),
+            source: "user_attachment".into(),
+            host: None,
+            ts_ms: 1,
+        },
+        sanitization: SanitizationVerdict {
+            trust: crate::security::TrustLevel::Untrusted,
+            detector: None,
+            action: SanitizationAction::Pointerized,
+            original_bytes: 42,
+            delivered_bytes: 22,
+            summary_model: None,
+            labels: Vec::new(),
+        },
+    };
+
+    let json = serde_json::to_value(&event).expect("serialize");
+    assert_eq!(json["type"], "host_attachment");
+    assert!(json.get("description").is_none());
+    assert_eq!(json["rendered"], "pointer_only");
+
+    let recovered: AgentEvent = serde_json::from_value(json).expect("deserialize");
+    assert_eq!(recovered.session_id(), "s");
+    match recovered {
+        AgentEvent::HostAttachment {
+            artifact_pointer,
+            description,
+            ..
+        } => {
+            assert_eq!(artifact_pointer, ".burin/chat-assets/a.png");
+            assert!(description.is_none());
+        }
+        other => panic!("expected HostAttachment, got {other:?}"),
+    }
+}
+
+#[test]
 fn tool_call_audit_serializes_typed_receipt_when_present() {
     let receipt = ToolCallReceipt {
         schema_version: 1,

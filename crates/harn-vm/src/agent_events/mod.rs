@@ -26,6 +26,7 @@
 
 mod agent;
 mod from_host;
+mod host_injection;
 mod registry;
 mod sinks;
 mod tool;
@@ -35,6 +36,10 @@ mod worker;
 mod tests;
 
 pub use agent::AgentEvent;
+pub use host_injection::{
+    AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
+    SanitizationAction, SanitizationVerdict,
+};
 #[cfg(test)]
 pub use registry::reset_wildcard_sinks;
 pub use registry::{

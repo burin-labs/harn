@@ -1,6 +1,7 @@
 use harn_vm::agent_events::{
-    AgentEvent, AgentEventSink, FsWatchEvent, ToolCallErrorCategory, ToolCallStatus, ToolExecutor,
-    ToolMutationStatus,
+    AgentEvent, AgentEventSink, AttachmentFlavor, AttachmentRendering, FsWatchEvent,
+    HostInjectionProvenance, InjectionDelivery, SanitizationAction, SanitizationVerdict,
+    ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus,
 };
 use harn_vm::composition::{
     composition_snippet_hash, CompositionChildCall, CompositionChildResult,
@@ -513,6 +514,67 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
                 "stage": "verify"
             }),
         },
+        AgentEvent::HostToolResult {
+            session_id: "session-1".to_string(),
+            injection_id: "inj-tool-1".to_string(),
+            tool_call_id: "hosttc-1".to_string(),
+            tool_name: "web_fetch".to_string(),
+            kind: Some(ToolKind::Fetch),
+            raw_input: serde_json::json!({"url": "https://example.test"}),
+            status: ToolCallStatus::Completed,
+            raw_output: Some(serde_json::json!({"text": "payload"})),
+            result_pointer: None,
+            error: None,
+            duration_ms: Some(17),
+            delivery: InjectionDelivery::Immediate,
+            delivered_at_seam: Some("immediate".to_string()),
+            sequence: 2,
+            provenance: HostInjectionProvenance {
+                initiator: "user".to_string(),
+                source: "user_invoked_tool".to_string(),
+                host: Some("tui".to_string()),
+                ts_ms: 1_782_000_000_000,
+            },
+            sanitization: SanitizationVerdict {
+                trust: harn_vm::security::TrustLevel::Untrusted,
+                detector: None,
+                action: SanitizationAction::Passed,
+                original_bytes: 31,
+                delivered_bytes: 7,
+                summary_model: None,
+                labels: vec!["web_content".to_string()],
+            },
+        },
+        AgentEvent::HostAttachment {
+            session_id: "session-1".to_string(),
+            injection_id: "inj-attachment-1".to_string(),
+            media_type: "image/png".to_string(),
+            flavor: AttachmentFlavor::Image,
+            artifact_pointer: ".burin/chat-assets/a.png".to_string(),
+            sha256: "a".repeat(64),
+            size_bytes: 42,
+            rendered: AttachmentRendering::PointerOnly,
+            description: Some("screenshot".to_string()),
+            description_model: Some("vision-model".to_string()),
+            delivery: InjectionDelivery::Immediate,
+            delivered_at_seam: Some("immediate".to_string()),
+            sequence: 3,
+            provenance: HostInjectionProvenance {
+                initiator: "user".to_string(),
+                source: "user_attachment".to_string(),
+                host: Some("tui".to_string()),
+                ts_ms: 1_782_000_000_001,
+            },
+            sanitization: SanitizationVerdict {
+                trust: harn_vm::security::TrustLevel::Untrusted,
+                detector: None,
+                action: SanitizationAction::Pointerized,
+                original_bytes: 42,
+                delivered_bytes: 22,
+                summary_model: None,
+                labels: Vec::new(),
+            },
+        },
         AgentEvent::FeedbackInjected {
             session_id: "session-1".to_string(),
             kind: "protocol_violation".to_string(),
@@ -574,7 +636,8 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     ]
 }
 
-/// Pipeline-loop milestone events ride on the ACP `ExtNotification`
+/// Harn agent events without a canonical ACP `session/update` slot ride on
+/// the ACP `ExtNotification`
 /// channel via `_harn/agentEvent`. The fixture pins the wire shape
 /// per kind so any drift in field names (e.g. snake_case vs.
 /// camelCase) or payload structure trips a build-time failure
@@ -608,7 +671,7 @@ async fn agent_event_ext_notification_fixtures_are_pinned() {
         assert_eq!(
             notification["method"].as_str().expect("method"),
             HARN_AGENT_EVENT_METHOD,
-            "every pipeline-loop milestone notification must use the \
+            "every Harn agent-event extension notification must use the \
                  advertised _harn/agentEvent method"
         );
         assert!(
