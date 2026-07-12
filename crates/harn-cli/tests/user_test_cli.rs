@@ -64,3 +64,84 @@ pipeline test_beta(task) {
         "test-start progress should be emitted before PASS:\n{stdout}"
     );
 }
+
+#[test]
+fn user_tests_register_project_host_capability_manifest_for_mocks() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("suite");
+    std::fs::create_dir_all(&suite).expect("create suite");
+    std::fs::write(
+        temp.path().join("harn.toml"),
+        "[check]\nhost_capabilities_path = \"host-capabilities.json\"\n",
+    )
+    .expect("write manifest");
+    std::fs::write(
+        temp.path().join("host-capabilities.json"),
+        r#"{"synthetic_fixture":["answer"]}"#,
+    )
+    .expect("write host capabilities");
+    std::fs::write(
+        suite.join("test_manifest_mock.harn"),
+        r#"
+import { with_host_mocks } from "std/testing"
+
+pipeline test_manifest_mock(task) {
+  with_host_mocks(
+    [{capability: "synthetic_fixture", operation: "answer", result: 42}],
+    { _ -> assert_eq(host_call("synthetic_fixture.answer", {}), 42) },
+  )
+}
+"#,
+    )
+    .expect("write test");
+
+    let output = Command::new(binary_path())
+        .args(["test", suite.to_str().unwrap(), "--timeout", "10000"])
+        .output()
+        .expect("spawn harn test");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn user_tests_reject_mock_operation_missing_from_project_manifest() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("suite");
+    std::fs::create_dir_all(&suite).expect("create suite");
+    std::fs::write(
+        temp.path().join("harn.toml"),
+        "[check]\nhost_capabilities.synthetic_fixture = [\"answer\"]\n",
+    )
+    .expect("write manifest");
+    std::fs::write(
+        suite.join("test_manifest_typo.harn"),
+        r#"
+import { with_host_mocks } from "std/testing"
+
+pipeline test_manifest_typo(task) {
+  with_host_mocks(
+    [{capability: "synthetic_fixture", operation: "asnwer", result: 42}],
+    { _ -> nil },
+  )
+}
+"#,
+    )
+    .expect("write test");
+
+    let output = Command::new(binary_path())
+        .args(["test", suite.to_str().unwrap(), "--timeout", "10000"])
+        .output()
+        .expect("spawn harn test");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(!output.status.success(), "unexpected success:\n{stdout}");
+    assert!(
+        stdout.contains("unregistered host operation synthetic_fixture.asnwer"),
+        "missing strict registration failure:\n{stdout}"
+    );
+}

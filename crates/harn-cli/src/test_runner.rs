@@ -36,6 +36,25 @@ fn install_user_test_event_log_if_unset() {
     );
 }
 
+fn register_manifest_host_operations(extensions: &crate::package::RuntimeExtensions) {
+    let (Some(manifest), Some(manifest_dir)) = (
+        extensions.root_manifest.as_ref(),
+        extensions.root_manifest_dir.as_deref(),
+    ) else {
+        return;
+    };
+    let check = crate::package::absolutize_check_config_paths(manifest.check.clone(), manifest_dir);
+    for (capability, operations) in crate::commands::check::load_host_capabilities(&check) {
+        for operation in operations {
+            harn_vm::stdlib::host::register_mockable_host_operation(
+                &capability,
+                &operation,
+                "Host operation declared by the project manifest.",
+            );
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TestResult {
     pub name: String,
@@ -1255,6 +1274,7 @@ async fn execute_case(
             crate::skill_loader::emit_loader_warnings(&loaded.loader_warnings);
             crate::skill_loader::install_skills_global(&mut vm, &loaded);
             let extensions = crate::package::load_runtime_extensions(&case.file);
+            register_manifest_host_operations(&extensions);
             crate::package::install_runtime_extensions(&extensions);
             crate::package::install_manifest_triggers(&mut vm, &extensions)
                 .await
