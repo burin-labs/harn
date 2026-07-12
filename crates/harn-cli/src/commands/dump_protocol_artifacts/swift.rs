@@ -10,13 +10,18 @@ use super::constants::*;
 use super::support::*;
 use super::values::*;
 
+#[cfg(test)]
 pub(super) fn generate_swift() -> String {
+    generate_swift_for_version(env!("CARGO_PKG_VERSION"))
+}
+
+pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "swift");
     out.push_str("import Foundation\n\n");
     out.push_str("public enum HarnProtocolConstants {\n");
     out.push_str(&format!(
         "    public static let artifactVersion = {}\n",
-        json_string_literal(env!("CARGO_PKG_VERSION"))
+        json_string_literal(artifact_version)
     ));
     out.push_str(&format!(
         "    public static let acpSchemaCompatibility = {}\n",

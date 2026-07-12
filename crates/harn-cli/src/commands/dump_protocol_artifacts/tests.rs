@@ -610,8 +610,58 @@ fn generated_manifest_references_schema_artifacts() {
 }
 
 #[test]
+fn explicit_artifact_version_is_validated_and_stamped_everywhere() {
+    const VERSION: &str = "9.8.7-beta.1";
+    assert_eq!(
+        resolve_artifact_version(None),
+        Ok(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(resolve_artifact_version(Some(VERSION)), Ok(VERSION));
+    assert!(resolve_artifact_version(Some("v9.8.7")).is_err());
+    assert!(resolve_artifact_version(Some("next")).is_err());
+
+    let artifacts = generate_artifacts(VERSION).expect("artifacts");
+    for path in [
+        "harn-protocol.ts",
+        "HarnProtocol.swift",
+        "harn-protocol.rs",
+        "python/harn_protocol.py",
+        "go/harnprotocol/harnprotocol.go",
+    ] {
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.relative_path == path)
+            .unwrap_or_else(|| panic!("missing generated artifact {path}"));
+        assert!(
+            artifact.contents.contains(VERSION),
+            "{path} did not use the explicit artifact version"
+        );
+    }
+
+    for path in ["manifest.json", "fixtures/round_trip.json"] {
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.relative_path == path)
+            .unwrap_or_else(|| panic!("missing generated artifact {path}"));
+        let value: serde_json::Value =
+            serde_json::from_str(&artifact.contents).expect("generated JSON");
+        assert_eq!(value["artifactVersion"], json!(VERSION));
+    }
+    let round_trip = artifacts
+        .iter()
+        .find(|artifact| artifact.relative_path == "fixtures/round_trip.json")
+        .expect("round-trip fixture");
+    let round_trip: serde_json::Value =
+        serde_json::from_str(&round_trip.contents).expect("round-trip JSON");
+    assert_eq!(
+        round_trip["mcpDiscoverResult"]["serverInfo"]["version"],
+        json!(VERSION)
+    );
+}
+
+#[test]
 fn committed_protocol_artifacts_match_generator() {
-    let artifacts = generate_artifacts().expect("artifacts");
+    let artifacts = generate_artifacts(env!("CARGO_PKG_VERSION")).expect("artifacts");
     let output_root = repo_root().join("spec/protocol-artifacts");
     for artifact in artifacts {
         let path = output_root.join(&artifact.relative_path);

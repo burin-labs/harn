@@ -57,8 +57,12 @@ impl Artifact {
     }
 }
 
-pub(crate) fn run(output_dir: &str, check_only: bool) {
-    let artifacts = generate_artifacts().unwrap_or_else(|error| {
+pub(crate) fn run(output_dir: &str, check_only: bool, artifact_version: Option<&str>) {
+    let artifact_version = resolve_artifact_version(artifact_version).unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        process::exit(2);
+    });
+    let artifacts = generate_artifacts(artifact_version).unwrap_or_else(|error| {
         eprintln!("error: failed to generate protocol artifacts: {error}");
         process::exit(1);
     });
@@ -103,19 +107,44 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
     }
 }
 
-fn generate_artifacts() -> Result<Vec<Artifact>, String> {
-    let go_artifact = generate_go_artifact()?;
+fn resolve_artifact_version(requested: Option<&str>) -> Result<&str, String> {
+    let version = requested.unwrap_or(env!("CARGO_PKG_VERSION"));
+    semver::Version::parse(version)
+        .map(|_| version)
+        .map_err(|error| format!("invalid protocol artifact version '{version}': {error}"))
+}
+
+fn generate_artifacts(artifact_version: &str) -> Result<Vec<Artifact>, String> {
+    let go_artifact = generate_go_artifact_for_version(artifact_version)?;
     let mut artifacts = vec![
         Artifact::new("README.md", generate_readme()),
-        Artifact::new("manifest.json", generate_manifest()?),
-        Artifact::new("harn-protocol.ts", generate_typescript()),
-        Artifact::new("HarnProtocol.swift", generate_swift()),
-        Artifact::new("harn-protocol.rs", generate_rust()),
-        Artifact::new("python/harn_protocol.py", generate_python()),
+        Artifact::new(
+            "manifest.json",
+            generate_manifest_for_version(artifact_version)?,
+        ),
+        Artifact::new(
+            "harn-protocol.ts",
+            generate_typescript_for_version(artifact_version),
+        ),
+        Artifact::new(
+            "HarnProtocol.swift",
+            generate_swift_for_version(artifact_version),
+        ),
+        Artifact::new(
+            "harn-protocol.rs",
+            generate_rust_for_version(artifact_version),
+        ),
+        Artifact::new(
+            "python/harn_protocol.py",
+            generate_python_for_version(artifact_version),
+        ),
         Artifact::new("python/__init__.py", PYTHON_INIT_STUB.to_string()),
         Artifact::new("go/harnprotocol/harnprotocol.go", go_artifact),
         Artifact::new("go/harnprotocol/go.mod", generate_go_mod()),
-        Artifact::new("fixtures/round_trip.json", generate_round_trip_fixture()?),
+        Artifact::new(
+            "fixtures/round_trip.json",
+            generate_round_trip_fixture_for_version(artifact_version)?,
+        ),
         Artifact::new(
             TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
             generate_tool_call_receipt_schema()?,

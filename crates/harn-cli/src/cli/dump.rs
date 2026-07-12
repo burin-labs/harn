@@ -63,4 +63,9 @@ pub(crate) struct DumpProtocolArtifactsArgs {
     /// if stale.
     #[arg(long)]
     pub check: bool,
+    /// Stamp generated bindings and fixtures with an explicit Harn release
+    /// version. Release automation uses this after updating workspace metadata
+    /// so the already-built generator does not need to be rebuilt.
+    #[arg(long, value_name = "SEMVER")]
+    pub artifact_version: Option<String>,
 }

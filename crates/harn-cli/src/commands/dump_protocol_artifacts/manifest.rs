@@ -29,6 +29,10 @@ pub(crate) fn manifest_json() -> Result<String, String> {
 }
 
 pub(super) fn generate_manifest() -> Result<String, String> {
+    generate_manifest_for_version(env!("CARGO_PKG_VERSION"))
+}
+
+pub(super) fn generate_manifest_for_version(artifact_version: &str) -> Result<String, String> {
     let mut schemas = SCHEMA_COPIES
         .iter()
         .map(|schema| {
@@ -53,7 +57,7 @@ pub(super) fn generate_manifest() -> Result<String, String> {
 
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
-        "artifactVersion": env!("CARGO_PKG_VERSION"),
+        "artifactVersion": artifact_version,
         "generatedBy": "harn dump-protocol-artifacts",
         "checkCommand": "make check-protocol-artifacts",
         "bindings": {
@@ -220,7 +224,14 @@ pub(super) fn generate_readme() -> String {
     )
 }
 
+#[cfg(test)]
 pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
+    generate_round_trip_fixture_for_version(env!("CARGO_PKG_VERSION"))
+}
+
+pub(super) fn generate_round_trip_fixture_for_version(
+    artifact_version: &str,
+) -> Result<String, String> {
     let tool_call = json!({
         "sessionUpdate": "tool_call",
         "toolCallId": "call-001",
@@ -333,7 +344,7 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
         "resultType": "complete",
         "supportedVersions": MCP_PROTOCOL_VERSIONS,
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "harn", "version": env!("CARGO_PKG_VERSION")},
+        "serverInfo": {"name": "harn", "version": artifact_version},
         "instructions": "Use the stable MCP version unless the RC is explicitly enabled.",
     });
     let mcp_input_required_result = json!({
@@ -369,7 +380,7 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
     });
 
     let fixture = json!({
-        "artifactVersion": env!("CARGO_PKG_VERSION"),
+        "artifactVersion": artifact_version,
         "harnAgentEventMethod": HARN_AGENT_EVENT_METHOD,
         "harnProviderCatalogMethod": HARN_PROVIDER_CATALOG_METHOD,
         "envelopes": {
