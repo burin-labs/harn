@@ -798,6 +798,31 @@
               "members": [
                 {
                   "type": "STRING",
+                  "value": "throws"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "throws",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "type_annotation"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
                   "value": "extends"
                 },
                 {
@@ -3492,6 +3517,31 @@
           "type": "CHOICE",
           "members": [
             {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "throws"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "throws",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "type_annotation"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
               "type": "SYMBOL",
               "name": "where_clause"
             },
@@ -3615,6 +3665,31 @@
                 {
                   "type": "SYMBOL",
                   "name": "type_annotation"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "throws"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "throws",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "type_annotation"
+                  }
                 }
               ]
             },
@@ -8376,6 +8451,31 @@
           ]
         },
         {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "throws"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "throws",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "type_annotation"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
           "type": "FIELD",
           "name": "body",
           "content": {
@@ -8905,6 +9005,10 @@
         {
           "type": "STRING",
           "value": "throw"
+        },
+        {
+          "type": "STRING",
+          "value": "throws"
         },
         {
           "type": "STRING",
