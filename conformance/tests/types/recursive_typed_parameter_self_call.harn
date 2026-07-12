@@ -1,0 +1,14 @@
+type Tree = {value: int, children: list<Tree>}
+
+fn total(t: Tree) -> int {
+  let sum = t.value
+  for child in t.children {
+    sum = sum + total(child)
+  }
+  return sum
+}
+
+pipeline default() {
+  const tree: Tree = {value: 1, children: [{value: 2, children: []}]}
+  __io_println(to_string(total(tree)))
+}

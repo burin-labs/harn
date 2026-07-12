@@ -325,6 +325,67 @@ impl TypeChecker {
         }
     }
 
+    /// Unfold only the alias chain at the root of `ty`.
+    ///
+    /// Subtyping already descends through compound types recursively. Fully
+    /// normalizing a recursive alias at every descent turns a finite value type
+    /// into a progressively deeper tree, so the coinductive pair guard never
+    /// sees the same pair twice. Root-chain unfolding preserves aliases inside
+    /// the first structural body while still following ordinary forwarding
+    /// aliases (`Handle -> Binding -> {shape}`) to their meaningful root.
+    fn unfold_alias_root(&self, ty: &TypeExpr, scope: &TypeScope) -> TypeExpr {
+        let mut current = ty.clone();
+        let mut visited = HashSet::new();
+        loop {
+            current = match &current {
+                TypeExpr::Named(name) if name == "number" => {
+                    return TypeExpr::Union(vec![
+                        TypeExpr::Named("int".to_string()),
+                        TypeExpr::Named("float".to_string()),
+                    ]);
+                }
+                TypeExpr::Named(name) => {
+                    if !visited.insert(name.clone()) {
+                        return current;
+                    }
+                    let Some(resolved) = scope.resolve_type(name) else {
+                        return current;
+                    };
+                    resolved.clone()
+                }
+                TypeExpr::Applied { name, args } => {
+                    if !visited.insert(name.clone()) {
+                        return current;
+                    }
+                    let Some(info) = scope.resolve_type_alias(name) else {
+                        return current;
+                    };
+                    if info.type_params.len() != args.len() {
+                        return current;
+                    }
+                    let args: Vec<TypeExpr> = args
+                        .iter()
+                        .map(|arg| {
+                            let resolved = self.resolve_alias(arg, scope);
+                            if matches!(resolved, TypeExpr::Union(_)) {
+                                resolved
+                            } else {
+                                arg.clone()
+                            }
+                        })
+                        .collect();
+                    let names: Vec<String> = info
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .collect();
+                    instantiate_alias_distributive(&info.body, &names, &args)
+                }
+                _ => return current,
+            };
+        }
+    }
+
     /// Check a record's explicit fields against an actual record's known
     /// fields (the shared core of shape / open-shape subtyping). Each expected
     /// field must be present-and-compatible, be optional, or — when missing —
@@ -428,8 +489,8 @@ impl TypeChecker {
             None
         };
 
-        let expected = self.resolve_alias(expected, scope);
-        let actual = self.resolve_alias(actual, scope);
+        let expected = self.unfold_alias_root(expected, scope);
+        let actual = self.unfold_alias_root(actual, scope);
 
         // `owned<T>` is transparent to the underlying handle type at the type
         // boundary: the ownership marker only influences scope-exit codegen

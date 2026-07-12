@@ -2485,3 +2485,58 @@ fn test_bool_match_requires_both_arms() {
         "covered bool match should be clean: {errs:?}"
     );
 }
+
+#[test]
+fn recursive_typed_parameter_self_call_terminates() {
+    let errs = errors(
+        r"type Tree = {value: int, children: list<Tree>}
+
+fn total(t: Tree) -> int {
+  let sum = t.value
+  for child in t.children {
+    sum = sum + total(child)
+  }
+  return sum
+}
+
+pipeline default() {
+  const tree: Tree = {value: 1, children: [{value: 2, children: []}]}
+  total(tree)
+}",
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn recursive_typed_parameter_still_rejects_nested_mismatch() {
+    let errs = errors(
+        r#"type Tree = {value: int, children: list<Tree>}
+
+fn visit(t: Tree) -> int {
+  return visit({value: "wrong", children: []})
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|error| error.contains("expected int") && error.contains("found string")),
+        "expected nested recursive-alias mismatch, got: {errs:?}"
+    );
+}
+
+#[test]
+fn alias_forwarding_chain_reaches_structural_root() {
+    let errs = errors(
+        r#"type Binding = {id: string}
+type Handle = Binding
+
+fn dynamic_handle() -> dict {
+  return {id: "trigger-1"}
+}
+
+pipeline default() {
+  const handle: Handle = dynamic_handle()
+  return handle.id
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}

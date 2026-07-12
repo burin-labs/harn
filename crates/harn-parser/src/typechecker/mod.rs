@@ -142,7 +142,7 @@ pub struct TypeChecker {
     /// expressions like `const Y = X + 1` work.
     const_env: crate::const_eval::ConstEnv,
     /// Coinductive guard for recursive-type subtype checks. Holds the
-    /// resolved `(expected, actual)` pairs currently on the
+    /// pre-unfolding `(expected, actual)` pairs currently on the
     /// `types_compatible_at` stack. Re-encountering a pair means the walk has
     /// cycled through a recursive type alias (`type Tree = {children: [Tree]}`);
     /// we then assume compatibility (greatest-fixpoint / equirecursive
