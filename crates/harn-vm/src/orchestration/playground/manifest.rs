@@ -236,7 +236,7 @@ impl ScenarioManifest {
             .map(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
             .unwrap_or(false);
         let manifest: ScenarioManifest = if is_yaml {
-            serde_yml::from_slice(bytes).map_err(|error| {
+            serde_yaml_ng::from_slice(bytes).map_err(|error| {
                 VmError::Runtime(format!(
                     "failed to parse YAML scenario manifest {}: {error}",
                     path.display()

@@ -14,7 +14,7 @@ use crate::vm::Vm;
 const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cache_entries;
 
 /// Deepest `VmValue` nesting we will hand to a third-party recursive encoder
-/// (pretty JSON via `serde_json`, YAML via `serde_yml`). Our own JSON writer
+/// (pretty JSON via `serde_json`, YAML via `serde_yaml_ng`). Our own JSON writer
 /// grows the stack on demand, but those library serializers recurse without a
 /// hook we can guard, so a value past this depth is rejected with a catchable
 /// error rather than aborting the process. See `value::recursion`.
@@ -118,7 +118,7 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(sig = "yaml_parse(text: string?) -> any", category = "json")]
 fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
-    match serde_yml::from_str::<serde_yml::Value>(&text) {
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) {
         Ok(value) => match serde_json::to_value(value) {
             Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
             Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -136,7 +136,7 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let value = args.first().unwrap_or(&VmValue::Nil);
     ensure_serializable_depth(value, "yaml_stringify")?;
     let data_value = vm_value_to_data_value(value);
-    serde_yml::to_string(&data_value)
+    serde_yaml_ng::to_string(&data_value)
         .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
         .map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(

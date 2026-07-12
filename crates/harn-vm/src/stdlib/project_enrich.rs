@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
-use serde_yml::Value as YamlValue;
+use serde_yaml_ng::Value as YamlValue;
 use sha2::{Digest, Sha256};
 
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
@@ -527,7 +527,7 @@ fn collect_workflow_evidence(
         scan.combined_text.push_str(&content);
 
         let rel_path = relative_posix(root, &path);
-        let parsed = match serde_yml::from_str::<YamlValue>(&content) {
+        let parsed = match serde_yaml_ng::from_str::<YamlValue>(&content) {
             Ok(value) => value,
             Err(_) => continue,
         };
@@ -558,16 +558,17 @@ fn collect_workflow_evidence(
 }
 
 fn collect_workflow_jobs(
-    jobs: &serde_yml::Mapping,
+    jobs: &serde_yaml_ng::Mapping,
     workflow_name: &str,
     required_checks: Option<&BTreeSet<String>>,
 ) -> Vec<WorkflowJobEvidence> {
     let mut entries = jobs.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| *key);
+    entries.sort_by(|(a, _), (b, _)| a.as_str().cmp(&b.as_str()));
     entries
         .into_iter()
         .filter_map(|(job_id, job_value)| {
-            let job_id = job_id.clone();
+            // Workflow job ids are always string keys.
+            let job_id = job_id.as_str().unwrap_or_default().to_string();
             let job_map = job_value.as_mapping()?;
             let name = job_map
                 .get("name")
@@ -796,7 +797,7 @@ fn collect_hook_evidence(root: &Path) -> HookEvidence {
 }
 
 fn collect_pre_commit_hooks(content: &str, stages: &mut BTreeMap<String, Vec<String>>) {
-    let Ok(parsed) = serde_yml::from_str::<YamlValue>(content) else {
+    let Ok(parsed) = serde_yaml_ng::from_str::<YamlValue>(content) else {
         return;
     };
     let default_stages = parsed
@@ -862,14 +863,16 @@ fn collect_lefthook_hooks(
     content: &str,
     stages: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), String> {
-    let Ok(parsed) = serde_yml::from_str::<YamlValue>(content) else {
+    let Ok(parsed) = serde_yaml_ng::from_str::<YamlValue>(content) else {
         return Ok(());
     };
     let Some(root) = parsed.as_mapping() else {
         return Ok(());
     };
     for (stage, value) in root {
-        let stage_name = stage.as_str();
+        let Some(stage_name) = stage.as_str() else {
+            continue;
+        };
         if !stage_name.contains('-') {
             continue;
         }
@@ -900,7 +903,7 @@ fn collect_nested_run_commands(
                     }
                 }
                 let mut entries = mapping.iter().collect::<Vec<_>>();
-                entries.sort_by_key(|(left, _)| *left);
+                entries.sort_by(|(a, _), (b, _)| a.as_str().cmp(&b.as_str()));
                 for (key, child) in entries.into_iter().rev() {
                     if key == "run" {
                         continue;
@@ -1852,7 +1855,7 @@ exit 1
 
     #[test]
     fn lefthook_run_collection_preserves_sorted_depth_first_order() {
-        let value: YamlValue = serde_yml::from_str(
+        let value: YamlValue = serde_yaml_ng::from_str(
             r"
 commands:
   z:
@@ -1874,8 +1877,11 @@ commands:
 
     #[test]
     fn lefthook_run_collection_reports_yaml_depth_limit() {
-        let mut run = serde_yml::Mapping::new();
-        run.insert("run", YamlValue::String("echo too-deep".to_string()));
+        let mut run = serde_yaml_ng::Mapping::new();
+        run.insert(
+            YamlValue::String("run".to_string()),
+            YamlValue::String("echo too-deep".to_string()),
+        );
         let mut value = YamlValue::Mapping(run);
         for _ in 0..=PROJECT_ENRICH_YAML_MAX_DEPTH {
             value = YamlValue::Sequence(vec![value]);
@@ -2175,6 +2181,44 @@ jobs:
                 .and_then(|policy| policy.get("squash_only"))
                 .and_then(value_as_bool),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn collect_workflow_jobs_sorts_by_string_key() {
+        // serde_yaml_ng is Value-keyed, so job ids are `YamlValue`s, not
+        // `String`s. The collector sorts via `as_str().cmp(..)`; this pins the
+        // deterministic ordering that the old String-keyed `sort_by_key` gave.
+        let workflow: YamlValue = serde_yaml_ng::from_str(
+            "jobs:\n  zeta:\n    steps: []\n  alpha:\n    steps: []\n  mid:\n    steps: []\n",
+        )
+        .expect("parse workflow yaml");
+        let jobs = workflow
+            .get("jobs")
+            .and_then(YamlValue::as_mapping)
+            .expect("jobs mapping");
+        let evidence = collect_workflow_jobs(jobs, "CI", None);
+        let ids = evidence.iter().map(|j| j.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["alpha", "mid", "zeta"]);
+    }
+
+    #[test]
+    fn lefthook_non_string_stage_key_does_not_crash() {
+        // A Value-keyed mapping can carry a non-string top-level key (here a
+        // number). The stage collector must skip it via its `as_str()` guard
+        // rather than panic, while still harvesting valid hyphenated stages.
+        let content = "123:\n  commands:\n    lint:\n      run: echo numeric\n\
+                       pre-commit:\n  commands:\n    fmt:\n      run: cargo fmt\n";
+        let mut stages: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        collect_lefthook_hooks(content, &mut stages).expect("non-string stage key must not error");
+        assert!(
+            stages.contains_key("pre-commit"),
+            "valid hyphenated stage must still be collected: {stages:?}",
+        );
+        assert!(
+            stages["pre-commit"].iter().any(|c| c.contains("cargo fmt")),
+            "expected the pre-commit run command: {:?}",
+            stages["pre-commit"],
         );
     }
 }
