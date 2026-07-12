@@ -50,11 +50,11 @@ fn exercise_fresh_token_no_lock(harness: Harness) {
       token_type: "Bearer",
     },
   )
-  let lock_calls = 0
+  const lock_calls = atomic(0)
   const store = inner
     + {
     with_refresh_lock: { key, body ->
-      lock_calls = lock_calls + 1
+      atomic_add(lock_calls, 1)
       return body()
     },
   }
@@ -70,12 +70,18 @@ fn exercise_fresh_token_no_lock(harness: Harness) {
     },
   )
   require_eq("token() returns the already-fresh token", token(cli), "ACCESS-FRESH")
-  require_eq("fresh token path must not acquire refresh lock", lock_calls, 0)
+  require_eq("fresh token path must not acquire refresh lock", atomic_get(lock_calls), 0)
   require_eq(
     "fresh token path must not call token endpoint",
     len(http_mock_calls({include_sensitive: true})),
     0,
   )
+  require_eq(
+    "lock spy returns body result",
+    store.with_refresh_lock("freshNoLock", { -> "observed" }),
+    "observed",
+  )
+  require_eq("lock spy observes direct acquisition", atomic_get(lock_calls), 1)
   const _ = unmock_time()
 }
 

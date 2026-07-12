@@ -1,5 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
+const flaky_calls = atomic(0)
+
 /**
  * agent_loop applies transcript_projection at each turn boundary,
  * emits a transcript.projection event into the immutable raw transcript,
@@ -10,10 +12,9 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 fn flaky_tool() {
   let tools = tool_registry()
-  let calls = 0
   const handler = fn(_args) {
-    calls = calls + 1
-    if calls == 1 {
+    const previous_calls = atomic_add(flaky_calls, 1)
+    if previous_calls == 0 {
       throw "tool error: first try"
     }
     return "ok"
@@ -22,7 +23,7 @@ fn flaky_tool() {
     tools,
     "run",
     "Run a step.",
-    {handler: handler, parameters: {type: "object", properties: {}}, returns: {type: "string"}},
+    {handler: handler, parameters: {step: {type: "string", required: true}}, returns: {type: "string"}},
   )
   return tools
 }
@@ -63,10 +64,11 @@ fn gc_tools() {
 }
 
 pipeline default() {
+  atomic_set(flaky_calls, 0)
   with_llm_script(
     [
-      {tool_calls: [{id: "call_1", name: "run", arguments: {}}]},
-      {tool_calls: [{id: "call_2", name: "run", arguments: {}}]},
+      {tool_calls: [{id: "call_1", name: "run", arguments: {step: "first"}}]},
+      {tool_calls: [{id: "call_2", name: "run", arguments: {step: "second"}}]},
       llm_text("Finished. ##DONE##"),
     ],
     { ->
@@ -85,6 +87,10 @@ pipeline default() {
       )
       __io_println("status:" + result.status)
       const raw_messages = transcript_messages(result.transcript)
+      const raw_text = json_stringify(raw_messages)
+      require atomic_get(flaky_calls) == 2, "flaky tool was invoked twice"
+      require len(split(raw_text, "tool error: first try")) - 1 == 1, "first tool call failed exactly once"
+      require contains(raw_text, "[result of run]\\nok\\n[end of run result]"), "second tool call succeeded"
       __io_println("raw_message_count:" + to_string(len(raw_messages)))
       const events = transcript_events_by_kind(result.transcript, "transcript.projection")
       __io_println("projection_events:" + to_string(len(events) > 0))
