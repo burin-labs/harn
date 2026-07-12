@@ -1,0 +1,157 @@
+import { models_with } from "std/llm/catalog"
+import { image_content, text_content } from "std/llm/media"
+
+/**
+ * Typed host-to-agent injection contracts.
+ *
+ * Hosts persist artifacts and provide provenance. Harn owns trust-boundary
+ * sanitization, attachment capability routing, transcript placement, and replay
+ * receipts. Call these wrappers instead of constructing the low-level builtin
+ * envelope directly.
+ */
+pub type HostInjectionDelivery = "immediate" | "turn_boundary" | "after_next_tool_call"
+
+pub type HostInjectionProvenance = {initiator: string, source: string, host?: string, ts_ms: int}
+
+pub type HostToolResultPayload = {
+  tool_call_id?: string,
+  tool_name: string,
+  kind?: "read" | "search" | "fetch" | "execute" | "edit" | "delete" | "move" | "think" | "other",
+  raw_input?: any,
+  status?: "pending" | "in_progress" | "completed" | "failed",
+  raw_output?: any,
+  result_pointer?: string,
+  error?: string,
+  duration_ms?: int,
+}
+
+pub type HostAttachmentPayload = {
+  media_type: string,
+  flavor: "image" | "text_frame" | "frame_ring" | "file",
+  artifact_pointer: string,
+  sha256: string,
+  size_bytes: int,
+  description?: string,
+  description_model?: string,
+}
+
+pub type HostAttachmentDescriptionOptions = {
+  provider?: string,
+  model?: string,
+  prompt?: string,
+  system?: string,
+  image?: dict,
+}
+
+fn __host_attachment_description_route(options: HostAttachmentDescriptionOptions) -> {provider?: string, model: string}? {
+  if options.model != nil && options.model != "" {
+    if options.provider == nil {
+      return {model: options.model}
+    }
+    return {provider: options.provider, model: options.model}
+  }
+  const candidates = models_with({strengths: ["vision"], available_only: true, exclude_deprecated: true})
+  if len(candidates) == 0 {
+    return nil
+  }
+  return {provider: to_string(candidates[0].provider), model: to_string(candidates[0].id)}
+}
+
+/**
+ * Generate a recorded attachment description through a vision-capable route.
+ * Returns nil on catalog, transport, or empty-response failure so callers can
+ * continue with pointer-only delivery.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn describe_host_attachment(source: any, options: HostAttachmentDescriptionOptions = {}) -> {description: string, description_model: string}? {
+  const route = __host_attachment_description_route(options)
+  if route == nil {
+    return nil
+  }
+  const prompt = options.prompt
+    ?? "Describe this image precisely for a coding agent. Preserve visible text, state, errors, and spatial relationships."
+  const messages = [{role: "user", content: [text_content(prompt), image_content(source, options.image ?? {})]}]
+  const result = try {
+    if route.provider == nil {
+      llm_call("", options.system, {model: route.model, vision: true, messages: messages})
+    } else {
+      llm_call(
+        "",
+        options.system,
+        {provider: route.provider, model: route.model, vision: true, messages: messages},
+      )
+    }
+  } catch (_error) {
+    nil
+  }
+  const description = to_string(result?.text ?? result?.content ?? "").trim()
+  if description == "" {
+    return nil
+  }
+  return {description: description, description_model: route.model}
+}
+
+/**
+ * Add a recorded description receipt when possible. Failure returns the input
+ * payload unchanged; the injection runtime then uses its pointer-only floor.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn prepare_host_attachment(
+  payload: HostAttachmentPayload,
+  source: any,
+  options: HostAttachmentDescriptionOptions = {},
+) -> HostAttachmentPayload {
+  if payload.description != nil && payload.description != "" {
+    return payload
+  }
+  const described = describe_host_attachment(source, options)
+  if described == nil {
+    return payload
+  }
+  return payload + described
+}
+
+/**
+ * Inject a typed host-executed tool receipt.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ */
+pub fn inject_host_tool_result(
+  session_id: string,
+  payload: HostToolResultPayload,
+  provenance: HostInjectionProvenance,
+  delivery: HostInjectionDelivery = "immediate",
+) -> dict {
+  return agent_inject_host_event(
+    session_id,
+    {kind: "host_tool_result", delivery: delivery, payload: payload, provenance: provenance},
+  )
+}
+
+/**
+ * Inject a durable attachment pointer.
+ *
+ * `description` and `description_model` are a previously recorded description
+ * receipt, never an instruction to regenerate during replay. The runtime uses
+ * a registered host resolver for direct text/image materialization and falls
+ * back to description+pointer or pointer-only without blocking the session.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ */
+pub fn inject_host_attachment(
+  session_id: string,
+  payload: HostAttachmentPayload,
+  provenance: HostInjectionProvenance,
+  delivery: HostInjectionDelivery = "immediate",
+) -> dict {
+  return agent_inject_host_event(
+    session_id,
+    {kind: "host_attachment", delivery: delivery, payload: payload, provenance: provenance},
+  )
+}

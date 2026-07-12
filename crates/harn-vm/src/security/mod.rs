@@ -133,6 +133,47 @@ pub struct TaintRecord {
     pub endpoints: Vec<String>,
 }
 
+/// A trust-boundary normalization result shared by every transcript ingress.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SanitizedIngress {
+    pub delivered: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detector: Option<DetectorVerdict>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<String>,
+}
+
+/// Normalize content once at its owning trust boundary.
+pub fn sanitize_ingress(raw: &str, origin: &str, trust: TrustLevel) -> SanitizedIngress {
+    let policy = current_policy();
+    let delivered = if policy.spotlight_external && trust != TrustLevel::Trusted {
+        spotlight_wrap(
+            raw,
+            origin,
+            trust,
+            policy.mode,
+            policy.neutralize_special_tokens,
+            policy.destyle_untrusted,
+        )
+    } else {
+        raw.to_string()
+    };
+    let detector = if policy.detect_injection && trust.is_untrusted() && !raw.is_empty() {
+        ensure_neural_classifier(&policy.guard_model);
+        Some(classify_injection(raw, policy.guard_threshold_percent))
+    } else {
+        None
+    };
+    SanitizedIngress {
+        delivered,
+        detector,
+        labels: content_labels(raw),
+        endpoints: extract_endpoints(raw),
+    }
+}
+
 /// Resolved, runtime-readable security policy. Derived from [`SecurityConfig`];
 /// the default is spotlight-on.
 #[derive(Clone, Debug, PartialEq, Eq)]

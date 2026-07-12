@@ -180,6 +180,10 @@ pub struct SessionState {
     pub completed_turn_checkpoints: Vec<SessionTurnCheckpoint>,
     pub redo_stack: Vec<SessionRedoEntry>,
     pub text_tool_call_seq: u64,
+    /// Durable trust-boundary evidence consulted by the agent dispatch gate.
+    /// It lives with the transcript so pre-loop injections and resumed loops
+    /// cannot lose security provenance.
+    pub taint: Vec<crate::security::TaintRecord>,
 }
 
 impl SessionState {
@@ -212,6 +216,7 @@ impl SessionState {
             completed_turn_checkpoints: Vec::new(),
             redo_stack: Vec::new(),
             text_tool_call_seq: 0,
+            taint: Vec::new(),
         }
     }
 
@@ -226,6 +231,25 @@ impl SessionState {
         self.transcript = transcript;
         self.touch();
     }
+}
+
+pub(crate) fn push_session_taint(id: &str, record: crate::security::TaintRecord) {
+    SESSIONS.with(|sessions| {
+        if let Some(state) = sessions.borrow_mut().get_mut(id) {
+            state.taint.push(record);
+            state.touch();
+        }
+    });
+}
+
+pub(crate) fn session_taint_snapshot(id: &str) -> Vec<crate::security::TaintRecord> {
+    SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .map(|state| state.taint.clone())
+            .unwrap_or_default()
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1440,6 +1464,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         src_transcript_budget_policy,
         src_last_transcript_budget_action,
         src_text_tool_call_seq,
+        src_taint,
         dst,
     ) = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
@@ -1461,6 +1486,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             src.transcript_budget_policy.clone(),
             src.last_transcript_budget_action.clone(),
             src.text_tool_call_seq,
+            src.taint.clone(),
             dst,
         ))
     })?;
@@ -1482,6 +1508,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.transcript_budget_policy = src_transcript_budget_policy;
             state.last_transcript_budget_action = src_last_transcript_budget_action;
             state.text_tool_call_seq = src_text_tool_call_seq;
+            state.taint = src_taint;
             state.touch();
         }
         update_lineage(&mut map, src_id, &dst, None);
@@ -1762,6 +1789,7 @@ struct HostInjectionRequest {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HostToolResultPayload {
     #[serde(default)]
     tool_call_id: Option<String>,
@@ -1783,13 +1811,13 @@ struct HostToolResultPayload {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HostAttachmentPayload {
     media_type: String,
     flavor: AttachmentFlavor,
     artifact_pointer: String,
     sha256: String,
     size_bytes: u64,
-    rendered: AttachmentRendering,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
@@ -1809,6 +1837,7 @@ pub fn inject_host_event(id: &str, injection: VmValue) -> Result<serde_json::Val
             "agent_inject_host_event: unknown session id '{id}'"
         ));
     }
+    validate_host_injection_payload(request.kind, request.payload.clone())?;
     let injection_id = uuid::Uuid::now_v7().to_string();
     if request.delivery == InjectionDelivery::Immediate {
         let sequence = crate::orchestration::agent_inbox::reserve_sequence(id);
@@ -1820,7 +1849,6 @@ pub fn inject_host_event(id: &str, injection: VmValue) -> Result<serde_json::Val
             "status": "injected",
         }));
     }
-    validate_host_injection_payload(request.kind, request.payload.clone())?;
     let queued = serde_json::json!({
         "injection_id": injection_id,
         "request": request,
@@ -1897,9 +1925,32 @@ fn validate_host_injection_payload(
             })?;
         }
         HostInjectionKind::HostAttachment => {
-            let _: HostAttachmentPayload = serde_json::from_value(payload).map_err(|error| {
-                format!("agent_inject_host_event: invalid host_attachment payload: {error}")
-            })?;
+            let attachment: HostAttachmentPayload =
+                serde_json::from_value(payload).map_err(|error| {
+                    format!("agent_inject_host_event: invalid host_attachment payload: {error}")
+                })?;
+            if attachment.media_type.trim().is_empty() {
+                return Err(
+                    "agent_inject_host_event: host_attachment media_type must not be empty".into(),
+                );
+            }
+            if attachment.artifact_pointer.trim().is_empty() {
+                return Err(
+                    "agent_inject_host_event: host_attachment artifact_pointer must not be empty"
+                        .into(),
+                );
+            }
+            if attachment.sha256.len() != 64
+                || !attachment
+                    .sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err("agent_inject_host_event: host_attachment sha256 must be a 64-character hex digest".into());
+            }
+            if attachment.description_model.is_some() && attachment.description.is_none() {
+                return Err("agent_inject_host_event: host_attachment description_model requires a recorded description".into());
+            }
         }
     }
     Ok(())
@@ -1963,17 +2014,28 @@ fn build_host_tool_result_injection(
         .map(str::to_owned)
         .unwrap_or_else(|| format!("hosttc_{}", injection_id.replace('-', "")));
     let body = host_tool_result_body(&payload);
-    let text =
-        host_injection_envelope("host_tool_result", &payload.tool_name, &injection_id, &body);
-    let sanitization = h1_sanitization_verdict(
-        trust_for_tool(payload.kind, &provenance),
+    let trust = trust_for_tool(payload.kind, &provenance);
+    let origin = format!("host_injected:{}", payload.tool_name);
+    let ingress = crate::security::sanitize_ingress(&body, &origin, trust);
+    let text = host_injection_envelope(
+        "host_tool_result",
+        &payload.tool_name,
+        &injection_id,
+        &ingress.delivered,
+    );
+    let sanitization = sanitization_verdict(
+        trust,
         &serde_json::json!({
             "raw_output": payload.raw_output,
             "result_pointer": payload.result_pointer,
             "error": payload.error,
         }),
         &text,
+        SanitizationAction::Passed,
+        &ingress,
+        None,
     );
+    record_host_ingress(session_id, &origin, &tool_call_id, trust, &body, &ingress);
     let metadata = serde_json::json!({
         "injection_id": injection_id,
         "sequence": sequence,
@@ -1983,7 +2045,7 @@ fn build_host_tool_result_injection(
         "tool_name": payload.tool_name,
         "result_pointer": payload.result_pointer,
     });
-    let message = host_injection_user_message(&injection_id, &text, &metadata);
+    let message = host_injection_user_message(&injection_id, &text, &metadata, None);
     let transcript_event = crate::llm::helpers::transcript_event(
         "host_tool_result",
         "user",
@@ -2021,11 +2083,27 @@ fn build_host_attachment_injection(
     payload: HostAttachmentPayload,
     delivered_at_seam: &str,
 ) -> (VmValue, VmValue, AgentEvent) {
-    let body = host_attachment_body(&payload);
-    let text =
-        host_injection_envelope("host_attachment", &payload.media_type, &injection_id, &body);
-    let sanitization = h1_sanitization_verdict(
-        trust_for_attachment(payload.flavor, &provenance),
+    let materialized =
+        crate::host_attachments::materialize(&payload.artifact_pointer, &payload.media_type);
+    let (rendered, body, image) = select_attachment_rendering(session_id, &payload, materialized);
+    let trust = trust_for_attachment(payload.flavor, &provenance);
+    let origin = format!("host_attachment:{}", payload.artifact_pointer);
+    let ingress = crate::security::sanitize_ingress(&body, &origin, trust);
+    let text = host_injection_envelope(
+        "host_attachment",
+        &payload.media_type,
+        &injection_id,
+        &ingress.delivered,
+    );
+    let action = match rendered {
+        AttachmentRendering::DescriptionPlusPointer => SanitizationAction::Summarized,
+        AttachmentRendering::PointerOnly => SanitizationAction::Pointerized,
+        AttachmentRendering::ImageBlock | AttachmentRendering::InlineText => {
+            SanitizationAction::Passed
+        }
+    };
+    let sanitization = sanitization_verdict(
+        trust,
         &serde_json::json!({
             "artifact_pointer": payload.artifact_pointer,
             "sha256": payload.sha256,
@@ -2033,7 +2111,11 @@ fn build_host_attachment_injection(
             "description": payload.description,
         }),
         &text,
+        action,
+        &ingress,
+        payload.description_model.as_deref(),
     );
+    record_host_ingress(session_id, &origin, &injection_id, trust, &body, &ingress);
     let metadata = serde_json::json!({
         "injection_id": injection_id,
         "sequence": sequence,
@@ -2043,8 +2125,11 @@ fn build_host_attachment_injection(
         "sha256": payload.sha256,
         "media_type": payload.media_type,
         "flavor": payload.flavor,
+        "rendered": rendered,
+        "description": payload.description,
+        "description_model": payload.description_model,
     });
-    let message = host_injection_user_message(&injection_id, &text, &metadata);
+    let message = host_injection_user_message(&injection_id, &text, &metadata, image);
     let transcript_event = crate::llm::helpers::transcript_event(
         "host_attachment",
         "user",
@@ -2060,7 +2145,7 @@ fn build_host_attachment_injection(
         artifact_pointer: payload.artifact_pointer,
         sha256: payload.sha256,
         size_bytes: payload.size_bytes,
-        rendered: payload.rendered,
+        rendered,
         description: payload.description,
         description_model: payload.description_model,
         delivery,
@@ -2133,6 +2218,7 @@ fn host_injection_user_message(
     injection_id: &str,
     text: &str,
     metadata: &serde_json::Value,
+    image: Option<crate::host_attachments::MaterializedAttachment>,
 ) -> VmValue {
     let mut message = BTreeMap::new();
     message.put_str("role", "user");
@@ -2140,11 +2226,21 @@ fn host_injection_user_message(
         "messageId",
         format!("hostinj_{}", injection_id.replace('-', "")),
     );
+    let mut content = vec![serde_json::json!({"type": "text", "text": text})];
+    match image {
+        Some(crate::host_attachments::MaterializedAttachment::ImageUrl(url)) => {
+            content.push(serde_json::json!({"type": "image", "url": url}));
+        }
+        Some(crate::host_attachments::MaterializedAttachment::ImageBase64 { media_type, data }) => {
+            content.push(
+                serde_json::json!({"type": "image", "base64": data, "media_type": media_type}),
+            );
+        }
+        Some(crate::host_attachments::MaterializedAttachment::Text(_)) | None => {}
+    }
     message.insert(
         "content".to_string(),
-        crate::stdlib::json_to_vm_value(&serde_json::json!([
-            {"type": "text", "text": text}
-        ])),
+        crate::stdlib::json_to_vm_value(&serde_json::Value::Array(content)),
     );
     message.insert(
         "metadata".to_string(),
@@ -2171,20 +2267,52 @@ fn host_tool_result_body(payload: &HostToolResultPayload) -> String {
     String::new()
 }
 
-fn host_attachment_body(payload: &HostAttachmentPayload) -> String {
-    match payload.rendered {
-        AttachmentRendering::InlineText => payload
-            .description
-            .clone()
-            .unwrap_or_else(|| format!("Attachment: {}", payload.artifact_pointer)),
-        AttachmentRendering::DescriptionPlusPointer => format!(
-            "{}\nArtifact: {}",
-            payload.description.clone().unwrap_or_default(),
-            payload.artifact_pointer
-        ),
-        AttachmentRendering::ImageBlock | AttachmentRendering::PointerOnly => {
-            format!("Attachment: {}", payload.artifact_pointer)
+fn select_attachment_rendering(
+    session_id: &str,
+    payload: &HostAttachmentPayload,
+    materialized: Result<crate::host_attachments::MaterializedAttachment, String>,
+) -> (
+    AttachmentRendering,
+    String,
+    Option<crate::host_attachments::MaterializedAttachment>,
+) {
+    if let Ok(crate::host_attachments::MaterializedAttachment::Text(text)) = &materialized {
+        return (AttachmentRendering::InlineText, text.clone(), None);
+    }
+    let vision_capable = pinned_model(session_id)
+        .map(|selector| crate::llm_config::resolve_model_info(&selector))
+        .map(|resolved| {
+            crate::llm::capabilities::lookup(&resolved.provider, &resolved.id).vision_supported
+        })
+        .unwrap_or(false);
+    if vision_capable {
+        if let Ok(
+            image @ (crate::host_attachments::MaterializedAttachment::ImageUrl(_)
+            | crate::host_attachments::MaterializedAttachment::ImageBase64 { .. }),
+        ) = materialized
+        {
+            return (
+                AttachmentRendering::ImageBlock,
+                format!("Attachment: {}", payload.artifact_pointer),
+                Some(image),
+            );
         }
+    }
+    match payload
+        .description
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        Some(description) => (
+            AttachmentRendering::DescriptionPlusPointer,
+            format!("{description}\nArtifact: {}", payload.artifact_pointer),
+            None,
+        ),
+        None => (
+            AttachmentRendering::PointerOnly,
+            format!("Attachment: {}", payload.artifact_pointer),
+            None,
+        ),
     }
 }
 
@@ -2205,22 +2333,49 @@ fn escape_attr(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn h1_sanitization_verdict(
+fn sanitization_verdict(
     trust: TrustLevel,
     original: &serde_json::Value,
     delivered: &str,
+    action: SanitizationAction,
+    ingress: &crate::security::SanitizedIngress,
+    summary_model: Option<&str>,
 ) -> SanitizationVerdict {
     SanitizationVerdict {
         trust,
-        detector: None,
-        action: SanitizationAction::Passed,
+        detector: ingress.detector.clone(),
+        action,
         original_bytes: serde_json::to_vec(original)
             .map(|bytes| bytes.len() as u64)
             .unwrap_or(0),
         delivered_bytes: delivered.len() as u64,
-        summary_model: None,
-        labels: Vec::new(),
+        summary_model: summary_model.map(str::to_owned),
+        labels: ingress.labels.clone(),
     }
+}
+
+fn record_host_ingress(
+    session_id: &str,
+    origin: &str,
+    introduced_by: &str,
+    trust: TrustLevel,
+    raw: &str,
+    ingress: &crate::security::SanitizedIngress,
+) {
+    if !trust.is_untrusted() || raw.is_empty() {
+        return;
+    }
+    push_session_taint(
+        session_id,
+        crate::security::TaintRecord {
+            origin: origin.to_string(),
+            trust,
+            introduced_by: introduced_by.to_string(),
+            detector: ingress.detector.clone(),
+            labels: ingress.labels.clone(),
+            endpoints: ingress.endpoints.clone(),
+        },
+    );
 }
 
 fn trust_for_tool(kind: Option<ToolKind>, provenance: &HostInjectionProvenance) -> TrustLevel {

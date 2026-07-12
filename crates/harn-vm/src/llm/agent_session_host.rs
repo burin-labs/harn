@@ -93,11 +93,6 @@ struct AgentHostSession {
     /// the last call truncated due to its `max_tokens` parameter) and
     /// `refusal` (Anthropic refusal stop_reason).
     last_llm_stop_reason: Option<String>,
-    /// Lethal-trifecta taint ledger: untrusted external content (MCP servers,
-    /// `Fetch`-kind tools) that entered this session's context. Owned here so
-    /// it drops with the session — no cross-session leak. Read by the dispatch
-    /// gate to decide whether exfiltration-capable tools need confirmation.
-    taint: Vec<crate::security::TaintRecord>,
     /// Untrusted-origin file provenance ledger: workspace paths whose content
     /// came from an untrusted step (fetch/clone/MCP, or a write made while
     /// context was tainted). Owned here so it drops with the session. Read on the
@@ -174,7 +169,6 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         daemon_idle_backoff_ms: 100,
         host_bridge: None,
         last_llm_stop_reason: None,
-        taint: Vec::new(),
         file_provenance: crate::security::FileProvenanceLedger::default(),
         nested_policy_guard: None,
     };
@@ -202,19 +196,13 @@ fn with_session<R>(
 /// Append a taint record to the session's lethal-trifecta ledger. No-op when
 /// the session is unknown (e.g. tool results recorded outside a host session).
 pub(crate) fn push_session_taint(session_id: &str, record: crate::security::TaintRecord) {
-    let _ = with_session(session_id, "record_session_taint", |session| {
-        session.taint.push(record);
-        Ok(())
-    });
+    crate::agent_sessions::push_session_taint(session_id, record);
 }
 
 /// Snapshot the session's taint ledger for the dispatch gate. Empty when the
 /// session is unknown or no untrusted content has entered context.
 pub(crate) fn session_taint_snapshot(session_id: &str) -> Vec<crate::security::TaintRecord> {
-    with_session(session_id, "snapshot_session_taint", |session| {
-        Ok(session.taint.clone())
-    })
-    .unwrap_or_default()
+    crate::agent_sessions::session_taint_snapshot(session_id)
 }
 
 /// Record that `path` now holds untrusted-origin content (taint-on-write). No-op
@@ -539,7 +527,6 @@ async fn host_agent_session_init(
         daemon_idle_backoff_ms: 100,
         host_bridge,
         last_llm_stop_reason: None,
-        taint: Vec::new(),
         file_provenance: crate::security::FileProvenanceLedger::default(),
         nested_policy_guard,
     };
@@ -2170,19 +2157,13 @@ fn host_agent_session_record_tool_results_builtin(
                 }
             })
         };
-        let observation = match &provenance {
-            Some((trust, origin)) if security_policy.spotlight_external => {
-                crate::security::spotlight_wrap(
-                    &raw_observation,
-                    origin,
-                    *trust,
-                    security_policy.mode,
-                    security_policy.neutralize_special_tokens,
-                    security_policy.destyle_untrusted,
-                )
-            }
-            _ => raw_observation.clone(),
-        };
+        let ingress = provenance.as_ref().map(|(trust, origin)| {
+            crate::security::sanitize_ingress(&raw_observation, origin, *trust)
+        });
+        let observation = ingress
+            .as_ref()
+            .map(|ingress| ingress.delivered.clone())
+            .unwrap_or_else(|| raw_observation.clone());
         let tool_call_id = dict_get(result, "tool_call_id")
             .or_else(|| dict_get(result, "tool_use_id"))
             .map(|v| v.display())
@@ -2223,17 +2204,15 @@ fn host_agent_session_record_tool_results_builtin(
                         // backend (if the host installed a loader) is materialized
                         // lazily on this first scored span; otherwise the
                         // dependency-free heuristic runs.
-                        detector: if security_policy.detect_injection {
-                            crate::security::ensure_neural_classifier(&security_policy.guard_model);
-                            Some(crate::security::classify_injection(
-                                &raw_observation,
-                                security_policy.guard_threshold_percent,
-                            ))
-                        } else {
-                            None
-                        },
-                        labels: crate::security::content_labels(&raw_observation),
-                        endpoints: crate::security::extract_endpoints(&raw_observation),
+                        detector: ingress.as_ref().and_then(|value| value.detector.clone()),
+                        labels: ingress
+                            .as_ref()
+                            .map(|value| value.labels.clone())
+                            .unwrap_or_default(),
+                        endpoints: ingress
+                            .as_ref()
+                            .map(|value| value.endpoints.clone())
+                            .unwrap_or_default(),
                     },
                 );
                 context_tainted = true;

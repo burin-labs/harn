@@ -518,6 +518,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/host_tools.harn"),
     },
     StdlibSource {
+        module: "agent/host_injection",
+        source: include_str!("stdlib/agent/host_injection.harn"),
+    },
+    StdlibSource {
         module: "agent/budget",
         source: include_str!("stdlib/agent/budget.harn"),
     },
@@ -1490,6 +1494,7 @@ mod tests {
             "personas/prelude",
             "personas/bulletins",
             "agent/host_tools",
+            "agent/host_injection",
             "agent/user",
             "agent/governors",
             "agent/guardrails",
