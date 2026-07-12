@@ -78,6 +78,7 @@ website/*.tsbuildinfo
 tree-sitter-harn/*.dylib
 tree-sitter-harn/*.so
 tree-sitter-harn/*.dll
+tree-sitter-harn/tree-sitter
 
 # Test artifacts from conformance tests that create fixtures in CWD
 # (project_scan_*, project_deep_scan_*, and polyglot_tree tests in
