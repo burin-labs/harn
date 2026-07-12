@@ -26,6 +26,15 @@ fn reset_hostlib_state() {
 #[cfg(not(feature = "hostlib"))]
 fn reset_hostlib_state() {}
 
+fn install_user_test_event_log_if_unset() {
+    if std::env::var_os(harn_vm::event_log::HARN_EVENT_LOG_BACKEND_ENV).is_some() {
+        return;
+    }
+    harn_vm::event_log::install_memory_for_current_thread(
+        harn_vm::RuntimeLimits::DEFAULT.default_event_log_queue_depth,
+    );
+}
+
 #[derive(Clone, Debug)]
 pub struct TestResult {
     pub name: String,
@@ -1164,6 +1173,7 @@ async fn execute_case(
             let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
             let store_base = project_root.as_deref().unwrap_or(source_parent);
             let source_dir = source_parent.to_string_lossy().into_owned();
+            install_user_test_event_log_if_unset();
             harn_vm::register_store_builtins(&mut vm, store_base);
             harn_vm::register_metadata_builtins(&mut vm, store_base);
             let pipeline_name = case
@@ -1434,6 +1444,35 @@ pipeline test_cli_skills(task) {
 
         assert_eq!(summary.failed, 0, "{:?}", summary.results[0].error);
         assert_eq!(summary.passed, 1);
+    }
+
+    #[tokio::test]
+    async fn user_tests_default_to_memory_event_log() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let _backend_guard = ScopedEnvVar::unset(harn_vm::event_log::HARN_EVENT_LOG_BACKEND_ENV);
+        let _dir_guard = ScopedEnvVar::unset(harn_vm::event_log::HARN_EVENT_LOG_DIR_ENV);
+        let _sqlite_guard = ScopedEnvVar::unset(harn_vm::event_log::HARN_EVENT_LOG_SQLITE_PATH_ENV);
+        let _state_guard = ScopedEnvVar::unset(harn_vm::runtime_paths::HARN_STATE_DIR_ENV);
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_store.harn",
+            r#"
+pipeline test_store_builtin_uses_runner_event_log(task) {
+  store_set("test.key", "value")
+  assert_eq(store_get("test.key"), "value")
+}
+"#,
+        );
+
+        let suite = temp.path().join("suite");
+        let summary = run_tests(&suite, None, 1_000, false, &[]).await;
+
+        assert_eq!(summary.failed, 0, "{:?}", summary.results[0].error);
+        assert_eq!(summary.passed, 1);
+        assert!(
+            !suite.join(".harn/events.sqlite").exists(),
+            "plain user tests should not create the default SQLite event log",
+        );
     }
 
     #[test]
