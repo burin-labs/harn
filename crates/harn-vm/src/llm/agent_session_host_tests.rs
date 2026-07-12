@@ -3,9 +3,9 @@ use serde_json::json;
 use crate::agent_events::AgentEvent;
 
 use super::{
-    agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
-    canonical_provider_stop_reason, dict_get, initial_user_content, is_length_truncation,
-    json_to_vm, last_assistant_text, list_items, pair_orphaned_tool_use,
+    agent_terminal_class, agent_turn_made_no_llm_call, assistant_message_from_llm_result,
+    canonical_acp_stop_reason, canonical_provider_stop_reason, dict_get, initial_user_content,
+    is_length_truncation, json_to_vm, last_assistant_text, list_items, pair_orphaned_tool_use,
     reset_agent_session_host_state, screenshots_from_tool_result, seed_host_session_provider_model,
     synthesize_orphan_tool_results, text_has_tool_call_prefix, tool_result_message_for_provider,
     truncated_tool_call_should_continue, vm_to_json,
@@ -50,6 +50,102 @@ fn file_provenance_execution_policy() -> crate::orchestration::CapabilityPolicy 
         ]),
         ..Default::default()
     }
+}
+
+#[test]
+fn agent_terminal_class_prefers_structured_error_fields() {
+    let cases = [
+        (json!({"category": "no_llm_call"}), "provider_misconfigured"),
+        (json!({"category": "context_overflow"}), "context_overflow"),
+        (
+            json!({"error_category": "permission_denied"}),
+            "tool_policy_rejected",
+        ),
+        (
+            json!({"reason": "rate_limit", "provider": "anthropic"}),
+            "rate_limited",
+        ),
+        (json!({"kind": "deadline_exceeded"}), "timeout"),
+        (
+            json!({"code": "-32601", "message": "host bridge tool is not implemented by BurinHostResponder"}),
+            "host_bridge_unimplemented",
+        ),
+        (
+            json!({"reason": "invalid_request", "tool_format": "native", "after_tool_result": true}),
+            "agent_loop_protocol_failure",
+        ),
+        (
+            json!({"tool_format": "native", "after_tool_result": true}),
+            "agent_loop_protocol_failure",
+        ),
+    ];
+    for (error, expected) in cases {
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(expected),
+            "error={error}"
+        );
+    }
+}
+
+#[test]
+fn agent_terminal_class_uses_legacy_text_only_as_harn_side_fallback() {
+    let provider_wrapped = json!({
+        "message": "session/prompt error: agent_loop: provider not configured: missing API key"
+    });
+    assert_eq!(
+        agent_terminal_class("error", "", Some(&provider_wrapped)),
+        Some("provider_misconfigured")
+    );
+
+    let protocol_wrapped = json!({
+        "message": "session/prompt error [-32000]: agent_loop: tool_caller result missing `tool_name`"
+    });
+    assert_eq!(
+        agent_terminal_class("error", "", Some(&protocol_wrapped)),
+        Some("agent_loop_protocol_failure")
+    );
+
+    assert_eq!(
+        agent_terminal_class("failed", "verify_exhausted", None),
+        Some("generic_throw")
+    );
+    assert_eq!(
+        agent_terminal_class(
+            "error",
+            "",
+            Some(&json!({"tool_format": "native", "after_tool_result": false}))
+        ),
+        Some("generic_throw")
+    );
+    assert_eq!(agent_terminal_class("done", "", None), None);
+}
+
+#[test]
+fn agent_terminal_class_keeps_structured_fields_authoritative() {
+    assert_eq!(
+        agent_terminal_class(
+            "error",
+            "",
+            Some(&json!({
+                "category": "rate_limited",
+                "message": "session/prompt error: tool_caller result missing `tool_name`",
+            }))
+        ),
+        Some("rate_limited")
+    );
+    assert_eq!(
+        agent_terminal_class(
+            "error",
+            "",
+            Some(&json!({
+                "provider": "anthropic",
+                "model": "claude-sonnet",
+                "message": "plain provider envelope without class authority",
+            }))
+        ),
+        Some("generic_throw")
+    );
 }
 
 /// taint-on-write: a workspace write under tainted context (or from an untrusted
