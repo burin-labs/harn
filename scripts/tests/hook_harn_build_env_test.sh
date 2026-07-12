@@ -152,8 +152,30 @@ if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir/build" "$record"; then
   cat "$record" >&2
   exit 1
 fi
+if [[ "$(grep -c '^run scripts/check_rust_prompt_prose.harn$' "$prompt_record")" -ne 1 ]]; then
+  echo "check_no_rust_prompt_prose did not run exactly one normal prompt-prose scan" >&2
+  cat "$prompt_record" >&2
+  exit 1
+fi
+
+: > "$record"
+: > "$prompt_record"
+RUSTC_WRAPPER=sccache \
+  CARGO_BUILD_RUSTC_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_HARN_RECORD="$prompt_record" \
+  HARN_PROMPT_PROSE_SELF_TEST=1 \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/check_no_rust_prompt_prose.sh"
+
 if [[ "$(grep -c '^run scripts/check_rust_prompt_prose.harn' "$prompt_record")" -ne 2 ]]; then
-  echo "check_no_rust_prompt_prose did not run both prompt-prose checks" >&2
+  echo "check_no_rust_prompt_prose did not run self-test plus scan when requested" >&2
+  cat "$prompt_record" >&2
+  exit 1
+fi
+if ! grep -Fxq "run scripts/check_rust_prompt_prose.harn -- --self-test" "$prompt_record"; then
+  echo "check_no_rust_prompt_prose did not pass the self-test flag" >&2
   cat "$prompt_record" >&2
   exit 1
 fi
