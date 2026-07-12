@@ -97,6 +97,7 @@ impl Compiler {
                 fn_compiler.record_param_types(params);
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
+                fn_compiler.seed_captured_idents(body);
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Nil, self.line);
                 fn_compiler.chunk.emit(Op::Return, self.line);

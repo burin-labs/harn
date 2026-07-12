@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 63 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 64 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -313,6 +313,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-061`](#harn-lnt-061) | nil coalesce fallback is nil | — | — |
 | [`HARN-LNT-062`](#harn-lnt-062) | nil coalesce fallback is unreachable | — | — |
 | [`HARN-LNT-063`](#harn-lnt-063) | non-null assertion `!` on an already-non-nil value | `expressions/simplify` | `behavior-preserving` |
+| [`HARN-LNT-064`](#harn-lnt-064) | a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race | — | — |
 
 ## FMT — Formatter
 
@@ -3450,6 +3451,38 @@ non-nil, so the assertion does nothing and can be removed.
   trailing `!`.
 - Suppress the lint with an attribute only when the surrounding code is
   intentionally non-idiomatic.
+
+### `HARN-LNT-064`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race
+
+A variable declared in an enclosing scope is reassigned inside a `parallel` or
+`spawn` body. Harn closures capture by reference, and `parallel`/`spawn` bodies
+are lowered into closures whose captured cells are shared — by `Arc` — with
+every concurrent branch. Reassigning such a variable therefore mutates a single
+shared cell from many branches at once.
+
+This is memory-safe (the cell is a mutex), but the writes race: branches
+interleave at every `await` point (an `llm_call`, a host call), so a
+read-modify-write such as `total = total + x` silently loses updates, and under
+a multi-threaded runtime it is a genuine data race in the logical sense.
+
+#### How to fix
+
+- Prefer returning a value from each branch and combining the results after the
+  fan-out, which is deterministic and lock-free:
+
+  ```harn
+  const parts = parallel each items { item -> compute(item) }
+  const total = fold(parts, 0, { acc, part -> acc + part })
+  ```
+
+- If a shared mutable accumulator is genuinely required, guard it explicitly and
+  accept that ordering is nondeterministic.
+- Reassigning a variable that is declared *inside* the branch body is fine and
+  never flagged — only captures from an enclosing scope trip this lint.
 
 ### `HARN-FMT-001`
 

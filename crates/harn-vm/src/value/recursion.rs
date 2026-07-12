@@ -173,7 +173,11 @@ pub fn dismantle_values<I: IntoIterator<Item = VmValue>>(values: I) {
                 if let Some(mut closure) = Arc::into_inner(closure) {
                     for scope in &mut closure.env.scopes {
                         if let Some(vars) = Arc::get_mut(&mut scope.vars) {
-                            stack.extend(std::mem::take(vars).into_values().map(|(v, _)| v));
+                            stack.extend(
+                                std::mem::take(vars)
+                                    .into_values()
+                                    .filter_map(super::env::Binding::into_teardown_value),
+                            );
                         }
                     }
                 }

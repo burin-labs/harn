@@ -31,6 +31,7 @@ impl Compiler {
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
         let is_gen = is_stream || body_contains_yield(body);
+        fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
         fn_compiler.drain_finallys_to_floor(0)?;
@@ -80,6 +81,7 @@ impl Compiler {
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
+        fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
         fn_compiler.drain_finallys_to_floor(0)?;
@@ -342,6 +344,7 @@ impl Compiler {
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
         let is_gen = body_contains_yield(body);
+        fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
         fn_compiler.drain_finallys_to_floor(0)?;

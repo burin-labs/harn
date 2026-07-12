@@ -668,7 +668,7 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         // Consume one value (into a binding / property / discard). `SetVar`,
         // `SetProperty` and the local-slot stores read their target by name
         // or slot index, so they only pop the value being stored.
-        DefLet | DefVar | SetVar | DefLocalSlot | SetLocalSlot | SetProperty
+        DefLet | DefVar | DefCell | SetVar | DefLocalSlot | SetLocalSlot | SetProperty
         | SetLocalSlotProperty | ConcatAssignLocal | Pop => -1,
         // Value-preserving: unary ops, by-name lookups/checks, and scope /
         // iterator / exception-handler bookkeeping (the last three touch

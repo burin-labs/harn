@@ -63,6 +63,7 @@ impl Compiler {
             fn_compiler
                 .record_binding_type(&BindingPattern::Identifier(param_name.clone()), param_type);
         }
+        fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
         let param_slots = crate::chunk::ParamSlot::vec_from_typed(&typed_params);
@@ -101,6 +102,7 @@ impl Compiler {
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
+        fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
         super::ensure_chunk_addressable(&fn_compiler.chunk, "spawn body", self.line)?;

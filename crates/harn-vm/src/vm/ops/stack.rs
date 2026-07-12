@@ -128,6 +128,25 @@ impl super::super::Vm {
         self.env.define(name, val, true)
     }
 
+    /// Define a mutable `let` binding that a nested closure captures, boxed in a
+    /// shared cell (see `env::Binding::Cell`). Emitted only for such captured
+    /// locals; the closure minted after this point shares the cell, so its
+    /// writes and this frame's writes to the name are mutually visible —
+    /// closure capture by reference. Runs once per activation, so each
+    /// activation gets a distinct cell.
+    pub(super) fn execute_def_cell(&mut self) -> Result<(), VmError> {
+        let (chunk, idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Arc::clone(&frame.chunk), idx)
+        };
+        let name = Self::const_str(&chunk.constants[idx])?;
+        let val = self.pop()?;
+        self.sync_current_frame_locals_to_env();
+        self.env.define_cell(name, val, true)
+    }
+
     pub(super) fn execute_push_scope(&mut self) {
         self.env.push_scope();
         if let Some(frame) = self.frames.last_mut() {

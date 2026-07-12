@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 63
+      "count": 64
     },
     {
       "id": "FMT",
@@ -2342,6 +2342,15 @@
           "summary": "Simplify the expression to its canonical form"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-064",
+      "category": "LNT",
+      "summary": "a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
