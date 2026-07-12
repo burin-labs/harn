@@ -1,4 +1,6 @@
 use crate::value::VmDictExt;
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value as JsonValue};
@@ -442,10 +444,104 @@ async fn run_git_command(
         .get("success")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    if !success {
+        let exit_code = result_json
+            .get("exit_code")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(-1);
+        let stderr = result_json
+            .get("stderr")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        warn_git_failure(command.operation, exit_code, stderr);
+    }
     let data = parse_git_data(&command.data_parser, &result_json, success)?;
     let receipt = build_receipt(&command, &result_json, status, data, approval);
     persist_receipt_and_trust(&receipt, &command, success).await?;
     Ok(crate::stdlib::json_to_vm_value(&receipt))
+}
+
+/// Git operations whose `success == false` receipt is a normal answer,
+/// not a fault, and therefore must stay silent. A probe is invoked
+/// precisely to learn whether a condition holds: `git.repo.discover`
+/// runs `git rev-parse` against an arbitrary path so the caller can ask
+/// "is this a git repository?", so an exit-128 "not a git repository"
+/// result is the answer it wanted, not an error worth warning about.
+/// Warning here would spam every discovery of a non-repo path.
+const PROBE_OPERATIONS: &[&str] = &["git.repo.discover"];
+
+/// Longest stderr excerpt carried in a failure diagnostic. The first
+/// line is usually a single `fatal:`/`error:` sentence; the cap keeps a
+/// pathological multi-kilobyte stderr from flooding the warning channel.
+const FAILURE_STDERR_MAX_CHARS: usize = 200;
+
+thread_local! {
+    /// Dedup set for [`warn_git_failure`], keyed by
+    /// `(operation, exit_code, first-stderr-line)`. A probe/retry loop
+    /// that keeps hitting the same failure warns at most once per
+    /// process, mirroring the `WARNED_KEYS` pattern in
+    /// `stdlib::sandbox`. Thread-local (not global) so parallel VM
+    /// threads stay independent and tests can observe a clean slate.
+    static WARNED_GIT_FAILURES: RefCell<BTreeSet<String>> =
+        const { RefCell::new(BTreeSet::new()) };
+}
+
+/// Emit a one-line runtime diagnostic when a git stdlib command comes
+/// back with a `success == false` receipt.
+///
+/// The receipt-returning git builtins deliberately never throw (probes
+/// are legitimate), so a failure is otherwise completely silent: the
+/// caller reads empty `data` — an empty diff, an empty status — and may
+/// interpolate it into an LLM prompt with zero indication anything broke.
+/// This makes the fact speak at the source. The diagnostic is additive
+/// only: it does not change the receipt, the return value, or the
+/// non-throwing contract.
+///
+/// Deduplicated per `(operation, exit_code, first-stderr-line)` so a
+/// probe or retry loop cannot spam the warning channel.
+fn warn_git_failure(operation: &str, exit_code: i64, stderr: &str) {
+    if PROBE_OPERATIONS.contains(&operation) {
+        return;
+    }
+    let first_line = truncate_chars(
+        stderr.lines().next().unwrap_or("").trim(),
+        FAILURE_STDERR_MAX_CHARS,
+    );
+    let key = format!("{operation}\u{1f}{exit_code}\u{1f}{first_line}");
+    let is_new = WARNED_GIT_FAILURES.with(|keys| keys.borrow_mut().insert(key));
+    if !is_new {
+        return;
+    }
+    let detail = if first_line.is_empty() {
+        "no stderr".to_string()
+    } else {
+        first_line
+    };
+    crate::events::log_warn(
+        "stdlib.git",
+        &format!(
+            "{operation} failed (exit {exit_code}): {detail} \
+             (receipt success=false; callers see empty data)"
+        ),
+    );
+}
+
+/// Clear the failed-command warn-once dedup set. Called from
+/// `reset_stdlib_state` so a fresh test (or reused runtime thread) starts
+/// with no suppressed diagnostics, mirroring `sandbox::reset_sandbox_state`.
+pub(crate) fn reset_git_state() {
+    WARNED_GIT_FAILURES.with(|keys| keys.borrow_mut().clear());
+}
+
+/// Truncate `text` to at most `max` characters (not bytes), appending an
+/// ellipsis when it was shortened, so the excerpt never splits a UTF-8
+/// codepoint.
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(max).collect();
+    format!("{head}…")
 }
 
 async fn planned_or_noop_receipt(
@@ -1482,6 +1578,216 @@ mod tests {
             .expect_err("non-string path should be rejected");
         assert!(
             matches!(err, VmError::TypeError(message) if message.contains("paths entries must be strings"))
+        );
+    }
+
+    /// Capture the diagnostics emitted while `body` runs by swapping the
+    /// thread-local event sinks for a [`CollectorSink`], returning only
+    /// the `stdlib.git` warnings.
+    fn capture_git_warnings(body: impl FnOnce()) -> Vec<crate::events::LogEvent> {
+        use crate::events::{add_event_sink, clear_event_sinks, reset_event_sinks, CollectorSink};
+        use std::rc::Rc;
+        let sink = Rc::new(CollectorSink::new());
+        clear_event_sinks();
+        add_event_sink(sink.clone());
+        body();
+        reset_event_sinks();
+        let warnings = sink
+            .logs
+            .borrow()
+            .iter()
+            .filter(|event| event.category == "stdlib.git")
+            .cloned()
+            .collect();
+        warnings
+    }
+
+    #[test]
+    fn warn_git_failure_dedupes_by_operation_exit_and_stderr_line() {
+        use crate::events::EventLevel;
+        reset_git_state();
+        let warnings = capture_git_warnings(|| {
+            // First failure warns.
+            warn_git_failure("git.diff", 128, "fatal: not a git repository: /x\ntrailing");
+            // Same (op, exit, first stderr line) is suppressed even though
+            // line 2 differs — the dedup key is the first line only.
+            warn_git_failure("git.diff", 128, "fatal: not a git repository: /x\nother");
+            // A different exit code is a distinct key and warns again.
+            warn_git_failure("git.diff", 1, "error: bad revision");
+        });
+        reset_git_state();
+        assert_eq!(warnings.len(), 2, "unexpected diagnostics: {warnings:?}");
+        assert_eq!(warnings[0].level, EventLevel::Warn);
+        assert_eq!(warnings[0].category, "stdlib.git");
+        assert!(
+            warnings[0]
+                .message
+                .contains("git.diff failed (exit 128): fatal: not a git repository: /x"),
+            "message was: {}",
+            warnings[0].message
+        );
+        assert!(
+            warnings[0]
+                .message
+                .contains("receipt success=false; callers see empty data"),
+            "message was: {}",
+            warnings[0].message
+        );
+        assert!(warnings[1].message.contains("git.diff failed (exit 1)"));
+    }
+
+    #[test]
+    fn warn_git_failure_exempts_probe_operations() {
+        reset_git_state();
+        let warnings = capture_git_warnings(|| {
+            warn_git_failure("git.repo.discover", 128, "fatal: not a git repository: /x");
+        });
+        reset_git_state();
+        assert!(
+            warnings.is_empty(),
+            "probe operations must stay silent on failure: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn warn_git_failure_truncates_long_stderr() {
+        reset_git_state();
+        let long = format!("fatal: {}", "x".repeat(500));
+        let warnings = capture_git_warnings(|| {
+            warn_git_failure("git.diff", 128, &long);
+        });
+        reset_git_state();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].message.contains('…'),
+            "truncated excerpt should end with an ellipsis: {}",
+            warnings[0].message
+        );
+        // Excerpt is capped at FAILURE_STDERR_MAX_CHARS characters; the
+        // surrounding wrapper text adds a bounded, fixed amount.
+        assert!(
+            warnings[0].message.chars().count() < FAILURE_STDERR_MAX_CHARS + 120,
+            "message unexpectedly long: {}",
+            warnings[0].message
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_git_command_emits_single_diagnostic_end_to_end() {
+        if !require_git() {
+            return;
+        }
+        crate::event_log::reset_active_event_log();
+        crate::stdlib::reset_stdlib_state();
+        // A directory that is definitively not a git repo.
+        let not_repo = tempfile::tempdir().expect("temp dir");
+        let warnings = run_on_local(async {
+            let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+            crate::events::clear_event_sinks();
+            crate::events::add_event_sink(sink.clone());
+            // Two identical failing calls; the second must be deduped.
+            for _ in 0..2 {
+                let receipt = run_git_command(
+                    None,
+                    GitCommand {
+                        operation: "git.diff",
+                        action: "git.diff",
+                        cwd: not_repo.path().to_path_buf(),
+                        argv: vec!["git".to_string(), "diff".to_string(), "HEAD".to_string()],
+                        mutation: GitMutation::Read,
+                        affected_paths: Vec::new(),
+                        data_parser: GitDataParser::Diff,
+                    },
+                )
+                .await
+                .expect("git.diff returns a receipt, never throws");
+                let json = crate::llm::vm_value_to_json(&receipt);
+                assert_eq!(json["success"], false);
+                // Data stays the empty diff the caller would silently consume.
+                assert_eq!(json["data"]["diff"], "");
+            }
+            crate::events::reset_event_sinks();
+            let collected = sink
+                .logs
+                .borrow()
+                .iter()
+                .filter(|event| event.category == "stdlib.git")
+                .cloned()
+                .collect::<Vec<_>>();
+            collected
+        })
+        .await;
+        assert_eq!(
+            warnings.len(),
+            1,
+            "two identical failures should warn exactly once: {warnings:?}"
+        );
+        // The exact exit code and stderr wording vary across git versions
+        // (128 "fatal: not a git repository" vs 129 usage-error phrasing),
+        // so assert the shape, not the specific code.
+        assert!(
+            warnings[0].message.contains("git.diff failed (exit "),
+            "message was: {}",
+            warnings[0].message
+        );
+        assert!(
+            warnings[0]
+                .message
+                .to_lowercase()
+                .contains("not a git repository"),
+            "stderr first line should be surfaced: {}",
+            warnings[0].message
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn discover_probe_failure_stays_silent_end_to_end() {
+        if !require_git() {
+            return;
+        }
+        crate::event_log::reset_active_event_log();
+        crate::stdlib::reset_stdlib_state();
+        let not_repo = tempfile::tempdir().expect("temp dir");
+        let warnings = run_on_local(async {
+            let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+            crate::events::clear_event_sinks();
+            crate::events::add_event_sink(sink.clone());
+            let receipt = run_git_command(
+                None,
+                GitCommand {
+                    operation: "git.repo.discover",
+                    action: "git.repo.discover",
+                    cwd: not_repo.path().to_path_buf(),
+                    argv: vec![
+                        "git".to_string(),
+                        "rev-parse".to_string(),
+                        "--show-toplevel".to_string(),
+                    ],
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Discover {
+                        input: display_path(not_repo.path()),
+                    },
+                },
+            )
+            .await
+            .expect("git.repo.discover returns a receipt");
+            let json = crate::llm::vm_value_to_json(&receipt);
+            assert_eq!(json["success"], false);
+            crate::events::reset_event_sinks();
+            let collected = sink
+                .logs
+                .borrow()
+                .iter()
+                .filter(|event| event.category == "stdlib.git")
+                .cloned()
+                .collect::<Vec<_>>();
+            collected
+        })
+        .await;
+        assert!(
+            warnings.is_empty(),
+            "git.repo.discover is a probe and must stay silent: {warnings:?}"
         );
     }
 }

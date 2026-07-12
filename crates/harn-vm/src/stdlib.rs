@@ -413,6 +413,7 @@ pub fn reset_stdlib_state() {
     clock::reset_clock_state();
     io::reset_io_state();
     sandbox::reset_sandbox_state();
+    git::reset_git_state();
     fs::reset_fs_state();
     json::reset_json_state();
     json_stream::reset_json_stream_state();

@@ -441,6 +441,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/stdlib/git.rs"
+statics = ["WARNED_GIT_FAILURES"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/stdlib/hitl.rs"
 statics = ["REQUEST_SEQUENCE"]
 category = "logical_task"
