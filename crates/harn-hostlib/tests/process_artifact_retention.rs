@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use filetime::FileTime;
 use harn_hostlib::process::{install_spawner, MockProcessConfig, MockSpawner};
@@ -149,11 +149,7 @@ fn command_creation_pressure_sweeps_completed_siblings_from_current_process() {
         .join(format!("harn-command-cmd_{}_100_1", std::process::id()));
     std::fs::create_dir(&old_completed).unwrap();
     std::fs::write(old_completed.join("combined.txt"), "old").unwrap();
-    let old = FileTime::from_system_time(
-        std::time::SystemTime::now()
-            .checked_sub(Duration::from_mins(1))
-            .expect("system clock before epoch"),
-    );
+    let old = FileTime::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_mins(1));
     filetime::set_file_mtime(&old_completed, old).unwrap();
 
     let spawner = Arc::new(MockSpawner::new());
