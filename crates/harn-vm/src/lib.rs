@@ -141,10 +141,9 @@ pub mod clock_mock {
     /// monotonic time while a testbench mock is installed. See the module
     /// docs for the full design.
     pub mod leak_audit {
-        #[cfg(test)]
-        pub use crate::triggers::test_util::clock_leak::TEST_LOCK;
         pub use crate::triggers::test_util::clock_leak::{
-            drain, instant_now, reset, snapshot, wall_now, ClockLeak,
+            drain, enter_scope, install_scope, instant_now, reset, snapshot, wall_now, ClockLeak,
+            ClockLeakScope, ClockLeakScopeGuard,
         };
     }
 }

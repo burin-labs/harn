@@ -12,9 +12,9 @@
 //!
 //! This module gives capabilities a single seam to route those reads
 //! through. The seam returns the real value (so production behavior is
-//! unchanged when no mock is installed) and, when a mock is active,
-//! records the capability id so the operator can see exactly which
-//! capability bypassed the mock.
+//! unchanged when no audit scope is installed) and, when a testbench
+//! session opts into auditing, records the capability id so the operator
+//! can see exactly which capability bypassed the mock.
 //!
 //! ## Usage
 //!
@@ -26,23 +26,20 @@
 //!
 //! ## Lifecycle
 //!
-//! - Recording is gated on [`super::clock::is_mocked`]: outside a
-//!   testbench session the audit is a single boolean check and a
-//!   real-clock read. Production pays nothing.
-//! - The recorded set is process-global so capabilities running on a
-//!   tokio worker thread (which has no thread-local mock state of its
-//!   own — the mock lives on the dispatching thread) still surface in
-//!   the audit. Tests that run sessions concurrently must therefore be
-//!   single-threaded; the testbench session contract already requires
-//!   serial setup, and the [`super::clock`] mock stack is thread-local
-//!   for the same reason.
-//! - [`drain`] empties the registry. [`crate::testbench::TestbenchSession::finalize`]
-//!   calls it so each session reports the leaks it observed.
+//! - Recording is gated on an active [`ClockLeakScope`]: outside a
+//!   testbench session the audit is a thread-local scope check and a
+//!   real-clock read. Production pays nothing beyond that check.
+//! - The registry is process-global so capabilities running on worker
+//!   threads can surface in the audit, but entries are keyed by scope.
+//!   A reset in one test cannot erase a sibling session's observations.
+//! - [`drain`] empties only the current scope.
+//!   [`crate::testbench::TestbenchSession::finalize`] calls it so each
+//!   session reports the leaks it observed.
 
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime};
-
-use super::clock as clock_inner;
 
 /// One observed leak: a capability read real time while a testbench
 /// mock was installed.
@@ -57,51 +54,158 @@ pub struct ClockLeak {
     pub count: u64,
 }
 
-struct LeakRegistry {
-    /// Insertion-ordered entries keyed by `capability_id`. We use a
-    /// `Vec` instead of a `HashMap` so the report is stable across runs
-    /// (which matters for tape fidelity diagnostics) and there are
-    /// rarely more than a handful of distinct entries.
+/// Stable audit scope for one mock-clock testbench session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClockLeakScope(u64);
+
+impl ClockLeakScope {
+    fn next() -> Self {
+        static NEXT_SCOPE_ID: AtomicU64 = AtomicU64::new(1);
+        Self(NEXT_SCOPE_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+thread_local! {
+    static ACTIVE_SCOPE_STACK: RefCell<Vec<ClockLeakScope>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Guard that makes a [`ClockLeakScope`] current on this thread.
+pub struct ClockLeakScopeGuard {
+    scope: ClockLeakScope,
+    owner: bool,
+}
+
+impl ClockLeakScopeGuard {
+    /// The scope this guard installed. Pass it to [`enter_scope`] when a
+    /// worker thread must report leaks to the same session.
+    pub fn scope(&self) -> ClockLeakScope {
+        self.scope
+    }
+}
+
+impl Drop for ClockLeakScopeGuard {
+    fn drop(&mut self) {
+        ACTIVE_SCOPE_STACK.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if stack.last().copied() == Some(self.scope) {
+                stack.pop();
+            } else if let Some(index) = stack.iter().rposition(|scope| *scope == self.scope) {
+                stack.remove(index);
+            }
+        });
+        if self.owner {
+            REGISTRY
+                .lock()
+                .expect("clock leak registry mutex poisoned")
+                .remove_scope(self.scope);
+        }
+    }
+}
+
+/// Start a fresh audit scope on this thread. Owning guards remove any
+/// leftover entries on drop, so a panicking test cannot leak observations
+/// into a later session.
+pub fn install_scope() -> ClockLeakScopeGuard {
+    let scope = ClockLeakScope::next();
+    ACTIVE_SCOPE_STACK.with(|stack| stack.borrow_mut().push(scope));
+    ClockLeakScopeGuard { scope, owner: true }
+}
+
+/// Enter an existing audit scope on this thread. This is the explicit
+/// propagation hook for worker threads that need to attribute real-clock
+/// reads to their parent testbench session.
+pub fn enter_scope(scope: ClockLeakScope) -> ClockLeakScopeGuard {
+    ACTIVE_SCOPE_STACK.with(|stack| stack.borrow_mut().push(scope));
+    ClockLeakScopeGuard {
+        scope,
+        owner: false,
+    }
+}
+
+fn active_scope() -> Option<ClockLeakScope> {
+    ACTIVE_SCOPE_STACK.with(|stack| stack.borrow().last().copied())
+}
+
+struct ScopedLeaks {
+    scope: ClockLeakScope,
     entries: Vec<ClockLeak>,
+}
+
+struct LeakRegistry {
+    scopes: Vec<ScopedLeaks>,
 }
 
 impl LeakRegistry {
     const fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
+        Self { scopes: Vec::new() }
     }
 
-    fn record(&mut self, capability_id: &str) {
-        if let Some(entry) = self
-            .entries
+    fn entries_mut(&mut self, scope: ClockLeakScope) -> &mut Vec<ClockLeak> {
+        if let Some(index) = self.scopes.iter().position(|entry| entry.scope == scope) {
+            return &mut self.scopes[index].entries;
+        }
+        self.scopes.push(ScopedLeaks {
+            scope,
+            entries: Vec::new(),
+        });
+        &mut self.scopes.last_mut().expect("scope just pushed").entries
+    }
+
+    fn record(&mut self, scope: ClockLeakScope, capability_id: &str) {
+        let entries = self.entries_mut(scope);
+        if let Some(entry) = entries
             .iter_mut()
             .find(|entry| entry.capability_id == capability_id)
         {
             entry.count = entry.count.saturating_add(1);
             return;
         }
-        self.entries.push(ClockLeak {
+        entries.push(ClockLeak {
             capability_id: capability_id.to_string(),
             count: 1,
         });
+    }
+
+    fn snapshot(&self, scope: ClockLeakScope) -> Vec<ClockLeak> {
+        self.scopes
+            .iter()
+            .find(|entry| entry.scope == scope)
+            .map(|entry| entry.entries.clone())
+            .unwrap_or_default()
+    }
+
+    fn drain(&mut self, scope: ClockLeakScope) -> Vec<ClockLeak> {
+        let Some(index) = self.scopes.iter().position(|entry| entry.scope == scope) else {
+            return Vec::new();
+        };
+        std::mem::take(&mut self.scopes[index].entries)
+    }
+
+    fn reset(&mut self, scope: ClockLeakScope) {
+        if let Some(entry) = self.scopes.iter_mut().find(|entry| entry.scope == scope) {
+            entry.entries.clear();
+        }
+    }
+
+    fn remove_scope(&mut self, scope: ClockLeakScope) {
+        self.scopes.retain(|entry| entry.scope != scope);
     }
 }
 
 static REGISTRY: Mutex<LeakRegistry> = Mutex::new(LeakRegistry::new());
 
 /// Read the system wall clock, recording a leak entry when a testbench
-/// mock is installed. Always returns the real value so production
-/// callers (which never run with a mock) are unaffected.
+/// audit scope is active. Always returns the real value so production
+/// callers (which never install a scope) are unaffected.
 pub fn wall_now(capability_id: &str) -> SystemTime {
-    record_if_mocked(capability_id);
+    record_in_active_scope(capability_id);
     SystemTime::now()
 }
 
 /// Read the system monotonic clock, recording a leak entry when a
-/// testbench mock is installed. Always returns the real value.
+/// testbench audit scope is active. Always returns the real value.
 pub fn instant_now(capability_id: &str) -> Instant {
-    record_if_mocked(capability_id);
+    record_in_active_scope(capability_id);
     Instant::now()
 }
 
@@ -110,60 +214,61 @@ pub fn instant_now(capability_id: &str) -> Instant {
 /// so the script can observe and assert without disturbing later
 /// `finalize()` consumption.
 pub fn snapshot() -> Vec<ClockLeak> {
+    let Some(scope) = active_scope() else {
+        return Vec::new();
+    };
     REGISTRY
         .lock()
         .expect("clock leak registry mutex poisoned")
-        .entries
-        .clone()
+        .snapshot(scope)
 }
 
 /// Drain and return the registry. Called by
 /// [`crate::testbench::TestbenchSession::finalize`] so each session
 /// reports a self-contained leak set.
 pub fn drain() -> Vec<ClockLeak> {
-    std::mem::take(
-        &mut REGISTRY
-            .lock()
-            .expect("clock leak registry mutex poisoned")
-            .entries,
-    )
+    let Some(scope) = active_scope() else {
+        return Vec::new();
+    };
+    REGISTRY
+        .lock()
+        .expect("clock leak registry mutex poisoned")
+        .drain(scope)
 }
 
-/// Reset the registry. Production code should rely on [`drain`] to
-/// consume entries; this is the catch-all called by
-/// [`crate::reset_thread_local_state`] and the per-session install path
-/// so a fresh session starts with an empty registry.
+/// Reset the current scope's registry entries. Production code should
+/// rely on [`drain`] to consume entries; this is the catch-all called by
+/// [`crate::reset_thread_local_state`] so a reset in one in-process
+/// test cannot erase another active session's observations.
 pub fn reset() {
-    REGISTRY
-        .lock()
-        .expect("clock leak registry mutex poisoned")
-        .entries
-        .clear();
-}
-
-fn record_if_mocked(capability_id: &str) {
-    if !clock_inner::is_mocked() {
+    let Some(scope) = active_scope() else {
         return;
-    }
+    };
     REGISTRY
         .lock()
         .expect("clock leak registry mutex poisoned")
-        .record(capability_id);
+        .reset(scope);
 }
 
-/// Test-only serialization mutex. The registry is process-global, so
-/// every test that touches it must lock this so they don't race. Shared
-/// with the testbench module's tests via [`crate::clock_mock::leak_audit`].
-#[cfg(test)]
-pub static TEST_LOCK: Mutex<()> = Mutex::new(());
+fn record_in_active_scope(capability_id: &str) {
+    let Some(scope) = active_scope() else {
+        return;
+    };
+    REGISTRY
+        .lock()
+        .expect("clock leak registry mutex poisoned")
+        .record(scope, capability_id);
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::clock_mock::{install_override, MockClock};
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     fn isolated_registry<F: FnOnce()>(f: F) {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _scope = install_scope();
         reset();
         f();
         reset();
@@ -171,11 +276,9 @@ mod tests {
 
     #[test]
     fn no_mock_no_leak() {
-        isolated_registry(|| {
-            let _ = wall_now("test/cap");
-            let _ = instant_now("test/cap");
-            assert!(snapshot().is_empty());
-        });
+        let _ = wall_now("test/cap");
+        let _ = instant_now("test/cap");
+        assert!(snapshot().is_empty());
     }
 
     #[test]
@@ -228,5 +331,33 @@ mod tests {
             assert_eq!(drained.len(), 1);
             assert!(snapshot().is_empty());
         });
+    }
+
+    #[test]
+    fn sibling_scope_reset_cannot_erase_active_scope() {
+        let alpha = install_scope();
+        let alpha_scope = alpha.scope();
+        let beta = install_scope();
+        let beta_scope = beta.scope();
+
+        let barrier = Arc::new(Barrier::new(2));
+        let worker_barrier = Arc::clone(&barrier);
+        let worker = thread::spawn(move || {
+            let _beta = enter_scope(beta_scope);
+            worker_barrier.wait();
+            crate::reset_thread_local_state();
+            wall_now("test/beta");
+            assert_eq!(snapshot().len(), 1);
+        });
+
+        let _alpha_thread = enter_scope(alpha_scope);
+        wall_now("test/alpha");
+        barrier.wait();
+        worker.join().expect("worker");
+        let leaks = snapshot();
+        assert_eq!(leaks.len(), 1);
+        assert_eq!(leaks[0].capability_id, "test/alpha");
+        assert_eq!(leaks[0].count, 1);
+        drop((alpha, beta));
     }
 }
