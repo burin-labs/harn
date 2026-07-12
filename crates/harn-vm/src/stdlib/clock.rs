@@ -22,8 +22,13 @@ static MONOTONIC_START: OnceLock<Instant> = OnceLock::new();
 thread_local! {
     /// RAII guards held alive by `mock_time(...)` calls from Harn scripts.
     /// `unmock_time()` pops one. The per-test reset hook clears the lot.
-    static MOCK_TIME_GUARDS: RefCell<Vec<clock_mock::ClockOverrideGuard>> =
+    static MOCK_TIME_GUARDS: RefCell<Vec<ScriptMockTimeGuard>> =
         const { RefCell::new(Vec::new()) };
+}
+
+struct ScriptMockTimeGuard {
+    _clock: clock_mock::ClockOverrideGuard,
+    _leak_scope: clock_mock::leak_audit::ClockLeakScopeGuard,
 }
 
 fn real_wall_ms() -> i64 {
@@ -87,8 +92,12 @@ pub fn advance(ms: i64) {
 }
 
 fn push_mock(wall_ms: i64) {
+    let leak_scope = clock_mock::leak_audit::install_scope();
     let clock = clock_mock::MockClock::at_wall_ms(wall_ms);
-    let guard = clock_mock::install_override(clock);
+    let guard = ScriptMockTimeGuard {
+        _clock: clock_mock::install_override(clock),
+        _leak_scope: leak_scope,
+    };
     MOCK_TIME_GUARDS.with(|stack| stack.borrow_mut().push(guard));
 }
 

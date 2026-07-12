@@ -717,6 +717,12 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
+path = "src/triggers/test_util/clock_leak.rs"
+statics = ["ACTIVE_SCOPE_STACK"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/triggers/webhook_intake.rs"
 statics = ["REGISTRY"]
 category = "runtime_registry"

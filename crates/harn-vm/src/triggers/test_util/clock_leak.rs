@@ -85,7 +85,10 @@ impl ClockLeakScopeGuard {
 
 impl Drop for ClockLeakScopeGuard {
     fn drop(&mut self) {
-        ACTIVE_SCOPE_STACK.with(|stack| {
+        // Script-level `mock_time(...)` guards can live inside a
+        // thread-local stack. If that stack is torn down at thread exit,
+        // accessing a sibling TLS slot with `with` aborts the process.
+        let _ = ACTIVE_SCOPE_STACK.try_with(|stack| {
             let mut stack = stack.borrow_mut();
             if stack.last().copied() == Some(self.scope) {
                 stack.pop();
