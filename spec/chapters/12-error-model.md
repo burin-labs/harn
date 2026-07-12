@@ -29,9 +29,27 @@ When a callable declares `throws E`, every value it can `throw` — or surface v
 a compile-time type error (`HARN-TYP-026`). A callable without the clause is not
 throw-checked.
 
-> Catch-exhaustiveness against a declared `throws` set (warning when a typed
-> `catch` fails to cover every declared thrown variant) is a separate check
-> tracked as future work.
+**Catch-exhaustiveness.** A `throw` inside a `try` block does not automatically
+count against the enclosing `throws` set — a `catch` that handles it removes it
+from what escapes, exactly as at run time. A typed `catch (e: E)` handles a
+thrown error only when its type is `E` (the runtime matches thrown *enum* errors
+by name and rethrows the rest), an untyped `catch` is a catch-all that handles
+everything, and a `throw` in the `catch` or `finally` body always escapes. The
+errors that remain — those the `catch` does not cover — are what the declared
+`throws` set must account for. So a `try`/`catch` whose handler does not cover an
+error the body can throw makes that error part of the callable's thrown set, and
+it must then be declared (or handled) or it raises `HARN-TYP-026`:
+
+```harn
+fn load(path: string) throws NotFound {
+  try {
+    throw NotFound              // handled below — does not escape
+  } catch (e: NotFound) {
+    // recover
+  }
+  // clean: nothing escapes the callable
+}
+```
 
 ### try/catch/finally
 
