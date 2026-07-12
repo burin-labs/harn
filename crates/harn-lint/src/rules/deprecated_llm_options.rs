@@ -164,6 +164,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
         | Node::ThrowStmt { value }
         | Node::Spread(value)
         | Node::TryOperator { operand: value }
+        | Node::NonNullAssert { operand: value }
         | Node::TryStar { operand: value }
         | Node::UnaryOp { operand: value, .. } => visit_node(value, diagnostics),
         Node::HitlExpr { args, .. } => {

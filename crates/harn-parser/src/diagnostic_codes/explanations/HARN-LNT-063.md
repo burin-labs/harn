@@ -1,4 +1,4 @@
-# HARN-LNT-061 — unnecessary non-null assertion
+# HARN-LNT-063 — unnecessary non-null assertion
 
 A non-null assertion (`expr!`) was applied to a value whose type is already
 non-nil, so the assertion does nothing and can be removed.

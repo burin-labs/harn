@@ -245,6 +245,7 @@ impl<'a, 'd> State<'a, 'd> {
             | Node::OptionalPropertyAccess { object, .. }
             | Node::Spread(object)
             | Node::TryOperator { operand: object }
+            | Node::NonNullAssert { operand: object }
             | Node::TryStar { operand: object }
             | Node::UnaryOp {
                 operand: object, ..

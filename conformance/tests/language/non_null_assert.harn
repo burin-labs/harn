@@ -1,0 +1,17 @@
+type Box = {value: int?}
+
+fn get(b: Box) -> int {
+  // `b.value!` asserts non-nil: `int?` -> `int`, identity at runtime.
+  return b.value!
+}
+
+pipeline main() {
+  __io_println(to_string(get({value: 42})))
+  // The nil case throws a catchable `unwrap_nil` error, not a silent nil.
+  const empty: Box = {value: nil}
+  try {
+    __io_println(to_string(empty.value!))
+  } catch (e) {
+    __io_println("caught nil unwrap")
+  }
+}

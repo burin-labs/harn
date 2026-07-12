@@ -351,6 +351,7 @@ diagnostic_codes! {
     LintUnnormalizedOptions, "HARN-LNT-060", Lnt, "inline options dict bypasses the typed option constructors";
     LintNilCoalesceNoop, "HARN-LNT-061", Lnt, "nil coalesce fallback is nil";
     LintNilCoalesceUnreachableFallback, "HARN-LNT-062", Lnt, "nil coalesce fallback is unreachable";
+    LintUnnecessaryNonNullAssert, "HARN-LNT-063", Lnt, "non-null assertion `!` on an already-non-nil value";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
@@ -832,6 +833,7 @@ impl Code {
             }
             Code::LintRedundantNilTernary
             | Code::LintUnnecessarySafeNavigation
+            | Code::LintUnnecessaryNonNullAssert
             | Code::LintPreferOptionalShorthand
             | Code::LintComparisonToBool
             | Code::LintPointlessComparison

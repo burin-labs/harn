@@ -448,6 +448,7 @@ fn collect_mock_host_capabilities_from_node(
         }
         | Node::Spread(object)
         | Node::TryOperator { operand: object }
+        | Node::NonNullAssert { operand: object }
         | Node::TryStar { operand: object } => {
             collect_mock_host_capabilities_from_node(
                 object,

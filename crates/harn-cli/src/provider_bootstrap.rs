@@ -402,6 +402,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
         | Node::YieldExpr { value: Some(value) }
         | Node::Spread(value)
         | Node::TryOperator { operand: value }
+        | Node::NonNullAssert { operand: value }
         | Node::TryStar { operand: value }
         | Node::UnaryOp { operand: value, .. } => node_uses_provider_llm(value, shadows),
         Node::GuardStmt {

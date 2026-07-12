@@ -814,7 +814,9 @@ fn collect_symbols(
         Node::UnaryOp { operand, .. } => {
             recurse!(operand, scope_span);
         }
-        Node::TryOperator { operand } | Node::TryStar { operand } => {
+        Node::TryOperator { operand }
+        | Node::NonNullAssert { operand }
+        | Node::TryStar { operand } => {
             recurse!(operand, scope_span);
         }
         Node::FunctionCall { args, .. } => {

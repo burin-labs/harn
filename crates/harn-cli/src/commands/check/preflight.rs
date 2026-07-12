@@ -510,6 +510,7 @@ fn collect_static_tool_surface_from_node(
         | Node::ReturnStmt { value: Some(value) }
         | Node::Spread(value)
         | Node::TryOperator { operand: value }
+        | Node::NonNullAssert { operand: value }
         | Node::TryStar { operand: value }
         | Node::UnaryOp { operand: value, .. } => collect_static_tool_surface_from_node(
             value,
@@ -1977,6 +1978,7 @@ fn scan_node_preflight(
         }
         Node::Spread(expr)
         | Node::TryOperator { operand: expr }
+        | Node::NonNullAssert { operand: expr }
         | Node::TryStar { operand: expr } => {
             scan_node_preflight(
                 expr,

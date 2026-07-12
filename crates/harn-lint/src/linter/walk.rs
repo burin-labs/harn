@@ -1161,7 +1161,9 @@ impl<'a> Linter<'a> {
                 self.lint_node(inner);
             }
 
-            Node::TryOperator { operand } | Node::TryStar { operand } => {
+            Node::TryOperator { operand }
+            | Node::NonNullAssert { operand }
+            | Node::TryStar { operand } => {
                 self.lint_node(operand);
             }
 

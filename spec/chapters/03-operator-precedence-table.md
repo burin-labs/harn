@@ -15,7 +15,13 @@ From lowest to highest binding:
 | 9 | `*` `/` `%` | Left | Multiplicative |
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
 | 11 | `**` | Right | Exponentiation |
-| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` | Left | Postfix |
+| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+
+`!` appears at two precedence levels with two distinct meanings: a **prefix**
+`!` (level 10) is logical negation (`!ok`), while a **postfix** `!` (level 12)
+is the non-null assertion (`value!`). They never collide — a `!` before an
+operand is negation, a `!` after one is the assertion — and `!=` is a single
+token, so neither reading is ambiguous.
 
 Exponentiation binds more tightly than a unary prefix on its **left** operand,
 so `-2 ** 2` parses as `-(2 ** 2)` (`-4`), matching Python, Ruby, and ordinary

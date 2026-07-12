@@ -468,6 +468,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         | Node::ThrowStmt { value: object }
         | Node::Spread(object)
         | Node::TryOperator { operand: object }
+        | Node::NonNullAssert { operand: object }
         | Node::TryStar { operand: object } => vec![object.as_ref()],
         Node::SubscriptAccess { object, index }
         | Node::OptionalSubscriptAccess { object, index } => {

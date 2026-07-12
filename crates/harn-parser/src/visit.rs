@@ -220,6 +220,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         | Node::Spread(value)
         | Node::TryOperator { operand: value }
         | Node::TryStar { operand: value }
+        | Node::NonNullAssert { operand: value }
         | Node::UnaryOp { operand: value, .. } => children.push(value),
         Node::HitlExpr { args, .. } => {
             for arg in args {

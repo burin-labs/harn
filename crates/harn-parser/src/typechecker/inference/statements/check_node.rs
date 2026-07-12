@@ -837,6 +837,11 @@ impl TypeChecker {
                 self.check_node(operand, scope);
             }
 
+            Node::NonNullAssert { operand } => {
+                self.check_unnecessary_non_null_assert(snode, operand, scope);
+                self.check_node(operand, scope);
+            }
+
             Node::MatchExpr { value, arms } => {
                 self.check_node(value, scope);
                 let value_type = self.infer_type(value, scope);

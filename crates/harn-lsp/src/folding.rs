@@ -235,6 +235,7 @@ fn collect_ast_ranges(
         }
         Node::UnaryOp { operand, .. }
         | Node::TryOperator { operand }
+        | Node::NonNullAssert { operand }
         | Node::TryStar { operand }
         | Node::Spread(operand) => collect_ast_ranges(operand, ranges, seen),
         Node::Ternary {

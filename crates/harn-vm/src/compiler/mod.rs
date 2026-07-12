@@ -298,6 +298,25 @@ impl Compiler {
                     _ => {}
                 }
             }
+            Node::NonNullAssert { operand } => {
+                // `expr!` — identity when present, throws when `nil`. Leaves the
+                // (non-nil) value on the stack. `JumpIfFalse` peeks, so the
+                // `is_nil` bool is popped on both paths.
+                self.compile_node(operand)?; // [value]
+                self.chunk.emit(Op::Dup, self.line); // [value, value]
+                self.chunk.emit(Op::Nil, self.line); // [value, value, nil]
+                self.chunk.emit(Op::Equal, self.line); // [value, is_nil]
+                let present_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                // nil path: drop the bool, throw a structured message.
+                self.chunk.emit(Op::Pop, self.line); // [value]
+                let idx =
+                    self.string_constant("non-null assertion failed: value was nil (unwrap_nil)");
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+                self.chunk.emit(Op::Throw, self.line);
+                // present path: drop the bool, leaving the value.
+                self.chunk.patch_jump(present_jump);
+                self.chunk.emit(Op::Pop, self.line); // [value]
+            }
             Node::Ternary {
                 condition,
                 true_expr,
