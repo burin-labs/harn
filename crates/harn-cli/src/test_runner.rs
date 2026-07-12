@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -195,6 +196,9 @@ pub struct RunOptions {
     /// historical "everything sequential" semantics that `harn test`
     /// defaulted to before `--parallel` was introduced.
     pub parallel: bool,
+    /// Stop claiming new cases after the first discovery or execution failure.
+    /// Cases already running in parallel finish and retain their results.
+    pub fail_fast: bool,
     /// Explicit worker limit (`-j`/`--jobs`). `None` defaults to the
     /// available parallelism, capped by a small constant when running in
     /// parallel mode. Ignored when `parallel = false`.
@@ -302,6 +306,7 @@ pub async fn run_tests(
         max_test_ms: test_budget_ms_via_env(HARN_TEST_MAX_MS_ENV),
         max_execute_ms: test_budget_ms_via_env(HARN_TEST_MAX_EXECUTE_MS_ENV),
         parallel,
+        fail_fast: false,
         jobs: None,
         shard: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
@@ -326,6 +331,7 @@ pub async fn run_tests_with_progress(
         max_test_ms: test_budget_ms_via_env(HARN_TEST_MAX_MS_ENV),
         max_execute_ms: test_budget_ms_via_env(HARN_TEST_MAX_EXECUTE_MS_ENV),
         parallel,
+        fail_fast: false,
         jobs: None,
         shard: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
@@ -418,7 +424,9 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
 
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
-    all_results.extend(execute_cases(cases, workers, options, total_tests).await);
+    if !options.fail_fast || all_results.is_empty() {
+        all_results.extend(execute_cases(cases, workers, options, total_tests).await);
+    }
 
     let total = all_results.len();
     let passed = all_results.iter().filter(|r| r.passed).count();
@@ -900,6 +908,9 @@ async fn execute_cases(
                 TestRunEvent::TestFinished(result.clone()),
             );
             results.push(result);
+            if options.fail_fast && !results.last().is_some_and(|result| result.passed) {
+                break;
+            }
         }
         return results;
     }
@@ -907,6 +918,7 @@ async fn execute_cases(
     let queue = Arc::new(Mutex::new(cases));
     let gate = Arc::new(ResourceGate::new(workers));
     let results: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
+    let cancelled = Arc::new(AtomicBool::new(false));
 
     let mut handles = Vec::with_capacity(workers);
     for worker_idx in 0..workers {
@@ -920,6 +932,8 @@ async fn execute_cases(
         let cli_skill_dirs = options.cli_skill_dirs.clone();
         let progress = options.progress.clone();
         let diagnose = options.diagnose;
+        let fail_fast = options.fail_fast;
+        let cancelled = Arc::clone(&cancelled);
         let handle = thread::Builder::new()
             .name(format!("harn-test-worker-{worker_idx}"))
             .stack_size(CLI_RUNTIME_STACK_SIZE)
@@ -945,7 +959,9 @@ async fn execute_cases(
                 // from the tail gives this worker the slowest unclaimed
                 // test, which front-loads long poles and prevents workers
                 // from stranding on quick tests at the end of the run.
-                while let Some(case) = queue.lock().unwrap().pop() {
+                loop {
+                    let case = claim_next_case(&queue, &cancelled, fail_fast);
+                    let Some(case) = case else { break };
                     let _guard = gate.acquire(case.weight, case.serial_group.as_deref());
                     let cwd = case_execution_cwd(&case);
                     let test_index = next_test_index(&completed);
@@ -961,6 +977,9 @@ async fn execute_cases(
                     let result =
                         runtime.block_on(execute_case(&case, &cwd, timeout_ms, &cli_skill_dirs));
                     let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
+                    if fail_fast && !result.passed {
+                        cancelled.store(true, Ordering::Release);
+                    }
                     if diagnose {
                         result.emit_diagnose();
                     }
@@ -982,6 +1001,19 @@ async fn execute_cases(
     Arc::try_unwrap(results)
         .map(|m| m.into_inner().unwrap_or_default())
         .unwrap_or_else(|arc| arc.lock().unwrap().clone())
+}
+
+fn claim_next_case(
+    queue: &Mutex<Vec<TestCase>>,
+    cancelled: &AtomicBool,
+    fail_fast: bool,
+) -> Option<TestCase> {
+    let mut queue = queue.lock().unwrap();
+    if fail_fast && cancelled.load(Ordering::Acquire) {
+        None
+    } else {
+        queue.pop()
+    }
 }
 
 fn enforce_case_budgets(
@@ -1960,5 +1992,62 @@ pipeline test_b(task) {}
         assert_eq!(events.first().copied(), Some("suite"));
         assert_eq!(events.iter().filter(|e| **e == "started").count(), 2);
         assert_eq!(events.iter().filter(|e| **e == "finished").count(), 2);
+    }
+
+    #[tokio::test]
+    async fn fail_fast_stops_sequential_execution_after_first_failure() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_fail_fast.harn",
+            r#"
+pipeline test_a_fails(task) { assert(false, "first failure") }
+pipeline test_z_must_not_run(task) { assert(false, "second case ran") }
+"#,
+        );
+
+        let opts = RunOptions {
+            fail_fast: true,
+            ..RunOptions::new(5_000)
+        };
+        let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
+
+        assert_eq!(summary.total, 1, "only the first case should execute");
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.results[0].name, "test_a_fails");
+    }
+
+    #[tokio::test]
+    async fn fail_fast_discovery_error_prevents_case_execution() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write("suite/test_broken.harn", "pipeline test_broken( {");
+        temp.write(
+            "suite/test_valid.harn",
+            "pipeline test_valid(task) { assert(false, \"case ran\") }",
+        );
+
+        let opts = RunOptions {
+            fail_fast: true,
+            ..RunOptions::new(5_000)
+        };
+        let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.results[0].name, "<file error>");
+    }
+
+    #[test]
+    fn fail_fast_parallel_claim_refuses_queued_case_after_cancellation() {
+        let source = Arc::new("pipeline test_one(task) {}".to_string());
+        let program = Arc::new(parse_program(&source).unwrap());
+        let cases =
+            extract_cases_from_program(Path::new("test_one.harn"), &source, &program, None, 2);
+        let queue = Mutex::new(cases);
+        let cancelled = AtomicBool::new(true);
+
+        assert!(claim_next_case(&queue, &cancelled, true).is_none());
+        assert_eq!(queue.lock().unwrap().len(), 1, "case must remain unclaimed");
+        assert!(claim_next_case(&queue, &cancelled, false).is_some());
     }
 }

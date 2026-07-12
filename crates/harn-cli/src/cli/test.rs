@@ -47,6 +47,10 @@ pub(crate) struct TestArgs {
     /// Run user tests concurrently where supported.
     #[arg(long)]
     pub parallel: bool,
+    /// Stop scheduling new user tests after the first failure. Tests already
+    /// running under --parallel finish and remain in the report.
+    #[arg(long)]
+    pub fail_fast: bool,
     /// Maximum number of concurrent test workers. Defaults to available
     /// parallelism, capped both by core count and by currently-available
     /// system memory (so an auto-sized run backs off on a small or already-
