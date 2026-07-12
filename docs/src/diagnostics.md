@@ -43,7 +43,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
-| [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
+| [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 60 |
