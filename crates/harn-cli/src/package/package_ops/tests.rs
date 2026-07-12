@@ -156,6 +156,24 @@ fn extract_api_symbols_recognizes_block_doc_comments() {
 }
 
 #[test]
+fn extract_api_symbols_ignores_declarations_inside_strings() {
+    let symbols = extract_api_symbols(
+        r#"/** Real export. */
+pub fn real() {}
+
+const generated = """
+/** Generated code, not an export. */
+pub fn generated() {}
+"""
+"#,
+    );
+
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "real");
+    assert_eq!(symbols[0].docs.as_deref(), Some("Real export."));
+}
+
+#[test]
 fn package_docs_and_pack_use_exports() {
     let tmp = tempfile::tempdir().unwrap();
     write_publishable_package(tmp.path());
