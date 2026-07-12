@@ -576,6 +576,12 @@ impl TypeChecker {
             // `dict` now behaves like `unknown` here — the shape target requires
             // narrowing first.
             (TypeExpr::Named(n), TypeExpr::Shape(_)) if n == "dict" => true,
+            // The *empty* shape `{}` is the top object type (TS/Flow `{}`): it
+            // carries no field obligations, so any `dict` — indeed any object —
+            // satisfies it. This is the one shape a bare `dict` may flow into
+            // without narrowing, and it is what lets `let m = {}` accept a later
+            // `m = json_parse(...)`. A non-empty shape still requires narrowing.
+            (TypeExpr::Shape(ef), TypeExpr::Named(n)) if n == "dict" && ef.is_empty() => true,
             // Open records. Subtyping verifies only the EXPECTED side's
             // explicit fields against the actual's known fields — Harn shapes
             // are already width-subtyped, so extra actual fields (and the

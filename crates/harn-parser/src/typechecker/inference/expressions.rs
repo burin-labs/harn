@@ -443,11 +443,14 @@ impl TypeChecker {
                         }],
                     );
                 }
-                if !fields.is_empty() {
-                    Some(TypeExpr::Shape(fields))
-                } else {
-                    Some(TypeExpr::Named("dict".into()))
-                }
+                // A dict literal has statically known fields, so it is a
+                // precise closed record — the empty literal `{}` is the empty
+                // record `Shape([])`, not the opaque `dict`. This is how TS/Flow
+                // type object literals: `{}` is the top object type (it satisfies
+                // an all-optional shape and accepts any later value), while a
+                // *bare* `dict` value from `json_parse` stays opaque and must be
+                // narrowed before it can flow into a specific shape.
+                Some(TypeExpr::Shape(fields))
             }
             Node::Closure {
                 params,

@@ -6,3 +6,9 @@
   `schema_is` / `schema_expect` / `.has(...)`, exactly as you already narrow
   `unknown`. A shape still widens to `dict` (a shape *is* a dict), which is
   sound and unchanged.
+
+  The empty literal `{}` is the sole exception: it is the top object type
+  (matching TS/Flow `{}`), so it satisfies an all-optional shape and a
+  `let m = {}` still accepts a later `m = some_dict()`. A dict literal is
+  otherwise typed by its precise fields, checked structurally against the
+  target shape.
