@@ -461,7 +461,7 @@ fn render_fleet(
             let ctx = LlmRenderContext::resolve(&entry.provider, &entry.model);
             let family = ctx.family.clone();
             let capabilities = vm_value_to_json(&ctx.capabilities);
-            let auth_available = llm_config::provider_key_available(&entry.provider);
+            let auth_available = harn_vm::llm::provider_auth_status(&entry.provider).available;
 
             let result = {
                 let _guard = LlmRenderContextGuard::enter(ctx);

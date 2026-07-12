@@ -42,9 +42,9 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
             continue;
         };
         let base_url = llm_config::resolve_base_url(&def);
-        let auth_envs = auth_env_names(&def.auth_env);
-        let auth_configured = llm_config::provider_key_available(&name);
-        let viable = def.auth_style == "none" || auth_configured;
+        let auth_envs = llm_config::auth_env_names(&def.auth_env);
+        let auth_configured = harn_vm::llm::provider_auth_status(&name).available;
+        let viable = auth_configured;
         let local = is_local_provider(&base_url);
         let aliases = config
             .aliases
@@ -100,14 +100,6 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         preferred_provider,
         preferred_model,
         providers,
-    }
-}
-
-fn auth_env_names(auth_env: &llm_config::AuthEnv) -> Vec<String> {
-    match auth_env {
-        llm_config::AuthEnv::None => Vec::new(),
-        llm_config::AuthEnv::Single(name) => vec![name.clone()],
-        llm_config::AuthEnv::Multiple(names) => names.clone(),
     }
 }
 

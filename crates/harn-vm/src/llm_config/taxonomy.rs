@@ -95,11 +95,11 @@ pub(crate) const FALLBACK_PROVIDER: &str = "anthropic";
 
 static AUTO_PROVIDER_WARNED: AtomicBool = AtomicBool::new(false);
 
-/// True when any of the provider's auth env vars holds a non-empty value.
-fn provider_has_credentials(def: &ProviderDef) -> bool {
-    auth_env_names(&def.auth_env).iter().any(|name| {
-        std::env::var(name).is_ok_and(|value| super::catalog::auth_env_value_available(&value))
-    })
+fn provider_has_credentials(name: &str, def: &ProviderDef) -> bool {
+    matches!(
+        crate::llm::provider_auth_status_with_definition(name, def).credential_status,
+        crate::llm::ProviderCredentialStatus::Ok | crate::llm::ProviderCredentialStatus::Deferred
+    )
 }
 
 /// True when the provider can serve without cloud credentials — a managed
@@ -138,7 +138,7 @@ pub(crate) fn auto_select_provider(config: &ProvidersConfig) -> String {
         if config
             .providers
             .get(*name)
-            .is_some_and(provider_has_credentials)
+            .is_some_and(|definition| provider_has_credentials(name, definition))
         {
             if *name != FALLBACK_PROVIDER {
                 warn_auto_provider_once(&format!(
@@ -150,7 +150,7 @@ pub(crate) fn auto_select_provider(config: &ProvidersConfig) -> String {
         }
     }
     for (name, def) in &config.providers {
-        if provider_has_credentials(def) {
+        if provider_has_credentials(name, def) {
             warn_auto_provider_once(&format!(
                 "no default provider configured; using '{name}' (its API key is set). \
                  Set HARN_DEFAULT_PROVIDER or `default_provider` to silence this."

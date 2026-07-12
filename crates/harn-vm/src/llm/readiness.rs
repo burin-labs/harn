@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 use super::api::apply_auth_headers;
-use super::helpers::resolve_api_key;
+use super::resolve_api_key;
 use crate::llm_config::{self, ProviderDef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -77,7 +77,7 @@ pub(crate) fn build_equivalent_failover_policy(
         {
             continue;
         }
-        if super::helpers::resolve_api_key(&candidate.provider).is_err() {
+        if super::resolve_api_key(&candidate.provider).is_err() {
             continue;
         }
         chain.push(ChainLink {
@@ -1398,7 +1398,7 @@ fn link_options(
         }
         opts.budget = Some(merged);
     }
-    if let Ok(key) = super::helpers::resolve_api_key(&link.provider) {
+    if let Ok(key) = super::resolve_api_key(&link.provider) {
         opts.api_key = key;
     }
     if let Some(overrides) = link.overrides.as_ref() {

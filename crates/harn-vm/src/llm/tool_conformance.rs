@@ -405,7 +405,7 @@ async fn execute_live_probe_case(
     } else {
         crate::llm::shared_blocking_client().clone()
     };
-    let api_key = crate::llm::helpers::resolve_api_key(provider).unwrap_or_default();
+    let api_key = crate::llm::resolve_api_key(provider).unwrap_or_default();
     let request = client
         .post(&url)
         .header("Content-Type", "application/json")

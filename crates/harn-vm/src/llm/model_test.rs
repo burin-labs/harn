@@ -43,7 +43,7 @@ pub async fn run_model_smoke_test(
         .filter(|provider| !provider.is_empty())
         .map(str::to_string)
         .unwrap_or(resolved.provider);
-    let api_key = super::helpers::resolve_api_key(&provider).map_err(vm_error_message)?;
+    let api_key = super::resolve_api_key(&provider).map_err(vm_error_message)?;
 
     if let Some(def) = crate::llm_config::provider_config(&provider) {
         if super::supports_model_readiness_probe(&def) {

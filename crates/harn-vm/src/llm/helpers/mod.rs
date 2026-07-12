@@ -15,13 +15,7 @@ pub(crate) use options::{
     assemble_system_prompt, compose_system_prompt, expects_structured_output, extract_json,
     extract_llm_options, system_prompt_event_metadata, system_prompt_metadata,
 };
-pub use provider::no_credentials_message;
-#[cfg(test)]
-pub(crate) use provider::reset_provider_key_cache;
-pub use provider::resolve_api_key;
-pub(crate) use provider::{
-    provider_key_available, vm_resolve_model, vm_resolve_provider, ResolvedProvider,
-};
+pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvider};
 #[cfg(test)]
 pub(crate) use transcript::transcript_to_vm_with_events;
 pub(crate) use transcript::{
@@ -152,6 +146,7 @@ pub(crate) fn vm_value_dict_to_json_strict(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::resolve_api_key;
     use crate::value::VmDictExt;
 
     use std::rc::Rc;
@@ -173,7 +168,6 @@ mod tests {
             std::env::remove_var("HARN_LLM_PROVIDER");
             std::env::remove_var("HARN_LLM_MODEL");
         }
-        reset_provider_key_cache();
 
         assert_eq!(vm_resolve_provider(&None), "local");
         assert_eq!(vm_resolve_model(&None, "local"), "qwen2.5-coder-32b");
@@ -197,7 +191,6 @@ mod tests {
                 None => std::env::remove_var("HARN_LLM_MODEL"),
             }
         }
-        reset_provider_key_cache();
     }
 
     #[test]
@@ -222,7 +215,6 @@ mod tests {
             std::env::remove_var("HARN_LLM_PROVIDER");
             std::env::remove_var("HARN_LLM_MODEL");
         }
-        reset_provider_key_cache();
 
         // `anthropic/claude-sonnet-4-6` is a catalog alias that resolves
         // to the openrouter provider. With LOCAL_LLM_BASE_URL set the
@@ -259,7 +251,6 @@ mod tests {
                 None => std::env::remove_var("HARN_LLM_MODEL"),
             }
         }
-        reset_provider_key_cache();
     }
 
     #[test]
@@ -342,7 +333,6 @@ mod tests {
             std::env::set_var("LOCAL_LLM_MODEL", "gemma-4-e4b-it");
             std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
         }
-        reset_provider_key_cache();
 
         let options = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model_tier"),
@@ -387,7 +377,6 @@ mod tests {
             std::env::set_var("LOCAL_LLM_MODEL", "gemma-4-e4b-it");
             std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
         }
-        reset_provider_key_cache();
 
         let options = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model_tier"),
@@ -460,7 +449,6 @@ mod tests {
             std::env::remove_var("HARN_LLM_MODEL");
             std::env::remove_var("LOCAL_LLM_BASE_URL");
         }
-        reset_provider_key_cache();
 
         let mut opts: crate::value::DictMap = crate::value::DictMap::new();
         opts.put_str("provider", "auto");
@@ -493,7 +481,6 @@ mod tests {
                 None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
             }
         }
-        reset_provider_key_cache();
     }
 
     #[test]
@@ -509,7 +496,6 @@ mod tests {
             std::env::remove_var("LOCAL_LLM_BASE_URL");
             std::env::set_var("HARN_DEFAULT_PROVIDER", "mock");
         }
-        reset_provider_key_cache();
 
         crate::events::clear_event_sinks();
         let sink = Rc::new(crate::events::CollectorSink::new());
@@ -555,7 +541,6 @@ mod tests {
                 None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
             }
         }
-        reset_provider_key_cache();
     }
 
     #[test]
@@ -610,7 +595,6 @@ mod tests {
             std::env::set_var("HARN_LLM_MODEL", "gpt-4o-mini");
             std::env::set_var("HARN_LLM_PROVIDER", "openai");
         }
-        reset_provider_key_cache();
 
         crate::agent_sessions::reset_session_store();
         let id = crate::agent_sessions::open_or_create(Some("pinned-resolver-session".to_string()));
@@ -635,7 +619,6 @@ mod tests {
                 None => std::env::remove_var("HARN_LLM_PROVIDER"),
             }
         }
-        reset_provider_key_cache();
 
         assert_eq!(provider, "anthropic", "session pin should reroute provider");
         assert_eq!(
@@ -653,7 +636,6 @@ mod tests {
             std::env::remove_var("HARN_LLM_MODEL");
             std::env::remove_var("HARN_LLM_PROVIDER");
         }
-        reset_provider_key_cache();
 
         crate::agent_sessions::reset_session_store();
         let id =
@@ -684,7 +666,6 @@ mod tests {
                 None => std::env::remove_var("HARN_LLM_PROVIDER"),
             }
         }
-        reset_provider_key_cache();
 
         assert_eq!(provider, "openai");
         assert_eq!(model, "gpt-4o-mini");

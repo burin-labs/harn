@@ -1680,7 +1680,7 @@ async fn local_provider_readiness(
 
 fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
     let provider_names = if available_only {
-        harn_vm::llm_config::available_provider_names()
+        harn_vm::llm::available_provider_names()
     } else {
         harn_vm::llm_config::provider_names()
     };
@@ -1698,7 +1698,7 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
                     "regions": def.regions,
                     "auth_style": def.auth_style,
                     "auth_envs": harn_vm::llm_config::auth_env_names(&def.auth_env),
-                    "auth_available": harn_vm::llm_config::provider_key_available(&name),
+                    "auth_available": harn_vm::llm::provider_auth_status(&name).available,
                     "features": def.features,
                     "cost_per_1k_in": def.cost_per_1k_in,
                     "cost_per_1k_out": def.cost_per_1k_out,
@@ -1740,7 +1740,7 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
     serde_json::json!({
         "providers": providers,
         "known_model_names": harn_vm::llm_config::known_model_names(),
-        "available_providers": harn_vm::llm_config::available_provider_names(),
+        "available_providers": harn_vm::llm::available_provider_names(),
         "aliases": aliases,
         "models": models,
         "routing_routes": routing_routes,

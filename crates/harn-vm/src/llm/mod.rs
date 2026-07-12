@@ -140,6 +140,7 @@ pub use fake::{
 pub use mock::drain_tool_recordings;
 mod healthcheck;
 pub(crate) mod provider;
+mod provider_auth;
 pub(crate) mod providers;
 pub mod rate_governor;
 pub(crate) mod rate_limit;
@@ -278,8 +279,6 @@ pub use self::healthcheck::{
     ProviderHealthcheckOptions, ProviderHealthcheckResult,
 };
 pub(crate) use self::helpers::extract_llm_options;
-pub use self::helpers::no_credentials_message;
-pub use self::helpers::resolve_api_key;
 pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
 pub use self::jsonl::{load_llm_mocks_jsonl, parse_llm_mock_value, serialize_llm_mock};
 pub use self::mock::{
@@ -287,6 +286,11 @@ pub use self::mock::{
     take_cli_llm_recordings, LlmMock, LlmReplayMode, MockError,
 };
 pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmokeTestResult};
+pub(crate) use self::provider_auth::provider_auth_status_with_definition;
+pub use self::provider_auth::{
+    available_provider_names, no_credentials_message, provider_auth_status, provider_auth_statuses,
+    resolve_api_key, ProviderAuthStatus, ProviderCredentialStatus,
+};
 pub use self::readiness::{selected_model_for_provider, supports_model_readiness_probe};
 pub use self::trace::{
     agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,

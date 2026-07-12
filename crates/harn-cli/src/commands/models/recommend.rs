@@ -7,7 +7,7 @@
 //! `crates/harn-stdlib/src/stdlib/cli/models/recommend.harn`. Hardware
 //! probing (`sysctl` / `/proc/meminfo` / `nvidia-smi` /
 //! `MetalPerformanceShaders`), provider credential detection
-//! (`llm_config::provider_key_available`), and parsing
+//! (`llm::provider_auth_status`), and parsing
 //! `data/model_recommendations.toml` all stay in Rust — none of those
 //! capabilities are exposed to script-land today, and the sandbox
 //! would block the subprocess calls. The Rust shim collects everything
@@ -308,7 +308,11 @@ fn cloud_provider_key_available(provider: &str) -> bool {
     if def.auth_style == "none" || matches!(def.auth_env, harn_vm::llm_config::AuthEnv::None) {
         return false;
     }
-    harn_vm::llm_config::provider_key_available(provider)
+    matches!(
+        harn_vm::llm::provider_auth_status(provider).credential_status,
+        harn_vm::llm::ProviderCredentialStatus::Ok
+            | harn_vm::llm::ProviderCredentialStatus::Deferred
+    )
 }
 
 #[cfg(test)]
