@@ -656,14 +656,17 @@ impl TypeChecker {
             }
             // Shape expected, dict<K, V> actual → gradual: allow since dict may have the fields
             (TypeExpr::Shape(_), TypeExpr::DictType(_, _)) => true,
-            // list<T> is invariant: the element type must match exactly
-            // (no int→float widening) because lists are mutable
-            // (`push`, index assignment). Covariant lists are unsound
-            // on write — a `list<int>` flowing into a `list<float>`
-            // slot would let a `float` be pushed and later observed
-            // as an `int`.
+            // list<T> is covariant in T. The classic covariance-with-mutation
+            // hole — push a `float` through a `list<float>` alias, then read it
+            // back as `int` through the original `list<int>` — requires *shared*
+            // mutable aliasing, which Harn does not have: values have copy
+            // semantics, so binding or passing a list hands over an independent
+            // copy (`let b = a; b[0] = x` leaves `a` untouched) and `push` is a
+            // functional operation that yields a new list. With no aliasing a
+            // widening read is always sound, so `list` widens exactly like the
+            // read-only `iter`/`generator`/`stream` sequences below.
             (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
-                self.types_compatible_at(Polarity::Invariant, expected_inner, actual_inner, scope)
+                self.types_compatible(expected_inner, actual_inner, scope)
             }
             (TypeExpr::Named(n), TypeExpr::List(_)) if n == "list" => true,
             (TypeExpr::List(_), TypeExpr::Named(n)) if n == "list" => true,
@@ -693,12 +696,15 @@ impl TypeChecker {
             }
             (TypeExpr::Named(n), TypeExpr::Stream(_)) if n == "stream" || n == "Stream" => true,
             (TypeExpr::Stream(_), TypeExpr::Named(n)) if n == "stream" || n == "Stream" => true,
-            // dict<K, V> is invariant in both K and V: dicts are
-            // mutable (key/value assignment). See the `list` comment
-            // above for the soundness argument.
+            // dict<K, V> is covariant in its value type V, for the same
+            // value-semantics reason as `list` above: there is no shared mutable
+            // aliasing, so a widening read is sound. The key type K stays
+            // invariant — Harn map keys are `string` in practice, and key
+            // variance interacts with lookup in ways plain width-subtyping does
+            // not, so keeping K exact costs nothing real and avoids that corner.
             (TypeExpr::DictType(ek, ev), TypeExpr::DictType(ak, av)) => {
                 self.types_compatible_at(Polarity::Invariant, ek, ak, scope)
-                    && self.types_compatible_at(Polarity::Invariant, ev, av, scope)
+                    && self.types_compatible(ev, av, scope)
             }
             (TypeExpr::Named(n), TypeExpr::DictType(_, _)) if n == "dict" => true,
             (TypeExpr::DictType(_, _), TypeExpr::Named(n)) if n == "dict" => true,

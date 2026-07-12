@@ -1,6 +1,6 @@
-import { convergence_guard_decision } from "std/agent/governors"
+import { convergence_guard_decision, ConvergenceFactVector } from "std/agent/governors"
 
-fn summarize(obs: dict) -> string {
+fn summarize(obs: ConvergenceFactVector) -> string {
   const decision = convergence_guard_decision({}, obs)
   return decision.shape + ":" + to_string(decision?.receipt?.reason ?? "") + ":"
     + to_string(decision?.recovery?.verb ?? "")

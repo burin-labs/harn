@@ -54,7 +54,7 @@ fn project_context_profile_native_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    sig = "project_fingerprint(path?: string) -> dict",
+    sig = "project_fingerprint(path?: string) -> ProjectFingerprint",
     category = "project"
 )]
 fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

@@ -1,1 +1,1 @@
-HARN-TYP-007
+expected {name: string}, found dict
