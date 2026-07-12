@@ -98,6 +98,7 @@ impl TypeChecker {
                         child.clear_nil_widenable(p);
                     }
                     self.fn_depth += 1;
+                    Self::mark_closure_mutated_captures(&mut child, body);
                     self.expected_return_types.push(return_type.clone());
                     self.check_block_with_expected_tail(body, return_type.as_ref(), &mut child);
                     self.expected_return_types.pop();

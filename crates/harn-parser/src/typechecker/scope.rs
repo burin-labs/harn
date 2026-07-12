@@ -133,6 +133,14 @@ pub(super) struct TypeScope {
     /// type is a best-effort guess, and historical scripts treat them like
     /// loose dicts.
     pub(super) annotated_vars: BTreeSet<String>,
+    /// Variables reassigned inside a nested closure within the current callable.
+    /// Post-#4479 closures capture by reference, so calling such a closure can
+    /// reassign the variable — which makes any flow-narrowing on it unsound to
+    /// keep. Populated once per callable body (before its statements are
+    /// checked) and consulted by `apply_refinements` to suppress narrowing of
+    /// these variables entirely (the conservative, TypeScript-aligned "assigned
+    /// in a nested function ⇒ not narrowed" rule). See `harn#4523`.
+    pub(super) closure_mutated_vars: BTreeSet<String>,
     /// Lexical parent. Held by `Rc` so creating a child scope is an
     /// `Rc::clone` (constant time) rather than a deep clone of the entire
     /// parent chain. Lookups walk this chain by shared reference; no
@@ -187,6 +195,7 @@ impl TypeScope {
             untyped_sources: BTreeMap::new(),
             unknown_ruled_out: BTreeMap::new(),
             annotated_vars: BTreeSet::new(),
+            closure_mutated_vars: BTreeSet::new(),
             parent: None,
         };
         scope.enums.insert(
@@ -263,6 +272,7 @@ impl TypeScope {
             untyped_sources: BTreeMap::new(),
             unknown_ruled_out: BTreeMap::new(),
             annotated_vars: BTreeSet::new(),
+            closure_mutated_vars: BTreeSet::new(),
             parent: Some(parent),
         }
     }
@@ -585,6 +595,28 @@ impl TypeScope {
         self.parent
             .as_ref()
             .map(|parent| parent.is_annotated(name))
+            .unwrap_or(false)
+    }
+
+    /// Mark `name` as reassigned by a nested closure, so its flow-narrowing is
+    /// suppressed for the rest of this callable (see `closure_mutated_vars`).
+    pub(super) fn mark_closure_mutated(&mut self, name: &str) {
+        if is_discard_name(name) {
+            return;
+        }
+        self.closure_mutated_vars.insert(name.to_string());
+    }
+
+    /// Whether `name` is reassigned by a nested closure anywhere in the
+    /// enclosing callable — checked along the lexical chain so a narrowing
+    /// applied in a child block still sees a marker set on the body scope.
+    pub(super) fn is_closure_mutated(&self, name: &str) -> bool {
+        if self.closure_mutated_vars.contains(name) {
+            return true;
+        }
+        self.parent
+            .as_ref()
+            .map(|parent| parent.is_closure_mutated(name))
             .unwrap_or(false)
     }
 

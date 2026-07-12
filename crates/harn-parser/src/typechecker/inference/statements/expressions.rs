@@ -215,6 +215,7 @@ impl TypeChecker {
         let saved_stream_emit_types = self.stream_emit_types.clone();
         self.stream_fn_depth = 0;
         self.stream_emit_types.clear();
+        Self::mark_closure_mutated_captures(&mut closure_scope, body);
         self.expected_return_types
             .push(Some(closure_return.clone()));
         self.check_block(body, &mut closure_scope);

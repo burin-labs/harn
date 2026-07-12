@@ -313,10 +313,159 @@ fn collect_assigned_var_names(node: &SNode, names: &mut Vec<String>) {
     }
 }
 
+/// Variables reassigned *inside a nested closure* within `body` — the mirror of
+/// [`assigned_var_names`], which deliberately stops at closure boundaries.
+///
+/// Post-#4479 closures capture by reference, so a closure that reassigns an
+/// outer variable can reset it (e.g. to nil) when it is later called. Any
+/// flow-narrowing on such a variable is therefore unsound to keep. The callable
+/// pre-marks this set on its body scope so `apply_refinements` never narrows
+/// them — the conservative, TypeScript/Flow-aligned "assigned in a nested
+/// function ⇒ not narrowed" rule. See harn#4523.
+pub(in crate::typechecker) fn vars_reassigned_in_nested_closures(body: &[SNode]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for node in body {
+        find_nested_closure_captures(node, &mut names);
+    }
+    names
+}
+
+/// Descend to the first nested closure/fn/tool on each path from `node`; for
+/// each, collect the *captured* variables it reassigns — assignments to names it
+/// does not itself declare (its params or its own `let`/`const`). A name it
+/// declares locally is closure-local, not a capture, so reassigning it cannot
+/// threaten an enclosing scope's narrowing. Missing this exclusion would flag a
+/// closure's own local (e.g. `{ -> let e = nil; if e != nil { ... } }`) as
+/// capture-mutated and wrongly suppress its narrowing.
+fn find_nested_closure_captures(node: &SNode, out: &mut Vec<String>) {
+    match &node.node {
+        Node::Closure { params, body, .. }
+        | Node::FnDecl { params, body, .. }
+        | Node::ToolDecl { params, body, .. } => {
+            let mut bound = std::collections::HashSet::new();
+            for param in params {
+                bound.insert(param.name.clone());
+            }
+            collect_local_declarations(body, &mut bound);
+            collect_captured_reassignments(body, &bound, out);
+        }
+        _ => {
+            for child in crate::visit::immediate_children(node) {
+                find_nested_closure_captures(child, out);
+            }
+        }
+    }
+}
+
+/// Add every `let`/`const`/`for`-in name declared directly in `body` — through
+/// blocks and control flow, but not across a nested closure boundary — to
+/// `bound`.
+fn collect_local_declarations(body: &[SNode], bound: &mut std::collections::HashSet<String>) {
+    for node in body {
+        collect_local_declarations_node(node, bound);
+    }
+}
+
+fn collect_local_declarations_node(node: &SNode, bound: &mut std::collections::HashSet<String>) {
+    match &node.node {
+        Node::LetBinding { pattern, .. }
+        | Node::ConstBinding { pattern, .. }
+        | Node::ForIn { pattern, .. } => binding_pattern_names(pattern, bound),
+        // A nested closure owns its locals; they are handled when that closure
+        // is analysed on its own with its own extended `bound`.
+        Node::Closure { .. } | Node::FnDecl { .. } | Node::ToolDecl { .. } => return,
+        _ => {}
+    }
+    for child in crate::visit::immediate_children(node) {
+        collect_local_declarations_node(child, bound);
+    }
+}
+
+/// Collect assignment targets in `body` whose name is not in `bound` (so it is
+/// captured from further out). A deeper nested closure extends `bound` with its
+/// own params and locals before its body is scanned, so a name shadowed at a
+/// deeper level is attributed there rather than harvested here.
+fn collect_captured_reassignments(
+    body: &[SNode],
+    bound: &std::collections::HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    for node in body {
+        collect_captured_reassignments_node(node, bound, out);
+    }
+}
+
+fn collect_captured_reassignments_node(
+    node: &SNode,
+    bound: &std::collections::HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    match &node.node {
+        Node::Assignment { target, .. } => {
+            if let Node::Identifier(name) = &target.node {
+                if !bound.contains(name) && !out.iter().any(|n| n == name) {
+                    out.push(name.clone());
+                }
+            }
+        }
+        Node::Closure { params, body, .. }
+        | Node::FnDecl { params, body, .. }
+        | Node::ToolDecl { params, body, .. } => {
+            let mut inner = bound.clone();
+            for param in params {
+                inner.insert(param.name.clone());
+            }
+            collect_local_declarations(body, &mut inner);
+            collect_captured_reassignments(body, &inner, out);
+            return;
+        }
+        _ => {}
+    }
+    for child in crate::visit::immediate_children(node) {
+        collect_captured_reassignments_node(child, bound, out);
+    }
+}
+
+/// Insert every identifier a binding pattern introduces into `set`.
+fn binding_pattern_names(pattern: &BindingPattern, set: &mut std::collections::HashSet<String>) {
+    match pattern {
+        BindingPattern::Identifier(name) => {
+            set.insert(name.clone());
+        }
+        BindingPattern::Pair(first, second) => {
+            set.insert(first.clone());
+            set.insert(second.clone());
+        }
+        BindingPattern::Dict(fields) => {
+            for field in fields {
+                set.insert(field.alias.clone().unwrap_or_else(|| field.key.clone()));
+            }
+        }
+        BindingPattern::List(elements) => {
+            for element in elements {
+                set.insert(element.name.clone());
+            }
+        }
+    }
+}
+
 impl TypeChecker {
     /// Invalidate every narrowing (variable or reference path) whose subject is
     /// reassigned in a branch or loop body that can continue in the current
     /// callable.
+    /// Pre-mark, on a fresh callable body scope, every variable a nested
+    /// closure reassigns, so its flow-narrowing is suppressed for the whole
+    /// body. Call once at each callable entry (fn/pipeline/tool/closure) before
+    /// its statements are checked. See [`vars_reassigned_in_nested_closures`].
+    pub(in crate::typechecker) fn mark_closure_mutated_captures(
+        scope: &mut TypeScope,
+        body: &[SNode],
+    ) {
+        for name in vars_reassigned_in_nested_closures(body) {
+            scope.mark_closure_mutated(&name);
+        }
+    }
+
     pub(in crate::typechecker) fn invalidate_assigned_narrowings(
         scope: &mut TypeScope,
         body: &[SNode],

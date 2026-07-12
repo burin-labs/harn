@@ -1511,3 +1511,109 @@ fn test_schema_is_falsy_branch_keeps_partially_overlapping_members() {
         "string member wrongly subtracted: {errs:?}"
     );
 }
+
+// --- Closure-reassignment de-narrowing (harn#4523) ---
+//
+// Post-#4479 closures capture by reference, so a closure that reassigns an
+// outer variable can reset it when called. A `!= nil` narrowing on such a
+// variable is therefore unsound to keep, and must be suppressed.
+
+#[test]
+fn test_closure_reassignment_suppresses_narrowing() {
+    // The closure `clear` reassigns the captured `x`, so `x` must NOT stay
+    // narrowed to `string` — assigning it to a `string` binding is an error.
+    let errs = errors(
+        r#"pipeline t(task) {
+  let x: string | nil = "hi"
+  if x != nil {
+    const clear = { -> x = nil }
+    clear()
+    let s: string = x
+  }
+}"#,
+    );
+    assert!(
+        !errs.is_empty(),
+        "narrowing must be suppressed for a closure-reassigned variable"
+    );
+}
+
+#[test]
+fn test_closure_reassignment_suppresses_even_before_guard() {
+    // The closure is defined before the guard; suppression is scope-wide, so
+    // the later `if x != nil` still does not narrow.
+    let errs = errors(
+        r#"pipeline t(task) {
+  let x: string | nil = "hi"
+  const clear = { -> x = nil }
+  if x != nil {
+    let s: string = x
+  }
+  clear()
+}"#,
+    );
+    assert!(
+        !errs.is_empty(),
+        "scope-wide suppression must apply even when the closure precedes the guard"
+    );
+}
+
+#[test]
+fn test_readonly_capture_still_narrows() {
+    // A closure that only *reads* the captured variable does not reassign it,
+    // so narrowing is preserved — no false positive.
+    let errs = errors(
+        r#"pipeline t(task) {
+  let x: string | nil = "hi"
+  const read = { -> x }
+  if x != nil {
+    let s: string = x
+    read()
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "read-only capture must not suppress narrowing: {errs:?}"
+    );
+}
+
+#[test]
+fn test_no_closure_narrowing_unaffected() {
+    // Straight-line narrowing with no closure at all is unchanged.
+    let errs = errors(
+        r#"pipeline t(task) {
+  let x: string | nil = "hi"
+  if x != nil {
+    let s: string = x
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "plain narrowing must still work: {errs:?}");
+}
+
+#[test]
+fn test_closure_local_narrowing_unaffected() {
+    // A closure's OWN local, reassigned within that same closure, must still
+    // narrow — it is not a capture, so suppression must not reach it. This is
+    // the pattern that produced a false positive in harn-bump-fleet:
+    // `release_owner_guard.harn`'s inner closure declares `let error = nil`,
+    // reassigns it, and guards on `error != nil`.
+    let errs = errors(
+        r#"pipeline t(task) {
+  const f = { ->
+    let e: string | nil = nil
+    if take() { e = "x" }
+    let d = if e != nil { e } else { "y" }
+    let s: string = d
+    return s
+  }
+  f()
+}
+fn take() -> bool { return true }"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "a closure's own reassigned local must still narrow: {errs:?}"
+    );
+}

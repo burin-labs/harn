@@ -537,6 +537,13 @@ pub(super) fn narrow_shape_union_by_tag(
 /// Apply a list of refinements to a scope, tracking pre-narrowing types.
 pub(super) fn apply_refinements(scope: &mut TypeScope, refinements: &[(String, InferredType)]) {
     for (var_name, narrowed_type) in refinements {
+        // A variable reassigned by a nested closure cannot be soundly narrowed:
+        // post-#4479 the closure captures it by reference, so calling the
+        // closure can reset it (e.g. to nil) while the narrowing still claims
+        // the refined type. Leave it at its declared type. See harn#4523.
+        if scope.is_closure_mutated(var_name) {
+            continue;
+        }
         // Save the pre-narrowing type so we can restore it on reassignment
         if !scope.narrowed_vars.contains_key(var_name) {
             if let Some(original) = scope.get_var(var_name).cloned() {
