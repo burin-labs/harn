@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 
 mod core_parser;
 mod corpus_conformance;
+mod entity_decode;
 mod function_markup;
 mod heredoc_and_messages;
 mod native_tools;
