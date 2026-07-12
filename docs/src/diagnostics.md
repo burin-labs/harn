@@ -206,6 +206,7 @@ A module-level import declaration cannot be satisfied or has been authored in a 
 | [`HARN-MOD-004`](#harn-mod-004) | module export is invalid | — | — |
 | [`HARN-MOD-005`](#harn-mod-005) | module imports expose colliding names | — | — |
 | [`HARN-MOD-006`](#harn-mod-006) | module re-exports conflict | — | — |
+| [`HARN-MOD-007`](#harn-mod-007) | imported module failed to compile | — | — |
 
 ## RMD — Reminder lifecycle
 
@@ -1824,6 +1825,27 @@ checks.
 
 - Confirm the import path resolves on disk and the imported symbol is exported.
 - Run `harn lint --fix` to auto-sort / dedupe import groups.
+
+### `HARN-MOD-007`
+
+**Category:** `MOD` (Modules and exports) &nbsp;·&nbsp; **API stability:** `stable`
+
+imported module failed to compile
+
+#### What it means
+
+An `import` in this file resolves to a module that could not itself be lexed or
+parsed. Because the target never produced an AST, none of its symbols exist, so
+callers would otherwise see every imported name reported as "undefined" at their
+own call sites — pointing you at the wrong file. This diagnostic instead names
+the broken module and surfaces its real lex/parse error.
+
+#### How to fix
+
+- Open the imported module named in the message and fix the lex/parse error
+  reported there (the message includes its failing line and column).
+- Re-run `harn check` on the imported module directly to confirm it compiles,
+  then re-check this consumer.
 
 ### `HARN-RMD-001`
 
