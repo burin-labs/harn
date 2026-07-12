@@ -15,6 +15,7 @@ pub use core::{
     intern_key, string_char_count, struct_fields_to_map, DictMap, HarnStr, StructInstanceData,
     StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmBuiltinRefId, VmEnumVariant, VmValue,
 };
+pub(crate) use env::Binding;
 pub use env::{closest_match, ModuleFunctionRegistry, ModuleState, VmClosure, VmEnv};
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,

@@ -88,6 +88,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(DeprecatedLlmOptions),
         Box::new(UnnormalizedOptions),
         Box::new(NilCoalesceNoop),
+        Box::new(MutableCaptureAcrossParallel),
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
         Box::new(ReminderRoleHint),
@@ -212,6 +213,12 @@ program_rule!(
     "nil-coalesce-noop",
     src,
     crate::rules::nil_coalesce::check_nil_coalesce_noop
+);
+program_rule!(
+    MutableCaptureAcrossParallel,
+    "mutable-capture-across-parallel",
+    ast,
+    crate::rules::parallel_capture::check_mutable_capture_across_parallel
 );
 program_rule!(
     ReminderLifecycle,

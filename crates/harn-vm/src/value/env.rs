@@ -130,9 +130,88 @@ pub struct VmEnv {
     pub(crate) scopes: Vec<Scope>,
 }
 
+/// A shared, mutable cell backing a captured binding.
+///
+/// A local that a nested closure captures is stored behind a `Cell` instead of
+/// inline. Cloning a [`Scope`] (which happens on every call and every closure
+/// mint) refcount-bumps this `Arc`, so the defining frame and every closure
+/// that captured the binding all point at the *same* cell — a write through any
+/// of them is observed by all of them. This is what makes closure capture
+/// **by reference** (JS/Python/Swift semantics) while keeping distinct
+/// variables independent (`let b = a` still copies the value out of `a`'s
+/// cell into `b`'s binding). See `docs/design/closure-reference-capture.md`.
+pub(crate) type BindingCell = Arc<VmMutex<VmValue>>;
+
+/// One name's binding in a [`Scope`].
+///
+/// `Value` is the ordinary, unshared binding — a read clones the value out and
+/// a write replaces it (copy-on-assignment), exactly as before. `Cell` is a
+/// binding captured by a nested closure: the value lives behind a shared
+/// [`BindingCell`] so reads clone the inner value out (value semantics for
+/// reads is preserved) and writes go *through* the cell rather than replacing
+/// the map entry — which also sidesteps the scope-map copy-on-write, so shared
+/// mutation survives the per-call env clone.
+#[derive(Debug, Clone)]
+pub(crate) enum Binding {
+    Value { value: VmValue, mutable: bool },
+    Cell { cell: BindingCell, mutable: bool },
+}
+
+impl Binding {
+    #[inline]
+    pub(crate) fn mutable(&self) -> bool {
+        match self {
+            Binding::Value { mutable, .. } | Binding::Cell { mutable, .. } => *mutable,
+        }
+    }
+
+    /// The current value of this binding, cloned out. Reads never expose the
+    /// cell itself — value semantics for reads is identical for both variants.
+    #[inline]
+    pub(crate) fn read(&self) -> VmValue {
+        match self {
+            Binding::Value { value, .. } => value.clone(),
+            Binding::Cell { cell, .. } => cell.lock().clone(),
+        }
+    }
+
+    /// Ownership-taking accessor for the iterative teardown paths. A `Value`
+    /// yields its inner value directly. A `Cell` yields its inner value only
+    /// when this binding holds the *last* reference to the shared cell; a
+    /// still-shared cell yields `None` and is left for its own `Arc` drop to
+    /// reclaim once the final closure releases it.
+    #[inline]
+    pub(crate) fn into_teardown_value(self) -> Option<VmValue> {
+        match self {
+            Binding::Value { value, .. } => Some(value),
+            Binding::Cell { cell, .. } => Arc::into_inner(cell).map(VmMutex::into_inner),
+        }
+    }
+
+    /// Whether this binding *uniquely* owns a deeply-nested container that the
+    /// default recursive drop could overflow the native stack on. A `Value`
+    /// checks its container directly. A `Cell` only qualifies when unshared
+    /// (`strong_count == 1`) — a cell still held by a live closure must not be
+    /// torn down from here — and is peeked with `try_lock` so a drop never
+    /// blocks.
+    #[inline]
+    fn owns_recursive_container(&self) -> bool {
+        match self {
+            Binding::Value { value, .. } => super::recursion::is_recursive_container(value),
+            Binding::Cell { cell, .. } => {
+                Arc::strong_count(cell) == 1
+                    && cell
+                        .try_lock()
+                        .map(|v| super::recursion::is_recursive_container(&v))
+                        .unwrap_or(false)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Scope {
-    pub(crate) vars: Arc<BTreeMap<String, (VmValue, bool)>>, // (value, mutable)
+    pub(crate) vars: Arc<BTreeMap<String, Binding>>,
 }
 
 /// Process-wide shared empty binding map.
@@ -145,7 +224,7 @@ pub(crate) struct Scope {
 /// [`Scope::empty`] a refcount bump instead; the first real `define`/`assign`
 /// copies-on-write away from this shared map via `Arc::make_mut` (the insert
 /// paths already do), so a scope that never binds anything never allocates.
-static EMPTY_SCOPE_VARS: std::sync::LazyLock<Arc<BTreeMap<String, (VmValue, bool)>>> =
+static EMPTY_SCOPE_VARS: std::sync::LazyLock<Arc<BTreeMap<String, Binding>>> =
     std::sync::LazyLock::new(|| Arc::new(BTreeMap::new()));
 
 impl Scope {
@@ -168,13 +247,19 @@ impl Drop for Scope {
         // instead. `Arc::get_mut` succeeds only for a uniquely-owned scope, so
         // shared snapshots fall through to the cheap default drop and the real
         // teardown happens later at the last owner (also a `Scope`).
+        //
+        // A still-shared `Cell` may outlive this scope (a live closure holds
+        // it), so its `Arc` refcount — not this map's — governs when its inner
+        // value drops. `into_teardown_value` therefore only reclaims a cell we
+        // uniquely own; shared cells fall through to their own `Arc` drop.
         if let Some(map) = Arc::get_mut(&mut self.vars) {
-            if map
-                .values()
-                .any(|(value, _)| super::recursion::is_recursive_container(value))
-            {
+            if map.values().any(Binding::owns_recursive_container) {
                 let bindings = std::mem::take(map);
-                super::recursion::dismantle_values(bindings.into_values().map(|(value, _)| value));
+                super::recursion::dismantle_values(
+                    bindings
+                        .into_values()
+                        .filter_map(Binding::into_teardown_value),
+                );
             }
         }
     }
@@ -231,8 +316,8 @@ impl VmEnv {
 
     pub fn get(&self, name: &str) -> Option<VmValue> {
         for scope in self.scopes.iter().rev() {
-            if let Some((val, _)) = scope.vars.get(name) {
-                return Some(val.clone());
+            if let Some(binding) = scope.vars.get(name) {
+                return Some(binding.read());
             }
         }
         None
@@ -246,18 +331,43 @@ impl VmEnv {
     }
 
     pub fn define(&mut self, name: &str, value: VmValue, mutable: bool) -> Result<(), VmError> {
+        self.define_binding(name, Binding::Value { value, mutable })
+    }
+
+    /// Define `name` as a **captured** binding: a fresh shared cell holding
+    /// `value`. Emitted for a local that a nested closure captures. A closure
+    /// minted after this point clones the enclosing env (refcount-bumping the
+    /// cell), so its reads and writes of `name` flow through the same cell as
+    /// the defining frame. Called once per activation, so each activation gets
+    /// a distinct cell (per-iteration loop captures stay independent).
+    pub(crate) fn define_cell(
+        &mut self,
+        name: &str,
+        value: VmValue,
+        mutable: bool,
+    ) -> Result<(), VmError> {
+        self.define_binding(
+            name,
+            Binding::Cell {
+                cell: Arc::new(VmMutex::new(value)),
+                mutable,
+            },
+        )
+    }
+
+    fn define_binding(&mut self, name: &str, binding: Binding) -> Result<(), VmError> {
         if let Some(scope) = self.scopes.last_mut() {
-            if let Some((_, existing_mutable)) = scope.vars.get(name) {
-                if !existing_mutable && !mutable {
+            if let Some(existing) = scope.vars.get(name) {
+                if !existing.mutable() && !binding.mutable() {
                     return Err(VmError::Runtime(format!(
                         "Cannot redeclare immutable variable '{name}' in the same scope (use 'let' for mutable bindings)"
                     )));
                 }
             }
-            if let Some((previous, _)) =
-                Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable))
+            if let Some(Binding::Value { value, .. }) =
+                Arc::make_mut(&mut scope.vars).insert(name.to_string(), binding)
             {
-                super::recursion::dismantle(previous);
+                super::recursion::dismantle(value);
             }
         }
         Ok(())
@@ -266,8 +376,8 @@ impl VmEnv {
     pub fn all_variables(&self) -> crate::value::DictMap {
         let mut vars = crate::value::DictMap::new();
         for scope in &self.scopes {
-            for (name, (value, _)) in scope.vars.iter() {
-                vars.insert(crate::value::intern_key(name), value.clone());
+            for (name, binding) in scope.vars.iter() {
+                vars.insert(crate::value::intern_key(name), binding.read());
             }
         }
         vars
@@ -275,19 +385,41 @@ impl VmEnv {
 
     pub fn assign(&mut self, name: &str, value: VmValue) -> Result<(), VmError> {
         for scope in self.scopes.iter_mut().rev() {
-            if let Some((_, mutable)) = scope.vars.get(name) {
-                if !mutable {
-                    return Err(VmError::ImmutableAssignment(name.to_string()));
-                }
-                if let Some((previous, _)) =
-                    Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, true))
-                {
-                    // Iterative teardown so overwriting a deeply nested binding
-                    // cannot overflow the stack on drop (scalars are a no-op).
+            let Some(existing) = scope.vars.get(name) else {
+                continue;
+            };
+            if !existing.mutable() {
+                return Err(VmError::ImmutableAssignment(name.to_string()));
+            }
+            match existing {
+                // Write *through* the shared cell: the entry is not replaced,
+                // so the scope-map copy-on-write is sidestepped and every
+                // holder of this cell (the defining frame, sibling closures)
+                // observes the update.
+                Binding::Cell { cell, .. } => {
+                    let previous = std::mem::replace(&mut *cell.lock(), value);
                     super::recursion::dismantle(previous);
                 }
-                return Ok(());
+                Binding::Value { .. } => {
+                    // Iterative teardown so overwriting a deeply nested binding
+                    // cannot overflow the stack on drop (scalars are a no-op).
+                    // The prior binding here is always a `Value` (a name is
+                    // either always boxed or never — see the compiler's capture
+                    // pre-pass), so only that arm needs draining.
+                    if let Some(Binding::Value { value, .. }) = Arc::make_mut(&mut scope.vars)
+                        .insert(
+                            name.to_string(),
+                            Binding::Value {
+                                value,
+                                mutable: true,
+                            },
+                        )
+                    {
+                        super::recursion::dismantle(value);
+                    }
+                }
             }
+            return Ok(());
         }
         Err(VmError::UndefinedVariable(name.to_string()))
     }
@@ -301,11 +433,22 @@ impl VmEnv {
     /// unchanged after the debugger overrides.
     pub fn assign_debug(&mut self, name: &str, value: VmValue) -> Result<(), VmError> {
         for scope in self.scopes.iter_mut().rev() {
-            if let Some((_, mutable)) = scope.vars.get(name) {
-                let mutable = *mutable;
-                Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
-                return Ok(());
+            let Some(existing) = scope.vars.get(name) else {
+                continue;
+            };
+            match existing {
+                // Preserve the shared-cell identity so a debugger override of a
+                // captured binding is still observed by the closures holding it.
+                Binding::Cell { cell, .. } => {
+                    *cell.lock() = value;
+                }
+                Binding::Value { mutable, .. } => {
+                    let mutable = *mutable;
+                    Arc::make_mut(&mut scope.vars)
+                        .insert(name.to_string(), Binding::Value { value, mutable });
+                }
             }
+            return Ok(());
         }
         Err(VmError::UndefinedVariable(name.to_string()))
     }

@@ -521,8 +521,16 @@ impl Vm {
                 while env.scopes.len() <= scope_idx {
                     env.push_scope();
                 }
-                Arc::make_mut(&mut env.scopes[scope_idx].vars)
-                    .insert(info.name.clone(), (slot.value.clone(), info.mutable));
+                // Slot-backed locals are never boxed captures (those resolve
+                // to `None` in the compiler and are defined straight into the
+                // env as `Cell`s), so syncing a slot always yields a `Value`.
+                Arc::make_mut(&mut env.scopes[scope_idx].vars).insert(
+                    info.name.clone(),
+                    crate::value::Binding::Value {
+                        value: slot.value.clone(),
+                        mutable: info.mutable,
+                    },
+                );
             }
         }
     }

@@ -11,6 +11,7 @@ pub(crate) mod file_header;
 pub(crate) mod import_order;
 pub(crate) mod nil_coalesce;
 pub(crate) mod optional_shorthand;
+pub(crate) mod parallel_capture;
 pub(crate) mod reminder_lifecycle;
 pub(crate) mod reminder_provider_count;
 pub(crate) mod reminder_role_hint;

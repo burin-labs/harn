@@ -53,9 +53,10 @@ impl Vm {
         // for local recursive / mutually-recursive fns to self-reference
         // without leaking caller-local data into the callee.
         for scope in &caller_env.scopes {
-            for (name, (val, mutable)) in scope.vars.iter() {
+            for (name, binding) in scope.vars.iter() {
+                let val = binding.read();
                 if matches!(val, VmValue::Closure(_)) && !call_env.contains(name) {
-                    let _ = call_env.define(name, val.clone(), *mutable);
+                    let _ = call_env.define(name, val, binding.mutable());
                 }
             }
         }

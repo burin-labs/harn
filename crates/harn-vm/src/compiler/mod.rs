@@ -195,6 +195,16 @@ pub struct Compiler {
     /// Pipeline bodies and nested `Compiler::new()` instances (fn,
     /// closure, tool, etc.) flip this to false before compiling.
     module_level: bool,
+    /// Names referenced inside a nested closure of the body this compiler is
+    /// emitting. A mutable (`let`) local whose name is in this set is captured
+    /// by a closure, so it is boxed into a shared cell (`Op::DefCell`) rather
+    /// than a by-value local slot — this is what makes closure capture
+    /// **by reference** (harn#4479). Recomputed per function-like body via
+    /// [`Compiler::seed_captured_idents`]; an over-approximation (a shadowed or
+    /// read-only capture may be boxed) is safe — it only forgoes the slot fast
+    /// path for that one local. `const` locals and params are immutable and
+    /// never boxed.
+    captured_idents: std::collections::HashSet<String>,
 }
 
 impl Compiler {

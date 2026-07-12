@@ -44,6 +44,7 @@ harn_opcode_macros::define_opcodes! {
     GetVar { sync(self.execute_get_var()), disasm: const_pool_u16("GET_VAR"), flags: [reads_outer_name] };
     DefLet { sync(self.execute_def_let()), disasm: const_pool_u16("DEF_LET") };
     DefVar { sync(self.execute_def_var()), disasm: const_pool_u16("DEF_VAR") };
+    DefCell { sync(self.execute_def_cell()), disasm: const_pool_u16("DEF_CELL") };
     SetVar { sync(self.execute_set_var()), disasm: const_pool_u16("SET_VAR"), flags: [reads_outer_name] };
     PushScope { sync_void(self.execute_push_scope()), disasm: bare("PUSH_SCOPE") };
     PopScope { sync_void(self.execute_pop_scope()), disasm: bare("POP_SCOPE") };

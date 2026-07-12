@@ -1,0 +1,90 @@
+pipeline default() {
+  // Harn closures capture the enclosing environment by reference: a mutable
+  // `let` reassigned or mutated through a closure is visible at the capture
+  // site, and the closure sees the latest value. Immutable `const`/parameter
+  // captures and container value semantics are unchanged.
+  // 1. Scalar rebind through a closure propagates.
+  let n = 0
+  const inc = { -> n = n + 1 }
+  inc()
+  inc()
+  __io_println(n)  // 2
+  // 2. In-place subscript mutation through a captured list.
+  let xs: list<int> = [0, 0]
+  const setit = { -> xs[1] = 9 }
+  setit()
+  __io_println(xs[1])  // 9
+  // 3. Field mutation through a captured dict.
+  let d = {n: 0}
+  const bump = { -> d.n = d.n + 1 }
+  bump()
+  bump()
+  __io_println(d.n)  // 2
+  // 4. Compound assignment through a captured let.
+  let c = 10
+  const addfive = { -> c += 5 }
+  addfive()
+  __io_println(c)  // 15
+  // 5. A fresh cell per activation: a re-entered function does not share the
+  //    previous call's captured state.
+  __io_println(counter())  // 3
+  __io_println(counter())  // 3
+  // 6. A capture is a live reference, not a mint-time snapshot: a write after
+  //    the closure is created is visible when it runs.
+  let later = 1
+  const readlater = { -> later }
+  later = 42
+  __io_println(readlater())  // 42
+  // 7. An uncaptured closure is unaffected (value-semantic parameters).
+  const double = { x -> x * 2 }
+  __io_println(double(21))  // 42
+  // 8. Shadowing: a closure's own inner `let` never touches the outer binding.
+  let s = 100
+  const shadow = { ->
+    let s = 5
+    s = s + 1
+    return s
+  }
+  __io_println(shadow())  // 6
+  __io_println(s)  // 100
+  // 9. Container value semantics still hold: copying then mutating the copy
+  //    leaves the captured original untouched.
+  let original: list<int> = [1, 2, 3]
+  let copy = original
+  const mutate_copy = { -> copy[0] = 99 }
+  mutate_copy()
+  __io_println(original[0])  // 1
+  __io_println(copy[0])  // 99
+  // 10. Escaping closure (counter factory): the captured cell outlives the
+  //     defining frame, and each activation gets its own cell.
+  const c1 = make_counter()
+  const c2 = make_counter()
+  __io_println(c1())  // 1
+  __io_println(c1())  // 2
+  __io_println(c2())  // 1
+  __io_println(c1())  // 3
+  // 11. Two closures over one variable share a single cell.
+  let shared = 0
+  const bump_shared = { -> shared = shared + 1 }
+  const read_shared = { -> shared }
+  bump_shared()
+  bump_shared()
+  __io_println(read_shared())  // 2
+}
+
+fn make_counter() {
+  let count = 0
+  return { ->
+    count = count + 1
+    return count
+  }
+}
+
+fn counter() {
+  let g = 0
+  const b = { -> g = g + 1 }
+  b()
+  b()
+  b()
+  return g
+}

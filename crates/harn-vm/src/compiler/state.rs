@@ -49,6 +49,7 @@ impl Compiler {
             string_constants: std::collections::HashMap::new(),
             local_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
+            captured_idents: std::collections::HashSet::new(),
         }
     }
 
@@ -295,6 +296,11 @@ impl Compiler {
         Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
+        // Box module-level mutable `let`s that a top-level or pipeline-body
+        // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
+        // their own capture set when compiled, so this only governs the
+        // module-level bindings emitted by `self`.
+        self.seed_captured_idents(program);
 
         for sn in program {
             match &sn.node {
@@ -385,6 +391,11 @@ impl Compiler {
         Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
+        // Box module-level mutable `let`s that a top-level or pipeline-body
+        // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
+        // their own capture set when compiled, so this only governs the
+        // module-level bindings emitted by `self`.
+        self.seed_captured_idents(program);
 
         for sn in program {
             if matches!(
@@ -877,8 +888,38 @@ impl Compiler {
         }
     }
 
+    /// Seed [`Compiler::captured_idents`] for the function-like body about to be
+    /// compiled: every identifier that appears anywhere inside a nested closure
+    /// literal in `body`. A mutable local whose name lands here is captured by a
+    /// closure and must be boxed into a shared cell (see [`Self::is_boxed_capture`]).
+    /// Called once per body — `fn`/closure/`tool` bodies, pipeline bodies, and
+    /// the module top level — each with its own set.
+    pub(super) fn seed_captured_idents(&mut self, body: &[SNode]) {
+        let mut set = std::collections::HashSet::new();
+        for sn in body {
+            collect_closure_capture_idents(sn, &mut set);
+        }
+        self.captured_idents = set;
+    }
+
+    /// Whether a binding named `name` declared `mutable` here must be boxed into
+    /// a shared cell because a nested closure captures it. Only mutable (`let`)
+    /// bindings qualify: `const` locals and params are immutable in Harn (they
+    /// can be neither rebound nor mutated in place), so a by-value snapshot of
+    /// them is already indistinguishable from a shared reference.
+    #[inline]
+    fn is_boxed_capture(&self, name: &str, mutable: bool) -> bool {
+        mutable && self.captured_idents.contains(name)
+    }
+
     fn define_local_slot(&mut self, name: &str, mutable: bool) -> Option<u16> {
-        if self.module_level || harn_parser::is_discard_name(name) {
+        if self.module_level
+            || harn_parser::is_discard_name(name)
+            || self.is_boxed_capture(name, mutable)
+        {
+            // A boxed capture lives in the env behind a shared cell, never in a
+            // by-value local slot, so its reads/writes route through the
+            // cell-aware env path (`GetVar`/`SetVar`) shared with the closure.
             return None;
         }
         let current = self.local_scopes.last_mut()?;
@@ -922,7 +963,13 @@ impl Compiler {
     }
 
     pub(super) fn emit_define_binding(&mut self, name: &str, mutable: bool) {
-        if let Some(slot) = self.define_local_slot(name, mutable) {
+        if self.is_boxed_capture(name, mutable) {
+            // Box a closure-captured mutable local into a shared cell. Runs
+            // regardless of `module_level`: a captured top-level `let` needs the
+            // same shared cell so a top-level closure observes its writes.
+            let idx = self.string_constant(name);
+            self.chunk.emit_u16(Op::DefCell, idx, self.line);
+        } else if let Some(slot) = self.define_local_slot(name, mutable) {
             self.chunk.emit_u16(Op::DefLocalSlot, slot, self.line);
         } else {
             let idx = self.string_constant(name);
@@ -1475,6 +1522,7 @@ impl Compiler {
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
         let is_gen = body_contains_yield(body);
+        fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Nil, 0);
         fn_compiler.chunk.emit(Op::Return, 0);
@@ -1544,5 +1592,60 @@ impl Compiler {
 impl Default for Compiler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Collect into `set` every identifier that appears inside a nested closure
+/// literal reachable from `node` (without descending past `node` itself if it
+/// is not a closure). A `Node::Closure`/`FnDecl`/`ToolDecl` body has *all* of
+/// its identifiers harvested (via [`collect_all_idents`], which recurses
+/// through its own nested closures too, so a name captured across several
+/// closure levels is still recorded); any other node is only traversed to find
+/// the closures within it. The current body's own top-level identifiers are
+/// therefore never added unless they also appear inside a closure — which is
+/// exactly the "is this local captured?" question.
+fn collect_closure_capture_idents(node: &SNode, set: &mut std::collections::HashSet<String>) {
+    match super::peel_node(node) {
+        Node::Closure { body, .. } | Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
+            for sn in body {
+                collect_all_idents(sn, set);
+            }
+        }
+        // `parallel`/`spawn` bodies are lowered (in `compile_parallel` /
+        // `compile_spawn_expr`) into nested closures that capture the enclosing
+        // environment exactly like a closure literal — each concurrent branch
+        // runs `closure.clone()`, sharing the captured `Cell`s by `Arc`. A
+        // mutable local mutated inside such a body must therefore be boxed too;
+        // otherwise its write lands in the branch's private env copy and is
+        // silently lost — the very by-value regression this cutover removes,
+        // but re-introduced *only* for concurrent code. The driving
+        // `expr`/options run in the enclosing scope, so we still descend into
+        // `expr` to find any closure literals nested there.
+        Node::Parallel { expr, body, .. } => {
+            for sn in body {
+                collect_all_idents(sn, set);
+            }
+            collect_closure_capture_idents(expr, set);
+        }
+        Node::SpawnExpr { body } => {
+            for sn in body {
+                collect_all_idents(sn, set);
+            }
+        }
+        _ => {
+            for child in harn_parser::visit::immediate_children(node) {
+                collect_closure_capture_idents(child, set);
+            }
+        }
+    }
+}
+
+/// Add every `Node::Identifier` name anywhere under `node` (inclusive) to `set`.
+fn collect_all_idents(node: &SNode, set: &mut std::collections::HashSet<String>) {
+    if let Node::Identifier(name) = super::peel_node(node) {
+        set.insert(name.clone());
+    }
+    for child in harn_parser::visit::immediate_children(node) {
+        collect_all_idents(child, set);
     }
 }
