@@ -196,6 +196,7 @@ module.exports = grammar({
         parameterList($),
         ")",
         optional(seq("->", field("return_type", $.type_annotation))),
+        optional(seq("throws", field("throws", $.type_annotation))),
         optional(seq("extends", field("parent", $.identifier))),
         $.block
       ),
@@ -552,6 +553,7 @@ module.exports = grammar({
         parameterList($),
         ")",
         optional(seq("->", $.type_annotation)),
+        optional(seq("throws", field("throws", $.type_annotation))),
         optional($.where_clause),
         field("body", $.block)
       ),
@@ -565,6 +567,7 @@ module.exports = grammar({
         parameterList($),
         ")",
         optional(seq("->", $.type_annotation)),
+        optional(seq("throws", field("throws", $.type_annotation))),
         "{",
         statementSeparated($, choice($.tool_description, $._statement)),
         "}"
@@ -1143,6 +1146,7 @@ module.exports = grammar({
         parameterList($),
         ")",
         optional(seq("->", field("return_type", $.type_annotation))),
+        optional(seq("throws", field("throws", $.type_annotation))),
         field("body", $.block)
       ),
 

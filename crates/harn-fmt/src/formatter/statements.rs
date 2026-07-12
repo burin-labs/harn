@@ -1,7 +1,8 @@
 use harn_parser::{Node, SNode};
 
 use crate::helpers::{
-    escape_string, format_catch_param, format_pattern, format_type_ann, format_type_expr,
+    escape_string, format_catch_param, format_pattern, format_throws_clause, format_type_ann,
+    format_type_expr,
 };
 
 use super::Formatter;
@@ -59,6 +60,7 @@ impl Formatter<'_> {
                 type_params,
                 params,
                 return_type,
+                throws,
                 where_clauses,
                 body,
                 is_pub,
@@ -76,6 +78,7 @@ impl Formatter<'_> {
                     type_params,
                     params,
                     return_type,
+                    throws,
                     where_clauses,
                     indent_level,
                 );
@@ -86,6 +89,7 @@ impl Formatter<'_> {
                 description,
                 params,
                 return_type,
+                throws,
                 body,
                 is_pub,
             } => {
@@ -95,6 +99,7 @@ impl Formatter<'_> {
                 } else {
                     String::new()
                 };
+                let throws_str = format_throws_clause(throws);
                 let prefix_len = indent_level * 2 + pub_prefix.len() + 5 + name.len() + 1;
                 let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);
                 let mut effective_body = Vec::new();
@@ -108,7 +113,7 @@ impl Formatter<'_> {
                 }
                 effective_body.extend(body.iter().cloned());
                 self.format_block_expr(
-                    &format!("{pub_prefix}tool {name}({params_str}){ret} {{"),
+                    &format!("{pub_prefix}tool {name}({params_str}){ret}{throws_str} {{"),
                     &effective_body,
                     indent_level,
                 )

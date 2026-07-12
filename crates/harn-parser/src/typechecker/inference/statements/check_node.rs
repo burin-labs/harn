@@ -185,6 +185,7 @@ impl TypeChecker {
                 type_params,
                 params,
                 return_type,
+                throws,
                 where_clauses,
                 body,
                 is_stream,
@@ -213,12 +214,16 @@ impl TypeChecker {
                     *is_stream,
                     span,
                 );
+                if let Some(declared) = throws {
+                    self.check_declared_throws(declared, params, body, span);
+                }
             }
 
             Node::ToolDecl {
                 name,
                 params,
                 return_type,
+                throws,
                 body,
                 ..
             } => {
@@ -235,6 +240,9 @@ impl TypeChecker {
                     "tool result",
                     "tool return type declared here",
                 );
+                if let Some(declared) = throws {
+                    self.check_declared_throws(declared, params, body, span);
+                }
             }
 
             Node::SkillDecl { name, fields, .. } => {
@@ -1314,6 +1322,7 @@ impl TypeChecker {
             Node::Closure {
                 params,
                 return_type,
+                throws,
                 body,
                 ..
             } => {
@@ -1339,6 +1348,10 @@ impl TypeChecker {
                 self.stream_fn_depth = saved_stream_depth;
                 self.stream_emit_types = saved_stream_emit_types;
                 self.fn_depth -= 1;
+
+                if let Some(declared) = throws {
+                    self.check_declared_throws(declared, params, body, span);
+                }
 
                 if let Some(expected_return) = return_type {
                     let mut ret_scope = closure_scope.clone();

@@ -333,11 +333,18 @@ impl Formatter<'_> {
             Node::Closure {
                 params,
                 return_type,
+                throws,
                 body,
                 fn_syntax,
             } => {
-                if *fn_syntax || return_type.is_some() {
-                    self.format_fn_closure(params, return_type.as_ref(), body, indent)
+                if *fn_syntax || return_type.is_some() || throws.is_some() {
+                    self.format_fn_closure(
+                        params,
+                        return_type.as_ref(),
+                        throws.as_ref(),
+                        body,
+                        indent,
+                    )
                 } else {
                     self.format_arrow_closure(params, body, indent)
                 }
@@ -590,6 +597,7 @@ impl Formatter<'_> {
                 type_params,
                 params,
                 return_type,
+                throws,
                 where_clauses,
                 body,
                 is_pub,
@@ -607,6 +615,7 @@ impl Formatter<'_> {
                     type_params,
                     params,
                     return_type,
+                    throws,
                     where_clauses,
                     indent,
                 );
@@ -617,6 +626,7 @@ impl Formatter<'_> {
                 description,
                 params,
                 return_type,
+                throws,
                 body,
                 is_pub,
             } => {
@@ -626,6 +636,7 @@ impl Formatter<'_> {
                 } else {
                     String::new()
                 };
+                let throws_str = format_throws_clause(throws);
                 let prefix_len = indent * 2 + pub_prefix.len() + 5 + name.len() + 1;
                 let params_str = self.format_typed_params_wrapped(params, prefix_len, indent);
                 let mut effective_body = Vec::new();
@@ -639,7 +650,7 @@ impl Formatter<'_> {
                 }
                 effective_body.extend(body.iter().cloned());
                 self.format_block_expr(
-                    &format!("{pub_prefix}tool {name}({params_str}){ret} {{"),
+                    &format!("{pub_prefix}tool {name}({params_str}){ret}{throws_str} {{"),
                     &effective_body,
                     indent,
                 )
@@ -798,6 +809,7 @@ impl Formatter<'_> {
         &self,
         params: &[TypedParam],
         return_type: Option<&TypeExpr>,
+        throws: Option<&TypeExpr>,
         body: &[SNode],
         indent: usize,
     ) -> String {
@@ -805,11 +817,18 @@ impl Formatter<'_> {
         let return_str = return_type
             .map(|ty| format!(" -> {}", format_type_expr(ty)))
             .unwrap_or_default();
+        let throws_str = throws
+            .map(|ty| format!(" throws {}", format_type_expr(ty)))
+            .unwrap_or_default();
         if body.len() == 1 && is_simple_expr(&body[0]) {
             let expr = self.format_expr(&body[0], indent);
-            format!("fn({params_str}){return_str} {{ {expr} }}")
+            format!("fn({params_str}){return_str}{throws_str} {{ {expr} }}")
         } else {
-            self.format_block_expr(&format!("fn({params_str}){return_str} {{"), body, indent)
+            self.format_block_expr(
+                &format!("fn({params_str}){return_str}{throws_str} {{"),
+                body,
+                indent,
+            )
         }
     }
 

@@ -217,6 +217,10 @@ impl Compiler {
         value: &SNode,
         op: &Option<String>,
     ) -> Result<(), CompileError> {
+        // `Index` carries a full `SNode`; the size gap to `Prop(String)` is
+        // inherent to this short-lived path-desugaring helper, not worth an
+        // allocation to box away.
+        #[allow(clippy::large_enum_variant)]
         enum Seg {
             Prop(String),
             Index(SNode),

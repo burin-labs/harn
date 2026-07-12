@@ -88,6 +88,7 @@ impl TypeChecker {
                 Node::Pipeline {
                     params,
                     return_type,
+                    throws,
                     body,
                     ..
                 } => {
@@ -100,6 +101,14 @@ impl TypeChecker {
                     self.expected_return_types.push(return_type.clone());
                     self.check_block_with_expected_tail(body, return_type.as_ref(), &mut child);
                     self.expected_return_types.pop();
+                    if let Some(declared) = throws {
+                        self.check_declared_throws_untyped_params(
+                            declared,
+                            params,
+                            body,
+                            inner_node.span,
+                        );
+                    }
                     if let Some(ret_type) = return_type.as_ref() {
                         let mut ret_scope = child.clone();
                         ret_scope.restore_narrowed_vars();
@@ -138,6 +147,7 @@ impl TypeChecker {
                     type_params,
                     params,
                     return_type,
+                    throws,
                     where_clauses,
                     body,
                     is_stream,
@@ -171,6 +181,9 @@ impl TypeChecker {
                         *is_stream,
                         snode.span,
                     );
+                    if let Some(declared_throws) = throws {
+                        self.check_declared_throws(declared_throws, params, body, snode.span);
+                    }
                 }
                 _ => {
                     // Top-level statements that aren't fn/pipeline decls

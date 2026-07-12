@@ -11,6 +11,49 @@ throw expression
 Evaluates the expression and throws it as `HarnRuntimeError.thrownError(value)`.
 Any value can be thrown (strings, dicts, etc.).
 
+### throws (declared exception channel)
+
+A function, tool, pipeline, or `fn` closure may declare the type of value it
+throws with a `throws` clause after the return type:
+
+```harn,ignore
+fn parse(s: string) -> Doc throws ParseError { ... }
+fn load(path: string) throws NotFound | ParseError { ... }
+```
+
+`throws E1 | E2` is an ordinary union type (the same bare `A | B` union syntax
+used everywhere else — Harn types are not parenthesized). The clause is **optional and
+additive**: a callable with no `throws` clause keeps the historical
+unconstrained behavior, so existing code is unaffected and no callable is ever
+forced to declare one.
+
+When a callable declares `throws E`, every value it can `throw` — or surface via
+`?` — must conform to `E`. A `throw` of a type the declared set does not cover is
+a compile-time type error (`HARN-TYP-026`). A callable without the clause is not
+throw-checked.
+
+**Catch-exhaustiveness.** A `throw` inside a `try` block does not automatically
+count against the enclosing `throws` set — a `catch` that handles it removes it
+from what escapes, exactly as at run time. A typed `catch (e: E)` handles a
+thrown error only when its type is `E` (the runtime matches thrown *enum* errors
+by name and rethrows the rest), an untyped `catch` is a catch-all that handles
+everything, and a `throw` in the `catch` or `finally` body always escapes. The
+errors that remain — those the `catch` does not cover — are what the declared
+`throws` set must account for. So a `try`/`catch` whose handler does not cover an
+error the body can throw makes that error part of the callable's thrown set, and
+it must then be declared (or handled) or it raises `HARN-TYP-026`:
+
+```harn
+fn load(path: string) throws NotFound {
+  try {
+    throw NotFound              // handled below — does not escape
+  } catch (e: NotFound) {
+    // recover
+  }
+  // clean: nothing escapes the callable
+}
+```
+
 ### try/catch/finally
 
 ```harn

@@ -204,6 +204,7 @@ diagnostic_codes! {
     InvalidEnumConstruct, "HARN-TYP-023", Typ, "enum construction is invalid";
     InvalidPatternBinding, "HARN-TYP-024", Typ, "pattern binding is invalid for the expected type";
     InvalidOptionalAccess, "HARN-TYP-025", Typ, "optional access is invalid for the receiver type";
+    ThrowsTypeMismatch, "HARN-TYP-026", Typ, "thrown value type is not covered by the callable's declared throws set";
     ParserUnexpectedToken, "HARN-PAR-001", Par, "parser found an unexpected token";
     ParserUnexpectedEof, "HARN-PAR-002", Par, "parser reached end of file while expecting syntax";
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";

@@ -100,6 +100,12 @@ pub enum Node {
         name: String,
         params: Vec<String>,
         return_type: Option<TypeExpr>,
+        /// Declared exception channel: `throws E` / `throws (E1 | E2)`, parsed
+        /// as a single [`TypeExpr`] (a `throws (E1 | E2)` clause is a
+        /// [`TypeExpr::Union`]). `None` leaves the callable's thrown-type set
+        /// unconstrained — the historical default, so the annotation is purely
+        /// additive and no existing code is forced to declare it.
+        throws: Option<TypeExpr>,
         body: Vec<SNode>,
         extends: Option<String>,
         is_pub: bool,
@@ -237,6 +243,9 @@ pub enum Node {
         type_params: Vec<TypeParam>,
         params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
+        /// Declared exception channel `throws E` / `throws (E1 | E2)`; see the
+        /// [`Node::Pipeline`] `throws` field. `None` = unconstrained.
+        throws: Option<TypeExpr>,
         where_clauses: Vec<WhereClause>,
         body: Vec<SNode>,
         is_pub: bool,
@@ -247,6 +256,9 @@ pub enum Node {
         description: Option<String>,
         params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
+        /// Declared exception channel; see the [`Node::Pipeline`] `throws`
+        /// field. `None` = unconstrained.
+        throws: Option<TypeExpr>,
         body: Vec<SNode>,
         is_pub: bool,
     },
@@ -490,6 +502,11 @@ pub enum Node {
     Closure {
         params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
+        /// Declared exception channel; see the [`Node::Pipeline`] `throws`
+        /// field. `None` = unconstrained. Only the `fn(params) -> R throws E`
+        /// closure spelling can carry it; the bare `x -> expr` arrow form has
+        /// no place to put a clause and always parses `None`.
+        throws: Option<TypeExpr>,
         body: Vec<SNode>,
         /// When true, this closure was written as `fn(params) { body }`.
         /// The formatter preserves this distinction.

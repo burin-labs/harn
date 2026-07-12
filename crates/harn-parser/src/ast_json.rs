@@ -115,6 +115,7 @@ pub fn token_kind_name(kind: &TokenKind) -> &'static str {
         TokenKind::DualControl => "DualControl",
         TokenKind::AskUser => "AskUser",
         TokenKind::EscalateTo => "EscalateTo",
+        TokenKind::Throws => "Throws",
         TokenKind::Identifier(_) => "Identifier",
         TokenKind::StringLiteral(_) => "StringLiteral",
         TokenKind::InterpolatedString(_) => "InterpolatedString",

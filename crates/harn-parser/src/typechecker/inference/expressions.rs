@@ -19,6 +19,7 @@ use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
+use super::super::format::format_type;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
 use super::super::union::{
@@ -86,6 +87,50 @@ impl TypeChecker {
                         inferred.push(ty);
                     }
                 }
+                // A `try`/`catch` handles some of its body's errors and lets the
+                // rest escape — so the block contributes its *residual*, not the
+                // raw body-thrown set. This is what makes the throws channel
+                // (and its catch-exhaustiveness) sound: an error caught here does
+                // not count against an enclosing `throws`, and one the catch does
+                // not cover does. The runtime is type-selective — a typed
+                // `catch (e: E)` matches only errors whose type is `E` and
+                // rethrows the rest (see `Vm::handle_error`) — so the static
+                // residual mirrors exactly what propagates at run time.
+                Node::TryCatch {
+                    body,
+                    has_catch,
+                    error_type,
+                    catch_body,
+                    finally_body,
+                    ..
+                } => {
+                    let body_thrown = self.infer_try_error_type(body, scope);
+                    if !has_catch {
+                        // `try { } finally { }` with no catch: the body's errors
+                        // propagate unchanged.
+                        if let Some(ty) = body_thrown {
+                            inferred.push(ty);
+                        }
+                    } else if let Some(catch_ty) = error_type {
+                        // Typed catch: only body errors assignable to the catch
+                        // type are handled; the residual propagates.
+                        inferred.extend(self.uncaught_residual(body_thrown, catch_ty, scope));
+                    }
+                    // else: an untyped `catch` is a catch-all — no body error escapes.
+
+                    // The catch handler and the `finally` block can themselves
+                    // throw, and those always escape.
+                    if *has_catch {
+                        if let Some(ty) = self.infer_try_error_type(catch_body, scope) {
+                            inferred.push(ty);
+                        }
+                    }
+                    if let Some(finally_body) = finally_body {
+                        if let Some(ty) = self.infer_try_error_type(finally_body, scope) {
+                            inferred.push(ty);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -94,6 +139,123 @@ impl TypeChecker {
         } else {
             Some(simplify_union(inferred))
         }
+    }
+
+    /// The members of a `try` body's thrown-type union that a `catch (e: E)`
+    /// clause does *not* handle — i.e. those that will be rethrown and
+    /// propagate past the block. A thrown member `M` is caught iff it is
+    /// assignable to the catch type `E` (`E` is a supertype of `M`), matching
+    /// the VM's type-selective `handle_error`. A bare/aggregate throw union is
+    /// treated member-by-member so `catch (e: A)` over a `throw`-`A`-or-`B`
+    /// body correctly leaves `B` escaping.
+    fn uncaught_residual(
+        &self,
+        thrown: InferredType,
+        catch_ty: &TypeExpr,
+        scope: &TypeScope,
+    ) -> Vec<TypeExpr> {
+        let Some(thrown) = thrown else {
+            return Vec::new();
+        };
+        let members = match thrown {
+            TypeExpr::Union(members) => members,
+            single => vec![single],
+        };
+        // The VM only catches *enum* errors: `handle_error` matches a thrown
+        // `EnumVariant` by name and rethrows everything else. A typed catch on a
+        // non-enum type therefore catches nothing at run time, so — to stay
+        // sound (never under-count what escapes) — treat the whole body-thrown
+        // set as escaping unless the catch type is an enum (or a union of them).
+        if !self.is_enum_catch_type(catch_ty, scope) {
+            return members;
+        }
+        members
+            .into_iter()
+            .filter(|member| !self.types_compatible(catch_ty, member, scope))
+            .collect()
+    }
+
+    /// Whether `ty` is an enum type — or a union whose every non-nil member is
+    /// one — i.e. a catch type the VM can actually match against a thrown
+    /// `EnumVariant`. Used to keep [`Self::uncaught_residual`] sound with the
+    /// runtime's enum-only `catch` dispatch.
+    fn is_enum_catch_type(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+        match self.resolve_alias(ty, scope) {
+            TypeExpr::Named(name) => scope.get_enum(&name).is_some(),
+            TypeExpr::Applied { name, .. } => scope.get_enum(&name).is_some(),
+            TypeExpr::Union(members) => members
+                .iter()
+                .all(|m| self.type_is_nil(m, scope) || self.is_enum_catch_type(m, scope)),
+            _ => false,
+        }
+    }
+
+    /// Enforce a callable's declared `throws E` (or `throws (E1 | E2)`) channel:
+    /// every value the body can `throw` — or surface via `?` — must conform to
+    /// the declared set. Reuses [`Self::infer_try_error_type`] (the same
+    /// collector that computes a `try` block's error type) to gather the body's
+    /// thrown-type union, then requires it to be covered by `declared`.
+    ///
+    /// Only callables that opt into a `throws` clause are checked, so this never
+    /// constrains existing unannotated code. Throw sites nested inside a local
+    /// `try {}` are accounted for precisely: [`Self::infer_try_error_type`]
+    /// subtracts the errors a `catch` clause handles and adds those the catch /
+    /// finally bodies raise, so a caught error does not count against the
+    /// declared set and an *uncaught* one does. That makes the declared channel
+    /// catch-exhaustive — a `try`/`catch` that fails to cover an error the body
+    /// can throw surfaces here as an uncovered escapee (HARN-TYP-026) unless the
+    /// clause declares it.
+    pub(in crate::typechecker) fn check_declared_throws(
+        &mut self,
+        declared: &TypeExpr,
+        params: &[TypedParam],
+        body: &[SNode],
+        throws_span: Span,
+    ) {
+        let mut body_scope = TypeScope::child_of(&self.scope);
+        for param in params {
+            let param_type = if param.rest {
+                param
+                    .type_expr
+                    .clone()
+                    .map(|inner| TypeExpr::List(Box::new(inner)))
+            } else {
+                param.type_expr.clone()
+            };
+            body_scope.define_var(&param.name, param_type);
+        }
+        let Some(actual) = self.infer_try_error_type(body, &body_scope) else {
+            return;
+        };
+        if !self.types_compatible(declared, &actual, &body_scope) {
+            self.error_at(
+                Code::ThrowsTypeMismatch,
+                format!(
+                    "this callable can throw `{}`, which its declared `throws {}` does not cover",
+                    format_type(&actual),
+                    format_type(declared),
+                ),
+                throws_span,
+            );
+        }
+    }
+
+    /// Untyped-parameter variant of [`Self::check_declared_throws`] for
+    /// pipelines, whose params are bare names (`Vec<String>`) with no declared
+    /// types. The names are bound as untyped so a thrown expression that
+    /// references one still resolves to a binding rather than an unknown.
+    pub(in crate::typechecker) fn check_declared_throws_untyped_params(
+        &mut self,
+        declared: &TypeExpr,
+        param_names: &[String],
+        body: &[SNode],
+        throws_span: Span,
+    ) {
+        let params: Vec<TypedParam> = param_names
+            .iter()
+            .map(|name| TypedParam::untyped(name.as_str()))
+            .collect();
+        self.check_declared_throws(declared, &params, body, throws_span);
     }
 
     pub(in crate::typechecker) fn infer_list_literal_type(

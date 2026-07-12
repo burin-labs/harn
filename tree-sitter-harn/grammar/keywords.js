@@ -21,6 +21,7 @@ module.exports = [
   "try",
   "catch",
   "throw",
+  "throws",
   "finally",
   "fn",
   "spawn",

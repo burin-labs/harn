@@ -530,6 +530,17 @@ pub(crate) fn format_where_clauses(clauses: &[WhereClause]) -> String {
     }
 }
 
+/// Render an optional `throws` exception-channel clause. Returns
+/// ` throws <type>` (leading space) or the empty string when absent, so call
+/// sites can splice it directly after the rendered return type — mirroring
+/// [`format_where_clauses`].
+pub(crate) fn format_throws_clause(throws: &Option<TypeExpr>) -> String {
+    match throws {
+        Some(ty) => format!(" throws {}", format_type_expr(ty)),
+        None => String::new(),
+    }
+}
+
 /// Format an expression inline for use in parameter defaults.
 pub(crate) fn format_inline_expr(node: &SNode) -> String {
     let fmt = Formatter::new("", BTreeMap::new(), 100, AUTO_SEPARATOR_WIDTH);
