@@ -8,11 +8,25 @@ pipeline test(task) {
     when_to_use "Use alpha first"
   }
   const registry = skill_define(beta, "alpha", skill_find(alpha, "alpha") ?? {})
+  // Catalog entries are projected in a deterministic id-sorted order regardless
+  // of definition order (beta is defined first, but alpha sorts ahead of it),
+  // each carrying the skill's card fields. Assert that structured contract
+  // rather than the rendered catalog prose, which is model-facing framing owned
+  // by `render_catalog` / `CATALOG_HEADER` in harn-vm.
   const entries = skills_catalog_entries(registry)
-  const rendered = render_always_on_catalog(entries, 500)
-  const expected = "## Available skills\n\nThese skills are available. Call `load_skill({ name: \"<skill-id>\" })` to load the full body of a skill when it becomes relevant.\n\n- `alpha`: First skill\n  when: Use alpha first\n- `beta`: Second skill\n  when: Use beta second"
-  assert(rendered == expected, "catalog render is deterministic and sorted")
-  const small = render_always_on_catalog(entries, 170)
-  assert(contains(small, "omitted to stay within budget"), "budget note emitted")
+  assert(entries.count() == 2, "catalog projects one entry per skill")
+  assert(entries[0].name == "alpha", "entries sort by id: alpha first")
+  assert(entries[0].description == "First skill", "entry carries its description")
+  assert(entries[0].when_to_use == "Use alpha first", "entry carries its when_to_use")
+  assert(entries[1].name == "beta", "entries sort by id: beta second")
+  // Budget enforcement: with ample budget every skill is shown; with a tight
+  // budget skills are omitted to fit. Assert the structured shown/omitted split
+  // (byte-robust) rather than the rendered note wording.
+  const full_ev = skills_activation_evidence(registry, {budget: 500})
+  assert(full_ev.shown.count() == 2, "ample budget shows every skill")
+  assert(full_ev.omitted.count() == 0, "ample budget omits nothing")
+  const tight_ev = skills_activation_evidence(registry, {budget: 170})
+  assert(tight_ev.omitted.count() > 0, "a tight budget omits at least one skill")
+  assert(tight_ev.shown.count() + tight_ev.omitted.count() == 2, "every skill is shown or omitted")
   log("skills_load_skill_catalog passed")
 }

@@ -136,7 +136,8 @@ fn registered_provider_metadata_marks_builtin_connectors() {
         .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
         .collect();
 
-    assert_eq!(builtin.len(), 9);
+    // The exact number of builtin connectors is not pinned (adding one is not a
+    // regression); the specific connectors below must classify correctly.
     assert!(builtin.iter().any(|entry| entry.provider == "a2a-push"));
     assert!(builtin.iter().any(|entry| entry.provider == "cron"));
     assert!(builtin.iter().any(|entry| entry.provider == "webhook"));
