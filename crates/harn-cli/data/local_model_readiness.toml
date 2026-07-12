@@ -24,11 +24,11 @@ score = 35
 evidence = "Initial local run hit an Ollama HTTP 500 / EOF transport path; report separately from model task quality."
 
 [[outcomes]]
-provider = "ollama"
-model = "gemma4:26b"
-selector = "ollama-gemma4"
+provider = "local"
+model = "gemma-4-26b-a4b-it"
+selector = "local-gemma4"
 tool_format = "text"
-class = "behavioral_failure"
-status = "failed"
-score = 20
-evidence = "Initial local run failed behaviorally by hallucinating paths/tools in the coding-agent fixture."
+class = "skipped"
+status = "catalog_default"
+score = 0
+evidence = "Bundled fallback records the shipped local QC default without stale failure evidence; run harn eval coding-agent --include-local to replace this seed with local empirical results."

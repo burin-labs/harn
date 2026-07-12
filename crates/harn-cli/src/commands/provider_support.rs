@@ -1119,6 +1119,7 @@ mod tests {
             .iter()
             .find(|entry| entry.id == "openai")
             .expect("openai row");
+        assert_eq!(openai.recommended.model, "gpt-5.4-mini");
         assert!(
             openai
                 .capabilities
@@ -1142,6 +1143,30 @@ mod tests {
                     && tier.request_value.as_deref() == Some("priority")),
             "Gemini support row should surface Priority as a synchronous serving tier"
         );
+    }
+
+    #[test]
+    fn curated_recommendations_do_not_point_at_superseded_models() {
+        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[]).expect("report");
+        for entry in &report.providers {
+            if entry.recommended.model == "*" || entry.recommended.model.contains('*') {
+                continue;
+            }
+            let model = harn_vm::llm_config::model_catalog_entry(&entry.recommended.model)
+                .unwrap_or_else(|| panic!("{} recommends missing catalog model", entry.id));
+            assert_eq!(
+                model.provider, entry.catalog_provider,
+                "{} recommends {} from provider {}, not {}",
+                entry.id, entry.recommended.model, model.provider, entry.catalog_provider
+            );
+            assert!(
+                model.superseded_by.is_none(),
+                "{} recommends superseded model {} -> {:?}",
+                entry.id,
+                entry.recommended.model,
+                model.superseded_by
+            );
+        }
     }
 
     #[test]

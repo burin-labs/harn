@@ -32,13 +32,13 @@ id = "openai"
 catalog_provider = "openai"
 display_name = "OpenAI"
 endpoint_style = "OpenAI chat completions / Responses-compatible routes"
-recommended_model = "gpt-4o-mini"
-recommended_selector = "mid"
+recommended_model = "gpt-5.4-mini"
+recommended_selector = "openai:gpt-5.4-mini"
 recommended_tool_format = "native"
 usage_confidence = "high"
 recommended_options = [
   'provider = "openai"',
-  'model = "mid"',
+  'model = "gpt-5.4-mini"',
   'tool_format = "native"',
   'structured_output_mode = "native_json"',
 ]
