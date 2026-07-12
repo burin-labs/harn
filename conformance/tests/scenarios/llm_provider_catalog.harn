@@ -1,3 +1,5 @@
+import "std/collections"
+
 pipeline test(task) {
   const local = llm_resolve_model("local:gemma-4-e4b-it")
   assert_eq(local.id, "gemma-4-e4b-it")
@@ -8,14 +10,14 @@ pipeline test(task) {
   assert_eq(ollama.tool_format, "native")
   assert(ollama.auth_available, "ollama should not require API auth")
   const known = llm_known_models()
-  assert(len(known.filter({ name -> name == "mid" })) == 1, "known aliases include mid")
+  assert(count_where(known, { name -> name == "mid" }) == 1, "known aliases include mid")
   const available = llm_available_providers()
   assert(
-    len(available.filter({ name -> name == "ollama" })) == 1,
+    count_where(available, { name -> name == "ollama" }) == 1,
     "available providers include keyless ollama",
   )
   assert(
-    len(available.filter({ name -> name == "local" })) == 1,
+    count_where(available, { name -> name == "local" }) == 1,
     "available providers include keyless local",
   )
   const catalog = llm_provider_catalog()

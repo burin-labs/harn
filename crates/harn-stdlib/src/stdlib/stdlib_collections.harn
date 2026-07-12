@@ -91,3 +91,42 @@ pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
   }
   return __dict_from_pairs(pairs)
 }
+
+/**
+ * Sum the non-nil values produced by `project` for each item.
+ *
+ * Nil projections are skipped so callers do not need a `?? 0` default inside
+ * the projection. Numeric validation follows the runtime list-sum contract.
+ *
+ * @effects: []
+ * @errors: [TypeError]
+ * @example: sum_by(rows, { row -> row?.input_tokens })
+ */
+pub fn sum_by<T>(items: list<T>, project) {
+  let projected = []
+  for item in items ?? [] {
+    const value = project(item)
+    if value != nil {
+      projected = projected.push(value)
+    }
+  }
+  return projected.sum()
+}
+
+/**
+ * Count items where `predicate(item)` is truthy without materializing a
+ * filtered list.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: count_where(rows, { row -> row.status == "pass" })
+ */
+pub fn count_where<T>(items: list<T>, predicate) -> int {
+  let count = 0
+  for item in items ?? [] {
+    if predicate(item) {
+      count = count + 1
+    }
+  }
+  return count
+}

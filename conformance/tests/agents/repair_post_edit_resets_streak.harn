@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import "std/collections"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -99,7 +100,7 @@ pipeline default() {
         ) },
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
-      __io_println(len(stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })))
+      __io_println(count_where(stalls, { s -> s.warning.pattern == "stuck_same_diagnostic" }))
       __io_println(len(stalls))
       __io_println(captured.result.status)
     },
