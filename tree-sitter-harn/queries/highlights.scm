@@ -17,7 +17,6 @@
 "try" @keyword.exception
 "catch" @keyword.exception
 "throw" @keyword.exception
-"throws" @keyword.exception
 "finally" @keyword.exception
 "return" @keyword.return
 "import" @keyword.import
