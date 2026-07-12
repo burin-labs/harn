@@ -68,9 +68,9 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
 // Snapshot of the leak audit registry so a script can assert that a
 // capability either *did* or *did not* observe real wall-clock time
 // during the run. Returns `[{capability, count}]` in the order each
-// capability first surfaced. The list survives `finalize()` only
-// until the next session installs (which calls `leak_audit::reset`),
-// so scripts typically read it just before they end.
+// capability first surfaced for the active testbench session.
+// `finalize()` drains the same scoped list, so scripts typically read it
+// just before they end.
 #[harn_builtin(sig = "testbench_clock_leaks() -> list", category = "testbench")]
 fn testbench_clock_leaks_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let leaks = crate::clock_mock::leak_audit::snapshot();

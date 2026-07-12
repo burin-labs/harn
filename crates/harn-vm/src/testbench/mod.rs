@@ -275,6 +275,7 @@ impl TestbenchBuilder {
 /// for the active axes; dropping it tears them all down in order.
 #[must_use = "the testbench tears down on drop; bind the handle to a `_session` local"]
 pub struct TestbenchSession {
+    _clock_leak_scope: Option<leak_audit::ClockLeakScopeGuard>,
     _clock: Option<ClockOverrideGuard>,
     _process: Option<ProcessTapeGuard>,
     _overlay: Option<OverlayFsGuard>,
@@ -305,14 +306,10 @@ struct SavedEgressEnv {
 
 impl TestbenchSession {
     fn install(bench: Testbench) -> Result<Self, TestbenchError> {
-        // Clear the leak audit so the session reports leaks it observed
-        // rather than entries left behind by an earlier session that
-        // never called `finalize` (e.g. a panicking test).
-        leak_audit::reset();
-
-        let (clock_guard, started_at_unix_ms) = match bench.clock {
-            ClockConfig::Real => (None, None),
+        let (clock_leak_scope, clock_guard, started_at_unix_ms) = match bench.clock {
+            ClockConfig::Real => (None, None, None),
             ClockConfig::Paused { starting_at_ms } => (
+                Some(leak_audit::install_scope()),
                 Some(install_override(MockClock::at_wall_ms(starting_at_ms))),
                 Some(starting_at_ms),
             ),
@@ -422,6 +419,7 @@ impl TestbenchSession {
         };
 
         Ok(Self {
+            _clock_leak_scope: clock_leak_scope,
             _clock: clock_guard,
             _process: process_guard,
             _overlay: overlay_guard,
@@ -582,16 +580,15 @@ impl std::error::Error for TestbenchError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
-    /// Tests in this module mutate process-global state (env vars, the
-    /// leak audit registry) and must run one at a time even though
-    /// `cargo test` defaults to parallel execution. We share
-    /// [`leak_audit::TEST_LOCK`] so the audit module's own tests
-    /// serialize with the testbench's tests against the same registry.
+    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Some tests in this module mutate process-global env vars. Keep
+    /// those serialized without coupling them to the clock-leak audit,
+    /// which is session-scoped.
     fn serial<F: FnOnce()>(body: F) {
-        let _guard = leak_audit::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         body();
     }
 
