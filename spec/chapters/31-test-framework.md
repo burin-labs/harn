@@ -26,6 +26,22 @@ pipeline test_string_concat() {
 }
 ```
 
+Pipelines can also opt in with `@test`, including table-driven cases. A
+`@test(cases: [...])` attribute creates one independent test case per row.
+Each row must be a dict with a unique string `name` and an `args` list whose
+length matches the pipeline parameter count. Reports and filters use the
+display name `pipeline[row]`.
+
+```harn
+@test(cases: [
+  {name: "positive", args: [2, 3, 5]},
+  {name: "negative", args: [-2, 1, -1]},
+])
+pipeline add_case(left, right, expected) {
+  assert_eq(left + right, expected)
+}
+```
+
 ### Assertions
 
 Three assertion builtins are available. They can be called anywhere, but

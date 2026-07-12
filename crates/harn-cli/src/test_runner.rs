@@ -7,7 +7,9 @@ use std::thread;
 use std::time::Instant;
 
 use harn_lexer::Lexer;
+use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
 use harn_parser::{Attribute, Node, Parser, SNode};
+use harn_vm::VmValue;
 
 use crate::env_guard::ScopedEnvVar;
 use crate::CLI_RUNTIME_STACK_SIZE;
@@ -282,6 +284,7 @@ impl RunOptions {
 struct TestCase {
     file: PathBuf,
     name: String,
+    pipeline_name: String,
     source: Arc<String>,
     program: Arc<Vec<SNode>>,
     /// Optional serial group — tests with the same group never run
@@ -291,6 +294,8 @@ struct TestCase {
     /// Number of workers this test reserves while running. Capped at the
     /// pool size during discovery so heavy tests still get scheduled.
     weight: usize,
+    /// Parameter bindings supplied by one `@test(cases: [...])` row.
+    bindings: Vec<(String, VmValue)>,
 }
 
 fn canonicalize_existing_path(path: &Path) -> PathBuf {
@@ -486,7 +491,7 @@ pub async fn run_test_file(
     let source = Arc::new(source);
     let program = Arc::new(program);
 
-    let cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX);
+    let cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
 
     let mut results = Vec::with_capacity(cases.len());
     let execution_cwd = execution_cwd
@@ -674,10 +679,21 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
 
         let source = Arc::new(source);
         let program = Arc::new(program);
-        let file_cases = extract_cases_from_program(file, &source, &program, filter, workers);
-        if !file_cases.is_empty() {
-            files_with_tests += 1;
-            cases.extend(file_cases);
+        match extract_cases_from_program(file, &source, &program, filter, workers) {
+            Ok(file_cases) => {
+                if !file_cases.is_empty() {
+                    files_with_tests += 1;
+                    cases.extend(file_cases);
+                }
+            }
+            Err(error) => discovery_errors.push(TestResult {
+                name: "<file error>".to_string(),
+                file: file.display().to_string(),
+                passed: false,
+                error: Some(error),
+                duration_ms: 0,
+                phases: PhaseTimings::default(),
+            }),
         }
     }
 
@@ -701,39 +717,65 @@ fn extract_cases_from_program(
     program: &Arc<Vec<SNode>>,
     filter: Option<&str>,
     workers: usize,
-) -> Vec<TestCase> {
+) -> Result<Vec<TestCase>, String> {
     let mut cases = Vec::new();
     for snode in program.iter() {
-        let Some(meta) = inspect_test_pipeline(snode) else {
+        let Some(meta) = inspect_test_pipeline(snode)? else {
             continue;
         };
-        if let Some(pattern) = filter {
-            if !meta.name.contains(pattern) {
-                continue;
-            }
-        }
         // Cap heavy weight so a single annotated test never deadlocks
         // when the pool is smaller than the requested concurrency.
         let weight = meta.weight.min(workers).max(1);
-        cases.push(TestCase {
-            file: file.to_path_buf(),
-            name: meta.name,
-            source: Arc::clone(source),
-            program: Arc::clone(program),
-            serial_group: meta.serial_group,
-            weight,
-        });
+        if meta.rows.is_empty() {
+            if filter.is_some_and(|pattern| !meta.name.contains(pattern)) {
+                continue;
+            }
+            cases.push(TestCase {
+                file: file.to_path_buf(),
+                name: meta.name.clone(),
+                pipeline_name: meta.name,
+                source: Arc::clone(source),
+                program: Arc::clone(program),
+                serial_group: meta.serial_group,
+                weight,
+                bindings: Vec::new(),
+            });
+        } else {
+            for row in meta.rows {
+                let case_name = format!("{}[{}]", meta.name, row.name);
+                if filter.is_some_and(|pattern| !case_name.contains(pattern)) {
+                    continue;
+                }
+                cases.push(TestCase {
+                    file: file.to_path_buf(),
+                    name: case_name,
+                    pipeline_name: meta.name.clone(),
+                    source: Arc::clone(source),
+                    program: Arc::clone(program),
+                    serial_group: meta.serial_group.clone(),
+                    weight,
+                    bindings: meta.params.iter().cloned().zip(row.args).collect(),
+                });
+            }
+        }
     }
-    cases
+    Ok(cases)
 }
 
 struct PipelineMeta {
     name: String,
+    params: Vec<String>,
     serial_group: Option<String>,
     weight: usize,
+    rows: Vec<ParameterizedRow>,
 }
 
-fn inspect_test_pipeline(snode: &SNode) -> Option<PipelineMeta> {
+struct ParameterizedRow {
+    name: String,
+    args: Vec<VmValue>,
+}
+
+fn inspect_test_pipeline(snode: &SNode) -> Result<Option<PipelineMeta>, String> {
     // Pipelines marked `@test`, or named `test_*`, are user tests. The
     // companion attributes `@serial` and `@heavy` only tune the scheduler
     // and never make a non-test pipeline discoverable on their own.
@@ -741,13 +783,13 @@ fn inspect_test_pipeline(snode: &SNode) -> Option<PipelineMeta> {
         Node::AttributedDecl { attributes, inner } => (attributes.as_slice(), inner.as_ref()),
         _ => (&[][..], snode),
     };
-    let name = match &inner.node {
-        Node::Pipeline { name, .. } => name.clone(),
-        _ => return None,
+    let (name, params) = match &inner.node {
+        Node::Pipeline { name, params, .. } => (name.clone(), params.clone()),
+        _ => return Ok(None),
     };
     let has_test_attr = attributes.iter().any(|a| a.name == "test");
     if !has_test_attr && !name.starts_with("test_") {
-        return None;
+        return Ok(None);
     }
     let serial_group = attributes
         .iter()
@@ -758,11 +800,118 @@ fn inspect_test_pipeline(snode: &SNode) -> Option<PipelineMeta> {
         .find(|a| a.name == "heavy")
         .and_then(heavy_weight_for)
         .unwrap_or(1);
-    Some(PipelineMeta {
+    let rows = match attributes.iter().find(|a| a.name == "test") {
+        Some(attribute) => parameterized_rows(attribute, &name, params.len())?,
+        None => Vec::new(),
+    };
+    Ok(Some(PipelineMeta {
         name,
+        params,
         serial_group,
         weight,
+        rows,
+    }))
+}
+
+fn parameterized_rows(
+    attribute: &Attribute,
+    pipeline_name: &str,
+    parameter_count: usize,
+) -> Result<Vec<ParameterizedRow>, String> {
+    let Some(cases) = attribute.named_arg("cases") else {
+        return Ok(Vec::new());
+    };
+    let Node::ListLiteral(items) = &cases.node else {
+        return Err(format!(
+            "@test cases for `{pipeline_name}` must be a list of {{name, args}} rows"
+        ));
+    };
+    if items.is_empty() {
+        return Err(format!(
+            "@test cases for `{pipeline_name}` must not be empty"
+        ));
+    }
+
+    let mut rows = Vec::with_capacity(items.len());
+    let mut names = HashSet::new();
+    for item in items {
+        let Node::DictLiteral(entries) = &item.node else {
+            return Err(format!(
+                "@test case in `{pipeline_name}` must be a {{name, args}} dict"
+            ));
+        };
+        let name_node = dict_entry(entries, "name").ok_or_else(|| {
+            format!("@test case in `{pipeline_name}` is missing string field `name`")
+        })?;
+        let name = match &name_node.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => value.trim().to_string(),
+            _ => {
+                return Err(format!(
+                    "@test case name in `{pipeline_name}` must be a string literal"
+                ));
+            }
+        };
+        if name.is_empty() || !names.insert(name.clone()) {
+            return Err(format!(
+                "@test case names in `{pipeline_name}` must be non-empty and unique: `{name}`"
+            ));
+        }
+        let args_node = dict_entry(entries, "args").ok_or_else(|| {
+            format!("@test case `{name}` in `{pipeline_name}` is missing list field `args`")
+        })?;
+        let Node::ListLiteral(args) = &args_node.node else {
+            return Err(format!(
+                "@test case `{name}` in `{pipeline_name}` must provide `args` as a list"
+            ));
+        };
+        if args.len() != parameter_count {
+            return Err(format!(
+                "@test case `{name}` in `{pipeline_name}` has {} arguments; expected {parameter_count}",
+                args.len()
+            ));
+        }
+        let args = args
+            .iter()
+            .map(attribute_value)
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.push(ParameterizedRow { name, args });
+    }
+    Ok(rows)
+}
+
+fn dict_entry<'a>(entries: &'a [harn_parser::DictEntry], key: &str) -> Option<&'a SNode> {
+    entries.iter().find_map(|entry| {
+        let matches = match &entry.key.node {
+            Node::Identifier(value) | Node::StringLiteral(value) => value == key,
+            _ => false,
+        };
+        matches.then_some(&entry.value)
     })
+}
+
+fn attribute_value(node: &SNode) -> Result<VmValue, String> {
+    let value = const_eval(node, &ConstEnv::new())
+        .map_err(|error| format!("@test case arguments must be compile-time values: {error:?}"))?;
+    Ok(const_value_to_vm(value))
+}
+
+fn const_value_to_vm(value: ConstValue) -> VmValue {
+    match value {
+        ConstValue::Int(value) => VmValue::Int(value),
+        ConstValue::Float(value) => VmValue::Float(value),
+        ConstValue::Bool(value) => VmValue::Bool(value),
+        ConstValue::String(value) => VmValue::String(value.into()),
+        ConstValue::Nil => VmValue::Nil,
+        ConstValue::List(items) => {
+            VmValue::List(Arc::new(items.into_iter().map(const_value_to_vm).collect()))
+        }
+        ConstValue::Dict(entries) => VmValue::dict(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, const_value_to_vm(value)))
+                .collect::<Vec<(String, VmValue)>>(),
+        ),
+    }
 }
 
 fn serial_group_for(attr: &Attribute) -> String {
@@ -1194,7 +1343,12 @@ async fn execute_case(
     let total_start = Instant::now();
 
     let compile_start = Instant::now();
-    let chunk = match harn_vm::Compiler::new().compile_named(&case.program, &case.name) {
+    let compiler = harn_vm::Compiler::new();
+    let chunk = match if case.bindings.is_empty() {
+        compiler.compile_named(&case.program, &case.pipeline_name)
+    } else {
+        compiler.compile_named_with_param_globals(&case.program, &case.pipeline_name)
+    } {
         Ok(c) => c,
         Err(e) => {
             phases.compile_ms = compile_start.elapsed().as_millis() as u64;
@@ -1289,6 +1443,9 @@ async fn execute_case(
                 .await
                 .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             vm.set_harness(harn_vm::Harness::real());
+            for (name, value) in &case.bindings {
+                vm.set_global(name, value.clone());
+            }
             let setup_ms = setup_start.elapsed().as_millis() as u64;
             let exec_start = Instant::now();
             let outcome = match vm.execute(&chunk).await {
@@ -1654,10 +1811,12 @@ pipeline test_store_builtin_uses_runner_event_log(task) {
         let mk = |name: &str| TestCase {
             file: PathBuf::from("tests/a.harn"),
             name: name.to_string(),
+            pipeline_name: name.to_string(),
             source: Arc::clone(&source),
             program: Arc::clone(&program),
             serial_group: None,
             weight: 1,
+            bindings: Vec::new(),
         };
         let mut cases = vec![mk("test_quick"), mk("test_slow"), mk("test_medium")];
         let mut timings = BTreeMap::new();
@@ -1686,10 +1845,12 @@ pipeline test_store_builtin_uses_runner_event_log(task) {
         let mk = |name: &str| TestCase {
             file: PathBuf::from("tests/a.harn"),
             name: name.to_string(),
+            pipeline_name: name.to_string(),
             source: Arc::clone(&source),
             program: Arc::clone(&program),
             serial_group: None,
             weight: 1,
+            bindings: Vec::new(),
         };
         let mut timings = BTreeMap::new();
         timings.insert("tests/a.harn::test_big".to_string(), 100);
@@ -2062,12 +2223,104 @@ pipeline test_z_must_not_run(task) { assert(false, "second case ran") }
         let source = Arc::new("pipeline test_one(task) {}".to_string());
         let program = Arc::new(parse_program(&source).unwrap());
         let cases =
-            extract_cases_from_program(Path::new("test_one.harn"), &source, &program, None, 2);
+            extract_cases_from_program(Path::new("test_one.harn"), &source, &program, None, 2)
+                .unwrap();
         let queue = Mutex::new(cases);
         let cancelled = AtomicBool::new(true);
 
         assert!(claim_next_case(&queue, &cancelled, true).is_none());
         assert_eq!(queue.lock().unwrap().len(), 1, "case must remain unclaimed");
         assert!(claim_next_case(&queue, &cancelled, false).is_some());
+    }
+
+    #[tokio::test]
+    async fn parameterized_test_rows_bind_values_and_report_independently() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_parameterized.harn",
+            r#"
+@test(cases: [
+  {name: "passes", args: [2, 2]},
+  {name: "fails", args: [2, 3]},
+  {name: "also_passes", args: [4, 4]},
+])
+pipeline test_equal(actual, expected) {
+  assert_eq(actual, expected)
+}
+"#,
+        );
+
+        let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
+
+        assert_eq!(summary.total, 3);
+        assert_eq!(summary.passed, 2);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(
+            summary
+                .results
+                .iter()
+                .map(|result| result.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "test_equal[also_passes]",
+                "test_equal[fails]",
+                "test_equal[passes]"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn parameterized_test_filter_selects_individual_row() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_parameterized.harn",
+            r#"
+@test(cases: [
+  {name: "ascii", args: ["abc", 3]},
+  {name: "empty", args: ["", 0]},
+])
+pipeline test_length(value, expected) { assert_eq(len(value), expected) }
+"#,
+        );
+
+        let summary = run_tests(
+            &temp.path().join("suite"),
+            Some("[empty]"),
+            5_000,
+            false,
+            &[],
+        )
+        .await;
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.passed, 1);
+        assert_eq!(summary.results[0].name, "test_length[empty]");
+    }
+
+    #[tokio::test]
+    async fn malformed_parameterized_rows_fail_during_discovery() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_parameterized.harn",
+            r#"
+@test(cases: [
+  {name: "duplicate", args: [1]},
+  {name: "duplicate", args: [2]},
+])
+pipeline test_value(value) { assert(false, "must not execute") }
+"#,
+        );
+
+        let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.results[0].name, "<file error>");
+        assert!(summary.results[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("non-empty and unique")));
     }
 }

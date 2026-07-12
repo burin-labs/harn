@@ -380,9 +380,32 @@ impl Compiler {
 
     /// Compile a specific named pipeline (for test runners).
     pub fn compile_named(
+        self,
+        program: &[SNode],
+        pipeline_name: &str,
+    ) -> Result<Chunk, CompileError> {
+        self.compile_named_inner(program, pipeline_name, false)
+    }
+
+    /// Compile a named pipeline and materialize its parameters from VM globals.
+    ///
+    /// This is for hosts that supply one binding set out-of-band, such as the
+    /// CLI test runner's `@test(cases: ...)` rows. Plain `compile_named` keeps
+    /// the historical behavior where unused pipeline parameters do not require
+    /// ambient globals.
+    pub fn compile_named_with_param_globals(
+        self,
+        program: &[SNode],
+        pipeline_name: &str,
+    ) -> Result<Chunk, CompileError> {
+        self.compile_named_inner(program, pipeline_name, true)
+    }
+
+    fn compile_named_inner(
         mut self,
         program: &[SNode],
         pipeline_name: &str,
+        bind_params_from_globals: bool,
     ) -> Result<Chunk, CompileError> {
         Self::collect_enum_names(program, &mut self.enum_names);
         self.enum_names.insert("Result".to_string());
@@ -411,11 +434,25 @@ impl Compiler {
 
         if let Some(sn) = target {
             self.compile_top_level_declarations(program)?;
-            if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
+            if let Node::Pipeline {
+                body,
+                extends,
+                params,
+                ..
+            } = peel_node(sn)
+            {
                 if let Some(parent_name) = extends {
                     self.compile_parent_pipeline(program, parent_name)?;
                 }
                 let saved = std::mem::replace(&mut self.module_level, false);
+                if bind_params_from_globals {
+                    for param in params {
+                        self.define_local_slot(param, false);
+                        let idx = self.string_constant(param);
+                        self.chunk.emit_u16(Op::GetVar, idx, self.line);
+                        self.emit_init_or_define_binding(param, false);
+                    }
+                }
                 self.compile_block(body)?;
                 self.module_level = saved;
             }
