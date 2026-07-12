@@ -14,7 +14,7 @@
 //! into a single JSON payload and hands it across; the script picks
 //! the matching rule and formats the output.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
 
 use serde::{Deserialize, Serialize};
@@ -164,6 +164,9 @@ fn load_recommendation_table() -> Result<RecommendationTable, String> {
 
 fn validate_recommendation_table(table: &RecommendationTable) -> Result<(), String> {
     let mut seen = BTreeSet::new();
+    let aliases = harn_vm::llm_config::alias_entries()
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
     for rule in &table.recommendations {
         let key = (rule.ram_bucket, rule.gpu, rule.has_provider_key);
         if !seen.insert(key) {
@@ -174,12 +177,76 @@ fn validate_recommendation_table(table: &RecommendationTable) -> Result<(), Stri
                 rule.has_provider_key
             ));
         }
+        validate_recommendation_model(rule, &aliases)?;
     }
     let expected_count = RAM_BUCKETS.len() * GPU_KEYS.len() * 2;
     if seen.len() != expected_count {
         return Err(format!(
             "model recommendation table covers {} tuples; expected {expected_count}",
             seen.len()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_recommendation_model(
+    rule: &RecommendationRule,
+    aliases: &BTreeMap<String, harn_vm::llm_config::AliasDef>,
+) -> Result<(), String> {
+    if rule.provider == "cloud" {
+        if rule.model_id == "$cloud_default" {
+            return Ok(());
+        }
+        return Err(format!(
+            "cloud model recommendation for ram_bucket={} gpu={:?} must use $cloud_default, got {}",
+            rule.ram_bucket.as_str(),
+            rule.gpu,
+            rule.model_id
+        ));
+    }
+    if rule.model_id == "$cloud_default" {
+        return Err(format!(
+            "non-cloud model recommendation for ram_bucket={} gpu={:?} uses $cloud_default",
+            rule.ram_bucket.as_str(),
+            rule.gpu
+        ));
+    }
+
+    let resolved_model_id;
+    let (model_id, provider, alias_label) = if let Some(alias) = aliases.get(&rule.model_id) {
+        (
+            alias.id.as_str(),
+            alias.provider.as_str(),
+            Some(rule.model_id.as_str()),
+        )
+    } else {
+        resolved_model_id = harn_vm::llm_config::normalize_model_id(&rule.model_id);
+        (resolved_model_id.as_str(), rule.provider.as_str(), None)
+    };
+    if provider != rule.provider {
+        return Err(format!(
+            "model recommendation for ram_bucket={} gpu={:?} says provider={} but {} routes to provider={provider}",
+            rule.ram_bucket.as_str(),
+            rule.gpu,
+            rule.provider,
+            alias_label.unwrap_or(&rule.model_id)
+        ));
+    }
+    let Some(model) = harn_vm::llm_config::model_catalog_entry(model_id) else {
+        return Err(format!(
+            "model recommendation for ram_bucket={} gpu={:?} references unknown model_id={} (resolved id={model_id})",
+            rule.ram_bucket.as_str(),
+            rule.gpu,
+            rule.model_id
+        ));
+    };
+    if model.provider != provider {
+        return Err(format!(
+            "model recommendation for ram_bucket={} gpu={:?} resolves {} to provider={} but row provider={provider}",
+            rule.ram_bucket.as_str(),
+            rule.gpu,
+            rule.model_id,
+            model.provider
         ));
     }
     Ok(())
@@ -246,7 +313,10 @@ fn cloud_provider_key_available(provider: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_recommendation_table, validate_recommendation_table, GPU_KEYS, RAM_BUCKETS};
+    use super::{
+        load_recommendation_table, validate_recommendation_table, RamBucket, RecommendationGpu,
+        RecommendationRule, RecommendationTable, GPU_KEYS, RAM_BUCKETS,
+    };
 
     #[test]
     fn recommendation_table_has_unique_tuple_keys() {
@@ -256,5 +326,20 @@ mod tests {
             table.recommendations.len(),
             RAM_BUCKETS.len() * GPU_KEYS.len() * 2
         );
+    }
+
+    #[test]
+    fn recommendation_table_rejects_unknown_local_model_ids() {
+        let table = RecommendationTable {
+            recommendations: vec![RecommendationRule {
+                ram_bucket: RamBucket::Lt8,
+                gpu: RecommendationGpu::None,
+                has_provider_key: false,
+                provider: "ollama".to_string(),
+                model_id: "ollama/qwen2.5:3b-instruct".to_string(),
+            }],
+        };
+        let error = validate_recommendation_table(&table).expect_err("dead model should fail");
+        assert!(error.contains("unknown model_id=ollama/qwen2.5:3b-instruct"));
     }
 }

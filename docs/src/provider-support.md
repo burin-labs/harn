@@ -41,7 +41,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Nebius` | OpenAI-compatible chat completions | `nebius` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/minimax-m2.7` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | No | none | `high` | `not_recorded` |
-| `OpenAI` | OpenAI chat completions / Responses-compatible routes | `mid` | `native` | yes | yes | `native` / `native_json` | none | yes | Yes (50%) | `fast:premium`, `priority:premium`, `flex:discounted` | `high` | `not_recorded` |
+| `OpenAI` | OpenAI chat completions / Responses-compatible routes | `openai:gpt-5.4-mini` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | `fast:premium`, `priority:premium`, `flex:discounted` | `high` | `not_recorded` |
 | `Openrouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled` | yes | No | none | `high` | `not_recorded` |
 | `Parasail` | OpenAI-compatible chat completions | `parasail` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Qianfan` | OpenAI-compatible chat completions | `qianfan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
@@ -298,13 +298,13 @@ Local setup:
 ### OpenAI
 
 - catalog provider: `openai`
-- recommended route: `mid` (`gpt-4o-mini`)
+- recommended route: `openai:gpt-5.4-mini` (`gpt-5.4-mini`)
 - endpoint style: OpenAI chat completions / Responses-compatible routes
 - recommended Harn options:
 
 ```toml
 provider = "openai"
-model = "mid"
+model = "gpt-5.4-mini"
 tool_format = "native"
 structured_output_mode = "native_json"
 ```
