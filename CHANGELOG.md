@@ -9,6 +9,79 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.13
+
+### Added
+
+- **Zero-write terminal-verify guard for the agent loop (#4525).** A new
+  default-off `stall_diagnostics.zero_write_terminal_verify` knob. A run that
+  ends with a lone tool call and no source write used to seal at a
+  budget/iteration boundary before the completion gate — and its
+  `no_source_write` veto — ever evaluated, producing an invisible zero-write
+  "no-show". When enabled, such a terminal now gets one completion-gate
+  evaluation pass, reusing the reserved terminal-verify machinery and tagged
+  `kind: "zero_write_terminal_verify"`. The agent loop also now always seals a
+  typed, non-empty `stop_reason` (derived from `final_status` when a break left
+  it unstamped) instead of an empty "missing" value.
+- Add `harn test --fail-fast`, which stops scheduling new user tests after the
+  first discovery or execution failure while preserving results from tests
+  already running in parallel.
+
+### Changed
+
+- Closures now capture outer bindings **by reference**, not by value. A closure
+  that mutates a captured `let` — a rebind (`n = n + 1`), a compound assignment,
+  or an in-place container write (`xs[i] = ...`, `d.field = ...`) — now has that
+  write observed by the enclosing scope and by later invocations of the same
+  closure, matching JavaScript, Python, and Swift. Previously such writes hit a
+  private per-closure snapshot and silently vanished. Value semantics is
+  unchanged: distinct variables stay independent (`let b = a` still copies), and
+  `const` bindings (which cannot be rebound or mutated in place) are unaffected.
+  This fixes a class of silent lost-write bugs, including a latent dedup bug in
+  `std/text extract_paths`. `parallel` and `spawn` bodies capture by reference on
+  the same terms, so a captured `let` mutated inside a concurrent branch is no
+  longer lost — but because every branch then shares one cell, a new warning lint
+  `mutable-capture-across-parallel` (`HARN-LNT-064`) flags reassigning a captured
+  variable inside a `parallel`/`spawn` body and suggests returning per-branch
+  results to combine after the fan-out. (#4479)
+
+### Fixed
+
+- Agent sessions now recover from retry-exhausted empty provider generations through compatible catalog routes. They also
+  report a typed failure reason with the actual attempt count.
+- **Package API documentation now ignores declarations embedded in source strings
+  (#4519).** Generated code templates no longer create phantom exports or duplicate Markdown
+  headings.
+- Ensure each live tool-call ID emits one observable start event even when a
+  streaming provider announces the call before dispatch.
+- `harn check` now drops flow narrowing for a variable that a nested closure
+  captures and reassigns. Because closures capture by reference, calling such a
+  closure can
+  reset the variable (for example to nil), so keeping a `!= nil` narrowing across
+  the call was unsound: `harn check` accepted code that its own runtime type check
+  then rejected. This closes that check/run divergence, matching the rule
+  TypeScript and Flow apply. Read the value through optional chaining or a
+  non-null assertion instead of a guard. (#4523)
+- Decode standard HTML character references in text tool-call JSON arguments exactly once at the
+  parse boundary, so a text-format model that escapes its markup delimiters no longer ships
+  operators to the tool as encoded bytes (`if (a &lt;= b)`, `xs.map(x =&gt; x)`, `a &amp;&amp; b`)
+  that cannot compile. A double-escaped value (`&amp;lt;`) still decodes to the intended literal
+  `&lt;`, and heredoc raw-body content is left untouched.
+- **Documentation snippet validation now returns a nonzero exit status when a
+  snippet fails (#4527).** The checker also removes its scratch directory
+  before terminating after a failed run.
+- **Project-declared host mocks work in `harn test` again (#4543).** The user-test
+  runner now registers operations from the nearest manifest's
+  `[check].host_capabilities` and `host_capabilities_path`, while undeclared or
+  misspelled operations remain rejected.
+
+### Security
+
+- Replace the unmaintained, unsound `serde_yml` YAML crate
+  (RUSTSEC-2025-0068) with the maintained `serde_yaml_ng` fork across
+  `harn-cli`, `harn-serve`, and `harn-vm`. Same `unsafe-libyaml` backend and
+  `serde_yaml`-compatible API, so parsing behavior is unchanged.
+
 ## v0.10.12
 
 ### Breaking
