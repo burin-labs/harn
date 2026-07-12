@@ -1,0 +1,10 @@
+case1.status=done
+case1.stop_reason=zero_write_terminal_verify
+case1.verify_passed=true
+case2.status=budget_exhausted
+case2.stop_reason=zero_write_terminal_verify_failed
+case2.verify_failed=true
+case2.events=3
+case3.status=budget_exhausted
+case3.stop_reason=max_iterations
+case3.events=0

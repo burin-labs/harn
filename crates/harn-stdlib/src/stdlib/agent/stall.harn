@@ -202,6 +202,7 @@ type AgentStallConfig = {
   no_net_progress_hard_cap_after: int,
   reserved_terminal_verify: bool,
   reserved_terminal_verify_iterations: int,
+  zero_write_terminal_verify: bool,
   verify_state_streak: int,
   verify_state_stall_turns: int,
   verify_state_recurrence_hard: int,
@@ -439,6 +440,7 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     no_net_progress_hard_cap_after: STALL_NO_NET_PROGRESS_HARD_CAP_AFTER,
     reserved_terminal_verify: false,
     reserved_terminal_verify_iterations: STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
+    zero_write_terminal_verify: false,
     verify_state_streak: STALL_VERIFY_STATE_STREAK,
     verify_state_stall_turns: STALL_VERIFY_STATE_STALL_TURNS,
     verify_state_recurrence_hard: STALL_VERIFY_STATE_RECURRENCE_HARD,
@@ -543,6 +545,11 @@ fn __agent_stall_config(value) -> AgentStallConfig {
       __agent_stall_repair_value(value, repair_diagnostics, "reserved_terminal_verify_iterations"),
       STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
       1,
+    ),
+    zero_write_terminal_verify: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "zero_write_terminal_verify"),
+      false,
+      "zero_write_terminal_verify",
     ),
     verify_state_streak: __agent_stall_int(
       __agent_stall_repair_value(value, repair_diagnostics, "verify_state_streak"),
@@ -741,7 +748,7 @@ fn __agent_stall_gate_input(previous, result) {
  */
 fn __agent_stall_result_outcome(result) -> dict {
   if __agent_stall_result_ok(result) {
-    const payload = json_stringify(result?.result ?? result?.output ?? result?.content ?? nil)
+    const payload = json_stringify(result?.result ?? result?.output ?? result?.content)
     return {kind: "ok", signature: "ok:" + sha256(payload)}
   }
   const error_text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
@@ -2001,6 +2008,7 @@ pub fn agent_stall_repair_config(raw_config) -> dict {
     no_net_progress_hard_cap_after: config.no_net_progress_hard_cap_after,
     reserved_terminal_verify: config.reserved_terminal_verify,
     reserved_terminal_verify_iterations: config.reserved_terminal_verify_iterations,
+    zero_write_terminal_verify: config.zero_write_terminal_verify,
   }
 }
 

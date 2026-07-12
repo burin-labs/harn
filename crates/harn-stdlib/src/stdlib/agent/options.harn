@@ -63,6 +63,7 @@ pub type RepairDiagnostics = {
   no_net_progress_hard_cap_after?: int,
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
+  zero_write_terminal_verify?: bool,
 }
 
 /**
@@ -96,6 +97,7 @@ pub type StallDiagnostics = {
   no_net_progress_hard_cap_after?: int,
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
+  zero_write_terminal_verify?: bool,
 }
 
 /**

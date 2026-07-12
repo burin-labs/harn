@@ -2712,18 +2712,47 @@ const __RESERVED_VERIFY_TERMINAL_STATUSES = ["budget_exhausted", "stuck"]
  * first and only spends a reserve iteration on a repair turn when the verify
  * comes back red and reserve remains, so this predicate gates the verify.
  */
+/**
+ * Every terminal path must seal a NON-EMPTY, typed stop reason so downstream
+ * forensics never has to infer a stop from an absent value (#4525). Several
+ * inner breaks set `final_status` (e.g. "budget_exhausted") but leave
+ * `stop_reason` unstamped; sealing `stop_reason ?? ""` then wrote an empty
+ * string that read as "missing" to the eval completion-contract. Fall back to
+ * the already-typed `final_status`; only a truly clean natural finish (both
+ * empty) seals as "completed".
+ */
+fn __agent_loop_sealed_stop_reason(stop_reason, final_status) -> string {
+  const explicit = to_string(stop_reason ?? "")
+  if explicit != "" {
+    return explicit
+  }
+  if to_string(final_status ?? "") != "" {
+    return to_string(final_status)
+  }
+  return "completed"
+}
+
 fn __agent_loop_should_spend_reserve(
   repair_cfg,
   turn_opts,
   final_status,
   write_unverified: bool,
+  made_source_write: bool,
   verify_allowed: bool,
 ) -> bool {
-  return repair_cfg.reserved_terminal_verify
-    && contains(__RESERVED_VERIFY_TERMINAL_STATUSES, final_status)
-    && write_unverified
-    && verify_allowed
-    && __agent_loop_verify_closure_exists(turn_opts)
+  const terminal = contains(__RESERVED_VERIFY_TERMINAL_STATUSES, final_status)
+  const closure = __agent_loop_verify_closure_exists(turn_opts)
+  // Existing case: an unverified source write ran out of runway.
+  const write_path = repair_cfg.reserved_terminal_verify && write_unverified
+  // #4525 case: a genuine ZERO-write terminal — no pending unverified write AND
+  // nothing was ever written — so the completion gate (its `no_source_write`
+  // rung) never got an evaluation pass before the run sealed. Default OFF: when
+  // `zero_write_terminal_verify` is false this adds nothing and behavior is
+  // byte-identical to today.
+  const zero_write_path = repair_cfg.zero_write_terminal_verify
+    && !write_unverified
+    && !made_source_write
+  return terminal && verify_allowed && closure && (write_path || zero_write_path)
 }
 
 fn __merge_tool_names(existing, additions) {
@@ -4282,7 +4311,9 @@ fn __agent_loop_run(message, session, initial_opts) {
     const loop_start_ms = __agent_loop_clock_now_ms()
     const __reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
     let terminal_write_unverified = false
-    let terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify {
+    let made_source_write = false
+    let terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify
+      || __reserve_cfg.zero_write_terminal_verify {
       __reserve_cfg.reserved_terminal_verify_iterations
     } else {
       0
@@ -5141,6 +5172,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         const reverify_mandated = __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, opts?.tools)
         if __turn_made_edit(dispatch, opts?.tools) {
           terminal_write_unverified = true
+          made_source_write = true
         }
         let should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
         let verdict_record = nil
@@ -5355,9 +5387,15 @@ fn __agent_loop_run(message, session, initial_opts) {
         opts,
         final_status,
         terminal_write_unverified,
+        made_source_write,
         verify_attempts < max_verify_attempts,
       ) {
         in_terminal_verify_reserve = true
+        const reserve_kind = if terminal_write_unverified {
+          "reserved_terminal_verify"
+        } else {
+          "zero_write_terminal_verify"
+        }
         const terminal_verdict = agent_verify_or_continue(
           session,
           opts
@@ -5366,7 +5404,7 @@ fn __agent_loop_run(message, session, initial_opts) {
             _done_judge_invocations: done_judge_invocations,
             _verify_completion_judge_invocations: verify_completion_judge_invocations,
           },
-          "reserved_terminal_verify",
+          reserve_kind,
           "",
           iteration,
         )
@@ -5377,11 +5415,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           terminal_write_unverified = false
           stall_state = stall_state + {reverify_owed: false}
           final_status = "done"
-          stop_reason = "reserved_terminal_verify"
+          stop_reason = reserve_kind
           agent_emit_event(
             session.session_id,
             "reserved_terminal_verify",
-            {phase: "verify_passed", iteration: iteration},
+            {kind: reserve_kind, phase: "verify_passed", iteration: iteration},
           )
           break
         }
@@ -5392,7 +5430,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         agent_emit_event(
           session.session_id,
           "reserved_terminal_verify",
-          {phase: "verify_failed", iteration: iteration, terminal_status: final_status},
+          {kind: reserve_kind, phase: "verify_failed", iteration: iteration, terminal_status: final_status},
         )
         if terminal_verify_reserve_remaining > 0 && verify_attempts < max_verify_attempts {
           terminal_verify_reserve_remaining = terminal_verify_reserve_remaining - 1
@@ -5400,6 +5438,7 @@ fn __agent_loop_run(message, session, initial_opts) {
             session.session_id,
             "reserved_terminal_verify",
             {
+              kind: reserve_kind,
               phase: "grant",
               reserve_remaining: terminal_verify_reserve_remaining,
               iteration: iteration,
@@ -5412,7 +5451,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           budget_exhausted_emitted = false
           continue
         }
-        stop_reason = "reserved_terminal_verify_failed"
+        stop_reason = reserve_kind + "_failed"
       }
       if final_status != ""
         && suspend_result == nil
@@ -5494,7 +5533,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       session.session_id,
       {
         final_status: final_status,
-        stop_reason: stop_reason ?? "",
+        stop_reason: __agent_loop_sealed_stop_reason(stop_reason, final_status),
         iterations: iteration,
         error: terminal_error,
       },
@@ -5568,6 +5607,19 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Same terminal-verify machinery, two entry conditions: an unverified
+// source write (existing) vs a genuine zero-write no-show (#4525). The
+// wire event stays `reserved_terminal_verify` (payload-preserving by
+// design — no new wire kind); `reserve_kind` tags the payload `kind` and
+// the sealed stop_reason so forensics can separate the two mechanisms.
+// Monotonic: true once any turn made a workspace source write, never reset.
+// Distinguishes a genuine ZERO-write terminal (the #4525 no-show) from a
+// run that wrote and then verified green (terminal_write_unverified also
+// false, but not zero-write).
+// Same terminal-verify machinery, two entry conditions: an unverified
+// source write (existing) vs a genuine zero-write no-show (#4525). Label
+// the events/stop reason by which fired so forensics can separate the
+// mechanisms.
 // Verify-state payload for a host `progress_signal` callback (seam 1).
 // Carries the prior turn's dispatch (the results the callback classifies)
 // — inert unless a progress_signal is configured on stall_diagnostics.

@@ -1,0 +1,191 @@
+import { agent_capture_events } from "std/agent/events"
+import { with_llm_script } from "std/testing"
+
+/**
+ * Zero-write terminal-verify guard (#4525): the zero-write counterpart to the
+ * reserved (unverified-write) terminal-verify guard.
+ *
+ * A text-format model can end every turn with a single non-edit tool call (e.g.
+ * one `look` read) and never propose completion. Such a turn is executed and
+ * continued, so the completion machinery — which hosts the `no_source_write`
+ * veto — is never entered for it; the run then terminates at a budget/iteration
+ * boundary with `files_written == 0`, and the entire zero-write recovery ladder
+ * was structurally BLIND to that path (the existing reserved guard fires only
+ * for an unverified source WRITE). This guard gives a genuine zero-write
+ * abnormal termination ONE completion-gate evaluation pass before the run seals.
+ *
+ * Cases:
+ *  1. ON, gate releases: a legitimately-complete no-write task — the terminal
+ *     verify runs, passes, and the run terminates `done` (NOT a silent
+ *     budget_exhausted), stop_reason `zero_write_terminal_verify`.
+ *  2. ON, gate vetoes (bounded): the terminal verify RUNS and surfaces the
+ *     zero-write veto (stop_reason `zero_write_terminal_verify_failed`) instead
+ *     of a blind exhaust; the reserve cannot loop forever.
+ *  3. OFF (control): identical script with the flag off terminates
+ *     `budget_exhausted` and emits NO `zero_write_terminal_verify` events —
+ *     behavior is byte-identical to today.
+ *
+ * Every case also asserts the sealed `stop_reason` is NON-EMPTY (#4525 ask 3:
+ * no termination path may seal an untyped/"missing" stop reason).
+ */
+fn build_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "look_file",
+    "Read a file from the workspace",
+    {
+      handler: { _args -> "file contents" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+/**
+ * The zero-write guard reuses the payload-preserving `reserved_terminal_verify`
+ * wire event and tags the mechanism with `payload.kind` (no new wire kind), so
+ * forensics filters on the kind discriminator.
+ */
+fn is_zero_write_event(event) -> bool {
+  return event.type == "reserved_terminal_verify"
+    && (event?.payload?.kind ?? "") == "zero_write_terminal_verify"
+}
+
+fn count_zero_write_events(events) {
+  let n = 0
+  for event in events {
+    if is_zero_write_event(event) {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+fn has_phase(events, phase) {
+  for event in events {
+    if is_zero_write_event(event) && (event?.payload?.phase ?? "") == phase {
+      return true
+    }
+  }
+  return false
+}
+
+fn terminal_verify_ran(events) -> bool {
+  return has_phase(events, "verify_passed") || has_phase(events, "verify_failed")
+}
+
+/**
+ * The model only ever READS (never edits, never proposes completion), so the run
+ * is a genuine zero-write. `release_verify` controls the terminal gate verdict:
+ * nil (pass) releases a legitimately-complete no-write task as `done`; a string
+ * (veto) stands in for the `no_source_write` rung surfacing the missing write.
+ */
+fn run_scenario(zero_write_on, reserve_iterations, release_verify) {
+  return with_llm_script(
+    [
+      {text: "", tool_calls: [{id: "r1", name: "look_file", arguments: {}}]},
+      {text: "", tool_calls: [{id: "r2", name: "look_file", arguments: {}}]},
+      {text: "", tool_calls: [{id: "r3", name: "look_file", arguments: {}}]},
+      {text: "", tool_calls: [{id: "r4", name: "look_file", arguments: {}}]},
+      {text: "", tool_calls: [{id: "r5", name: "look_file", arguments: {}}]},
+    ],
+    { ->
+      const session = "zero-write-verify-" + uuid()
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Investigate the module.",
+          nil,
+          {
+            provider: "mock",
+            tools: build_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 2,
+            max_nudges: 10,
+            session_id: session,
+            verify_completion: { info ->
+              if info.stop_reason == "zero_write_terminal_verify" {
+                if release_verify {
+                  return nil
+                }
+                return "no source write: edit a file to complete the task"
+              }
+              nil
+            },
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              post_edit_reverify: true,
+              zero_write_terminal_verify: zero_write_on,
+              reserved_terminal_verify_iterations: reserve_iterations,
+            },
+          },
+        ) },
+      )
+      return {status: captured.result.status, stop_reason: captured.result.stop_reason, events: captured.events}
+    },
+  )
+}
+
+pipeline default() {
+  // Case 1: ON, gate releases -> the terminal verify runs, passes, and the run
+  // completes `done` instead of a silent budget_exhausted.
+  const case1 = run_scenario(true, 2, true)
+  __io_println("case1.status=" + case1.status)
+  __io_println("case1.stop_reason=" + case1.stop_reason)
+  __io_println("case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")))
+  assert(
+    case1.status == "done",
+    "case1: a passing zero-write terminal verify must terminate done, not a blind budget_exhausted",
+  )
+  assert(
+    has_phase(case1.events, "verify_passed"),
+    "case1: the terminal completion gate must actually run and pass",
+  )
+  assert(
+    case1.stop_reason == "zero_write_terminal_verify",
+    "case1: stop_reason must name the zero-write terminal verify; got " + case1.stop_reason,
+  )
+  assert(case1.stop_reason != "", "case1: sealed stop_reason must never be empty")
+  // Case 2: ON, gate vetoes -> the terminal verify RUNS and surfaces the
+  // zero-write veto rather than swallowing it. Bounded reserve.
+  const case2 = run_scenario(true, 1, false)
+  __io_println("case2.status=" + case2.status)
+  __io_println("case2.stop_reason=" + case2.stop_reason)
+  __io_println("case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")))
+  __io_println("case2.events=" + to_string(count_zero_write_events(case2.events)))
+  assert(
+    terminal_verify_ran(case2.events),
+    "case2: a completion-gate evaluation pass must RUN before the zero-write run seals",
+  )
+  assert(
+    has_phase(case2.events, "verify_failed"),
+    "case2: the zero-write veto must be surfaced, not swallowed",
+  )
+  assert(case2.status != "done", "case2: an unresolved zero-write run must not terminate done")
+  assert(
+    case2.stop_reason == "zero_write_terminal_verify_failed",
+    "case2: stop_reason must name the failed zero-write verify; got " + case2.stop_reason,
+  )
+  assert(case2.stop_reason != "", "case2: sealed stop_reason must never be empty")
+  // Case 3: OFF control — byte-identical to today. No zero-write-verify events,
+  // no terminal verify, plain budget_exhausted, still a typed stop_reason.
+  const case3 = run_scenario(false, 2, false)
+  __io_println("case3.status=" + case3.status)
+  __io_println("case3.stop_reason=" + case3.stop_reason)
+  __io_println("case3.events=" + to_string(count_zero_write_events(case3.events)))
+  assert(
+    case3.status == "budget_exhausted",
+    "case3: with the guard OFF the run exhausts its budget unchanged",
+  )
+  assert(
+    count_zero_write_events(case3.events) == 0,
+    "case3: OFF must emit no zero-write-verify events",
+  )
+  assert(!terminal_verify_ran(case3.events), "case3: OFF must never run a terminal zero-write verify")
+  assert(case3.stop_reason != "", "case3: sealed stop_reason must never be empty even OFF")
+}
