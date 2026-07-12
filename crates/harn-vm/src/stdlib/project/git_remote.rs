@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::stdlib::git_topology::{read_commondir, read_gitdir_file};
 use crate::value::VmValue;
 
 use super::*;
@@ -98,27 +99,6 @@ fn git_config_paths(git_path: &Path) -> Vec<PathBuf> {
         out.push(common_dir.join("config"));
     }
     out
-}
-
-fn read_gitdir_file(git_path: &Path) -> Option<PathBuf> {
-    let text = read_text_if_exists(git_path.to_path_buf())?;
-    let raw = text.trim().strip_prefix("gitdir:")?.trim();
-    let candidate = PathBuf::from(raw);
-    if candidate.is_absolute() {
-        Some(candidate)
-    } else {
-        Some(git_path.parent()?.join(candidate))
-    }
-}
-
-fn read_commondir(git_dir: &Path) -> Option<PathBuf> {
-    let raw = read_text_if_exists(git_dir.join("commondir"))?;
-    let candidate = PathBuf::from(raw.trim());
-    if candidate.is_absolute() {
-        Some(candidate)
-    } else {
-        Some(git_dir.join(candidate))
-    }
 }
 
 fn parse_git_config_remotes(config: &str) -> Vec<GitRemoteSignal> {

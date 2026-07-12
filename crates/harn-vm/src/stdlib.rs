@@ -46,6 +46,7 @@ pub(crate) mod files;
 mod flow;
 mod fs;
 mod git;
+pub(crate) mod git_topology;
 mod grounding;
 pub(crate) mod harn_entry;
 pub(crate) mod hitl;
