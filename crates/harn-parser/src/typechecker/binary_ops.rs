@@ -188,8 +188,14 @@ pub(super) fn infer_binary_op_type(
                     None => Some(non_nil_left),
                 },
             },
-            // Unknown left: use right as best guess.
-            (None, _) => right.clone(),
+            // Unknown left: the result is also unknown. `a ?? b` is
+            // `non_nil(a) | b`; when `a`'s type is unknown so is `non_nil(a)`,
+            // and unknown absorbs `b`, so the union stays unknown. Adopting the
+            // fallback type instead would be unsound — it claims the result is
+            // always `b`'s type, which only holds when `a` is *always* nil — and
+            // it collapses `unknown_dict?.field ?? nil` to `nil`, blocking the
+            // sound `type_of(...) == "T"` narrowing a caller then relies on.
+            (None, _) => None,
         },
         "|>" => None,
         _ => None,
