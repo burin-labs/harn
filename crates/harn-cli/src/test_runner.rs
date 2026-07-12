@@ -1171,7 +1171,15 @@ async fn execute_case(
             crate::install_default_hostlib(&mut vm);
             let source_parent = case.file.parent().unwrap_or(Path::new("."));
             let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
-            let store_base = project_root.as_deref().unwrap_or(source_parent);
+            // Persistent runtime state is production behavior, but sharing it
+            // between user tests leaks store overrides, metadata, and
+            // checkpoints across otherwise-fresh VMs. A per-case root keeps
+            // both sequential and parallel test execution hermetic.
+            let test_state = tempfile::Builder::new()
+                .prefix("harn-user-test-state-")
+                .tempdir()
+                .map_err(|error| format!("failed to create test state directory: {error}"))?;
+            let store_base = test_state.path();
             let source_dir = source_parent.to_string_lossy().into_owned();
             install_user_test_event_log_if_unset();
             harn_vm::register_store_builtins(&mut vm, store_base);
@@ -1840,6 +1848,51 @@ pipeline test_b_clock_is_fresh(task) {
                 .collect::<Vec<_>>()
         );
         assert_eq!(summary.passed, 2);
+    }
+
+    #[tokio::test]
+    async fn user_tests_isolate_persistent_runtime_state_per_case() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+
+        for parallel in [false, true] {
+            let temp = TempTestDir::new();
+            temp.write(
+                "suite/test_store_isolation.harn",
+                r#"
+pipeline test_a_sets_store_value(task) {
+  store_set("test-only-key", "from-a")
+  assert_eq(store_get("test-only-key"), "from-a")
+}
+
+pipeline test_b_has_fresh_store(task) {
+  assert_eq(store_get("test-only-key"), nil)
+}
+"#,
+            );
+
+            let opts = RunOptions {
+                parallel,
+                jobs: parallel.then_some(2),
+                ..RunOptions::new(5_000)
+            };
+            let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
+            assert_eq!(
+                summary.failed,
+                0,
+                "persistent state leaked with parallel={parallel}: {:?}",
+                summary
+                    .results
+                    .iter()
+                    .filter(|result| !result.passed)
+                    .map(|result| (result.name.clone(), result.error.clone()))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(summary.passed, 2);
+            assert!(
+                !temp.path().join("store.json").exists(),
+                "user tests must not write persistent state into the project root"
+            );
+        }
     }
 
     #[tokio::test]
