@@ -41,11 +41,6 @@ fn acp_project_root(
     if let Some(root) = explicit_project_root {
         return Some(std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
     }
-    if let Ok(root) = std::env::var("HARN_PROJECT_ROOT") {
-        if !root.trim().is_empty() {
-            return Some(PathBuf::from(root));
-        }
-    }
     let source_parent = source_path.and_then(|p| p.parent()).unwrap_or(cwd);
     harn_vm::stdlib::process::find_project_root(source_parent)
         .or_else(|| harn_vm::stdlib::process::find_project_root(cwd))
@@ -308,56 +303,10 @@ pub(super) async fn load_host_mcp_clients(
 mod tests {
     use super::*;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    struct ScopedEnvVar {
-        previous: Option<String>,
-    }
-
-    impl ScopedEnvVar {
-        fn set(value: &Path) -> Self {
-            let previous = std::env::var("HARN_PROJECT_ROOT").ok();
-            std::env::set_var("HARN_PROJECT_ROOT", value);
-            Self { previous }
-        }
-
-        fn remove() -> Self {
-            let previous = std::env::var("HARN_PROJECT_ROOT").ok();
-            std::env::remove_var("HARN_PROJECT_ROOT");
-            Self { previous }
-        }
-    }
-
-    impl Drop for ScopedEnvVar {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var("HARN_PROJECT_ROOT", value),
-                None => std::env::remove_var("HARN_PROJECT_ROOT"),
-            }
-        }
-    }
-
     #[test]
-    fn acp_project_root_prefers_host_project_root_env() {
-        let _guard = ENV_LOCK.lock().expect("env lock");
-        let host_root = tempfile::tempdir().expect("host root");
-        let pipeline_root = tempfile::tempdir().expect("pipeline root");
-        let _env = ScopedEnvVar::set(host_root.path());
-        let source_path = pipeline_root.path().join("agent.harn");
-
-        assert_eq!(
-            acp_project_root(Some(&source_path), pipeline_root.path(), None),
-            Some(host_root.path().to_path_buf())
-        );
-    }
-
-    #[test]
-    fn acp_project_root_prefers_explicit_session_root_over_env() {
-        let _guard = ENV_LOCK.lock().expect("env lock");
-        let host_root = tempfile::tempdir().expect("host root");
+    fn acp_project_root_prefers_explicit_session_root() {
         let session_root = tempfile::tempdir().expect("session root");
         let pipeline_root = tempfile::tempdir().expect("pipeline root");
-        let _env = ScopedEnvVar::set(host_root.path());
         let source_path = pipeline_root.path().join("agent.harn");
 
         assert_eq!(
@@ -366,18 +315,16 @@ mod tests {
                 pipeline_root.path(),
                 Some(session_root.path())
             ),
-            Some(session_root.path().to_path_buf())
+            Some(std::fs::canonicalize(session_root.path()).expect("canonical session root"))
         );
     }
 
     #[test]
     fn acp_project_root_falls_back_to_nearest_harn_project() {
-        let _guard = ENV_LOCK.lock().expect("env lock");
         let project_root = tempfile::tempdir().expect("project root");
         let nested = project_root.path().join("pipelines");
         std::fs::create_dir(&nested).expect("nested");
         std::fs::write(project_root.path().join("harn.toml"), "").expect("harn.toml");
-        let _env = ScopedEnvVar::remove();
         let source_path = nested.join("agent.harn");
 
         assert_eq!(
