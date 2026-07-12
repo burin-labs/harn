@@ -8,6 +8,7 @@ members = [
     "crates/harn-clock",
     "crates/harn-glob",
     "crates/harn-secret-catalog",
+    "crates/harn-terminal",
     "crates/harn-lexer",
     "crates/harn-parser",
     "crates/harn-ir",

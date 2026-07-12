@@ -11,6 +11,9 @@ Opt-in host builtins for the Harn VM that provide:
    `run_build_command`, `inspect_test_results`, `manage_packages`).
 3. **Session filesystem staging** — per-session deferred writes, deletes,
    read-through overlays, status reporting, commit, and discard.
+4. **Typed terminal sessions** — default-off PTY lifecycle, key input,
+   resize, idle waits, and VT screen/cursor/style capture through the shared
+   `harn-terminal` engine.
 
 ## Cargo features
 
@@ -30,6 +33,10 @@ into what they need:
   languages. A language whose family is absent still parses by name and
   extension but resolves no grammar, so its AST-precise edits degrade to the
   text fallback. `ast` turns on the `grammars-all` umbrella for parity.
+- `terminal-session` — links the small `harn-terminal` PTY/VT engine and
+  registers the typed terminal host contract. Calls still require the
+  runtime `terminal:session` opt-in. The `full` feature enables this crate
+  feature; lean embedders may omit it.
 
 See `docs/src/embedding-rust.md` for how `harn-serve` exposes these to
 embedders (`hostlib`, `hostlib-full`, `full`).
@@ -237,6 +244,29 @@ independent enable set.
 Embedders that want to enable the surface from Rust without going through
 the builtin can use [`tools::permissions::enable_for_test`] (test-only)
 or call `tools::permissions::enable("tools:deterministic")` directly.
+
+## Typed terminal sessions
+
+The `terminal_session` capability is separately gated. A pipeline must call
+
+```text
+hostlib_enable("terminal:session")
+```
+
+before it can start or operate a PTY. The capability accepts argv vectors,
+never shell strings, scrubs inherited secret-bearing environment variables,
+rejects explicit secret-bearing environment keys, applies the universal
+catastrophic-command floor, and bounds sessions, dimensions, input, capture
+cells, retained output, and waits.
+
+`portable-pty` cannot currently preserve Harn's restricted process sandbox.
+Consequently `terminal_session.start` fails with the typed
+`sandbox_unsupported` error under `worktree`, `os_hardened`, and `wasi`
+profiles. It is usable only from an explicitly unrestricted trusted harness.
+This is a fail-closed boundary, not an implicit sandbox escape.
+
+See [Typed terminal sessions](../../docs/src/hostlib/terminal-session.md) for
+the request shapes and capture contract.
 
 ## Staged filesystem mode
 

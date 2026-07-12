@@ -44,6 +44,9 @@ use crate::registry::SyncHandler;
 /// and the integration tests share the exact same string.
 pub const FEATURE_TOOLS_DETERMINISTIC: &str = "tools:deterministic";
 
+/// Feature key for typed terminal sessions.
+pub const FEATURE_TERMINAL_SESSION: &str = "terminal:session";
+
 thread_local! {
     static ENABLED: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
 }
@@ -91,14 +94,23 @@ pub fn gated_handler(
     name: &'static str,
     runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
 ) -> SyncHandler {
+    gated_handler_for(FEATURE_TOOLS_DETERMINISTIC, name, Arc::new(runner))
+}
+
+/// Wrap a stateful handler in an explicit per-session feature gate.
+pub(crate) fn gated_handler_for(
+    feature: &'static str,
+    name: &'static str,
+    runner: SyncHandler,
+) -> SyncHandler {
     Arc::new(move |args: &[VmValue]| {
-        if !is_enabled(FEATURE_TOOLS_DETERMINISTIC) {
+        if !is_enabled(feature) {
             return Err(HostlibError::Backend {
                 builtin: name,
                 message: format!(
-                    "feature `{FEATURE_TOOLS_DETERMINISTIC}` is not enabled in this \
-                     session — call `hostlib_enable(\"{FEATURE_TOOLS_DETERMINISTIC}\")` \
-                     before invoking deterministic tools"
+                    "feature `{feature}` is not enabled in this \
+                     session — call `hostlib_enable(\"{feature}\")` \
+                     before invoking this capability"
                 ),
             });
         }

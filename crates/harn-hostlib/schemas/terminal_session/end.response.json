@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/terminal_session/end.response.json",
+  "title": "terminal_session.end response",
+  "type": "object",
+  "oneOf": [
+    { "properties": { "session_id": { "type": "string" }, "state": { "const": "running" } }, "required": ["session_id", "state"], "additionalProperties": false },
+    { "properties": { "session_id": { "type": "string" }, "state": { "const": "exited" }, "code": { "type": ["integer", "null"] }, "signal": { "type": ["string", "null"] } }, "required": ["session_id", "state", "code", "signal"], "additionalProperties": false },
+    { "properties": { "session_id": { "type": "string" }, "state": { "const": "failed" }, "message": { "type": "string" } }, "required": ["session_id", "state", "message"], "additionalProperties": false }
+  ]
+}

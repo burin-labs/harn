@@ -70,6 +70,17 @@ pub enum HostlibError {
         message: String,
     },
 
+    /// A host capability cannot preserve the active sandbox contract.
+    #[error("{message}")]
+    SandboxUnsupported {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// Active sandbox profile.
+        profile: String,
+        /// Stable rejection message.
+        message: String,
+    },
+
     /// A never-approvable UNIVERSAL catastrophic command (machine/disk/data
     /// destruction) was rejected by the floor BEFORE spawning, at the shared
     /// [`crate::process::spawn_process`] chokepoint. Enforced unconditionally
@@ -97,6 +108,7 @@ impl HostlibError {
             | HostlibError::InvalidParameter { builtin, .. }
             | HostlibError::Backend { builtin, .. }
             | HostlibError::SandboxViolation { builtin, .. }
+            | HostlibError::SandboxUnsupported { builtin, .. }
             | HostlibError::CatastrophicFloor { builtin, .. } => builtin,
         }
     }
@@ -113,12 +125,17 @@ impl From<HostlibError> for VmError {
             HostlibError::InvalidParameter { .. } => "invalid_parameter",
             HostlibError::Backend { .. } => "backend_error",
             HostlibError::SandboxViolation { .. } => "tool_rejected",
+            HostlibError::SandboxUnsupported { .. } => "sandbox_unsupported",
             HostlibError::CatastrophicFloor { .. } => "catastrophic_floor",
         };
         // Carry the offending path on sandbox violations so `catch` blocks
         // and telemetry can branch on it without re-parsing the message.
         let path = match &err {
             HostlibError::SandboxViolation { path, .. } => Some(path.clone()),
+            _ => None,
+        };
+        let profile = match &err {
+            HostlibError::SandboxUnsupported { profile, .. } => Some(profile.clone()),
             _ => None,
         };
         let builtin = err.builtin();
@@ -130,6 +147,9 @@ impl From<HostlibError> for VmError {
         dict.put_str("message", message);
         if let Some(path) = path {
             dict.put_str("path", path);
+        }
+        if let Some(profile) = profile {
+            dict.put_str("profile", profile);
         }
         VmError::Thrown(VmValue::dict(dict))
     }

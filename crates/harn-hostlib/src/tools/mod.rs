@@ -64,7 +64,7 @@ mod test_parsers;
 mod toolchain_facts;
 mod wait_command;
 
-pub use permissions::FEATURE_TOOLS_DETERMINISTIC;
+pub use permissions::{FEATURE_TERMINAL_SESSION, FEATURE_TOOLS_DETERMINISTIC};
 
 /// Tools capability handle.
 #[derive(Default)]
@@ -198,22 +198,30 @@ fn handle_enable(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
-    match feature.as_str() {
-        permissions::FEATURE_TOOLS_DETERMINISTIC => {
-            let newly_enabled = permissions::enable(&feature);
-            let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-            map.put_str("feature", feature);
-            map.insert(harn_vm::value::intern_key("enabled"), VmValue::Bool(true));
-            map.insert(
-                harn_vm::value::intern_key("newly_enabled"),
-                VmValue::Bool(newly_enabled),
-            );
-            Ok(VmValue::dict(map))
-        }
-        other => Err(HostlibError::InvalidParameter {
+    let supported = feature == permissions::FEATURE_TOOLS_DETERMINISTIC
+        || cfg!(feature = "terminal-session") && feature == permissions::FEATURE_TERMINAL_SESSION;
+    if !supported {
+        return Err(HostlibError::InvalidParameter {
             builtin: "hostlib_enable",
             param: "feature",
-            message: format!("unknown feature `{other}`; supported: [`tools:deterministic`]"),
-        }),
+            message: format!(
+                "unknown feature `{feature}`; supported: [`tools:deterministic`{}]",
+                if cfg!(feature = "terminal-session") {
+                    ", `terminal:session`"
+                } else {
+                    ""
+                }
+            ),
+        });
     }
+
+    let newly_enabled = permissions::enable(&feature);
+    let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
+    map.put_str("feature", feature);
+    map.insert(harn_vm::value::intern_key("enabled"), VmValue::Bool(true));
+    map.insert(
+        harn_vm::value::intern_key("newly_enabled"),
+        VmValue::Bool(newly_enabled),
+    );
+    Ok(VmValue::dict(map))
 }
