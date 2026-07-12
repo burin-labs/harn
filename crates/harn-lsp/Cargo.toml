@@ -13,15 +13,15 @@ name = "harn-lsp"
 path = "src/main.rs"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "=0.10.11" }
-harn-parser = { path = "../harn-parser", version = "=0.10.11" }
-harn-ir = { path = "../harn-ir", version = "=0.10.11" }
-harn-lint = { path = "../harn-lint", version = "=0.10.11" }
-harn-modules = { path = "../harn-modules", version = "=0.10.11" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.11" }
-harn-vm = { path = "../harn-vm", version = "=0.10.11" }
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.11" }
-harn-rules = { path = "../harn-rules", version = "=0.10.11" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.12" }
+harn-parser = { path = "../harn-parser", version = "=0.10.12" }
+harn-ir = { path = "../harn-ir", version = "=0.10.12" }
+harn-lint = { path = "../harn-lint", version = "=0.10.12" }
+harn-modules = { path = "../harn-modules", version = "=0.10.12" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.12" }
+harn-vm = { path = "../harn-vm", version = "=0.10.12" }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.12" }
+harn-rules = { path = "../harn-rules", version = "=0.10.12" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 serde = { version = "1", features = ["derive"] }
