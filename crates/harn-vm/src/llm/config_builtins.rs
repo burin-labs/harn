@@ -149,9 +149,7 @@ fn llm_available_providers_builtin(
     _args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    Ok(string_list_to_vm_value(
-        llm_config::available_provider_names(),
-    ))
+    Ok(string_list_to_vm_value(super::available_provider_names()))
 }
 
 /// Return the configured cheap QC/repair model for a provider.
@@ -431,59 +429,16 @@ async fn llm_catalog_refresh_builtin(
 }
 
 pub(crate) fn llm_provider_status_value() -> VmValue {
-    // Mirror `llm_providers()` for the name set so runtime-registered
-    // providers also show up, but enrich each entry with a credential
-    // probe so callers like `harn providers` and `harn doctor` can
-    // render a single table without making N follow-up calls.
-    //
-    // Ensure the thread-local registered_provider_names() is populated
-    // before snapshotting: callers like the CLI `run` path may invoke
-    // this builtin before `reset_llm_state()` would have populated the
-    // default set, which would silently omit `mock` (and any other
-    // registered-only provider) from the status table.
-    super::provider::register_default_providers();
-    let mut names: std::collections::BTreeSet<String> =
-        llm_config::provider_names().into_iter().collect();
-    names.extend(super::provider::registered_provider_names());
-
-    let mut entries = Vec::with_capacity(names.len());
-    for name in names {
+    let statuses = super::provider_auth_statuses();
+    let mut entries = Vec::with_capacity(statuses.len());
+    for status in statuses {
         let mut entry = crate::value::DictMap::new();
-        entry.put_str("name", name.clone());
-
-        // Providers with `auth_style = "none"` (e.g. local Ollama) and
-        // the multi-step auth providers (`credential_resolution =
-        // "platform_managed"`, e.g. Bedrock/Vertex) report
-        // `credential_status = "not_required"` / `"deferred"` rather
-        // than `"ok"` so callers can distinguish a successfully
-        // resolved API key from a deferred resolution. `mock` always
-        // reports `"not_required"`.
-        let (available, credential_status) = if name == "mock" {
-            (true, "not_required")
-        } else if let Some(pdef) = llm_config::provider_config(&name) {
-            if pdef.auth_style == "none" {
-                (true, "not_required")
-            } else if pdef.is_credential_resolution_platform_managed() {
-                (true, "deferred")
-            } else {
-                match super::helpers::resolve_api_key(&name) {
-                    Ok(_) => (true, "ok"),
-                    Err(_) => (false, "missing"),
-                }
-            }
-        } else {
-            // Runtime-registered providers without config entries fall
-            // back to a credential probe through the standard helper.
-            match super::helpers::resolve_api_key(&name) {
-                Ok(_) => (true, "ok"),
-                Err(_) => (false, "missing"),
-            }
-        };
+        entry.put_str("name", status.name);
         entry.insert(
             crate::value::intern_key("available"),
-            VmValue::Bool(available),
+            VmValue::Bool(status.available),
         );
-        entry.put_str("credential_status", credential_status);
+        entry.put_str("credential_status", status.credential_status.as_str());
         entries.push(VmValue::dict(entry));
     }
     VmValue::List(std::sync::Arc::new(entries))
@@ -943,7 +898,7 @@ fn provider_def_to_vm_value(
         crate::value::intern_key("auth_available"),
         VmValue::Bool(
             provider_name
-                .map(llm_config::provider_key_available)
+                .map(|name| super::provider_auth_status(name).available)
                 .unwrap_or(pdef.auth_style == "none"),
         ),
     );
@@ -1253,7 +1208,7 @@ fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     );
     dict.insert(
         crate::value::intern_key("auth_available"),
-        VmValue::Bool(llm_config::provider_key_available(&resolved.provider)),
+        VmValue::Bool(crate::llm::provider_auth_status(&resolved.provider).available),
     );
     VmValue::dict(dict)
 }
@@ -1863,7 +1818,7 @@ fn provider_catalog_to_vm_value() -> VmValue {
     );
     dict.insert(
         crate::value::intern_key("available_providers"),
-        string_list_to_vm_value(llm_config::available_provider_names()),
+        string_list_to_vm_value(super::available_provider_names()),
     );
     let aliases = llm_config::alias_entries()
         .into_iter()

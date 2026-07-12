@@ -370,7 +370,7 @@ fn all_required_provider_keys_available(
     for selector in selectors {
         if selector.provider != "mock"
             && selector.provider != "fake"
-            && !harn_vm::llm_config::provider_key_available(&selector.provider)
+            && !harn_vm::llm::provider_auth_status(&selector.provider).available
         {
             eprintln!(
                 "error: provider `{}` for `{}` has no configured credentials",

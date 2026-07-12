@@ -36,10 +36,10 @@ pub(super) use crate::stdlib::xml::escape_xml_text;
 pub(super) use crate::value::{VmError, VmValue};
 
 pub(super) use super::{
-    emit_reminder_lifecycle_event, opt_bool, opt_float, opt_int, opt_str, provider_key_available,
-    reminder_from_event, resolve_api_key, vm_messages_to_json, vm_resolve_model,
-    vm_resolve_provider, vm_value_dict_to_json, vm_value_to_json, ReminderRoleHint, SystemReminder,
-    REMINDER_DROPPED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
+    emit_reminder_lifecycle_event, opt_bool, opt_float, opt_int, opt_str, reminder_from_event,
+    vm_messages_to_json, vm_resolve_model, vm_resolve_provider, vm_value_dict_to_json,
+    vm_value_to_json, ReminderRoleHint, SystemReminder, REMINDER_DROPPED_EVENT_KIND,
+    SYSTEM_REMINDER_EVENT_KIND,
 };
 
 // Public surface consumed by `super` (llm::helpers::mod).

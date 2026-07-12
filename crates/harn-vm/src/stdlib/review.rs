@@ -712,7 +712,6 @@ mod tests {
     use super::*;
 
     use crate::compiler::Compiler;
-    use crate::llm::helpers::reset_provider_key_cache;
     use crate::stdlib::register_vm_stdlib;
     use crate::value::VmValue;
     use harn_lexer::Lexer;
@@ -750,7 +749,6 @@ mod tests {
             std::env::set_var("HARN_LLM_PROVIDER", "mock");
             std::env::remove_var("HARN_LLM_MODEL");
         }
-        reset_provider_key_cache();
         crate::llm::mock::reset_llm_mock_state();
         crate::event_log::reset_active_event_log();
         crate::stdlib::reset_stdlib_state();
@@ -768,7 +766,6 @@ mod tests {
                 None => std::env::remove_var("HARN_LLM_MODEL"),
             }
         }
-        reset_provider_key_cache();
         result
     }
 

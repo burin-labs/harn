@@ -532,38 +532,6 @@ pub fn auth_env_names(auth_env: &AuthEnv) -> Vec<String> {
     }
 }
 
-pub fn provider_key_available(provider: &str) -> bool {
-    let Some(pdef) = provider_config(provider) else {
-        return provider == "ollama";
-    };
-    if pdef.auth_style == "none" || matches!(pdef.auth_env, AuthEnv::None) {
-        return true;
-    }
-    auth_env_names(&pdef.auth_env).into_iter().any(|env_name| {
-        std::env::var(env_name)
-            .ok()
-            .is_some_and(|value| auth_env_value_available(&value))
-    })
-}
-
-pub(crate) fn auth_env_value_available(value: &str) -> bool {
-    if value.trim().is_empty() {
-        return false;
-    }
-    match crate::secrets::resolve_secret_ref_to_string(value) {
-        Ok(Some(secret)) => !secret.trim().is_empty(),
-        Ok(None) => true,
-        Err(_) => false,
-    }
-}
-
-pub fn available_provider_names() -> Vec<String> {
-    provider_names()
-        .into_iter()
-        .filter(|provider| provider_key_available(provider))
-        .collect()
-}
-
 /// Check if a provider advertises a legacy provider-level feature.
 pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
     provider_config(provider)

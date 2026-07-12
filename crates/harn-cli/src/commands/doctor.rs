@@ -487,14 +487,7 @@ async fn collect_providers(check_providers: bool) -> Vec<ProviderInfo> {
 }
 
 async fn collect_provider(name: String, check_providers: bool) -> ProviderInfo {
-    let def = llm_config::provider_config(&name);
-    let configured = match &def {
-        None => false,
-        Some(def) if def.auth_style == "none" => true,
-        Some(def) => llm_config::auth_env_names(&def.auth_env)
-            .iter()
-            .any(|env| std::env::var(env).map(|v| !v.is_empty()).unwrap_or(false)),
-    };
+    let configured = harn_vm::llm::provider_auth_status(&name).available;
 
     // Probing an unconfigured provider would short-circuit inside the
     // healthcheck with a "missing credentials" error and report a 0ms
@@ -677,58 +670,52 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
     providers.sort();
 
     let mut checks = Vec::new();
-    let mut any_creds = false;
+    let mut any_credential_path = false;
     for name in &providers {
         let Some(def) = llm_config::provider_config(name) else {
             continue;
         };
-        if def.auth_style == "none" || name == "ollama" {
-            checks.push(DoctorCheck {
-                id: format!("creds:{name}"),
-                status: DoctorStatus::Skip,
-                label: format!("creds:{name}"),
-                detail: "no key required".to_string(),
-                ..Default::default()
-            });
-            continue;
-        }
+        let auth = harn_vm::llm::provider_auth_status(name);
         let envs = llm_config::auth_env_names(&def.auth_env);
-        if envs.is_empty() {
-            checks.push(DoctorCheck {
-                id: format!("creds:{name}"),
-                status: DoctorStatus::Skip,
-                label: format!("creds:{name}"),
-                detail: "no env vars declared".to_string(),
-                ..Default::default()
-            });
-            continue;
-        }
-        let mut found: Vec<String> = Vec::new();
-        for env in &envs {
-            if std::env::var(env).map(|v| !v.is_empty()).unwrap_or(false) {
-                found.push(env.clone());
+        let (status, detail, fix_command) = match auth.credential_status {
+            harn_vm::llm::ProviderCredentialStatus::Ok => {
+                any_credential_path = true;
+                (
+                    DoctorStatus::Ok,
+                    "credential resolved by dispatch".to_string(),
+                    None,
+                )
             }
-        }
-        if found.is_empty() {
-            checks.push(DoctorCheck {
-                id: format!("creds:{name}"),
-                status: DoctorStatus::Warn,
-                label: format!("creds:{name}"),
-                detail: format!("missing: {}", envs.join(", ")),
-                fix_command: Some(format!("export {}=…", envs[0])),
-                docs_url: Some("https://harnlang.com/docs/llm/providers.html".to_string()),
-                blocks: Vec::new(),
-            });
-        } else {
-            any_creds = true;
-            checks.push(DoctorCheck {
-                id: format!("creds:{name}"),
-                status: DoctorStatus::Ok,
-                label: format!("creds:{name}"),
-                detail: format!("present: {}", found.join(", ")),
-                ..Default::default()
-            });
-        }
+            harn_vm::llm::ProviderCredentialStatus::Deferred => {
+                any_credential_path = true;
+                (
+                    DoctorStatus::Ok,
+                    "credential resolution deferred to platform provider".to_string(),
+                    None,
+                )
+            }
+            harn_vm::llm::ProviderCredentialStatus::NotRequired => {
+                (DoctorStatus::Skip, "no key required".to_string(), None)
+            }
+            harn_vm::llm::ProviderCredentialStatus::Missing => {
+                let detail = if envs.is_empty() {
+                    "credential unavailable".to_string()
+                } else {
+                    format!("missing: {}", envs.join(", "))
+                };
+                let fix = envs.first().map(|env| format!("export {env}=…"));
+                (DoctorStatus::Warn, detail, fix)
+            }
+        };
+        checks.push(DoctorCheck {
+            id: format!("creds:{name}"),
+            status,
+            label: format!("creds:{name}"),
+            detail,
+            fix_command,
+            docs_url: Some("https://harnlang.com/docs/llm/providers.html".to_string()),
+            blocks: Vec::new(),
+        });
     }
 
     // Add an aggregate row that fails only when no provider has creds AND
@@ -736,15 +723,15 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
     // FAIL when the synchronous `ollama --version` probe errors. Otherwise
     // demote to WARN so users without local models still get a softer signal.
     let ollama_present = which::which("ollama").is_ok();
-    let aggregate_status = if any_creds {
+    let aggregate_status = if any_credential_path {
         DoctorStatus::Ok
     } else if ollama_present {
         DoctorStatus::Warn
     } else {
         DoctorStatus::Fail
     };
-    let aggregate_detail = if any_creds {
-        "at least one provider has credentials".to_string()
+    let aggregate_detail = if any_credential_path {
+        "at least one provider credential path is available".to_string()
     } else if ollama_present {
         "no cloud credentials; falling back to local Ollama".to_string()
     } else {

@@ -1,34 +1,10 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 use crate::events::{emit_log, EventLevel};
-use crate::value::{VmError, VmValue};
 
-/// Cache of provider name -> whether a usable API key is available.
-/// Cached for process lifetime since env vars don't change mid-run.
-static PROVIDER_KEY_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
 static MODEL_TIER_WARNING_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PROVIDER_INFERENCE_WARNING_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-
-/// Check whether `provider` has a usable API key (or needs none). Cached.
-pub(crate) fn provider_key_available(provider: &str) -> bool {
-    let cache = PROVIDER_KEY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = cache.lock().unwrap();
-    if let Some(&available) = map.get(provider) {
-        return available;
-    }
-    let available = resolve_api_key(provider).is_ok();
-    map.insert(provider.to_string(), available);
-    available
-}
-
-/// Clear the provider key cache (for tests that manipulate env vars).
-#[cfg(test)]
-pub(crate) fn reset_provider_key_cache() {
-    if let Some(cache) = PROVIDER_KEY_CACHE.get() {
-        cache.lock().unwrap().clear();
-    }
-}
 
 fn push_unique(items: &mut Vec<String>, value: impl Into<String>) {
     let value = value.into();
@@ -141,7 +117,7 @@ fn env_selected_model_for_tier() -> Option<(String, String)> {
         })
         .unwrap_or_else(|| llm_config::infer_provider(&selected_model));
 
-    if provider_key_available(&selected_provider) {
+    if crate::llm::provider_auth_status(&selected_provider).available {
         Some((selected_model, selected_provider))
     } else {
         None
@@ -189,7 +165,9 @@ fn resolve_available_tier_model(
 
     let requested = llm_config::resolve_tier_model(target, preferred_provider);
     if let Some((model, provider)) = requested.as_ref() {
-        if preferred_provider == Some(provider.as_str()) && provider_key_available(provider) {
+        if preferred_provider == Some(provider.as_str())
+            && crate::llm::provider_auth_status(provider).available
+        {
             return Some((model.clone(), provider.clone()));
         }
     }
@@ -211,7 +189,7 @@ fn resolve_available_tier_model(
 
     let candidates = llm_config::tier_candidates(target);
     for provider in preferred_provider_order(preferred_provider) {
-        if !provider_key_available(&provider) {
+        if !crate::llm::provider_auth_status(&provider).available {
             continue;
         }
         if let Some((model, candidate_provider)) = candidates
@@ -234,7 +212,7 @@ fn resolve_available_tier_model(
     }
 
     if let Some((model, provider)) = requested.as_ref() {
-        if provider_key_available(provider) {
+        if crate::llm::provider_auth_status(provider).available {
             return Some((model.clone(), provider.clone()));
         }
     }
@@ -327,11 +305,11 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
     // key is missing - avoids noisy errors when a sub-pipeline (e.g.
     // enrichment) didn't inherit the provider env.
     let default = llm_config::default_provider();
-    if provider_key_available(&default) {
+    if crate::llm::provider_auth_status(&default).available {
         return default;
     }
     for fallback in ["ollama", "local"] {
-        if provider_key_available(fallback) {
+        if crate::llm::provider_auth_status(fallback).available {
             return fallback.to_string();
         }
     }
@@ -383,120 +361,6 @@ pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider
         }
     }
     llm_config::default_model_for_provider(provider)
-}
-
-/// Build the canonical "no provider credentials" guidance line. The list of
-/// env vars is derived from the live providers config so it can't drift from
-/// the catalog; providers with `auth_style == "none"` (e.g. ollama) are skipped.
-pub fn no_credentials_message() -> String {
-    use crate::llm_config;
-    let mut envs: Vec<String> = Vec::new();
-    for name in llm_config::provider_names() {
-        if let Some(def) = llm_config::provider_config(&name) {
-            if def.auth_style == "none" {
-                continue;
-            }
-            for env in llm_config::auth_env_names(&def.auth_env) {
-                if !envs.contains(&env) {
-                    envs.push(env);
-                }
-            }
-        }
-    }
-    envs.sort();
-    envs.dedup();
-    let env_list = if envs.is_empty() {
-        "(no providers declared)".to_string()
-    } else {
-        envs.join(", ")
-    };
-    format!(
-        "No LLM providers configured. Set one of these env vars to an API key or \
-         harn-secret://namespace/name reference: {env_list} (or run a local Ollama). \
-         For diagnostics: `harn doctor`. For a recommended setup: `harn models recommend` \
-         (when available)."
-    )
-}
-
-pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
-    use crate::llm_config;
-
-    if provider == "mock"
-        || provider == "fake"
-        || crate::llm::mock::cli_llm_mock_replay_active()
-        || crate::llm::mock::builtin_llm_mock_active()
-    {
-        return Ok(String::new());
-    }
-
-    // Explain provenance (env vs llm.toml vs default) and how to opt into mock.
-    let selection_hint = {
-        let config_path = llm_config::loaded_config_path()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<built-in defaults>".to_string());
-        format!(
-            " (provider '{provider}' selected via LLM_PROVIDER / llm.toml @ {config_path}; \
-             set HARN_LLM_PROVIDER=mock or LLM_PROVIDER=mock for offline use)"
-        )
-    };
-
-    if let Some(pdef) = llm_config::provider_config(provider) {
-        if pdef.auth_style == "none" {
-            return Ok(String::new());
-        }
-        // Providers declaring `credential_resolution = "platform_managed"`
-        // resolve auth inside their own shim through a multi-step chain the
-        // generic `auth_env` lookup cannot see (Bedrock's AWS credential
-        // chain — env/profile/container/instance-role — or Vertex's bearer
-        // token / service-account JSON / ADC). Returning an empty string
-        // here keeps generic option extraction from rejecting valid setups
-        // not captured by the declared `auth_env` list before the provider
-        // shim can inspect them itself.
-        if pdef.is_credential_resolution_platform_managed() {
-            return Ok(String::new());
-        }
-        let aggregate_hint = no_credentials_message();
-        match &pdef.auth_env {
-            llm_config::AuthEnv::Single(env) => {
-                let raw = std::env::var(env).map_err(|_| {
-                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                        "Missing API key: set {env} environment variable{selection_hint}\n{aggregate_hint}"
-                    ))))
-                })?;
-                return resolve_auth_env_value(env, &raw);
-            }
-            llm_config::AuthEnv::Multiple(envs) => {
-                for env in envs {
-                    if let Ok(val) = std::env::var(env) {
-                        if !val.is_empty() {
-                            return resolve_auth_env_value(env, &val);
-                        }
-                    }
-                }
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                    "Missing API key: set one of {} environment variables{selection_hint}\n{aggregate_hint}",
-                    envs.join(", ")
-                )))));
-            }
-            llm_config::AuthEnv::None => return Ok(String::new()),
-        }
-    }
-    let aggregate_hint = no_credentials_message();
-    std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "Missing API key: set ANTHROPIC_API_KEY environment variable{selection_hint}\n{aggregate_hint}"
-        ))))
-    })
-}
-
-fn resolve_auth_env_value(env_name: &str, raw: &str) -> Result<String, VmError> {
-    match crate::secrets::resolve_secret_ref_to_string(raw) {
-        Ok(Some(secret)) => Ok(secret),
-        Ok(None) => Ok(raw.to_string()),
-        Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("Failed to resolve API key secret reference from {env_name}: {error}"),
-        )))),
-    }
 }
 
 pub(crate) struct ResolvedProvider {
@@ -557,7 +421,7 @@ impl ResolvedProvider {
 
 #[cfg(test)]
 mod no_credentials_tests {
-    use super::no_credentials_message;
+    use crate::llm::no_credentials_message;
 
     #[test]
     fn message_includes_canonical_env_vars_and_doctor_hint() {
@@ -579,7 +443,7 @@ mod no_credentials_tests {
 
 #[cfg(test)]
 mod platform_managed_credential_resolution_tests {
-    use super::resolve_api_key;
+    use crate::llm::resolve_api_key;
 
     /// `resolve_api_key` must defer to the provider shim for ANY provider
     /// declaring `credential_resolution = "platform_managed"` in
@@ -647,7 +511,7 @@ mod secret_reference_auth_tests {
 
     use crate::value::{VmError, VmValue};
 
-    use super::{provider_key_available, reset_provider_key_cache, resolve_api_key};
+    use crate::llm::{provider_auth_status, resolve_api_key};
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -696,12 +560,9 @@ mod secret_reference_auth_tests {
             "harn-secret://provider/anthropic-api-key",
         );
         let _secret = ScopedEnvVar::set("HARN_SECRET_PROVIDER_ANTHROPIC_API_KEY", "sk-from-ref");
-        reset_provider_key_cache();
 
         assert_eq!(resolve_api_key("anthropic").unwrap(), "sk-from-ref");
-        reset_provider_key_cache();
-        assert!(provider_key_available("anthropic"));
-        assert!(crate::llm_config::provider_key_available("anthropic"));
+        assert!(provider_auth_status("anthropic").available);
     }
 
     #[test]
@@ -713,7 +574,6 @@ mod secret_reference_auth_tests {
             "harn-secret://provider/anthropic-api-key",
         );
         let _secret = ScopedEnvVar::unset("HARN_SECRET_PROVIDER_ANTHROPIC_API_KEY");
-        reset_provider_key_cache();
 
         let message = error_message(resolve_api_key("anthropic").unwrap_err());
         assert!(
@@ -721,8 +581,6 @@ mod secret_reference_auth_tests {
         );
         assert!(message.contains("provider/anthropic-api-key"));
         assert!(!message.contains("sk-from-ref"));
-        reset_provider_key_cache();
-        assert!(!provider_key_available("anthropic"));
-        assert!(!crate::llm_config::provider_key_available("anthropic"));
+        assert!(!provider_auth_status("anthropic").available);
     }
 }

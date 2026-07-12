@@ -2,14 +2,12 @@
 //! script. The shim stays intentionally tiny because agent-loop option
 //! wiring belongs in the script.
 
-use harn_vm::llm_config;
-
 use crate::cli::TryArgs;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 pub(crate) async fn run(args: TryArgs) {
-    if !mock_provider_active() && llm_config::available_provider_names().is_empty() {
+    if !mock_provider_active() && harn_vm::llm::available_provider_names().is_empty() {
         eprintln!("{}", crate::commands::doctor::no_credentials_hint());
         std::process::exit(1);
     }

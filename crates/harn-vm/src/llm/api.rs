@@ -387,7 +387,7 @@ async fn try_fallback_provider(request: &LlmRequestPayload) -> Option<LlmResult>
         if route.provider == request.provider && route.model == request.model {
             continue;
         }
-        let Ok(fb_key) = super::helpers::resolve_api_key(&route.provider) else {
+        let Ok(fb_key) = super::resolve_api_key(&route.provider) else {
             continue;
         };
 
@@ -423,7 +423,7 @@ async fn try_fallback_provider(request: &LlmRequestPayload) -> Option<LlmResult>
     }
 
     for fallback_provider in fallback_providers {
-        let Ok(fb_key) = super::helpers::resolve_api_key(&fallback_provider) else {
+        let Ok(fb_key) = super::resolve_api_key(&fallback_provider) else {
             continue;
         };
 
@@ -1075,7 +1075,6 @@ mod tests {
                 },
             );
             crate::llm_config::set_user_overrides(Some(overlay));
-            crate::llm::helpers::reset_provider_key_cache();
 
             let mut opts = base_opts("anthropic");
             opts.model = "claude-opus-4-6".to_string();
@@ -1088,7 +1087,6 @@ mod tests {
                 .expect("stubbed Anthropic response");
 
             crate::llm_config::clear_user_overrides();
-            crate::llm::helpers::reset_provider_key_cache();
             drop(server);
 
             assert_eq!(result.text, "ok");

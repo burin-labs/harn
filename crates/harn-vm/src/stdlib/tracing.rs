@@ -139,7 +139,7 @@ fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     } else {
         resolved.id
     };
-    let api_key_set = crate::llm_config::provider_key_available(&provider);
+    let api_key_set = crate::llm::provider_auth_status(&provider).available;
     let mut info = crate::value::DictMap::new();
     info.put_str("provider", provider);
     info.put_str("model", model);

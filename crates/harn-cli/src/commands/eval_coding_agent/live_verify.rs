@@ -686,5 +686,5 @@ fn provider_available(selector: &ModelSelector) -> bool {
     if matches!(selector.provider.as_str(), "mock" | "fake") || selector_is_local(selector) {
         return true;
     }
-    harn_vm::llm_config::provider_key_available(&selector.provider)
+    harn_vm::llm::provider_auth_status(&selector.provider).available
 }

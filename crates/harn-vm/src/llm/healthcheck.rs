@@ -81,7 +81,7 @@ pub async fn run_provider_healthcheck_with_options(
         );
     };
 
-    let auth = resolve_healthcheck_auth(&def, options.api_key);
+    let auth = resolve_healthcheck_auth(provider, &def, options.api_key);
     if auth.requires_auth && auth.api_key.is_none() {
         let mut metadata = base_metadata("missing_credentials");
         metadata.insert("provider".to_string(), json!(provider));
@@ -213,25 +213,27 @@ struct ResolvedHealthcheckAuth {
 }
 
 fn resolve_healthcheck_auth(
+    provider: &str,
     def: &ProviderDef,
     api_key_override: Option<String>,
 ) -> ResolvedHealthcheckAuth {
     let candidates = auth_env_candidates(&def.auth_env);
-    if def.auth_style == "none" || matches!(def.auth_env, AuthEnv::None) {
-        let api_key = api_key_override.and_then(non_empty);
+    if let Some(api_key) = api_key_override.and_then(non_empty) {
         return ResolvedHealthcheckAuth {
-            requires_auth: api_key.is_some(),
-            api_key,
+            requires_auth: true,
+            api_key: Some(api_key),
             candidates,
         };
     }
 
-    let api_key = api_key_override
-        .and_then(non_empty)
-        .or_else(|| resolve_api_key_from_env(&def.auth_env));
+    let auth = super::provider_auth::resolve_provider_auth(provider);
+    let requires_auth = matches!(
+        auth.status.credential_status,
+        super::ProviderCredentialStatus::Ok | super::ProviderCredentialStatus::Missing
+    );
     ResolvedHealthcheckAuth {
-        requires_auth: true,
-        api_key,
+        requires_auth,
+        api_key: auth.into_api_key(),
         candidates,
     }
 }
@@ -241,16 +243,6 @@ fn auth_env_candidates(auth_env: &AuthEnv) -> Vec<String> {
         AuthEnv::None => Vec::new(),
         AuthEnv::Single(env) => vec![env.clone()],
         AuthEnv::Multiple(envs) => envs.clone(),
-    }
-}
-
-fn resolve_api_key_from_env(auth_env: &AuthEnv) -> Option<String> {
-    match auth_env {
-        AuthEnv::None => None,
-        AuthEnv::Single(env) => std::env::var(env).ok().and_then(non_empty),
-        AuthEnv::Multiple(envs) => envs
-            .iter()
-            .find_map(|env| std::env::var(env).ok().and_then(non_empty)),
     }
 }
 
@@ -300,6 +292,30 @@ mod tests {
         let mut config = llm_config::ProvidersConfig::default();
         config.providers.insert(name.to_string(), provider);
         llm_config::set_user_overrides(Some(config));
+    }
+
+    struct ScopedEnv {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnv {
+        fn set(name: &'static str, value: &str) -> Self {
+            let previous = std::env::var(name).ok();
+            unsafe { std::env::set_var(name, value) };
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.name, value),
+                    None => std::env::remove_var(self.name),
+                }
+            }
+        }
     }
 
     fn spawn_healthcheck_stub(
@@ -460,6 +476,42 @@ mod tests {
             json!(["HARN_TEST_PROVIDER_KEY"])
         );
         assert!(result.message.contains("Missing credentials"));
+    }
+
+    #[test]
+    fn healthcheck_auth_uses_dispatch_secret_and_platform_resolution() {
+        let _guard = crate::llm::env_guard();
+        let _providers = ScopedEnv::set("HARN_SECRET_PROVIDERS", "env");
+        let _reference = ScopedEnv::set(
+            "HARN_TEST_PROVIDER_KEY",
+            "harn-secret://provider/healthcheck-key",
+        );
+        let _secret = ScopedEnv::set("HARN_SECRET_PROVIDER_HEALTHCHECK_KEY", "resolved-key");
+
+        let definition = provider_with_healthcheck(
+            "https://example.invalid".to_string(),
+            HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/health".to_string()),
+                url: None,
+                body: None,
+            },
+        );
+        install_provider("acme-secret", definition.clone());
+        let secret_auth = resolve_healthcheck_auth("acme-secret", &definition, None);
+        assert!(secret_auth.requires_auth);
+        assert_eq!(secret_auth.api_key.as_deref(), Some("resolved-key"));
+
+        let managed = ProviderDef {
+            credential_resolution: "platform_managed".to_string(),
+            ..definition
+        };
+        install_provider("acme-managed", managed.clone());
+        let managed_auth = resolve_healthcheck_auth("acme-managed", &managed, None);
+        assert!(!managed_auth.requires_auth);
+        assert!(managed_auth.api_key.is_none());
+
+        llm_config::clear_user_overrides();
     }
 
     #[tokio::test(flavor = "current_thread")]

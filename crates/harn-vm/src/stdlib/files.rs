@@ -253,7 +253,7 @@ async fn upload_file(path: String, provider: String) -> Result<String, VmError> 
     let api_key = if provider == "mock" {
         String::new()
     } else {
-        crate::llm::helpers::resolve_api_key(&provider)?
+        crate::llm::resolve_api_key(&provider)?
     };
     let key = cache_key(&provider, &resolved_path, &media_type, &bytes, &api_key);
     if let Some(file_id) = cache_get(&key) {

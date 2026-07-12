@@ -3,6 +3,7 @@ use super::{
     defaults::*, json::*, output::*, reminders::*, routing::*, system_prompt::*, thinking::*,
     tool_search::*,
 };
+use crate::llm::resolve_api_key;
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(

@@ -382,7 +382,7 @@ pub(super) fn route_alternative(
     let quality_tier = crate::llm_config::model_tier(&model);
     let pricing = crate::llm::cost::pricing_per_1k_for(&provider, &model);
     crate::llm::api::LlmRouteAlternative {
-        available: provider_key_available(&provider),
+        available: crate::llm::provider_auth_status(&provider).available,
         cost_per_1k_in: pricing.map(|p| p.0),
         cost_per_1k_out: pricing.map(|p| p.1),
         latency_p50_ms: crate::llm::cost::latency_p50_ms_for(&provider),

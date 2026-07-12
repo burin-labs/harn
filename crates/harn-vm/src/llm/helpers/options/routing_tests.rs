@@ -64,7 +64,6 @@ fn install_test_routes() {
         tier: "mid".to_string(),
     });
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 }
 
 fn test_provider(url: &str) -> ProviderDef {
@@ -155,7 +154,6 @@ fn install_equivalent_routes() {
         test_equivalent_model("primary", "test-equivalent-model"),
     );
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 }
 
 fn extract_with_policy(policy: &str) -> crate::llm::api::LlmCallOptions {
@@ -189,7 +187,6 @@ fn cheapest_over_quality_selects_lowest_cost_available_candidate() {
         .iter()
         .any(|alt| alt.provider == "fast"));
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 fn extract_with_options(
@@ -245,7 +242,6 @@ fn model_role_defaults_fill_missing_llm_options() {
         ]),
     );
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 
     let opts = extract_with_options(model_role_options("merge")).expect("options");
 
@@ -256,7 +252,6 @@ fn model_role_defaults_fill_missing_llm_options() {
 
     crate::llm_config::clear_user_overrides();
     clear_merge_role_env();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -279,7 +274,6 @@ fn explicit_options_win_over_model_role_defaults() {
         ]),
     );
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 
     let mut options = model_role_options("merge");
     options.put_str("model", "mock-explicit");
@@ -292,7 +286,6 @@ fn explicit_options_win_over_model_role_defaults() {
 
     crate::llm_config::clear_user_overrides();
     clear_merge_role_env();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -307,7 +300,6 @@ fn model_defaults_fill_missing_generation_options() {
         )]),
     );
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 
     let mut options = crate::value::DictMap::new();
     options.put_str("provider", "mock");
@@ -321,7 +313,6 @@ fn model_defaults_fill_missing_generation_options() {
     assert_eq!(opts.max_tokens, 512);
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -331,7 +322,6 @@ fn merge_model_role_has_env_overrides() {
     clear_merge_role_env();
     std::env::set_var("HARN_LLM_MERGE_PROVIDER", "mock");
     std::env::set_var("HARN_LLM_MERGE_MODEL", "mock-env-merge");
-    super::super::reset_provider_key_cache();
 
     let opts = extract_with_options(model_role_options("merge")).expect("options");
 
@@ -340,7 +330,6 @@ fn merge_model_role_has_env_overrides() {
 
     clear_merge_role_env();
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -375,7 +364,6 @@ fn model_role_aliases_do_not_override_exact_role_defaults() {
         ]),
     );
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 
     let merge_opts = extract_with_options(model_role_options("merge")).expect("merge options");
     let fast_apply_opts =
@@ -386,7 +374,6 @@ fn model_role_aliases_do_not_override_exact_role_defaults() {
 
     crate::llm_config::clear_user_overrides();
     clear_merge_role_env();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -398,7 +385,6 @@ fn model_role_env_aliases_do_not_override_exact_role_env() {
     std::env::set_var("HARN_LLM_FAST_APPLY_MODEL", "mock-env-fast-apply");
     std::env::set_var("HARN_LLM_MERGE_PROVIDER", "mock");
     std::env::set_var("HARN_LLM_MERGE_MODEL", "mock-env-merge");
-    super::super::reset_provider_key_cache();
 
     let merge_opts = extract_with_options(model_role_options("merge")).expect("merge options");
     let fast_apply_opts =
@@ -409,7 +395,6 @@ fn model_role_env_aliases_do_not_override_exact_role_env() {
 
     clear_merge_role_env();
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -431,7 +416,6 @@ fn model_role_config_keys_normalize_like_call_options() {
         ]),
     );
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 
     let opts = extract_with_options(model_role_options("fast_apply")).expect("options");
 
@@ -440,7 +424,6 @@ fn model_role_config_keys_normalize_like_call_options() {
 
     crate::llm_config::clear_user_overrides();
     clear_merge_role_env();
-    super::super::reset_provider_key_cache();
 }
 
 fn fast_options(model: &str) -> crate::value::DictMap {
@@ -487,7 +470,6 @@ fn fast_opts_into_tier_for_supported_model_and_guards_others() {
     ))
     .expect("test catalog overlay");
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 
     match extract_with_options(fast_options("test-fast-supported")) {
         Ok(opts) => assert!(opts.fast, "fast must be set for a model with a usable tier"),
@@ -518,7 +500,6 @@ fn fast_opts_into_tier_for_supported_model_and_guards_others() {
     }
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -528,7 +509,6 @@ fn fastest_over_quality_selects_lowest_latency_available_candidate() {
     assert_eq!(opts.provider, "fast");
     assert_eq!(opts.model, "fast-mid-model");
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -562,7 +542,6 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
     assert_eq!(opts.route_fallbacks[0].provider, "fast");
     assert_eq!(opts.route_fallbacks[0].model, "fast-mid-model");
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -603,7 +582,6 @@ fn equivalent_failover_builds_catalog_backed_routing_policy() {
     assert!(!policy.failover.on_no_dispatch);
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -636,7 +614,6 @@ fn equivalent_failover_enables_no_dispatch_failover_when_requested() {
     assert!(policy.failover.on_no_dispatch);
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -667,7 +644,6 @@ fn equivalent_failover_uses_request_context_instead_of_source_max_window() {
         ),
     );
     crate::llm_config::set_user_overrides(Some(overlay));
-    super::super::reset_provider_key_cache();
 
     assert!(
         crate::llm_config::equivalent_model_catalog_entries("huge-primary-model").is_empty(),
@@ -698,7 +674,6 @@ fn equivalent_failover_uses_request_context_instead_of_source_max_window() {
         .any(|link| link.provider == "smaller-backup" && link.model == "smaller-backup-model"));
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -739,7 +714,6 @@ fn equivalent_failover_filters_by_multimodal_requirements() {
     .join("\n");
     crate::llm::capabilities::set_user_overrides_toml(&capability_overlay)
         .expect("capability override");
-    super::super::reset_provider_key_cache();
 
     let image_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
@@ -798,7 +772,6 @@ fn equivalent_failover_filters_by_multimodal_requirements() {
 
     crate::llm_config::clear_user_overrides();
     crate::llm::capabilities::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -847,7 +820,6 @@ fn equivalent_failover_filters_by_provider_tool_requirements() {
     .join("\n");
     crate::llm::capabilities::set_user_overrides_toml(&capability_overlay)
         .expect("capability override");
-    super::super::reset_provider_key_cache();
 
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
@@ -892,7 +864,6 @@ fn equivalent_failover_filters_by_provider_tool_requirements() {
 
     crate::llm_config::clear_user_overrides();
     crate::llm::capabilities::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -933,7 +904,6 @@ fn equivalent_failover_rejects_non_bool_no_dispatch_option() {
     }
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -984,7 +954,6 @@ fn equivalent_failover_rejects_explicit_routing_policy() {
     }
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -1023,7 +992,6 @@ fn equivalent_failover_rejects_prefer_route_owner() {
     }
 
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -1033,7 +1001,6 @@ fn always_policy_accepts_provider_model_selector() {
     assert_eq!(opts.provider, "fast");
     assert_eq!(opts.model, "fast-mid-model");
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 }
 
 #[test]
@@ -1216,7 +1183,6 @@ fn unsupported_local_options(extra: Vec<(&str, VmValue)>) -> VmError {
 fn assert_unsupported_local_option(option: &str, extra: Vec<(&str, VmValue)>) {
     crate::llm::capabilities::clear_user_overrides();
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 
     let err = unsupported_local_options(extra);
 
@@ -1256,7 +1222,6 @@ impl ScopedEnvVar {
     fn set(key: &'static str, value: &str) -> Self {
         let previous = std::env::var(key).ok();
         std::env::set_var(key, value);
-        super::super::reset_provider_key_cache();
         Self { key, previous }
     }
 }
@@ -1267,7 +1232,6 @@ impl Drop for ScopedEnvVar {
             Some(value) => std::env::set_var(self.key, value),
             None => std::env::remove_var(self.key),
         }
-        super::super::reset_provider_key_cache();
     }
 }
 
@@ -1317,7 +1281,6 @@ fn tool_choice_accepted_on_text_tool_routes() {
     // pass tool_choice="none" to suppress further tool calls).
     crate::llm::capabilities::clear_user_overrides();
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 
     let options = crate::value::DictMap::from_iter([
         (
@@ -1345,7 +1308,6 @@ fn tool_choice_accepted_on_text_tool_routes() {
 fn text_tool_format_does_not_emit_native_provider_tools() {
     crate::llm::capabilities::clear_user_overrides();
     crate::llm_config::clear_user_overrides();
-    super::super::reset_provider_key_cache();
 
     let options = crate::value::DictMap::from_iter([
         (
@@ -1716,7 +1678,6 @@ thinking_modes = ["effort"]
 "#,
     )
     .expect("capability override");
-    super::super::reset_provider_key_cache();
 
     let err = unsupported_local_options(vec![
         (
