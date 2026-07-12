@@ -1877,6 +1877,24 @@ fn project_root_workspace_root() -> Option<PathBuf> {
 }
 
 fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let mut roots = base_workspace_roots(policy);
+    // Git keeps a linked worktree's real git dir and shared common dir outside
+    // the working tree; both need read-write scope or every git subprocess
+    // fails inside an otherwise ordinary worktree checkout. See
+    // [`crate::stdlib::git_topology`].
+    for dir in git_scope_extension_for_roots(&roots).read_write {
+        if !roots.iter().any(|existing| existing == &dir) {
+            roots.push(dir);
+        }
+    }
+    roots
+}
+
+/// The workspace roots as configured by the policy (or the anchored/project/
+/// execution-root fallback), before any git-topology extension. Kept separate
+/// from [`normalized_workspace_roots`] so the git-topology detection runs
+/// against the real project roots and never re-inspects the git dirs it adds.
+fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     if policy.workspace_roots.is_empty() {
         // An empty `policy.workspace_roots` means no explicit write-jail was
         // configured for this call. Historically this fell straight back to the
@@ -1922,11 +1940,46 @@ pub(crate) fn process_sandbox_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
 /// scope is purely additive, so there is no execution-root fallback to
 /// synthesize.
 fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    policy
+    let mut roots: Vec<PathBuf> = policy
         .read_only_roots
         .iter()
         .map(|root| normalize_for_policy(&resolve_policy_path(root)))
-        .collect()
+        .collect();
+    // Object stores borrowed through `objects/info/alternates` (e.g. a
+    // `git clone --shared`) live outside the workspace and are only ever read
+    // by git; grant them read-only scope. See [`crate::stdlib::git_topology`].
+    for dir in git_scope_extension_for_roots(&base_workspace_roots(policy)).read_only {
+        if !roots.iter().any(|existing| existing == &dir) {
+            roots.push(dir);
+        }
+    }
+    roots
+}
+
+/// Merge the git-topology scope extension across every workspace `base_root`,
+/// normalizing each discovered directory the same way as a configured root so
+/// scope checks and dedup compare canonical paths. Both the OS sandbox backends
+/// and the pure `check_fs_path_scope` enforcement consume the extended roots.
+fn git_scope_extension_for_roots(
+    base_roots: &[PathBuf],
+) -> crate::stdlib::git_topology::GitScopeExtension {
+    let mut merged = crate::stdlib::git_topology::GitScopeExtension::default();
+    for root in base_roots {
+        let ext = crate::stdlib::git_topology::git_scope_extension(root);
+        for dir in ext.read_write {
+            let dir = normalize_for_policy(&dir);
+            if !merged.read_write.iter().any(|existing| existing == &dir) {
+                merged.read_write.push(dir);
+            }
+        }
+        for dir in ext.read_only {
+            let dir = normalize_for_policy(&dir);
+            if !merged.read_only.iter().any(|existing| existing == &dir) {
+                merged.read_only.push(dir);
+            }
+        }
+    }
+    merged
 }
 
 #[cfg(any(
@@ -2580,6 +2633,81 @@ mod tests {
             })
             .is_err(),
             "a command root outside the explicit workspace ceiling must be rejected"
+        );
+
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn git_worktree_topology_extends_scope_for_external_git_dirs() {
+        // A linked worktree's `.git` points at `<main>/.git/worktrees/<name>`
+        // and its `commondir` back at `<main>/.git`, both outside the working
+        // tree. Under a restricted profile the sandbox scope must reach those
+        // read-write (git writes locks/index/refs there) or every git
+        // subprocess fails inside an ordinary worktree checkout.
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
+        let git_common = main.join(".git");
+        let worktree_gitdir = git_common.join("worktrees/feature");
+        std::fs::create_dir_all(git_common.join("objects/info")).unwrap();
+        std::fs::create_dir_all(&worktree_gitdir).unwrap();
+        std::fs::write(worktree_gitdir.join("commondir"), "../..\n").unwrap();
+
+        // A `git clone --shared`-style borrowed object store, external and
+        // read-only.
+        let shared_objects = tmp.path().join("source/.git/objects");
+        std::fs::create_dir_all(&shared_objects).unwrap();
+        std::fs::write(
+            git_common.join("objects/info/alternates"),
+            format!("{}\n", shared_objects.display()),
+        )
+        .unwrap();
+
+        let worktree = tmp.path().join("feature");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", worktree_gitdir.display()),
+        )
+        .unwrap();
+
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![worktree.to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+
+        // The external worktree git dir and shared common dir are writable.
+        assert!(
+            check_fs_path_scope(&worktree_gitdir.join("index"), FsAccess::Write).is_ok(),
+            "git subprocess must be able to write the worktree index"
+        );
+        assert!(
+            check_fs_path_scope(&git_common.join("HEAD"), FsAccess::Write).is_ok(),
+            "git subprocess must be able to write refs in the shared common dir"
+        );
+        // Borrowed alternate objects are readable but not writable.
+        assert!(
+            check_fs_path_scope(&shared_objects.join("pack"), FsAccess::Read).is_ok(),
+            "git must be able to read borrowed alternate objects"
+        );
+        assert!(
+            check_fs_path_scope(&shared_objects.join("pack"), FsAccess::Write).is_err(),
+            "alternate object stores are read-only scope, not writable"
+        );
+        // A genuinely unrelated path stays out of scope.
+        let outside = tmp.path().join("elsewhere/secret");
+        assert!(
+            check_fs_path_scope(&outside, FsAccess::Read).is_err(),
+            "the git-topology extension must not widen scope beyond git's own dirs"
+        );
+
+        // The first (real) workspace root is preserved for temp-dir anchoring.
+        let policy = crate::orchestration::current_execution_policy().unwrap();
+        assert_eq!(
+            normalized_workspace_roots(&policy).first(),
+            Some(&normalize_for_policy(&worktree)),
+            "the real workspace root must remain the primary anchor"
         );
 
         pop_execution_policy();
