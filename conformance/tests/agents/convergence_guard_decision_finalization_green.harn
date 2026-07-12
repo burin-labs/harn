@@ -1,4 +1,4 @@
-import { convergence_guard_decision, ConvergenceFactVector } from "std/agent/governors"
+import { ConvergenceFactVector, convergence_guard_decision } from "std/agent/governors"
 
 fn summarize(obs: ConvergenceFactVector) -> string {
   const decision = convergence_guard_decision({}, obs)
