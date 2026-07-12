@@ -571,7 +571,7 @@ jobs:
           # (hostlib was absent from the pattern) and only surfaced on the
           # main-push backstop. Route the whole crate — the windows job's
           # nextest filter already builds+tests `package(harn-hostlib)`.
-          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
+          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|crates/harn-terminal/.*|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
 
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves
@@ -682,7 +682,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
         run: |
-          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules) or package(harn-dap)'
+          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-terminal) or package(harn-fmt) or package(harn-lint) or package(harn-modules) or package(harn-dap)'
           package_args=(--workspace)
 
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
@@ -711,7 +711,7 @@ jobs:
             cargo nextest run "${package_args[@]}" --profile ci -E "$windows_filter" --no-tests=warn
           else
             cargo test "${package_args[@]}" --no-run
-            cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
+            cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
           fi
           if [[ ! -f target/debug/harn.exe ]]; then
             cargo build -p harn-cli --bin harn
@@ -823,7 +823,7 @@ jobs:
           # `grep -rl 'target_os = "macos"' crates/` plus the workflow
           # itself and the Cargo graph roots. When in doubt, the daily
           # macos-nightly.yml backstop covers the rest.
-          macos_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
+          macos_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
 
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves

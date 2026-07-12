@@ -44,6 +44,8 @@ pub mod sandbox;
 pub mod scanner;
 pub mod schemas;
 pub mod secret_store;
+#[cfg(feature = "terminal-session")]
+pub mod terminal_session;
 pub mod tools;
 
 mod json;
@@ -81,6 +83,10 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability);
+    #[cfg(feature = "terminal-session")]
+    {
+        registry = registry.with(terminal_session::TerminalSessionCapability::new());
+    }
     // Computer use (screenshot + mouse/keyboard) is opt-in at the feature
     // level AND default-deny at runtime: even with `computer-local` compiled,
     // the backend is a NullBackend unless `BURIN_COMPUTER_USE_TRANSPORT` is

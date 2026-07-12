@@ -272,6 +272,7 @@
 - [Text similarity / embeddings (hostlib)](./hostlib/embed.md)
 - [Staged filesystem (hostlib)](./hostlib/staged-fs.md)
 - [Per-tool-call FS snapshots (hostlib)](./hostlib/fs-snapshot.md)
+- [Typed terminal sessions (hostlib)](./hostlib/terminal-session.md)
 
 # Explanation
 

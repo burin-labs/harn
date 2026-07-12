@@ -1158,6 +1158,79 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/embed/info.response.json"),
     ),
+    // terminal_session/
+    (
+        "terminal_session",
+        "start",
+        SchemaKind::Request,
+        include_str!("../schemas/terminal_session/start.request.json"),
+    ),
+    (
+        "terminal_session",
+        "start",
+        SchemaKind::Response,
+        include_str!("../schemas/terminal_session/start.response.json"),
+    ),
+    (
+        "terminal_session",
+        "send_keys",
+        SchemaKind::Request,
+        include_str!("../schemas/terminal_session/send_keys.request.json"),
+    ),
+    (
+        "terminal_session",
+        "send_keys",
+        SchemaKind::Response,
+        include_str!("../schemas/terminal_session/send_keys.response.json"),
+    ),
+    (
+        "terminal_session",
+        "capture",
+        SchemaKind::Request,
+        include_str!("../schemas/terminal_session/capture.request.json"),
+    ),
+    (
+        "terminal_session",
+        "capture",
+        SchemaKind::Response,
+        include_str!("../schemas/terminal_session/capture.response.json"),
+    ),
+    (
+        "terminal_session",
+        "resize",
+        SchemaKind::Request,
+        include_str!("../schemas/terminal_session/resize.request.json"),
+    ),
+    (
+        "terminal_session",
+        "resize",
+        SchemaKind::Response,
+        include_str!("../schemas/terminal_session/resize.response.json"),
+    ),
+    (
+        "terminal_session",
+        "wait_idle",
+        SchemaKind::Request,
+        include_str!("../schemas/terminal_session/wait_idle.request.json"),
+    ),
+    (
+        "terminal_session",
+        "wait_idle",
+        SchemaKind::Response,
+        include_str!("../schemas/terminal_session/wait_idle.response.json"),
+    ),
+    (
+        "terminal_session",
+        "end",
+        SchemaKind::Request,
+        include_str!("../schemas/terminal_session/end.request.json"),
+    ),
+    (
+        "terminal_session",
+        "end",
+        SchemaKind::Response,
+        include_str!("../schemas/terminal_session/end.response.json"),
+    ),
     // Extension hostlibs registered through HostlibRegistry.
     (
         "rules",

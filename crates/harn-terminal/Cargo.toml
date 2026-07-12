@@ -1,0 +1,20 @@
+[package]
+name = "harn-terminal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Typed pseudo-terminal sessions and VT screen capture for Harn hosts"
+readme = "README.md"
+include = ["src/**/*", "tests/**/*", "Cargo.toml", "README.md"]
+
+[dependencies]
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+vt100 = "0.15"
+
+[lints]
+workspace = true

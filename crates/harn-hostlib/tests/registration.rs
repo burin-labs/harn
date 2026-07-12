@@ -9,6 +9,8 @@
 
 use std::fs;
 
+#[cfg(feature = "terminal-session")]
+use harn_hostlib::terminal_session::TerminalSessionCapability;
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, embed::EmbedCapability, fs::FsCapability,
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability, scanner::ScannerCapability,
@@ -57,6 +59,17 @@ fn sha256_label(bytes: &[u8]) -> String {
 
 fn harn_string_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn assert_response_schema(module: &str, method: &str, value: &VmValue) {
+    let schema = schemas::lookup(module, method, schemas::SchemaKind::Response)
+        .unwrap_or_else(|| panic!("missing response schema for {module}.{method}"));
+    let schema: serde_json::Value = serde_json::from_str(schema).expect("schema JSON");
+    let schema = harn_vm::json_to_vm_value(&schema);
+    let schema = harn_vm::schema::canonicalize_json_schema(&schema)
+        .unwrap_or_else(|error| panic!("invalid response schema for {module}.{method}: {error}"));
+    harn_vm::schema::validate_value_against_canonical_schema(value, &schema, true)
+        .unwrap_or_else(|error| panic!("invalid {module}.{method} response: {error}"));
 }
 
 #[test]
@@ -462,6 +475,39 @@ fn secret_store_capability_registers_documented_methods() {
     }
 }
 
+#[cfg(feature = "terminal-session")]
+#[test]
+fn terminal_session_capability_is_complete_and_default_off() {
+    let registry = collect_into_registry(TerminalSessionCapability::new());
+    let names: Vec<_> = registry.iter().map(|builtin| builtin.name).collect();
+    assert_eq!(
+        names,
+        vec![
+            "hostlib_terminal_session_start",
+            "hostlib_terminal_session_send_keys",
+            "hostlib_terminal_session_capture",
+            "hostlib_terminal_session_resize",
+            "hostlib_terminal_session_wait_idle",
+            "hostlib_terminal_session_end",
+        ]
+    );
+    permissions::reset();
+    for builtin in registry.iter() {
+        let error = (builtin.handler)(&[]).expect_err("terminal sessions default off");
+        match error {
+            HostlibError::Backend {
+                builtin: name,
+                message,
+            } => {
+                assert_eq!(name, builtin.name);
+                assert!(message.contains("terminal:session"));
+                assert!(message.contains("hostlib_enable"));
+            }
+            other => panic!("expected terminal feature gate, got {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn install_default_wires_every_module_into_a_vm() {
     let mut vm = harn_vm::Vm::new();
@@ -469,7 +515,10 @@ fn install_default_wires_every_module_into_a_vm() {
 
     // `mut` is only needed when the `computer` feature adds a module below; the
     // allow keeps the no-feature build (CI default) warning-clean.
-    #[cfg_attr(not(feature = "computer"), allow(unused_mut))]
+    #[cfg_attr(
+        not(any(feature = "computer", feature = "terminal-session")),
+        allow(unused_mut)
+    )]
     let mut expected = vec![
         "ast",
         "code_index",
@@ -485,6 +534,8 @@ fn install_default_wires_every_module_into_a_vm() {
     // compiled in (it is out of default/full so headless/Linux CI is unaffected).
     #[cfg(feature = "computer")]
     expected.push("computer");
+    #[cfg(feature = "terminal-session")]
+    expected.push("terminal_session");
     assert_eq!(registry.modules(), expected.as_slice());
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
@@ -542,6 +593,107 @@ pipeline default(task) {
         Some("tools:deterministic".to_string())
     );
     assert!(matches!(dict.get("enabled"), Some(VmValue::Bool(true))));
+}
+
+#[cfg(all(unix, feature = "terminal-session"))]
+#[test]
+fn registered_terminal_session_round_trips_through_harn_and_schemas() {
+    permissions::reset();
+    let result = execute_harn(
+        r#"
+pipeline default(task) {
+  hostlib_enable("terminal:session")
+  let started = hostlib_terminal_session_start({
+    argv: ["sh", "-c", "stty -echo; printf READY; IFS= read -r line; printf GOT:%s \"$line\"; cat"],
+    rows: 4,
+    columns: 20
+  })
+  let idle_before = hostlib_terminal_session_wait_idle({
+    session_id: started.session_id,
+    quiet_ms: 10,
+    timeout_ms: 3000
+  })
+  let before_send = hostlib_terminal_session_capture({session_id: started.session_id})
+  let sent = hostlib_terminal_session_send_keys({
+    session_id: started.session_id,
+    events: [
+      {type: "text", text: "hello"},
+      {type: "key", key: {kind: "named", name: "enter"}}
+    ]
+  })
+  let idle_after = hostlib_terminal_session_wait_idle({
+    session_id: started.session_id,
+    after_revision: before_send.revision,
+    quiet_ms: 10,
+    timeout_ms: 3000
+  })
+  let resized = hostlib_terminal_session_resize({
+    session_id: started.session_id,
+    rows: 6,
+    columns: 30
+  })
+  let captured = hostlib_terminal_session_capture({session_id: started.session_id})
+  let ended = hostlib_terminal_session_end({
+    session_id: started.session_id,
+    timeout_ms: 3000
+  })
+  return {
+    started: started,
+    idle_before: idle_before,
+    before_send: before_send,
+    sent: sent,
+    idle_after: idle_after,
+    resized: resized,
+    captured: captured,
+    ended: ended
+  }
+}
+"#,
+    )
+    .expect("terminal hostlib operations should round-trip through the VM");
+    let result = result.as_dict().expect("pipeline returns a dict");
+    for (field, method) in [
+        ("started", "start"),
+        ("idle_before", "wait_idle"),
+        ("before_send", "capture"),
+        ("sent", "send_keys"),
+        ("idle_after", "wait_idle"),
+        ("resized", "resize"),
+        ("captured", "capture"),
+        ("ended", "end"),
+    ] {
+        let value = result
+            .get(field)
+            .unwrap_or_else(|| panic!("missing {field} response"));
+        assert_response_schema("terminal_session", method, value);
+    }
+    let captured = result
+        .get("captured")
+        .and_then(VmValue::as_dict)
+        .expect("typed capture");
+    let rows = match captured.get("text_rows") {
+        Some(VmValue::List(rows)) => rows,
+        other => panic!("expected text rows list, got {other:?}"),
+    };
+    let screen = rows
+        .iter()
+        .map(VmValue::display)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("READY"));
+    assert!(screen.contains("GOT:hello"));
+    assert_eq!(
+        captured.get("rows").map(VmValue::display),
+        Some("6".to_string())
+    );
+    let ended = result
+        .get("ended")
+        .and_then(VmValue::as_dict)
+        .expect("typed end status");
+    assert_eq!(
+        ended.get("state").map(VmValue::display),
+        Some("exited".to_string())
+    );
 }
 
 #[test]
@@ -615,6 +767,8 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(FsWatchCapability)
         .with(ToolsCapability)
         .with(SecretStoreCapability);
+    #[cfg(feature = "terminal-session")]
+    let registry = registry.with(TerminalSessionCapability::new());
 
     for entry in registry.builtins().iter() {
         assert!(
