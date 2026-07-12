@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
@@ -10,12 +10,14 @@ use crate::error::HostlibError;
 
 static ARTIFACTS: LazyLock<Mutex<BTreeMap<String, CommandArtifacts>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static ACTIVE_ARTIFACT_DIRS: LazyLock<Mutex<BTreeSet<PathBuf>>> =
+    LazyLock::new(|| Mutex::new(BTreeSet::new()));
 static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
 
 const RETENTION_ENV: &str = "HARN_COMMAND_ARTIFACT_RETENTION_SECS";
 const MAX_DIRS_ENV: &str = "HARN_COMMAND_ARTIFACT_MAX_DIRS";
 const DEFAULT_RETENTION: Duration = Duration::from_hours(168);
-const DEFAULT_MAX_DIRS: usize = 4096;
+const DEFAULT_MAX_DIRS: usize = 512;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
 
@@ -82,7 +84,9 @@ pub(crate) fn persist_artifacts(
         byte_count: combined.len() as u64,
         output_sha256,
     };
+    mark_artifacts_inactive(&artifacts);
     register_artifacts(command_id, handle_id, &artifacts);
+    maybe_sweep_stale_artifacts();
     Ok(artifacts)
 }
 
@@ -118,7 +122,9 @@ pub(crate) fn register_live_artifacts(
         builtin: "hostlib_tools_run_command",
         message: format!("failed to create combined output artifact: {e}"),
     })?;
+    mark_artifacts_active(&artifacts);
     register_artifacts(command_id, handle_id, &artifacts);
+    maybe_sweep_stale_artifacts();
     Ok(artifacts)
 }
 
@@ -181,6 +187,28 @@ fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &Com
     store.insert(command_id.to_string(), artifacts.clone());
     if let Some(handle_id) = handle_id {
         store.insert(handle_id.to_string(), artifacts.clone());
+    }
+}
+
+fn artifact_dir(artifacts: &CommandArtifacts) -> Option<PathBuf> {
+    artifacts.output_path.parent().map(Path::to_path_buf)
+}
+
+fn mark_artifacts_active(artifacts: &CommandArtifacts) {
+    if let Some(dir) = artifact_dir(artifacts) {
+        ACTIVE_ARTIFACT_DIRS
+            .lock()
+            .expect("active command artifact store poisoned")
+            .insert(dir);
+    }
+}
+
+fn mark_artifacts_inactive(artifacts: &CommandArtifacts) {
+    if let Some(dir) = artifact_dir(artifacts) {
+        ACTIVE_ARTIFACT_DIRS
+            .lock()
+            .expect("active command artifact store poisoned")
+            .remove(&dir);
     }
 }
 
@@ -312,7 +340,7 @@ fn sweep_command_artifact_dirs(
         {
             continue;
         }
-        if process_is_alive(dir.pid) {
+        if should_preserve_artifact_dir(dir) {
             continue;
         }
         if std::fs::remove_dir_all(&dir.path).is_ok() {
@@ -326,13 +354,24 @@ fn sweep_command_artifact_dirs(
         if live_count <= max_dirs {
             break;
         }
-        if !dir.path.exists() || process_is_alive(dir.pid) {
+        if !dir.path.exists() || should_preserve_artifact_dir(dir) {
             continue;
         }
         if std::fs::remove_dir_all(&dir.path).is_ok() {
             live_count = live_count.saturating_sub(1);
         }
     }
+}
+
+fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
+    if ACTIVE_ARTIFACT_DIRS
+        .lock()
+        .expect("active command artifact store poisoned")
+        .contains(&dir.path)
+    {
+        return true;
+    }
+    dir.pid != std::process::id() && process_is_alive(dir.pid)
 }
 
 fn parse_command_artifact_dir_name(name: &str) -> Option<u32> {
@@ -458,15 +497,37 @@ mod tests {
     }
 
     #[test]
-    fn command_artifact_sweep_preserves_live_pid_artifact_dirs() {
+    fn command_artifact_sweep_removes_completed_current_process_artifact_dirs() {
         let temp = tempdir().unwrap();
         let now = SystemTime::now();
-        let live = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
-        set_dir_mtime(&live, now - Duration::from_secs(10));
+        let completed = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
+        set_dir_mtime(&completed, now - Duration::from_secs(10));
 
         sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
 
-        assert!(live.exists());
+        assert!(!completed.exists());
+    }
+
+    #[test]
+    fn command_artifact_sweep_preserves_active_current_process_artifact_dirs() {
+        let temp = tempdir().unwrap();
+        let now = SystemTime::now();
+        let active = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
+        let artifacts = CommandArtifacts {
+            output_path: active.join("combined.txt"),
+            stdout_path: active.join("stdout.txt"),
+            stderr_path: active.join("stderr.txt"),
+            line_count: 0,
+            byte_count: 0,
+            output_sha256: String::new(),
+        };
+        mark_artifacts_active(&artifacts);
+        set_dir_mtime(&active, now - Duration::from_secs(10));
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
+
+        assert!(active.exists());
+        mark_artifacts_inactive(&artifacts);
     }
 
     #[test]
