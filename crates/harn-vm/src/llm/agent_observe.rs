@@ -888,43 +888,46 @@ fn is_retryable_unproductive_completion(result: &super::api::LlmResult) -> bool 
 /// (replayed turns) — are test/replay routes, not real provider endpoints. They
 /// are already excluded from the empty-completion retry budget
 /// ([`empty_completion_retry_budget`]) and backoff ([`llm_retry_backoff_ms`]);
-/// exclude them from the unproductive-completion circuit breaker for the same
-/// reason. A scripted empty turn is a fixture, not a dead provider lane, and
-/// tripping the process-global route breaker on the shared `fake` route would
-/// couple otherwise-independent unit tests. The breaker's real target is a live
-/// provider (e.g. an Anthropic-only escalation target or judge) that keeps
-/// serving empty completions with no cross-provider alternate to fail over to.
-fn is_internal_llm_simulator(provider: &str) -> bool {
-    crate::llm::providers::MockProvider::should_intercept(provider)
-        || crate::llm::fake::FakeLlmProvider::should_intercept(provider)
-}
-
+/// exclude them from terminal empty-generation recovery for the same reason. A
+/// scripted empty turn is a fixture, not a dead provider lane.
 fn terminal_unproductive_completion_failover_error(
     opts: &super::api::LlmCallOptions,
     result: &super::api::LlmResult,
     provider_under_throttle: bool,
+    attempt_count: usize,
 ) -> Option<VmError> {
-    if !provider_under_throttle || !is_retryable_unproductive_completion(result) {
+    if crate::llm::providers::is_internal_simulator(&opts.provider)
+        || !is_retryable_unproductive_completion(result)
+    {
         return None;
     }
 
-    let detail = if is_zero_token_empty_completion(result) {
-        format!(
+    if is_zero_token_empty_completion(result) {
+        let detail = format!(
             "returned completion_tokens={} and delivered no content, thinking, or tool calls",
             result.output_tokens
-        )
-    } else {
-        format!(
-            "ended with stop_reason={} after completion_tokens={} and delivered no dispatchable tool call",
-            result.stop_reason.as_deref().unwrap_or("unknown"),
-            result.output_tokens
-        )
-    };
+        );
+        return Some(VmError::CategorizedError {
+            category: crate::value::ErrorCategory::CircuitOpen,
+            message: format!(
+                "provider {} model {} exhausted empty-completion retry budget: reason=empty_generation attempt_count={attempt_count}; {detail}",
+                opts.provider, opts.model,
+            ),
+        });
+    }
+    if !provider_under_throttle {
+        return None;
+    }
 
+    let detail = format!(
+        "ended with stop_reason={} after completion_tokens={} and delivered no dispatchable tool call",
+        result.stop_reason.as_deref().unwrap_or("unknown"),
+        result.output_tokens
+    );
     Some(VmError::CategorizedError {
         category: crate::value::ErrorCategory::CircuitOpen,
         message: format!(
-            "provider {} model {} exhausted empty-completion retry budget while rate governor circuit_open/under throttle: {detail}",
+            "provider {} model {} exhausted unproductive-completion retry budget while rate governor circuit_open/under throttle: {detail}",
             opts.provider, opts.model
         ),
     })
@@ -941,6 +944,7 @@ struct ProviderCallErrorObservation<'a> {
     message: &'a str,
     retryable: bool,
     failover_eligible: bool,
+    attempt_count: Option<usize>,
 }
 
 fn append_provider_call_error_observability(observation: ProviderCallErrorObservation<'_>) {
@@ -955,6 +959,7 @@ fn append_provider_call_error_observability(observation: ProviderCallErrorObserv
         message,
         retryable,
         failover_eligible,
+        attempt_count,
     } = observation;
     let mut fields = serde_json::Map::from_iter([
         ("iteration".to_string(), serde_json::json!(iteration)),
@@ -979,6 +984,12 @@ fn append_provider_call_error_observability(observation: ProviderCallErrorObserv
         fields.insert(
             "failover_eligible".to_string(),
             serde_json::json!(failover_eligible),
+        );
+    }
+    if let Some(attempt_count) = attempt_count {
+        fields.insert(
+            "attempt_count".to_string(),
+            serde_json::json!(attempt_count),
         );
     }
     append_llm_observability_entry("provider_call_error", fields);
@@ -2187,6 +2198,7 @@ pub(crate) async fn observed_llm_call(
                     }
                     continue;
                 }
+                let attempt_count = attempt + 1;
                 let provider_under_throttle = provider_was_throttled_during_call
                     || crate::llm::rate_governor::provider_already_throttled(
                         &opts.provider,
@@ -2196,6 +2208,7 @@ pub(crate) async fn observed_llm_call(
                     opts,
                     &result,
                     provider_under_throttle,
+                    attempt_count,
                 ) {
                     let category = crate::value::error_to_category(&error);
                     let message = error.to_string();
@@ -2227,6 +2240,7 @@ pub(crate) async fn observed_llm_call(
                         message: &message,
                         retryable: false,
                         failover_eligible: true,
+                        attempt_count: Some(attempt_count),
                     });
                     dump_resolved_dispatch(
                         iteration.unwrap_or(0),
@@ -2367,7 +2381,7 @@ pub(crate) async fn observed_llm_call(
                 // and works for a single-provider model harn#4023's failover
                 // cannot rescue). A genuinely answering turn closes the breaker.
                 if is_retryable_unproductive_completion(&result)
-                    && !is_internal_llm_simulator(&opts.provider)
+                    && !crate::llm::providers::is_internal_simulator(&opts.provider)
                 {
                     super::rate_limit::observe_unproductive_completion_for_llm_call(opts);
                 } else {
@@ -2489,6 +2503,7 @@ pub(crate) async fn observed_llm_call(
                     message: &message,
                     retryable,
                     failover_eligible: false,
+                    attempt_count: None,
                 });
                 if let Some(b) = bridge {
                     b.send_call_end(
@@ -2506,7 +2521,9 @@ pub(crate) async fn observed_llm_call(
                     );
                 }
                 if !can_retry {
-                    if empty_completion_error && !is_internal_llm_simulator(&opts.provider) {
+                    if empty_completion_error
+                        && !crate::llm::providers::is_internal_simulator(&opts.provider)
+                    {
                         // A thrown empty completion that exhausted its retry
                         // budget is terminal-unproductive: feed the always-on
                         // unproductive-completion streak so a route that keeps
@@ -4229,17 +4246,13 @@ mod empty_completion_retry_tests {
     }
 
     #[test]
-    fn terminal_empty_completion_failover_requires_provider_throttle() {
-        let opts = fake_opts();
+    fn terminal_empty_completion_is_typed_and_failover_eligible() {
+        let mut opts = fake_opts();
+        opts.provider = "openrouter".to_string();
         let result = empty_result();
 
-        assert!(
-            terminal_unproductive_completion_failover_error(&opts, &result, false).is_none(),
-            "healthy-provider exhausted empties keep the existing Ok-empty behavior"
-        );
-
-        let err = terminal_unproductive_completion_failover_error(&opts, &result, true)
-            .expect("throttled-provider exhausted empty should become failover-eligible");
+        let err = terminal_unproductive_completion_failover_error(&opts, &result, false, 2)
+            .expect("live-provider exhausted empty should become failover-eligible");
         match &err {
             VmError::CategorizedError { category, message } => {
                 assert_eq!(*category, crate::value::ErrorCategory::CircuitOpen);
@@ -4252,28 +4265,34 @@ mod empty_completion_retry_tests {
                     "message keeps the resolved-dispatch empty marker: {message}"
                 );
                 assert!(
-                    message.contains("circuit_open"),
-                    "message names the provider-health circuit: {message}"
+                    message.contains("reason=empty_generation"),
+                    "message names the canonical provider failure: {message}"
                 );
+                assert!(message.contains("attempt_count=2"));
             }
             other => panic!("expected categorized circuit-open error, got {other:?}"),
         }
+
+        opts.provider = "fake".to_string();
+        assert!(
+            terminal_unproductive_completion_failover_error(&opts, &result, false, 2).is_none()
+        );
     }
 
     #[test]
-    fn terminal_errored_actionless_failover_requires_provider_throttle() {
-        let opts = fake_opts();
+    fn terminal_errored_actionless_completion_is_failover_eligible() {
+        let mut opts = fake_opts();
+        opts.provider = "openrouter".to_string();
         let mut result = empty_result();
         result.stop_reason = Some("error".to_string());
         result.text = "I need to edit tests/foo_test.cpp".to_string();
         result.output_tokens = 17;
 
         assert!(
-            terminal_unproductive_completion_failover_error(&opts, &result, false).is_none(),
-            "healthy-provider errored actionless turns keep the existing bounded path"
+            terminal_unproductive_completion_failover_error(&opts, &result, false, 2).is_none(),
+            "non-empty actionless completions retain the existing throttle gate"
         );
-
-        let message = terminal_unproductive_completion_failover_error(&opts, &result, true)
+        let message = terminal_unproductive_completion_failover_error(&opts, &result, true, 2)
             .expect("throttled-provider actionless error should fail over")
             .to_string();
         assert!(message.contains("circuit_open"));

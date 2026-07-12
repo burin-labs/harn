@@ -42,6 +42,7 @@ pub(crate) enum LlmErrorReason {
     ContentPolicy,
     InvalidRequest,
     ModelUnavailable,
+    EmptyGeneration,
     Unknown,
 }
 
@@ -57,6 +58,7 @@ impl LlmErrorReason {
             Self::ContentPolicy => "content_policy",
             Self::InvalidRequest => "invalid_request",
             Self::ModelUnavailable => "model_unavailable",
+            Self::EmptyGeneration => "empty_generation",
             Self::Unknown => "unknown",
         }
     }
@@ -363,6 +365,9 @@ fn classify_http_status_and_body(
 
 fn classify_error_message_taxonomy(msg: &str) -> Option<(LlmErrorKind, LlmErrorReason)> {
     let lower = msg.to_lowercase();
+    if lower.contains("reason=empty_generation") {
+        return Some((LlmErrorKind::Transient, LlmErrorReason::EmptyGeneration));
+    }
     if lower.contains("kind") && lower.contains("transient") {
         if lower.contains("rate_limit") || lower.contains("rate_limited") {
             return Some((LlmErrorKind::Transient, LlmErrorReason::RateLimit));
@@ -584,6 +589,16 @@ fn is_model_unavailable(lower: &str) -> bool {
 mod tests {
     use super::{classify_llm_error, classify_provider_http_error, LlmErrorKind, LlmErrorReason};
     use crate::value::ErrorCategory;
+
+    #[test]
+    fn classify_empty_generation_reason_tag() {
+        let info = classify_llm_error(
+            ErrorCategory::CircuitOpen,
+            "provider route failed: reason=empty_generation attempt_count=2",
+        );
+        assert_eq!(info.kind, LlmErrorKind::Transient);
+        assert_eq!(info.reason, LlmErrorReason::EmptyGeneration);
+    }
 
     #[test]
     fn classify_tags_vllm_prompt_too_long_as_context_overflow() {

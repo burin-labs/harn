@@ -1,0 +1,40 @@
+// Run: harn test tests/agent/equivalent_failover_test.harn
+import { omit } from "std/json"
+
+fn run_with_options(key, options) {
+  const observed = shared_cell({scope: "task_group", key: key, initial: {}})
+  const caller = { call ->
+    shared_set(observed, call.opts)
+    return {ok: true, value: {text: "DONE", tool_calls: [], provider: "mock", model: "model"}}
+  }
+  agent_loop(
+    "finish",
+    nil,
+    options
+      + {
+      provider: "mock",
+      model: "model",
+      llm_caller: caller,
+      loop_until_done: true,
+      done_sentinel: "DONE",
+      max_iterations: 1,
+    },
+  )
+  return omit(shared_get(observed), ["messages"])
+}
+
+pipeline test_agent_loop_enables_equivalent_failover_on_primary(_task) {
+  const opts = run_with_options("equivalent-primary", {})
+  assert_eq(opts.equivalent_failover, {max_routes: 3, on_no_dispatch: true})
+}
+
+pipeline test_agent_loop_preserves_equivalent_failover_opt_out(_task) {
+  const opts = run_with_options("equivalent-opt-out", {equivalent_failover: false})
+  assert_eq(opts.equivalent_failover, false)
+}
+
+pipeline test_agent_loop_preserves_explicit_route_owner(_task) {
+  const opts = run_with_options("equivalent-route-owner", {fallback_chain: ["backup:model"]})
+  assert_eq(opts?.equivalent_failover, nil)
+  assert_eq(opts.fallback_chain, ["backup:model"])
+}

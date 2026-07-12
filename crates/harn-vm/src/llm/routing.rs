@@ -49,7 +49,7 @@ pub(crate) fn build_equivalent_failover_policy(
     on_no_dispatch: bool,
     requirements: crate::llm_config::EquivalentModelRequirements,
 ) -> Option<Arc<RoutingPolicyConfig>> {
-    if max_routes < 2 {
+    if max_routes < 2 || super::providers::is_internal_simulator(provider) {
         return None;
     }
 
@@ -2368,6 +2368,18 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect()
+    }
+
+    #[test]
+    fn equivalent_failover_excludes_internal_simulators() {
+        let policy = build_equivalent_failover_policy(
+            "mock",
+            "model",
+            3,
+            true,
+            crate::llm_config::EquivalentModelRequirements::default(),
+        );
+        assert!(policy.is_none());
     }
 
     #[test]
