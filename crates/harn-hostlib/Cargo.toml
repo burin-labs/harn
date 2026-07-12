@@ -150,6 +150,8 @@ grep-matcher = "0.1"
 grep-regex = "0.1"
 ignore = "0.4"
 notify = "8"
+rusqlite = { version = "0.40", features = ["bundled"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 globset = "0.4"
 walkdir = "2"
 base64 = "0.22"

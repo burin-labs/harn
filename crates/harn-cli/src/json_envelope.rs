@@ -134,6 +134,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "host lease",
+            schema_version: crate::commands::host::HOST_LEASE_CLI_SCHEMA_VERSION,
+            description: "Machine-global host lease acquire, renew, release, and status receipts.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "session export",
             schema_version: 1,
             description: "Portable Harn session bundle export.",

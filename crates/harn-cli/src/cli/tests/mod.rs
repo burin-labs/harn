@@ -8,14 +8,15 @@ pub(crate) use std::time::Duration as StdDuration;
 pub(crate) use super::{
     CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
-    FlowCommand, HarnessThreadingMode, LocalCommand, McpCommand, McpMockCommand,
-    MergeCaptainCommand, ModelsBatchCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
-    OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
-    OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
-    PackageScaffoldCommand, PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand,
-    ProviderCatalogCommand, ProviderCommand, ProviderToolProbeModeArg, PublishArgs, RuleCommand,
-    RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand,
-    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    FlowCommand, HarnessThreadingMode, HostCommand, HostLeaseCommand, HostLeasePriorityArg,
+    LocalCommand, McpCommand, McpMockCommand, MergeCaptainCommand, ModelsBatchCommand,
+    ModelsCommand, ModelsLoraCommand, OrchestratorCommand, OrchestratorDeployProvider,
+    OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
+    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
+    PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand, ProviderCatalogCommand,
+    ProviderCommand, ProviderToolProbeModeArg, PublishArgs, RuleCommand, RunsCommand,
+    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand,
+    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 
 mod parse_cmds;
