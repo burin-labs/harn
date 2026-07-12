@@ -2529,7 +2529,7 @@ fn alias_forwarding_chain_reaches_structural_root() {
         r#"type Binding = {id: string}
 type Handle = Binding
 
-fn dynamic_handle() -> dict {
+fn dynamic_handle() -> Binding {
   return {id: "trigger-1"}
 }
 
