@@ -839,13 +839,13 @@ fn parse_deepseek_dsml_calls(
             let as_string = param.get(2).map(|m| m.as_str()) != Some("false");
             let raw = param.get(3).map(|m| m.as_str()).unwrap_or("");
             let value = if as_string {
-                serde_json::Value::String(decode_dsml_text(raw))
+                serde_json::Value::String(decode_html_entities(raw))
             } else {
                 parse_dsml_value(raw).unwrap_or_else(|error| {
                     errors.push(format!(
                         "DeepSeek DSML parameter `{key}` for `{name}` could not parse as JSON: {error}."
                     ));
-                    serde_json::Value::String(decode_dsml_text(raw))
+                    serde_json::Value::String(decode_html_entities(raw))
                 })
             };
             args.insert(key, value);
@@ -893,12 +893,87 @@ fn parse_dsml_value(raw: &str) -> Result<serde_json::Value, serde_json::Error> {
     serde_json::from_str(raw.trim())
 }
 
-fn decode_dsml_text(raw: &str) -> String {
-    raw.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&amp;", "&")
+/// Decode the standard HTML character references a text-format model emits when
+/// it escapes its own markup delimiters. Text-tool models trained on
+/// angle-bracket framing (Harmony/gpt-oss `<|channel|>…<|message|>`, the
+/// `<tool_call>` wrapper) routinely HTML-escape `<`, `>`, and `&` inside their
+/// tool-call *string arguments* so a literal operator cannot be mistaken for a
+/// frame or tag boundary — shipping `if (a &lt;= b)`, `xs.map(x =&gt; x)`, or
+/// `a &amp;&amp; b` as the file content. Left encoded, that source cannot
+/// compile.
+///
+/// The scan is SINGLE-PASS and resolves each reference exactly once: after
+/// substituting `&amp;` it advances past the produced `&` without re-scanning
+/// it, so a value the model *double*-escaped — `&amp;lt;`, the on-the-wire form
+/// of a literal `&lt;` — decodes to `&lt;` (the intended literal) rather than
+/// collapsing to `<`. An `&` that does not open a recognized reference (a bare
+/// `R&D`, a shell `a & b`, a truncated `&amp`) is emitted verbatim, so only
+/// genuine references are touched. Callers MUST invoke this at most once per
+/// value; a second pass is not idempotent for double-escaped input.
+fn decode_html_entities(raw: &str) -> String {
+    // Named/numeric references this decoder recognizes. Kept to the operators a
+    // model escapes to protect markup framing plus the two quote forms; an
+    // unlisted reference is left verbatim rather than guessed at.
+    const NAMED: &[(&str, char)] = &[
+        ("amp;", '&'),
+        ("lt;", '<'),
+        ("gt;", '>'),
+        ("quot;", '"'),
+        ("apos;", '\''),
+        ("#39;", '\''),
+        ("#34;", '"'),
+    ];
+    if !raw.contains('&') {
+        return raw.to_string();
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after = &rest[amp + 1..];
+        if let Some((token, decoded)) = NAMED.iter().find(|(token, _)| after.starts_with(token)) {
+            out.push(*decoded);
+            rest = &after[token.len()..];
+        } else {
+            // Not a recognized reference: emit the `&` literally and keep
+            // scanning the remainder for further references.
+            out.push('&');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Decode HTML character references in every string value reachable in a parsed
+/// tool-call `arguments` payload, recursing through nested objects and arrays.
+/// This is the single owning boundary for the operator-corruption class: the
+/// value arrived through a JSON-string channel where the model escaped its
+/// markup delimiters, so it is decoded here exactly once as the call is
+/// finalized. Heredoc/raw-body channels never pass through here — their
+/// delimiters are sentinel lines, not angle brackets, so the model writes raw
+/// operators there and any literal reference (e.g. authored HTML) must survive
+/// untouched.
+fn decode_html_entities_in_args(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => {
+            let decoded = decode_html_entities(text);
+            if decoded != *text {
+                *text = decoded;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                decode_html_entities_in_args(item);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values_mut() {
+                decode_html_entities_in_args(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn canonical_for_recovered_calls(calls: &[serde_json::Value], prose: &str) -> String {
@@ -1592,7 +1667,7 @@ fn parse_xml_wrapped_json_args_body(
         ));
     };
     let json_src = &after_open[..obj_len];
-    let arguments: serde_json::Value = serde_json::from_str(json_src).map_err(|error| {
+    let mut arguments: serde_json::Value = serde_json::from_str(json_src).map_err(|error| {
         format!(
             "<tool_call><{name}> body did not parse as a JSON object: {error}. \
              Emit `<tool_call>{name}({{ ... }})</tool_call>` instead."
@@ -1603,6 +1678,9 @@ fn parse_xml_wrapped_json_args_body(
             "Nested XML arguments for tool '{name}' must be a JSON object, got `{arguments}`."
         ));
     }
+    // Same JSON-string channel as `parse_json_tool_call_body`: decode escaped
+    // markup delimiters exactly once so operators are not shipped HTML-encoded.
+    decode_html_entities_in_args(&mut arguments);
     Ok(Some(serde_json::json!({
         "id": format!("tc_xml_{name}"),
         "name": name,
@@ -1939,7 +2017,7 @@ fn parse_json_tool_call_body(
         })
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
-    let arguments = match arguments {
+    let mut arguments = match arguments {
         serde_json::Value::String(raw) => serde_json::from_str(&raw).map_err(|error| {
             format!("Could not parse JSON string arguments for tool '{name}': {error}")
         })?,
@@ -1950,6 +2028,11 @@ fn parse_json_tool_call_body(
             "Tool '{name}' arguments must be a JSON object, got `{arguments}`."
         ));
     }
+    // The value arrived through the JSON-string channel, where a text-format
+    // model escapes its markup delimiters (`&lt;`, `=&gt;`, `&amp;&amp;`).
+    // Decode those references exactly once here so operators reach the tool as
+    // real source, never HTML-encoded bytes that cannot compile.
+    decode_html_entities_in_args(&mut arguments);
     let id = obj
         .get("id")
         .and_then(|id| id.as_str())
