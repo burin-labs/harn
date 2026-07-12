@@ -12,6 +12,7 @@ mod binary_ops;
 mod exits;
 mod format;
 mod inference;
+pub mod method_registry;
 mod schema_inference;
 mod scope;
 mod union;

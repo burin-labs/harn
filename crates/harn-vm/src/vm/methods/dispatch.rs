@@ -99,3 +99,102 @@ impl crate::vm::Vm {
         })
     }
 }
+
+#[cfg(test)]
+mod drift_guard_tests {
+    //! Keep the typechecker's builtin-method registry
+    //! (`harn_parser::typechecker::method_registry`) in sync with the VM
+    //! dispatch here. If a method name in a registry list is *not* accepted by
+    //! the corresponding VM dispatch, the typechecker would wrongly reject a
+    //! call the runtime supports — a false positive. These tests fail when
+    //! that drift is introduced (e.g. a VM method is renamed without updating
+    //! the registry).
+    //!
+    //! A `None` from a `*_sync` dispatcher means "handled by the async path",
+    //! which is still a valid method, so only an explicit `has no method`
+    //! error counts as rejection.
+    use crate::value::VmValue;
+    use harn_parser::typechecker::method_registry as reg;
+    use std::sync::Arc;
+
+    fn sample_args() -> Vec<VmValue> {
+        // Enough positional args (2 strings) to satisfy guarded arms such as
+        // `"replace" if args.len() >= 2`.
+        vec![VmValue::string("a"), VmValue::string("b"), VmValue::Int(1)]
+    }
+
+    fn is_no_method_rejection(result: Option<Result<VmValue, crate::value::VmError>>) -> bool {
+        matches!(result, Some(Err(e)) if format!("{e:?}").contains("has no method"))
+    }
+
+    #[test]
+    fn string_registry_matches_vm_dispatch() {
+        let s = arcstr::ArcStr::from("hello");
+        let args = sample_args();
+        for &name in reg::STRING_METHODS {
+            if name == "iter" {
+                continue; // dispatched in call_method_sync, not call_string_method
+            }
+            let res = crate::vm::Vm::call_string_method(&s, name, &args);
+            assert!(
+                !format!("{res:?}").contains("has no method"),
+                "STRING_METHODS lists `{name}` but the VM rejects it"
+            );
+        }
+        // Sanity: a name absent from the registry is genuinely rejected.
+        let bogus = crate::vm::Vm::call_string_method(&s, "frobnicate", &args);
+        assert!(format!("{bogus:?}").contains("has no method"));
+    }
+
+    #[test]
+    fn list_registry_matches_vm_dispatch() {
+        let items: Arc<Vec<VmValue>> = Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
+        let args = sample_args();
+        for &name in reg::LIST_METHODS {
+            if name == "iter" {
+                continue;
+            }
+            let res = crate::vm::Vm::call_list_method_sync(&items, name, &args);
+            assert!(
+                !is_no_method_rejection(res),
+                "LIST_METHODS lists `{name}` but the VM rejects it"
+            );
+        }
+    }
+
+    #[test]
+    fn set_registry_matches_vm_dispatch() {
+        let VmValue::Set(set) = VmValue::set([VmValue::Int(1), VmValue::Int(2)]) else {
+            unreachable!("VmValue::set builds a Set");
+        };
+        let args = vec![VmValue::set([VmValue::Int(3)]), VmValue::string("a")];
+        for &name in reg::SET_METHODS {
+            if name == "iter" {
+                continue;
+            }
+            let res = crate::vm::Vm::call_set_method_sync(&set, name, &args);
+            assert!(
+                !is_no_method_rejection(res),
+                "SET_METHODS lists `{name}` but the VM rejects it"
+            );
+        }
+    }
+
+    #[test]
+    fn dict_registry_matches_vm_dispatch() {
+        let VmValue::Dict(map) = VmValue::dict([("k", VmValue::Int(1))]) else {
+            unreachable!("VmValue::dict builds a Dict");
+        };
+        let args = sample_args();
+        for &name in reg::DICT_METHODS {
+            if name == "iter" {
+                continue;
+            }
+            let res = crate::vm::Vm::call_dict_method_sync(&map, name, &args);
+            assert!(
+                !is_no_method_rejection(res),
+                "DICT_METHODS lists `{name}` but the VM rejects it"
+            );
+        }
+    }
+}

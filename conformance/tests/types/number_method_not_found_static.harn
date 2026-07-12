@@ -1,0 +1,8 @@
+// A bogus method on a concrete numeric receiver is caught statically by
+// HARN-NAM-005: `float` exposes no `frobnicate`, so the mistake is a
+// compile-time type error rather than a silent `nil` or a deferred runtime
+// throw. (The VM keeps a runtime throw as defense-in-depth for receivers
+// whose type escapes static analysis — see `call_number_method`.)
+pipeline default() {
+  const _ = 3.14.frobnicate()
+}
