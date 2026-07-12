@@ -32,7 +32,7 @@ pipeline default(_task) {
   // repeats the source and the optional-chain + null-coalesce dance.
   const raw = pipeline_input()
   const path_old = raw?.path ?? "."
-  const namespace_old = raw?.namespace ?? nil
+  const namespace_old = raw?.namespace
   const retries_old = raw?.retries ?? 0
   const verbose_old = raw?.verbose ?? false
   __io_println("before — 4 lines, source repeated 4x:")

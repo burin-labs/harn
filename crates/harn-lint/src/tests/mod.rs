@@ -117,6 +117,7 @@ mod long_running;
 mod mcp_tools;
 mod mutability;
 mod naming_types;
+mod nil_coalesce;
 mod optional_shorthand;
 mod persona_steps;
 mod redundant_nil_ternary;

@@ -87,6 +87,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(UnnecessaryParentheses),
         Box::new(DeprecatedLlmOptions),
         Box::new(UnnormalizedOptions),
+        Box::new(NilCoalesceNoop),
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
         Box::new(ReminderRoleHint),
@@ -205,6 +206,12 @@ program_rule!(
     "unnormalized-options",
     ast,
     crate::rules::unnormalized_options::check_unnormalized_options
+);
+program_rule!(
+    NilCoalesceNoop,
+    "nil-coalesce-noop",
+    src,
+    crate::rules::nil_coalesce::check_nil_coalesce_noop
 );
 program_rule!(
     ReminderLifecycle,

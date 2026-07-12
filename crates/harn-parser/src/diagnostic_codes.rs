@@ -349,6 +349,8 @@ diagnostic_codes! {
     LintVacuousCondition, "HARN-LNT-058", Lnt, "if / while / guard condition is statically known to always succeed or always fail";
     LintRuleEngine, "HARN-LNT-059", Lnt, "project rule-engine or native lint rule";
     LintUnnormalizedOptions, "HARN-LNT-060", Lnt, "inline options dict bypasses the typed option constructors";
+    LintNilCoalesceNoop, "HARN-LNT-061", Lnt, "nil coalesce fallback is nil";
+    LintNilCoalesceUnreachableFallback, "HARN-LNT-062", Lnt, "nil coalesce fallback is unreachable";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";

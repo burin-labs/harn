@@ -309,6 +309,111 @@ pipeline t(task) {
 }
 
 #[test]
+fn test_nil_coalesce_unreachable_fallback_warns_on_non_nil_typed_producer() {
+    let diagnostics = check_source_with_source(
+        r#"
+fn parse_number(raw: string) -> float {
+  return 1.0
+}
+
+pipeline t(task) {
+  let raw: string? = nil
+  const value = parse_number(raw ?? "0") ?? 0.0
+  log(value)
+}
+"#,
+    );
+    let unreachable = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.details,
+                Some(DiagnosticDetails::LintRule { rule })
+                    if *rule == "nil-coalesce-unreachable-fallback"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(unreachable.len(), 1, "got diagnostics: {diagnostics:?}");
+    assert_eq!(
+        unreachable[0].code,
+        crate::diagnostic_codes::Code::LintNilCoalesceUnreachableFallback
+    );
+    assert_eq!(
+        unreachable[0]
+            .fix
+            .as_ref()
+            .expect("fix")
+            .first()
+            .expect("single fix")
+            .replacement,
+        ""
+    );
+}
+
+#[test]
+fn test_nil_coalesce_unreachable_fallback_respects_nilable_left_side() {
+    let diagnostics = check_source_with_source(
+        r"
+pipeline t(task) {
+  let maybe: int? = nil
+  const value = maybe ?? 0
+  log(value)
+}
+",
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| !matches!(
+            &diagnostic.details,
+            Some(DiagnosticDetails::LintRule { rule })
+                if *rule == "nil-coalesce-unreachable-fallback"
+        )),
+        "nilable left side should not trigger unreachable-fallback lint: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_nil_coalesce_unreachable_fallback_ignores_non_producer_left_side() {
+    let diagnostics = check_source_with_source(
+        r#"
+pipeline t(task) {
+  const present = "value"
+  const from_local = present ?? "fallback"
+  const from_literal = "present" ?? "fallback"
+  log(from_local + from_literal)
+}
+"#,
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| !matches!(
+            &diagnostic.details,
+            Some(DiagnosticDetails::LintRule { rule })
+                if *rule == "nil-coalesce-unreachable-fallback"
+        )),
+        "non-producer left sides should not trigger unreachable-fallback lint: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_nil_coalesce_unreachable_fallback_ignores_ambient_typed_producer() {
+    let diagnostics = check_source_with_source(
+        r"
+pipeline t(task) {
+  const value = to_float(1) ?? 0.0
+  log(value)
+}
+",
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| !matches!(
+            &diagnostic.details,
+            Some(DiagnosticDetails::LintRule { rule })
+                if *rule == "nil-coalesce-unreachable-fallback"
+        )),
+        "ambient typed producers should not trigger unreachable-fallback lint: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn test_optional_access_on_dynamic_dict_union_stays_unknown() {
     let errs = errors(
         r"
