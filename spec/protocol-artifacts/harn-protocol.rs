@@ -24,6 +24,7 @@ pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
 
 pub const ACP_AGENT_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_AGENT_METHOD_SESSION_INJECT: &str = "session/inject";
+pub const ACP_AGENT_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
 pub const ACP_AGENT_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_AGENT_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_AGENT_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
@@ -44,6 +45,7 @@ pub const ACP_AGENT_METHOD_SESSION_STOP: &str = "session/stop";
 pub const ACP_AGENT_METHODS: &[&str] = &[
     "initialize",
     "session/inject",
+    "session/inject_host_event",
     "session/new",
     "session/load",
     "session/replace_inject",
@@ -87,6 +89,7 @@ pub const ACP_DISPATCHED_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel
 pub const ACP_DISPATCHED_METHOD_SESSION_CLOSE: &str = "session/close";
 pub const ACP_DISPATCHED_METHOD_SESSION_STOP: &str = "session/stop";
 pub const ACP_DISPATCHED_METHOD_SESSION_INJECT: &str = "session/inject";
+pub const ACP_DISPATCHED_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
 pub const ACP_DISPATCHED_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
 pub const ACP_DISPATCHED_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_DISPATCHED_METHOD_SESSION_REMIND: &str = "session/remind";
@@ -151,6 +154,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/close",
     "session/stop",
     "session/inject",
+    "session/inject_host_event",
     "session/revoke_inject",
     "session/replace_inject",
     "session/remind",
@@ -222,6 +226,7 @@ pub const ACP_HANDLED_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_to
 pub const ACP_HANDLED_METHOD_SESSION_CLOSE: &str = "session/close";
 pub const ACP_HANDLED_METHOD_SESSION_STOP: &str = "session/stop";
 pub const ACP_HANDLED_METHOD_SESSION_INJECT: &str = "session/inject";
+pub const ACP_HANDLED_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
 pub const ACP_HANDLED_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
 pub const ACP_HANDLED_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_HANDLED_METHOD_SESSION_REMIND: &str = "session/remind";
@@ -287,6 +292,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "session/close",
     "session/stop",
     "session/inject",
+    "session/inject_host_event",
     "session/revoke_inject",
     "session/replace_inject",
     "session/remind",

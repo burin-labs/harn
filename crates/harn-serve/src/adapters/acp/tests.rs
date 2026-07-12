@@ -170,6 +170,100 @@ async fn public_acp_output_callback_receives_server_lines() {
     assert_eq!(response["result"]["agentInfo"]["name"], "harn");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn session_inject_host_event_round_trips_typed_tool_result() {
+    harn_vm::reset_thread_local_state();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/inject_host_event",
+            "params": {
+                "sessionId": session_id,
+                "event": {
+                    "kind": "host_tool_result",
+                    "delivery": "immediate",
+                    "payload": {
+                        "tool_name": "host.search",
+                        "raw_input": {"query": "typed boundary"},
+                        "raw_output": {"matches": 3}
+                    },
+                    "provenance": {
+                        "initiator": "user",
+                        "source": "acp-test",
+                        "host": "test-host",
+                        "ts_ms": 42
+                    }
+                }
+            }
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["result"]["status"], "injected");
+    assert_eq!(response["result"]["delivery"], "immediate");
+
+    let messages = harn_vm::agent_sessions::messages_json(&session_id);
+    let message = messages.last().expect("injected message");
+    assert_eq!(message["role"], "user");
+    assert_eq!(
+        message["metadata"]["host_injection"]["tool_name"],
+        "host.search"
+    );
+    assert_eq!(
+        message["metadata"]["host_injection"]["provenance"]["source"],
+        "acp-test"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_inject_host_event_rejects_unknown_wire_fields() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/inject_host_event",
+            "params": {
+                "sessionId": "session",
+                "event": {
+                    "kind": "host_attachment",
+                    "payload": {},
+                    "provenance": {
+                        "initiator": "user",
+                        "source": "test",
+                        "ts_ms": 42
+                    },
+                    "rendered": "host-authored prompt material"
+                }
+            }
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["error"]["code"], -32602);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unknown field `rendered`"));
+}
+
 fn attach_test_host_bridge(
     server: &mut AcpServer,
     session_id: &str,
@@ -1523,6 +1617,13 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
         serde_json::json!({
             "modes": ["interrupt_immediate", "finish_step", "audit_only"],
             "pending": {"list": true, "revoke": true},
+        })
+    );
+    assert_eq!(
+        capabilities["session"]["injectHostEvent"],
+        serde_json::json!({
+            "kinds": ["host_tool_result", "host_attachment"],
+            "delivery": ["turn_boundary", "immediate", "after_next_tool_call"],
         })
     );
     assert_eq!(

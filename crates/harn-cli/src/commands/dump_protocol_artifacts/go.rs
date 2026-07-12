@@ -323,6 +323,28 @@ type ACPNotification struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+// HarnHostInjectionProvenance records who supplied a typed host event.
+type HarnHostInjectionProvenance struct {
+	Initiator string  `json:"initiator"`
+	Source    string  `json:"source"`
+	Host      *string `json:"host,omitempty"`
+	TsMs      int64   `json:"ts_ms"`
+}
+
+// HarnHostInjectionEvent is the canonical host-to-agent typed injection contract.
+type HarnHostInjectionEvent struct {
+	Kind       string                      `json:"kind"`
+	Delivery   string                      `json:"delivery,omitempty"`
+	Payload    JSONObject                  `json:"payload"`
+	Provenance HarnHostInjectionProvenance `json:"provenance"`
+}
+
+// ACPSessionInjectHostEventParams is the session/inject_host_event request payload.
+type ACPSessionInjectHostEventParams struct {
+	SessionID string                 `json:"sessionId"`
+	Event     HarnHostInjectionEvent `json:"event"`
+}
+
 // HarnExtensionMeta is the canonical envelope for `_meta.harn` payloads.
 type HarnExtensionMeta struct {
 	Harn JSONObject `json:"harn,omitempty"`

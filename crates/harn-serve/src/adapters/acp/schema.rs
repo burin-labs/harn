@@ -212,6 +212,10 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
                     "replace": true,
                 },
             },
+            "injectHostEvent": {
+                "kinds": ["host_tool_result", "host_attachment"],
+                "delivery": ["turn_boundary", "immediate", "after_next_tool_call"],
+            },
             "remind": {
                 "modes": ["interrupt_immediate", "finish_step", "audit_only"],
                 "pending": {

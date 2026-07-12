@@ -17,6 +17,7 @@ pub const ACP_METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const ACP_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
 pub const ACP_METHOD_SESSION_CLOSE: &str = "session/close";
 pub const ACP_METHOD_SESSION_INJECT: &str = "session/inject";
+pub const ACP_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
 pub const ACP_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
 pub const ACP_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
@@ -129,6 +130,15 @@ impl AcpJsonRpcRequest<AcpSessionIdParams> {
 impl AcpJsonRpcRequest<AcpSessionInjectParams> {
     pub fn session_inject(id: impl Into<AcpJsonRpcId>, params: AcpSessionInjectParams) -> Self {
         Self::new(id, ACP_METHOD_SESSION_INJECT, params)
+    }
+}
+
+impl AcpJsonRpcRequest<AcpSessionInjectHostEventParams> {
+    pub fn session_inject_host_event(
+        id: impl Into<AcpJsonRpcId>,
+        params: AcpSessionInjectHostEventParams,
+    ) -> Self {
+        Self::new(id, ACP_METHOD_SESSION_INJECT_HOST_EVENT, params)
     }
 }
 
@@ -482,6 +492,27 @@ pub struct AcpSessionInjectParams {
     pub meta: Option<AcpMeta>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// Harn ACP extension params for injecting a typed, provenance-bearing host event.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcpSessionInjectHostEventParams {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    pub event: harn_vm::agent_sessions::HostInjectionRequest,
+}
+
+impl AcpSessionInjectHostEventParams {
+    pub fn new(
+        session_id: impl Into<String>,
+        event: harn_vm::agent_sessions::HostInjectionRequest,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            event,
+        }
+    }
 }
 
 impl AcpSessionInjectParams {

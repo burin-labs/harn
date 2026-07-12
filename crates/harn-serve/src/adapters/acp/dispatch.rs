@@ -182,6 +182,12 @@ impl AcpServer {
                 }
                 self.handle_session_inject(&id, &params).await;
             }
+            "session/inject_host_event" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_inject_host_event(&id, params);
+            }
             "session/revoke_inject" => {
                 if self.reject_unauthenticated(&id) {
                     return;

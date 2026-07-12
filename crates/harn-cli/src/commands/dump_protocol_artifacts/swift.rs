@@ -623,6 +623,41 @@ public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var rawInputPartial: String?
 }
 
+public enum HarnHostInjectionKind: String, Codable, Sendable, Equatable {
+    case hostToolResult = "host_tool_result"
+    case hostAttachment = "host_attachment"
+}
+
+public enum HarnHostInjectionDelivery: String, Codable, Sendable, Equatable {
+    case turnBoundary = "turn_boundary"
+    case immediate
+    case afterNextToolCall = "after_next_tool_call"
+}
+
+public struct HarnHostInjectionProvenance: Codable, Sendable, Equatable {
+    public var initiator: String
+    public var source: String
+    public var host: String?
+    public var tsMs: Int
+
+    enum CodingKeys: String, CodingKey {
+        case initiator, source, host
+        case tsMs = "ts_ms"
+    }
+}
+
+public struct HarnHostInjectionEvent: Codable, Sendable, Equatable {
+    public var kind: HarnHostInjectionKind
+    public var delivery: HarnHostInjectionDelivery?
+    public var payload: [String: HarnACPValue]
+    public var provenance: HarnHostInjectionProvenance
+}
+
+public struct HarnACPSessionInjectHostEventParams: Codable, Sendable, Equatable {
+    public var sessionId: String
+    public var event: HarnHostInjectionEvent
+}
+
 public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
     public var schemaVersion: Int
     public var sessionId: String

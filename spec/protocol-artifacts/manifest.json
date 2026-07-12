@@ -34,6 +34,7 @@
     "agentMethods": [
       "initialize",
       "session/inject",
+      "session/inject_host_event",
       "session/new",
       "session/load",
       "session/replace_inject",
@@ -106,6 +107,7 @@
       "session/close",
       "session/stop",
       "session/inject",
+      "session/inject_host_event",
       "session/revoke_inject",
       "session/replace_inject",
       "session/remind",
@@ -170,6 +172,7 @@
       "session/close",
       "session/stop",
       "session/inject",
+      "session/inject_host_event",
       "session/revoke_inject",
       "session/replace_inject",
       "session/remind",
