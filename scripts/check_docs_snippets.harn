@@ -157,7 +157,7 @@ pipeline main(task) {
     .spawn_captured({cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
-    return 1
+    exit(1)
   }
   const tmp_dir = mk.stdout.trim()
   defer {
@@ -208,7 +208,9 @@ pipeline main(task) {
     __io_println("hint: snippets must parse under `harn check`. Wrap bare statements")
     __io_println("      in `pipeline default() { ... }`, inline any referenced helpers,")
     __io_println("      or tag the block as ```harn,ignore if it's an intentional fragment.")
-    return 1
+    // exit() bypasses defer, so remove the scratch directory before reporting
+    // failure to the calling shell.
+    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_dir]})
+    exit(1)
   }
-  return 0
 }
