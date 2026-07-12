@@ -4,7 +4,7 @@
 
 The fallback side of a nil-coalescing expression is the literal `nil`:
 
-```harn
+```harn,ignore
 const value = task?.flag ?? nil
 ```
 

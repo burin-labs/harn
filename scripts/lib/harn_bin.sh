@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # Shared Harn CLI binary resolution for hooks, Make targets, and CI helper
-# scripts. The freshness check intentionally tracks Rust/Cargo inputs that
-# relink the executable; Harn source files are checked from disk by the
-# executable and should not force a broad Cargo rebuild for stdlib-only edits.
+# scripts. The freshness check tracks every file under `crates/` because Rust
+# crates embed Harn, Markdown, schema, prompt, and fixture assets at compile
+# time in addition to ordinary Rust/Cargo inputs.
 
 harn_repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || pwd
@@ -55,9 +55,7 @@ pathspecs = [
     "rust-toolchain.toml",
     ".cargo/config",
     ".cargo/config.toml",
-    ":(glob)crates/**/Cargo.toml",
-    ":(glob)crates/**/*.rs",
-    ":(glob)crates/**/build.rs",
+    "crates",
 ]
 proc = subprocess.run(
     ["git", "-C", root, "ls-files", "-z", "--", *pathspecs],
@@ -103,7 +101,7 @@ harn_require_fresh_bin() {
   fi
   local stale
   if ! stale="$(harn_bin_newer_source_report "$bin")"; then
-    echo "error: harn binary is stale relative to Rust/Cargo executable inputs: $bin" >&2
+    echo "error: harn binary is stale relative to compiled executable inputs: $bin" >&2
     if [[ -n "$stale" ]]; then
       echo "newer inputs:" >&2
       printf '%s\n' "$stale" | sed 's/^/  /' >&2

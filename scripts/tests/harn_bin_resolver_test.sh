@@ -34,4 +34,31 @@ if ! grep -Fxq "$fake_bin" "$tmp_root/fresh.out"; then
   exit 1
 fi
 
+# Non-Rust crate assets may be embedded with include_str!/include_bytes! and
+# therefore participate in executable freshness just like .rs files.
+freshness_repo="$tmp_root/freshness-repo"
+mkdir -p "$freshness_repo/crates/example/src/explanations"
+git -C "$freshness_repo" init -q
+printf '# embedded explanation\n' > "$freshness_repo/crates/example/src/explanations/example.md"
+git -C "$freshness_repo" add crates/example/src/explanations/example.md
+
+embedded_bin="$tmp_root/embedded-harn"
+cp "$fake_bin" "$embedded_bin"
+touch -t 202001010000 "$embedded_bin"
+touch -t 202101010000 "$freshness_repo/crates/example/src/explanations/example.md"
+
+if (
+  cd "$freshness_repo"
+  source "$repo_root/scripts/lib/harn_bin.sh"
+  harn_bin_newer_source_report "$embedded_bin"
+) > "$tmp_root/embedded-stale.out"; then
+  echo "harn_bin resolver accepted a binary older than an embedded crate asset" >&2
+  exit 1
+fi
+if ! grep -Fxq "crates/example/src/explanations/example.md" "$tmp_root/embedded-stale.out"; then
+  echo "harn_bin resolver did not report the newer embedded crate asset" >&2
+  cat "$tmp_root/embedded-stale.out" >&2
+  exit 1
+fi
+
 echo "harn_bin_resolver_test: ok"

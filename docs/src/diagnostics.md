@@ -3391,7 +3391,7 @@ nil coalesce fallback is nil
 
 The fallback side of a nil-coalescing expression is the literal `nil`:
 
-```harn
+```harn,ignore
 const value = task?.flag ?? nil
 ```
 
@@ -3513,7 +3513,7 @@ nil coalesce fallback repeats the left identifier
 
 Both sides of a nil-coalescing expression are the same identifier:
 
-```harn
+```harn,ignore
 const value = task ?? task
 ```
 

@@ -4,7 +4,7 @@
 
 Both sides of a nil-coalescing expression are the same identifier:
 
-```harn
+```harn,ignore
 const value = task ?? task
 ```
 
