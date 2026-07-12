@@ -216,7 +216,7 @@ fn __typed_checkpoint_envelope(args) {
     data: if ok {
       final_result?.data
     } else {
-      args.data ?? nil
+      args.data
     },
     raw_text: final_result?.raw_text ?? args.raw_text ?? "",
     raw_outputs: args.raw_outputs ?? [],

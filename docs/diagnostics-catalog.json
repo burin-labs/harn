@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 64
+      "count": 65
     },
     {
       "id": "FMT",
@@ -2317,7 +2317,13 @@
       "code": "HARN-LNT-061",
       "category": "LNT",
       "summary": "nil coalesce fallback is nil",
-      "repairs": [],
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
@@ -2351,6 +2357,21 @@
       "category": "LNT",
       "summary": "a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race",
       "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-065",
+      "category": "LNT",
+      "summary": "nil coalesce fallback repeats the left identifier",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

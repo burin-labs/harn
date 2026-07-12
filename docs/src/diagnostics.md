@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 64 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 65 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -310,10 +310,11 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-058`](#harn-lnt-058) | if / while / guard condition is statically known to always succeed or always fail | — | — |
 | [`HARN-LNT-059`](#harn-lnt-059) | project rule-engine or native lint rule | — | — |
 | [`HARN-LNT-060`](#harn-lnt-060) | inline options dict bypasses the typed option constructors | `types/add-shape-annotation` | `surface-changing` |
-| [`HARN-LNT-061`](#harn-lnt-061) | nil coalesce fallback is nil | — | — |
+| [`HARN-LNT-061`](#harn-lnt-061) | nil coalesce fallback is nil | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-062`](#harn-lnt-062) | nil coalesce fallback is unreachable | — | — |
 | [`HARN-LNT-063`](#harn-lnt-063) | non-null assertion `!` on an already-non-nil value | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-064`](#harn-lnt-064) | a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race | — | — |
+| [`HARN-LNT-065`](#harn-lnt-065) | nil coalesce fallback repeats the left identifier | `expressions/simplify` | `behavior-preserving` |
 
 ## FMT — Formatter
 
@@ -3383,15 +3384,30 @@ nudge toward the single documented path.
 
 nil coalesce fallback is nil
 
-A non-null assertion (`expr!`) was applied to a value whose type is already
-non-nil, so the assertion does nothing and can be removed.
+- **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
+- Simplify the expression to its canonical form
+
+#### What it means
+
+The fallback side of a nil-coalescing expression is the literal `nil`:
+
+```harn
+const value = task?.flag ?? nil
+```
+
+That expression is equivalent to `task?.flag`. If the left side is present, its
+value is returned; if it is absent, `?? nil` returns `nil`, which is already the
+left side's absent value.
 
 #### How to fix
 
-- Apply the lint's auto-fix where one is offered (`harn lint --fix`) to drop the
-  trailing `!`.
-- Suppress the lint with an attribute only when the surrounding code is
-  intentionally non-idiomatic.
+Remove the fallback:
+
+```harn
+const value = task?.flag
+```
+
+Use a real default only when the surrounding code needs a non-nil value.
 
 ### `HARN-LNT-062`
 
@@ -3483,6 +3499,37 @@ a multi-threaded runtime it is a genuine data race in the logical sense.
   accept that ordering is nondeterministic.
 - Reassigning a variable that is declared *inside* the branch body is fine and
   never flagged — only captures from an enclosing scope trip this lint.
+
+### `HARN-LNT-065`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+nil coalesce fallback repeats the left identifier
+
+- **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
+- Simplify the expression to its canonical form
+
+#### What it means
+
+Both sides of a nil-coalescing expression are the same identifier:
+
+```harn
+const value = task ?? task
+```
+
+For a plain identifier, this is equivalent to `task`. If `task` is present, the
+left side wins; if it is `nil`, the fallback evaluates to the same `nil` value.
+
+#### How to fix
+
+Remove the fallback:
+
+```harn
+const value = task
+```
+
+If a real recovery path is needed, replace the right side with an actual
+default or explicitly handle `nil` before using the value.
 
 ### `HARN-FMT-001`
 

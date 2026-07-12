@@ -160,7 +160,7 @@ fn __probe_typecheck_diagnostics(stdout) -> dict {
   const envelope = unwrap(parsed)
   const summary = envelope?.data?.summary ?? envelope?.summary ?? {}
   const {errors = -1, warnings = -1} = summary ?? {}
-  return {parsed: true, errors: errors, warnings: warnings, envelope_ok: envelope?.ok ?? nil}
+  return {parsed: true, errors: errors, warnings: warnings, envelope_ok: envelope?.ok}
 }
 
 fn __probe_typecheck(body, opts) -> dict {

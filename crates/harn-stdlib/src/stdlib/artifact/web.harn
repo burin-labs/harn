@@ -201,7 +201,7 @@ pub fn web_artifact_text_fallback(html, options = nil) {
     .replace("&quot;", "\"")
     .replace("&#39;", "'")
   const fallback = trim(regex_replace("\\s+", " ", decoded))
-  const max_chars = options?.max_chars ?? nil
+  const max_chars = options?.max_chars
   if max_chars != nil && len(fallback) > max_chars {
     return substring(fallback, 0, max_chars)
   }

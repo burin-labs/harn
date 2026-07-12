@@ -311,10 +311,10 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
       next_step: verdict?.next_step ?? "",
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
       source: verdict?.source ?? "unknown",
-      trigger: verdict?.trigger ?? nil,
-      reason: verdict?.reason ?? nil,
+      trigger: verdict?.trigger,
+      reason: verdict?.reason,
       confirm: verdict?.confirm ?? !verdict.vetoed,
-      converted_from: verdict?.converted_from ?? nil,
+      converted_from: verdict?.converted_from,
       specific_gaps: verdict?.specific_gaps ?? [],
       accepted_evidence: verdict?.accepted_evidence ?? [],
     },
@@ -445,7 +445,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
       done_judge_cap_reached = true
     } else {
       verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
-      verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger ?? nil}
+      verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger}
       __emit_judge_decision(session.session_id, iteration, verdict)
     }
   }
@@ -758,7 +758,7 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
   }
   const resolved = budgeted.verdict
   if resolved?.ok ?? false {
-    return {confirm: true, reason: resolved?.reason ?? "", converted_from: resolved?.converted_from ?? nil}
+    return {confirm: true, reason: resolved?.reason ?? "", converted_from: resolved?.converted_from}
   }
   return {confirm: false, message: to_string(resolved?.feedback ?? ""), reason: resolved?.reason ?? ""}
 }

@@ -15,7 +15,7 @@ fn __read_options(options) {
   return {
     strict: opts?.strict ?? false,
     max_records: to_int(opts?.max_records) ?? 0,
-    on_error: opts?.on_error ?? nil,
+    on_error: opts?.on_error,
   }
 }
 

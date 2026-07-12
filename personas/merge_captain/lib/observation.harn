@@ -11,7 +11,7 @@ pub fn from_github(pr, checks, required_checks) {
     { check -> {
       name: check.name ?? check.context ?? "",
       status: check.status ?? "unknown",
-      conclusion: check.conclusion ?? nil,
+      conclusion: check.conclusion,
     } },
   )
   const conclusion_for = { name ->
@@ -26,14 +26,14 @@ pub fn from_github(pr, checks, required_checks) {
   const missing_required = (required_checks ?? [])
     .filter(
     { name ->
-      let c = conclusion_for(name)
+      const c = conclusion_for(name)
       c == nil || c.status != "completed"
     },
   )
   const failed_required = (required_checks ?? [])
     .filter(
     { name ->
-      let c = conclusion_for(name)
+      const c = conclusion_for(name)
       c != nil && c.status == "completed" && c.conclusion != "success" && c.conclusion != "neutral"
     },
   )

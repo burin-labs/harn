@@ -86,7 +86,7 @@ fn __record_to_fixture(value, line_no) -> string {
   if value["prompt"] == nil {
     throw "trace line " + to_string(line_no) + " is missing `prompt`"
   }
-  const response = value["response"] ?? nil
+  const response = value["response"]
   const response_obj = __response_object(response)
   const top_tool_calls = __coerce_tool_calls(value["tool_calls"])
   const resp_tool_calls = __coerce_tool_calls(response_obj["tool_calls"])

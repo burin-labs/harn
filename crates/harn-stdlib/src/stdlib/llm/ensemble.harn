@@ -211,7 +211,7 @@ pub fn best_of_n(prompt, system, opts = nil) {
     const best = samples[safe_idx]
     return {
       ok: true,
-      best: {text: best?.text ?? "", index: safe_idx, score: verdict?.score ?? nil},
+      best: {text: best?.text ?? "", index: safe_idx, score: verdict?.score},
       candidates: samples,
       judge: "closure",
       reasoning: to_string(verdict?.reasoning ?? ""),
@@ -528,14 +528,14 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
     i = i + 1
   }
   const raw = parallel each indexed with { max_concurrent: __clamp_int(cfg?.max_concurrent ?? 4, 1, 64) } { entry ->
-    let started = harness.clock.now_ms()
-    let r = try {
+    const started = harness.clock.now_ms()
+    const r = try {
       judge_fn(entry.item)
     }
-    let duration = harness.clock.now_ms() - started
+    const duration = harness.clock.now_ms() - started
     if is_err(r) {
-      let err = unwrap_err(r)
-      let record = {index: entry.index, item: entry.item, ok: false, error: err, duration_ms: duration}
+      const err = unwrap_err(r)
+      const record = {index: entry.index, item: entry.item, ok: false, error: err, duration_ms: duration}
       if on_progress != nil {
         let _ = try {
           on_progress({index: entry.index, total: total, item: entry.item, verdict: nil})
@@ -543,8 +543,8 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
       }
       record
     } else {
-      let verdict = unwrap(r)
-      let record = {index: entry.index, item: entry.item, ok: true, verdict: verdict, duration_ms: duration}
+      const verdict = unwrap(r)
+      const record = {index: entry.index, item: entry.item, ok: true, verdict: verdict, duration_ms: duration}
       if on_progress != nil {
         let _ = try {
           on_progress({index: entry.index, total: total, item: entry.item, verdict: verdict})

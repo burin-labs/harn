@@ -69,7 +69,7 @@ fn __guardrails_validate_llm_config(cfg) {
   if type_of(meta_prompt) != "string" {
     throw "llm_risk_classifier: meta_prompt must be a string"
   }
-  const provider = cfg?.provider ?? nil
+  const provider = cfg?.provider
   if provider != nil && type_of(provider) != "string" {
     throw "llm_risk_classifier: provider must be a string"
   }
@@ -231,10 +231,10 @@ pub fn prompt_injection_scanner(opts) -> string {
 pub fn llm_risk_classifier(opts) -> string {
   const cfg = __guardrails_validate_llm_config(opts ?? {})
   const scan_fn = { payload, context ->
-    let payload_text = json_stringify(payload)
-    let envelope = llm_call_safe(payload_text, cfg.meta_prompt, __guardrails_classifier_options(cfg))
-    let raw_text = __guardrails_extract_text(envelope)
-    let verdict = __guardrails_parse_verdict(raw_text)
+    const payload_text = json_stringify(payload)
+    const envelope = llm_call_safe(payload_text, cfg.meta_prompt, __guardrails_classifier_options(cfg))
+    const raw_text = __guardrails_extract_text(envelope)
+    const verdict = __guardrails_parse_verdict(raw_text)
     if len(to_string(verdict.error ?? "")) > 0 {
       return {verdict: "allow", reason: "classifier-error: " + to_string(verdict.error)}
     }
@@ -250,7 +250,7 @@ pub fn llm_risk_classifier(opts) -> string {
           + to_string(verdict.reason ?? ""),
       }
     }
-    let final_verdict = if verdict.verdict == "block" {
+    const final_verdict = if verdict.verdict == "block" {
       cfg.on_high_risk
     } else {
       verdict.verdict

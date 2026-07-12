@@ -5,7 +5,7 @@
  *
  *     let input = pipeline_input() ?? {}
  *     let path = input?.path ?? ""          // before: one let per field,
- *     let namespace = input?.namespace ?? nil   //   source repeated every line
+ *     let namespace = input?.namespace       //   source repeated every line
  *     let retries = input?.retries ?? 0
  *
  *     let { path = "", namespace = nil, retries = 0 } = pipeline_input() ?? {}

@@ -1602,7 +1602,7 @@ fn __http_result(harness: Harness, method: string, url: string, options: dict) -
   const parsed = __parse_response_body(body_text)
   return {
     ok: response?.ok ?? false,
-    status: response?.status ?? nil,
+    status: response?.status,
     headers: response?.headers ?? {},
     body: parsed,
     body_text: body_text,
@@ -1781,8 +1781,8 @@ fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
       + {
       status: "submitted",
       provider_batch_id: safe_string(body["id"], ""),
-      provider_status: body["processing_status"] ?? nil,
-      results_url: body["results_url"] ?? nil,
+      provider_status: body["processing_status"],
+      results_url: body["results_url"],
       response_status: response["status"],
       response: body,
     },
@@ -1937,12 +1937,12 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       + {
       status: "submitted",
       provider_batch_id: provider_batch_id,
-      provider_status: body["state"] ?? nil,
+      provider_status: body["state"],
       input_dataset_id: input_dataset_id,
       input_dataset_resource: __fireworks_dataset_resource(account_id, input_dataset_id),
       output_dataset_id: output_dataset_id,
       output_dataset_resource: __fireworks_dataset_resource(account_id, output_dataset_id),
-      job_progress: body["jobProgress"] ?? nil,
+      job_progress: body["jobProgress"],
       input_dataset: input_dataset,
       upload: upload,
       response_status: response["status"],
@@ -2064,10 +2064,10 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
       + {
       status: "submitted",
       provider_batch_id: safe_string(batch_body["id"], ""),
-      provider_status: batch_body["status"] ?? nil,
+      provider_status: batch_body["status"],
       input_file_id: safe_string(upload["file_id"], ""),
-      output_file_id: batch_body["output_file_id"] ?? nil,
-      error_file_id: batch_body["error_file_id"] ?? nil,
+      output_file_id: batch_body["output_file_id"],
+      error_file_id: batch_body["error_file_id"],
       upload: upload,
       response_status: response["status"],
       response: body,
@@ -2130,10 +2130,10 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
       + {
       status: "submitted",
       provider_batch_id: safe_string(body["id"], ""),
-      provider_status: body["status"] ?? nil,
+      provider_status: body["status"],
       input_files: body["input_files"] ?? [safe_string(upload["file_id"], "")],
-      output_file: body["output_file"] ?? nil,
-      error_file: body["error_file"] ?? nil,
+      output_file: body["output_file"],
+      error_file: body["error_file"],
       upload: upload,
       response_status: response["status"],
       response: body,
@@ -2220,7 +2220,7 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __header_value(headers: dict, name: string) -> string {
-  const exact = headers[name] ?? headers[lowercase(name)] ?? nil
+  const exact = headers[name] ?? headers[lowercase(name)]
   if exact != nil {
     return trim(to_string(exact))
   }
@@ -2244,7 +2244,7 @@ fn __gemini_model_path(model: string) -> string {
 fn __gemini_provider_status(body: dict) -> string {
   const metadata = safe_dict(body["metadata"])
   const response = safe_dict(body["response"])
-  const status = body["state"] ?? metadata["state"] ?? response["state"] ?? nil
+  const status = body["state"] ?? metadata["state"] ?? response["state"]
   const text = safe_string(status, "")
   if text != "" {
     return text
@@ -2298,7 +2298,7 @@ fn __upload_gemini_jsonl_file(
       ok: false,
       error: "gemini batch file upload start failed using " + credential_env,
       status: start["status"],
-      response: start["body"] ?? nil,
+      response: start["body"],
     }
   }
   const upload = __http_result(
@@ -2331,7 +2331,7 @@ fn __upload_gemini_jsonl_file(
   return {
     ok: true,
     file_name: file_name,
-    file_uri: file["uri"] ?? nil,
+    file_uri: file["uri"],
     path: file_path,
     start_status: start["status"],
     status: upload["status"],
@@ -2709,7 +2709,7 @@ fn __batch_job_lifecycle(job: dict, phase: string, dry_run: bool) -> dict {
     phase: phase,
     state: state,
     dry_run: dry_run,
-    provider_status: job["provider_status"] ?? nil,
+    provider_status: job["provider_status"],
     terminal: __batch_lifecycle_terminal(state, dry_run),
     result_available: __batch_lifecycle_result_available(state),
     cancelable: __batch_lifecycle_cancelable(job, state, dry_run),
@@ -2769,24 +2769,24 @@ fn __status_job_base(job: dict, dry_run: bool) -> dict {
 }
 
 fn __cached_status_job(job: dict, dry_run: bool) -> dict {
-  const provider_status = job["provider_status"] ?? job["status"] ?? nil
+  const provider_status = job["provider_status"] ?? job["status"]
   return __status_job_base(job, dry_run)
     + {
     status: __provider_batch_status(provider_status),
     provider_status: provider_status,
     status_checked: false,
-    output_file_id: job["output_file_id"] ?? nil,
-    error_file_id: job["error_file_id"] ?? nil,
-    output_file: job["output_file"] ?? nil,
-    error_file: job["error_file"] ?? nil,
-    results_url: job["results_url"] ?? nil,
-    responses_file: job["responses_file"] ?? nil,
-    input_dataset_id: job["input_dataset_id"] ?? nil,
-    input_dataset_resource: job["input_dataset_resource"] ?? nil,
-    output_dataset_id: job["output_dataset_id"] ?? nil,
-    output_dataset_resource: job["output_dataset_resource"] ?? nil,
-    job_progress: job["job_progress"] ?? nil,
-    response: job["response"] ?? nil,
+    output_file_id: job["output_file_id"],
+    error_file_id: job["error_file_id"],
+    output_file: job["output_file"],
+    error_file: job["error_file"],
+    results_url: job["results_url"],
+    responses_file: job["responses_file"],
+    input_dataset_id: job["input_dataset_id"],
+    input_dataset_resource: job["input_dataset_resource"],
+    output_dataset_id: job["output_dataset_id"],
+    output_dataset_resource: job["output_dataset_resource"],
+    job_progress: job["job_progress"],
+    response: job["response"],
   }
 }
 
@@ -2815,7 +2815,7 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
       errors: [provider + " batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  const provider_status = body["status"] ?? nil
+  const provider_status = body["status"]
   return {
     ok: true,
     job: base_job
@@ -2823,8 +2823,8 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
       status: __provider_batch_status(provider_status),
       provider_status: provider_status,
       status_checked: true,
-      output_file_id: body["output_file_id"] ?? nil,
-      error_file_id: body["error_file_id"] ?? nil,
+      output_file_id: body["output_file_id"],
+      error_file_id: body["error_file_id"],
       response_status: response["status"],
       response: body,
     },
@@ -2857,7 +2857,7 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
       errors: ["anthropic batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  const provider_status = body["processing_status"] ?? nil
+  const provider_status = body["processing_status"]
   return {
     ok: true,
     job: base_job
@@ -2865,7 +2865,7 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
       status: __provider_batch_status(provider_status),
       provider_status: provider_status,
       status_checked: true,
-      results_url: body["results_url"] ?? nil,
+      results_url: body["results_url"],
       response_status: response["status"],
       response: body,
     },
@@ -2898,7 +2898,7 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
       errors: ["mistral batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  const provider_status = body["status"] ?? nil
+  const provider_status = body["status"]
   return {
     ok: true,
     job: base_job
@@ -2906,8 +2906,8 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
       status: __provider_batch_status(provider_status),
       provider_status: provider_status,
       status_checked: true,
-      output_file: body["output_file"] ?? nil,
-      error_file: body["error_file"] ?? nil,
+      output_file: body["output_file"],
+      error_file: body["error_file"],
       response_status: response["status"],
       response: body,
     },
@@ -2959,7 +2959,7 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
       errors: ["fireworks batch status failed for job " + safe_string(job["id"], "")],
     }
   }
-  const provider_status = body["state"] ?? nil
+  const provider_status = body["state"]
   const output_dataset = safe_string(
     body["outputDatasetId"],
     safe_string(job["output_dataset_resource"], safe_string(job["output_dataset_id"], "")),
@@ -2971,8 +2971,8 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
       status: __provider_batch_status(provider_status),
       provider_status: provider_status,
       status_checked: true,
-      input_dataset_id: job["input_dataset_id"] ?? nil,
-      input_dataset_resource: job["input_dataset_resource"] ?? nil,
+      input_dataset_id: job["input_dataset_id"],
+      input_dataset_resource: job["input_dataset_resource"],
       output_dataset_id: if starts_with(output_dataset, "accounts/") {
         safe_string(job["output_dataset_id"], output_dataset)
       } else {
@@ -2983,7 +2983,7 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
       } else {
         __fireworks_dataset_resource(account_id, output_dataset)
       },
-      job_progress: body["jobProgress"] ?? nil,
+      job_progress: body["jobProgress"],
       response_status: response["status"],
       response: body,
     },
@@ -3094,7 +3094,7 @@ fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
       status: __provider_batch_status(provider_status),
       provider_status: provider_status,
       status_checked: true,
-      input_file_name: job["input_file_name"] ?? nil,
+      input_file_name: job["input_file_name"],
       responses_file: __gemini_responses_file(body),
       response_status: response["status"],
       response: body,
@@ -3315,19 +3315,19 @@ fn __cancel_status(job: dict, dry_run: bool) -> dict {
     batch: safe_dict(job["batch"]),
     request_count: __safe_int(job["request_count"]) ?? 0,
     provider_batch_id: safe_string(job["provider_batch_id"], ""),
-    provider_status: job["provider_status"] ?? nil,
+    provider_status: job["provider_status"],
     source_status: safe_string(job["status"], ""),
-    output_file_id: job["output_file_id"] ?? nil,
-    error_file_id: job["error_file_id"] ?? nil,
-    output_file: job["output_file"] ?? nil,
-    error_file: job["error_file"] ?? nil,
-    results_url: job["results_url"] ?? nil,
-    responses_file: job["responses_file"] ?? nil,
-    input_dataset_id: job["input_dataset_id"] ?? nil,
-    input_dataset_resource: job["input_dataset_resource"] ?? nil,
-    output_dataset_id: job["output_dataset_id"] ?? nil,
-    output_dataset_resource: job["output_dataset_resource"] ?? nil,
-    job_progress: job["job_progress"] ?? nil,
+    output_file_id: job["output_file_id"],
+    error_file_id: job["error_file_id"],
+    output_file: job["output_file"],
+    error_file: job["error_file"],
+    results_url: job["results_url"],
+    responses_file: job["responses_file"],
+    input_dataset_id: job["input_dataset_id"],
+    input_dataset_resource: job["input_dataset_resource"],
+    output_dataset_id: job["output_dataset_id"],
+    output_dataset_resource: job["output_dataset_resource"],
+    job_progress: job["job_progress"],
     dry_run: dry_run,
   }
 }
@@ -3450,8 +3450,8 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
       cancel_requested: true,
       skipped: false,
       cancel_operation: __cancel_operation_for_job(harness, job, provider),
-      output_file_id: body["output_file_id"] ?? job["output_file_id"] ?? nil,
-      error_file_id: body["error_file_id"] ?? job["error_file_id"] ?? nil,
+      output_file_id: body["output_file_id"] ?? job["output_file_id"],
+      error_file_id: body["error_file_id"] ?? job["error_file_id"],
       response_status: response["status"],
       response: body,
     },
@@ -3493,7 +3493,7 @@ fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
       cancel_requested: true,
       skipped: false,
       cancel_operation: __cancel_operation_for_job(harness, job, "anthropic"),
-      results_url: body["results_url"] ?? job["results_url"] ?? nil,
+      results_url: body["results_url"] ?? job["results_url"],
       response_status: response["status"],
       response: body,
     },
@@ -3754,13 +3754,13 @@ fn __download_status(job: dict, dry_run: bool) -> dict {
     tool_format: safe_string(job["tool_format"], ""),
     batch: safe_dict(job["batch"]),
     provider_batch_id: safe_string(job["provider_batch_id"], ""),
-    provider_status: job["provider_status"] ?? nil,
-    responses_file: job["responses_file"] ?? nil,
-    input_dataset_id: job["input_dataset_id"] ?? nil,
-    input_dataset_resource: job["input_dataset_resource"] ?? nil,
-    output_dataset_id: job["output_dataset_id"] ?? nil,
-    output_dataset_resource: job["output_dataset_resource"] ?? nil,
-    job_progress: job["job_progress"] ?? nil,
+    provider_status: job["provider_status"],
+    responses_file: job["responses_file"],
+    input_dataset_id: job["input_dataset_id"],
+    input_dataset_resource: job["input_dataset_resource"],
+    output_dataset_id: job["output_dataset_id"],
+    output_dataset_resource: job["output_dataset_resource"],
+    job_progress: job["job_progress"],
     source_status: safe_string(job["status"], ""),
     dry_run: dry_run,
   }
@@ -3843,7 +3843,7 @@ fn __download_text_file(
     return {
       ok: false,
       artifact: __download_artifact_record(label, handle, out_path, operation, "", false)
-        + {response_status: response["status"], response: response["body"] ?? nil},
+        + {response_status: response["status"], response: response["body"]},
       errors: [provider + " batch result download failed for " + label + " handle " + handle],
     }
   }
@@ -3975,7 +3975,7 @@ fn __download_fireworks_results(
     const out_path = __download_artifact_path(out_dir, job, label)
     const downloaded = __download_text_file(harness, "fireworks", signed_url, {}, "", label, filename, out_path, max_bytes)
     errors = errors + safe_list(downloaded["errors"])
-    const artifact = downloaded["artifact"] ?? nil
+    const artifact = downloaded["artifact"]
     if artifact != nil {
       artifacts = artifacts.push(artifact)
     }
@@ -4226,7 +4226,7 @@ fn __download_gemini_responses(
 fn __append_download_result(state: dict, result: dict) -> dict {
   let artifacts = safe_list(state["artifacts"])
   let errors = safe_list(state["errors"]) + safe_list(result["errors"])
-  const artifact = result["artifact"] ?? nil
+  const artifact = result["artifact"]
   if artifact != nil {
     artifacts = artifacts.push(artifact)
   }

@@ -366,12 +366,11 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
   const mean_cost = __mean_or_nil(costs)
   const stdev_cost = __stdev_or_nil(costs)
   const group = __text(metadata?.group ?? metadata?.language ?? "")
-  const case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint ?? nil
+  const case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint
   const harness_config_fingerprint = metadata?.harnessConfigFingerprint
     ?? metadata?.harness_config_fingerprint
     ?? metadata?.harnessFingerprint
     ?? metadata?.harness_fingerprint
-    ?? nil
   return {
     name: name,
     case_name: name,
