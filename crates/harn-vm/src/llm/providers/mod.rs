@@ -36,3 +36,10 @@ pub(crate) use ollama::OllamaProvider;
 pub(crate) use openai_compat::OpenAiCompatibleProvider;
 pub(crate) use openai_responses::OpenAiResponsesProvider;
 pub(crate) use vertex::VertexProvider;
+
+/// Deterministic in-process providers used by tests and replay. They are not
+/// network routes and must not participate in provider-health recovery.
+pub(crate) fn is_internal_simulator(provider: &str) -> bool {
+    MockProvider::should_intercept(provider)
+        || super::fake::FakeLlmProvider::should_intercept(provider)
+}

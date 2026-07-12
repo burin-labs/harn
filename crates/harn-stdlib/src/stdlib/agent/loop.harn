@@ -1160,7 +1160,7 @@ fn __agent_await_resumption_call(tool_calls) {
 
 fn __agent_await_resumption_args(call) {
   const args = __tool_call_args(call)
-  return agent_await_resumption(args?.reason ?? "", args?.conditions ?? nil, args?.resume_by ?? nil)
+  return agent_await_resumption(args?.reason ?? "", args?.conditions, args?.resume_by)
 }
 
 /**
@@ -2870,11 +2870,9 @@ fn __agent_loop_has_partial_route_patch(loop_opts) {
     && !(loop_opts?._agent_loop_last_llm_route_patch_complete ?? false)
 }
 
-fn __agent_loop_enable_escalation_failover(llm_opts, primary_provider, primary_model, loop_opts) {
-  if !__agent_loop_route_differs_from_primary(llm_opts, primary_provider, primary_model) {
-    return llm_opts
-  }
-  if __agent_loop_has_partial_route_patch(loop_opts)
+fn __agent_loop_enable_equivalent_failover(llm_opts, primary_provider, primary_model, loop_opts) {
+  const changed_route = __agent_loop_route_differs_from_primary(llm_opts, primary_provider, primary_model)
+  if (changed_route && __agent_loop_has_partial_route_patch(loop_opts))
     || __agent_loop_has_explicit_routing_owner(llm_opts)
     || llm_opts?.equivalent_failover != nil {
     return llm_opts
@@ -4390,7 +4388,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
         const turn_prompt = __agent_loop_build_turn_prompt(session, turn_llm_opts, iteration_index)
-        const llm_opts = __agent_loop_enable_escalation_failover(
+        const llm_opts = __agent_loop_enable_equivalent_failover(
           turn_llm_opts
             + {
             messages: turn_prompt.messages,
