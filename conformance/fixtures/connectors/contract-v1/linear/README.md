@@ -89,7 +89,7 @@ scripts or private automation. Minimum OAuth scopes depend on the methods used:
 - `issues:create` is only needed for workflows that create issues.
 - Avoid `admin`; these helpers do not require it.
 
-## Inbound Events
+## Inbound events
 
 Supported Linear webhook resources are:
 
@@ -106,7 +106,7 @@ with their lower-case resource name; unknown actions are rejected. Dedupe keys
 prefer `linear:<Linear-Delivery>`, then `linear:<webhookId>`, then
 `linear:sha256:<raw-body-hash>`.
 
-## Outbound Methods
+## Outbound methods
 
 `call("graphql", args)` is the escape hatch. It accepts `query`, optional
 `variables`, optional `operation_name` / `operationName`, auth, and optional
