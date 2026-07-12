@@ -297,7 +297,7 @@ fn __model_matches_identity_filters(model, opts) {
 
 fn __model_matches_catalog_constraints(model, opts, available) {
   const want_open_weight = opts?.open_weight
-  if want_open_weight != nil && (model?.open_weight ?? nil) != want_open_weight {
+  if want_open_weight != nil && model?.open_weight != want_open_weight {
     return false
   }
   const min_tpm = opts?.min_tpm

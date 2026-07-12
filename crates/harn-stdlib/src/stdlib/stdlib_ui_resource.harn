@@ -546,7 +546,7 @@ pub fn ui_context_update_envelope(key: string, value, options: UiContextUpdateOp
   if context_key == "" {
     throw "std/ui_resource: context update key is required"
   }
-  const id = (options?.id ?? "ui_ctx_") + substring(sha256(context_key + json_stringify(value ?? nil)), 0, 16)
+  const id = (options?.id ?? "ui_ctx_") + substring(sha256(context_key + json_stringify(value)), 0, 16)
   return {
     schema: UI_CONTEXT_UPDATE_SCHEMA,
     jsonrpc: "2.0",

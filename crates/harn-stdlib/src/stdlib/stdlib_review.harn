@@ -50,5 +50,5 @@ pub fn review_rubrics() {
 
 pub fn review_rubric(name) {
   const rubrics = review_rubrics()
-  return rubrics[name] ?? nil
+  return rubrics[name]
 }

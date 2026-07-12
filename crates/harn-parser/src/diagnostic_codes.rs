@@ -353,6 +353,7 @@ diagnostic_codes! {
     LintNilCoalesceUnreachableFallback, "HARN-LNT-062", Lnt, "nil coalesce fallback is unreachable";
     LintUnnecessaryNonNullAssert, "HARN-LNT-063", Lnt, "non-null assertion `!` on an already-non-nil value";
     LintMutableCaptureAcrossParallel, "HARN-LNT-064", Lnt, "a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race";
+    LintNilCoalesceSelfFallback, "HARN-LNT-065", Lnt, "nil coalesce fallback repeats the left identifier";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
@@ -832,7 +833,9 @@ impl Code {
             Code::LintUnnecessaryElseReturn | Code::LintLetThenReturn => {
                 Some(&REPAIR_CONTROL_FLOW_FLATTEN)
             }
-            Code::LintRedundantNilTernary
+            Code::LintNilCoalesceNoop
+            | Code::LintNilCoalesceSelfFallback
+            | Code::LintRedundantNilTernary
             | Code::LintUnnecessarySafeNavigation
             | Code::LintUnnecessaryNonNullAssert
             | Code::LintPreferOptionalShorthand

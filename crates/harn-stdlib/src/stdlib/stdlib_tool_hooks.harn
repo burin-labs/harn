@@ -277,11 +277,11 @@ fn __classifier_validate_config(cfg) {
   if type_of(meta_prompt) != "string" {
     throw "preset_run_command: llm_classifier.meta_prompt must be a string"
   }
-  const provider = cfg?.provider ?? nil
+  const provider = cfg?.provider
   if provider != nil && type_of(provider) != "string" {
     throw "preset_run_command: llm_classifier.provider must be a string"
   }
-  const cache = cfg?.cache ?? nil
+  const cache = cfg?.cache
   const cache_ttl_ms = if cache == nil {
     0
   } else {
@@ -452,13 +452,13 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
   const verdict = if cached != nil {
     cached
   } else {
-    let envelope = llm_call_safe(
+    const envelope = llm_call_safe(
       original_command,
       classifier_cfg.meta_prompt,
       __classifier_build_options(classifier_cfg),
     )
-    let text = __classifier_extract_text(envelope)
-    let parsed = __classifier_parse_verdict(text)
+    const text = __classifier_extract_text(envelope)
+    const parsed = __classifier_parse_verdict(text)
     if parsed.kind != "error" && classifier_cfg.cache_ttl_ms > 0 {
       __tool_hooks_classifier_cache_put(cache_key, parsed, now, classifier_cfg.cache_ttl_ms)
     }

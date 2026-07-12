@@ -98,11 +98,11 @@ fn _empty_output_run(args) {
     status: args.status,
     approval_state: args.approval_state,
     blocking_actions: args.blocking_actions ?? [],
-    agent_loop: args.agent_loop ?? nil,
+    agent_loop: args.agent_loop,
     output: nil,
     validation_errors: args.errors ?? [],
     raw_text: args.raw_text ?? "",
-    typed_checkpoint: args.typed_checkpoint ?? nil,
+    typed_checkpoint: args.typed_checkpoint,
     started_at: args.started_at,
     finished_at: args.finished_at ?? now_ms(),
   }
