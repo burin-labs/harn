@@ -19,6 +19,15 @@ impl InjectionDelivery {
             Self::AfterNextToolCall => "after_next_tool_call",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "turn_boundary" => Some(Self::TurnBoundary),
+            "immediate" => Some(Self::Immediate),
+            "after_next_tool_call" => Some(Self::AfterNextToolCall),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

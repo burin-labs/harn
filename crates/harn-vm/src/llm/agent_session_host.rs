@@ -33,6 +33,7 @@ const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assista
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
+const HOST_SESSION_DRAIN_HOST_INJECTIONS: &str = "__host_agent_session_drain_host_injections";
 const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
 const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_bridge_injection";
 const HOST_SESSION_PUSH_USER_MESSAGE: &str = "__host_agent_session_push_user_message";
@@ -2480,20 +2481,77 @@ fn host_agent_session_drain_feedback_builtin(
             )))
         }
     };
-    let drained = crate::orchestration::agent_inbox::drain(&session_id)
+    let drained = crate::orchestration::agent_inbox::drain_where(&session_id, |entry| {
+        entry.payload.is_none()
+    })
+    .into_iter()
+    .map(|entry| {
+        let mut item = crate::value::DictMap::new();
+        item.put_str("kind", entry.kind);
+        item.put_str("content", entry.content);
+        item.put_str("source", entry.source);
+        item.insert(
+            crate::value::intern_key("sequence"),
+            VmValue::Int(entry.sequence as i64),
+        );
+        item.insert(crate::value::intern_key("ts_ms"), VmValue::Int(entry.ts_ms));
+        VmValue::dict(item)
+    })
+    .collect::<Vec<_>>();
+    Ok(VmValue::List(std::sync::Arc::new(drained)))
+}
+
+/// Drain queued typed host injections for a delivery seam and append them to the
+/// live transcript.
+#[harn_builtin(
+    sig = "__host_agent_session_drain_host_injections(session_id: string, delivery: string, seam: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_session_drain_host_injections_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_DRAIN_HOST_INJECTIONS}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let delivery = match args.get(1) {
+        Some(VmValue::String(s)) => crate::agent_events::InjectionDelivery::parse(s.as_str())
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "{HOST_SESSION_DRAIN_HOST_INJECTIONS}: unsupported delivery '{}'",
+                    s.as_str()
+                ))
+            })?,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_DRAIN_HOST_INJECTIONS}: unsupported delivery '{}'",
+                other.display()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_DRAIN_HOST_INJECTIONS}: delivery must be a string"
+            )))
+        }
+    };
+    let seam = match args.get(2) {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_DRAIN_HOST_INJECTIONS}: seam must be a non-empty string"
+            )))
+        }
+    };
+    let drained = crate::agent_sessions::drain_queued_host_injections(&session_id, delivery, &seam)
+        .map_err(VmError::Runtime)?
         .into_iter()
-        .map(|entry| {
-            let mut item = crate::value::DictMap::new();
-            item.put_str("kind", entry.kind);
-            item.put_str("content", entry.content);
-            item.put_str("source", entry.source);
-            item.insert(
-                crate::value::intern_key("sequence"),
-                VmValue::Int(entry.sequence as i64),
-            );
-            item.insert(crate::value::intern_key("ts_ms"), VmValue::Int(entry.ts_ms));
-            VmValue::dict(item)
-        })
+        .map(|value| json_to_vm(&value))
         .collect::<Vec<_>>();
     Ok(VmValue::List(std::sync::Arc::new(drained)))
 }
@@ -3462,6 +3520,7 @@ async fn daemon_checkpoint_drain(
         kind: kind.to_string(),
         delivered,
         inbox_delivered: 0,
+        typed_delivered: 0,
         dispatch_skipped: false,
     };
     super::agent_runtime::emit_agent_event_with_ctx(Some(ctx), &event).await;
@@ -3996,6 +4055,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AGENT_SESSION_PAIR_ORPHANED_TOOL_USE_BUILTIN_DEF,
     &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
     &HOST_AGENT_SESSION_DRAIN_FEEDBACK_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_DRAIN_HOST_INJECTIONS_BUILTIN_DEF,
     &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
     &HOST_AGENT_TRUNCATED_TOOL_CALL_BUILTIN_DEF,
     &HOST_AGENT_SESSION_INJECT_FEEDBACK_BUILTIN_DEF,

@@ -59,6 +59,8 @@ use harn_clock::{Clock, RealClock};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
+use crate::agent_events::InjectionDelivery;
+
 /// A single inbox entry. Producers fill in `kind`, `content`, and
 /// `source`; the inbox stamps `sequence` and `ts_ms`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,6 +73,10 @@ pub struct InboxEntry {
     pub content: String,
     pub source: String,
     pub ts_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<InjectionDelivery>,
 }
 
 #[derive(Default)]
@@ -123,6 +129,53 @@ fn clock_arc() -> std::sync::Arc<dyn Clock> {
         .clone()
 }
 
+fn next_sequence(state: &mut InboxState) -> u64 {
+    state.seq = state.seq.wrapping_add(1).max(1);
+    state.seq
+}
+
+fn push_entry(
+    session_id: &str,
+    kind: &str,
+    content: &str,
+    source: &str,
+    payload: Option<serde_json::Value>,
+    delivery: Option<InjectionDelivery>,
+) -> u64 {
+    let reg = registry();
+    let (notify, sequence) = {
+        let mut map = lock_map(reg);
+        let state = map.entry(session_id.to_string()).or_default();
+        let sequence = next_sequence(state);
+        let entry = InboxEntry {
+            sequence,
+            session_id: session_id.to_string(),
+            kind: kind.to_string(),
+            content: content.to_string(),
+            source: source.to_string(),
+            ts_ms: harn_clock::now_wall_ms(&*clock_arc()),
+            payload,
+            delivery,
+        };
+        state.entries.push_back(entry);
+        (state.notify.clone(), sequence)
+    };
+    reg.sync_cv.notify_all();
+    notify.notify_waiters();
+    sequence
+}
+
+/// Reserve a sequence number in the same per-session domain as queued
+/// inbox entries without enqueuing an item. Immediate host injections
+/// use this so their typed transcript events have a total order with
+/// queued feedback/injection entries.
+pub fn reserve_sequence(session_id: &str) -> u64 {
+    let reg = registry();
+    let mut map = lock_map(reg);
+    let state = map.entry(session_id.to_string()).or_default();
+    next_sequence(state)
+}
+
 /// Install a clock implementation. Idempotent: only the first caller
 /// wins (subsequent calls are silently dropped) which matches the
 /// pattern used elsewhere in the runtime.
@@ -138,24 +191,20 @@ pub fn install_clock(clock: std::sync::Arc<dyn Clock>) {
 /// (background fs/glob workers without a session context) can drain
 /// with `drain("")`. New producers should always supply a session id.
 pub fn push(session_id: &str, kind: &str, content: &str, source: &str) {
-    let reg = registry();
-    let notify = {
-        let mut map = lock_map(reg);
-        let state = map.entry(session_id.to_string()).or_default();
-        state.seq = state.seq.wrapping_add(1).max(1);
-        let entry = InboxEntry {
-            sequence: state.seq,
-            session_id: session_id.to_string(),
-            kind: kind.to_string(),
-            content: content.to_string(),
-            source: source.to_string(),
-            ts_ms: harn_clock::now_wall_ms(&*clock_arc()),
-        };
-        state.entries.push_back(entry);
-        state.notify.clone()
-    };
-    reg.sync_cv.notify_all();
-    notify.notify_waiters();
+    let _ = push_entry(session_id, kind, content, source, None, None);
+}
+
+/// Queue a typed host injection for deterministic delivery at a later
+/// agent-loop seam. Returns the per-session sequence stamped on the
+/// inbox entry.
+pub fn push_host_injection(
+    session_id: &str,
+    kind: &str,
+    payload: serde_json::Value,
+    delivery: InjectionDelivery,
+    source: &str,
+) -> u64 {
+    push_entry(session_id, kind, "", source, Some(payload), Some(delivery))
 }
 
 /// Drain every entry currently queued for `session_id`, in FIFO order.

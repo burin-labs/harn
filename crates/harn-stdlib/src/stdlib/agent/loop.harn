@@ -68,6 +68,7 @@ import {
   agent_reminder_providers_fire,
   agent_session_drain_bridge_injections,
   agent_session_drain_feedback,
+  agent_session_drain_host_injections,
   agent_session_finalize,
   agent_session_init,
   agent_session_inject_feedback,
@@ -107,6 +108,14 @@ fn __agent_loop_clock_now_ms() {
 fn __agent_loop_clock_sleep_ms(delay_ms) {
   harness.clock.sleep_ms(delay_ms)
 }
+
+const __AGENT_LOOP_CHECKPOINT_ITERATION_START = "iteration_start"
+
+const __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH = "post_tool_dispatch"
+
+const __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY = "turn_boundary"
+
+const __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL = "after_next_tool_call"
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
   // When a harness registers an `on_delta` callback, issue the per-turn call
@@ -3350,18 +3359,33 @@ fn __agent_loop_suspend_checkpoint(session, iteration) {
  */
 fn __agent_loop_checkpoint_modes(kind) {
   if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
-    return {immediate: true, finish_step: false, audit_only: false, inbox: false}
+    return {immediate: true, finish_step: false, audit_only: false, inbox: false, typed_delivery: nil}
   }
-  if kind == "iteration_start" || kind == "post_tool_dispatch" || kind == "iteration_end" {
-    return {immediate: true, finish_step: true, audit_only: false, inbox: false}
+  if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START
+    || kind == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
+    || kind == "iteration_end" {
+    const typed_delivery = if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START {
+      __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY
+    } else if kind == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH {
+      __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL
+    } else {
+      nil
+    }
+    return {
+      immediate: true,
+      finish_step: true,
+      audit_only: false,
+      inbox: false,
+      typed_delivery: typed_delivery,
+    }
   }
   if kind == "pre_compact" || kind == "post_compact" {
-    return {immediate: false, finish_step: false, audit_only: false, inbox: true}
+    return {immediate: false, finish_step: false, audit_only: false, inbox: true, typed_delivery: nil}
   }
   if kind == "loop_exit" {
-    return {immediate: false, finish_step: false, audit_only: true, inbox: false}
+    return {immediate: false, finish_step: false, audit_only: true, inbox: false, typed_delivery: nil}
   }
-  return {immediate: false, finish_step: false, audit_only: false, inbox: false}
+  return {immediate: false, finish_step: false, audit_only: false, inbox: false, typed_delivery: nil}
 }
 
 /**
@@ -3395,6 +3419,11 @@ fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
     const result = agent_session_drain_bridge_injections(session_id, "audit_only")
     delivered = delivered + (result?.delivered ?? 0)
   }
+  let typed_delivered = 0
+  if modes.typed_delivery != nil {
+    const pending = agent_session_drain_host_injections(session_id, modes.typed_delivery, kind)
+    typed_delivered = len(pending ?? [])
+  }
   let inbox_delivered = 0
   if modes.inbox {
     const pending = agent_session_drain_feedback(session_id)
@@ -3413,6 +3442,7 @@ fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
       kind: kind,
       delivered: delivered,
       inbox_delivered: inbox_delivered,
+      typed_delivered: typed_delivered,
       dispatch_skipped: dispatch_skipped,
     },
   )
@@ -3424,12 +3454,14 @@ fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
       kind: kind,
       delivered: delivered,
       inbox_delivered: inbox_delivered,
+      typed_delivered: typed_delivered,
       dispatch_skipped: dispatch_skipped,
     },
   )
   return {
     delivered: delivered,
     inbox_delivered: inbox_delivered,
+    typed_delivered: typed_delivered,
     dispatch_skipped: dispatch_skipped,
     kind: kind,
   }

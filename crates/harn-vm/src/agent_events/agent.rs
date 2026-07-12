@@ -850,9 +850,11 @@ pub enum AgentEvent {
     /// `pre_compact`, `post_compact`, `daemon_idle_pre`,
     /// `daemon_idle_post`, `loop_exit`. `delivered` is the count of
     /// bridge injections drained at this seam (inbox drains are
-    /// reported separately under `inbox_delivered`). `dispatch_skipped`
-    /// is true only when an `interrupt_immediate` injection arrived at
-    /// `pre_tool_dispatch` and the pending tool batch was skipped.
+    /// reported separately under `inbox_delivered`). Typed host
+    /// injections delivered from `agent_inbox` are reported under
+    /// `typed_delivered`. `dispatch_skipped` is true only when an
+    /// `interrupt_immediate` injection arrived at `pre_tool_dispatch`
+    /// and the pending tool batch was skipped.
     LoopCheckpoint {
         session_id: String,
         iteration: usize,
@@ -860,6 +862,8 @@ pub enum AgentEvent {
         delivered: usize,
         #[serde(default, skip_serializing_if = "is_zero_usize")]
         inbox_delivered: usize,
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        typed_delivered: usize,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         dispatch_skipped: bool,
     },

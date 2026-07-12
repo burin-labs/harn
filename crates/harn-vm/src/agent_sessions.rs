@@ -1736,14 +1736,23 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
     })
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 enum HostInjectionKind {
     HostToolResult,
     HostAttachment,
 }
 
-#[derive(serde::Deserialize)]
+impl HostInjectionKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::HostToolResult => "host_tool_result",
+            Self::HostAttachment => "host_attachment",
+        }
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
 struct HostInjectionRequest {
     kind: HostInjectionKind,
     #[serde(default)]
@@ -1795,14 +1804,114 @@ pub fn inject_host_event(id: &str, injection: VmValue) -> Result<serde_json::Val
     let injection_json = crate::llm::helpers::vm_value_to_json(&injection);
     let request: HostInjectionRequest = serde_json::from_value(injection_json)
         .map_err(|error| format!("agent_inject_host_event: invalid injection: {error}"))?;
-    if request.delivery != InjectionDelivery::Immediate {
+    if !exists(id) {
         return Err(format!(
-            "agent_inject_host_event: delivery '{}' is reserved for queued injection in H2; H1 only supports 'immediate'",
-            request.delivery.as_str()
+            "agent_inject_host_event: unknown session id '{id}'"
         ));
     }
     let injection_id = uuid::Uuid::now_v7().to_string();
-    let sequence = next_host_injection_sequence(id)?;
+    if request.delivery == InjectionDelivery::Immediate {
+        let sequence = crate::orchestration::agent_inbox::reserve_sequence(id);
+        deliver_host_injection_request(id, injection_id.clone(), sequence, request, "immediate")?;
+        return Ok(serde_json::json!({
+            "injection_id": injection_id,
+            "sequence": sequence,
+            "delivery": InjectionDelivery::Immediate.as_str(),
+            "status": "injected",
+        }));
+    }
+    validate_host_injection_payload(request.kind, request.payload.clone())?;
+    let queued = serde_json::json!({
+        "injection_id": injection_id,
+        "request": request,
+    });
+    let sequence = crate::orchestration::agent_inbox::push_host_injection(
+        id,
+        request.kind.as_str(),
+        queued,
+        request.delivery,
+        "agent_inject_host_event",
+    );
+    Ok(serde_json::json!({
+        "injection_id": injection_id,
+        "sequence": sequence,
+        "delivery": request.delivery.as_str(),
+        "status": "queued",
+    }))
+}
+
+pub fn drain_queued_host_injections(
+    id: &str,
+    delivery: InjectionDelivery,
+    seam: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    if !exists(id) {
+        return Err(format!(
+            "agent_inject_host_event: unknown session id '{id}'"
+        ));
+    }
+    let entries = crate::orchestration::agent_inbox::drain_where(id, |entry| {
+        entry.payload.is_some() && entry.delivery == Some(delivery)
+    });
+    let mut delivered = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let payload = entry.payload.ok_or_else(|| {
+            "agent_inject_host_event: queued typed inbox entry missing payload".to_string()
+        })?;
+        let injection_id = payload
+            .get("injection_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                "agent_inject_host_event: queued injection missing injection_id".to_string()
+            })?
+            .to_string();
+        let request_value = payload.get("request").cloned().ok_or_else(|| {
+            "agent_inject_host_event: queued injection missing request".to_string()
+        })?;
+        let request: HostInjectionRequest =
+            serde_json::from_value(request_value).map_err(|error| {
+                format!("agent_inject_host_event: invalid queued injection: {error}")
+            })?;
+        deliver_host_injection_request(id, injection_id.clone(), entry.sequence, request, seam)?;
+        delivered.push(serde_json::json!({
+            "injection_id": injection_id,
+            "sequence": entry.sequence,
+            "delivery": delivery.as_str(),
+            "delivered_at_seam": seam,
+            "kind": entry.kind,
+            "source": entry.source,
+            "ts_ms": entry.ts_ms,
+        }));
+    }
+    Ok(delivered)
+}
+
+fn validate_host_injection_payload(
+    kind: HostInjectionKind,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    match kind {
+        HostInjectionKind::HostToolResult => {
+            let _: HostToolResultPayload = serde_json::from_value(payload).map_err(|error| {
+                format!("agent_inject_host_event: invalid host_tool_result payload: {error}")
+            })?;
+        }
+        HostInjectionKind::HostAttachment => {
+            let _: HostAttachmentPayload = serde_json::from_value(payload).map_err(|error| {
+                format!("agent_inject_host_event: invalid host_attachment payload: {error}")
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn deliver_host_injection_request(
+    id: &str,
+    injection_id: String,
+    sequence: u64,
+    request: HostInjectionRequest,
+    delivered_at_seam: &str,
+) -> Result<(), String> {
     let (message, transcript_event, agent_event) = match request.kind {
         HostInjectionKind::HostToolResult => {
             let payload: HostToolResultPayload =
@@ -1811,11 +1920,12 @@ pub fn inject_host_event(id: &str, injection: VmValue) -> Result<serde_json::Val
                 })?;
             build_host_tool_result_injection(
                 id,
-                injection_id.clone(),
+                injection_id,
                 sequence,
                 request.delivery,
                 request.provenance,
                 payload,
+                delivered_at_seam,
             )
         }
         HostInjectionKind::HostAttachment => {
@@ -1825,51 +1935,16 @@ pub fn inject_host_event(id: &str, injection: VmValue) -> Result<serde_json::Val
                 })?;
             build_host_attachment_injection(
                 id,
-                injection_id.clone(),
+                injection_id,
                 sequence,
                 request.delivery,
                 request.provenance,
                 payload,
+                delivered_at_seam,
             )
         }
     };
-    inject_typed_message(id, message, transcript_event, agent_event)?;
-    Ok(serde_json::json!({
-        "injection_id": injection_id,
-        "sequence": sequence,
-        "delivery": request.delivery.as_str(),
-        "status": "injected",
-    }))
-}
-
-fn next_host_injection_sequence(id: &str) -> Result<u64, String> {
-    SESSIONS.with(|s| {
-        let map = s.borrow();
-        let Some(state) = map.get(id) else {
-            return Err(format!(
-                "agent_inject_host_event: unknown session id '{id}'"
-            ));
-        };
-        let dict = state
-            .transcript
-            .as_dict()
-            .cloned()
-            .unwrap_or_else(crate::value::DictMap::new);
-        let count = match dict.get("events") {
-            Some(VmValue::List(events)) => events
-                .iter()
-                .filter(|event| {
-                    event
-                        .as_dict()
-                        .and_then(|event| event.get("kind"))
-                        .map(VmValue::display)
-                        .is_some_and(|kind| kind == "host_tool_result" || kind == "host_attachment")
-                })
-                .count(),
-            _ => 0,
-        };
-        Ok(count as u64)
-    })
+    inject_typed_message(id, message, transcript_event, agent_event)
 }
 
 fn build_host_tool_result_injection(
@@ -1879,6 +1954,7 @@ fn build_host_tool_result_injection(
     delivery: InjectionDelivery,
     provenance: HostInjectionProvenance,
     payload: HostToolResultPayload,
+    delivered_at_seam: &str,
 ) -> (VmValue, VmValue, AgentEvent) {
     let tool_call_id = payload
         .tool_call_id
@@ -1928,7 +2004,7 @@ fn build_host_tool_result_injection(
         error: payload.error,
         duration_ms: payload.duration_ms,
         delivery,
-        delivered_at_seam: Some("immediate".to_string()),
+        delivered_at_seam: Some(delivered_at_seam.to_string()),
         sequence,
         provenance,
         sanitization,
@@ -1943,6 +2019,7 @@ fn build_host_attachment_injection(
     delivery: InjectionDelivery,
     provenance: HostInjectionProvenance,
     payload: HostAttachmentPayload,
+    delivered_at_seam: &str,
 ) -> (VmValue, VmValue, AgentEvent) {
     let body = host_attachment_body(&payload);
     let text =
@@ -1987,7 +2064,7 @@ fn build_host_attachment_injection(
         description: payload.description,
         description_model: payload.description_model,
         delivery,
-        delivered_at_seam: Some("immediate".to_string()),
+        delivered_at_seam: Some(delivered_at_seam.to_string()),
         sequence,
         provenance,
         sanitization,

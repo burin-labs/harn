@@ -16,7 +16,12 @@
 use harn_vm::value::VmError;
 
 fn run(source: &str) -> Result<String, String> {
+    run_with_setup(source, || {})
+}
+
+fn run_with_setup(source: &str, setup: impl FnOnce()) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
+    setup();
     let chunk = harn_vm::compile_source(source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -39,6 +44,14 @@ fn run(source: &str) -> Result<String, String> {
 
 fn out(source: &str) -> Vec<String> {
     let raw = run(source).expect("script failed");
+    raw.lines()
+        .filter_map(|l| l.strip_prefix("[harn] "))
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn out_with_setup(source: &str, setup: impl FnOnce()) -> Vec<String> {
+    let raw = run_with_setup(source, setup).expect("script failed");
     raw.lines()
         .filter_map(|l| l.strip_prefix("[harn] "))
         .map(|s| s.to_string())
@@ -155,4 +168,40 @@ fn drain_resets_inbox_between_calls() {
     let second = harn_vm::orchestration::agent_inbox::drain(&session_id);
     assert_eq!(second.len(), 1);
     assert_eq!(second[0].content, "c");
+}
+
+#[test]
+fn feedback_drain_ignores_queued_typed_host_injections() {
+    let session_id = format!("inbox-typed-separation-{}", uuid::Uuid::now_v7());
+
+    let lines = out_with_setup(
+        &format!(
+            r#"
+import {{ agent_session_drain_feedback }} from "std/agent/state"
+
+pipeline main(task) {{
+  const drained = agent_session_drain_feedback("{session_id}")
+  log(len(drained))
+  log(drained[0].kind)
+  log(drained[0].content)
+}}
+"#
+        ),
+        || {
+            harn_vm::orchestration::agent_inbox::push(&session_id, "feedback", "nudge", "test");
+            harn_vm::orchestration::agent_inbox::push_host_injection(
+                &session_id,
+                "host_tool_result",
+                serde_json::json!({"injection_id": "inj-1", "request": {"kind": "host_tool_result"}}),
+                harn_vm::agent_events::InjectionDelivery::AfterNextToolCall,
+                "test",
+            );
+        },
+    );
+    assert_eq!(lines, vec!["1", "feedback", "nudge"]);
+    assert_eq!(
+        harn_vm::orchestration::agent_inbox::pending_count(&session_id),
+        1,
+        "typed host injection must remain queued for its typed delivery seam"
+    );
 }
