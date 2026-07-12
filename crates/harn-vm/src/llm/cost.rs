@@ -1431,6 +1431,7 @@ mod tests {
             "gpt-4o-mini".to_string(),
             crate::llm_config::ModelDef {
                 name: "Test GPT-4o Mini".to_string(),
+                blurb: None,
                 provider: "openai".to_string(),
                 context_window: 128_000,
                 logical_model: None,
@@ -1526,6 +1527,7 @@ mod tests {
             "gpt-4o-mini".to_string(),
             crate::llm_config::ModelDef {
                 name: "Test GPT-4o Mini".to_string(),
+                blurb: None,
                 provider: "openai".to_string(),
                 context_window: 128_000,
                 logical_model: None,

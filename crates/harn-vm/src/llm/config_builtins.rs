@@ -1622,6 +1622,14 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         crate::llm_config::effective_batch_api_supported(&model.provider, &capabilities);
     dict.put_str("id", id);
     dict.put_str("name", model.name.as_str());
+    dict.insert(
+        crate::value::intern_key("blurb"),
+        model
+            .blurb
+            .as_deref()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
     dict.put_str("provider", model.provider.as_str());
     dict.insert(
         crate::value::intern_key("context_window"),
@@ -1711,6 +1719,10 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
     dict.insert(
         crate::value::intern_key("capabilities"),
         string_list_to_vm_value(model.capabilities.clone()),
+    );
+    dict.insert(
+        crate::value::intern_key("reasoning_effort_levels"),
+        string_list_to_vm_value(capabilities.reasoning_effort_levels.clone()),
     );
     insert_batch_support_fields(&mut dict, batch_api, &capabilities);
     dict.insert(
@@ -1828,6 +1840,7 @@ fn serving_tier_to_vm_value(tier: &llm_config::ServingTierDef) -> VmValue {
 
 fn provider_catalog_to_vm_value() -> VmValue {
     let mut dict = crate::value::DictMap::new();
+    let artifact = crate::provider_catalog::artifact();
 
     let mut providers = Vec::new();
     for name in llm_config::provider_names() {
@@ -1869,9 +1882,21 @@ fn provider_catalog_to_vm_value() -> VmValue {
         VmValue::List(std::sync::Arc::new(models)),
     );
     dict.insert(
+        crate::value::intern_key("variants"),
+        json_to_vm_value(
+            &serde_json::to_value(&artifact.variants).unwrap_or_else(|_| serde_json::json!([])),
+        ),
+    );
+    dict.insert(
+        crate::value::intern_key("families"),
+        json_to_vm_value(
+            &serde_json::to_value(&artifact.families).unwrap_or_else(|_| serde_json::json!([])),
+        ),
+    );
+    dict.insert(
         crate::value::intern_key("routing_routes"),
         json_to_vm_value(
-            &serde_json::to_value(crate::provider_catalog::artifact().routing_routes)
+            &serde_json::to_value(&artifact.routing_routes)
                 .unwrap_or_else(|_| serde_json::json!([])),
         ),
     );
@@ -2532,6 +2557,49 @@ mod tests {
             ),
             other => panic!("expected nested batch operational notes list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn provider_catalog_builtin_surfaces_presentation_families_and_effort_levels() {
+        llm_config::clear_user_overrides();
+        super::super::capabilities::clear_user_overrides();
+        let catalog = provider_catalog_to_vm_value();
+        let catalog = catalog.as_dict().expect("provider catalog dict");
+
+        let families = match catalog.get("families") {
+            Some(VmValue::List(families)) => families,
+            other => panic!("expected families list, got {other:?}"),
+        };
+        let gpt_family = families
+            .iter()
+            .filter_map(VmValue::as_dict)
+            .find(|family| {
+                family.get("id").map(VmValue::display) == Some("openai-gpt-5-6".to_string())
+            })
+            .expect("GPT-5.6 family");
+        assert_eq!(
+            gpt_family.get("provider").map(VmValue::display).as_deref(),
+            Some("openai")
+        );
+
+        let models = match catalog.get("models") {
+            Some(VmValue::List(models)) => models,
+            other => panic!("expected models list, got {other:?}"),
+        };
+        let sol = models
+            .iter()
+            .filter_map(VmValue::as_dict)
+            .find(|model| model.get("id").map(VmValue::display) == Some("gpt-5.6-sol".to_string()))
+            .expect("GPT-5.6 Sol model");
+        assert!(sol
+            .get("blurb")
+            .map(VmValue::display)
+            .is_some_and(|blurb| !blurb.is_empty()));
+        let levels = match sol.get("reasoning_effort_levels") {
+            Some(VmValue::List(levels)) => levels.iter().map(VmValue::display).collect::<Vec<_>>(),
+            other => panic!("expected reasoning_effort_levels list, got {other:?}"),
+        };
+        assert_eq!(levels, ["none", "low", "medium", "high", "xhigh", "max"]);
     }
 
     #[test]

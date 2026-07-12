@@ -115,6 +115,15 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 .errors
                 .push(format!("model {} name cannot be empty", model.id));
         }
+        if model
+            .blurb
+            .as_deref()
+            .is_some_and(|blurb| blurb.trim().is_empty())
+        {
+            result
+                .errors
+                .push(format!("model {} blurb cannot be empty", model.id));
+        }
         if !provider_ids.contains(model.provider.as_str()) {
             result.errors.push(format!(
                 "model {} references unknown provider {}",
@@ -472,9 +481,298 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
     }
 
+    validate_model_families(artifact, &provider_ids, &mut result);
+
     result
 }
 
 pub fn validate_current() -> ProviderCatalogValidation {
     validate_artifact(&artifact())
+}
+
+fn validate_model_families(
+    artifact: &ProviderCatalogArtifact,
+    provider_ids: &BTreeSet<&str>,
+    result: &mut ProviderCatalogValidation,
+) {
+    let models_by_id: BTreeMap<&str, &CatalogModel> = artifact
+        .models
+        .iter()
+        .map(|model| (model.id.as_str(), model))
+        .collect();
+    let mut family_ids = BTreeSet::new();
+
+    for family in &artifact.families {
+        let context = format!("model family {}", family.id);
+        if !family_ids.insert(family.id.as_str()) {
+            result
+                .errors
+                .push(format!("duplicate model family id {}", family.id));
+        }
+        validate_presentation_token(&context, "id", &family.id, false, result);
+        validate_nonempty(&context, "label", &family.label, result);
+        validate_nonempty(
+            &context,
+            "plain_description",
+            &family.plain_description,
+            result,
+        );
+        if !provider_ids.contains(family.provider.as_str()) {
+            result.errors.push(format!(
+                "{context} references unknown provider {}",
+                family.provider
+            ));
+        }
+        if !(1..=2).contains(&family.dimensions.len()) {
+            result.errors.push(format!(
+                "{context} must declare one or two dimensions, got {}",
+                family.dimensions.len()
+            ));
+        }
+        if family.presets.is_empty() {
+            result
+                .errors
+                .push(format!("{context} must declare at least one preset"));
+        }
+
+        let mut dimension_keys = BTreeSet::new();
+        let mut model_dimension = None;
+        let mut reasoning_dimension = None;
+        let mut referenced_model_ids = Vec::new();
+        if let Some(model_id) = family.model_id.as_deref() {
+            referenced_model_ids.push(model_id);
+        }
+
+        for dimension in &family.dimensions {
+            let dimension_context = format!("{context} dimension {}", dimension.key);
+            validate_presentation_token(&dimension_context, "key", &dimension.key, true, result);
+            if !dimension_keys.insert(dimension.key.as_str()) {
+                result.errors.push(format!(
+                    "{context} declares duplicate dimension key {}",
+                    dimension.key
+                ));
+            }
+            validate_nonempty(&dimension_context, "label", &dimension.label, result);
+            validate_nonempty(
+                &dimension_context,
+                "plain_description",
+                &dimension.plain_description,
+                result,
+            );
+            if dimension.ordered_values.is_empty() {
+                result
+                    .errors
+                    .push(format!("{dimension_context} must declare ordered_values"));
+            }
+
+            match dimension.kind {
+                llm_config::ModelFamilyDimensionKind::Model => {
+                    if model_dimension.replace(dimension).is_some() {
+                        result
+                            .errors
+                            .push(format!("{context} may declare at most one model dimension"));
+                    }
+                }
+                llm_config::ModelFamilyDimensionKind::ReasoningEffort => {
+                    if reasoning_dimension.replace(dimension).is_some() {
+                        result.errors.push(format!(
+                            "{context} may declare at most one reasoning_effort dimension"
+                        ));
+                    }
+                }
+            }
+
+            let mut values = BTreeSet::new();
+            for value in &dimension.ordered_values {
+                let value_context = format!("{dimension_context} value {}", value.value);
+                validate_presentation_token(&value_context, "value", &value.value, true, result);
+                if !values.insert(value.value.as_str()) {
+                    result.errors.push(format!(
+                        "{dimension_context} declares duplicate value {}",
+                        value.value
+                    ));
+                }
+                validate_nonempty(&value_context, "label", &value.label, result);
+                validate_nonempty(
+                    &value_context,
+                    "plain_description",
+                    &value.plain_description,
+                    result,
+                );
+                for (field, hint) in [
+                    ("relative_cost_hint", value.relative_cost_hint),
+                    ("relative_speed_hint", value.relative_speed_hint),
+                ] {
+                    if !(1..=5).contains(&hint) {
+                        result.errors.push(format!(
+                            "{value_context} {field} must be between 1 and 5, got {hint}"
+                        ));
+                    }
+                }
+                match dimension.kind {
+                    llm_config::ModelFamilyDimensionKind::Model => {
+                        if let Some(model_id) = value.model_id.as_deref() {
+                            referenced_model_ids.push(model_id);
+                        } else {
+                            result.errors.push(format!(
+                                "{value_context} on a model dimension must declare model_id"
+                            ));
+                        }
+                    }
+                    llm_config::ModelFamilyDimensionKind::ReasoningEffort => {
+                        if value.model_id.is_some() {
+                            result.errors.push(format!(
+                                "{value_context} on a reasoning_effort dimension must not declare model_id"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        match (model_dimension.is_some(), family.model_id.is_some()) {
+            (true, true) => result.errors.push(format!(
+                "{context} must not declare model_id when a model dimension selects the model"
+            )),
+            (false, false) => result.errors.push(format!(
+                "{context} without a model dimension must declare model_id"
+            )),
+            _ => {}
+        }
+
+        for model_id in &referenced_model_ids {
+            match models_by_id.get(model_id) {
+                Some(model) if model.provider != family.provider => result.errors.push(format!(
+                    "{context} model {} belongs to provider {}, not {}",
+                    model.id, model.provider, family.provider
+                )),
+                Some(_) => {}
+                None => result
+                    .errors
+                    .push(format!("{context} references unknown model {model_id}")),
+            }
+        }
+
+        if let Some(dimension) = reasoning_dimension {
+            for value in &dimension.ordered_values {
+                let supported_somewhere = referenced_model_ids.iter().any(|model_id| {
+                    models_by_id.get(model_id).is_some_and(|model| {
+                        model
+                            .reasoning
+                            .effort_levels
+                            .iter()
+                            .any(|level| level == &value.value)
+                    })
+                });
+                if !supported_somewhere {
+                    result.errors.push(format!(
+                        "{context} reasoning effort {} is unsupported by every referenced model",
+                        value.value
+                    ));
+                }
+            }
+        }
+
+        let mut preset_ids = BTreeSet::new();
+        for preset in &family.presets {
+            let preset_context = format!("{context} preset {}", preset.id);
+            validate_presentation_token(&preset_context, "id", &preset.id, true, result);
+            if !preset_ids.insert(preset.id.as_str()) {
+                result.errors.push(format!(
+                    "{context} declares duplicate preset id {}",
+                    preset.id
+                ));
+            }
+            validate_nonempty(&preset_context, "label", &preset.label, result);
+            validate_nonempty(&preset_context, "plain_blurb", &preset.plain_blurb, result);
+            if preset.coordinates.len() != family.dimensions.len()
+                || dimension_keys
+                    .iter()
+                    .any(|key| !preset.coordinates.contains_key(*key))
+            {
+                result.errors.push(format!(
+                    "{preset_context} coordinates must name every dimension exactly once"
+                ));
+                continue;
+            }
+
+            let mut selected_model_id = family.model_id.as_deref();
+            for dimension in &family.dimensions {
+                let coordinate = preset
+                    .coordinates
+                    .get(&dimension.key)
+                    .expect("coordinate keys checked above");
+                let selected_value = dimension
+                    .ordered_values
+                    .iter()
+                    .find(|value| value.value == *coordinate);
+                let Some(selected_value) = selected_value else {
+                    result.errors.push(format!(
+                        "{preset_context} selects unknown {} value {}",
+                        dimension.key, coordinate
+                    ));
+                    continue;
+                };
+                if dimension.kind == llm_config::ModelFamilyDimensionKind::Model {
+                    selected_model_id = selected_value.model_id.as_deref();
+                }
+            }
+
+            if let (Some(model_id), Some(dimension)) = (selected_model_id, reasoning_dimension) {
+                let effort = preset
+                    .coordinates
+                    .get(&dimension.key)
+                    .expect("coordinate keys checked above");
+                if let Some(model) = models_by_id.get(model_id) {
+                    if !model
+                        .reasoning
+                        .effort_levels
+                        .iter()
+                        .any(|level| level == effort)
+                    {
+                        result.errors.push(format!(
+                            "{preset_context} selects unsupported effort {effort} for model {model_id}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn validate_nonempty(
+    context: &str,
+    field: &str,
+    value: &str,
+    result: &mut ProviderCatalogValidation,
+) {
+    if value.trim().is_empty() {
+        result
+            .errors
+            .push(format!("{context} {field} cannot be empty"));
+    }
+}
+
+fn validate_presentation_token(
+    context: &str,
+    field: &str,
+    value: &str,
+    allow_underscore: bool,
+    result: &mut ProviderCatalogValidation,
+) {
+    let mut chars = value.chars();
+    let valid_start = chars
+        .next()
+        .is_some_and(|character| character.is_ascii_lowercase() || character.is_ascii_digit());
+    let valid_rest = chars.all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || character == '-'
+            || (allow_underscore && character == '_')
+    });
+    if !valid_start || !valid_rest {
+        result.errors.push(format!(
+            "{context} {field} must be a normalized lowercase token, got {value:?}"
+        ));
+    }
 }

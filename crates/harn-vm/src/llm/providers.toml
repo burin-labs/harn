@@ -1701,6 +1701,99 @@ zai = "glm-4.6"
 deepseek = "deepseek-v4-flash"
 gemini = "gemini-2.5-flash-lite"
 
+# --- source: 50-presentation/00-model-selection.toml ---
+# Host-facing model-selection metadata. These rows describe presentation only;
+# they do not change routing, defaults, escalation, or request parameters.
+
+[presentation.variants.fast]
+order = 10
+label = "Fast"
+description = "Lowest-latency general route for quick, routine work."
+selector = { kind = "alias", name = "small" }
+
+[presentation.variants.balanced]
+order = 20
+label = "Balanced"
+description = "Default cost and capability trade-off for everyday work."
+selector = { kind = "alias", name = "mid" }
+
+[presentation.variants.high-reasoning]
+order = 30
+label = "High reasoning"
+description = "Most capable route for difficult planning, repair, and review."
+selector = { kind = "alias", name = "frontier" }
+
+[presentation.variants.local]
+order = 40
+label = "Local"
+description = "Largest-context local or offline route in this catalog."
+selector = { kind = "best_local" }
+
+[presentation.variants.cheap]
+order = 50
+label = "Cheap"
+description = "Lowest known hosted input-plus-output token price."
+selector = { kind = "cheapest_hosted" }
+
+[presentation.variants.vision-capable]
+order = 60
+label = "Vision capable"
+description = "Largest-context route that accepts image input."
+selector = { kind = "largest_vision_context" }
+
+[presentation.variants.long-context]
+order = 70
+label = "Long context"
+description = "Largest context-window route in this catalog."
+selector = { kind = "largest_context" }
+
+[presentation.families.openai-gpt-5-6]
+label = "GPT-5.6"
+plain_description = "Choose a model size and how much time it spends reasoning."
+
+[[presentation.families.openai-gpt-5-6.dimensions]]
+key = "variant"
+label = "Model size"
+plain_description = "Larger variants trade speed and cost for more capability."
+kind = "model"
+ordered_values = [
+  { value = "luna", label = "Luna", plain_description = "Fastest and lowest cost for routine work.", relative_cost_hint = 1, relative_speed_hint = 5, model_id = "gpt-5.6-luna" },
+  { value = "terra", label = "Terra", plain_description = "Balanced capability, speed, and cost.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-5.6-terra" },
+  { value = "sol", label = "Sol", plain_description = "Most capable and most expensive for difficult work.", relative_cost_hint = 5, relative_speed_hint = 1, model_id = "gpt-5.6-sol" },
+]
+
+[[presentation.families.openai-gpt-5-6.dimensions]]
+key = "effort"
+label = "Thinking time"
+plain_description = "More thinking time can improve difficult answers but takes longer and costs more."
+kind = "reasoning_effort"
+ordered_values = [
+  { value = "none", label = "None", plain_description = "Respond directly without extra reasoning.", relative_cost_hint = 1, relative_speed_hint = 5 },
+  { value = "low", label = "Low", plain_description = "Brief reasoning for straightforward work.", relative_cost_hint = 1, relative_speed_hint = 5 },
+  { value = "medium", label = "Medium", plain_description = "Balanced reasoning for everyday work.", relative_cost_hint = 2, relative_speed_hint = 4 },
+  { value = "high", label = "High", plain_description = "More reasoning for difficult tasks.", relative_cost_hint = 3, relative_speed_hint = 3 },
+  { value = "xhigh", label = "Extra high", plain_description = "Deep reasoning for complex tasks.", relative_cost_hint = 4, relative_speed_hint = 2 },
+  { value = "max", label = "Maximum", plain_description = "Most reasoning for the hardest tasks.", relative_cost_hint = 5, relative_speed_hint = 1 },
+]
+
+[[presentation.families.openai-gpt-5-6.presets]]
+id = "fast"
+label = "Fast"
+plain_blurb = "Quick, low-cost responses for routine edits and questions."
+coordinates = { variant = "luna", effort = "low" }
+
+[[presentation.families.openai-gpt-5-6.presets]]
+id = "balanced"
+label = "Balanced"
+plain_blurb = "A practical default for everyday coding and analysis."
+coordinates = { variant = "terra", effort = "medium" }
+
+[[presentation.families.openai-gpt-5-6.presets]]
+id = "deep"
+label = "Deep"
+plain_blurb = "Maximum capability and reasoning for the hardest work."
+coordinates = { variant = "sol", effort = "max" }
+
 # --- source: 60-models/00-anthropic.toml ---
 # ── Models ───────────────────────────────────────────────────────────────────
 # Canonical model metadata: display name, provider, context window,
@@ -2047,6 +2140,7 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # projections remain correct when usage reports cache_write_tokens.
 [models."gpt-5.6-sol"]
 name = "GPT-5.6 Sol"
+blurb = "Most capable GPT-5.6 option for difficult planning, coding, and review, with the highest cost."
 provider = "openai"
 context_window = 1050000
 logical_model = "gpt-5.6-sol"
@@ -2064,6 +2158,7 @@ serving_tiers = [
 
 [models."gpt-5.6-terra"]
 name = "GPT-5.6 Terra"
+blurb = "Balanced GPT-5.6 option for everyday coding work, with lower cost and latency than Sol."
 provider = "openai"
 context_window = 1050000
 logical_model = "gpt-5.6-terra"
@@ -2081,6 +2176,7 @@ serving_tiers = [
 
 [models."gpt-5.6-luna"]
 name = "GPT-5.6 Luna"
+blurb = "Fastest and lowest-cost GPT-5.6 option for routine edits, summaries, and quick iterations."
 provider = "openai"
 context_window = 1050000
 logical_model = "gpt-5.6-luna"

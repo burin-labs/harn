@@ -413,6 +413,7 @@ preferred_tool_format = "native"
                 "acme-good-1".to_string(),
                 crate::llm_config::ModelDef {
                     name: "Acme Good".to_string(),
+                    blurb: None,
                     provider: "acme".to_string(),
                     context_window: 128_000,
                     logical_model: None,
