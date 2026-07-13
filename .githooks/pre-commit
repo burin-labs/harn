@@ -86,11 +86,9 @@ else
   echo "=== Pre-commit: skipping CI ratchets (no protected paths changed) ==="
 fi
 
-# Pure-Python, sub-second, no harn build — cheap enough to check (not just
-# at push) so drift in the lexer<->tree-sitter keyword mirror or the
-# generated-artifact registry is caught at the moment it's introduced. We
-# check rather than auto-regenerate so the hand-curated grouping/comments
-# in keywords.js survive; the hint points at `make gen-tree-sitter-keywords`.
+# Cheap read-only validators run before formatters. The keyword mirror is
+# pure Python; the generated-artifact registry is Harn-backed and reuses the
+# already-authorized runtime unless compiled Rust inputs changed.
 if hook_paths_match "$changed" "$HOOK_TREESITTER_PATTERN"; then
   if hook_skip_no_local_build "pre-commit tree-sitter keyword mirror check"; then
     :
@@ -108,8 +106,7 @@ if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
     :
   else
     echo "=== Pre-commit: checking generated-artifact registry ==="
-    hook_export_fresh_worktree_harn_bin
-    make -s check-generated-registry HARN_BIN="$HARN_BIN"
+    hook_check_generated_registry "$changed"
     echo "    Generated-artifact registry OK."
   fi
 else

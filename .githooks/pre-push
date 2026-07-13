@@ -138,15 +138,14 @@ else
 fi
 
 # Meta-guard: keep scripts/generated_artifacts.toml in agreement with the
-# Makefile `all:` recipe and the CI workflows, so a new gen/check pair
-# can't silently skip CI. Pure-Python; no harn build.
+# Makefile `all:` recipe and CI workflows. The checker is Harn-backed; reuse
+# the authorized runtime unless compiled Rust inputs changed.
 if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
   if hook_skip_no_local_build "pre-push generated-artifact registry check"; then
     :
   else
     echo "=== Pre-push: checking generated-artifact registry ==="
-    hook_export_fresh_worktree_harn_bin
-    make -s check-generated-registry HARN_BIN="$HARN_BIN"
+    hook_check_generated_registry "$changed"
     echo "    Generated-artifact registry OK."
   fi
 else
