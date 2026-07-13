@@ -378,6 +378,9 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         | "git.push"
         | "git.diff"
         | "git.merge_base"
+        | "git.tag_list"
+        | "git.describe"
+        | "git.ls_remote"
             if !policy_allows_capability(&policy, "process", "exec")
                 || !policy_allows_side_effect(&policy, "process_exec") =>
         {

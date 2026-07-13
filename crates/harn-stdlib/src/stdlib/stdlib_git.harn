@@ -136,6 +136,17 @@ type GitShowOptions = {
   patch?: bool,
 }
 
+type GitTagListOptions = {pattern?: string, sort?: string}
+
+type GitDescribeOptions = {tags?: bool, match?: string, rev?: string}
+
+type GitLsRemoteOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  refs?: list<string>,
+  tags?: bool,
+  heads?: bool,
+}
+
 type GitSwitchOptions = {
   repo?: string | GitRepo | GitReceipt,
   cwd?: string,
@@ -487,6 +498,47 @@ pub fn git_diff(repo = ".", selector = nil) -> GitReceipt {
  */
 pub fn git_merge_base(left: string, right: string, repo = ".") -> GitReceipt {
   return git.merge_base(repo, __git_ref_arg(left, "left"), __git_ref_arg(right, "right"))
+}
+
+/** Return local tags as structured `data.tags` in an audited receipt. */
+pub fn git_tag_list(repo = ".", options: GitTagListOptions = {}) -> GitReceipt {
+  const pattern = if options.pattern == nil {
+    nil
+  } else {
+    __git_ref_arg(options.pattern, "pattern")
+  }
+  const sort = if options.sort == nil {
+    nil
+  } else {
+    __git_ref_arg(options.sort, "sort")
+  }
+  return git.tag_list(repo, {pattern: pattern, sort: sort})
+}
+
+/** Return a parsed `git describe` result in an audited receipt. */
+pub fn git_describe(repo = ".", options: GitDescribeOptions = {}) -> GitReceipt {
+  const pattern = if options.match == nil {
+    nil
+  } else {
+    __git_ref_arg(options.match, "match")
+  }
+  const rev = if options.rev == nil {
+    nil
+  } else {
+    __git_ref_arg(options.rev, "rev")
+  }
+  return git.describe(repo, {tags: options.tags ?? false, match: pattern, rev: rev})
+}
+
+/** Return remote refs as structured `data.refs` in an audited receipt. */
+pub fn git_ls_remote(remote: string, options: GitLsRemoteOptions = {}) -> GitReceipt {
+  const refs = __git_string_list(options.refs, "refs").map({ name -> __git_ref_arg(name, "refs") })
+  return git
+    .ls_remote(
+    git_repo_path(options.repo ?? "."),
+    __git_ref_arg(remote, "remote"),
+    {refs: refs, tags: options.tags ?? false, heads: options.heads ?? false},
+  )
 }
 
 /**

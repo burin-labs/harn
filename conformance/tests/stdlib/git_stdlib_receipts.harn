@@ -21,6 +21,7 @@ pipeline default() {
   harness.fs.write_text(path_join(root, "README.md"), "initial\n")
   run_git(root, ["git", "add", "README.md"])
   run_git(root, ["git", "commit", "-m", "initial"])
+  run_git(root, ["git", "tag", "v1.0.0"])
   harness.fs.write_text(path_join(root, "README.md"), "changed\n")
   const status: GitReceipt = git.status(root)
   const status_fn: GitReceipt = git_status(root)
@@ -37,6 +38,15 @@ pipeline default() {
   __io_println(branch.success && branch.branch == "main")
   const log_result = git_log(root, {max_count: 1})
   __io_println(log_result.success && contains(log_result.stdout, "initial"))
+  const tags = git_tag_list(root, {pattern: "v*", sort: "-v:refname"})
+  __io_println(tags.success && tags.data.tags == ["v1.0.0"])
+  const described = git_describe(root, {tags: true, match: "v*"})
+  __io_println(
+    described.success
+      && described.data.tag == "v1.0.0"
+      && described.data.distance == 0
+      && described.data.dirty,
+  )
   const switch_result = git_switch("feature/std-git", root, {create: true})
   __io_println(switch_result.success)
   __io_println(git_current_branch(root).branch == "feature/std-git")
@@ -48,6 +58,13 @@ pipeline default() {
   run_git(root, ["git", "init", "--bare", remote])
   run_git(root, ["git", "remote", "add", "origin", remote])
   run_git(root, ["git", "push", "-u", "origin", "main"])
+  run_git(root, ["git", "push", "origin", "v1.0.0"])
+  const remote_refs = git_ls_remote("origin", {repo: root, tags: true, refs: ["refs/tags/v*"]})
+  __io_println(
+    remote_refs.success
+      && remote_refs.data.remote == "origin"
+      && remote_refs.data.refs.any({ row -> row.ref == "refs/tags/v1.0.0" }),
+  )
   const pull = git_pull_ff_only(root, "origin", "main", {quiet: true})
   __io_println(pull.success)
   const read_tools = git_tools(
