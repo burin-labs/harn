@@ -291,6 +291,13 @@ agent to build a cumulative diff before touching the working tree.
   compare-and-swap text write: reads the pre-image through the
   overlay, rejects with `result: "stale_base"` when `expected_hash`
   diverges, otherwise writes `content` back through the same overlay.
+  Immediate-mode transactions use per-target advisory locks under
+  `~/.harn/fs-cas-locks/` across threads and processes. The OS releases
+  ownership when a process exits; inert lock files remain in place so
+  concurrent waiters never split across lock-file inodes. Cooperating
+  processes must resolve the same user home. Missing-target lock keys fold
+  path case on macOS and Windows; Linux preserves path bytes and therefore
+  follows the mounted filesystem's normal case-sensitive convention.
   `std/edit`'s `edit_safe_text_patch` is the Harn-facing wrapper that
   composes multi-hunk patches on top of this builtin.
 
