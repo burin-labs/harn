@@ -428,41 +428,140 @@ pub fn compile_source_named(source: &str, pipeline_name: &str) -> Result<Chunk, 
         .map_err(|e| e.to_string())
 }
 
+/// Lowers Harn `TypeExpr`s to JSON Schema with `type`-alias EXPANSION, built once
+/// from a parsed program's alias declarations. Without expansion, a tool parameter
+/// typed as a user alias (`p: EvalSource`, `p: FunnelStage`) erases to an empty
+/// `{}` schema because the low-level lowering only recognizes built-in type names —
+/// the exporter must first resolve the alias to its underlying shape/union (a
+/// literal-union alias then round-trips as a JSON `enum`). Cycle-safe via the same
+/// `expand_alias` guard the compiler and typechecker share.
+pub struct SchemaAliasResolver {
+    compiler: compiler::Compiler,
+}
+
+impl SchemaAliasResolver {
+    /// A resolver with no aliases in scope — lowering is identical to the raw
+    /// (unexpanded) form, so `Named(alias)` still lowers to `{}` when unknown.
+    pub fn empty() -> Self {
+        Self {
+            compiler: compiler::Compiler::new(),
+        }
+    }
+
+    /// Collect every `type` alias declared in `program`, so named references in
+    /// tool signatures resolve to their bodies.
+    pub fn from_program(program: &[harn_parser::SNode]) -> Self {
+        let mut compiler = compiler::Compiler::new();
+        compiler.collect_type_aliases(program);
+        Self { compiler }
+    }
+
+    /// JSON Schema for one `TypeExpr`, expanding any named alias first. `None`
+    /// when the (expanded) type has no JSON-Schema form (function types, ...).
+    pub fn json_schema_for_type_expr(
+        &self,
+        type_expr: &harn_parser::TypeExpr,
+    ) -> Option<serde_json::Value> {
+        let expanded = self.compiler.expand_alias(type_expr);
+        let schema = compiler::Compiler::type_expr_to_schema_value(&expanded)?;
+        let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;
+        Some(llm::vm_value_to_json(&json_schema))
+    }
+
+    /// JSON Schema `object` for a parameter list (a served tool's `inputSchema`),
+    /// expanding aliases per parameter.
+    pub fn json_schema_for_typed_params(
+        &self,
+        params: &[harn_parser::TypedParam],
+    ) -> serde_json::Value {
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+
+        for param in params {
+            let param_schema = param
+                .type_expr
+                .as_ref()
+                .and_then(|type_expr| self.json_schema_for_type_expr(type_expr))
+                .unwrap_or_else(|| serde_json::json!({}));
+            if param.default_value.is_none() {
+                required.push(serde_json::Value::String(param.name.clone()));
+            }
+            properties.insert(param.name.clone(), param_schema);
+        }
+
+        let mut schema = serde_json::Map::new();
+        schema.insert(
+            "type".to_string(),
+            serde_json::Value::String("object".to_string()),
+        );
+        schema.insert(
+            "properties".to_string(),
+            serde_json::Value::Object(properties),
+        );
+        if !required.is_empty() {
+            schema.insert("required".to_string(), serde_json::Value::Array(required));
+        }
+        serde_json::Value::Object(schema)
+    }
+}
+
+/// Raw lowering with no program aliases in scope. Prefer
+/// [`SchemaAliasResolver::from_program`] when serving a module so named-alias
+/// parameters resolve instead of erasing to `{}`.
 pub fn json_schema_for_type_expr(type_expr: &harn_parser::TypeExpr) -> Option<serde_json::Value> {
-    let schema = compiler::Compiler::type_expr_to_schema_value(type_expr)?;
-    let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;
-    Some(llm::vm_value_to_json(&json_schema))
+    SchemaAliasResolver::empty().json_schema_for_type_expr(type_expr)
 }
 
 pub fn json_schema_for_typed_params(params: &[harn_parser::TypedParam]) -> serde_json::Value {
-    let mut properties = serde_json::Map::new();
-    let mut required = Vec::new();
+    SchemaAliasResolver::empty().json_schema_for_typed_params(params)
+}
 
-    for param in params {
-        let param_schema = param
-            .type_expr
-            .as_ref()
-            .and_then(json_schema_for_type_expr)
-            .unwrap_or_else(|| serde_json::json!({}));
-        if param.default_value.is_none() {
-            required.push(serde_json::Value::String(param.name.clone()));
+#[cfg(test)]
+mod schema_alias_resolver_tests {
+    use super::*;
+
+    fn fn_params_schema(src: &str) -> serde_json::Value {
+        let program = harn_parser::parse_source(src).expect("parse test source");
+        let resolver = SchemaAliasResolver::from_program(&program);
+        for node in &program {
+            let (_, inner) = harn_parser::peel_attributes(node);
+            if let harn_parser::Node::FnDecl { params, .. } = &inner.node {
+                return resolver.json_schema_for_typed_params(params);
+            }
         }
-        properties.insert(param.name.clone(), param_schema);
+        panic!("no fn decl in test source");
     }
 
-    let mut schema = serde_json::Map::new();
-    schema.insert(
-        "type".to_string(),
-        serde_json::Value::String("object".to_string()),
-    );
-    schema.insert(
-        "properties".to_string(),
-        serde_json::Value::Object(properties),
-    );
-    if !required.is_empty() {
-        schema.insert("required".to_string(), serde_json::Value::Array(required));
+    #[test]
+    fn named_shape_alias_projects_like_inline_shape() {
+        let inline = fn_params_schema("pub fn f(p: {kind: string, path: string}) {}");
+        let aliased =
+            fn_params_schema("type Src = {kind: string, path: string}\npub fn f(p: Src) {}");
+        assert_eq!(
+            aliased, inline,
+            "a named shape alias must project the same inputSchema as its inline shape",
+        );
+        assert_ne!(
+            aliased["properties"]["p"],
+            serde_json::json!({}),
+            "the alias parameter must not erase to an empty schema",
+        );
     }
-    serde_json::Value::Object(schema)
+
+    #[test]
+    fn literal_union_alias_projects_json_enum() {
+        let schema = fn_params_schema("type Kind = \"local\" | \"ssh\"\npub fn f(p: Kind) {}");
+        let p = &schema["properties"]["p"];
+        assert_eq!(p["type"], "string");
+        assert_eq!(p["enum"], serde_json::json!(["local", "ssh"]));
+    }
+
+    #[test]
+    fn unknown_named_type_still_erases_to_empty() {
+        // No alias declared: unchanged behavior — an unknown named type lowers to {}.
+        let schema = fn_params_schema("pub fn f(p: Unknown) {}");
+        assert_eq!(schema["properties"]["p"], serde_json::json!({}));
+    }
 }
 
 fn reset_llm_state_for_thread_reset() {
