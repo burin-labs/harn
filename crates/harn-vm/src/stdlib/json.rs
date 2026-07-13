@@ -141,28 +141,43 @@ fn validate_deep_json(text: &str) -> Result<(), serde_json::Error> {
     deserializer.end()
 }
 
-fn json_parse_error_value(
+fn structured_parse_error_value(
+    format: &'static str,
     kind: &'static str,
     message: impl AsRef<str>,
-    line: usize,
-    column: usize,
+    location: Option<(usize, usize)>,
 ) -> VmValue {
     let mut fields = crate::value::DictMap::new();
-    fields.put_str("error", "json_parse_error");
+    fields.put_str("error", "structured_parse_error");
+    fields.put_str("format", format);
     fields.put_str("kind", kind);
     fields.put_str("message", message);
-    fields.put_int("line", line as i64);
-    fields.put_int("column", column as i64);
+    if let Some((line, column)) = location {
+        fields.put_int("line", line as i64);
+        fields.put_int("column", column as i64);
+    }
     VmValue::dict(fields)
 }
 
 fn malformed_json_error(error: serde_json::Error) -> VmError {
-    VmError::Thrown(json_parse_error_value(
+    VmError::Thrown(structured_parse_error_value(
+        "json",
         "malformed",
         format!("JSON parse error: {error}"),
-        error.line(),
-        error.column(),
+        Some((error.line(), error.column())),
     ))
+}
+
+fn byte_offset_location(text: &str, byte_offset: usize) -> (usize, usize) {
+    let mut offset = byte_offset.min(text.len());
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let prefix = &text[..offset];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let column = text[line_start..offset].chars().count() + 1;
+    (line, column)
 }
 
 pub(crate) fn register_json_builtins(vm: &mut Vm) {
@@ -211,13 +226,13 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         Err(error) => {
             if let Some(violation) = json_depth_violation(&text) {
                 return match validate_deep_json(&text) {
-                    Ok(()) => Err(VmError::Thrown(json_parse_error_value(
+                    Ok(()) => Err(VmError::Thrown(structured_parse_error_value(
+                        "json",
                         "recursion_limit",
                         format!(
                             "JSON nesting exceeds the maximum container depth ({JSON_PARSE_MAX_CONTAINER_DEPTH})"
                         ),
-                        violation.line,
-                        violation.column,
+                        Some((violation.line, violation.column)),
                     ))),
                     Err(syntax_error) => Err(malformed_json_error(syntax_error)),
                 };
@@ -233,13 +248,24 @@ fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) {
         Ok(value) => match serde_json::to_value(value) {
             Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-            Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("yaml_parse: {error}"),
-            )))),
+            Err(error) => Err(VmError::Thrown(structured_parse_error_value(
+                "yaml",
+                "malformed",
+                format!("YAML parse error: {error}"),
+                None,
+            ))),
         },
-        Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("YAML parse error: {error}"),
-        )))),
+        Err(error) => {
+            let location = error
+                .location()
+                .map(|location| (location.line(), location.column()));
+            Err(VmError::Thrown(structured_parse_error_value(
+                "yaml",
+                "malformed",
+                format!("YAML parse error: {error}"),
+                location,
+            )))
+        }
     }
 }
 
@@ -263,13 +289,24 @@ fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     match toml::from_str::<toml::Value>(&text) {
         Ok(value) => match serde_json::to_value(value) {
             Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-            Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("toml_parse: {error}"),
-            )))),
+            Err(error) => Err(VmError::Thrown(structured_parse_error_value(
+                "toml",
+                "malformed",
+                format!("TOML parse error: {error}"),
+                None,
+            ))),
         },
-        Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("TOML parse error: {error}"),
-        )))),
+        Err(error) => {
+            let location = error
+                .span()
+                .map(|span| byte_offset_location(&text, span.start));
+            Err(VmError::Thrown(structured_parse_error_value(
+                "toml",
+                "malformed",
+                format!("TOML parse error: {}", error.message()),
+                location,
+            )))
+        }
     }
 }
 
@@ -1004,22 +1041,29 @@ mod tests {
         format!("{}{}{}", "[".repeat(depth), leaf, "]".repeat(depth))
     }
 
-    fn json_parse_failure(text: &str) -> VmValue {
+    fn parse_failure(
+        parse: fn(&[VmValue], &mut String) -> Result<VmValue, VmError>,
+        text: &str,
+    ) -> VmValue {
         let mut output = String::new();
-        match json_parse_impl(&[VmValue::String(arcstr::ArcStr::from(text))], &mut output)
-            .expect_err("invalid JSON must throw")
+        match parse(&[VmValue::String(arcstr::ArcStr::from(text))], &mut output)
+            .expect_err("invalid structured data must throw")
         {
             VmError::Thrown(failure) => failure,
-            other => panic!("expected thrown JSON failure, got {other:?}"),
+            other => panic!("expected thrown structured-data failure, got {other:?}"),
         }
+    }
+
+    fn json_parse_failure(text: &str) -> VmValue {
+        parse_failure(json_parse_impl, text)
     }
 
     fn failure_field<'a>(failure: &'a VmValue, key: &str) -> &'a VmValue {
         match failure {
             VmValue::Dict(fields) => fields
                 .get(key)
-                .unwrap_or_else(|| panic!("missing JSON failure field {key}")),
-            other => panic!("expected JSON failure dict, got {other:?}"),
+                .unwrap_or_else(|| panic!("missing structured-data failure field {key}")),
+            other => panic!("expected structured-data failure dict, got {other:?}"),
         }
     }
 
@@ -1054,8 +1098,9 @@ mod tests {
         let failure = json_parse_failure("{\n  bad");
         assert_eq!(
             failure_field(&failure, "error").display(),
-            "json_parse_error"
+            "structured_parse_error"
         );
+        assert_eq!(failure_field(&failure, "format").display(), "json");
         assert_eq!(failure_field(&failure, "kind").display(), "malformed");
         assert_eq!(failure_field(&failure, "line").as_int(), Some(2));
         assert!(failure_field(&failure, "column")
@@ -1070,14 +1115,58 @@ mod tests {
         let failure = json_parse_failure(&over_limit);
         assert_eq!(
             failure_field(&failure, "error").display(),
-            "json_parse_error"
+            "structured_parse_error"
         );
+        assert_eq!(failure_field(&failure, "format").display(), "json");
         assert_eq!(failure_field(&failure, "kind").display(), "recursion_limit");
         assert_eq!(failure_field(&failure, "line").as_int(), Some(1));
         assert_eq!(
             failure_field(&failure, "column").as_int(),
             Some((JSON_PARSE_MAX_CONTAINER_DEPTH + 1) as i64)
         );
+    }
+
+    #[test]
+    fn yaml_parse_throws_closed_malformed_failure() {
+        let failure = parse_failure(yaml_parse_impl, "name: [\n");
+        assert_eq!(
+            failure_field(&failure, "error").display(),
+            "structured_parse_error"
+        );
+        assert_eq!(failure_field(&failure, "format").display(), "yaml");
+        assert_eq!(failure_field(&failure, "kind").display(), "malformed");
+        assert!(failure_field(&failure, "line")
+            .as_int()
+            .is_some_and(|line| line > 0));
+        assert!(failure_field(&failure, "column")
+            .as_int()
+            .is_some_and(|column| column > 0));
+        assert!(!failure_field(&failure, "message").as_str_cow().is_empty());
+    }
+
+    #[test]
+    fn toml_parse_throws_closed_malformed_failure() {
+        let failure = parse_failure(toml_parse_impl, "name = \"Ada\"\nitems = [\n");
+        assert_eq!(
+            failure_field(&failure, "error").display(),
+            "structured_parse_error"
+        );
+        assert_eq!(failure_field(&failure, "format").display(), "toml");
+        assert_eq!(failure_field(&failure, "kind").display(), "malformed");
+        assert!(failure_field(&failure, "line")
+            .as_int()
+            .is_some_and(|line| line > 0));
+        assert!(failure_field(&failure, "column")
+            .as_int()
+            .is_some_and(|column| column > 0));
+        assert!(!failure_field(&failure, "message").as_str_cow().is_empty());
+    }
+
+    #[test]
+    fn byte_offsets_become_one_based_unicode_locations() {
+        assert_eq!(byte_offset_location("é\nvalue", 3), (2, 1));
+        assert_eq!(byte_offset_location("é\nvalue", 4), (2, 2));
+        assert_eq!(byte_offset_location("é\nvalue", 1), (1, 1));
     }
 
     #[test]

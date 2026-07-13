@@ -1,6 +1,6 @@
 // std/run_artifacts - directory-backed run artifact helpers for harnesses.
 import {
-  JsonReadFailure,
+  StructuredReadFailure,
   is_dir,
   read_json,
   read_json_result,
@@ -187,7 +187,7 @@ pub fn run_artifact_write_json(
  * Read a required JSON artifact, throwing a typed JSON read failure.
  *
  * @effects: [fs.read]
- * @errors: [validation, JsonReadFailure]
+ * @errors: [validation, StructuredReadFailure]
  * @example: run_artifact_read_json(run, "facts.json")
  */
 pub fn run_artifact_read_json(run: RunArtifactsRun, name: string) -> unknown {
@@ -198,7 +198,7 @@ pub fn run_artifact_read_json(run: RunArtifactsRun, name: string) -> unknown {
  * Read and validate a required JSON artifact against its consumer-owned schema.
  *
  * @effects: [fs.read]
- * @errors: [validation, JsonReadFailure, SchemaValidationFailure]
+ * @errors: [validation, StructuredReadFailure, SchemaValidationFailure]
  */
 pub fn run_artifact_read_json_typed<T>(run: RunArtifactsRun, name: string, schema: Schema<T>) -> T {
   return read_json_typed(run_artifact_path(run, name), schema)
@@ -210,7 +210,7 @@ pub fn run_artifact_read_json_typed<T>(run: RunArtifactsRun, name: string, schem
  * @effects: [fs.read]
  * @errors: [validation]
  */
-pub fn run_artifact_read_json_result(run: RunArtifactsRun, name: string) -> Result<unknown, JsonReadFailure> {
+pub fn run_artifact_read_json_result(run: RunArtifactsRun, name: string) -> Result<unknown, StructuredReadFailure> {
   return read_json_result(run_artifact_path(run, name))
 }
 
