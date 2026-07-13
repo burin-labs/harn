@@ -1,0 +1,1 @@
+- Stop `stream_object` from emitting structural partials after its schema validator reaches a terminal invalid state.
