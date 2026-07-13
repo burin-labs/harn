@@ -10,6 +10,10 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "America/Los_Angeles"
+    groups:
+      cranelift:
+        patterns:
+          - "cranelift-*"
     cooldown:
       default-days: 7
 
