@@ -49,6 +49,16 @@ fn captures_typed_screen_cursor_styles_and_wide_cells() {
 }
 
 #[test]
+fn reports_parser_errors_from_terminal_bytes() {
+    let session = shell("printf '\\001ok'", 4, 12);
+    session.wait_exit(TIMEOUT).expect("shell exits");
+    let capture = session.capture(None).expect("capture");
+
+    assert_eq!(capture.parser_errors, 1);
+    assert!(capture.text_rows.join("\n").contains("ok"));
+}
+
+#[test]
 fn sends_control_keys_resizes_and_waits_without_polling() {
     let session = shell(
         "stty -echo; printf READY; IFS= read -r line; printf '\\nGOT:%s' \"$line\"",
