@@ -33,7 +33,6 @@ pipeline default() {
   __io_println(status_fn.operation == "git.status" && status_fn.data.dirty)
   __io_println(len(records) >= 1 && records[len(records) - 1]?.action == "git.status")
   __io_println(remove.status == "no_op" && remove.data.idempotent)
-  run_git(root, ["git", "checkout", "--", "README.md"])
   const branch = git_current_branch(root)
   __io_println(branch.success && branch.branch == "main")
   const log_result = git_log(root, {max_count: 1})
@@ -54,6 +53,7 @@ pipeline default() {
       && described.data.distance == 0
       && described.data.dirty,
   )
+  run_git(root, ["git", "checkout", "--", "README.md"])
   const switch_result = git_switch("feature/std-git", root, {create: true})
   __io_println(switch_result.success)
   __io_println(git_current_branch(root).branch == "feature/std-git")
