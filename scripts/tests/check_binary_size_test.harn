@@ -1,7 +1,40 @@
+import "std/schema"
 // Tests for scripts/check_binary_size.harn — argument parsing, budget
 // math, report formatting, and release-workflow default drift. The
 // build/bloat paths shell out and are covered by behavior-parity runs.
 import "../check_binary_size.harn"
+
+type ReleaseWorkflowStep = {name?: string, if?: string}
+
+type ReleaseWorkflow = {
+  env: {BINARY_SIZE_BUDGET_MB: string},
+  jobs: {build: {steps: list<ReleaseWorkflowStep>}},
+}
+
+fn release_workflow() -> ReleaseWorkflow {
+  const step_schema = schema_object(
+    {name: schema_field(schema_string(), false), if: schema_field(schema_string(), false)},
+  )
+  const schema: Schema<ReleaseWorkflow> = schema_object(
+    {
+      env: schema_field(schema_object({BINARY_SIZE_BUDGET_MB: schema_field(schema_string())})),
+      jobs: schema_field(
+        schema_object({build: schema_field(schema_object({steps: schema_field(schema_list(step_schema))}))}),
+      ),
+    },
+  )
+  const path = "../../.github/workflows/build-release-binaries.yml"
+  return unwrap(get_typed_result(yaml_parse(harness.fs.read_text(path)), schema))
+}
+
+fn release_workflow_step(steps: list<ReleaseWorkflowStep>, name: string) -> ReleaseWorkflowStep {
+  for step in steps {
+    if step.name == name {
+      return step
+    }
+  }
+  throw "release workflow step not found: ${name}"
+}
 
 fn defaults() {
   return {target: "", harn_bin: "", budget_mb: default_binary_size_budget_mb(), report_dir: ""}
@@ -89,8 +122,23 @@ pipeline test_budget_bytes_rounding(task) {
 
 @test
 pipeline test_workflow_budget_matches_helper_default(task) {
-  const workflow = harness.fs.read_text("../../.github/workflows/build-release-binaries.yml")
-  assert_eq(workflow.contains("BINARY_SIZE_BUDGET_MB: \"${default_binary_size_budget_mb()}\""), true)
+  assert_eq(release_workflow().env.BINARY_SIZE_BUDGET_MB, default_binary_size_budget_mb())
+}
+
+@test
+pipeline test_workflow_runs_bloat_only_for_warm_builds(task) {
+  const warm_only = "matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'"
+  const steps = release_workflow().jobs.build.steps
+  assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, warm_only)
+  assert_eq(release_workflow_step(steps, "Generate cargo-bloat report (warm only)").if, warm_only)
+  assert_eq(
+    release_workflow_step(steps, "Check binary size budget").if,
+    "matrix.target == 'x86_64-unknown-linux-gnu'",
+  )
+  assert_eq(
+    release_workflow_step(steps, "Upload binary-size report").if,
+    "always() && matrix.target == 'x86_64-unknown-linux-gnu'",
+  )
 }
 
 // --- format_mib -------------------------------------------------------------
