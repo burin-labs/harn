@@ -1326,7 +1326,6 @@ fn compiled_schemas() -> &'static [CompiledSchema] {
     COMPILED.get_or_init(|| {
         SCHEMAS
             .iter()
-            .filter(|(_, _, kind, _)| *kind == SchemaKind::Request)
             .map(|(module, method, kind, body)| {
                 let body = serde_json::from_str::<serde_json::Value>(body)
                     .map_err(|err| format!("schema is not valid JSON: {err}"))
@@ -1378,6 +1377,33 @@ pub(crate) fn validate_request_args(
             builtin,
             param: "request",
             message,
+        },
+    )
+}
+
+pub(crate) fn validate_response(
+    builtin: &'static str,
+    module: &'static str,
+    method: &'static str,
+    response: VmValue,
+) -> Result<VmValue, HostlibError> {
+    let schema = compiled_schema(module, method, SchemaKind::Response).ok_or_else(|| {
+        HostlibError::Backend {
+            builtin,
+            message: format!("missing response schema for {module}.{method}"),
+        }
+    })?;
+    let schema = schema
+        .body
+        .as_ref()
+        .map_err(|message| HostlibError::Backend {
+            builtin,
+            message: format!("invalid response schema for {module}.{method}: {message}"),
+        })?;
+    harn_vm::schema::validate_value_against_canonical_schema(&response, schema, true).map_err(
+        |message| HostlibError::Backend {
+            builtin,
+            message: format!("response schema violation for {module}.{method}: {message}"),
         },
     )
 }
@@ -1477,6 +1503,21 @@ mod tests {
             &[request],
         )
         .expect("env_remove must be a valid run_command request field");
+    }
+
+    #[test]
+    fn response_validation_rejects_incomplete_run_command_result() {
+        let response = VmValue::dict([("status", VmValue::string("completed"))]);
+
+        let err = validate_response(
+            "hostlib_tools_run_command",
+            "tools",
+            "run_command",
+            response,
+        )
+        .expect_err("producer responses must satisfy the public response contract");
+
+        assert!(matches!(err, HostlibError::Backend { .. }));
     }
 
     #[test]

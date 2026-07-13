@@ -255,7 +255,13 @@ impl HostlibRegistry {
                                 let response = harn_vm::orchestration::blocked_command_response(
                                     params, status, &message, context, decisions,
                                 );
-                                Ok(crate::tools::policy_blocked_run_command_response(response))
+                                crate::schemas::validate_response(
+                                    builtin.name,
+                                    module,
+                                    method,
+                                    crate::tools::policy_blocked_run_command_response(response),
+                                )
+                                .map_err(VmError::from)
                             }
                             harn_vm::orchestration::CommandPolicyPreflight::Proceed {
                                 params,
@@ -275,16 +281,30 @@ impl HostlibRegistry {
                                 .map_err(VmError::from)?;
                                 let result = handler(&[validated]).map_err(VmError::from)?;
                                 if crate::tools::run_command_request_is_background(&params) {
-                                    return Ok(result);
+                                    return crate::schemas::validate_response(
+                                        builtin.name,
+                                        module,
+                                        method,
+                                        result,
+                                    )
+                                    .map_err(VmError::from);
                                 }
-                                harn_vm::orchestration::run_command_policy_postflight_with_ctx(
-                                    Some(&ctx),
-                                    &params,
+                                let result =
+                                    harn_vm::orchestration::run_command_policy_postflight_with_ctx(
+                                        Some(&ctx),
+                                        &params,
+                                        result,
+                                        context,
+                                        decisions,
+                                    )
+                                    .await?;
+                                crate::schemas::validate_response(
+                                    builtin.name,
+                                    module,
+                                    method,
                                     result,
-                                    context,
-                                    decisions,
                                 )
-                                .await
+                                .map_err(VmError::from)
                             }
                         }
                     }

@@ -202,6 +202,30 @@ pipeline default() {
   assert(background_blocked?.handle_id == nil, "denied background command has no process handle")
   assert(!harness.fs.exists(background_marker), "denied background command never starts")
   command_policy_pop()
+  const invalid_post_calls = atomic(0)
+  const invalid_post_policy = command_policy(
+    {
+      workspace_roots: [root],
+      post: { _ctx ->
+        atomic_add(invalid_post_calls, 1)
+        return {result: {status: "completed"}}
+      },
+    },
+  )
+  let invalid_post_rejected = false
+  command_policy_push(invalid_post_policy)
+  try {
+    hostlib_tools_run_command({argv: ["printf", "valid-before-post"], cwd: root})
+  } catch {
+    invalid_post_rejected = true
+  } finally {
+    command_policy_pop()
+  }
+  assert(atomic_get(invalid_post_calls) == 1, "the invalid replacement reached command postflight")
+  assert(
+    invalid_post_rejected,
+    "a post hook cannot replace a command result with an invalid response",
+  )
   let tools = tool_registry()
   tools = tool_define(
     tools,
