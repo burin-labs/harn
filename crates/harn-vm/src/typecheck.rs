@@ -463,6 +463,10 @@ mod tests {
         VmValue::String(arcstr::ArcStr::from(s))
     }
 
+    fn vm_dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
+        VmValue::dict(entries)
+    }
+
     fn ty_int() -> TypeExpr {
         TypeExpr::Named("int".into())
     }
@@ -639,5 +643,19 @@ mod tests {
 
         let err = validate_user_call(&func, &[vm_int(1)], None).unwrap_err();
         assert!(matches!(err, VmError::Runtime(_) | VmError::TypeError(_)));
+    }
+
+    #[test]
+    fn runtime_guard_does_not_narrow_partially_lowerable_union() {
+        let func = compiled_function(vec![param_slot(
+            "options",
+            Some(TypeExpr::Union(vec![
+                TypeExpr::Named("OpenOptions".into()),
+                TypeExpr::Named("nil".into()),
+            ])),
+        )]);
+
+        validate_user_call(&func, &[VmValue::Nil], None).unwrap();
+        validate_user_call(&func, &[vm_dict([("foo", vm_string("ok"))])], None).unwrap();
     }
 }

@@ -1,0 +1,16 @@
+type OpenOptions = {foo?: string, ...rest}
+
+pipeline default() {
+  fn direct(options: {foo?: string, ...rest}? = nil) -> string {
+    const opts: {foo?: string, ...rest} = options ?? {}
+    return to_string(opts.foo ?? "missing")
+  }
+  fn aliased(options: OpenOptions? = nil) -> string {
+    const opts: OpenOptions = options ?? {}
+    return to_string(opts.foo ?? "missing")
+  }
+  __io_println("direct:nil=" + direct(nil))
+  __io_println("direct:dict=" + direct({foo: "x", extra: 1}))
+  __io_println("alias:nil=" + aliased(nil))
+  __io_println("alias:dict=" + aliased({foo: "y", extra: 2}))
+}
