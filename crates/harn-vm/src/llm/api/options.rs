@@ -956,6 +956,56 @@ mod tests {
         );
     }
 
+    /// Scoped `HARN_LLM_TIMEOUT` override that restores the prior value on drop
+    /// so this env-reading test cannot leak into others.
+    struct ScopedTimeoutEnv {
+        previous: Option<String>,
+    }
+
+    impl ScopedTimeoutEnv {
+        fn set(value: &str) -> Self {
+            let previous = std::env::var("HARN_LLM_TIMEOUT").ok();
+            unsafe { std::env::set_var("HARN_LLM_TIMEOUT", value) };
+            Self { previous }
+        }
+    }
+
+    impl Drop for ScopedTimeoutEnv {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var("HARN_LLM_TIMEOUT", value),
+                    None => std::env::remove_var("HARN_LLM_TIMEOUT"),
+                }
+            }
+        }
+    }
+
+    /// Regression for the streaming overall-budget bug: when a caller leaves
+    /// `opts.timeout` unset and relies on `HARN_LLM_TIMEOUT` (as the Burin eval
+    /// runner does), the resolved whole-request deadline the streaming path
+    /// bounds itself with must be the env value — NOT the old 30-minute (1800s)
+    /// fallback that `opts.timeout.unwrap_or(30 * 60)` silently used.
+    #[test]
+    fn stream_overall_budget_resolves_env_not_thirty_minute_default() {
+        let _env = ScopedTimeoutEnv::set("150");
+        let mut opts = base_opts("fireworks");
+        // Caller relies on the env, not an explicit per-call timeout.
+        opts.timeout = None;
+        // Unknown model -> no catalog `stream_timeout`, so env alone decides.
+        opts.model = "model-that-does-not-exist-xyz".to_string();
+
+        let resolved = opts.resolve_timeout();
+        assert_eq!(
+            resolved, 150,
+            "streaming overall budget must follow HARN_LLM_TIMEOUT, not the 1800s default"
+        );
+        assert_ne!(
+            resolved, 1800,
+            "resolved deadline must never fall back to the old 30-minute stream budget"
+        );
+    }
+
     #[test]
     fn request_payload_is_send_safe_and_drops_vm_local_fields() {
         let payload = LlmRequestPayload::from(&base_opts("openai"));
