@@ -2,9 +2,9 @@ import "std/git"
 import "std/triggers"
 
 fn run_git(cwd, argv) {
-  const result = host_call("process.exec", {mode: "argv", argv: argv, cwd: cwd})
-  if !result?.success {
-    throw "git command failed: " + (result?.stderr ?? result?.stdout ?? "")
+  const result: {success: bool, stderr?: string, stdout?: string} = host_call("process.exec", {mode: "argv", argv: argv, cwd: cwd})
+  if !result.success {
+    throw "git command failed: " + (result.stderr ?? result.stdout ?? "")
   }
   return result
 }
@@ -24,7 +24,7 @@ pipeline default() {
   run_git(root, ["git", "tag", "v1.0.0"])
   harness.fs.write_text(path_join(root, "README.md"), "changed\n")
   const status: GitReceipt = git.status(root)
-  const status_fn: GitReceipt = git_status(root)
+  const status_fn: GitStatusReceipt = git_status(root)
   const records: list<TrustRecord> = trust_query({action: "git.status"})
   const remove: GitReceipt = git.worktree_remove(path_join(root, "missing-worktree"), {force: true})
   __io_println(status.schema == "harn-stdlib-git-receipt-v1")
@@ -35,9 +35,11 @@ pipeline default() {
   __io_println(remove.status == "no_op" && remove.data.idempotent)
   const branch = git_current_branch(root)
   __io_println(branch.success && branch.branch == "main")
+  const merge_base: GitMergeBaseReceipt = git_merge_base("HEAD", "HEAD", root)
+  __io_println(merge_base.success && merge_base.data.oid != "")
   const log_result = git_log(root, {max_count: 1})
   __io_println(log_result.success && contains(log_result.stdout, "initial"))
-  const tags = git_tag_list(root, {pattern: "v*", sort: "-v:refname"})
+  const tags: GitTagListReceipt = git_tag_list(root, {pattern: "v*", sort: "-v:refname"})
   __io_println(tags.success && tags.data.tags == ["v1.0.0"])
   const invalid_sort = try {
     git_tag_list(root, {sort: "version:refname\n--format=unsafe"})
@@ -46,7 +48,7 @@ pipeline default() {
     is_err(invalid_sort)
       && contains(to_string(unwrap_err(invalid_sort)), "sort must not contain newlines"),
   )
-  const described = git_describe(root, {tags: true, match: "v*"})
+  const described: GitDescribeReceipt = git_describe(root, {tags: true, match: "v*"})
   __io_println(
     described.success
       && described.data.tag == "v1.0.0"
@@ -66,7 +68,7 @@ pipeline default() {
   run_git(root, ["git", "remote", "add", "origin", remote])
   run_git(root, ["git", "push", "-u", "origin", "main"])
   run_git(root, ["git", "push", "origin", "v1.0.0"])
-  const remote_refs = git_ls_remote("origin", {repo: root, tags: true, refs: ["refs/tags/v*"]})
+  const remote_refs: GitLsRemoteReceipt = git_ls_remote("origin", {repo: root, tags: true, refs: ["refs/tags/v*"]})
   __io_println(
     remote_refs.success
       && remote_refs.data.remote == "origin"
