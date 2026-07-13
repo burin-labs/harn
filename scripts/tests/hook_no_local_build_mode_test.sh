@@ -119,6 +119,11 @@ case "$*" in
   "rev-parse HEAD")
     printf '%s\n' deadbeef
     ;;
+  "check-ref-format refs/heads/obsolete"|"check-ref-format refs/tags/old")
+    ;;
+  "check-ref-format "*)
+    exit 1
+    ;;
   *)
     printf 'git %s\n' "$*" >> "$UNEXPECTED_COMMAND_RECORD"
     exit 91
@@ -133,6 +138,56 @@ set -euo pipefail
 exit 0
 SH
 chmod +x "$prepush_fake_bin/gh"
+
+zero_oid=0000000000000000000000000000000000000000
+delete_update="(delete) $zero_oid refs/heads/obsolete deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+multiple_delete_updates="$delete_update
+(delete) $zero_oid refs/tags/old feedfacefeedfacefeedfacefeedfacefeedface"
+mixed_updates="$delete_update
+refs/heads/current cafebabecafebabecafebabecafebabecafebabe refs/heads/current deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+malformed_update="refs/heads/obsolete $zero_oid refs/heads/obsolete"
+wrong_local_ref_update="refs/heads/obsolete $zero_oid refs/heads/obsolete deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+short_oid_update="(delete) 0000 refs/heads/obsolete deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+invalid_remote_oid_update="(delete) $zero_oid refs/heads/obsolete not-an-object-id"
+invalid_remote_ref_update="(delete) $zero_oid refs/heads/bad..name deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+run_prepush() {
+  input=$1
+  output=$2
+  : > "$record"
+  (
+    cd "$work"
+    printf '%s' "$input" | \
+      HARN_HOOKS_NO_LOCAL_BUILD=1 \
+      UNEXPECTED_COMMAND_RECORD="$record" \
+      PATH="$prepush_fake_bin:$PATH" \
+      ./.githooks/pre-push origin git@example.com:burin-labs/harn.git
+  ) > "$output"
+}
+
+run_prepush "$delete_update" "$tmp_root/pre-push-delete.out"
+if [[ -s "$record" ]]; then
+  echo "deletion-only pre-push invoked a validation command" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq "deletion-only ref update" "$tmp_root/pre-push-delete.out"; then
+  echo "deletion-only pre-push did not report its early exit" >&2
+  cat "$tmp_root/pre-push-delete.out" >&2
+  exit 1
+fi
+
+run_prepush "$multiple_delete_updates" "$tmp_root/pre-push-multiple-delete.out"
+if [[ -s "$record" ]]; then
+  echo "multiple deletion-only pre-push invoked a validation command" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq "deletion-only ref update" "$tmp_root/pre-push-multiple-delete.out"; then
+  echo "multiple deletion-only pre-push did not report its early exit" >&2
+  cat "$tmp_root/pre-push-multiple-delete.out" >&2
+  exit 1
+fi
 
 (
   cd "$work"
@@ -171,6 +226,66 @@ if ! grep -Fq "skipping expensive local checks" "$tmp_root/pre-push.out"; then
   cat "$tmp_root/pre-push.out" >&2
   exit 1
 fi
+
+run_prepush "$mixed_updates" "$tmp_root/pre-push-mixed.out"
+if [[ -s "$record" ]]; then
+  echo "mixed pre-push unexpectedly invoked a build-capable command" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if grep -Fq "deletion-only ref update" "$tmp_root/pre-push-mixed.out"; then
+  echo "mixed pre-push was incorrectly classified as deletion-only" >&2
+  cat "$tmp_root/pre-push-mixed.out" >&2
+  exit 1
+fi
+if ! grep -Fq "skipping expensive local checks" "$tmp_root/pre-push-mixed.out"; then
+  echo "mixed pre-push did not follow the normal validation path" >&2
+  cat "$tmp_root/pre-push-mixed.out" >&2
+  exit 1
+fi
+
+run_prepush "$malformed_update" "$tmp_root/pre-push-malformed.out"
+if [[ -s "$record" ]]; then
+  echo "malformed pre-push unexpectedly invoked a build-capable command" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if grep -Fq "deletion-only ref update" "$tmp_root/pre-push-malformed.out"; then
+  echo "malformed pre-push was incorrectly classified as deletion-only" >&2
+  cat "$tmp_root/pre-push-malformed.out" >&2
+  exit 1
+fi
+if ! grep -Fq "skipping expensive local checks" "$tmp_root/pre-push-malformed.out"; then
+  echo "malformed pre-push did not follow the normal validation path" >&2
+  cat "$tmp_root/pre-push-malformed.out" >&2
+  exit 1
+fi
+
+for malformed_case in wrong_local_ref short_oid invalid_remote_oid invalid_remote_ref; do
+  case "$malformed_case" in
+    wrong_local_ref) input=$wrong_local_ref_update ;;
+    short_oid) input=$short_oid_update ;;
+    invalid_remote_oid) input=$invalid_remote_oid_update ;;
+    invalid_remote_ref) input=$invalid_remote_ref_update ;;
+  esac
+  output="$tmp_root/pre-push-${malformed_case}.out"
+  run_prepush "$input" "$output"
+  if [[ -s "$record" ]]; then
+    echo "$malformed_case pre-push unexpectedly invoked a build-capable command" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+  if grep -Fq "deletion-only ref update" "$output"; then
+    echo "$malformed_case pre-push was incorrectly classified as deletion-only" >&2
+    cat "$output" >&2
+    exit 1
+  fi
+  if ! grep -Fq "skipping expensive local checks" "$output"; then
+    echo "$malformed_case pre-push did not follow the normal validation path" >&2
+    cat "$output" >&2
+    exit 1
+  fi
+done
 
 git -C "$work" commit --quiet --no-verify -m initial
 

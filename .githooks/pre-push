@@ -10,12 +10,44 @@ changed=$(mktemp)
 harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
 changed_packages=$(mktemp)
+push_updates=$(mktemp)
 # Combine into a single EXIT trap (a second `trap ... EXIT` would replace,
 # not stack with, this one): capture the hook's real exit code FIRST (the
 # subsequent `rm` would otherwise clobber $? with its own status), clean up
 # temp files, then let hook_timing_finish append the NDJSON timing line and
 # re-exit with the captured code.
-trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"; hook_timing_finish "$hook_timing_exit_code"' EXIT
+hook_timing_exit_code=0
+trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages" "$push_updates"; hook_timing_finish "$hook_timing_exit_code"' EXIT
+
+# Git sends one four-field line per ref update on stdin. A deletion has the
+# literal local-ref marker `(delete)` plus an all-zero local object ID, so there
+# are no local commits or files to validate. Consume the stream once and fail
+# closed: empty, malformed, and mixed update sets continue through the normal
+# validation path.
+cat > "$push_updates"
+deletion_only=0
+if [ -s "$push_updates" ] && awk '
+  function valid_oid(oid) {
+    return oid ~ /^[0-9a-f]+$/ && (length(oid) == 40 || length(oid) == 64)
+  }
+  NF != 4 || $1 != "(delete)" || !valid_oid($2) || $2 !~ /^0+$/ ||
+    !valid_oid($4) || length($2) != length($4) { malformed = 1 }
+  END { exit malformed ? 1 : 0 }
+' "$push_updates"; then
+  deletion_only=1
+  while IFS=' ' read -r _local_ref _local_oid remote_ref _remote_oid _extra ||
+    [ -n "$_local_ref$_local_oid$remote_ref$_remote_oid$_extra" ]; do
+    if [ -n "$_extra" ] || ! git check-ref-format "$remote_ref" >/dev/null 2>&1; then
+      deletion_only=0
+      break
+    fi
+  done < "$push_updates"
+fi
+if [ "$deletion_only" -eq 1 ]; then
+  echo "=== Pre-push: deletion-only ref update; skipping local commit validation ==="
+  exit 0
+fi
+
 push_base=$(hook_push_base)
 validation_base=$(hook_validation_base)
 # Expensive changed-file gates should validate the PR delta against the base
