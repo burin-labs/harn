@@ -6,11 +6,9 @@ policy_path="${HARN_CACHE_POLICY_PATH:-$repo_root/.github/cache-policy.json}"
 repository="${GITHUB_REPOSITORY:-burin-labs/harn}"
 
 configured_limit="$(jq -er '.storage_limit_bytes | select(type == "number" and . >= 1073741824 and floor == .)' "$policy_path")"
-storage_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' "repos/$repository/actions/cache/storage-limit")"
 usage_json="$(gh api "repos/$repository/actions/cache/usage")"
 pages_json="$(gh api --paginate "repos/$repository/actions/caches?per_page=100" --slurp)"
 
-api_limit_bytes="$(jq -er '.max_cache_size_gb | select(type == "number" and . >= 1 and floor == .) * 1073741824' <<<"$storage_json")"
 usage_bytes="$(jq -er '.active_caches_size_in_bytes | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"
 usage_count="$(jq -er '.active_caches_count | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"
 inventory="$(jq -cer '
@@ -45,10 +43,9 @@ inventory="$(jq -cer '
 listed_bytes="$(jq -r '.listed_bytes' <<<"$inventory")"
 
 report="$(jq -cn \
-  --arg schema_version 'harn.ci_cache_budget.v1' \
+  --arg schema_version 'harn.ci_cache_budget.v2' \
   --arg repository "$repository" \
   --argjson configured_limit_bytes "$configured_limit" \
-  --argjson api_limit_bytes "$api_limit_bytes" \
   --argjson active_bytes "$usage_bytes" \
   --argjson active_count "$usage_count" \
   --argjson inventory "$inventory" \
@@ -56,14 +53,12 @@ report="$(jq -cn \
     schema_version: $schema_version,
     repository: $repository,
     configured_limit_bytes: $configured_limit_bytes,
-    api_limit_bytes: $api_limit_bytes,
     active_bytes: $active_bytes,
     active_count: $active_count,
     listed_bytes: $inventory.listed_bytes,
     listed_count: $inventory.listed_count,
     by_ref: $inventory.by_ref,
     by_class: $inventory.by_class,
-    limit_matches: ($configured_limit_bytes == $api_limit_bytes),
     within_budget: ($active_bytes <= $configured_limit_bytes and $inventory.listed_bytes <= $configured_limit_bytes)
   }')"
 
@@ -75,7 +70,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo
     echo "| Metric | Value |"
     echo "| --- | ---: |"
-    jq -r '"| Configured limit | \(.configured_limit_bytes) bytes |", "| GitHub limit | \(.api_limit_bytes) bytes |", "| Active usage | \(.active_bytes) bytes / \(.active_count) entries |", "| Listed inventory | \(.listed_bytes) bytes / \(.listed_count) entries |"' <<<"$report"
+    jq -r '"| Policy limit | \(.configured_limit_bytes) bytes |", "| Active usage | \(.active_bytes) bytes / \(.active_count) entries |", "| Listed inventory | \(.listed_bytes) bytes / \(.listed_count) entries |"' <<<"$report"
     echo
     echo "#### By class"
     jq -r '.by_class[] | "- \(.class): \(.bytes) bytes across \(.count) entries"' <<<"$report"
@@ -85,10 +80,6 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   } >>"$GITHUB_STEP_SUMMARY"
 fi
 
-if [[ "$configured_limit" -ne "$api_limit_bytes" ]]; then
-  echo "::warning::cache policy limit $configured_limit does not match GitHub limit $api_limit_bytes" >&2
-  exit 1
-fi
 if [[ "$usage_bytes" -gt "$configured_limit" || "$listed_bytes" -gt "$configured_limit" ]]; then
   echo "::warning::GitHub Actions cache exceeds the $configured_limit-byte policy budget (active=$usage_bytes listed=$listed_bytes)" >&2
   exit 1

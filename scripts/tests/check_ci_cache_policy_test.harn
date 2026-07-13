@@ -58,6 +58,10 @@ fn workflows() {
             },
           ],
         },
+        cache_budget: {
+          permissions: {actions: "read", contents: "read"},
+          steps: [{run: "./scripts/report_ci_cache_budget.sh"}],
+        },
       },
     },
     "ci.yml": {
@@ -86,6 +90,18 @@ pipeline test_ci_cache_policy_accepts_one_main_guarded_writer(task) {
 pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(task) {
   const invalid = {
     ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: workflows()["build-release-binaries.yml"].jobs.build,
+        cache_budget: {
+          permissions: {contents: "read"},
+          steps: [
+            {run: "./scripts/report_ci_cache_budget.sh", "continue-on-error": true},
+            {run: "./scripts/report_ci_cache_budget.sh"},
+          ],
+        },
+      },
+    },
     "ci.yml": {
       env: {SCCACHE_GHA_ENABLED: "true"},
       jobs: {
@@ -110,10 +126,36 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
     errors.contains("ci.yml:test bypasses Harn-owned cache actions with actions/cache/save@floating"),
   )
   assert(errors.contains("ci.yml:test enables an ungated BuildKit cache writer"))
+  assert(errors.contains("build-release-binaries.yml:cache_budget must grant actions: read"))
+  assert(
+    errors
+      .contains(
+      "build-release-binaries.yml:cache_budget must run ./scripts/report_ci_cache_budget.sh exactly once",
+    ),
+  )
 }
 
 pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(task) {
   assert_eq(ci_cache_policy_parse({...policy(), unexpected: true}), nil)
   assert_eq(ci_cache_policy_parse({...policy(), writers: policy().writers + policy().writers}), nil)
   assert_eq(ci_cache_policy_parse({...policy(), writers: []}), nil)
+}
+
+pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: workflows()["build-release-binaries.yml"].jobs.build,
+        cache_budget: {
+          permissions: {actions: "read", contents: "read"},
+          steps: [{run: "./scripts/report_ci_cache_budget.sh", "continue-on-error": true}],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains("build-release-binaries.yml:cache_budget must fail when cache telemetry fails"),
+  )
 }
