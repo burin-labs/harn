@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+real_path=$PATH
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -88,8 +89,25 @@ chmod +x "$fake_bin/harn"
 cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "unexpected cargo invocation: $*" >&2
-exit 2
+{
+  printf 'argv=%s\n' "$*"
+  printf 'CARGO_INCREMENTAL=%s\n' "${CARGO_INCREMENTAL-__unset__}"
+  printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
+  printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
+  printf 'SCCACHE_DISABLE=%s\n' "${SCCACHE_DISABLE-__unset__}"
+} >> "$FAKE_CARGO_RECORD"
+case "$*" in
+  "metadata --format-version=1")
+    printf '# reconciled by fake Cargo\n' >> Cargo.lock
+    ;;
+  "metadata --format-version=1 --locked")
+    grep -Fq '# reconciled by fake Cargo' Cargo.lock
+    ;;
+  *)
+    echo "unexpected cargo invocation: $*" >&2
+    exit 2
+    ;;
+esac
 SH
 chmod +x "$fake_bin/cargo"
 
@@ -126,6 +144,7 @@ record_make="$tmp_root/make-record.txt"
 HARN_RELEASE_ROOT="$release_root" \
 HARN_BIN="$fake_bin/harn" \
 FAKE_HARN_RECORD="$record_harn" \
+FAKE_CARGO_RECORD="$record_cargo" \
 FAKE_MAKE_RECORD="$record_make" \
 FAIL_ON_MAKE=1 \
 PATH="$fake_bin:$PATH" \
@@ -158,11 +177,19 @@ if ! grep -Fxq "argv=dump-protocol-artifacts --artifact-version 1.3.0" "$record_
   cat "$record_harn" >&2
   exit 1
 fi
-if [[ -e "$record_cargo" ]]; then
-  echo "release_gate prepare should not run Cargo with a warmed HARN_BIN" >&2
+if [[ $(grep -Fxc 'argv=metadata --format-version=1' "$record_cargo") -ne 1 ]] \
+  || [[ $(grep -Fxc 'argv=metadata --format-version=1 --locked' "$record_cargo") -ne 1 ]]; then
+  echo "release_gate prepare did not reconcile and verify Cargo.lock exactly once" >&2
   cat "$record_cargo" >&2
   exit 1
 fi
+for expected in CARGO_INCREMENTAL=0 RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= SCCACHE_DISABLE=1; do
+  if ! grep -Fxq "$expected" "$record_cargo"; then
+    echo "expected $expected in $record_cargo" >&2
+    cat "$record_cargo" >&2
+    exit 1
+  fi
+done
 
 if ! grep -Fxq "CARGO_INCREMENTAL=0" "$record_harn"; then
   echo "expected CARGO_INCREMENTAL=0 in $record_harn" >&2
@@ -184,6 +211,55 @@ if ! grep -Fxq "SCCACHE_DISABLE=1" "$record_harn"; then
   cat "$record_harn" >&2
   exit 1
 fi
+
+# Exercise the real Cargo lockfile boundary with a dependency-free workspace.
+# This falsifier fails on the old prepare implementation: Cargo.toml advances,
+# but the local package entry in Cargo.lock remains at the previous version.
+real_release_root="$tmp_root/real-release-root"
+mkdir -p "$real_release_root/crates/example/src" "$real_release_root/docs/src"
+cat > "$real_release_root/Cargo.toml" <<'EOF'
+[workspace]
+members = ["crates/example"]
+resolver = "2"
+
+[workspace.package]
+version = "1.2.3"
+EOF
+cat > "$real_release_root/crates/example/Cargo.toml" <<'EOF'
+[package]
+name = "example"
+version.workspace = true
+edition = "2021"
+EOF
+cat > "$real_release_root/crates/example/src/lib.rs" <<'EOF'
+pub fn example() {}
+EOF
+cat > "$real_release_root/docs/src/embedding-rust.md" <<'EOF'
+tag = "v1.2.3"
+EOF
+PATH="$real_path" cargo generate-lockfile --manifest-path "$real_release_root/Cargo.toml" --offline
+git -C "$real_release_root" init --quiet
+git -C "$real_release_root" config user.name "Release Test"
+git -C "$real_release_root" config user.email "release-test@example.com"
+git -C "$real_release_root" add .
+git -C "$real_release_root" commit --quiet -m "initial"
+
+HARN_RELEASE_ROOT="$real_release_root" \
+HARN_BIN="$fake_bin/harn" \
+FAKE_HARN_RECORD="$record_harn" \
+CARGO_TARGET_DIR="$tmp_root/real-target" \
+PATH="$real_path" \
+  "$repo_root/scripts/release_gate.sh" prepare --bump patch
+
+if ! grep -A2 -F 'name = "example"' "$real_release_root/Cargo.lock" | grep -Fq 'version = "1.2.4"'; then
+  echo "release_gate prepare left the real Cargo.lock package version stale" >&2
+  cat "$real_release_root/Cargo.lock" >&2
+  exit 1
+fi
+PATH="$real_path" cargo metadata \
+  --manifest-path "$real_release_root/Cargo.toml" \
+  --format-version=1 \
+  --locked >/dev/null
 
 git -C "$release_root" reset --hard --quiet HEAD
 : >"$record_make"
