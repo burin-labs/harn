@@ -11,6 +11,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple("egress_policy", &[Param::new("config", TY_DICT)], TY_DICT),
     BuiltinSignature::simple("git.conflicts", &[Param::new("repo", TY_STRING)], TY_DICT),
     BuiltinSignature::simple(
+        "git.describe",
+        &[
+            Param::new("repo", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "git.diff",
         &[
             Param::new("repo", TY_STRING),
@@ -24,6 +32,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("repo", TY_STRING),
             Param::new("remote", TY_STRING),
             Param::optional("refspecs", TY_LIST),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "git.ls_remote",
+        &[
+            Param::new("repo", TY_STRING),
+            Param::new("remote", TY_STRING),
+            Param::optional("options", TY_DICT),
         ],
         TY_DICT,
     ),
@@ -60,6 +77,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple("git.status", &[Param::new("repo", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "git.tag_list",
+        &[
+            Param::new("repo", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::simple(
         "git.worktree.create",
         &[
