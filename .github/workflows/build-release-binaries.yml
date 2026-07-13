@@ -35,9 +35,9 @@ name: Build release binaries
 #      so a later no-op `main` push cannot cancel a full warm matrix and
 #      replace it with a skipped setup-only run.
 #
-#   4. workflow_dispatch — either manual (re-)release of an existing tag
-#      (e.g. to recover when binaries were aborted mid-build last time) or
-#      an explicit warm-cache-only run on `main`.
+#   4. workflow_dispatch — manual recovery of an existing tag, an explicit
+#      warm-cache-only run on `main`, or a non-publishing targeted benchmark
+#      used to measure an alternate runner before changing release policy.
 #
 # Cache architecture note. GitHub Actions caches are scoped per-ref: a
 # tag-push run (refs/tags/vX.Y.Z) can only restore caches saved on that
@@ -82,6 +82,20 @@ on:
         required: false
         type: string
         default: ''
+      benchmark_only:
+        description: 'Build only the requested targets from the dispatched ref; never sign, package, upload, finalize a release, publish a container, or save caches.'
+        required: false
+        type: boolean
+        default: false
+      runner_profile:
+        description: 'Runner override for recovery/benchmark: policy, standard, or fast. Primary releases and warm builds always use policy.'
+        required: false
+        type: choice
+        options:
+          - policy
+          - standard
+          - fast
+        default: policy
 
 permissions:
   actions: read
@@ -121,10 +135,15 @@ jobs:
       should_finalize_release: ${{ steps.resolve.outputs.should_finalize_release }}
       should_publish_container: ${{ steps.resolve.outputs.should_publish_container }}
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
+      build_mode: ${{ steps.resolve.outputs.build_mode }}
+      runner_profile: ${{ steps.resolve.outputs.runner_profile }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          # Resolve policy from the workflow revision, not the source tag. This
+          # keeps current recovery logic available for old releases. Build jobs
+          # independently check out the resolved source ref.
+          ref: ${{ github.sha }}
           # Need at least one parent commit so the push-main warm-mode
           # path check (`git diff HEAD^ HEAD -- …`) below can resolve
           # HEAD^. depth: 2 is enough; the default depth=1 would make
@@ -137,6 +156,8 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
+          INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
+          INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'policy' }}
           FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
@@ -148,38 +169,9 @@ jobs:
           SHOULD_BUILD_BINARIES=false
           SHOULD_FINALIZE_RELEASE=false
           SHOULD_PUBLISH_CONTAINER=false
-          FULL_BUILD_MATRIX='[
-            {
-              "target": "x86_64-apple-darwin",
-              "os": "macos-15-intel",
-              "release_codegen_units": 16,
-              "use_sccache": "false"
-            },
-            {
-              "target": "aarch64-apple-darwin",
-              "os": "macos-latest",
-              "release_codegen_units": 16,
-              "use_sccache": "false"
-            },
-            {
-              "target": "x86_64-unknown-linux-gnu",
-              "os": "ubuntu-latest",
-              "release_codegen_units": 16,
-              "use_sccache": "true"
-            },
-            {
-              "target": "aarch64-unknown-linux-gnu",
-              "os": "ubuntu-24.04-arm",
-              "release_codegen_units": 16,
-              "use_sccache": "true"
-            },
-            {
-              "target": "x86_64-pc-windows-msvc",
-              "os": "windows-latest",
-              "release_codegen_units": 16,
-              "use_sccache": "false"
-            }
-          ]'
+          BUILD_MODE=""
+          RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
+          FULL_BUILD_MATRIX='[]'
 
           active_release_binary_runs() {
             local status
@@ -224,7 +216,7 @@ jobs:
           validate_requested_targets() {
             local targets_json="$1"
             local known_json unknown
-            known_json="$(jq -c '[.[].target]' <<<"$FULL_BUILD_MATRIX")"
+            known_json="$(jq -c '[.targets[].target]' .github/release-runner-policy.json)"
             unknown="$(jq -nr --argjson requested "$targets_json" --argjson known "$known_json" '$requested - $known | .[]')"
             if [[ -n "$unknown" ]]; then
               echo "::error::Unknown release target(s) in targets input:"
@@ -232,9 +224,19 @@ jobs:
                 [[ -n "$target" ]] || continue
                 echo "::error::  $target"
               done <<<"$unknown"
-              echo "::error::Known targets: $(jq -r '.[].target' <<<"$FULL_BUILD_MATRIX" | paste -sd ' ' -)"
+              echo "::error::Known targets: $(jq -r '.targets[].target' .github/release-runner-policy.json | paste -sd ' ' -)"
               exit 1
             fi
+          }
+
+          resolve_runner_matrix() {
+            local mode="$1"
+            local profile="$2"
+            local targets="${3:-}"
+            scripts/release_runner_matrix.sh \
+              --mode "$mode" \
+              --profile "$profile" \
+              --targets "$targets"
           }
 
           release_container_tags_missing() {
@@ -287,7 +289,25 @@ jobs:
           if (( REQUESTED_TARGET_COUNT > 0 )); then
             validate_requested_targets "$REQUESTED_TARGETS_JSON"
           fi
-          if [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
+          if [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
+            if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+              echo "::error::benchmark_only is only valid for workflow_dispatch"
+              exit 1
+            fi
+            if [[ "$INPUT_WARM_CACHE_ONLY" == "true" || -n "$INPUT_TAG" || "$FORCE_REBUILD" == "true" ]]; then
+              echo "::error::benchmark_only cannot be combined with warm_cache_only, tag, or force_rebuild"
+              exit 1
+            fi
+            if (( REQUESTED_TARGET_COUNT == 0 )); then
+              echo "::error::benchmark_only requires an explicit targets subset"
+              exit 1
+            fi
+            BUILD_MODE=benchmark
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE" "$INPUT_TARGETS")"
+            SHOULD_BUILD_BINARIES=true
+            echo "::notice::Non-publishing benchmark from $REF using runner profile $RUNNER_PROFILE. No sign/notarize/package/upload/release/container/cache save."
+          elif [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::warm_cache_only is only valid for workflow_dispatch"
               exit 1
@@ -300,10 +320,17 @@ jobs:
               echo "::error::targets is only valid for release tag recovery, not warm_cache_only"
               exit 1
             fi
+            if [[ "$RUNNER_PROFILE" != "policy" ]]; then
+              echo "::error::warm_cache_only always uses policy runners; runner_profile must be policy"
+              exit 1
+            fi
             if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
               echo "::error::warm_cache_only must be dispatched on the main branch so tag releases can restore the saved default-branch cache (got ${REF_TYPE}/${REF_NAME})"
               exit 1
             fi
+            BUILD_MODE=warm
+            RUNNER_PROFILE=policy
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             if skip_warm_cache_if_release_active; then
               echo "::notice::Warm-cache-only workflow_dispatch suppressed while release binaries are already building."
@@ -314,6 +341,13 @@ jobs:
             fi
           elif [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
             IS_RELEASE=true
+            if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              BUILD_MODE=recovery
+            else
+              BUILD_MODE=primary
+              RUNNER_PROFILE=policy
+            fi
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::expected tag of form vX.Y.Z, got '$REF'"
               exit 1
@@ -331,6 +365,9 @@ jobs:
             # Cron-driven warm-cache run. Normally proceed — the whole point
             # is to refresh the cache against GitHub's 7-day eviction — but
             # do not contend with an active release binary build.
+            BUILD_MODE=warm
+            RUNNER_PROFILE=policy
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             if skip_warm_cache_if_release_active; then
               echo "::notice::Warm-cache-only run (schedule) suppressed while release binaries are already building."
@@ -340,6 +377,9 @@ jobs:
               echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
             fi
           elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
+            BUILD_MODE=warm
+            RUNNER_PROFILE=policy
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
             if [[ "$COMMIT_SUBJECT" =~ ^Release[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
@@ -351,7 +391,7 @@ jobs:
               # changed something that rotates Swatinem's exact cache key.
               # For non-keying pushes the previous warm cache is still good
               # and a rebuild adds no signal.
-              CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.harn .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
+              CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.harn scripts/release_runner_matrix.sh .github/release-runner-policy.json .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
               if [[ -n "$CHANGED_KEYING_FILES" ]]; then
                 SHOULD_BUILD_BINARIES=true
                 BUILD_MATRIX="$FULL_BUILD_MATRIX"
@@ -359,11 +399,11 @@ jobs:
                 while IFS= read -r f; do printf '::notice::  %s\n' "$f"; done <<<"$CHANGED_KEYING_FILES"
                 echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
               else
-                echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / scripts/check_binary_size.harn / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
+                echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / release build scripts, runner policy, or build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
               fi
             fi
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "::error::workflow_dispatch requires either tag=vX.Y.Z for release recovery or warm_cache_only=true on main"
+            echo "::error::workflow_dispatch requires tag=vX.Y.Z, warm_cache_only=true, or benchmark_only=true"
             exit 1
           else
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -477,6 +517,8 @@ jobs:
             echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
             echo "should_finalize_release=$SHOULD_FINALIZE_RELEASE"
             echo "should_publish_container=$SHOULD_PUBLISH_CONTAINER"
+            echo "build_mode=$BUILD_MODE"
+            echo "runner_profile=$RUNNER_PROFILE"
             echo "build_matrix<<__JSON__"
             echo "$BUILD_MATRIX"
             echo "__JSON__"
@@ -490,6 +532,8 @@ jobs:
             echo "| Ref | $REF |"
             echo "| Version | $VERSION |"
             echo "| Release mode | $IS_RELEASE |"
+            echo "| Build mode | $BUILD_MODE |"
+            echo "| Runner profile | $RUNNER_PROFILE |"
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
             echo "| Finalize release | $SHOULD_FINALIZE_RELEASE |"
             echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
@@ -549,10 +593,10 @@ jobs:
     # as soon as it finishes (incremental per-arch publish).
     permissions:
       contents: write
-    # Use standard GitHub-hosted runners for both warm-cache and release runs.
-    # Larger macOS runners are billed even for public repositories, so release
-    # recovery retries should not route to macOS Large / XLarge by default.
-    runs-on: ${{ matrix.os }}
+    # Runner labels are resolved from release-runner-policy.json in setup.
+    # Warm, primary, recovery, and explicit benchmark capacity are separate
+    # policy dimensions; build jobs consume the selected label directly.
+    runs-on: ${{ matrix.runner }}
     # Avoid GitHub's multi-hour default timeout for release artifacts. Native
     # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
@@ -621,7 +665,7 @@ jobs:
         shell: bash
         env:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
-          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.os }}
+          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_SCCACHE_REQUESTED: ${{ matrix.use_sccache }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
           HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
@@ -689,7 +733,7 @@ jobs:
           HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
           HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
-          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.os }}
+          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
         run: |
           set -euo pipefail

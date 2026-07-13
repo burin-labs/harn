@@ -89,8 +89,9 @@ follow the moving target.
 
 ## Adding a new target triple
 
-1. Add the target to the build matrix in
-   `.github/workflows/build-release-binaries.yml`.
+1. Add the target and its warm, primary, recovery, standard, and fast runner
+   labels to `.github/release-runner-policy.json`, then extend
+   `scripts/tests/release_runner_matrix_test.harn`.
 2. Add the same target to the `EXPECTED_ASSETS` list in the workflow's
    `setup` job and to the per-step expected lists in the `release` job.
 3. Add a new entry to the `TARGETS` map in
@@ -99,7 +100,6 @@ follow the moving target.
 4. Make a note in `CHANGELOG.md` so downstream consumers know to bump
    their pinned manifest URL.
 
-The triple key in `TARGETS` is the single source of truth — the
-workflow fails loudly if a target appears in the matrix but not in the
-manifest script, or vice versa, because the expected-assets list is
-checked at multiple points.
+The runner policy owns build-matrix targets and `TARGETS` owns manifest
+packaging. The workflow fails loudly if those contracts drift because the
+resolver tests and expected-assets checks cover both sides.
