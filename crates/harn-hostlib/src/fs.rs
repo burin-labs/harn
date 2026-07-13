@@ -7,12 +7,13 @@
 //! touching the working tree until `hostlib_fs_commit_staged`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs as stdfs;
+use std::fs::{self as stdfs, File, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
+use fs2::FileExt;
 use harn_vm::agent_events::AgentEvent;
 use harn_vm::process_sandbox::{check_fs_path_scope, FsAccess};
 use harn_vm::VmValue;
@@ -628,10 +629,9 @@ fn hash_label(bytes: &[u8]) -> String {
 ///   sibling thread cannot stage a write into the window between the
 ///   pre-image snapshot and the commit.
 /// - When the call routes through disk (no active session, or session in
-///   immediate mode), the write goes through an atomic rename-into-place
-///   so partial-write tearing is impossible. Cross-process races are
-///   intentionally out of scope — the staged-fs overlay is the
-///   collision-rejection layer.
+///   immediate mode), a canonical-path file lock spans the read, hash check,
+///   and atomic rename. Competing Harn processes therefore observe the winner's
+///   post-image and return `stale_base` instead of silently overwriting it.
 pub fn safe_text_patch(
     path: &Path,
     content: &str,
@@ -795,6 +795,47 @@ fn safe_text_patch_disk(
     overwrite: bool,
     after_hash: String,
 ) -> Result<SafeTextPatchOutcome, HostlibError> {
+    let lock_root = safe_text_patch_lock_root()?;
+    safe_text_patch_disk_with_lock_root(
+        path,
+        new_bytes,
+        expected_hash,
+        create_parents,
+        overwrite,
+        after_hash,
+        &lock_root,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn safe_text_patch_disk_with_lock_root(
+    path: &Path,
+    new_bytes: &[u8],
+    expected_hash: Option<&str>,
+    create_parents: bool,
+    overwrite: bool,
+    after_hash: String,
+    lock_root: &Path,
+) -> Result<SafeTextPatchOutcome, HostlibError> {
+    let _lock = acquire_safe_text_patch_lock(path, lock_root)?;
+    safe_text_patch_disk_locked(
+        path,
+        new_bytes,
+        expected_hash,
+        create_parents,
+        overwrite,
+        after_hash,
+    )
+}
+
+fn safe_text_patch_disk_locked(
+    path: &Path,
+    new_bytes: &[u8],
+    expected_hash: Option<&str>,
+    create_parents: bool,
+    overwrite: bool,
+    after_hash: String,
+) -> Result<SafeTextPatchOutcome, HostlibError> {
     let (existing_bytes, existed) = match stdfs::read(path) {
         Ok(bytes) => (bytes, true),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
@@ -861,6 +902,105 @@ fn safe_text_patch_disk(
         created: !existed,
         bytes_written: new_bytes.len(),
     })
+}
+
+fn safe_text_patch_lock_root() -> Result<PathBuf, HostlibError> {
+    harn_vm::user_dirs::home_dir()
+        .map(|home| home.join(".harn/fs-cas-locks"))
+        .ok_or_else(|| HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: "cannot resolve the user home for safe-text-patch locks".to_string(),
+        })
+}
+
+fn acquire_safe_text_patch_lock(
+    path: &Path,
+    lock_root: &Path,
+) -> Result<SafeTextPatchLock, HostlibError> {
+    let file = open_safe_text_patch_lock(path, lock_root)?;
+    file.lock_exclusive()
+        .map_err(|error| HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: format!("acquire CAS lock for `{}`: {error}", path.display()),
+        })?;
+    Ok(SafeTextPatchLock { file })
+}
+
+fn open_safe_text_patch_lock(path: &Path, lock_root: &Path) -> Result<File, HostlibError> {
+    stdfs::create_dir_all(lock_root).map_err(|error| HostlibError::Backend {
+        builtin: SAFE_TEXT_PATCH_BUILTIN,
+        message: format!(
+            "create CAS lock directory `{}`: {error}",
+            lock_root.display()
+        ),
+    })?;
+    let identity = canonical_lock_identity(path);
+    let lock_name = format!(
+        "{}.lock",
+        hex::encode(Sha256::digest(lock_identity_bytes(&identity)))
+    );
+    let lock_path = lock_root.join(lock_name);
+    OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|error| HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: format!("open CAS lock `{}`: {error}", lock_path.display()),
+        })
+}
+
+fn lock_identity_bytes(identity: &Path) -> Vec<u8> {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        // These platforms commonly use case-insensitive filesystems. Folding
+        // only the private lock key safely over-serializes case-sensitive
+        // volumes while preventing two spellings of a missing target from
+        // acquiring different locks before the first create.
+        identity.to_string_lossy().to_lowercase().into_bytes()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        identity.as_os_str().as_encoded_bytes().to_vec()
+    }
+}
+
+fn canonical_lock_identity(path: &Path) -> PathBuf {
+    if let Ok(canonical) = stdfs::canonicalize(path) {
+        return canonical;
+    }
+    let absolute = normalize_logical(path);
+    let mut ancestor = absolute.as_path();
+    let mut suffix = Vec::new();
+    while let Some(name) = ancestor.file_name() {
+        suffix.push(name.to_os_string());
+        let Some(parent) = ancestor.parent() else {
+            break;
+        };
+        if let Ok(canonical_parent) = stdfs::canonicalize(parent) {
+            let mut identity = canonical_parent;
+            for component in suffix.iter().rev() {
+                identity.push(component);
+            }
+            return identity;
+        }
+        ancestor = parent;
+    }
+    absolute
+}
+
+struct SafeTextPatchLock {
+    file: File,
+}
+
+impl Drop for SafeTextPatchLock {
+    fn drop(&mut self) {
+        // Keep the lock file itself: unlinking it can split waiters across two
+        // inodes. The OS releases ownership automatically when a process exits.
+        let _ = FileExt::unlock(&self.file);
+    }
 }
 
 /// Read the pre-image through the staged-fs overlay (when active),
@@ -1694,6 +1834,214 @@ mod staged_path_tests {
         );
 
         let _ = super::remove_session_state(&session_id, Some(&root));
+    }
+}
+
+#[cfg(test)]
+mod safe_text_patch_lock_tests {
+    use super::{
+        acquire_safe_text_patch_lock, hash_label, open_safe_text_patch_lock,
+        safe_text_patch_disk_locked, safe_text_patch_disk_with_lock_root, SafeTextPatchResult,
+    };
+    use fs2::FileExt;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command, Stdio};
+    use tempfile::tempdir;
+
+    const CHILD_MODE: &str = "HARN_SAFE_TEXT_PATCH_TEST_CHILD";
+    const CHILD_PATH: &str = "HARN_SAFE_TEXT_PATCH_TEST_PATH";
+    const CHILD_LOCK_ROOT: &str = "HARN_SAFE_TEXT_PATCH_TEST_LOCK_ROOT";
+    const CHILD_EXPECTED_HASH: &str = "HARN_SAFE_TEXT_PATCH_TEST_EXPECTED_HASH";
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn absent_target_case_aliases_share_one_lock() {
+        let dir = tempdir().expect("tempdir");
+        let lock_root = dir.path().join("locks");
+
+        assert_lock_aliases_contend(
+            &dir.path().join("Missing.txt"),
+            &dir.path().join("missing.txt"),
+            &lock_root,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_target_symlink_aliases_share_one_lock() {
+        let dir = tempdir().expect("tempdir");
+        let target = dir.path().join("target.txt");
+        let alias = dir.path().join("alias.txt");
+        let lock_root = dir.path().join("locks");
+        std::fs::write(&target, b"original\n").expect("write target");
+        std::os::unix::fs::symlink(&target, &alias).expect("create symlink alias");
+
+        assert_lock_aliases_contend(&target, &alias, &lock_root);
+    }
+
+    #[test]
+    fn safe_text_patch_process_child() {
+        let Ok(mode) = std::env::var(CHILD_MODE) else {
+            return;
+        };
+        let path = PathBuf::from(std::env::var_os(CHILD_PATH).expect("child path"));
+        let lock_root = PathBuf::from(std::env::var_os(CHILD_LOCK_ROOT).expect("lock root"));
+        let expected_hash = std::env::var(CHILD_EXPECTED_HASH).expect("expected hash");
+        match mode.as_str() {
+            "holder" => run_lock_holder(&path, &lock_root, &expected_hash),
+            "contender" => run_lock_contender(&path, &lock_root, &expected_hash),
+            other => panic!("unknown child mode {other}"),
+        }
+    }
+
+    #[test]
+    fn immediate_safe_text_patch_is_compare_and_swap_across_processes() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("shared.txt");
+        let lock_root = dir.path().join("locks");
+        std::fs::write(&path, b"original\n").expect("write preimage");
+        let expected_hash = hash_label(b"original\n");
+
+        let (mut holder, mut holder_stdout) =
+            spawn_child("holder", &path, &lock_root, &expected_hash);
+        read_until(&mut holder_stdout, "LOCKED");
+        let (mut contender, mut contender_stdout) =
+            spawn_child("contender", &path, &lock_root, &expected_hash);
+        read_until(&mut contender_stdout, "LOCK_CONTENDED");
+
+        holder
+            .stdin
+            .take()
+            .expect("holder stdin")
+            .write_all(b"commit\n")
+            .expect("release holder");
+        read_until(&mut holder_stdout, "RESULT:applied");
+        assert!(holder.wait().expect("wait holder").success());
+        read_until(&mut contender_stdout, "RESULT:stale_base");
+        assert!(contender.wait().expect("wait contender").success());
+        assert_eq!(std::fs::read(&path).expect("read postimage"), b"holder\n");
+    }
+
+    #[test]
+    fn immediate_safe_text_patch_lock_is_exclusive_within_one_process() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("shared.txt");
+        let lock_root = dir.path().join("locks");
+        std::fs::write(&path, b"original\n").expect("write preimage");
+
+        let holder = acquire_safe_text_patch_lock(&path, &lock_root).expect("holder lock");
+        let contender = open_safe_text_patch_lock(&path, &lock_root).expect("contender lock file");
+        let error = contender
+            .try_lock_exclusive()
+            .expect_err("a second same-process open must observe contention");
+        assert_eq!(
+            error.raw_os_error(),
+            fs2::lock_contended_error().raw_os_error()
+        );
+
+        drop(holder);
+        contender
+            .try_lock_exclusive()
+            .expect("dropping the owner must release the advisory lock");
+        FileExt::unlock(&contender).expect("release contender lock");
+    }
+
+    fn assert_lock_aliases_contend(first: &Path, second: &Path, lock_root: &Path) {
+        let holder = acquire_safe_text_patch_lock(first, lock_root).expect("holder lock");
+        let contender = open_safe_text_patch_lock(second, lock_root).expect("alias lock file");
+        let error = contender
+            .try_lock_exclusive()
+            .expect_err("path aliases must contend on one lock");
+        assert_eq!(
+            error.raw_os_error(),
+            fs2::lock_contended_error().raw_os_error()
+        );
+
+        drop(holder);
+        contender
+            .try_lock_exclusive()
+            .expect("dropping the owner must release the alias lock");
+        FileExt::unlock(&contender).expect("release alias lock");
+    }
+
+    fn run_lock_holder(path: &Path, lock_root: &Path, expected_hash: &str) {
+        let _lock = acquire_safe_text_patch_lock(path, lock_root).expect("acquire holder lock");
+        println!("LOCKED");
+        std::io::stdout().flush().expect("flush locked signal");
+        let mut release = [0_u8; 1];
+        std::io::stdin()
+            .read_exact(&mut release)
+            .expect("read release signal");
+        let outcome = safe_text_patch_disk_locked(
+            path,
+            b"holder\n",
+            Some(expected_hash),
+            false,
+            true,
+            hash_label(b"holder\n"),
+        )
+        .expect("holder patch");
+        println!("RESULT:{}", outcome.result.as_str());
+    }
+
+    fn run_lock_contender(path: &Path, lock_root: &Path, expected_hash: &str) {
+        let probe = open_safe_text_patch_lock(path, lock_root).expect("open contender probe");
+        let error = probe
+            .try_lock_exclusive()
+            .expect_err("holder process must own the target lock");
+        assert_eq!(
+            error.raw_os_error(),
+            fs2::lock_contended_error().raw_os_error()
+        );
+        println!("LOCK_CONTENDED");
+        std::io::stdout().flush().expect("flush contention signal");
+        drop(probe);
+        let outcome = safe_text_patch_disk_with_lock_root(
+            path,
+            b"contender\n",
+            Some(expected_hash),
+            false,
+            true,
+            hash_label(b"contender\n"),
+            lock_root,
+        )
+        .expect("contender patch");
+        assert_eq!(outcome.result, SafeTextPatchResult::StaleBase);
+        println!("RESULT:{}", outcome.result.as_str());
+    }
+
+    fn spawn_child(
+        mode: &str,
+        path: &Path,
+        lock_root: &Path,
+        expected_hash: &str,
+    ) -> (Child, BufReader<std::process::ChildStdout>) {
+        let mut child = Command::new(std::env::current_exe().expect("current test executable"))
+            .arg("safe_text_patch_process_child")
+            .arg("--nocapture")
+            .env(CHILD_MODE, mode)
+            .env(CHILD_PATH, path)
+            .env(CHILD_LOCK_ROOT, lock_root)
+            .env(CHILD_EXPECTED_HASH, expected_hash)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("spawn child test process");
+        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        (child, stdout)
+    }
+
+    fn read_until(reader: &mut impl BufRead, marker: &str) {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert!(reader.read_line(&mut line).expect("read child output") > 0);
+            if line.trim_end() == marker {
+                return;
+            }
+        }
     }
 }
 

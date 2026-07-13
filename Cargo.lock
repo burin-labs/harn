@@ -3306,6 +3306,7 @@ dependencies = [
  "criterion",
  "enigo",
  "filetime",
+ "fs2",
  "globset",
  "grep-matcher",
  "grep-regex",
