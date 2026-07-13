@@ -100,8 +100,15 @@ if [[ "${FAIL_ON_MAKE:-0}" == "1" ]]; then
   echo "unexpected make invocation: $*" >&2
   exit 2
 fi
+if [[ "${ASSERT_DERIVED_PRE_BUMP:-0}" == "1" ]] \
+  && [[ "$*" == "sync-language-spec" || "$*" == "gen-highlight" ]] \
+  && grep -Fq 'version = "1.2.4"' Cargo.toml; then
+  echo "derived target ran after the metadata version bump: $*" >&2
+  exit 2
+fi
 {
   printf 'target=%s\n' "$*"
+  printf 'version=%s\n' "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
   printf 'HARN_BIN=%s\n' "${HARN_BIN-__unset__}"
   printf 'CARGO_INCREMENTAL=%s\n' "${CARGO_INCREMENTAL-__unset__}"
   printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
@@ -223,6 +230,7 @@ HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
 CARGO_TARGET_DIR="$target_dir" \
 SHIP_GATE_RECORD="$record_ship" \
 FAKE_MAKE_RECORD="$record_make" \
+ASSERT_DERIVED_PRE_BUMP=1 \
 PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/release_ship.sh" --prepare --bump patch --skip-dry-run
 
@@ -232,5 +240,14 @@ if ! grep -Fxq "prepare HARN_BIN=$expected_harn" "$record_ship"; then
   cat "$record_ship" >&2
   exit 1
 fi
+
+for target in sync-language-spec gen-highlight; do
+  expected_record=$(printf 'target=%s\nversion=1.2.3' "$target")
+  if ! grep -Fq "$expected_record" "$record_make"; then
+    echo "release_ship did not run $target against the pre-bump source version" >&2
+    cat "$record_make" >&2
+    exit 1
+  fi
+done
 
 echo "release_prepare_env_test: ok"

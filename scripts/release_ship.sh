@@ -650,6 +650,12 @@ prepare_here() {
   run_common_gates
 
   export_warmed_harn_bin
+  # Language-spec and highlight outputs derive from the audited source tree,
+  # not release metadata. Generate them while the audited CLI is still fresh;
+  # the version bump below intentionally makes Cargo manifests newer than it.
+  disable_prepare_cargo_cache_wrappers
+  regenerate_derived_files
+
   log_step "Version bump (in place)"
   "$RELEASE_GATE_SCRIPT" prepare --bump "$BUMP" --allow-dirty
   local actual_next
@@ -658,13 +664,6 @@ prepare_here() {
     echo "error: expected version $next, got $actual_next"
     exit 1
   fi
-
-  # `release_gate.sh prepare` disables cargo/sccache state for post-bump
-  # one-shot rebuilds. That export does not survive the subprocess boundary,
-  # so re-apply it for the cargo invocations `regenerate_derived_files` runs in
-  # this shell.
-  disable_prepare_cargo_cache_wrappers
-  regenerate_derived_files
 
   log_step "Stage release content"
   # Stage the version bump deterministically and then sweep tracked
