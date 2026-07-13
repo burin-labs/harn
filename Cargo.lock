@@ -3245,7 +3245,7 @@ dependencies = [
  "cranelift-frontend 0.132.3",
  "cranelift-jit",
  "cranelift-module",
- "cranelift-native 0.132.3",
+ "cranelift-native 0.133.1",
  "cranelift-object",
  "harn-parser",
  "harn-vm",
