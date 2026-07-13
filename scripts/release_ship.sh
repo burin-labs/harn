@@ -566,6 +566,11 @@ capture_prepare_tree() {
   local source_index
   source_index="$(git rev-parse --git-path index)"
   cp "$source_index" "$index_path"
+  GIT_INDEX_FILE="$index_path" git ls-files -z |
+    GIT_INDEX_FILE="$index_path" git update-index --no-assume-unchanged -z --stdin
+  GIT_INDEX_FILE="$index_path" git ls-files -z |
+    GIT_INDEX_FILE="$index_path" git update-index --no-skip-worktree -z --stdin
+  GIT_INDEX_FILE="$index_path" git add --renormalize -u -- .
   GIT_INDEX_FILE="$index_path" git add -A -- .
   GIT_INDEX_FILE="$index_path" git write-tree
 }
