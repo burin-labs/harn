@@ -1,0 +1,65 @@
+import { assert_contains, assert_false, assert_nil, assert_not_nil, assert_true } from "std/testing"
+
+pipeline test_testing_matchers(task) {
+  // === assert_nil: passes on nil, fails (with value) otherwise ===
+  assert_eq(assert_nil(nil), nil)
+  const not_nil_caught = try {
+    assert_nil(1)
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(not_nil_caught, "assert_nil: expected nil, got 1"))
+  // === assert_not_nil: returns the value, fails (naming nil) on nil ===
+  assert_eq(assert_not_nil(5), 5)
+  const nil_caught = try {
+    assert_not_nil(nil)
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(nil_caught, "assert_not_nil: expected a non-nil value, got nil"))
+  // === assert_true / assert_false: exact bool match, not merely truthy ===
+  assert_eq(assert_true(true), nil)
+  const true_caught = try {
+    assert_true(false)
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(true_caught, "assert_true: expected true, got false"))
+  assert_eq(assert_false(false), nil)
+  const false_caught = try {
+    assert_false(true)
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(false_caught, "assert_false: expected false, got true"))
+  // === assert_contains: substring for strings, membership for lists ===
+  assert_eq(assert_contains("hello world", "world"), "hello world")
+  assert_eq(assert_contains([1, 2, 3], 2), [1, 2, 3])
+  const string_miss = try {
+    assert_contains("hello", "bye")
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(string_miss, "assert_contains: expected hello to contain bye"))
+  const list_miss = try {
+    assert_contains([1, 2, 3], 9)
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(list_miss, "to contain 9"))
+  // === a custom message overrides the default on every matcher ===
+  const custom_message = try {
+    assert_true(false, "custom failure text")
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert_eq(custom_message, "custom failure text")
+  __io_println("ok")
+}

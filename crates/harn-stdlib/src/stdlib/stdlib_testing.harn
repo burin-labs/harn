@@ -788,6 +788,90 @@ pub fn assert_no_throw(body, message = nil) -> any {
 
 // -------------------------------------------------------------------------------------------------
 
+// Value assertions
+//
+// `assert`/`assert_eq`/`assert_ne` (VM builtins; see `crates/harn-vm/src/
+// stdlib/testing.rs`) already cover the boolean and equality cases, with
+// `assert_eq` rendering both sides on failure. These fill the remaining
+// shapes test authors otherwise hand-roll with bare `assert(cond, msg)`:
+// nil checks, strict booleans (vs. merely-truthy), and haystack/needle
+// containment for strings and lists. Each shows the offending value(s) in
+// its default failure message rather than a bare "assertion failed".
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Assert `value` is `nil`.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: assert_nil(cache_lookup("missing-key"))
+ */
+pub fn assert_nil(value: any, message = nil) -> nil {
+  require value == nil, message ?? ("assert_nil: expected nil, got " + to_string(value))
+  return nil
+}
+
+/**
+ * Assert `value` is not `nil`. Returns `value` so callers can chain further
+ * assertions or use the result directly.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: const id = assert_not_nil(created.id)
+ */
+pub fn assert_not_nil(value: any, message = nil) -> any {
+  require value != nil, message ?? "assert_not_nil: expected a non-nil value, got nil"
+  return value
+}
+
+/**
+ * Assert `value` is `true`. Prefer this over bare `assert(cond)` when the
+ * condition itself IS the thing under test: `value` is typed `bool`, so a
+ * caller passing a non-bool (e.g. a dict) is a compile-time type error
+ * instead of the check silently passing on any truthy value.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: assert_true(is_ready())
+ */
+pub fn assert_true(value: bool, message = nil) -> nil {
+  require value, message ?? ("assert_true: expected true, got " + to_string(value))
+  return nil
+}
+
+/**
+ * Assert `value` is `false`. The `assert_true` counterpart; see there for
+ * why the `bool` type annotation matters.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: assert_false(is_ready())
+ */
+pub fn assert_false(value: bool, message = nil) -> nil {
+  require !value, message ?? ("assert_false: expected false, got " + to_string(value))
+  return nil
+}
+
+/**
+ * Assert `haystack` contains `needle`: a substring check for `string`, or
+ * membership by value equality for `list` — the same semantics as the
+ * `contains` builtin, with a default message naming both sides. Returns
+ * `haystack` so callers can chain further assertions.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: assert_contains("hello world", "world")
+ * @example: assert_contains([1, 2, 3], 2)
+ */
+pub fn assert_contains(haystack: string | list, needle: any, message = nil) -> any {
+  require contains(haystack, needle), message
+    ?? ("assert_contains: expected " + to_string(haystack) + " to contain " + to_string(needle))
+  return haystack
+}
+
+// -------------------------------------------------------------------------------------------------
+
 // Filesystem fixtures
 //
 // A scoped temp workspace with guaranteed cleanup — the fs counterpart to
