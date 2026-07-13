@@ -19,9 +19,9 @@ HOOK_TREESITTER_PATTERN='(^crates/harn-lexer/src/token\.rs$|^tree-sitter-harn/gr
 # The generated-artifact registry and the consumers its audit cross-checks:
 # Makefile target/recipe lists, the CI workflow that references generated
 # artifact checks, and the hook logic. Other workflows (for example release
-# binary packaging) do not change generated-artifact coverage. When the guard
-# does run, it must use a fresh worktree Harn binary because registry coverage
-# is computed by Harn source from this checkout.
+# binary packaging) do not change generated-artifact coverage. The guard
+# executes Harn source from this checkout; only compiled Rust deltas require a
+# fresh worktree runtime.
 HOOK_GENREGISTRY_PATTERN='(^scripts/generated_artifacts\.toml$|^scripts/check_generated_registry\.harn$|^Makefile$|^\.github/workflows/ci\.yml$|^\.githooks/)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
 
@@ -247,6 +247,24 @@ hook_export_harn_bin() {
 hook_export_fresh_worktree_harn_bin() {
   HARN_BIN=$(unset HARN_BIN; ./scripts/harn_bin.sh --print)
   export HARN_BIN
+}
+
+# Registry checks execute repository Harn source but only require a freshly
+# built runtime when the pushed/staged delta changes compiled Rust inputs.
+# Non-Rust changes reuse the binary selected during hook initialization.
+hook_export_registry_harn_bin() {
+  changed_file_list=$1
+  if hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+    hook_export_fresh_worktree_harn_bin
+  else
+    hook_export_harn_bin
+  fi
+}
+
+hook_check_generated_registry() {
+  changed_file_list=$1
+  hook_export_registry_harn_bin "$changed_file_list"
+  "$HARN_BIN" run scripts/check_generated_registry.harn
 }
 
 hook_export_existing_harn_bin_for_non_rust_changes() {
