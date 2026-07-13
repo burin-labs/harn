@@ -1,10 +1,9 @@
 //! `harn models batch` — plan provider Batch API use.
 //!
-//! The catalog filtering and workload guidance live in
-//! `crates/harn-stdlib/src/stdlib/cli/models/batch_plan.harn`. This
-//! shim only forwards parsed clap flags through env vars, because the
-//! script already has the read-only `harness.llm.catalog()` capability
-//! it needs.
+//! The Harn implementation lives under
+//! `crates/harn-stdlib/src/stdlib/cli/models/batch_*.harn`, with
+//! `batch_plan.harn` as its entrypoint. This shim only forwards parsed clap
+//! flags through env vars because the scripts own catalog and lifecycle policy.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};

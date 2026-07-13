@@ -1,0 +1,282 @@
+import { __has_string } from "std/cli/models/batch_transport"
+import { safe_dict, safe_string } from "std/cli/render"
+
+type BatchActiveState = "prepared" | "ready" | "submitted" | "running" | "canceling"
+
+type BatchTerminalState = "completed" | "failed" | "downloaded" | "not_ready" | "canceled"
+
+type BatchLifecycleState = BatchActiveState | BatchTerminalState | "partial" | "unknown" | "dry_run" | "skipped"
+
+type BatchLifecyclePhase = "submit" | "status" | "cancel" | "download"
+
+type BatchJobLifecycle = {
+  phase: BatchLifecyclePhase,
+  state: BatchLifecycleState,
+  dry_run: bool,
+  provider_status: unknown,
+  terminal: bool,
+  result_available: bool,
+  cancelable: bool,
+  retryable: bool,
+}
+
+type BatchLifecycleCounts = {
+  prepared: int,
+  ready: int,
+  submitted: int,
+  running: int,
+  completed: int,
+  failed: int,
+  unknown: int,
+  downloaded: int,
+  not_ready: int,
+  canceling: int,
+  canceled: int,
+  skipped: int,
+}
+
+type BatchReceiptLifecycle = {
+  phase: BatchLifecyclePhase,
+  state: BatchLifecycleState,
+  dry_run: bool,
+  terminal: bool,
+  result_available: bool,
+  partial: bool,
+  counts: BatchLifecycleCounts,
+}
+
+type BatchLifecycleJobBase = {
+  id: string,
+  provider: string,
+  model: string,
+  workload: string,
+  endpoint: string,
+  tool_format: string,
+  batch: dict,
+  provider_batch_id: string,
+  dry_run: bool,
+}
+
+/**
+ * Project the provider-neutral fields shared by post-submission job receipts.
+ *
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __batch_lifecycle_job_base(job: dict, dry_run: bool) -> BatchLifecycleJobBase {
+  return {
+    id: safe_string(job["id"], ""),
+    provider: safe_string(job["provider"], ""),
+    model: safe_string(job["model"], ""),
+    workload: safe_string(job["workload"], ""),
+    endpoint: safe_string(job["endpoint"], ""),
+    tool_format: safe_string(job["tool_format"], ""),
+    batch: safe_dict(job["batch"]),
+    provider_batch_id: safe_string(job["provider_batch_id"], ""),
+    dry_run: dry_run,
+  }
+}
+
+/**
+ * Count jobs carrying one normalized status.
+ *
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __count_jobs_with_status(jobs: list, status: string) -> int {
+  let count = 0
+  for job in jobs {
+    if safe_string(safe_dict(job)["status"], "") == status {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+/**
+ * Normalize provider-native status vocabulary.
+ *
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __provider_batch_status(raw_status) -> BatchLifecycleState {
+  const status = lowercase(trim(to_string(raw_status ?? "")))
+  if status == "" {
+    return "unknown"
+  }
+  if __has_string(["ready"], status) {
+    return "ready"
+  }
+  if __has_string(
+    ["completed", "succeeded", "success", "ended", "job_state_succeeded", "batch_state_succeeded"],
+    status,
+  ) {
+    return "completed"
+  }
+  if __has_string(["canceling", "cancelling", "cancel_requested", "batch_state_cancelling"], status) {
+    return "canceling"
+  }
+  if __has_string(
+    [
+      "cancelled",
+      "canceled",
+      "job_state_cancelled",
+      "job_state_canceled",
+      "batch_state_cancelled",
+      "batch_state_canceled",
+      "cancelled_by_user",
+      "canceled_by_user",
+    ],
+    status,
+  ) {
+    return "canceled"
+  }
+  if __has_string(
+    [
+      "failed",
+      "error",
+      "errored",
+      "expired",
+      "job_state_failed",
+      "job_state_expired",
+      "batch_state_failed",
+      "batch_state_expired",
+    ],
+    status,
+  ) {
+    return "failed"
+  }
+  return "running"
+}
+
+/**
+ * Collapse a raw status into the receipt lifecycle vocabulary.
+ *
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __batch_lifecycle_state(raw_status) -> BatchLifecycleState {
+  const status = lowercase(trim(to_string(raw_status ?? "")))
+  if __has_string(
+    [
+      "prepared",
+      "ready",
+      "submitted",
+      "running",
+      "completed",
+      "failed",
+      "partial",
+      "unknown",
+      "dry_run",
+      "downloaded",
+      "not_ready",
+      "canceling",
+      "canceled",
+      "skipped",
+    ],
+    status,
+  ) {
+    return status
+  }
+  return __provider_batch_status(status)
+}
+
+fn __batch_lifecycle_terminal(state: BatchLifecycleState, dry_run: bool) -> bool {
+  if dry_run {
+    return false
+  }
+  return state == "completed" || state == "failed" || state == "downloaded" || state == "not_ready"
+    || state == "canceled"
+}
+
+fn __batch_lifecycle_result_available(state: BatchLifecycleState) -> bool {
+  return state == "completed" || state == "downloaded" || state == "canceled"
+}
+
+fn __batch_lifecycle_cancelable(job: dict, state: BatchLifecycleState, dry_run: bool) -> bool {
+  if dry_run {
+    return false
+  }
+  const cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
+  if cancellation != "supported" {
+    return false
+  }
+  return state == "submitted" || state == "running" || state == "ready"
+}
+
+fn __batch_lifecycle_retryable(state: BatchLifecycleState) -> bool {
+  return state == "failed" || state == "not_ready"
+}
+
+fn __batch_job_lifecycle(job: dict, phase: BatchLifecyclePhase, dry_run: bool) -> BatchJobLifecycle {
+  const state = __batch_lifecycle_state(job["status"])
+  return {
+    phase: phase,
+    state: state,
+    dry_run: dry_run,
+    provider_status: job["provider_status"],
+    terminal: __batch_lifecycle_terminal(state, dry_run),
+    result_available: __batch_lifecycle_result_available(state),
+    cancelable: __batch_lifecycle_cancelable(job, state, dry_run),
+    retryable: __batch_lifecycle_retryable(state),
+  }
+}
+
+/**
+ * Attach derived lifecycle facts to one job receipt.
+ *
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __with_batch_lifecycle(job: dict, phase: BatchLifecyclePhase, dry_run: bool) -> dict {
+  return job + {lifecycle: __batch_job_lifecycle(job, phase, dry_run)}
+}
+
+fn __batch_lifecycle_counts(jobs: list) -> BatchLifecycleCounts {
+  return {
+    prepared: __count_jobs_with_status(jobs, "prepared"),
+    ready: __count_jobs_with_status(jobs, "ready"),
+    submitted: __count_jobs_with_status(jobs, "submitted"),
+    running: __count_jobs_with_status(jobs, "running"),
+    completed: __count_jobs_with_status(jobs, "completed"),
+    failed: __count_jobs_with_status(jobs, "failed"),
+    unknown: __count_jobs_with_status(jobs, "unknown"),
+    downloaded: __count_jobs_with_status(jobs, "downloaded"),
+    not_ready: __count_jobs_with_status(jobs, "not_ready"),
+    canceling: __count_jobs_with_status(jobs, "canceling"),
+    canceled: __count_jobs_with_status(jobs, "canceled"),
+    skipped: __count_jobs_with_status(jobs, "skipped"),
+  }
+}
+
+/**
+ * Derive aggregate lifecycle facts for a receipt.
+ *
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __batch_receipt_lifecycle(
+  status: string,
+  jobs: list,
+  dry_run: bool,
+  phase: BatchLifecyclePhase,
+) -> BatchReceiptLifecycle {
+  const state = __batch_lifecycle_state(status)
+  return {
+    phase: phase,
+    state: state,
+    dry_run: dry_run,
+    terminal: __batch_lifecycle_terminal(state, dry_run),
+    result_available: __count_jobs_with_status(jobs, "completed") > 0
+      || __count_jobs_with_status(jobs, "downloaded") > 0
+      || __count_jobs_with_status(jobs, "canceled") > 0,
+    partial: state == "partial",
+    counts: __batch_lifecycle_counts(jobs),
+  }
+}

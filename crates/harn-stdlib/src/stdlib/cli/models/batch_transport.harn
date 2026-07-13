@@ -1,0 +1,917 @@
+import { safe_bool, safe_dict, safe_string } from "std/cli/render"
+
+/**
+ * Declare the live operations supported by one provider transport.
+ *
+ * @api_stability: internal
+ */
+pub type BatchLiveAdapter = {submit: bool, status: bool, cancel: bool, download: bool}
+
+/**
+ * Coerce a provider numeric field to an optional integer.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __safe_int(value) -> int? {
+  if type_of(value) == "int" {
+    return value
+  }
+  return to_int(value)
+}
+
+/**
+ * Test a dynamically shaped list for one string value.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __has_string(items: list, needle: string) -> bool {
+  for item in items {
+    if type_of(item) == "string" && item == needle {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Parse a non-empty integer CLI filter.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __filter_int(value: string) -> int? {
+  const text = trim(value)
+  if text == "" {
+    return nil
+  }
+  return to_int(text)
+}
+
+/**
+ * Resolve one provider and wire pair to its live adapter key.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __live_batch_adapter_key(provider: string, wire: string) -> string {
+  if provider == "anthropic" && wire == "anthropic_messages" {
+    return "anthropic"
+  }
+  if provider == "openai" && wire == "openai" {
+    return "openai"
+  }
+  if provider == "groq" && wire == "openai" {
+    return "groq"
+  }
+  if provider == "together" && wire == "openai" {
+    return "together"
+  }
+  if provider == "parasail" && wire == "openai" {
+    return "parasail"
+  }
+  if provider == "gemini" && wire == "gemini" {
+    return "gemini"
+  }
+  if provider == "fireworks" && wire == "fireworks" {
+    return "fireworks"
+  }
+  if provider == "mistral" && wire == "mistral" {
+    return "mistral"
+  }
+  if provider == "xai" && wire == "xai" {
+    return "xai"
+  }
+  return ""
+}
+
+/**
+ * Project live-operation support for one provider and wire pair.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __live_batch_adapter(provider: string, wire: string) -> BatchLiveAdapter {
+  const adapter = __live_batch_adapter_key(provider, wire)
+  const supported = adapter != ""
+  return {
+    submit: supported,
+    status: supported,
+    cancel: adapter == "anthropic" || adapter == "openai" || adapter == "gemini",
+    download: supported,
+  }
+}
+
+/**
+ * Identify adapters sharing the OpenAI batch wire.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __is_openai_compatible_live_adapter(adapter: string) -> bool {
+  return adapter == "openai" || adapter == "groq" || adapter == "together" || adapter == "parasail"
+}
+
+/**
+ * Render the canonical unsupported-operation error.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __live_batch_operation_error(operation: string, provider: string, wire: string) -> string {
+  return "live batch "
+    + operation
+    + " is not implemented for provider="
+    + provider
+    + " wire="
+    + wire
+    + "; use --dry-run or add a provider adapter"
+}
+
+/**
+ * Create each missing directory component for an artifact path.
+ * @api_stability: internal
+ * @effects: [fs.write]
+ * @errors: []
+ */
+pub fn __mkdirp(harness: Harness, path: string) {
+  if trim(path) == "" {
+    return
+  }
+  const absolute = starts_with(path, "/")
+  let current = if absolute {
+    "/"
+  } else {
+    ""
+  }
+  for part in split(path, "/") {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    try {
+      harness.fs.mkdir(current)
+    } catch (_e) {
+      nil
+    }
+  }
+}
+
+/**
+ * Remove query and fragment credentials from a receipt URL.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __redact_download_url(url: string) -> string {
+  return regex_replace("[?#].*$", "", url) ?? url
+}
+
+/**
+ * Parse the accepted truthy environment spellings.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __truthy_env(value: string) -> bool {
+  const text = lowercase(trim(value))
+  return text == "1" || text == "true" || text == "yes" || text == "on"
+}
+
+/**
+ * Return the primary credential variable for a provider.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __provider_auth_env(provider: string) -> string {
+  if provider == "openai" {
+    return "OPENAI_API_KEY"
+  }
+  if provider == "anthropic" {
+    return "ANTHROPIC_API_KEY"
+  }
+  if provider == "mistral" {
+    return "MISTRAL_API_KEY"
+  }
+  if provider == "xai" {
+    return "XAI_API_KEY"
+  }
+  if provider == "together" {
+    return "TOGETHER_AI_API_KEY"
+  }
+  return uppercase(provider) + "_API_KEY"
+}
+
+fn __provider_auth_env_candidates(provider: string) -> list {
+  if provider == "together" {
+    return ["TOGETHER_AI_API_KEY", "TOGETHER_API_KEY"]
+  }
+  if provider == "gemini" {
+    return ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+  }
+  if provider == "fireworks" {
+    return ["FIREWORKS_API_KEY"]
+  }
+  return [__provider_auth_env(provider)]
+}
+
+/**
+ * Resolve a provider base URL from environment and defaults.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __provider_base_url(harness: Harness, provider: string) -> string {
+  if provider == "openai" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_OPENAI_BASE_URL",
+        harness.env.get_or("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+      ),
+    )
+  }
+  if provider == "anthropic" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_ANTHROPIC_BASE_URL",
+        harness.env.get_or("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+      ),
+    )
+  }
+  if provider == "mistral" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_MISTRAL_BASE_URL",
+        harness.env.get_or("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
+      ),
+    )
+  }
+  if provider == "xai" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_XAI_BASE_URL",
+        harness.env.get_or("XAI_BASE_URL", "https://api.x.ai/v1"),
+      ),
+    )
+  }
+  if provider == "gemini" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_GEMINI_BASE_URL",
+        harness.env
+          .get_or(
+          "GEMINI_BASE_URL",
+          harness.env
+            .get_or(
+            "GOOGLE_GENERATIVE_LANGUAGE_BASE_URL",
+            "https://generativelanguage.googleapis.com",
+          ),
+        ),
+      ),
+    )
+  }
+  if provider == "groq" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_GROQ_BASE_URL",
+        harness.env.get_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+      ),
+    )
+  }
+  if provider == "together" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_TOGETHER_BASE_URL",
+        harness.env
+          .get_or(
+          "TOGETHER_AI_BASE_URL",
+          harness.env.get_or("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
+        ),
+      ),
+    )
+  }
+  if provider == "fireworks" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_FIREWORKS_BASE_URL",
+        harness.env.get_or("FIREWORKS_BASE_URL", "https://api.fireworks.ai/v1"),
+      ),
+    )
+  }
+  if provider == "parasail" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_PARASAIL_BASE_URL",
+        harness.env.get_or("PARASAIL_BASE_URL", "https://api.saas.parasail.io/v1"),
+      ),
+    )
+  }
+  return ""
+}
+
+/**
+ * Join a provider base URL and endpoint path without duplicate slashes.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __join_url(base: string, path: string) -> string {
+  const left = trim(base)
+  const right = trim(path)
+  if right == "" {
+    return left
+  }
+  if ends_with(left, "/") && starts_with(right, "/") {
+    return left[0:len(left) - 1] + right
+  }
+  if !ends_with(left, "/") && !starts_with(right, "/") {
+    return left + "/" + right
+  }
+  return left + right
+}
+
+fn __parse_response_body(body: string) {
+  const text = trim(body)
+  if text == "" {
+    return nil
+  }
+  return try {
+    json_parse(text)
+  } catch (_e) {
+    nil
+  }
+}
+
+/**
+ * Execute one provider request and normalize its response envelope.
+ * @api_stability: internal
+ * @effects: [network]
+ * @errors: [runtime]
+ */
+pub fn __http_result(harness: Harness, method: string, url: string, options: dict) -> dict {
+  const result = try {
+    harness.net.request(method, url, options)
+  }
+  if is_err(result) {
+    return {ok: false, error: "network error: " + to_string(unwrap_err(result))}
+  }
+  const response = unwrap(result)
+  const body_text = to_string(response?.body ?? "")
+  const parsed = __parse_response_body(body_text)
+  return {
+    ok: response?.ok ?? false,
+    status: response?.status,
+    headers: response?.headers ?? {},
+    body: parsed,
+    body_text: body_text,
+    final_url: response?.final_url ?? url,
+  }
+}
+
+/**
+ * Read and validate the prepared request file for a submit job.
+ * @api_stability: internal
+ * @effects: [fs.read]
+ * @errors: [runtime]
+ */
+pub fn __request_file_payload(harness: Harness, job: dict) -> dict {
+  const path = safe_string(job["request_file"], "")
+  if path == "" {
+    return {ok: false, error: "job " + safe_string(job["id"], "") + " has no request_file"}
+  }
+  if !harness.fs.exists(path) {
+    return {ok: false, error: "request file not found for job " + safe_string(job["id"], "") + ": " + path}
+  }
+  const text = harness.fs.read_text(path)
+  const actual_sha = sha256(text)
+  const expected_sha = safe_string(job["request_file_sha256"], "")
+  if expected_sha != "" && expected_sha != actual_sha {
+    return {
+      ok: false,
+      error: "request file sha256 mismatch for job " + safe_string(job["id"], ""),
+      expected_sha256: expected_sha,
+      actual_sha256: actual_sha,
+    }
+  }
+  return {ok: true, path: path, text: text, sha256: actual_sha}
+}
+
+fn __redacted_job_operation(job: dict, base_url: string, credential_env: string) -> dict {
+  const submit = safe_dict(job["submit"])
+  return {
+    provider: safe_string(job["provider"], ""),
+    operation: safe_string(submit["operation"], ""),
+    base_url: base_url,
+    credential_env: credential_env,
+    auth: if credential_env == "" {
+      "none"
+    } else {
+      credential_env + "=<redacted>"
+    },
+  }
+}
+
+/**
+ * Build the provider-neutral base of a submission job receipt.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __submission_job_base(harness: Harness, job: dict, payload: dict, dry_run: bool) -> dict {
+  const provider = safe_string(job["provider"], "")
+  const credential_env = __provider_auth_env(provider)
+  return {
+    id: safe_string(job["id"], ""),
+    provider: provider,
+    model: safe_string(job["model"], ""),
+    workload: safe_string(job["workload"], ""),
+    endpoint: safe_string(job["endpoint"], ""),
+    tool_format: safe_string(job["tool_format"], ""),
+    batch: safe_dict(job["batch"]),
+    request_count: __safe_int(job["request_count"]) ?? 0,
+    request_file: safe_string(job["request_file"], ""),
+    request_file_sha256: safe_string(payload["sha256"], safe_string(job["request_file_sha256"], "")),
+    request_format: safe_string(job["request_format"], ""),
+    dry_run: dry_run,
+    provider_operation: __redacted_job_operation(job, __provider_base_url(harness, provider), credential_env),
+  }
+}
+
+/**
+ * Build a validated submission result without provider calls.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict {
+  return {
+    ok: true,
+    job: __submission_job_base(harness, job, payload, true)
+      + {status: "ready", provider_batch_id: nil, response: nil},
+    errors: [],
+  }
+}
+
+/**
+ * Resolve one provider credential without exposing its value in receipts.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __api_key_for_job(harness: Harness, provider: string) -> dict {
+  const candidates = __provider_auth_env_candidates(provider)
+  for env_name in candidates {
+    const value = trim(harness.env.get_or(env_name, ""))
+    if value != "" {
+      return {ok: true, env: env_name, value: value}
+    }
+  }
+  const primary = __provider_auth_env(provider)
+  const aliases = join(candidates, ", ")
+  return {
+    ok: false,
+    env: primary,
+    error: "missing provider API key env " + primary + " (accepted: " + aliases + ")",
+  }
+}
+
+/**
+ * Resolve the Fireworks account identifier.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __fireworks_account_id(harness: Harness) -> dict {
+  const candidates = ["HARN_BATCH_FIREWORKS_ACCOUNT_ID", "FIREWORKS_ACCOUNT_ID"]
+  for env_name in candidates {
+    let value = trim(harness.env.get_or(env_name, ""))
+    if starts_with(value, "accounts/") {
+      value = value[9:len(value)]
+    }
+    if value != "" {
+      return {ok: true, env: env_name, value: value}
+    }
+  }
+  return {
+    ok: false,
+    env: "HARN_BATCH_FIREWORKS_ACCOUNT_ID",
+    error: "missing Fireworks account id env HARN_BATCH_FIREWORKS_ACCOUNT_ID (accepted: HARN_BATCH_FIREWORKS_ACCOUNT_ID, FIREWORKS_ACCOUNT_ID)",
+  }
+}
+
+/**
+ * Resolve the Fireworks account identifier or a dry-run placeholder.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __fireworks_account_id_or_placeholder(harness: Harness) -> string {
+  const account = __fireworks_account_id(harness)
+  if safe_bool(account["ok"], false) {
+    return safe_string(account["value"], "")
+  }
+  return "{account_id}"
+}
+
+/**
+ * Build a canonical Fireworks dataset resource name.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __fireworks_dataset_resource(account_id: string, dataset_id: string) -> string {
+  const trimmed = trim(dataset_id)
+  if starts_with(trimmed, "accounts/") {
+    return trimmed
+  }
+  return "accounts/" + account_id + "/datasets/" + trimmed
+}
+
+/**
+ * Derive a stable Fireworks dataset identifier for a job.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __fireworks_dataset_id(job: dict, suffix: string) -> string {
+  const seed = safe_string(job["id"], "")
+    + ":"
+    + safe_string(job["request_file_sha256"], "")
+    + ":"
+    + suffix
+  return "harn-" + suffix + "-" + substring(sha256(seed), 0, 20)
+}
+
+/**
+ * Derive a stable Fireworks batch job identifier.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __fireworks_batch_job_id(job: dict) -> string {
+  const seed = safe_string(job["id"], "")
+    + ":"
+    + safe_string(job["model"], "")
+    + ":"
+    + safe_string(job["request_file_sha256"], "")
+  return "harn-job-" + substring(sha256(seed), 0, 24)
+}
+
+/**
+ * Create one Fireworks dataset through its provider API.
+ * @api_stability: internal
+ * @effects: [network]
+ * @errors: [runtime]
+ */
+pub fn __fireworks_create_dataset(
+  harness: Harness,
+  account_id: string,
+  dataset_id: string,
+  api_key: string,
+) -> dict {
+  const response = __http_result(
+    harness,
+    "POST",
+    __join_url(__provider_base_url(harness, "fireworks"), "/accounts/" + account_id + "/datasets"),
+    {
+      headers: {Authorization: "Bearer " + api_key, "content-type": "application/json"},
+      body: json_stringify({datasetId: dataset_id, dataset: {displayName: dataset_id, userUploaded: {}}}),
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  const status_code = __safe_int(response["status"]) ?? 0
+  if safe_bool(response["ok"], false) || status_code == 409 {
+    return {
+      ok: true,
+      dataset_id: dataset_id,
+      dataset_resource: __fireworks_dataset_resource(account_id, dataset_id),
+      status: response["status"],
+      response: body,
+      already_exists: status_code == 409,
+    }
+  }
+  return {
+    ok: false,
+    error: "fireworks batch dataset create failed for " + dataset_id,
+    status: response["status"],
+    response: body,
+  }
+}
+
+/**
+ * Upload a prepared request file to a Fireworks dataset.
+ * @api_stability: internal
+ * @effects: [fs.read, network]
+ * @errors: [runtime]
+ */
+pub fn __fireworks_upload_dataset(
+  harness: Harness,
+  account_id: string,
+  dataset_id: string,
+  api_key: string,
+  file_path: string,
+) -> dict {
+  const response = __http_result(
+    harness,
+    "POST",
+    __join_url(
+      __provider_base_url(harness, "fireworks"),
+      "/accounts/" + account_id + "/datasets/" + dataset_id + ":upload",
+    ),
+    {
+      headers: {Authorization: "Bearer " + api_key},
+      multipart: [{name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"}],
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      error: "fireworks batch dataset upload failed for " + dataset_id,
+      status: response["status"],
+      response: body,
+    }
+  }
+  return {ok: true, dataset_id: dataset_id, status: response["status"], response: body}
+}
+
+/**
+ * Upload JSONL through an OpenAI-compatible file endpoint.
+ * @api_stability: internal
+ * @effects: [fs.read, network]
+ * @errors: [runtime]
+ */
+pub fn __upload_jsonl_file(
+  harness: Harness,
+  provider: string,
+  url: string,
+  credential_env: string,
+  api_key: string,
+  file_path: string,
+) -> dict {
+  const purpose = if provider == "together" {
+    "batch-api"
+  } else {
+    "batch"
+  }
+  const response = __http_result(
+    harness,
+    "POST",
+    url,
+    {
+      headers: {Authorization: "Bearer " + api_key},
+      multipart: [
+        {name: "purpose", value: purpose},
+        {name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"},
+      ],
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  const file_id = safe_string(body["id"], "")
+  if !safe_bool(response["ok"], false) || file_id == "" {
+    return {
+      ok: false,
+      error: provider + " batch file upload failed using " + credential_env,
+      status: response["status"],
+      response: body,
+    }
+  }
+  return {ok: true, file_id: file_id, status: response["status"], response: body}
+}
+
+/**
+ * Upload JSONL through the xAI file endpoint.
+ * @api_stability: internal
+ * @effects: [fs.read, network]
+ * @errors: [runtime]
+ */
+pub fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: string) -> dict {
+  const response = __http_result(
+    harness,
+    "POST",
+    __join_url(__provider_base_url(harness, "xai"), "/files"),
+    {
+      headers: {Authorization: "Bearer " + api_key},
+      multipart: [{name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"}],
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  const file_id = safe_string(body["id"], "")
+  if !safe_bool(response["ok"], false) || file_id == "" {
+    return {
+      ok: false,
+      error: "xai batch file upload failed using XAI_API_KEY",
+      status: response["status"],
+      response: body,
+    }
+  }
+  return {ok: true, file_id: file_id, status: response["status"], response: body}
+}
+
+/**
+ * Normalize xAI result counters to a provider status.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __xai_provider_status(body: dict) -> string {
+  const state = safe_dict(body["state"])
+  const pending = __safe_int(state["num_pending"])
+  const requests = __safe_int(state["num_requests"])
+  const errors = __safe_int(state["num_error"]) ?? 0
+  const cancelled = __safe_int(state["num_cancelled"]) ?? 0
+  if pending != nil {
+    if pending > 0 {
+      return "running"
+    }
+    if errors > 0 || cancelled > 0 {
+      return "failed"
+    }
+    if requests == nil || requests > 0 {
+      return "completed"
+    }
+    return "ready"
+  }
+  return safe_string(body["status"], "")
+}
+
+/**
+ * Build a paginated xAI results URL.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __xai_results_url(harness: Harness, batch_id: string, pagination_token: string) -> string {
+  let url = __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id + "/results?limit=100")
+  if trim(pagination_token) != "" {
+    url = url + "&pagination_token=" + trim(pagination_token)
+  }
+  return url
+}
+
+fn __header_value(headers: dict, name: string) -> string {
+  const exact = headers[name] ?? headers[lowercase(name)]
+  if exact != nil {
+    return trim(to_string(exact))
+  }
+  const target = lowercase(name)
+  for key in headers.keys() {
+    if lowercase(to_string(key)) == target {
+      return trim(to_string(headers[key]))
+    }
+  }
+  return ""
+}
+
+/**
+ * Normalize a Gemini model identifier for a provider endpoint.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __gemini_model_path(model: string) -> string {
+  const trimmed = trim(model)
+  if starts_with(trimmed, "models/") {
+    return trimmed
+  }
+  return "models/" + trimmed
+}
+
+/**
+ * Normalize a Gemini operation response to a provider status.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __gemini_provider_status(body: dict) -> string {
+  const metadata = safe_dict(body["metadata"])
+  const response = safe_dict(body["response"])
+  const status = body["state"] ?? metadata["state"] ?? response["state"]
+  const text = safe_string(status, "")
+  if text != "" {
+    return text
+  }
+  if safe_bool(body["done"], false) {
+    if body["error"] != nil {
+      return "JOB_STATE_FAILED"
+    }
+    return "JOB_STATE_SUCCEEDED"
+  }
+  return ""
+}
+
+/**
+ * Extract the Gemini responses file resource from an operation.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __gemini_responses_file(body: dict) -> string {
+  const response = safe_dict(body["response"])
+  const output = safe_dict(body["output"])
+  return safe_string(response["responsesFile"], safe_string(output["responsesFile"], ""))
+}
+
+/**
+ * Upload JSONL through the resumable Gemini file endpoint.
+ * @api_stability: internal
+ * @effects: [fs.read, network]
+ * @errors: [runtime]
+ */
+pub fn __upload_gemini_jsonl_file(
+  harness: Harness,
+  job: dict,
+  payload: dict,
+  credential_env: string,
+  api_key: string,
+) -> dict {
+  const base = __provider_base_url(harness, "gemini")
+  const file_path = safe_string(payload["path"], "")
+  const text = safe_string(payload["text"], "")
+  const start = __http_result(
+    harness,
+    "POST",
+    __join_url(base, "/upload/v1beta/files"),
+    {
+      headers: {
+        "x-goog-api-key": api_key,
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": to_string(len(text)),
+        "X-Goog-Upload-Header-Content-Type": "application/jsonl",
+        "Content-Type": "application/json",
+      },
+      body: json_stringify({file: {displayName: safe_string(job["id"], "harn-batch")}}),
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const upload_url = __header_value(safe_dict(start["headers"]), "x-goog-upload-url")
+  if !safe_bool(start["ok"], false) || upload_url == "" {
+    return {
+      ok: false,
+      error: "gemini batch file upload start failed using " + credential_env,
+      status: start["status"],
+      response: start["body"],
+    }
+  }
+  const upload = __http_result(
+    harness,
+    "POST",
+    upload_url,
+    {
+      headers: {
+        "Content-Length": to_string(len(text)),
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+        "Content-Type": "application/jsonl",
+      },
+      body: text,
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(upload["body"])
+  const file = safe_dict(body["file"])
+  const file_name = safe_string(file["name"], "")
+  if !safe_bool(upload["ok"], false) || file_name == "" {
+    return {
+      ok: false,
+      error: "gemini batch file upload finalize failed using " + credential_env,
+      status: upload["status"],
+      response: body,
+    }
+  }
+  return {
+    ok: true,
+    file_name: file_name,
+    file_uri: file["uri"],
+    path: file_path,
+    start_status: start["status"],
+    status: upload["status"],
+    response: body,
+  }
+}
