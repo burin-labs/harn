@@ -16,6 +16,17 @@ pub struct StdlibPromptAsset {
     pub source: &'static str,
 }
 
+macro_rules! embedded_catalog {
+    ($entry:ident, $key:ident, [$($name:literal => $path:literal),* $(,)?]) => {
+        &[
+            $($entry {
+                $key: $name,
+                source: include_str!($path),
+            },)*
+        ]
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StdlibPublicFunction {
     pub name: String,
@@ -32,816 +43,210 @@ pub struct StdlibEntrypointModule {
     pub category: String,
 }
 
-pub const STDLIB_SOURCES: &[StdlibSource] = &[
-    StdlibSource {
-        module: "text",
-        source: include_str!("stdlib/stdlib_text.harn"),
-    },
-    StdlibSource {
-        module: "semver",
-        source: include_str!("stdlib/stdlib_semver.harn"),
-    },
-    StdlibSource {
-        module: "ansi",
-        source: include_str!("stdlib/stdlib_ansi.harn"),
-    },
-    StdlibSource {
-        module: "table",
-        source: include_str!("stdlib/stdlib_table.harn"),
-    },
-    StdlibSource {
-        module: "diff",
-        source: include_str!("stdlib/stdlib_diff.harn"),
-    },
-    StdlibSource {
-        module: "edit",
-        source: include_str!("stdlib/stdlib_edit.harn"),
-    },
-    StdlibSource {
-        module: "ast",
-        source: include_str!("stdlib/stdlib_ast.harn"),
-    },
-    StdlibSource {
-        module: "rules",
-        source: include_str!("stdlib/stdlib_rules.harn"),
-    },
-    StdlibSource {
-        module: "lint",
-        source: include_str!("stdlib/stdlib_lint.harn"),
-    },
-    StdlibSource {
-        module: "artifact/web",
-        source: include_str!("stdlib/artifact/web.harn"),
-    },
-    StdlibSource {
-        module: "collections",
-        source: include_str!("stdlib/stdlib_collections.harn"),
-    },
-    StdlibSource {
-        module: "math",
-        source: include_str!("stdlib/stdlib_math.harn"),
-    },
-    StdlibSource {
-        module: "slug",
-        source: include_str!("stdlib/stdlib_slug.harn"),
-    },
-    StdlibSource {
-        module: "path",
-        source: include_str!("stdlib/stdlib_path.harn"),
-    },
-    StdlibSource {
-        module: "fs",
-        source: include_str!("stdlib/stdlib_fs.harn"),
-    },
-    StdlibSource {
-        module: "run_artifacts",
-        source: include_str!("stdlib/stdlib_run_artifacts.harn"),
-    },
-    StdlibSource {
-        module: "os",
-        source: include_str!("stdlib/stdlib_os.harn"),
-    },
-    StdlibSource {
-        module: "json",
-        source: include_str!("stdlib/stdlib_json.harn"),
-    },
-    StdlibSource {
-        module: "json/stream",
-        source: include_str!("stdlib/stdlib_json_stream.harn"),
-    },
-    StdlibSource {
-        module: "xml",
-        source: include_str!("stdlib/stdlib_xml.harn"),
-    },
-    StdlibSource {
-        module: "cache",
-        source: include_str!("stdlib/stdlib_cache.harn"),
-    },
-    StdlibSource {
-        module: "observability",
-        source: include_str!("stdlib/stdlib_observability.harn"),
-    },
-    StdlibSource {
-        module: "timing",
-        source: include_str!("stdlib/stdlib_timing.harn"),
-    },
-    StdlibSource {
-        module: "verification",
-        source: include_str!("stdlib/stdlib_verification.harn"),
-    },
-    StdlibSource {
-        module: "tools",
-        source: include_str!("stdlib/stdlib_tools.harn"),
-    },
-    StdlibSource {
-        module: "composition",
-        source: include_str!("stdlib/stdlib_composition.harn"),
-    },
-    StdlibSource {
-        module: "web",
-        source: include_str!("stdlib/stdlib_web.harn"),
-    },
-    StdlibSource {
-        module: "graphql",
-        source: include_str!("stdlib/stdlib_graphql.harn"),
-    },
-    StdlibSource {
-        module: "code_librarian",
-        source: include_str!("stdlib/stdlib_code_librarian.harn"),
-    },
-    StdlibSource {
-        module: "schema",
-        source: include_str!("stdlib/stdlib_schema.harn"),
-    },
-    StdlibSource {
-        module: "identity",
-        source: include_str!("stdlib/stdlib_identity.harn"),
-    },
-    StdlibSource {
-        module: "disclosure",
-        source: include_str!("stdlib/stdlib_disclosure.harn"),
-    },
-    StdlibSource {
-        module: "testing",
-        source: include_str!("stdlib/stdlib_testing.harn"),
-    },
-    StdlibSource {
-        module: "files",
-        source: include_str!("stdlib/stdlib_files.harn"),
-    },
-    StdlibSource {
-        module: "document",
-        source: include_str!("stdlib/stdlib_document.harn"),
-    },
-    StdlibSource {
-        module: "mcp",
-        source: include_str!("stdlib/stdlib_mcp.harn"),
-    },
-    StdlibSource {
-        module: "vision",
-        source: include_str!("stdlib/stdlib_vision.harn"),
-    },
-    StdlibSource {
-        module: "context",
-        source: include_str!("stdlib/stdlib_context.harn"),
-    },
-    StdlibSource {
-        module: "context/maintenance",
-        source: include_str!("stdlib/context/maintenance.harn"),
-    },
-    StdlibSource {
-        module: "context/eval",
-        source: include_str!("stdlib/context/eval.harn"),
-    },
-    StdlibSource {
-        module: "eval/stats",
-        source: include_str!("stdlib/stdlib_eval_stats.harn"),
-    },
-    StdlibSource {
-        module: "eval/agreement",
-        source: include_str!("stdlib/stdlib_eval_agreement.harn"),
-    },
-    StdlibSource {
-        module: "runtime",
-        source: include_str!("stdlib/stdlib_runtime.harn"),
-    },
-    StdlibSource {
-        module: "io",
-        source: include_str!("stdlib/stdlib_io.harn"),
-    },
-    StdlibSource {
-        module: "net",
-        source: include_str!("stdlib/stdlib_net.harn"),
-    },
-    StdlibSource {
-        module: "command",
-        source: include_str!("stdlib/stdlib_command.harn"),
-    },
-    StdlibSource {
-        module: "signal",
-        source: include_str!("stdlib/stdlib_signal.harn"),
-    },
-    StdlibSource {
-        module: "net_policy",
-        source: include_str!("stdlib/stdlib_net_policy.harn"),
-    },
-    StdlibSource {
-        module: "review",
-        source: include_str!("stdlib/stdlib_review.harn"),
-    },
-    StdlibSource {
-        module: "experiments",
-        source: include_str!("stdlib/stdlib_experiments.harn"),
-    },
-    StdlibSource {
-        module: "project",
-        source: include_str!("stdlib/stdlib_project.harn"),
-    },
-    StdlibSource {
-        module: "prompt_library",
-        source: include_str!("stdlib/stdlib_prompt_library.harn"),
-    },
-    StdlibSource {
-        module: "async",
-        source: include_str!("stdlib/stdlib_async.harn"),
-    },
-    StdlibSource {
-        module: "poll",
-        source: include_str!("stdlib/stdlib_poll.harn"),
-    },
-    StdlibSource {
-        module: "coerce",
-        source: include_str!("stdlib/stdlib_coerce.harn"),
-    },
-    StdlibSource {
-        module: "settled",
-        source: include_str!("stdlib/stdlib_settled.harn"),
-    },
-    StdlibSource {
-        module: "cli",
-        source: include_str!("stdlib/stdlib_cli.harn"),
-    },
-    StdlibSource {
-        module: "cli/argparse",
-        source: include_str!("stdlib/cli/argparse.harn"),
-    },
-    StdlibSource {
-        module: "cli/render",
-        source: include_str!("stdlib/cli/render.harn"),
-    },
-    StdlibSource {
-        module: "cli/models/batch_artifacts",
-        source: include_str!("stdlib/cli/models/batch_artifacts.harn"),
-    },
-    StdlibSource {
-        module: "cli/models/lora_render",
-        source: include_str!("stdlib/cli/models/lora_render.harn"),
-    },
-    StdlibSource {
-        module: "cli/paths",
-        source: include_str!("stdlib/cli/paths.harn"),
-    },
-    StdlibSource {
-        module: "gha",
-        source: include_str!("stdlib/stdlib_gha.harn"),
-    },
-    StdlibSource {
-        module: "tui",
-        source: include_str!("stdlib/stdlib_tui.harn"),
-    },
-    StdlibSource {
-        module: "jsonl",
-        source: include_str!("stdlib/stdlib_jsonl.harn"),
-    },
-    StdlibSource {
-        module: "config",
-        source: include_str!("stdlib/stdlib_config.harn"),
-    },
-    StdlibSource {
-        module: "calendar",
-        source: include_str!("stdlib/stdlib_calendar.harn"),
-    },
-    StdlibSource {
-        module: "agents",
-        source: include_str!("stdlib/stdlib_agents.harn"),
-    },
-    StdlibSource {
-        module: "lifecycle/pool",
-        source: include_str!("stdlib/lifecycle/pool.harn"),
-    },
-    StdlibSource {
-        module: "lifecycle/combinators",
-        source: include_str!("stdlib/lifecycle/combinators.harn"),
-    },
-    StdlibSource {
-        module: "lifecycle/on_budget",
-        source: include_str!("stdlib/lifecycle/on_budget.harn"),
-    },
-    StdlibSource {
-        module: "agent/prompts",
-        source: include_str!("stdlib/agent/prompts.harn"),
-    },
-    StdlibSource {
-        module: "llm/media",
-        source: include_str!("stdlib/llm/media.harn"),
-    },
-    StdlibSource {
-        module: "llm/options",
-        source: include_str!("stdlib/llm/options.harn"),
-    },
-    StdlibSource {
-        module: "llm/catalog",
-        source: include_str!("stdlib/llm/catalog.harn"),
-    },
-    StdlibSource {
-        module: "llm/safe",
-        source: include_str!("stdlib/llm/safe.harn"),
-    },
-    StdlibSource {
-        module: "harness/policy",
-        source: include_str!("stdlib/harness/policy.harn"),
-    },
-    StdlibSource {
-        module: "llm/budget",
-        source: include_str!("stdlib/llm/budget.harn"),
-    },
-    StdlibSource {
-        module: "llm/economics",
-        source: include_str!("stdlib/llm/economics.harn"),
-    },
-    StdlibSource {
-        module: "llm/prompts",
-        source: include_str!("stdlib/llm/prompts.harn"),
-    },
-    StdlibSource {
-        module: "llm/defaults",
-        source: include_str!("stdlib/llm/defaults.harn"),
-    },
-    StdlibSource {
-        module: "llm/handlers",
-        source: include_str!("stdlib/llm/handlers.harn"),
-    },
-    StdlibSource {
-        module: "llm/tool_telemetry",
-        source: include_str!("stdlib/llm/tool_telemetry.harn"),
-    },
-    StdlibSource {
-        module: "llm/tool_middleware",
-        source: include_str!("stdlib/llm/tool_middleware.harn"),
-    },
-    StdlibSource {
-        module: "llm/tool_binder",
-        source: include_str!("stdlib/llm/tool_binder.harn"),
-    },
-    StdlibSource {
-        module: "llm/structural_validator",
-        source: include_str!("stdlib/llm/structural_validator.harn"),
-    },
-    StdlibSource {
-        module: "llm/missing_tool_call",
-        source: include_str!("stdlib/llm/missing_tool_call.harn"),
-    },
-    StdlibSource {
-        module: "llm/scope_classifier",
-        source: include_str!("stdlib/llm/scope_classifier.harn"),
-    },
-    StdlibSource {
-        module: "llm/refine",
-        source: include_str!("stdlib/llm/refine.harn"),
-    },
-    StdlibSource {
-        module: "llm/ensemble",
-        source: include_str!("stdlib/llm/ensemble.harn"),
-    },
-    StdlibSource {
-        module: "llm/rerank",
-        source: include_str!("stdlib/llm/rerank.harn"),
-    },
-    StdlibSource {
-        module: "agent/reasoning",
-        source: include_str!("stdlib/agent/reasoning.harn"),
-    },
-    StdlibSource {
-        module: "agent/options",
-        source: include_str!("stdlib/agent/options.harn"),
-    },
-    StdlibSource {
-        module: "llm/judge",
-        source: include_str!("stdlib/llm/judge.harn"),
-    },
-    StdlibSource {
-        module: "llm/faithfulness",
-        source: include_str!("stdlib/llm/faithfulness.harn"),
-    },
-    StdlibSource {
-        module: "llm/optimize",
-        source: include_str!("stdlib/llm/optimize.harn"),
-    },
-    StdlibSource {
-        module: "agent/events",
-        source: include_str!("stdlib/agent/events.harn"),
-    },
-    StdlibSource {
-        module: "agent/completions",
-        source: include_str!("stdlib/agent/completions.harn"),
-    },
-    StdlibSource {
-        module: "agent/transcript",
-        source: include_str!("stdlib/agent/transcript.harn"),
-    },
-    StdlibSource {
-        module: "agent/primitives",
-        source: include_str!("stdlib/agent/primitives.harn"),
-    },
-    StdlibSource {
-        module: "agent/progress",
-        source: include_str!("stdlib/agent/progress.harn"),
-    },
-    StdlibSource {
-        module: "agent/required_tools",
-        source: include_str!("stdlib/agent/required_tools.harn"),
-    },
-    StdlibSource {
-        module: "agent/stall",
-        source: include_str!("stdlib/agent/stall.harn"),
-    },
-    StdlibSource {
-        module: "agent/governors",
-        source: include_str!("stdlib/agent/governors.harn"),
-    },
-    StdlibSource {
-        module: "agent/control",
-        source: include_str!("stdlib/agent/control.harn"),
-    },
-    StdlibSource {
-        module: "agent/best_of_n",
-        source: include_str!("stdlib/agent/best_of_n.harn"),
-    },
-    StdlibSource {
-        module: "agent/loop",
-        source: include_str!("stdlib/agent/loop.harn"),
-    },
-    StdlibSource {
-        module: "agent/chat",
-        source: include_str!("stdlib/agent/chat.harn"),
-    },
-    StdlibSource {
-        module: "agent/user",
-        source: include_str!("stdlib/agent/user.harn"),
-    },
-    StdlibSource {
-        module: "agent/tool_search",
-        source: include_str!("stdlib/agent/tool_search.harn"),
-    },
-    StdlibSource {
-        module: "agent/tool_annotations",
-        source: include_str!("stdlib/agent/tool_annotations.harn"),
-    },
-    StdlibSource {
-        module: "agent/turn",
-        source: include_str!("stdlib/agent/turn.harn"),
-    },
-    StdlibSource {
-        module: "agent/workers",
-        source: include_str!("stdlib/agent/workers.harn"),
-    },
-    StdlibSource {
-        module: "agent/introspection",
-        source: include_str!("stdlib/agent/introspection.harn"),
-    },
-    StdlibSource {
-        module: "agent/resume_by",
-        source: include_str!("stdlib/agent/resume_by.harn"),
-    },
-    StdlibSource {
-        module: "agent/state",
-        source: include_str!("stdlib/agent/state.harn"),
-    },
-    StdlibSource {
-        module: "agent/canon",
-        source: include_str!("stdlib/agent/canon.harn"),
-    },
-    StdlibSource {
-        module: "agent/skills",
-        source: include_str!("stdlib/agent/skills.harn"),
-    },
-    StdlibSource {
-        module: "agent/autocompact",
-        source: include_str!("stdlib/agent/autocompact.harn"),
-    },
-    StdlibSource {
-        module: "agent/mcp",
-        source: include_str!("stdlib/agent/mcp.harn"),
-    },
-    StdlibSource {
-        module: "agent/command_capture",
-        source: include_str!("stdlib/agent/command_capture.harn"),
-    },
-    StdlibSource {
-        module: "agent/host_tools",
-        source: include_str!("stdlib/agent/host_tools.harn"),
-    },
-    StdlibSource {
-        module: "agent/host_injection",
-        source: include_str!("stdlib/agent/host_injection.harn"),
-    },
-    StdlibSource {
-        module: "agent/budget",
-        source: include_str!("stdlib/agent/budget.harn"),
-    },
-    StdlibSource {
-        module: "agent/daemon",
-        source: include_str!("stdlib/agent/daemon.harn"),
-    },
-    StdlibSource {
-        module: "agent/preflight",
-        source: include_str!("stdlib/agent/preflight.harn"),
-    },
-    StdlibSource {
-        module: "agent/postturn",
-        source: include_str!("stdlib/agent/postturn.harn"),
-    },
-    StdlibSource {
-        module: "agent/stance",
-        source: include_str!("stdlib/agent/stance.harn"),
-    },
-    StdlibSource {
-        module: "agent/lanes",
-        source: include_str!("stdlib/agent/lanes.harn"),
-    },
-    StdlibSource {
-        module: "agent/overlays",
-        source: include_str!("stdlib/agent/overlays.harn"),
-    },
-    StdlibSource {
-        module: "agent/sitrep",
-        source: include_str!("stdlib/agent/sitrep.harn"),
-    },
-    StdlibSource {
-        module: "agent/judge_internals",
-        source: include_str!("stdlib/agent/judge_internals.harn"),
-    },
-    StdlibSource {
-        module: "agent/judge",
-        source: include_str!("stdlib/agent/judge.harn"),
-    },
-    StdlibSource {
-        module: "agent/guardrails",
-        source: include_str!("stdlib/agent/guardrails.harn"),
-    },
-    StdlibSource {
-        module: "agent/step_judge",
-        source: include_str!("stdlib/agent/step_judge.harn"),
-    },
-    StdlibSource {
-        module: "agent/scratchpad",
-        source: include_str!("stdlib/agent/scratchpad.harn"),
-    },
-    StdlibSource {
-        module: "agent/fact",
-        source: include_str!("stdlib/agent/fact.harn"),
-    },
-    StdlibSource {
-        module: "agent/hypothesis",
-        source: include_str!("stdlib/agent/hypothesis.harn"),
-    },
-    StdlibSource {
-        module: "agent/pattern_knowledge",
-        source: include_str!("stdlib/agent/pattern_knowledge.harn"),
-    },
-    StdlibSource {
-        module: "agent/probe",
-        source: include_str!("stdlib/agent/probe.harn"),
-    },
-    StdlibSource {
-        module: "agent/stream",
-        source: include_str!("stdlib/agent/stream.harn"),
-    },
-    StdlibSource {
-        module: "agent/presets",
-        source: include_str!("stdlib/agent/presets.harn"),
-    },
-    StdlibSource {
-        module: "agent/pins",
-        source: include_str!("stdlib/agent/pins.harn"),
-    },
-    StdlibSource {
-        module: "agent/goal",
-        source: include_str!("stdlib/agent/goal.harn"),
-    },
-    StdlibSource {
-        module: "agent/task_plan",
-        source: include_str!("stdlib/agent/task_plan.harn"),
-    },
-    StdlibSource {
-        module: "agent_state",
-        source: include_str!("stdlib/stdlib_agent_state.harn"),
-    },
-    StdlibSource {
-        module: "memory",
-        source: include_str!("stdlib/stdlib_memory.harn"),
-    },
-    StdlibSource {
-        module: "session-store",
-        source: include_str!("stdlib/stdlib_session_store.harn"),
-    },
-    StdlibSource {
-        module: "coordination",
-        source: include_str!("stdlib/stdlib_coordination.harn"),
-    },
-    StdlibSource {
-        module: "fleet/coordination",
-        source: include_str!("stdlib/fleet/coordination.harn"),
-    },
-    StdlibSource {
-        module: "postgres",
-        source: include_str!("stdlib/stdlib_postgres.harn"),
-    },
-    StdlibSource {
-        module: "postgres/query",
-        source: include_str!("stdlib/postgres/query.harn"),
-    },
-    StdlibSource {
-        module: "sqlite",
-        source: include_str!("stdlib/stdlib_sqlite.harn"),
-    },
-    StdlibSource {
-        module: "checkpoint",
-        source: include_str!("stdlib/stdlib_checkpoint.harn"),
-    },
-    StdlibSource {
-        module: "host",
-        source: include_str!("stdlib/stdlib_host.harn"),
-    },
-    StdlibSource {
-        module: "git",
-        source: include_str!("stdlib/stdlib_git.harn"),
-    },
-    StdlibSource {
-        module: "hitl",
-        source: include_str!("stdlib/stdlib_hitl.harn"),
-    },
-    StdlibSource {
-        module: "trust",
-        source: include_str!("stdlib/stdlib_trust.harn"),
-    },
-    StdlibSource {
-        module: "corrections",
-        source: include_str!("stdlib/stdlib_corrections.harn"),
-    },
-    StdlibSource {
-        module: "plan",
-        source: include_str!("stdlib/stdlib_plan.harn"),
-    },
-    StdlibSource {
-        module: "waitpoints",
-        source: include_str!("stdlib/stdlib_waitpoints.harn"),
-    },
-    StdlibSource {
-        module: "waitpoint",
-        source: include_str!("stdlib/stdlib_waitpoint.harn"),
-    },
-    StdlibSource {
-        module: "monitors",
-        source: include_str!("stdlib/stdlib_monitors.harn"),
-    },
-    StdlibSource {
-        module: "worktree",
-        source: include_str!("stdlib/stdlib_worktree.harn"),
-    },
-    StdlibSource {
-        module: "acp",
-        source: include_str!("stdlib/stdlib_acp.harn"),
-    },
-    StdlibSource {
-        module: "external_agent",
-        source: include_str!("stdlib/stdlib_external_agent.harn"),
-    },
-    StdlibSource {
-        module: "triggers",
-        source: include_str!("stdlib/stdlib_triggers.harn"),
-    },
-    StdlibSource {
-        module: "triage",
-        source: include_str!("stdlib/stdlib_triage.harn"),
-    },
-    StdlibSource {
-        module: "dashboard/jobs",
-        source: include_str!("stdlib/dashboard/jobs.harn"),
-    },
-    StdlibSource {
-        module: "ui_resource",
-        source: include_str!("stdlib/stdlib_ui_resource.harn"),
-    },
-    StdlibSource {
-        module: "handoffs",
-        source: include_str!("stdlib/stdlib_handoffs.harn"),
-    },
-    StdlibSource {
-        module: "lifecycle",
-        source: include_str!("stdlib/stdlib_lifecycle.harn"),
-    },
-    StdlibSource {
-        module: "tool_hooks_catalogues",
-        source: include_str!("stdlib/stdlib_tool_hooks_catalogues.harn"),
-    },
-    StdlibSource {
-        module: "tool_hooks",
-        source: include_str!("stdlib/stdlib_tool_hooks.harn"),
-    },
-    StdlibSource {
-        module: "channel_guardrails",
-        source: include_str!("stdlib/stdlib_channel_guardrails.harn"),
-    },
-    StdlibSource {
-        module: "personas/prelude",
-        source: include_str!("stdlib/stdlib_personas_prelude.harn"),
-    },
-    StdlibSource {
-        module: "personas/bulletins",
-        source: include_str!("stdlib/stdlib_personas_bulletins.harn"),
-    },
-    StdlibSource {
-        module: "connectors/shared",
-        source: include_str!("stdlib/stdlib_connectors_shared.harn"),
-    },
-    StdlibSource {
-        module: "oauth/providers",
-        source: include_str!("stdlib/oauth/providers.harn"),
-    },
-    StdlibSource {
-        module: "oauth/token_exchange_catalog",
-        source: include_str!("stdlib/oauth/token_exchange_catalog.harn"),
-    },
-    StdlibSource {
-        module: "oauth/token_exchange",
-        source: include_str!("stdlib/oauth/token_exchange.harn"),
-    },
-    StdlibSource {
-        module: "oauth/storage",
-        source: include_str!("stdlib/oauth/storage.harn"),
-    },
-    StdlibSource {
-        module: "oauth/client",
-        source: include_str!("stdlib/oauth/client.harn"),
-    },
-    StdlibSource {
-        module: "oauth/device_flow",
-        source: include_str!("stdlib/oauth/device_flow.harn"),
-    },
-    StdlibSource {
-        module: "oauth/redaction",
-        source: include_str!("stdlib/oauth/redaction.harn"),
-    },
-    StdlibSource {
-        module: "oauth/dynamic_registration",
-        source: include_str!("stdlib/oauth/dynamic_registration.harn"),
-    },
-    StdlibSource {
-        module: "connectors/github",
-        source: include_str!("stdlib/stdlib_connectors_github.harn"),
-    },
-    StdlibSource {
-        module: "connectors/linear",
-        source: include_str!("stdlib/stdlib_connectors_linear.harn"),
-    },
-    StdlibSource {
-        module: "connectors/notion",
-        source: include_str!("stdlib/stdlib_connectors_notion.harn"),
-    },
-    StdlibSource {
-        module: "connectors/slack",
-        source: include_str!("stdlib/stdlib_connectors_slack.harn"),
-    },
-    StdlibSource {
-        module: "workflow/prompts",
-        source: include_str!("stdlib/workflow/prompts.harn"),
-    },
-    StdlibSource {
-        module: "workflow/context",
-        source: include_str!("stdlib/workflow/context.harn"),
-    },
-    StdlibSource {
-        module: "workflow/options",
-        source: include_str!("stdlib/workflow/options.harn"),
-    },
-    StdlibSource {
-        module: "workflow/checkpoints",
-        source: include_str!("stdlib/workflow/checkpoints.harn"),
-    },
-    StdlibSource {
-        module: "workflow/patterns",
-        source: include_str!("stdlib/workflow/patterns.harn"),
-    },
-    StdlibSource {
-        module: "workflow/stage",
-        source: include_str!("stdlib/workflow/stage.harn"),
-    },
-    StdlibSource {
-        module: "workflow/map",
-        source: include_str!("stdlib/workflow/map.harn"),
-    },
-    StdlibSource {
-        module: "workflow/schedule",
-        source: include_str!("stdlib/workflow/schedule.harn"),
-    },
-    StdlibSource {
-        module: "workflow/execute",
-        source: include_str!("stdlib/workflow/execute.harn"),
-    },
-    StdlibSource {
-        module: "workflow/repair",
-        source: include_str!("stdlib/workflow/repair.harn"),
-    },
-    StdlibSource {
-        module: "security",
-        source: include_str!("stdlib/stdlib_security.harn"),
-    },
-    StdlibSource {
-        module: "pii",
-        source: include_str!("stdlib/stdlib_pii.harn"),
-    },
-];
+pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, module, [
+    "text" => "stdlib/stdlib_text.harn",
+    "semver" => "stdlib/stdlib_semver.harn",
+    "ansi" => "stdlib/stdlib_ansi.harn",
+    "table" => "stdlib/stdlib_table.harn",
+    "diff" => "stdlib/stdlib_diff.harn",
+    "edit" => "stdlib/stdlib_edit.harn",
+    "ast" => "stdlib/stdlib_ast.harn",
+    "rules" => "stdlib/stdlib_rules.harn",
+    "lint" => "stdlib/stdlib_lint.harn",
+    "artifact/web" => "stdlib/artifact/web.harn",
+    "collections" => "stdlib/stdlib_collections.harn",
+    "math" => "stdlib/stdlib_math.harn",
+    "slug" => "stdlib/stdlib_slug.harn",
+    "path" => "stdlib/stdlib_path.harn",
+    "fs" => "stdlib/stdlib_fs.harn",
+    "run_artifacts" => "stdlib/stdlib_run_artifacts.harn",
+    "os" => "stdlib/stdlib_os.harn",
+    "json" => "stdlib/stdlib_json.harn",
+    "json/stream" => "stdlib/stdlib_json_stream.harn",
+    "xml" => "stdlib/stdlib_xml.harn",
+    "cache" => "stdlib/stdlib_cache.harn",
+    "observability" => "stdlib/stdlib_observability.harn",
+    "timing" => "stdlib/stdlib_timing.harn",
+    "verification" => "stdlib/stdlib_verification.harn",
+    "tools" => "stdlib/stdlib_tools.harn",
+    "composition" => "stdlib/stdlib_composition.harn",
+    "web" => "stdlib/stdlib_web.harn",
+    "graphql" => "stdlib/stdlib_graphql.harn",
+    "code_librarian" => "stdlib/stdlib_code_librarian.harn",
+    "schema" => "stdlib/stdlib_schema.harn",
+    "identity" => "stdlib/stdlib_identity.harn",
+    "disclosure" => "stdlib/stdlib_disclosure.harn",
+    "testing" => "stdlib/stdlib_testing.harn",
+    "files" => "stdlib/stdlib_files.harn",
+    "document" => "stdlib/stdlib_document.harn",
+    "mcp" => "stdlib/stdlib_mcp.harn",
+    "vision" => "stdlib/stdlib_vision.harn",
+    "context" => "stdlib/stdlib_context.harn",
+    "context/maintenance" => "stdlib/context/maintenance.harn",
+    "context/eval" => "stdlib/context/eval.harn",
+    "eval/stats" => "stdlib/stdlib_eval_stats.harn",
+    "eval/agreement" => "stdlib/stdlib_eval_agreement.harn",
+    "runtime" => "stdlib/stdlib_runtime.harn",
+    "io" => "stdlib/stdlib_io.harn",
+    "net" => "stdlib/stdlib_net.harn",
+    "command" => "stdlib/stdlib_command.harn",
+    "signal" => "stdlib/stdlib_signal.harn",
+    "net_policy" => "stdlib/stdlib_net_policy.harn",
+    "review" => "stdlib/stdlib_review.harn",
+    "experiments" => "stdlib/stdlib_experiments.harn",
+    "project" => "stdlib/stdlib_project.harn",
+    "prompt_library" => "stdlib/stdlib_prompt_library.harn",
+    "async" => "stdlib/stdlib_async.harn",
+    "poll" => "stdlib/stdlib_poll.harn",
+    "coerce" => "stdlib/stdlib_coerce.harn",
+    "settled" => "stdlib/stdlib_settled.harn",
+    "cli" => "stdlib/stdlib_cli.harn",
+    "cli/argparse" => "stdlib/cli/argparse.harn",
+    "cli/render" => "stdlib/cli/render.harn",
+    "cli/models/batch_artifacts" => "stdlib/cli/models/batch_artifacts.harn",
+    "cli/models/lora_render" => "stdlib/cli/models/lora_render.harn",
+    "cli/paths" => "stdlib/cli/paths.harn",
+    "gha" => "stdlib/stdlib_gha.harn",
+    "tui" => "stdlib/stdlib_tui.harn",
+    "jsonl" => "stdlib/stdlib_jsonl.harn",
+    "config" => "stdlib/stdlib_config.harn",
+    "calendar" => "stdlib/stdlib_calendar.harn",
+    "agents" => "stdlib/stdlib_agents.harn",
+    "lifecycle/pool" => "stdlib/lifecycle/pool.harn",
+    "lifecycle/combinators" => "stdlib/lifecycle/combinators.harn",
+    "lifecycle/on_budget" => "stdlib/lifecycle/on_budget.harn",
+    "agent/prompts" => "stdlib/agent/prompts.harn",
+    "llm/media" => "stdlib/llm/media.harn",
+    "llm/options" => "stdlib/llm/options.harn",
+    "llm/catalog" => "stdlib/llm/catalog.harn",
+    "llm/safe" => "stdlib/llm/safe.harn",
+    "harness/policy" => "stdlib/harness/policy.harn",
+    "llm/budget" => "stdlib/llm/budget.harn",
+    "llm/economics" => "stdlib/llm/economics.harn",
+    "llm/prompts" => "stdlib/llm/prompts.harn",
+    "llm/defaults" => "stdlib/llm/defaults.harn",
+    "llm/handlers" => "stdlib/llm/handlers.harn",
+    "llm/tool_telemetry" => "stdlib/llm/tool_telemetry.harn",
+    "llm/tool_middleware" => "stdlib/llm/tool_middleware.harn",
+    "llm/tool_binder" => "stdlib/llm/tool_binder.harn",
+    "llm/structural_validator" => "stdlib/llm/structural_validator.harn",
+    "llm/missing_tool_call" => "stdlib/llm/missing_tool_call.harn",
+    "llm/scope_classifier" => "stdlib/llm/scope_classifier.harn",
+    "llm/refine" => "stdlib/llm/refine.harn",
+    "llm/ensemble" => "stdlib/llm/ensemble.harn",
+    "llm/rerank" => "stdlib/llm/rerank.harn",
+    "agent/reasoning" => "stdlib/agent/reasoning.harn",
+    "agent/options" => "stdlib/agent/options.harn",
+    "llm/judge" => "stdlib/llm/judge.harn",
+    "llm/faithfulness" => "stdlib/llm/faithfulness.harn",
+    "llm/optimize" => "stdlib/llm/optimize.harn",
+    "agent/events" => "stdlib/agent/events.harn",
+    "agent/completions" => "stdlib/agent/completions.harn",
+    "agent/transcript" => "stdlib/agent/transcript.harn",
+    "agent/primitives" => "stdlib/agent/primitives.harn",
+    "agent/progress" => "stdlib/agent/progress.harn",
+    "agent/required_tools" => "stdlib/agent/required_tools.harn",
+    "agent/stall" => "stdlib/agent/stall.harn",
+    "agent/governors" => "stdlib/agent/governors.harn",
+    "agent/control" => "stdlib/agent/control.harn",
+    "agent/best_of_n" => "stdlib/agent/best_of_n.harn",
+    "agent/loop" => "stdlib/agent/loop.harn",
+    "agent/chat" => "stdlib/agent/chat.harn",
+    "agent/user" => "stdlib/agent/user.harn",
+    "agent/tool_search" => "stdlib/agent/tool_search.harn",
+    "agent/tool_annotations" => "stdlib/agent/tool_annotations.harn",
+    "agent/turn" => "stdlib/agent/turn.harn",
+    "agent/workers" => "stdlib/agent/workers.harn",
+    "agent/introspection" => "stdlib/agent/introspection.harn",
+    "agent/resume_by" => "stdlib/agent/resume_by.harn",
+    "agent/state" => "stdlib/agent/state.harn",
+    "agent/canon" => "stdlib/agent/canon.harn",
+    "agent/skills" => "stdlib/agent/skills.harn",
+    "agent/autocompact" => "stdlib/agent/autocompact.harn",
+    "agent/mcp" => "stdlib/agent/mcp.harn",
+    "agent/command_capture" => "stdlib/agent/command_capture.harn",
+    "agent/host_tools" => "stdlib/agent/host_tools.harn",
+    "agent/host_injection" => "stdlib/agent/host_injection.harn",
+    "agent/budget" => "stdlib/agent/budget.harn",
+    "agent/daemon" => "stdlib/agent/daemon.harn",
+    "agent/preflight" => "stdlib/agent/preflight.harn",
+    "agent/postturn" => "stdlib/agent/postturn.harn",
+    "agent/stance" => "stdlib/agent/stance.harn",
+    "agent/lanes" => "stdlib/agent/lanes.harn",
+    "agent/overlays" => "stdlib/agent/overlays.harn",
+    "agent/sitrep" => "stdlib/agent/sitrep.harn",
+    "agent/judge_internals" => "stdlib/agent/judge_internals.harn",
+    "agent/judge" => "stdlib/agent/judge.harn",
+    "agent/guardrails" => "stdlib/agent/guardrails.harn",
+    "agent/step_judge" => "stdlib/agent/step_judge.harn",
+    "agent/scratchpad" => "stdlib/agent/scratchpad.harn",
+    "agent/fact" => "stdlib/agent/fact.harn",
+    "agent/hypothesis" => "stdlib/agent/hypothesis.harn",
+    "agent/pattern_knowledge" => "stdlib/agent/pattern_knowledge.harn",
+    "agent/probe" => "stdlib/agent/probe.harn",
+    "agent/stream" => "stdlib/agent/stream.harn",
+    "agent/presets" => "stdlib/agent/presets.harn",
+    "agent/pins" => "stdlib/agent/pins.harn",
+    "agent/goal" => "stdlib/agent/goal.harn",
+    "agent/task_plan" => "stdlib/agent/task_plan.harn",
+    "agent_state" => "stdlib/stdlib_agent_state.harn",
+    "memory" => "stdlib/stdlib_memory.harn",
+    "session-store" => "stdlib/stdlib_session_store.harn",
+    "coordination" => "stdlib/stdlib_coordination.harn",
+    "fleet/coordination" => "stdlib/fleet/coordination.harn",
+    "postgres" => "stdlib/stdlib_postgres.harn",
+    "postgres/query" => "stdlib/postgres/query.harn",
+    "sqlite" => "stdlib/stdlib_sqlite.harn",
+    "checkpoint" => "stdlib/stdlib_checkpoint.harn",
+    "host" => "stdlib/stdlib_host.harn",
+    "git" => "stdlib/stdlib_git.harn",
+    "hitl" => "stdlib/stdlib_hitl.harn",
+    "trust" => "stdlib/stdlib_trust.harn",
+    "corrections" => "stdlib/stdlib_corrections.harn",
+    "plan" => "stdlib/stdlib_plan.harn",
+    "waitpoints" => "stdlib/stdlib_waitpoints.harn",
+    "waitpoint" => "stdlib/stdlib_waitpoint.harn",
+    "monitors" => "stdlib/stdlib_monitors.harn",
+    "worktree" => "stdlib/stdlib_worktree.harn",
+    "acp" => "stdlib/stdlib_acp.harn",
+    "external_agent" => "stdlib/stdlib_external_agent.harn",
+    "triggers" => "stdlib/stdlib_triggers.harn",
+    "triage" => "stdlib/stdlib_triage.harn",
+    "dashboard/jobs" => "stdlib/dashboard/jobs.harn",
+    "ui_resource" => "stdlib/stdlib_ui_resource.harn",
+    "handoffs" => "stdlib/stdlib_handoffs.harn",
+    "lifecycle" => "stdlib/stdlib_lifecycle.harn",
+    "tool_hooks_catalogues" => "stdlib/stdlib_tool_hooks_catalogues.harn",
+    "tool_hooks" => "stdlib/stdlib_tool_hooks.harn",
+    "channel_guardrails" => "stdlib/stdlib_channel_guardrails.harn",
+    "personas/prelude" => "stdlib/stdlib_personas_prelude.harn",
+    "personas/bulletins" => "stdlib/stdlib_personas_bulletins.harn",
+    "connectors/shared" => "stdlib/stdlib_connectors_shared.harn",
+    "oauth/providers" => "stdlib/oauth/providers.harn",
+    "oauth/token_exchange_catalog" => "stdlib/oauth/token_exchange_catalog.harn",
+    "oauth/token_exchange" => "stdlib/oauth/token_exchange.harn",
+    "oauth/storage" => "stdlib/oauth/storage.harn",
+    "oauth/client" => "stdlib/oauth/client.harn",
+    "oauth/device_flow" => "stdlib/oauth/device_flow.harn",
+    "oauth/redaction" => "stdlib/oauth/redaction.harn",
+    "oauth/dynamic_registration" => "stdlib/oauth/dynamic_registration.harn",
+    "connectors/github" => "stdlib/stdlib_connectors_github.harn",
+    "connectors/linear" => "stdlib/stdlib_connectors_linear.harn",
+    "connectors/notion" => "stdlib/stdlib_connectors_notion.harn",
+    "connectors/slack" => "stdlib/stdlib_connectors_slack.harn",
+    "workflow/prompts" => "stdlib/workflow/prompts.harn",
+    "workflow/context" => "stdlib/workflow/context.harn",
+    "workflow/options" => "stdlib/workflow/options.harn",
+    "workflow/checkpoints" => "stdlib/workflow/checkpoints.harn",
+    "workflow/patterns" => "stdlib/workflow/patterns.harn",
+    "workflow/stage" => "stdlib/workflow/stage.harn",
+    "workflow/map" => "stdlib/workflow/map.harn",
+    "workflow/schedule" => "stdlib/workflow/schedule.harn",
+    "workflow/execute" => "stdlib/workflow/execute.harn",
+    "workflow/repair" => "stdlib/workflow/repair.harn",
+    "security" => "stdlib/stdlib_security.harn",
+    "pii" => "stdlib/stdlib_pii.harn",
+]);
 
 /// Canonical normalized connector event schemas, authored as Harn `type`
 /// declarations. This is the SOURCE OF TRUTH for the Rust event-payload
@@ -854,168 +259,47 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
 /// current working directory.
 pub const CONNECTOR_EVENT_SCHEMAS_SOURCE: &str = include_str!("stdlib/stdlib_event_schemas.harn");
 
-pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_text.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/tool_contract_text.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_json.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/tool_contract_json.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_native.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/tool_contract_native.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_text_response_protocol.harn.prompt",
-        source: include_str!(
-            "stdlib/agent/prompts/tool_contract_text_response_protocol.harn.prompt"
-        ),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_action_native.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/tool_contract_action_native.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_action_text.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/tool_contract_action_text.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_task_ledger.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/tool_contract_task_ledger.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/tool_contract_deferred_tools.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/tool_contract_deferred_tools.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/deferred_tool_listing.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/deferred_tool_listing.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/agent_turn_preamble.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/agent_turn_preamble.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/default_nudge.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/default_nudge.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/agentic_user_system.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/agentic_user_system.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/agentic_user_user.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/agentic_user_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/loop_until_done_system.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/loop_until_done_system.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/completion_judge_default.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/completion_judge_default.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/completion_judge_feedback_fallback.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/completion_judge_feedback_fallback.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/completion_judge_user.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/completion_judge_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/step_judge_system_default.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/step_judge_system_default.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/step_judge_system_adversarial.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/step_judge_system_adversarial.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/step_judge_user.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/step_judge_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/parse_guidance.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/parse_guidance.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/native_tool_contract_feedback.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/native_tool_contract_feedback.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/verification_gate_feedback.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/verification_gate_feedback.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/daemon_watch_feedback.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/daemon_watch_feedback.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/daemon_timer_feedback.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/daemon_timer_feedback.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/completion_fallback_system.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/completion_fallback_system.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/completion_fallback_user.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/completion_fallback_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/transcript_summarize_user.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/transcript_summarize_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/sitrep_user.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/sitrep_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/structural_chain_of_draft.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/structural_chain_of_draft.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/schema_recover_repair.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/schema_recover_repair.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/structured_envelope_schema_contract.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/structured_envelope_schema_contract.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/structured_envelope_repair.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/structured_envelope_repair.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/pairwise_rerank_user.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/pairwise_rerank_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "llm/prompts/tool_binder_user.harn.prompt",
-        source: include_str!("stdlib/llm/prompts/tool_binder_user.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "workflow/prompts/stage.harn.prompt",
-        source: include_str!("stdlib/workflow/prompts/stage.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "workflow/prompts/verification_context_intro.harn.prompt",
-        source: include_str!("stdlib/workflow/prompts/verification_context_intro.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "orchestration/prompts/compaction_summary.harn.prompt",
-        source: include_str!("stdlib/orchestration/prompts/compaction_summary.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "orchestration/prompts/compaction_policy_replacement.harn.prompt",
-        source: include_str!(
-            "stdlib/orchestration/prompts/compaction_policy_replacement.harn.prompt"
-        ),
-    },
-];
+pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibPromptAsset, path, [
+    "agent/prompts/tool_contract_text.harn.prompt" => "stdlib/agent/prompts/tool_contract_text.harn.prompt",
+    "agent/prompts/tool_contract_json.harn.prompt" => "stdlib/agent/prompts/tool_contract_json.harn.prompt",
+    "agent/prompts/tool_contract_native.harn.prompt" => "stdlib/agent/prompts/tool_contract_native.harn.prompt",
+    "agent/prompts/tool_contract_text_response_protocol.harn.prompt" => "stdlib/agent/prompts/tool_contract_text_response_protocol.harn.prompt",
+    "agent/prompts/tool_contract_action_native.harn.prompt" => "stdlib/agent/prompts/tool_contract_action_native.harn.prompt",
+    "agent/prompts/tool_contract_action_text.harn.prompt" => "stdlib/agent/prompts/tool_contract_action_text.harn.prompt",
+    "agent/prompts/tool_contract_task_ledger.harn.prompt" => "stdlib/agent/prompts/tool_contract_task_ledger.harn.prompt",
+    "agent/prompts/tool_contract_deferred_tools.harn.prompt" => "stdlib/agent/prompts/tool_contract_deferred_tools.harn.prompt",
+    "agent/prompts/deferred_tool_listing.harn.prompt" => "stdlib/agent/prompts/deferred_tool_listing.harn.prompt",
+    "agent/prompts/agent_turn_preamble.harn.prompt" => "stdlib/agent/prompts/agent_turn_preamble.harn.prompt",
+    "agent/prompts/default_nudge.harn.prompt" => "stdlib/agent/prompts/default_nudge.harn.prompt",
+    "agent/prompts/agentic_user_system.harn.prompt" => "stdlib/agent/prompts/agentic_user_system.harn.prompt",
+    "agent/prompts/agentic_user_user.harn.prompt" => "stdlib/agent/prompts/agentic_user_user.harn.prompt",
+    "agent/prompts/loop_until_done_system.harn.prompt" => "stdlib/agent/prompts/loop_until_done_system.harn.prompt",
+    "agent/prompts/completion_judge_default.harn.prompt" => "stdlib/agent/prompts/completion_judge_default.harn.prompt",
+    "agent/prompts/completion_judge_feedback_fallback.harn.prompt" => "stdlib/agent/prompts/completion_judge_feedback_fallback.harn.prompt",
+    "agent/prompts/completion_judge_user.harn.prompt" => "stdlib/agent/prompts/completion_judge_user.harn.prompt",
+    "agent/prompts/step_judge_system_default.harn.prompt" => "stdlib/agent/prompts/step_judge_system_default.harn.prompt",
+    "agent/prompts/step_judge_system_adversarial.harn.prompt" => "stdlib/agent/prompts/step_judge_system_adversarial.harn.prompt",
+    "agent/prompts/step_judge_user.harn.prompt" => "stdlib/agent/prompts/step_judge_user.harn.prompt",
+    "agent/prompts/parse_guidance.harn.prompt" => "stdlib/agent/prompts/parse_guidance.harn.prompt",
+    "agent/prompts/native_tool_contract_feedback.harn.prompt" => "stdlib/agent/prompts/native_tool_contract_feedback.harn.prompt",
+    "agent/prompts/verification_gate_feedback.harn.prompt" => "stdlib/agent/prompts/verification_gate_feedback.harn.prompt",
+    "agent/prompts/daemon_watch_feedback.harn.prompt" => "stdlib/agent/prompts/daemon_watch_feedback.harn.prompt",
+    "agent/prompts/daemon_timer_feedback.harn.prompt" => "stdlib/agent/prompts/daemon_timer_feedback.harn.prompt",
+    "llm/prompts/completion_fallback_system.harn.prompt" => "stdlib/llm/prompts/completion_fallback_system.harn.prompt",
+    "llm/prompts/completion_fallback_user.harn.prompt" => "stdlib/llm/prompts/completion_fallback_user.harn.prompt",
+    "llm/prompts/transcript_summarize_user.harn.prompt" => "stdlib/llm/prompts/transcript_summarize_user.harn.prompt",
+    "llm/prompts/sitrep_user.harn.prompt" => "stdlib/llm/prompts/sitrep_user.harn.prompt",
+    "llm/prompts/structural_chain_of_draft.harn.prompt" => "stdlib/llm/prompts/structural_chain_of_draft.harn.prompt",
+    "llm/prompts/schema_recover_repair.harn.prompt" => "stdlib/llm/prompts/schema_recover_repair.harn.prompt",
+    "llm/prompts/structured_envelope_schema_contract.harn.prompt" => "stdlib/llm/prompts/structured_envelope_schema_contract.harn.prompt",
+    "llm/prompts/structured_envelope_repair.harn.prompt" => "stdlib/llm/prompts/structured_envelope_repair.harn.prompt",
+    "llm/prompts/pairwise_rerank_user.harn.prompt" => "stdlib/llm/prompts/pairwise_rerank_user.harn.prompt",
+    "llm/prompts/tool_binder_user.harn.prompt" => "stdlib/llm/prompts/tool_binder_user.harn.prompt",
+    "workflow/prompts/stage.harn.prompt" => "stdlib/workflow/prompts/stage.harn.prompt",
+    "workflow/prompts/verification_context_intro.harn.prompt" => "stdlib/workflow/prompts/verification_context_intro.harn.prompt",
+    "orchestration/prompts/compaction_summary.harn.prompt" => "stdlib/orchestration/prompts/compaction_summary.harn.prompt",
+    "orchestration/prompts/compaction_policy_replacement.harn.prompt" => "stdlib/orchestration/prompts/compaction_policy_replacement.harn.prompt",
+]);
 
 /// Embedded `.harn` script that backs a CLI subcommand. Looked up by
 /// the `harn-cli` dispatch wedge (see harn#2293 epic and harn#2294 G1)
@@ -1031,163 +315,49 @@ pub struct StdlibCliScript {
     pub source: &'static str,
 }
 
-pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
-    StdlibCliScript {
-        name: "codemod",
-        source: include_str!("stdlib/cli/codemod.harn"),
-    },
-    StdlibCliScript {
-        name: "canon/check",
-        source: include_str!("stdlib/cli/canon/check.harn"),
-    },
-    StdlibCliScript {
-        name: "doctor",
-        source: include_str!("stdlib/cli/doctor.harn"),
-    },
-    StdlibCliScript {
-        name: "echo",
-        source: include_str!("stdlib/cli/echo.harn"),
-    },
+pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliScript, name, [
+    "codemod" => "stdlib/cli/codemod.harn",
+    "canon/check" => "stdlib/cli/canon/check.harn",
+    "doctor" => "stdlib/cli/doctor.harn",
+    "echo" => "stdlib/cli/echo.harn",
     // Helper module for the embedded `eval/*` scripts. Has a stub `main`
     // that exits non-zero — sibling scripts inline its helpers until the
     // dispatch wedge gains a cross-script import surface (#2300 / G7).
-    StdlibCliScript {
-        name: "eval/_runner",
-        source: include_str!("stdlib/cli/eval/_runner.harn"),
-    },
-    StdlibCliScript {
-        name: "eval/context",
-        source: include_str!("stdlib/cli/eval/context.harn"),
-    },
-    StdlibCliScript {
-        name: "eval/model_selector",
-        source: include_str!("stdlib/cli/eval/model_selector.harn"),
-    },
-    StdlibCliScript {
-        name: "eval/tool_calls",
-        source: include_str!("stdlib/cli/eval/tool_calls.harn"),
-    },
-    StdlibCliScript {
-        name: "eval/coding_agent",
-        source: include_str!("stdlib/cli/eval/coding_agent.harn"),
-    },
-    StdlibCliScript {
-        name: "eval/scope_triage",
-        source: include_str!("stdlib/cli/eval/scope_triage.harn"),
-    },
-    StdlibCliScript {
-        name: "eval/prompt",
-        source: include_str!("stdlib/cli/eval/prompt.harn"),
-    },
-    StdlibCliScript {
-        name: "explain",
-        source: include_str!("stdlib/cli/explain.harn"),
-    },
-    StdlibCliScript {
-        name: "graph",
-        source: include_str!("stdlib/cli/graph.harn"),
-    },
-    StdlibCliScript {
-        name: "models/batch_plan",
-        source: include_str!("stdlib/cli/models/batch_plan.harn"),
-    },
-    StdlibCliScript {
-        name: "models/list",
-        source: include_str!("stdlib/cli/models/list.harn"),
-    },
-    StdlibCliScript {
-        name: "models/lora_inspect",
-        source: include_str!("stdlib/cli/models/lora_inspect.harn"),
-    },
-    StdlibCliScript {
-        name: "models/lora_export",
-        source: include_str!("stdlib/cli/models/lora_export.harn"),
-    },
-    StdlibCliScript {
-        name: "models/lora_manifest",
-        source: include_str!("stdlib/cli/models/lora_manifest.harn"),
-    },
-    StdlibCliScript {
-        name: "models/lora_preflight",
-        source: include_str!("stdlib/cli/models/lora_preflight.harn"),
-    },
-    StdlibCliScript {
-        name: "models/lora_promote",
-        source: include_str!("stdlib/cli/models/lora_promote.harn"),
-    },
-    StdlibCliScript {
-        name: "models/lora_plan",
-        source: include_str!("stdlib/cli/models/lora_plan.harn"),
-    },
-    StdlibCliScript {
-        name: "models/lora_train",
-        source: include_str!("stdlib/cli/models/lora_train.harn"),
-    },
-    StdlibCliScript {
-        name: "models/recommend",
-        source: include_str!("stdlib/cli/models/recommend.harn"),
-    },
-    StdlibCliScript {
-        name: "models/test",
-        source: include_str!("stdlib/cli/models/test.harn"),
-    },
-    StdlibCliScript {
-        name: "precompile",
-        source: include_str!("stdlib/cli/precompile.harn"),
-    },
-    StdlibCliScript {
-        name: "providers/cache_probe",
-        source: include_str!("stdlib/cli/providers/cache_probe.harn"),
-    },
-    StdlibCliScript {
-        name: "providers/catalog",
-        source: include_str!("stdlib/cli/providers/catalog.harn"),
-    },
-    StdlibCliScript {
-        name: "providers/probe",
-        source: include_str!("stdlib/cli/providers/probe.harn"),
-    },
-    StdlibCliScript {
-        name: "providers/recommend",
-        source: include_str!("stdlib/cli/providers/recommend.harn"),
-    },
-    StdlibCliScript {
-        name: "providers/tool_probe",
-        source: include_str!("stdlib/cli/providers/tool_probe.harn"),
-    },
-    StdlibCliScript {
-        name: "providers/tool_scorecard",
-        source: include_str!("stdlib/cli/providers/tool_scorecard.harn"),
-    },
-    StdlibCliScript {
-        name: "routes",
-        source: include_str!("stdlib/cli/routes.harn"),
-    },
-    StdlibCliScript {
-        name: "scan",
-        source: include_str!("stdlib/cli/scan.harn"),
-    },
-    StdlibCliScript {
-        name: "scaffold/init",
-        source: include_str!("stdlib/cli/scaffold/init.harn"),
-    },
-    StdlibCliScript {
-        name: "scaffold/tool_new",
-        source: include_str!("stdlib/cli/scaffold/tool_new.harn"),
-    },
-    StdlibCliScript {
-        name: "trace_import",
-        source: include_str!("stdlib/cli/trace_import.harn"),
-    },
-    StdlibCliScript {
-        name: "try",
-        source: include_str!("stdlib/cli/try.harn"),
-    },
-    StdlibCliScript {
-        name: "version",
-        source: include_str!("stdlib/cli/version.harn"),
-    },
-];
+    "eval/_runner" => "stdlib/cli/eval/_runner.harn",
+    "eval/context" => "stdlib/cli/eval/context.harn",
+    "eval/model_selector" => "stdlib/cli/eval/model_selector.harn",
+    "eval/tool_calls" => "stdlib/cli/eval/tool_calls.harn",
+    "eval/coding_agent" => "stdlib/cli/eval/coding_agent.harn",
+    "eval/scope_triage" => "stdlib/cli/eval/scope_triage.harn",
+    "eval/prompt" => "stdlib/cli/eval/prompt.harn",
+    "explain" => "stdlib/cli/explain.harn",
+    "graph" => "stdlib/cli/graph.harn",
+    "models/batch_plan" => "stdlib/cli/models/batch_plan.harn",
+    "models/list" => "stdlib/cli/models/list.harn",
+    "models/lora_inspect" => "stdlib/cli/models/lora_inspect.harn",
+    "models/lora_export" => "stdlib/cli/models/lora_export.harn",
+    "models/lora_manifest" => "stdlib/cli/models/lora_manifest.harn",
+    "models/lora_preflight" => "stdlib/cli/models/lora_preflight.harn",
+    "models/lora_promote" => "stdlib/cli/models/lora_promote.harn",
+    "models/lora_plan" => "stdlib/cli/models/lora_plan.harn",
+    "models/lora_train" => "stdlib/cli/models/lora_train.harn",
+    "models/recommend" => "stdlib/cli/models/recommend.harn",
+    "models/test" => "stdlib/cli/models/test.harn",
+    "precompile" => "stdlib/cli/precompile.harn",
+    "providers/cache_probe" => "stdlib/cli/providers/cache_probe.harn",
+    "providers/catalog" => "stdlib/cli/providers/catalog.harn",
+    "providers/probe" => "stdlib/cli/providers/probe.harn",
+    "providers/recommend" => "stdlib/cli/providers/recommend.harn",
+    "providers/tool_probe" => "stdlib/cli/providers/tool_probe.harn",
+    "providers/tool_scorecard" => "stdlib/cli/providers/tool_scorecard.harn",
+    "routes" => "stdlib/cli/routes.harn",
+    "scan" => "stdlib/cli/scan.harn",
+    "scaffold/init" => "stdlib/cli/scaffold/init.harn",
+    "scaffold/tool_new" => "stdlib/cli/scaffold/tool_new.harn",
+    "trace_import" => "stdlib/cli/trace_import.harn",
+    "try" => "stdlib/cli/try.harn",
+    "version" => "stdlib/cli/version.harn",
+]);
 
 pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
     STDLIB_SOURCES
