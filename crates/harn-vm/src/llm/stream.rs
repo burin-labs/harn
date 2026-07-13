@@ -91,8 +91,13 @@ pub(crate) async fn vm_stream_llm(
 
     // Bound total stream duration: a provider that dribbles bytes fast
     // enough to keep resetting the idle timer would otherwise hold the
-    // stream open forever.
-    let overall_budget_secs = opts.timeout.unwrap_or(30 * 60);
+    // stream open forever. Resolve the SAME whole-request deadline the
+    // non-streaming path applies (explicit opts.timeout > HARN_LLM_TIMEOUT env
+    // > model-catalog stream_timeout > 120s default). Using the raw
+    // `opts.timeout` here silently fell back to 30 minutes whenever a caller
+    // relied on the HARN_LLM_TIMEOUT env (leaving opts.timeout = None), so a
+    // hung/dribbling provider stream could run for half an hour per call.
+    let overall_budget_secs = opts.resolve_timeout();
     let overall_dur = std::time::Duration::from_secs(overall_budget_secs);
     let stream_start = std::time::Instant::now();
 
