@@ -126,6 +126,7 @@ fn builtin_effect_group(builtin: &str) -> Option<BuiltinEffectGroup> {
         "read_file"
         | "read_file_result"
         | "read_file_bytes"
+        | "package_snapshot_open"
         | "render"
         | "render_prompt"
         | "render_with_provenance"

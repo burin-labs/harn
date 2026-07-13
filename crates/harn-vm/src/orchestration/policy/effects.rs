@@ -209,6 +209,7 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         "read_file"
         | "read_file_bytes"
         | "read_file_result"
+        | "package_snapshot_open"
         | "render"
         | "render_prompt"
         | "render_with_provenance"

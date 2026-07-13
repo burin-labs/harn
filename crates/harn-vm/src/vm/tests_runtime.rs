@@ -241,7 +241,7 @@ fn optimizer_differential_errors_match() {
     assert_eq!(optimized, unoptimized);
 }
 
-fn run_harn_at(path: &Path, source: &str) -> Result<(String, VmValue), VmError> {
+pub(super) fn run_harn_at(path: &Path, source: &str) -> Result<(String, VmValue), VmError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -2933,35 +2933,6 @@ log(label)
         out,
         "[harn] loop 1\n[harn] loop 2\n[harn] boom\n[harn] outer"
     );
-}
-
-#[test]
-fn package_export_import_executes_through_manifest_alias() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
-    std::fs::create_dir_all(root.join(".git")).unwrap();
-    std::fs::create_dir_all(root.join(".harn/packages/acme/runtime")).unwrap();
-    std::fs::write(
-        root.join(".harn/packages/acme/harn.toml"),
-        "[exports]\ncapabilities = \"runtime/capabilities.harn\"\n",
-    )
-    .unwrap();
-    std::fs::write(
-        root.join(".harn/packages/acme/runtime/capabilities.harn"),
-        "pub fn exported_capability() { return 41 + 1 }\n",
-    )
-    .unwrap();
-    let entry = root.join("main.harn");
-    let source = r#"
-import "acme/capabilities"
-
-pipeline main(task) {
-  __io_println(exported_capability())
-}
-"#;
-
-    let (out, _) = run_harn_at(&entry, source).unwrap();
-    assert_eq!(out.trim(), "42");
 }
 
 // --- Closure late-bind walk skip (Chunk::references_outer_names) ---

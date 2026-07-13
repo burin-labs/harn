@@ -6,7 +6,8 @@ fn load_runtime_extensions_uses_only_root_llm_config() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".git")).unwrap();
-    std::fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+    let packages = create_test_package_generation(root);
+    std::fs::create_dir_all(packages.join("acme")).unwrap();
     fs::write(
         root.join(MANIFEST),
         r#"
@@ -20,7 +21,7 @@ chat_endpoint = "/chat/completions"
     )
     .unwrap();
     fs::write(
-        root.join(".harn/packages/acme/harn.toml"),
+        packages.join("acme/harn.toml"),
         r#"
 [llm.aliases]
 acme-fast = { id = "acme/model", provider = "acme" }
@@ -47,7 +48,8 @@ fn load_runtime_extensions_ignores_package_hooks() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".git")).unwrap();
-    std::fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+    let packages = create_test_package_generation(root);
+    std::fs::create_dir_all(packages.join("acme")).unwrap();
     fs::write(
         root.join(MANIFEST),
         r#"
@@ -62,7 +64,7 @@ handler = "workspace::after_read"
     )
     .unwrap();
     fs::write(
-        root.join(".harn/packages/acme/harn.toml"),
+        packages.join("acme/harn.toml"),
         r#"
 [package]
 name = "acme"
@@ -128,13 +130,15 @@ connector = { rust = "builtin" }
         extensions.provider_connectors[1].connector,
         ResolvedProviderConnectorKind::RustBuiltin
     ));
+    assert!(!root.join(".harn").exists());
 }
 
 #[test]
 fn installed_package_provider_connectors_are_available_to_consumers() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    fs::create_dir_all(root.join(PKG_DIR).join("google")).unwrap();
+    let packages = create_test_package_generation(root);
+    fs::create_dir_all(packages.join("google")).unwrap();
     fs::write(
         root.join(MANIFEST),
         r#"
@@ -143,9 +147,7 @@ google = { path = "./vendor/google" }
 "#,
     )
     .unwrap();
-    fs::write(
-        root.join(LOCK_FILE),
-        r#"
+    let lock_body = r#"
 version = 4
 generator_version = "0.9.19"
 protocol_artifact_version = "0.9.19"
@@ -153,11 +155,11 @@ protocol_artifact_version = "0.9.19"
 [[package]]
 name = "google"
 source = "path+file:///vendor/google"
-"#,
-    )
-    .unwrap();
+"#;
+    fs::write(root.join(LOCK_FILE), lock_body).unwrap();
+    write_test_generation_lock(root, lock_body);
     fs::write(
-        root.join(PKG_DIR).join("google").join(MANIFEST),
+        packages.join("google").join(MANIFEST),
         r#"
 [[providers]]
 id = "google_workspace"
@@ -171,14 +173,11 @@ required_secrets = ["google_workspace/access-token"]
     )
     .unwrap();
 
-    let root_manifest = read_package_manifest_from_dir(root)
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(root)
         .unwrap()
-        .expect("root manifest");
-    let connectors = installed_package_provider_connectors(&ManifestContext {
-        manifest: root_manifest,
-        dir: root.to_path_buf(),
-    })
-    .expect("dependency connectors");
+        .unwrap();
+    let connectors =
+        installed_package_provider_connectors(&snapshot, &packages).expect("dependency connectors");
 
     assert_eq!(connectors.len(), 1);
     assert_eq!(connectors[0].id.as_str(), "google_workspace");
@@ -351,7 +350,8 @@ fn load_runtime_extensions_ignores_package_triggers() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join(".git")).unwrap();
-    std::fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+    let packages = create_test_package_generation(root);
+    std::fs::create_dir_all(packages.join("acme")).unwrap();
     fs::write(
         root.join(MANIFEST),
         r#"
@@ -368,7 +368,7 @@ handler = "worker://workspace-queue"
     )
     .unwrap();
     fs::write(
-        root.join(".harn/packages/acme/harn.toml"),
+        packages.join("acme/harn.toml"),
         r#"
 [package]
 name = "acme"
@@ -1065,12 +1065,16 @@ run = "run.json"
 async fn collect_manifest_triggers_accepts_installed_eval_pack_handler_uri() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    fs::create_dir_all(root.join(".harn/packages/installed-evals/evals")).unwrap();
+    let package_source = root.join("vendor/installed-evals");
+    fs::create_dir_all(package_source.join("evals")).unwrap();
     let harn_file = write_trigger_project(
         root,
         r#"
 [package]
 name = "workspace"
+
+[dependencies]
+installed-evals = { path = "vendor/installed-evals" }
 
 [[triggers]]
 id = "dependency-eval"
@@ -1084,20 +1088,7 @@ timezone = "UTC"
         None,
     );
     fs::write(
-        root.join(LOCK_FILE),
-        r#"
-version = 4
-generator_version = "0.8.90"
-protocol_artifact_version = "0.8.90"
-
-[[package]]
-name = "installed-evals"
-source = "path+file:///tmp/installed-evals"
-"#,
-    )
-    .unwrap();
-    fs::write(
-        root.join(".harn/packages/installed-evals/harn.toml"),
+        package_source.join("harn.toml"),
         r#"
 [package]
 name = "installed-evals"
@@ -1107,7 +1098,7 @@ evals = ["evals/dependency.toml"]
     )
     .unwrap();
     fs::write(
-        root.join(".harn/packages/installed-evals/evals/dependency.toml"),
+        package_source.join("evals/dependency.toml"),
         r#"
 version = 1
 id = "dependency-pack"
@@ -1120,6 +1111,13 @@ commit = "commit-a"
 id = "case-a"
 run = "run.json"
 "#,
+    )
+    .unwrap();
+    install_packages_in(
+        &PackageWorkspace::for_test(root, root.join(".cache")),
+        false,
+        None,
+        false,
     )
     .unwrap();
 

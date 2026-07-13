@@ -397,56 +397,6 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), PackageEr
     Ok(())
 }
 
-pub(crate) fn remove_materialized_package(
-    packages_dir: &Path,
-    alias: &str,
-) -> Result<(), PackageError> {
-    remove_materialized_path(&packages_dir.join(alias))?;
-    remove_materialized_path(&packages_dir.join(format!("{alias}.harn")))?;
-    Ok(())
-}
-
-fn remove_materialized_path(path: &Path) -> Result<(), PackageError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if is_link_like(&metadata) => remove_link_like_path(path)
-            .map_err(|error| format!("failed to remove {}: {error}", path.display()).into()),
-        Ok(metadata) if metadata.is_file() => fs::remove_file(path)
-            .map_err(|error| format!("failed to remove {}: {error}", path.display()).into()),
-        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path)
-            .map_err(|error| format!("failed to remove {}: {error}", path.display()).into()),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("failed to stat {}: {error}", path.display()).into()),
-    }
-}
-
-fn is_link_like(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink() || is_windows_reparse_point(metadata)
-}
-
-#[cfg(windows)]
-fn is_windows_reparse_point(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
-    false
-}
-
-fn remove_link_like_path(path: &Path) -> std::io::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(file_error) => match fs::remove_dir(path) {
-            Ok(()) => Ok(()),
-            Err(_) => Err(file_error),
-        },
-    }
-}
-
 #[cfg(unix)]
 pub(crate) fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), PackageError> {
     std::os::unix::fs::symlink(source, dest).map_err(|error| {
@@ -486,7 +436,6 @@ pub(crate) fn materialize_path_dependency(
     dest_root: &Path,
     alias: &str,
 ) -> Result<(), PackageError> {
-    remove_materialized_package(dest_root, alias)?;
     if source.is_dir() {
         let dest = dest_root.join(alias);
         match symlink_path_dependency(source, &dest) {
@@ -2209,11 +2158,10 @@ pub(crate) fn verify_lock_entry_cache_in(
 }
 
 pub(crate) fn verify_materialized_lock_entry(
-    ctx: &ManifestContext,
+    packages_dir: &Path,
     entry: &LockEntry,
 ) -> Result<bool, PackageError> {
     validate_package_alias(&entry.name)?;
-    let packages_dir = ctx.packages_dir();
     if entry.source.starts_with("path+") {
         let dir = packages_dir.join(&entry.name);
         let file = packages_dir.join(format!("{}.harn", entry.name));
@@ -2259,13 +2207,18 @@ pub(crate) fn verify_package_cache_in(
     let lock = LockFile::load(&ctx.lock_path())?
         .ok_or_else(|| format!("{} is missing", ctx.lock_path().display()))?;
     validate_lock_matches_manifest(workspace, &ctx, &lock)?;
+    let snapshot = materialized
+        .then(|| current_package_snapshot(&ctx))
+        .transpose()?;
     let mut verified = 0usize;
     for entry in &lock.packages {
         if verify_lock_entry_cache_in(workspace, entry)? {
             verified += 1;
         }
-        if materialized && verify_materialized_lock_entry(&ctx, entry)? {
-            verified += 1;
+        if let Some(snapshot) = snapshot.as_ref() {
+            if verify_materialized_lock_entry(snapshot.packages_root(), entry)? {
+                verified += 1;
+            }
         }
     }
     Ok(verified)
@@ -2710,29 +2663,6 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
         assert_eq!(first, second);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn remove_materialized_package_unlinks_directory_symlink_without_touching_source() {
-        let tmp = tempfile::tempdir().unwrap();
-        let source = tmp.path().join("source");
-        let packages = tmp.path().join(".harn/packages");
-        fs::create_dir_all(&source).unwrap();
-        fs::create_dir_all(&packages).unwrap();
-        fs::write(
-            source.join("lib.harn"),
-            "pub fn value() -> number { return 1 }\n",
-        )
-        .unwrap();
-
-        let materialized = packages.join("acme");
-        std::os::unix::fs::symlink(&source, &materialized).unwrap();
-
-        remove_materialized_package(&packages, "acme").unwrap();
-
-        assert!(!materialized.exists());
-        assert!(source.join("lib.harn").is_file());
-    }
-
     #[test]
     fn package_cache_verify_detects_tampering_even_with_stale_marker() {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
@@ -2981,8 +2911,7 @@ tag = "v1.0.0"
             .expect("registry-added entry should carry registry provenance");
         assert_eq!(registry.name, "@burin/acme-lib");
         assert_eq!(registry.version, "1.0.0");
-        assert!(root
-            .join(PKG_DIR)
+        assert!(current_packages_dir(root)
             .join("acme-lib")
             .join("lib.harn")
             .is_file());

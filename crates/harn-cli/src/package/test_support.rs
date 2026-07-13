@@ -1,6 +1,64 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
+pub(crate) fn create_test_package_generation(root: &Path) -> PathBuf {
+    use harn_modules::package_snapshot::{
+        generation_root, package_current_path, package_publication_lock_path,
+        PackageGenerationManifest, PackageGenerationPointer, GENERATION_LEASE_FILE,
+        GENERATION_LOCK_FILE, GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
+    };
+
+    let generation = "generation-test";
+    let generation_root = generation_root(root, generation);
+    let packages_root = generation_root.join(GENERATION_PACKAGES_DIR);
+    fs::create_dir_all(&packages_root).unwrap();
+    let lock_body =
+        b"version = 4\ngenerator_version = \"test\"\nprotocol_artifact_version = \"test\"\n";
+    fs::write(generation_root.join(GENERATION_LOCK_FILE), lock_body).unwrap();
+    fs::write(generation_root.join(GENERATION_LEASE_FILE), []).unwrap();
+    let digest = harn_modules::package_snapshot::package_lock_digest(lock_body);
+    let manifest = PackageGenerationManifest::new(generation, digest).unwrap();
+    fs::write(
+        generation_root.join(GENERATION_MANIFEST_FILE),
+        toml::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let pointer = PackageGenerationPointer::new(generation).unwrap();
+    fs::write(
+        package_current_path(root),
+        toml::to_string_pretty(&pointer).unwrap(),
+    )
+    .unwrap();
+    File::create(package_publication_lock_path(root)).unwrap();
+    packages_root
+}
+
+pub(crate) fn current_packages_dir(root: &Path) -> PathBuf {
+    harn_modules::package_snapshot::PackageSnapshot::acquire(root)
+        .unwrap()
+        .expect("published package generation")
+        .packages_root()
+        .to_path_buf()
+}
+
+pub(crate) fn write_test_generation_lock(root: &Path, body: &str) {
+    use harn_modules::package_snapshot::{
+        generation_root, package_lock_digest, PackageGenerationManifest, GENERATION_LOCK_FILE,
+        GENERATION_MANIFEST_FILE,
+    };
+
+    let generation = "generation-test";
+    let generation_root = generation_root(root, generation);
+    fs::write(generation_root.join(GENERATION_LOCK_FILE), body).unwrap();
+    let manifest =
+        PackageGenerationManifest::new(generation, package_lock_digest(body.as_bytes())).unwrap();
+    fs::write(
+        generation_root.join(GENERATION_MANIFEST_FILE),
+        toml::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TriggerTables {
     #[serde(default)]

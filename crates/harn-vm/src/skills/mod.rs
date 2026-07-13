@@ -62,7 +62,7 @@ pub struct FsLayerConfig {
     pub manifest_sources: Vec<ManifestSource>,
     /// `$HOME/.harn/skills` (or the platform equivalent).
     pub user_dir: Option<PathBuf>,
-    /// Walk target for `.harn/packages/**/skills/*/SKILL.md`.
+    /// Walk target for package-generation `**/skills/*/SKILL.md` entries.
     pub packages_dir: Option<PathBuf>,
     /// `/etc/harn/skills` + `$XDG_CONFIG_HOME/harn/skills` combined.
     pub system_dirs: Vec<PathBuf>,

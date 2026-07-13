@@ -1,6 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use base64::Engine;
 use serde::Deserialize;
@@ -9,6 +10,7 @@ use serde_json::{json, Value as JsonValue};
 #[derive(Clone, Debug, Default)]
 pub struct FilePromptCatalog {
     prompts: Vec<FilePrompt>,
+    _package_snapshot: Option<Arc<harn_modules::package_snapshot::PackageSnapshot>>,
 }
 
 #[derive(Clone, Debug)]
@@ -97,19 +99,32 @@ fn default_required() -> bool {
 }
 
 impl FilePromptCatalog {
-    pub fn discover(project_root: &Path, manifest_source: &str) -> Self {
+    pub fn discover(project_root: &Path) -> Self {
         let mut candidates = Vec::new();
         collect_prompt_files(project_root, project_root, None, &mut candidates);
 
-        for alias in dependency_aliases(manifest_source) {
-            let package_root = project_root.join(".harn/packages").join(&alias);
-            if package_root.is_dir() {
-                collect_prompt_files(&package_root, &package_root, Some(&alias), &mut candidates);
+        let package_snapshot =
+            harn_modules::package_snapshot::PackageSnapshot::acquire(project_root)
+                .ok()
+                .flatten()
+                .map(Arc::new);
+        if let Some(snapshot) = package_snapshot.as_ref() {
+            for alias in snapshot.package_names() {
+                let package_root = snapshot.packages_root().join(alias);
+                if package_root.is_dir() {
+                    collect_prompt_files(
+                        &package_root,
+                        &package_root,
+                        Some(alias),
+                        &mut candidates,
+                    );
+                }
             }
         }
 
         Self {
             prompts: resolve_prompt_name_collisions(candidates),
+            _package_snapshot: package_snapshot,
         }
     }
 
@@ -513,21 +528,6 @@ fn is_identifier(value: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
-fn dependency_aliases(manifest_source: &str) -> Vec<String> {
-    #[derive(Deserialize)]
-    struct PromptDependencyManifest {
-        #[serde(default)]
-        dependencies: BTreeMap<String, toml::Value>,
-    }
-
-    let Ok(manifest) = toml::from_str::<PromptDependencyManifest>(manifest_source) else {
-        return Vec::new();
-    };
-    let mut aliases = manifest.dependencies.keys().cloned().collect::<Vec<_>>();
-    aliases.sort();
-    aliases
-}
-
 fn image_data(image: &PromptImage, prompt_path: &Path) -> Result<String, String> {
     if let Some(data) = &image.data {
         return Ok(data.clone());
@@ -606,6 +606,39 @@ mod tests {
         fs::write(path, text).unwrap();
     }
 
+    fn package_fixture(root: &Path) -> PathBuf {
+        use harn_modules::package_snapshot::{
+            generation_root, package_current_path, package_publication_lock_path,
+            PackageGenerationManifest, PackageGenerationPointer, GENERATION_LEASE_FILE,
+            GENERATION_LOCK_FILE, GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
+        };
+
+        let generation = "generation-test";
+        let generation_root = generation_root(root, generation);
+        let packages_root = generation_root.join(GENERATION_PACKAGES_DIR);
+        fs::create_dir_all(&packages_root).unwrap();
+        let lock_body =
+            "version = 4\n\n[[package]]\nname = \"pack\"\nsource = \"path+file:///tmp/pack\"\n";
+        write(&generation_root.join(GENERATION_LOCK_FILE), lock_body);
+        write(&generation_root.join(GENERATION_LEASE_FILE), "");
+        let manifest = PackageGenerationManifest::new(
+            generation,
+            harn_modules::package_snapshot::package_lock_digest(lock_body.as_bytes()),
+        )
+        .unwrap();
+        write(
+            &generation_root.join(GENERATION_MANIFEST_FILE),
+            &toml::to_string_pretty(&manifest).unwrap(),
+        );
+        let pointer = PackageGenerationPointer::new(generation).unwrap();
+        write(
+            &package_current_path(root),
+            &toml::to_string_pretty(&pointer).unwrap(),
+        );
+        fs::File::create(package_publication_lock_path(root)).unwrap();
+        packages_root
+    }
+
     #[test]
     fn discovers_and_renders_front_matter_prompt() {
         let temp = TempDir::new().unwrap();
@@ -627,7 +660,7 @@ Review this: {{ code }}
 "#,
         );
 
-        let catalog = FilePromptCatalog::discover(temp.path(), "[package]\nname = \"x\"\n");
+        let catalog = FilePromptCatalog::discover(temp.path());
         assert_eq!(catalog.list()[0]["name"], "review");
         assert_eq!(
             catalog.list()[0]["arguments"][0]["description"],
@@ -653,13 +686,13 @@ pack = { path = "../pack" }
 "#;
         write(temp.path().join("harn.toml").as_path(), manifest);
         write(
-            temp.path()
-                .join(".harn/packages/pack/prompts/helper.harn.prompt")
+            package_fixture(temp.path())
+                .join("pack/prompts/helper.harn.prompt")
                 .as_path(),
             "Use {{ topic }}",
         );
 
-        let catalog = FilePromptCatalog::discover(temp.path(), manifest);
+        let catalog = FilePromptCatalog::discover(temp.path());
         assert_eq!(catalog.list()[0]["name"], "pack/prompts/helper");
     }
 
@@ -691,7 +724,7 @@ hello
 "#,
         );
 
-        let catalog = FilePromptCatalog::discover(temp.path(), "[package]\nname = \"x\"\n");
+        let catalog = FilePromptCatalog::discover(temp.path());
         let error = catalog.get("review", &json!({})).unwrap_err();
         assert!(error.contains("escapes the prompt directory"));
     }

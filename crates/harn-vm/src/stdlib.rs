@@ -73,6 +73,7 @@ mod oauth_dynreg;
 mod oauth_storage;
 pub(crate) mod observability;
 pub(crate) mod options;
+mod package_snapshot;
 mod path;
 pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
@@ -175,6 +176,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     io::register_io_builtins(vm);
     host::register_host_builtins(vm);
     fs::register_fs_builtins(vm);
+    package_snapshot::register_package_snapshot_builtins(vm);
     files::register_file_builtins(vm);
     git::register_git_builtins(vm);
     vision::register_vision_builtins(vm);

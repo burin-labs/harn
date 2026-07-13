@@ -116,9 +116,15 @@ openapi = { git = "https://github.com/burin-labs/harn-openapi", branch = "main" 
 local-fixture = { path = "../fixture-lib" }
 ```
 
-`[dependencies]` installs package sources into `.harn/packages/` so
-imports like `import "notion-sdk-harn"` or `import "notion/providers"`
-resolve without filesystem-relative hacks.
+`harn install` resolves `[dependencies]` into an immutable package generation
+under `.harn/package-generations/<generation>/packages/`, then atomically
+publishes `.harn/package-current.toml`. Imports like
+`import "notion-sdk-harn"` or `import "notion/providers"` resolve through one
+leased snapshot of that generation, never through a directory being mutated.
+Each generation contains its exact `harn.lock`, `generation.toml`, and
+`lease.lock`; readers hold a shared lease for their full operation, and
+garbage collection removes an old generation only after an exclusive lease
+succeeds.
 
 - The table key is the local import alias.
 - `git` accepts HTTPS, SSH, `file://`, local-repo paths, and GitHub-style
@@ -137,15 +143,15 @@ resolve without filesystem-relative hacks.
 - `package` documents the upstream package name when the local alias
   differs from the repository name.
 - `path` installs a local directory or `.harn` file without using the
-  shared git cache. Directory path dependencies are live-linked into
-  `.harn/packages/<alias>` when the platform supports symlinks, with a
-  copy fallback for restricted filesystems. This makes sibling-repo
+  shared git cache. Directory path dependencies are live-linked into the
+  published generation's `packages/<alias>` when the platform supports
+  symlinks, with a copy fallback for restricted filesystems. This makes sibling-repo
   development ergonomic for layouts such as `~/projects/{app,
   shared-packages,harn-openapi}`: editing `../harn-openapi/lib.harn` is
   immediately visible to imports in the consuming project.
 
 Transitive package dependencies are resolved from installed package
-manifests and flattened into the root workspace `.harn/packages/`
+manifests and flattened into the published generation's `packages/`
 directory. For example, a connector package can depend on
 `notion-sdk-harn`, and that SDK can depend on `harn-openapi` helpers;
 `harn install` records all reachable packages in `harn.lock` and
@@ -164,7 +170,7 @@ should be pinned by commit instead of live-linked.
 `[[package.tools]]` metadata, a stable `tools` export, package-local dispatch
 tests, API docs, and CI. `harn skill new <name>` scaffolds a SKILL.md
 bundle. Tool and skill packages still install through the
-same `[dependencies]`, `.harn/packages/`, and `harn.lock` mechanism as ordinary
+same `[dependencies]`, `harn.lock`, and atomic generation mechanism as ordinary
 module packages.
 
 ### Eval packs
@@ -180,7 +186,7 @@ evals = ["evals/webhooks.toml"]
 ```
 
 After `harn install`, eval-pack discovery includes the root package plus
-materialized dependency packages under `.harn/packages/<alias>/`. Installed
+dependency packages in the leased current generation. Installed
 package eval packs are inert until a command or root trigger references them;
 installing a package does not install that package's own triggers.
 
@@ -433,8 +439,8 @@ Registry entries map discovery names to the existing git-backed package
 manager path; they do not introduce a second package install mechanism.
 For example, `harn add @burin/notion-sdk@1.2.3` reads the index entry,
 writes the equivalent `[dependencies]` git table, updates `harn.lock`,
-and materializes the same `.harn/packages/<package>/` tree that a direct
-GitHub install would use.
+and publishes the same immutable package generation that a direct GitHub
+install would use.
 
 Manifests may also keep a registry dependency semantic:
 
@@ -514,8 +520,8 @@ entry per dependency. Each git entry records:
 - `host_requirements`
 
 `content_hash` is a SHA-256 over the cached package tree. Harn verifies
-that hash whenever it reuses a cached package or re-materializes
-`.harn/packages/<alias>/`. `manifest_digest` separately hashes the resolved
+that hash whenever it reuses a cached package or prepares a package
+generation. `manifest_digest` separately hashes the resolved
 package manifest so audit and host policy can detect package-surface drift
 without re-hashing the full tree. `provenance`, `exports`, `permissions`, and
 `host_requirements` mirror the resolved package's declared source,
@@ -528,7 +534,7 @@ manifest and lockfile disagree or when a locked git package is not
 already cached. `harn package cache list`, `clean`, and `verify`
 inspect, garbage-collect, and recompute content hashes for cached git
 packages. `harn package cache verify --materialized` also verifies
-installed `.harn/packages/` contents against the lockfile hashes.
+the currently published generation against its exact embedded lockfile hashes.
 `harn package list` summarizes locked packages, their exported surfaces,
 permissions, host requirements, materialization status, and integrity state.
 `harn package doctor` diagnoses missing/stale lockfiles, missing materialized
@@ -550,8 +556,9 @@ paths. After `harn install`, consumers import them as
 `"<package>/<export>"` instead of coupling to the package's internal
 directory layout.
 
-Exports are resolved after the direct `.harn/packages/<path>` lookup, so
-packages can still expose raw file trees when they want that behavior.
+Exports are resolved after direct lookup under the leased generation's
+`packages/<path>`, so packages can still expose raw file trees when they want
+that behavior.
 
 ### `[[package.tools]]` and `[[package.skills]]`
 

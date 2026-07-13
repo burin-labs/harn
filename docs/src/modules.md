@@ -1748,7 +1748,7 @@ Import paths resolve in this order:
 
 1. `std/<module>` from the embedded stdlib
 2. Relative to the importing file, with implicit `.harn`
-3. Installed packages under the nearest ancestor `.harn/packages/`
+3. Installed packages in the nearest ancestor's leased current generation
 4. Package manifest `[exports]` aliases
 5. Package directories with `lib.harn`
 
@@ -1760,17 +1760,17 @@ capabilities = "runtime/capabilities.harn"
 providers = "runtime/providers.harn"
 ```
 
-With that manifest, `import "acme/capabilities"` resolves to the
-declared file inside `.harn/packages/acme/`, and nested package modules
-can import sibling packages through the workspace-level `.harn/packages`
-root instead of relying on brittle relative paths.
+With that manifest, `import "acme/capabilities"` resolves to the declared file
+inside the current generation's `packages/acme/`. Nested package modules use
+the same leased packages root to import siblings without brittle relative
+paths.
 
-`harn add`, `harn install`, and `harn lock` populate
-`.harn/packages/` from `harn.lock`. Git dependencies must specify `tag`,
+`harn add`, `harn install`, and `harn lock` prepare an immutable generation
+from `harn.lock` and publish it through `.harn/package-current.toml`. Git dependencies must specify `tag`,
 `rev`, or `branch`; Harn resolves them to commits, records content hashes, caches
 them under the user cache directory, and copies them back into the
 workspace as needed. Package dependencies are flattened into the same
-workspace package root, so a connector package can import an SDK package
+generation packages root, so a connector package can import an SDK package
 declared in its own `harn.toml` without requiring a sibling checkout.
 Directory path dependencies are live-linked when possible and are meant
 for local development; git-installed packages cannot publish transitive

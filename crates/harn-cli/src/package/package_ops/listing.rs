@@ -11,9 +11,11 @@ pub(super) fn list_packages_in(
     let ctx = workspace.load_manifest_context()?;
     let lock_path = ctx.lock_path();
     let lock = LockFile::load(&lock_path)?;
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(&ctx.dir)
+        .map_err(|error| PackageError::Lockfile(error.to_string()))?;
     let packages = lock
         .as_ref()
-        .map(|lock| package_list_entries(&ctx, lock))
+        .map(|lock| package_list_entries(snapshot.as_ref(), lock))
         .unwrap_or_default();
     Ok(PackageListReport {
         manifest_path: ctx.manifest_path().display().to_string(),
@@ -64,6 +66,8 @@ pub(super) fn doctor_packages_in(
     }
 
     let lock = LockFile::load(&lock_path)?;
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(&ctx.dir)
+        .map_err(|error| PackageError::Lockfile(error.to_string()))?;
     if ctx.manifest.dependencies.is_empty() {
         diagnostics.push(package_doctor_diagnostic(
             "info",
@@ -90,13 +94,13 @@ pub(super) fn doctor_packages_in(
             ));
         }
         for entry in &lock.packages {
-            validate_installed_package_entry(&ctx, entry, &mut diagnostics);
+            validate_installed_package_entry(&ctx, snapshot.as_ref(), entry, &mut diagnostics);
         }
     }
 
     let packages = lock
         .as_ref()
-        .map(|lock| package_list_entries(&ctx, lock))
+        .map(|lock| package_list_entries(snapshot.as_ref(), lock))
         .unwrap_or_default();
     let ok = diagnostics
         .iter()
@@ -111,13 +115,13 @@ pub(super) fn doctor_packages_in(
 }
 
 pub(super) fn package_list_entries(
-    ctx: &ManifestContext,
+    snapshot: Option<&harn_modules::package_snapshot::PackageSnapshot>,
     lock: &LockFile,
 ) -> Vec<PackageListEntry> {
     lock.packages
         .iter()
         .map(|entry| {
-            let materialized = materialized_package_exists(ctx, entry);
+            let materialized = materialized_package_exists(snapshot, entry);
             PackageListEntry {
                 name: entry.name.clone(),
                 source: entry.source.clone(),
@@ -125,7 +129,7 @@ pub(super) fn package_list_entries(
                 harn_compat: entry.harn_compat.clone(),
                 provenance: entry.provenance.clone(),
                 materialized,
-                integrity: package_integrity_status(ctx, entry),
+                integrity: package_integrity_status(snapshot, entry),
                 exports: entry.exports.clone(),
                 permissions: entry.permissions.clone(),
                 host_requirements: entry.host_requirements.clone(),
@@ -134,27 +138,38 @@ pub(super) fn package_list_entries(
         .collect()
 }
 
-pub(super) fn materialized_package_path(ctx: &ManifestContext, entry: &LockEntry) -> PathBuf {
-    let packages_dir = ctx.packages_dir();
+pub(super) fn materialized_package_path(
+    snapshot: Option<&harn_modules::package_snapshot::PackageSnapshot>,
+    entry: &LockEntry,
+) -> Option<PathBuf> {
+    let packages_dir = snapshot?.packages_root();
     let dir = packages_dir.join(&entry.name);
     if dir.exists() {
-        return dir;
+        return Some(dir);
     }
-    packages_dir.join(format!("{}.harn", entry.name))
+    Some(packages_dir.join(format!("{}.harn", entry.name)))
 }
 
-pub(super) fn materialized_package_exists(ctx: &ManifestContext, entry: &LockEntry) -> bool {
-    materialized_package_path(ctx, entry).exists()
+pub(super) fn materialized_package_exists(
+    snapshot: Option<&harn_modules::package_snapshot::PackageSnapshot>,
+    entry: &LockEntry,
+) -> bool {
+    materialized_package_path(snapshot, entry).is_some_and(|path| path.exists())
 }
 
-pub(super) fn package_integrity_status(ctx: &ManifestContext, entry: &LockEntry) -> String {
-    if !materialized_package_exists(ctx, entry) {
+pub(super) fn package_integrity_status(
+    snapshot: Option<&harn_modules::package_snapshot::PackageSnapshot>,
+    entry: &LockEntry,
+) -> String {
+    if !materialized_package_exists(snapshot, entry) {
         return "missing".to_string();
     }
     let Some(expected) = entry.content_hash.as_deref() else {
         return "not_checked".to_string();
     };
-    let path = materialized_package_path(ctx, entry);
+    let Some(path) = materialized_package_path(snapshot, entry) else {
+        return "missing".to_string();
+    };
     if path.is_dir() && materialized_hash_matches(&path, expected) {
         "ok".to_string()
     } else {
@@ -164,25 +179,26 @@ pub(super) fn package_integrity_status(ctx: &ManifestContext, entry: &LockEntry)
 
 pub(super) fn validate_installed_package_entry(
     ctx: &ManifestContext,
+    snapshot: Option<&harn_modules::package_snapshot::PackageSnapshot>,
     entry: &LockEntry,
     diagnostics: &mut Vec<PackageDoctorDiagnostic>,
 ) {
-    let materialized_path = materialized_package_path(ctx, entry);
-    if !materialized_path.exists() {
+    let Some(materialized_path) =
+        materialized_package_path(snapshot, entry).filter(|path| path.exists())
+    else {
         diagnostics.push(package_doctor_diagnostic(
             "error",
             "package-not-materialized",
             format!(
-                "package {} is locked but missing from {}",
-                entry.name,
-                ctx.packages_dir().display()
+                "package {} is locked but no published generation contains it",
+                entry.name
             ),
             Some("run `harn install` to materialize locked packages"),
         ));
         return;
-    }
+    };
 
-    if package_integrity_status(ctx, entry) == "mismatch" {
+    if package_integrity_status(snapshot, entry) == "mismatch" {
         diagnostics.push(package_doctor_diagnostic(
             "error",
             "content-hash-mismatch",

@@ -31,14 +31,14 @@ pub(super) fn start_list_change_watcher(
         let Ok(event) = result else {
             return;
         };
-        let prompt_changed = event
-            .paths
-            .iter()
-            .any(|path| is_prompt_reload_path(path.as_path()));
-        let manifest_changed = event
-            .paths
-            .iter()
-            .any(|path| is_manifest_reload_path(path.as_path()));
+        let prompt_changed = event.paths.iter().any(|path| {
+            !is_package_generation_path(path, &project_root_for_callback)
+                && is_prompt_reload_path(path)
+        });
+        let manifest_changed = event.paths.iter().any(|path| {
+            !is_package_generation_path(path, &project_root_for_callback)
+                && is_manifest_reload_path(path)
+        });
         let package_changed = event
             .paths
             .iter()
@@ -83,8 +83,8 @@ pub(super) fn refresh_manifest_derived_state_cache(
 ) {
     *manifest_source_cache
         .lock()
-        .expect("manifest source poisoned") = manifest_source.clone();
-    let updated = FilePromptCatalog::discover(project_root, &manifest_source);
+        .expect("manifest source poisoned") = manifest_source;
+    let updated = FilePromptCatalog::discover(project_root);
     *prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
 }
 
@@ -110,22 +110,13 @@ fn is_manifest_reload_path(path: &Path) -> bool {
 }
 
 fn is_package_reload_path(path: &Path, project_root: &Path) -> bool {
-    if path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name == "harn.lock")
-    {
-        return true;
-    }
-
     let relative = path.strip_prefix(project_root).unwrap_or(path);
-    let mut components = relative
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(value) => value.to_str(),
-            _ => None,
-        });
-    matches!(components.next(), Some(".harn")) && matches!(components.next(), Some("packages"))
+    relative == Path::new(".harn").join("package-current.toml")
+}
+
+fn is_package_generation_path(path: &Path, project_root: &Path) -> bool {
+    let relative = path.strip_prefix(project_root).unwrap_or(path);
+    relative.starts_with(Path::new(".harn").join("package-generations"))
 }
 
 pub(super) fn spawn_list_notification_forwarder(
@@ -368,4 +359,34 @@ pub(super) fn severity_for_event(
         return mcp_protocol::McpLogLevel::Warning;
     }
     binding.default_level
+}
+
+#[cfg(test)]
+mod package_reload_tests {
+    use super::*;
+
+    #[test]
+    fn only_atomic_package_pointer_is_a_package_publication_event() {
+        let root = Path::new("workspace");
+        assert!(is_package_reload_path(
+            Path::new("workspace/.harn/package-current.toml"),
+            root
+        ));
+        assert!(!is_package_reload_path(
+            Path::new("workspace/harn.lock"),
+            root
+        ));
+        assert!(!is_package_reload_path(
+            Path::new("workspace/.harn/package-generations/generation-a/harn.lock"),
+            root
+        ));
+        assert!(!is_package_reload_path(
+            Path::new("workspace/.harn/packages/acme/harn.toml"),
+            root
+        ));
+        assert!(is_package_generation_path(
+            Path::new("workspace/.harn/package-generations/generation-a/packages/acme/harn.toml"),
+            root
+        ));
+    }
 }

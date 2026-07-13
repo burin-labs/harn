@@ -608,6 +608,8 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 |---|---|---|---|
 | `read_file(path)` | path: string | string | Read entire file as UTF-8 string, or return raw source for embedded `std/...harn.prompt` assets. Filesystem I/O failures throw structured `{error: "io_error", kind, message}`; policy denials remain categorized runtime errors. **Deprecated in favor of `read_file_result` for new code; the throwing form remains supported.** |
 | `read_file_result(path)` | path: string | `Result<string, {error, kind, message}>` | Non-throwing read: returns content or a structured `{error: "io_error", kind, message}` failure. Shares `read_file`'s cache and supports embedded `std/...harn.prompt` assets |
+| `package_snapshot_open(project_root)` | project_root: string | `{handle, generation, packages_root, lock_path, lock_digest, packages}` or nil | Acquire the current immutable package generation and exact locked package names while holding its reader lease. Pair every non-nil receipt with `package_snapshot_close(receipt.handle)`, normally in `defer` |
+| `package_snapshot_close(handle)` | handle: string | bool | Release a package-generation reader lease; returns false when the handle was not open |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
 | `append_file(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
 | `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
@@ -1968,12 +1970,11 @@ are configured via a TOML file. The VM searches for config in this order:
 
 1. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local, llama.cpp)
 2. `HARN_PROVIDERS_CONFIG` if set, otherwise `~/.config/harn/providers.toml`
-3. Installed package `[llm]` tables in `.harn/packages/*/harn.toml`
-4. The nearest project `harn.toml` `[llm]` table
+3. The nearest project `harn.toml` `[llm]` table
 
-The files in steps 2-4 are overlays on the built-in defaults. The `[llm]`
+The files in steps 2-3 are overlays on the built-in defaults. The `[llm]`
 section uses the same schema as `providers.toml`, so project and package
-manifests can ship provider adapters declaratively:
+manifest can configure provider adapters declaratively:
 
 ```toml
 [llm.providers.anthropic]

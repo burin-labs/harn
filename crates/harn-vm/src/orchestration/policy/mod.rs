@@ -322,6 +322,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         "read_file"
         | "read_file_result"
         | "read_file_bytes"
+        | "package_snapshot_open"
         | "render"
         | "render_prompt"
         | "render_with_provenance"

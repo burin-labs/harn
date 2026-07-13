@@ -2,7 +2,7 @@
 
 Harn packages are ordinary Harn projects with package metadata, stable exports,
 tests, and optional connector contracts in `harn.toml`. They use the same
-`[dependencies]`, `.harn/packages/`, and `harn.lock` workflow as applications.
+`[dependencies]`, `harn.lock`, and atomic package-generation workflow as applications.
 
 ## Create a package
 

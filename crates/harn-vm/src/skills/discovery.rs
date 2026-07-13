@@ -7,7 +7,7 @@
 //! 3. Project      — `.harn/skills/<name>/SKILL.md` walking up
 //! 4. Manifest     — `[skills] paths` + `[[skill.source]]`
 //! 5. User         — `~/.harn/skills/<name>/SKILL.md`
-//! 6. Package      — `.harn/packages/**/skills/*/SKILL.md`
+//! 6. Package      — current generation `**/skills/*/SKILL.md`
 //! 7. System       — `/etc/harn/skills/` + `$XDG_CONFIG_HOME/harn/skills`
 //! 8. Host         — Bridge-registered
 //!

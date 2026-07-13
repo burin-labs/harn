@@ -62,12 +62,11 @@ though this is mostly relevant for closures and parallel bodies.
 
 1. If path starts with `std/`, loads embedded stdlib module (e.g. `std/text`)
 2. Relative to current file's directory; auto-adds `.harn` extension
-3. `.harn/packages/<path>` directories rooted at the nearest ancestor
-   package root (the search walks upward and stops at a `.git` boundary).
-   Harn materializes this tree from `harn.lock` before import-aware
-   commands run.
-4. Package manifest `[exports]` mappings under
-   `.harn/packages/<package>/harn.toml`
+3. `<current-generation>/packages/<path>` in the leased package snapshot
+   published by the nearest ancestor package root (the search walks upward
+   and stops at a `.git` boundary).
+4. Package manifest `[exports]` mappings under that snapshot's
+   `packages/<package>/harn.toml`
 5. Package directories with `lib.harn` entry point
 
 Package manifests can publish stable module entry points without forcing
@@ -176,4 +175,3 @@ any import in the file is unresolved (missing file, parse error,
 non-existent package directory), so a single broken import does not
 avalanche into a sea of false-positive undefined-name errors. The
 unresolved import itself still surfaces via the runtime loader.
-

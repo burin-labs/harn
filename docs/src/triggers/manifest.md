@@ -111,7 +111,7 @@ the manifest hook loader:
 
 - bare names resolve against `lib.harn` next to the manifest
 - `module::function` resolves either through the current manifest's `[exports]`
-  table or through package imports under `.harn/packages`
+  table or through imports from the leased current package generation
 
 ## Validation
 

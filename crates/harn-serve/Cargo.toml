@@ -17,6 +17,7 @@ bytes = "1"
 futures = "0.3"
 globset = "0.4"
 harn-clock = { path = "../harn-clock", version = "=0.10.15" }
+harn-modules = { path = "../harn-modules", version = "=0.10.15" }
 harn-parser = { path = "../harn-parser", version = "=0.10.15" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.15" }
 # `default-features = false` keeps the in-process embedding surface lean:

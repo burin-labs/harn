@@ -376,6 +376,12 @@ const BUILTIN_CAPABILITIES: &[(&str, &str, &str, &str)] = &[
     ("read_file", "workspace", "read_text", "read_only"),
     ("read_file_result", "workspace", "read_text", "read_only"),
     ("read_file_bytes", "workspace", "read_text", "read_only"),
+    (
+        "package_snapshot_open",
+        "workspace",
+        "read_text",
+        "read_only",
+    ),
     ("render", "workspace", "read_text", "read_only"),
     ("render_prompt", "workspace", "read_text", "read_only"),
     (

@@ -1,22 +1,47 @@
 //! End-to-end coverage for installed-package rule packs (#2846): a pack
-//! fetched with `harn add` materializes under `<project>/.harn/packages/<name>`
+//! fetched with `harn add` materializes in the current immutable generation
 //! and is consumed by name via `harn scan/codemod --rule-pack <name>`, reading
 //! the pack's own `[rules] ruleDirs`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn create_package_generation(root: &Path, lock_body: &str) -> PathBuf {
+    use harn_modules::package_snapshot::{
+        generation_root, package_current_path, package_publication_lock_path,
+        PackageGenerationManifest, PackageGenerationPointer, GENERATION_LEASE_FILE,
+        GENERATION_LOCK_FILE, GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
+    };
+
+    let generation = "generation-test";
+    let generation_root = generation_root(root, generation);
+    let packages_root = generation_root.join(GENERATION_PACKAGES_DIR);
+    std::fs::create_dir_all(&packages_root).unwrap();
+    std::fs::write(generation_root.join(GENERATION_LOCK_FILE), lock_body).unwrap();
+    std::fs::write(generation_root.join(GENERATION_LEASE_FILE), []).unwrap();
+    let manifest = PackageGenerationManifest::new(
+        generation,
+        harn_modules::package_snapshot::package_lock_digest(lock_body.as_bytes()),
+    )
+    .unwrap();
+    std::fs::write(
+        generation_root.join(GENERATION_MANIFEST_FILE),
+        toml::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        package_current_path(root),
+        toml::to_string_pretty(&PackageGenerationPointer::new(generation).unwrap()).unwrap(),
+    )
+    .unwrap();
+    std::fs::File::create(package_publication_lock_path(root)).unwrap();
+    packages_root
+}
+
 fn project_with_installed_pack(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("harn-pack-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let pack = dir.join(".harn/packages/my-rules/rules");
-    std::fs::create_dir_all(&pack).unwrap();
-    std::fs::create_dir_all(dir.join("src")).unwrap();
-    // The consuming project.
-    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"app\"\n").unwrap();
-    std::fs::write(
-        dir.join("harn.lock"),
-        r#"version = 4
+    let lock_body = r#"version = 4
 
 [[package]]
 name = "my-rules"
@@ -26,12 +51,17 @@ source = "git+https://github.com/acme/my-rules"
 source = "index.toml"
 name = "@acme/my-rules"
 version = "0.1.0"
-"#,
-    )
-    .unwrap();
+"#;
+    let packages = create_package_generation(&dir, lock_body);
+    let pack = packages.join("my-rules/rules");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    // The consuming project.
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"app\"\n").unwrap();
+    std::fs::write(dir.join("harn.lock"), lock_body).unwrap();
     // The installed pack ships its own manifest declaring where its rules live.
     std::fs::write(
-        dir.join(".harn/packages/my-rules/harn.toml"),
+        packages.join("my-rules/harn.toml"),
         "[rules]\nruleDirs = [\"rules\"]\n",
     )
     .unwrap();

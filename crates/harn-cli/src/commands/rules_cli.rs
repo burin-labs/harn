@@ -100,13 +100,13 @@ fn load_rule_dir_specs(dir: &std::path::Path) -> Result<Vec<RuleSpec>, String> {
 
 /// Resolve a `--rule-pack` value to its rules. The value is either a local
 /// directory, or the name of an **installed package** (#2846) — a package
-/// fetched with `harn add` and materialized under `<project>/.harn/packages/`.
+/// fetched with `harn add` and materialized in the current package generation.
 fn resolve_rule_pack(pack: &str) -> Result<Vec<RuleSpec>, String> {
     let local = std::path::Path::new(pack);
     if local.is_dir() {
         return load_pack_rules(local);
     }
-    if let Some(installed) = installed_package_dir(pack) {
+    if let Some((_snapshot, installed)) = installed_package_dir(pack) {
         return load_pack_rules(&installed);
     }
     Err(format!(
@@ -117,19 +117,27 @@ fn resolve_rule_pack(pack: &str) -> Result<Vec<RuleSpec>, String> {
 
 /// The local directory of an installed package named by dependency alias or
 /// canonical registry name, if it exists.
-fn installed_package_dir(name: &str) -> Option<std::path::PathBuf> {
+fn installed_package_dir(
+    name: &str,
+) -> Option<(
+    harn_modules::package_snapshot::PackageSnapshot,
+    std::path::PathBuf,
+)> {
     let cwd = std::env::current_dir().ok()?;
     let (_, project_dir) = crate::package::find_nearest_manifest(&cwd)?;
-    let packages_dir = project_dir.join(".harn").join("packages");
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(&project_dir)
+        .ok()
+        .flatten()?;
+    let packages_dir = snapshot.packages_root().to_path_buf();
     if crate::package::validate_package_alias(name).is_ok() {
         let dir = packages_dir.join(name);
         if dir.is_dir() {
-            return Some(dir);
+            return Some((snapshot, dir));
         }
     }
 
     let (registry_name, requested_version) = crate::package::parse_registry_package_spec(name)?;
-    let lock = crate::package::LockFile::load(&project_dir.join("harn.lock"))
+    let lock = crate::package::LockFile::load(snapshot.lock_path())
         .ok()
         .flatten()?;
     let entry = lock.packages.iter().find(|entry| {
@@ -139,7 +147,7 @@ fn installed_package_dir(name: &str) -> Option<std::path::PathBuf> {
         })
     })?;
     let dir = packages_dir.join(&entry.name);
-    dir.is_dir().then_some(dir)
+    dir.is_dir().then_some((snapshot, dir))
 }
 
 /// Load a rule pack's rules: from the pack's own `[rules] ruleDirs` when it

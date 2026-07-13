@@ -26,7 +26,7 @@ impl McpContextCatalog {
         let project_root = project_root_for_script(script_path);
         let manifest_path = project_root.join("harn.toml");
         let manifest_source = fs::read_to_string(&manifest_path).unwrap_or_default();
-        let prompt_catalog = FilePromptCatalog::discover(&project_root, &manifest_source);
+        let prompt_catalog = FilePromptCatalog::discover(&project_root);
 
         let mut resources = Vec::new();
         if let Ok(source) = fs::read_to_string(script_path) {

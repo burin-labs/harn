@@ -40,10 +40,7 @@ impl McpOrchestratorService {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
-        let prompt_catalog = Arc::new(Mutex::new(FilePromptCatalog::discover(
-            &project_root,
-            &manifest_source,
-        )));
+        let prompt_catalog = Arc::new(Mutex::new(FilePromptCatalog::discover(&project_root)));
         let manifest_source = Arc::new(Mutex::new(manifest_source));
         let (list_notify_tx, _) = broadcast::channel(64);
         let (resource_notify_tx, _) = broadcast::channel(128);

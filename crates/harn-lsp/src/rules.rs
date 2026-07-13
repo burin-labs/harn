@@ -28,6 +28,7 @@ pub(crate) struct RuleWorkspace {
     enabled: bool,
     specs: Arc<Vec<RuleSpec>>,
     load_errors: Arc<Vec<RuleLoadError>>,
+    _package_snapshot: Option<Arc<harn_modules::package_snapshot::PackageSnapshot>>,
 }
 
 impl Default for RuleWorkspace {
@@ -37,6 +38,7 @@ impl Default for RuleWorkspace {
             enabled: true,
             specs: Arc::new(Vec::new()),
             load_errors: Arc::new(Vec::new()),
+            _package_snapshot: None,
         }
     }
 }
@@ -94,6 +96,7 @@ impl RuleWorkspace {
                 enabled: false,
                 specs: Arc::new(Vec::new()),
                 load_errors: Arc::new(Vec::new()),
+                _package_snapshot: None,
             };
         }
 
@@ -105,8 +108,23 @@ impl RuleWorkspace {
                 enabled: true,
                 specs: Arc::new(specs),
                 load_errors: Arc::new(errors),
+                _package_snapshot: None,
             };
         };
+
+        let package_snapshot =
+            match harn_modules::package_snapshot::PackageSnapshot::acquire(root_path) {
+                Ok(snapshot) => snapshot.map(Arc::new),
+                Err(error) => {
+                    if !settings.rule_packs.is_empty() {
+                        errors.push(RuleLoadError {
+                            path: root_path.to_path_buf(),
+                            message: format!("load package generation: {error}"),
+                        });
+                    }
+                    None
+                }
+            };
 
         let mut seen_dirs = HashSet::new();
         for dir in project_rule_dirs(root_path).into_iter().chain(
@@ -121,7 +139,7 @@ impl RuleWorkspace {
         }
 
         for pack in &settings.rule_packs {
-            match resolve_rule_pack(root_path, pack) {
+            match resolve_rule_pack(root_path, package_snapshot.as_deref(), pack) {
                 Some(paths) => {
                     for dir in paths {
                         if seen_dirs.insert(dir.clone()) {
@@ -141,6 +159,7 @@ impl RuleWorkspace {
             enabled: true,
             specs: Arc::new(specs),
             load_errors: Arc::new(errors),
+            _package_snapshot: package_snapshot,
         }
     }
 }
@@ -461,18 +480,23 @@ fn load_rule_file(path: &Path, specs: &mut Vec<RuleSpec>, errors: &mut Vec<RuleL
     });
 }
 
-fn resolve_rule_pack(root: &Path, pack: &str) -> Option<Vec<PathBuf>> {
+fn resolve_rule_pack(
+    root: &Path,
+    package_snapshot: Option<&harn_modules::package_snapshot::PackageSnapshot>,
+    pack: &str,
+) -> Option<Vec<PathBuf>> {
     let local = resolve_path(root, pack);
     if local.is_dir() {
         return Some(pack_rule_dirs(&local));
     }
 
-    let package_dir = root.join(".harn").join("packages").join(pack);
+    let snapshot = package_snapshot?;
+    let package_dir = snapshot.packages_root().join(pack);
     if package_dir.is_dir() {
         return Some(pack_rule_dirs(&package_dir));
     }
 
-    let locked = lockfile_package_dir(root, pack)?;
+    let locked = lockfile_package_dir(snapshot, pack)?;
     locked.is_dir().then(|| pack_rule_dirs(&locked))
 }
 
@@ -513,9 +537,11 @@ struct MinimalRegistry {
     name: String,
 }
 
-fn lockfile_package_dir(root: &Path, pack: &str) -> Option<PathBuf> {
-    let lock_path = root.join("harn.lock");
-    let source = std::fs::read_to_string(lock_path).ok()?;
+fn lockfile_package_dir(
+    snapshot: &harn_modules::package_snapshot::PackageSnapshot,
+    pack: &str,
+) -> Option<PathBuf> {
+    let source = std::fs::read_to_string(snapshot.lock_path()).ok()?;
     let lock = toml::from_str::<MinimalLockFile>(&source).ok()?;
     let entry = lock.packages.iter().find(|entry| {
         entry.name == pack
@@ -524,7 +550,7 @@ fn lockfile_package_dir(root: &Path, pack: &str) -> Option<PathBuf> {
                 .as_ref()
                 .is_some_and(|registry| registry.name == pack)
     })?;
-    Some(root.join(".harn").join("packages").join(&entry.name))
+    Some(snapshot.packages_root().join(&entry.name))
 }
 
 fn severity_to_lsp(severity: Severity) -> DiagnosticSeverity {
@@ -548,6 +574,39 @@ fn rule_span_to_range(span: &harn_rules::Span, source: &str) -> Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn publish_package_generation(root: &Path, alias: &str, registry_name: &str) -> PathBuf {
+        use harn_modules::package_snapshot::{
+            generation_root, package_current_path, package_lock_digest,
+            package_publication_lock_path, PackageGenerationManifest, PackageGenerationPointer,
+            GENERATION_LEASE_FILE, GENERATION_LOCK_FILE, GENERATION_MANIFEST_FILE,
+            GENERATION_PACKAGES_DIR,
+        };
+
+        let generation = "generation-lsp-rules";
+        let generation_root = generation_root(root, generation);
+        let packages_root = generation_root.join(GENERATION_PACKAGES_DIR);
+        std::fs::create_dir_all(&packages_root).unwrap();
+        let lock = format!(
+            "version = 4\n\n[[package]]\nname = {alias:?}\n\n[package.registry]\nname = {registry_name:?}\n"
+        );
+        write(&generation_root.join(GENERATION_LOCK_FILE), &lock);
+        write(&generation_root.join(GENERATION_LEASE_FILE), "");
+        let manifest =
+            PackageGenerationManifest::new(generation, package_lock_digest(lock.as_bytes()))
+                .unwrap();
+        write(
+            &generation_root.join(GENERATION_MANIFEST_FILE),
+            &toml::to_string_pretty(&manifest).unwrap(),
+        );
+        let pointer = PackageGenerationPointer::new(generation).unwrap();
+        write(
+            &package_current_path(root),
+            &toml::to_string_pretty(&pointer).unwrap(),
+        );
+        write(&package_publication_lock_path(root), "");
+        packages_root.join(alias)
+    }
 
     fn write(path: &Path, content: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -629,6 +688,50 @@ regex = "debugger;"
             "harn-rule-engine",
             "function f() { debugger; }\n",
         );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].diagnostic.message,
+            "[no-debugger] remove debugger statements"
+        );
+    }
+
+    #[test]
+    fn registry_rule_pack_resolves_from_published_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            &temp.path().join("harn.toml"),
+            "[package]\nname = \"app\"\n",
+        );
+        let package = publish_package_generation(temp.path(), "rules-alias", "acme/rules");
+        write(
+            &package.join("harn.toml"),
+            "[rules]\nruleDirs = [\"rules\"]\n",
+        );
+        write(
+            &package.join("rules/no-debugger.toml"),
+            r#"
+id = "no-debugger"
+language = "typescript"
+message = "remove debugger statements"
+severity = "warning"
+safety = "behavior-preserving"
+fix = ""
+
+[rule]
+regex = "debugger;"
+"#,
+        );
+
+        let workspace = RuleWorkspace::load(
+            Some(temp.path().to_path_buf()),
+            RuleSettings {
+                rule_packs: vec!["acme/rules".to_string()],
+                ..RuleSettings::default()
+            },
+        );
+        let uri = Url::from_file_path(temp.path().join("src/main.ts")).unwrap();
+        let diagnostics = workspace.diagnostics_for_document(&uri, "typescript", "debugger;\n");
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(

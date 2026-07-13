@@ -33,37 +33,55 @@ pub fn no_bad(slice, _ctx, _repo_at_base) {
 }
 """
 
-fn write_latex_canon_package(dir) {
-  harness.fs.mkdir(path_join(dir, ".harn/packages/latex-canon/canon/latex"))
+fn test_packages_dir(dir, package_name: string) -> string {
+  const generation = "generation-test"
+  const generation_root = path_join(dir, ".harn", "package-generations", generation)
+  const packages = path_join(generation_root, "packages")
+  const lock_body = "version = 4\n\n[[package]]\nname = \"${package_name}\"\n"
+  harness.fs.mkdir(packages)
+  harness.fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
+  harness.fs.write_text(path_join(generation_root, "lease.lock"), "")
   harness.fs
     .write_text(
-    path_join(dir, ".harn/packages/latex-canon/harn.toml"),
+    path_join(generation_root, "generation.toml"),
+    "schema_version = 1\ngeneration = \"${generation}\"\nlock_digest = \"sha256:${sha256(lock_body)}\"\n",
+  )
+  harness.fs.write_text(path_join(dir, ".harn", "package-generation.lock"), "")
+  harness.fs
+    .write_text(
+    path_join(dir, ".harn", "package-current.toml"),
+    "schema_version = 1\ngeneration = \"${generation}\"\n",
+  )
+  return packages
+}
+
+fn write_latex_canon_package(dir) {
+  const packages = test_packages_dir(dir, "latex-canon")
+  harness.fs.mkdir(path_join(packages, "latex-canon/canon/latex"))
+  harness.fs
+    .write_text(
+    path_join(packages, "latex-canon/harn.toml"),
     "version = 1\n[package]\nname = \"latex-canon\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nid = \"latex\"\ntitle = \"LaTeX\"\npath = \"canon/latex\"\nextensions = [\"tex\"]\n",
   )
   harness.fs
-    .write_text(
-    path_join(dir, ".harn/packages/latex-canon/canon/latex/invariants.harn"),
-    INVARIANTS,
-  )
+    .write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
 }
 
 fn write_manifest_canon_package(dir) {
-  harness.fs.mkdir(path_join(dir, ".harn/packages/canon-manifest/canon/latex"))
+  const packages = test_packages_dir(dir, "canon-manifest")
+  harness.fs.mkdir(path_join(packages, "canon-manifest/canon/latex"))
   harness.fs
     .write_text(
-    path_join(dir, ".harn/packages/canon-manifest/harn.toml"),
+    path_join(packages, "canon-manifest/harn.toml"),
     "version = 1\n[package]\nname = \"canon-manifest\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nmanifest = \"canon/canon-packs.json\"\n",
   )
   harness.fs
     .write_text(
-    path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json"),
+    path_join(packages, "canon-manifest/canon/canon-packs.json"),
     "{\"schema_version\":1,\"packs\":[{\"id\":\"latex\",\"title\":\"LaTeX\",\"invariants\":\"latex/invariants.harn\",\"extensions\":[\"tex\"]}]}",
   )
   harness.fs
-    .write_text(
-    path_join(dir, ".harn/packages/canon-manifest/canon/latex/invariants.harn"),
-    INVARIANTS,
-  )
+    .write_text(path_join(packages, "canon-manifest/canon/latex/invariants.harn"), INVARIANTS)
 }
 
 fn canon_feedback_state_key(session_id: string, suffix: string) -> string {
@@ -275,7 +293,7 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
       harness.fs.write_text(manifest_path, "{bad")
       const malformed = try {
         canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
@@ -288,7 +306,7 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
       harness.fs
         .write_text(
         manifest_path,
@@ -305,7 +323,7 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
       harness.fs
         .write_text(
         manifest_path,
@@ -322,7 +340,7 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
       harness.fs.delete(manifest_path)
       const missing = try {
         canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})

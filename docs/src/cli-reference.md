@@ -2027,8 +2027,8 @@ harn test package --evals
 
 Package eval discovery uses `[package].evals = ["evals/webhooks.toml"]` when
 present, otherwise it falls back to `harn.eval.toml` in the package root. After
-`harn install`, discovery also includes eval packs declared by materialized
-dependency packages under `.harn/packages/<alias>/`.
+`harn install`, discovery also includes eval packs declared by dependency
+packages in the leased current generation.
 
 Clarifying-question evals use an explicit fixture with
 `"eval_kind": "clarifying_question"`. The fixture checks persisted
@@ -2663,8 +2663,8 @@ installs; hand-authored manifests may also use registry semver ranges such as
 ## harn install
 
 Install dependencies declared in `harn.toml`, writing or reusing
-`harn.lock` and materializing direct plus transitive package
-dependencies into `.harn/packages/`.
+`harn.lock` and atomically publishing direct plus transitive dependencies as an
+immutable package generation.
 
 ```bash
 harn install
@@ -2703,8 +2703,8 @@ harn update --all --json
 
 ## harn remove
 
-Remove one dependency from `harn.toml`, `harn.lock`, and
-`.harn/packages/`.
+Remove one dependency from `harn.toml` and `harn.lock`, then publish a new
+generation without that package.
 
 ```bash
 harn remove my-lib
@@ -2877,7 +2877,7 @@ harn package cache clean --all
 ```
 
 `verify` recomputes cached package content hashes and compares them with
-`harn.lock`; `--materialized` also checks `.harn/packages/`. `clean`
+`harn.lock`; `--materialized` also checks the leased current generation. `clean`
 removes cache entries not referenced by the current lockfile, while
 `--all` clears all cached git package entries.
 

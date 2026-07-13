@@ -1445,7 +1445,7 @@ pub(crate) async fn execute_run_with_timing(
 /// harn run main.harn`. The old code skipped setting the source dir in that
 /// case, which left the resting thread-local source dir unset (`None`). A
 /// dependency provider-connector contract load during `harn run` startup then
-/// repointed the thread-local at `.harn/packages/<dep>/src` and, because the
+/// repointed the thread-local at a dependency generation's `src` and, because the
 /// restore-on-return path is a no-op over an unset baseline, left it there —
 /// so the entry pipeline's first `render("@alias/...")` resolved against the
 /// dependency's `harn.toml` instead of the project root. Always establishing
@@ -1765,7 +1765,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // contract loads, hook-handler module loads) transiently repoints the
     // thread-local source dir and does not guarantee it is restored to the
     // entry's dir — a dependency provider connector under
-    // `.harn/packages/<dep>/` would otherwise leave the entry pipeline's first
+    // a dependency generation would otherwise leave the entry pipeline's first
     // `render("@alias/...")` resolving against the dependency's `harn.toml`.
     vm.set_source_dir(&entry_source_dir(path));
     let execution = local
