@@ -19,7 +19,7 @@ pipeline default() {
   __io_println(triage._preset_kind)
   __io_println(triage.provider)
   __io_println(triage.timeout_ms)
-  __io_println(triage?.llm_caller != nil)
+  __io_println(triage?._llm_retry != nil)
   // Validation: bad family and unknown pack key throw; unknown kind throws.
   const bad_family = try {
     agent_preset_register("bad", {family: "nope"})

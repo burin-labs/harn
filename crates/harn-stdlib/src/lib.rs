@@ -143,6 +143,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/rerank" => "stdlib/llm/rerank.harn",
     "agent/reasoning" => "stdlib/agent/reasoning.harn",
     "agent/options" => "stdlib/agent/options.harn",
+    "agent/retry" => "stdlib/agent/retry.harn",
     "llm/judge" => "stdlib/llm/judge.harn",
     "llm/faithfulness" => "stdlib/llm/faithfulness.harn",
     "llm/optimize" => "stdlib/llm/optimize.harn",

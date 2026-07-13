@@ -1,5 +1,6 @@
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
+import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
 import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
@@ -262,6 +263,8 @@ pub type AgentLoopOptions = {
   verify_completion_judge?: bool | JudgeConfig,
   done_judge?: bool | JudgeConfig,
   step_judge?: dict,
+  retry?: bool | AgentLoopRetryOptions,
+  llm_retry?: AgentLoopRetryOptions,
   llm_caller?: any,
   tool_caller?: any,
   structural_validator?: any,
@@ -345,7 +348,7 @@ pub type AgentLoopOptions = {
  *
  * Rust twin: none — presets are stdlib-owned option packs.
  */
-pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: any, telemetry?: any, rate_limit?: bool | dict, dry_run?: bool | dict, handoff_sink?: any, cheap_caller?: any, frontier_caller?: any, escalate_predicate?: any, logging_sink?: any, logging_options?: dict, llm_options?: dict, persona?: any, task_kind?: string, judge?: bool | JudgeConfig, retry?: bool | dict, model_ladder?: list<string>}
+pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: any, telemetry?: any, rate_limit?: bool | dict, dry_run?: bool | dict, handoff_sink?: any, cheap_caller?: any, frontier_caller?: any, escalate_predicate?: any, logging_sink?: any, logging_options?: dict, llm_options?: dict, persona?: any, task_kind?: string, judge?: bool | JudgeConfig, model_ladder?: list<string>}
 
 fn __profile_defaults(profile) {
   if profile == "tool_using" {
@@ -1753,15 +1756,17 @@ pub fn agent_loop_options(options = nil) {
   __validate_removed_agent_loop_options(opts)
   __validate_agent_loop_completion_options(opts)
   __validate_agent_loop_callback_options(opts)
+  const profile = opts?.profile ?? "tool_using"
+  const defaults = __profile_defaults(profile)
+  opts = defaults + opts
+  opts = agent_apply_default_retry(opts)
   const llm_caller = opts?.llm_caller
+  const llm_retry = opts?._llm_retry
   const on_delta = opts?.on_delta
   const tool_caller = opts?.tool_caller
   const structural_validator = opts?.structural_validator
   const input_guardrail = opts?.input_guardrail
   const pre_turn_scope_classifier = opts?.pre_turn_scope_classifier
-  const profile = opts?.profile ?? "tool_using"
-  const defaults = __profile_defaults(profile)
-  opts = defaults + opts
   opts = __with_project_context_profile(opts)
   opts = agent_refresh_tool_format_for_route(opts)
   if !__has_key(opts, "tool_format")
@@ -1812,6 +1817,7 @@ pub fn agent_loop_options(options = nil) {
   opts = opts
     + {
     _llm_caller: llm_caller,
+    _llm_retry: llm_retry,
     _on_delta: on_delta,
     _tool_caller: tool_caller,
     _structural_validator: structural_validator,

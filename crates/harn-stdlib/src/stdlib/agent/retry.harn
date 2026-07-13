@@ -1,0 +1,183 @@
+import { with_retry } from "std/llm/handlers"
+
+pub type LlmRetryBackoff = "exponential" | "linear" | "jittered"
+
+pub type LlmRetryJitter = "full" | "equal" | "none"
+
+pub type AgentLoopRetryOptions = {
+  max_attempts?: int,
+  base_ms?: int,
+  max_ms?: int,
+  backoff?: LlmRetryBackoff,
+  jitter?: LlmRetryJitter,
+  honor_retry_after?: bool,
+  predicate?: any,
+}
+
+pub type AgentDefaultRetryApplyOptions = {wrap_existing?: bool}
+
+type AgentRetryOptionBag = {retry?: bool | AgentLoopRetryOptions, llm_retry?: AgentLoopRetryOptions, llm_caller?: any, ...rest}
+
+const __AGENT_RETRYABLE_STATUSES = ["rate_limited", "timeout", "network", "transient", "provider_5xx", "stream_interrupt"]
+
+const __AGENT_NEVER_RETRY_STATUSES = [
+  "budget_exhausted",
+  "schema_validation",
+  "auth",
+  "not_found",
+  "context_window_exceeded",
+  "context_overflow",
+  "policy_blocked",
+  "caller_aborted",
+  "caller_skipped",
+  "circuit_open",
+]
+
+const __AGENT_NEVER_RETRY_ERROR_TAGS = [
+  "auth",
+  "not_found",
+  "schema_validation",
+  "invalid_request",
+  "budget_exceeded",
+  "context_overflow",
+  "context_window_exceeded",
+  "empty_generation",
+  "policy_blocked",
+  "circuit_open",
+]
+
+const __AGENT_RETRYABLE_CATEGORIES = ["rate_limit", "rate_limited", "timeout", "overloaded", "transient_network"]
+
+const __AGENT_RETRYABLE_REASONS = [
+  "rate_limit",
+  "rate_limited",
+  "timeout",
+  "network_error",
+  "transient_network",
+  "provider_5xx",
+  "upstream_unavailable",
+]
+
+const __AGENT_RETRYABLE_KINDS = ["timeout", "network"]
+
+const __AGENT_RETRYABLE_HTTP_STATUS = [408, 429, 500, 502, 503, 504, 522, 524, 529]
+
+fn __agent_retry_text(value) -> string {
+  return lowercase(trim(to_string(value ?? "")))
+}
+
+fn __agent_retry_contains(values, value) -> bool {
+  return contains(values, value)
+}
+
+fn __retry_has_key(opts: AgentRetryOptionBag, key: string) -> bool {
+  return type_of(opts) == "dict" && contains(opts.keys(), key)
+}
+
+fn __validate_agent_loop_retry(opts: AgentRetryOptionBag) {
+  if __retry_has_key(opts, "retry") {
+    const requested_retry = opts.retry
+    if requested_retry != nil
+      && type_of(requested_retry) != "bool"
+      && type_of(requested_retry) != "dict" {
+      throw "agent_loop: `retry` must be false, a retry config dict, or nil; got "
+        + type_of(requested_retry)
+    }
+  }
+  if __retry_has_key(opts, "llm_retry")
+    && opts.llm_retry != nil
+    && type_of(opts.llm_retry) != "dict" {
+    throw "agent_loop: `llm_retry` must be a retry config dict or nil; got "
+      + type_of(opts.llm_retry)
+  }
+}
+
+fn __agent_loop_retry_config(opts: AgentRetryOptionBag) -> AgentLoopRetryOptions? {
+  if __retry_has_key(opts, "retry") {
+    const requested_retry = opts.retry
+    if type_of(requested_retry) == "bool" && !requested_retry {
+      return nil
+    }
+    if type_of(requested_retry) == "dict" {
+      return requested_retry
+    }
+  }
+  if __retry_has_key(opts, "llm_retry") {
+    const llm_retry = opts.llm_retry
+    if llm_retry == nil {
+      return nil
+    }
+    if type_of(llm_retry) == "dict" {
+      return llm_retry
+    }
+  }
+  return {max_attempts: 3}
+}
+
+pub fn agent_loop_default_retry_predicate(envelope) -> bool {
+  if type_of(envelope) != "dict" || (envelope?.ok ?? false) {
+    return false
+  }
+  const status = __agent_retry_text(envelope?.status)
+  if __agent_retry_contains(__AGENT_RETRYABLE_STATUSES, status) {
+    return true
+  }
+  if __agent_retry_contains(__AGENT_NEVER_RETRY_STATUSES, status) {
+    return false
+  }
+  const err = envelope?.error
+  const category = __agent_retry_text(err?.category ?? err?.error_category)
+  const reason = __agent_retry_text(err?.reason)
+  const kind = __agent_retry_text(err?.kind)
+  if category == "generic"
+    || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, category)
+    || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, reason)
+    || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, kind) {
+    return false
+  }
+  if to_int(err?.retry_after_ms ?? 0) > 0 {
+    return true
+  }
+  if __agent_retry_contains(__AGENT_RETRYABLE_CATEGORIES, category)
+    || __agent_retry_contains(__AGENT_RETRYABLE_REASONS, reason)
+    || __agent_retry_contains(__AGENT_RETRYABLE_KINDS, kind) {
+    return true
+  }
+  const status_code = to_int(err?.status ?? 0)
+  return __agent_retry_contains(__AGENT_RETRYABLE_HTTP_STATUS, status_code)
+}
+
+fn __agent_loop_retry_with_default_predicate(retry_cfg: AgentLoopRetryOptions) -> AgentLoopRetryOptions {
+  if retry_cfg.predicate != nil {
+    return retry_cfg
+  }
+  return retry_cfg + {predicate: agent_loop_default_retry_predicate}
+}
+
+/**
+ * Applies the agent-loop default transport retry at the owner boundary.
+ * Direct `llm_caller:` still wins unless the caller explicitly asks this
+ * helper to wrap a Harn-composed caller (the preset path uses that for its
+ * internal routing/logging stack). `retry: false` and `llm_retry: nil` opt out.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_apply_default_retry(options = nil, apply_options: AgentDefaultRetryApplyOptions = {}) {
+  const opts: AgentRetryOptionBag = options ?? {}
+  __validate_agent_loop_retry(opts)
+  const wrap_existing = apply_options.wrap_existing ?? false
+  if __retry_has_key(opts, "llm_caller") && !wrap_existing {
+    return opts
+  }
+  const retry_cfg = __agent_loop_retry_config(opts)
+  if retry_cfg == nil {
+    return opts
+  }
+  const cfg = __agent_loop_retry_with_default_predicate(retry_cfg)
+  if __retry_has_key(opts, "llm_caller") {
+    const base = opts.llm_caller
+    return opts + {llm_caller: with_retry(base, cfg)}
+  }
+  return opts + {_llm_retry: cfg}
+}

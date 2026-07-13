@@ -47,6 +47,7 @@ import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
+import { agent_loop_default_retry_predicate } from "std/agent/retry"
 import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 import { agent_skills_match } from "std/agent/skills"
 import {
@@ -95,6 +96,7 @@ import {
   suspend_agent,
 } from "std/agent/workers"
 import { omit } from "std/json"
+import { with_retry } from "std/llm/handlers"
 import { llm_call_options } from "std/llm/options"
 
 /**
@@ -232,6 +234,21 @@ fn __invoke_llm(message, turn_system, llm_opts) {
   __agent_loop_emit_llm_call_start(llm_opts)
   const caller = llm_opts?._llm_caller
   if caller == nil {
+    const retry_cfg = llm_opts?._llm_retry
+    if retry_cfg != nil {
+      const retrying_default = with_retry(
+        { call -> __default_invoke_llm(call.prompt, call.system, call.opts) },
+        retry_cfg + {predicate: retry_cfg?.predicate ?? agent_loop_default_retry_predicate},
+      )
+      return retrying_default(
+        {
+          prompt: message,
+          system: turn_system,
+          opts: llm_opts,
+          turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
+        },
+      )
+    }
     return __default_invoke_llm(message, turn_system, llm_opts)
   }
   let call = {
