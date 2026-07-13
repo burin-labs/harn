@@ -127,7 +127,34 @@ pipeline test_recv_timeout_pattern(task) {
 @test
 pipeline test_harn_command_does_not_match_e2e_variant(task) {
   assert_eq(find_hits("harn_e2e_command(args)\n", harn_command_pattern()).count, 0)
+  assert_eq(find_hits("run_harn_e2e(args)\n", harn_command_pattern()).count, 0)
   assert_eq(find_hits("harn_command(args)\n", harn_command_pattern()).count, 1)
+}
+
+@test
+pipeline test_harn_e2e_helper_pattern_covers_builder_and_runner(task) {
+  const text = "harn_e2e_command()\nrun_harn_e2e(&[], &[])\n"
+  assert_eq(find_hits(text, harn_e2e_command_pattern()).count, 2)
+}
+
+@test
+pipeline test_direct_harn_binary_ratchet(task) {
+  const direct = "env!(\"CARGO_BIN_EXE_harn\")\noption_env!(\"CARGO_BIN_EXE_harn\")\n"
+  assert_eq(find_hits(direct, direct_harn_binary_pattern()).count, 2)
+  assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/codemod_dispatch.rs"), 3)
+  assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/models_dispatch.rs"), 0)
+  assert_eq(direct_harn_binary_baseline_duplicates(), [])
+  assert_eq(
+    duplicate_baseline_paths(
+      [
+        {path: "a.rs", count: 1},
+        {path: "b.rs", count: 2},
+        {path: "a.rs", count: 3},
+        {path: "a.rs", count: 4},
+      ],
+    ),
+    ["a.rs"],
+  )
 }
 
 @test

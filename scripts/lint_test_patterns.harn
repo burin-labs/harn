@@ -120,7 +120,12 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/acp_server_cli.rs",
   "crates/harn-cli/tests/burin_mini_playground.rs",
   "crates/harn-cli/tests/check_result_cache.rs",
+  "crates/harn-cli/tests/doctor_dispatch.rs",
+  "crates/harn-cli/tests/models_dispatch.rs",
+  "crates/harn-cli/tests/providers_dispatch.rs",
+  "crates/harn-cli/tests/routes_graph_dispatch.rs",
   "crates/harn-cli/tests/flow_ship_cli.rs",
+  "crates/harn-cli/tests/host_lease_cli.rs",
   "crates/harn-cli/tests/harn_serve_mcp_cli.rs",
   "crates/harn-cli/tests/llm_mock_cli.rs",
   "crates/harn-cli/tests/mcp_server_cli.rs",
@@ -135,6 +140,56 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/support/mcp.rs",
   "crates/harn-cli/tests/support/process.rs",
   "crates/harn-cli/tests/test_util/process.rs",
+]
+
+// File-level ratchet for legacy direct access to Cargo's `harn` binary path.
+// Delete a row when its test migrates to `test_util::process`; any increase,
+// including inside an existing file, fails the lint.
+const DIRECT_HARN_BINARY_BASELINE = [
+  {path: "crates/harn-cli/tests/agent_run_command_argv_coercion.rs", count: 1},
+  {path: "crates/harn-cli/tests/canon_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/check_fmt_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/codemod_dispatch.rs", count: 3},
+  {path: "crates/harn-cli/tests/conformance_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/coverage_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/dev_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/dispatch_snapshot.rs", count: 1},
+  {path: "crates/harn-cli/tests/doctor_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/eval_cluster_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/eval_coding_agent_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/eval_prompt_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/explain_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/graph_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_script_lint_rules_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/json_schemas_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/lint_fix_exit_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/lint_replay_version_upgrade_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/lint_strict_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/merge_captain_cli.rs", count: 2},
+  {path: "crates/harn-cli/tests/native_rule_libraries.rs", count: 1},
+  {path: "crates/harn-cli/tests/parse_tokens_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/pg_codegen_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/precompile_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/replay_session_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/routes_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/rule_discovery_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/rule_pack_install_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/rule_test_dispatch.rs", count: 4},
+  {path: "crates/harn-cli/tests/run_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/runs_view_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/scaffold_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/scan_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/sidecar_version_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/supervisor_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/time_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/trace_import_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/try_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/usage_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/user_test_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/version_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/workflow_authoring_eval.rs", count: 1},
+  {path: "crates/harn-cli/tests/workflow_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/workflow_patch_cli.rs", count: 1},
 ]
 
 // Runtime files allowed to read host time directly (#1439). Each entry is a
@@ -496,7 +551,40 @@ pub fn harn_command_pattern() -> string {
 }
 
 pub fn harn_e2e_command_pattern() -> string {
-  return r"harn_e2e_command\("
+  return r"(harn_e2e_command|run_harn_e2e)\("
+}
+
+pub fn direct_harn_binary_pattern() -> string {
+  return "CARGO_BIN_EXE_harn"
+}
+
+pub fn direct_harn_binary_baseline(rel: string) -> int {
+  for item in DIRECT_HARN_BINARY_BASELINE {
+    if item.path == rel {
+      return item.count
+    }
+  }
+  return 0
+}
+
+/** Return duplicate path keys from a file/count baseline. */
+pub fn duplicate_baseline_paths(items: list) -> list<string> {
+  let seen = {}
+  let duplicates = []
+  for item in items {
+    if seen[item.path] ?? false {
+      if !duplicates.contains(item.path) {
+        duplicates = duplicates + [item.path]
+      }
+    } else {
+      seen[item.path] = true
+    }
+  }
+  return duplicates
+}
+
+pub fn direct_harn_binary_baseline_duplicates() -> list<string> {
+  return duplicate_baseline_paths(DIRECT_HARN_BINARY_BASELINE)
 }
 
 pub fn spawn_orchestrator_pattern() -> string {
@@ -662,13 +750,34 @@ pipeline main(task) {
       "    hint: harn_command was retired; use in-process APIs in fast tests or harn_e2e_command in the E2E suite.",
     ],
   )
-  __io_println("--- harn_e2e_command outside E2E subprocess tests ---")
+  __io_println("--- direct Cargo harn binary access (file-level ratchet) ---")
+  for path in direct_harn_binary_baseline_duplicates() {
+    __io_println("  duplicate baseline path: " + path)
+    __io_println("    hint: keep exactly one canonical expected-count row per file")
+    violations = violations + 1
+  }
+  for f in test_files {
+    if !f.rel.starts_with("crates/harn-cli/tests/")
+      || f.rel == "crates/harn-cli/tests/test_util/process.rs" {
+      continue
+    }
+    const actual = find_hits(f.text, direct_harn_binary_pattern()).count
+    const expected = direct_harn_binary_baseline(f.rel)
+    if actual != expected {
+      __io_println("  " + f.rel + ": expected " + to_string(expected) + ", found " + to_string(actual))
+      __io_println(
+        "    hint: route real CLI subprocesses through crates/harn-cli/tests/test_util/process.rs",
+      )
+      violations = violations + 1
+    }
+  }
+  __io_println("--- Harn E2E subprocess helper outside E2E tests ---")
   violations = violations
     + report_pattern(
     test_files,
     is_e2e_subprocess_path,
     harn_e2e_command_pattern(),
-    ["    hint: harn_e2e_command is E2E-only; use in-process command/library APIs in fast tests."],
+    ["    hint: Harn E2E helpers are E2E-only; use in-process command/library APIs in fast tests."],
   )
   __io_println("--- spawn_orchestrator outside E2E subprocess tests ---")
   violations = violations
@@ -757,7 +866,7 @@ pipeline main(task) {
   )
   __io_println("")
   if violations > 0 {
-    __io_println("FAIL: ${violations} wall-clock pattern violation(s) found in test files.")
+    __io_println("FAIL: ${violations} forbidden test pattern violation(s) found.")
     __io_println("")
     __io_println("Forbidden patterns cause flaky tests. See docs/src/dev/testing.md for")
     __io_println("approved alternatives and how to opt out with reviewer justification.")

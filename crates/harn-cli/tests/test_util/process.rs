@@ -85,6 +85,39 @@ pub fn harn_e2e_command() -> Command {
     Command::new(harn_e2e_binary())
 }
 
+/// Captured result from one real `harn` CLI invocation.
+pub struct HarnCliOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+}
+
+/// Run the warmed `harn` binary with deterministic color handling.
+///
+/// Empty environment values remove the variable instead of exporting an
+/// empty value, which lets credential-negative tests express scrubbing with
+/// the same compact `(&str, &str)` fixture shape as ordinary overrides.
+pub fn run_harn_e2e(argv: &[&str], extra_env: &[(&str, &str)]) -> HarnCliOutput {
+    let mut command = harn_e2e_command();
+    command
+        .args(argv)
+        .env_remove("NO_COLOR")
+        .env_remove("HARN_COLOR");
+    for (key, value) in extra_env {
+        if value.is_empty() {
+            command.env_remove(key);
+        } else {
+            command.env(key, value);
+        }
+    }
+    let output = command.output().expect("spawn harn");
+    HarnCliOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code().unwrap_or(-1),
+    }
+}
+
 fn prewarm(path: &Path) {
     let path = path.to_path_buf();
     // Some E2E tests first touch the warmed binary from inside a Tokio

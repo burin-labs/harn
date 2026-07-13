@@ -19,40 +19,10 @@
 //!     differs but the parsed shape must match).
 
 use std::path::Path;
-use std::process::{Command, Output};
 
-fn harn_binary() -> &'static str {
-    env!("CARGO_BIN_EXE_harn")
-}
+mod test_util;
 
-struct SubprocessOutcome {
-    stdout: String,
-    stderr: String,
-    exit_code: i32,
-}
-
-fn run(argv: &[&str], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
-    let mut cmd = Command::new(harn_binary());
-    for arg in argv {
-        cmd.arg(arg);
-    }
-    for key in ["NO_COLOR", "HARN_COLOR"] {
-        cmd.env_remove(key);
-    }
-    for (k, v) in extra_env {
-        cmd.env(k, v);
-    }
-    let Output {
-        status,
-        stdout,
-        stderr,
-    } = cmd.output().expect("spawn harn");
-    SubprocessOutcome {
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        exit_code: status.code().unwrap_or(-1),
-    }
-}
+use test_util::process::run_harn_e2e as run;
 
 fn parse_json(s: &str, label: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|err| {

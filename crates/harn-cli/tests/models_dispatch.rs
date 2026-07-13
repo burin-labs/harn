@@ -10,43 +10,12 @@
 //! dispatch wedge to the script for formatting.
 
 use std::fs;
-use std::process::{Command, Output};
+
+mod test_util;
+
+use test_util::process::run_harn_e2e as run;
 
 const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 4;
-
-fn harn_binary() -> &'static str {
-    env!("CARGO_BIN_EXE_harn")
-}
-
-struct SubprocessOutcome {
-    stdout: String,
-    stderr: String,
-    exit_code: i32,
-}
-
-fn run(argv: &[&str], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
-    let mut cmd = Command::new(harn_binary());
-    for arg in argv {
-        cmd.arg(arg);
-    }
-    // Strip terminal-detection env vars so they don't perturb renders.
-    for key in ["NO_COLOR", "HARN_COLOR"] {
-        cmd.env_remove(key);
-    }
-    for (k, v) in extra_env {
-        cmd.env(k, v);
-    }
-    let Output {
-        status,
-        stdout,
-        stderr,
-    } = cmd.output().expect("spawn harn");
-    SubprocessOutcome {
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        exit_code: status.code().unwrap_or(-1),
-    }
-}
 
 fn parse_json(s: &str, label: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|err| {
@@ -247,7 +216,7 @@ fn models_test_failure_json_envelope_is_stable() {
         ("HARN_LLM_PROVIDER", ""),
         ("LLM_PROVIDER", ""),
     ];
-    let harn = run_with_clean_env(
+    let harn = run(
         &[
             "models",
             "test",
@@ -4729,33 +4698,6 @@ fn write_lora_grouped_result_corpus_fixture() -> tempfile::TempDir {
     )
     .expect("write corpus");
     tmp
-}
-
-fn run_with_clean_env(argv: &[&str], env: &[(&str, &str)]) -> SubprocessOutcome {
-    let mut cmd = Command::new(harn_binary());
-    for arg in argv {
-        cmd.arg(arg);
-    }
-    for key in ["NO_COLOR", "HARN_COLOR"] {
-        cmd.env_remove(key);
-    }
-    for (k, v) in env {
-        if v.is_empty() {
-            cmd.env_remove(k);
-        } else {
-            cmd.env(k, v);
-        }
-    }
-    let Output {
-        status,
-        stdout,
-        stderr,
-    } = cmd.output().expect("spawn harn");
-    SubprocessOutcome {
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        exit_code: status.code().unwrap_or(-1),
-    }
 }
 
 fn test_line_keys(text: &str) -> Vec<String> {
