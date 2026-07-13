@@ -14,7 +14,7 @@ include = ["src/**/*", "tests/**/*", "Cargo.toml", "README.md"]
 portable-pty = "0.9"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-vt100 = "0.15"
+vt100 = "0.16"
 
 [lints]
 workspace = true
