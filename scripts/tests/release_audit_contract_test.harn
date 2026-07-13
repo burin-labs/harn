@@ -1,0 +1,285 @@
+import { with_temp_dir } from "std/testing"
+import {
+  release_audit_ci_contract_report,
+  release_audit_contract_parse,
+  release_audit_contract_read,
+  release_audit_receipt_plan,
+} from "../release_audit_contract"
+
+const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+const BINARY_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+fn contract() -> ReleaseAuditContract {
+  return {
+    schema_version: "harn.release_audit_contract.v1",
+    lanes: [
+      {name: "rust-audit", runner: "run_rust_audit", proof: "merge_group"},
+      {name: "harn-audit", runner: "run_harn_audit", proof: "merge_group"},
+      {name: "docs-audit", runner: "run_docs_audit", proof: "residual"},
+    ],
+    merge_group_jobs: [
+      {
+        name: "Rust lint",
+        job_id: "rust-builds",
+        matrix_kind: "lint",
+        proofs: ["rust-audit"],
+        steps: [
+          {
+            id: "release-audit-rust-lint",
+            condition: "matrix.kind == 'lint'",
+            run: "./scripts/ci/run_rust_lint_lane.sh",
+          },
+        ],
+      },
+      {
+        name: "Rust test",
+        job_id: "rust-builds",
+        matrix_kind: "test",
+        proofs: ["rust-audit"],
+        steps: [
+          {
+            id: "release-audit-rust-test",
+            condition: "matrix.kind == 'test' && github.event_name != 'pull_request'",
+            run: "scripts/ci/run_rust_test_lane.sh make test",
+          },
+        ],
+      },
+      {
+        name: "Harn conformance + audit",
+        job_id: "rust-builds",
+        matrix_kind: "audit",
+        proofs: ["harn-audit"],
+        steps: [{id: "release-audit-harn", condition: "matrix.kind == 'audit'", run: "./scripts/audit_gates.sh"}],
+      },
+    ],
+  }
+}
+
+fn jobs() {
+  return [
+    {
+      id: 1,
+      name: "Rust lint",
+      url: "https://github.com/burin-labs/harn/actions/runs/123/job/1",
+      status: "completed",
+      conclusion: "success",
+    },
+    {
+      id: 2,
+      name: "Rust test",
+      url: "https://github.com/burin-labs/harn/actions/runs/123/job/2",
+      status: "completed",
+      conclusion: "success",
+    },
+    {
+      id: 3,
+      name: "Harn conformance + audit",
+      url: "https://github.com/burin-labs/harn/actions/runs/123/job/3",
+      status: "completed",
+      conclusion: "success",
+    },
+  ]
+}
+
+fn merge_receipt() {
+  return {
+    schema_version: "harn.release_audit_receipt.v1",
+    proof_kind: "merge_group",
+    head_sha: SHA,
+    run: {
+      id: 123,
+      url: "https://github.com/burin-labs/harn/actions/runs/123",
+      event: "merge_group",
+      workflow: "CI",
+      head_sha: SHA,
+      status: "completed",
+      conclusion: "success",
+    },
+    jobs: jobs(),
+    warm: {
+      head_sha: SHA,
+      command: "cargo build -p harn-cli --bin harn --locked",
+      binary_sha256: BINARY_SHA,
+      status: "success",
+    },
+  }
+}
+
+pipeline test_release_audit_contract_and_receipts(task) {
+  const cfg = contract()
+  assert(release_audit_contract_parse(cfg) != nil)
+  assert_eq(release_audit_contract_parse({...cfg, unexpected: true}), nil)
+  const accepted = release_audit_receipt_plan(cfg, merge_receipt(), SHA, BINARY_SHA)
+  assert_eq(accepted.ok, true)
+  assert_eq(accepted.proof_kind, "merge_group")
+  assert_eq(accepted.lane_names, ["docs-audit"])
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...merge_receipt(), head_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "head_sha_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...merge_receipt(), jobs: jobs().filter({ job -> job.name != "Rust test" }).to_list()},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "merge_group_jobs_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(cfg, {...merge_receipt(), jobs: jobs() + [jobs()[0]]}, SHA, BINARY_SHA).reason,
+    "duplicate_merge_group_job_id",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...merge_receipt(), jobs: [{...jobs()[0], conclusion: "skipped"}, jobs()[1], jobs()[2]]},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "invalid_receipt",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...merge_receipt(), warm: {...merge_receipt().warm, status: "failed"}},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "invalid_receipt",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      merge_receipt(),
+      SHA,
+      "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    ).reason,
+    "warm_binary_sha256_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(cfg, {...merge_receipt(), unexpected: true}, SHA, BINARY_SHA).reason,
+    "invalid_receipt",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...merge_receipt(),
+        run: {...merge_receipt().run, url: "https://github.com/burin-labs/harn/actions/runs/999"},
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "run_url_identity_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...merge_receipt(),
+        jobs: [
+          {...jobs()[0], url: "https://github.com/burin-labs/harn/actions/runs/123/job/999"},
+          jobs()[1],
+          jobs()[2],
+        ],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "job_url_identity_mismatch",
+  )
+}
+
+pipeline test_release_audit_contract_reads_typed_result_from_disk(task) {
+  with_temp_dir(
+    { dir ->
+      const path = path_join(dir, "release-audit-contract.json")
+      harness.fs.write_text(path, json_stringify(contract()))
+      const loaded = release_audit_contract_read(path)
+      assert(loaded != nil)
+      assert_eq(loaded.schema_version, "harn.release_audit_contract.v1")
+      assert_eq(
+        loaded.merge_group_jobs.map({ job -> job.name }).to_list(),
+        ["Rust lint", "Rust test", "Harn conformance + audit"],
+      )
+      harness.fs.write_text(path, "{invalid")
+      assert_eq(release_audit_contract_read(path), nil)
+    },
+  )
+}
+
+pipeline test_release_audit_ci_contract_drift(task) {
+  const cfg = contract()
+  const ci = {
+    jobs: {
+      "rust-builds": {
+        strategy: {
+          matrix: {
+            include: [
+              {kind: "lint", name: "Rust lint"},
+              {kind: "test", name: "Rust test"},
+              {kind: "audit", name: "Harn conformance + audit"},
+            ],
+          },
+        },
+        steps: [
+          {
+            id: "release-audit-rust-lint",
+            if: "matrix.kind == 'lint'",
+            run: "./scripts/ci/run_rust_lint_lane.sh",
+          },
+          {
+            id: "release-audit-rust-test",
+            if: "matrix.kind == 'test' && github.event_name != 'pull_request'",
+            run: "scripts/ci/run_rust_test_lane.sh make test",
+          },
+          {id: "release-audit-harn", if: "matrix.kind == 'audit'", run: "./scripts/audit_gates.sh"},
+        ],
+      },
+    },
+  }
+  assert_eq(release_audit_ci_contract_report(cfg, ci).ok, true)
+  assert_eq(
+    release_audit_ci_contract_report(
+      cfg,
+      {
+        ...ci,
+        jobs: {
+          "rust-builds": {
+            ...ci.jobs["rust-builds"],
+            steps: ci.jobs["rust-builds"].steps
+              .map(
+              { step ->
+                if step.id == "release-audit-rust-test" {
+                  {...step, run: "make test-affected"}
+                } else {
+                  step
+                }
+              },
+            ).to_list(),
+          },
+        },
+      },
+    ).errors,
+    ["proof command drift: release-audit-rust-test"],
+  )
+  assert_eq(
+    release_audit_ci_contract_report(
+      cfg,
+      {
+        ...ci,
+        jobs: {
+          "rust-builds": {...ci.jobs["rust-builds"], strategy: {matrix: {include: [{kind: "lint", name: "Rust lint"}]}}},
+        },
+      },
+    ).reason,
+    "ci_contract_drift",
+  )
+}

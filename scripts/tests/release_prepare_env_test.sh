@@ -124,6 +124,9 @@ if [[ "${ASSERT_DERIVED_PRE_BUMP:-0}" == "1" ]] \
   echo "derived target ran after the metadata version bump: $*" >&2
   exit 2
 fi
+if [[ -n "${SHIP_GATE_RECORD:-}" ]]; then
+  printf 'make=%s\n' "$*" >> "$SHIP_GATE_RECORD"
+fi
 {
   printf 'target=%s\n' "$*"
   printf 'version=%s\n' "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
@@ -268,8 +271,13 @@ ship_gate="$tmp_root/fake-release-gate.sh"
 cat > "$ship_gate" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+printf 'gate=%s\n' "$*" >> "$SHIP_GATE_RECORD"
 case "${1:-}" in
   audit)
+    if [[ "${FAIL_RELEASE_AUDIT:-0}" == "1" && " $* " != *" --validate-only "* ]]; then
+      echo "injected release audit failure" >&2
+      exit 9
+    fi
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
@@ -300,15 +308,42 @@ chmod +x "$ship_gate"
 record_ship="$tmp_root/ship-gate-record.txt"
 target_dir="$tmp_root/target"
 
-HARN_RELEASE_ROOT="$release_root" \
-HARN_RELEASE_HARNESS=1 \
-HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
-CARGO_TARGET_DIR="$target_dir" \
-SHIP_GATE_RECORD="$record_ship" \
-FAKE_MAKE_RECORD="$record_make" \
-ASSERT_DERIVED_PRE_BUMP=1 \
-PATH="$fake_bin:$PATH" \
-  "$repo_root/scripts/release_ship.sh" --prepare --bump patch --skip-dry-run
+run_ship_prepare() {
+  local label="$1"
+  shift
+  git -C "$release_root" reset --hard --quiet HEAD
+  : > "$record_make"
+  : > "$record_ship"
+  HARN_RELEASE_ROOT="$release_root" \
+  HARN_RELEASE_HARNESS=1 \
+  HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
+  CARGO_TARGET_DIR="$target_dir" \
+  SHIP_GATE_RECORD="$record_ship" \
+  FAKE_MAKE_RECORD="$record_make" \
+  ASSERT_DERIVED_PRE_BUMP=1 \
+  PATH="$fake_bin:$PATH" \
+    "$repo_root/scripts/release_ship.sh" \
+      --prepare --bump patch --skip-dry-run "$@" > "$tmp_root/ship-$label.txt" 2>&1
+}
+
+assert_ordered_ship_events() {
+  local label="$1"
+  shift
+  local previous=0
+  local expected line
+  for expected in "$@"; do
+    line="$(grep -n -m 1 -Fx "$expected" "$record_ship" | cut -d: -f1 || true)"
+    if [[ -z "$line" || "$line" -le "$previous" ]]; then
+      echo "release_ship sequence mismatch for $label at: $expected" >&2
+      cat "$record_ship" >&2
+      exit 1
+    fi
+    previous="$line"
+  done
+}
+
+rm -rf "$target_dir"
+run_ship_prepare full
 
 expected_harn="$target_dir/debug/harn"
 if ! grep -Fxq "prepare HARN_BIN=$expected_harn" "$record_ship"; then
@@ -325,5 +360,113 @@ for target in sync-language-spec gen-highlight; do
     exit 1
   fi
 done
+
+assert_ordered_ship_events full \
+  "gate=audit --validate-only" \
+  "make=sync-language-spec" \
+  "make=gen-highlight" \
+  "gate=prepare --bump patch --allow-dirty" \
+  "make=portal-check" \
+  "gate=audit"
+
+rm -rf "$target_dir"
+receipt="$tmp_root/audit-receipt.json"
+printf '{}\n' > "$receipt"
+run_ship_prepare residual --audit-receipt "$receipt"
+assert_ordered_ship_events residual \
+  "gate=audit --validate-only --receipt $receipt" \
+  "make=sync-language-spec" \
+  "make=gen-highlight" \
+  "gate=prepare --bump patch --allow-dirty" \
+  "make=portal-check" \
+  "gate=audit --receipt $receipt"
+
+: > "$record_make"
+: > "$record_ship"
+if HARN_RELEASE_ROOT="$release_root" \
+  HARN_RELEASE_HARNESS=1 \
+  HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
+  CARGO_TARGET_DIR="$target_dir" \
+  SHIP_GATE_RECORD="$record_ship" \
+  FAKE_MAKE_RECORD="$record_make" \
+  PATH="$fake_bin:$PATH" \
+    "$repo_root/scripts/release_ship.sh" \
+      --prepare --bump patch --skip-dry-run --skip-audit \
+      > "$tmp_root/ship-removed-skip.txt" 2>&1; then
+  echo "release_ship accepted removed --skip-audit" >&2
+  exit 1
+fi
+if ! grep -Fq "error: unknown arg: --skip-audit" "$tmp_root/ship-removed-skip.txt"; then
+  echo "release_ship did not reject removed --skip-audit" >&2
+  cat "$tmp_root/ship-removed-skip.txt" >&2
+  exit 1
+fi
+if [[ -s "$record_make" || -s "$record_ship" ]]; then
+  echo "release_ship started work before rejecting removed --skip-audit" >&2
+  cat "$record_make" "$record_ship" >&2
+  exit 1
+fi
+
+git -C "$release_root" reset --hard --quiet HEAD
+printf '\n- authored before failed prepare\n' >> "$release_root/CHANGELOG.md"
+git -C "$release_root" add CHANGELOG.md
+printf '\nunstaged authored note\n' >> "$release_root/docs/src/embedding-rust.md"
+printf 'untracked authored note\n' > "$release_root/AUTHORED.md"
+baseline_diff="$tmp_root/prepare-baseline.diff"
+git -C "$release_root" diff --binary HEAD -- > "$baseline_diff"
+baseline_cached_diff="$tmp_root/prepare-baseline-cached.diff"
+git -C "$release_root" diff --cached --binary HEAD -- > "$baseline_cached_diff"
+baseline_unstaged_diff="$tmp_root/prepare-baseline-unstaged.diff"
+git -C "$release_root" diff --binary -- > "$baseline_unstaged_diff"
+baseline_status="$tmp_root/prepare-baseline.status"
+git -C "$release_root" status --porcelain=v1 > "$baseline_status"
+: > "$record_make"
+: > "$record_ship"
+if HARN_RELEASE_ROOT="$release_root" \
+  HARN_RELEASE_HARNESS=1 \
+  HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
+  CARGO_TARGET_DIR="$target_dir" \
+  SHIP_GATE_RECORD="$record_ship" \
+  FAKE_MAKE_RECORD="$record_make" \
+  FAIL_RELEASE_AUDIT=1 \
+  PATH="$fake_bin:$PATH" \
+    "$repo_root/scripts/release_ship.sh" \
+      --prepare --bump patch --skip-dry-run \
+      > "$tmp_root/ship-rollback.txt" 2>&1; then
+  echo "release_ship unexpectedly passed injected post-generation audit failure" >&2
+  exit 1
+fi
+after_diff="$tmp_root/prepare-after.diff"
+git -C "$release_root" diff --binary HEAD -- > "$after_diff"
+if ! cmp -s "$baseline_diff" "$after_diff"; then
+  echo "failed post-generation audit did not restore the authored release tree" >&2
+  diff -u "$baseline_diff" "$after_diff" >&2 || true
+  exit 1
+fi
+after_cached_diff="$tmp_root/prepare-after-cached.diff"
+git -C "$release_root" diff --cached --binary HEAD -- > "$after_cached_diff"
+if ! cmp -s "$baseline_cached_diff" "$after_cached_diff"; then
+  echo "failed post-generation audit did not restore the authored index" >&2
+  diff -u "$baseline_cached_diff" "$after_cached_diff" >&2 || true
+  exit 1
+fi
+after_unstaged_diff="$tmp_root/prepare-after-unstaged.diff"
+git -C "$release_root" diff --binary -- > "$after_unstaged_diff"
+if ! cmp -s "$baseline_unstaged_diff" "$after_unstaged_diff"; then
+  echo "failed post-generation audit did not restore the authored unstaged tree" >&2
+  diff -u "$baseline_unstaged_diff" "$after_unstaged_diff" >&2 || true
+  exit 1
+fi
+after_status="$tmp_root/prepare-after.status"
+git -C "$release_root" status --porcelain=v1 > "$after_status"
+if ! cmp -s "$baseline_status" "$after_status"; then
+  echo "failed post-generation audit did not restore authored status" >&2
+  diff -u "$baseline_status" "$after_status" >&2 || true
+  exit 1
+fi
+if ! grep -Fq 'version = "1.2.3"' "$release_root/Cargo.toml"; then
+  echo "failed post-generation audit left the version bump in place" >&2
+  exit 1
+fi
 
 echo "release_prepare_env_test: ok"

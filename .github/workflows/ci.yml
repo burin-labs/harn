@@ -241,8 +241,11 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt
-      - run: make fmt-check
+      - name: Run release format proof
+        id: release-audit-format
+        run: make fmt-check
       - name: Check published crate packages
+        id: release-audit-package
         run: ./scripts/verify_crate_packages.sh
 
   lint-md:
@@ -355,16 +358,11 @@ jobs:
       # the CI invocation here drops the prereq and runs just the cheap
       # prompt-prose ratchet (only when protected files changed) plus clippy.
       - name: Run Rust lint
+        id: release-audit-rust-lint
         if: matrix.kind == 'lint'
         env:
           RUN_PROMPT_PROSE_RATCHET: ${{ needs.changes.outputs.prompt_prose }}
-        run: |
-          if [[ "${RUN_PROMPT_PROSE_RATCHET}" == "true" ]]; then
-            make lint-no-rust-prompt-prose
-          else
-            echo "Skipping prompt-prose ratchet (no protected prompt paths changed)."
-          fi
-          cargo clippy --workspace --all-targets -- -D warnings
+        run: ./scripts/ci/run_rust_lint_lane.sh
       # SAFETY PRINCIPLE — prune for PR fast feedback, run the FULL suite on
       # the merge queue and non-metadata push backstop (#2663). On `pull_request`
       # events we run only the tests in crates affected by the diff, expanded
@@ -397,6 +395,7 @@ jobs:
           git fetch --no-tags origin "$BASE_REF"
           scripts/ci/run_rust_test_lane.sh make test-affected
       - name: Run full test suite (merge queue + non-metadata push backstop)
+        id: release-audit-rust-test
         if: matrix.kind == 'test' && github.event_name != 'pull_request'
         env:
           # See the PR fast-feedback test step above. This is the queue-critical
@@ -425,6 +424,7 @@ jobs:
       # catalog + refresh workflow, workflow quickstart, vm rss soak).
       # mcp-rc-conformance stays pruned (subset of the parallel nextest lane).
       - name: Run Harn conformance and audit
+        id: release-audit-harn
         if: matrix.kind == 'audit'
         run: ./scripts/audit_gates.sh
       # sccache-action starts a long-lived `sccache --start-server` daemon that

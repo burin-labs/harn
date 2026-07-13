@@ -38,14 +38,14 @@ configure_release_gate_cargo_env() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_gate.sh audit
+  ./scripts/release_gate.sh audit [--receipt path] [--validate-only]
   ./scripts/release_gate.sh prepare --bump patch|minor|major
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
   ./scripts/release_gate.sh full --bump patch|minor|major [--dry-run]
 
 Commands:
-  audit    Run the release-quality verification gate and docs audit.
+  audit    Run the full audit, or residual lanes authorized by an exact receipt.
   prepare  Bump the workspace version locally and print next tag/release steps.
   publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
   notes    Render GitHub release notes for a version from CHANGELOG.md.
@@ -228,16 +228,38 @@ harn_cmd() {
   fi
 }
 
-run_docs_audit() {
-  time_phase "sync_language_spec" harn_cmd run scripts/sync_language_spec.harn
-  time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
-  if command -v npm >/dev/null 2>&1; then
-    time_phase "docs site build" ./scripts/build_docs_site.sh
-  else
-    echo "warning: npm (Node.js) not installed; skipping docs site build"
+file_sha256() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+    return 0
   fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+    return 0
+  fi
+  echo "error: sha256sum or shasum is required to validate the warmed Harn binary" >&2
+  return 1
+}
+
+run_docs_audit() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "error: npm (Node.js) is required for the release docs audit" >&2
+    return 1
+  fi
+  time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
+  time_phase "docs site build" ./scripts/build_docs_site.sh
   time_phase "docs model refs" harn_cmd run scripts/check_docs_model_refs.harn
   time_phase "docs snippets" harn_cmd run scripts/check_docs_snippets.harn
+}
+
+run_generated_audit() {
+  time_phase "language-spec drift" make check-language-spec
+  time_phase "highlight drift" make check-highlight
+  time_phase "protocol artifact drift" make check-protocol-artifacts
+  time_phase "connector schema drift" make check-connector-schemas
+  time_phase "session bundle schema drift" make check-session-bundle-schema
+  time_phase "run-view fixture drift" make check-run-view-fixtures
 }
 
 run_grammar_audit() {
@@ -255,8 +277,12 @@ run_grammar_audit() {
   # mirror, so it does not depend on the sync having run in this lane.
   time_phase "verify_language_spec" harn_cmd run scripts/verify_language_spec.harn
   if [[ ! -d tree-sitter-harn ]]; then
-    echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"
-    return 0
+    echo "error: tree-sitter-harn is required for the release grammar audit" >&2
+    return 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "error: npm (Node.js) is required for the release grammar audit" >&2
+    return 1
   fi
   time_phase "tree-sitter npm ci" bash -c "cd tree-sitter-harn && npm ci"
   time_phase "verify_tree_sitter_parse" harn_cmd run scripts/verify_tree_sitter_parse.harn -- --strict
@@ -273,7 +299,7 @@ run_security_audit() {
 run_rust_audit() {
   time_phase "cargo fmt --check" make fmt-check
   time_phase "cargo clippy --workspace --all-targets" \
-    cargo clippy --workspace --all-targets -- -D warnings
+    env RUN_PROMPT_PROSE_RATCHET=true ./scripts/ci/run_rust_lint_lane.sh
   time_phase "make test (nextest/cargo test)" make test
 }
 
@@ -296,7 +322,127 @@ run_smoke_audit() {
   time_phase "release smoke" make smoke-audit
 }
 
+run_package_audit() {
+  ./scripts/verify_crate_packages.sh
+}
+
+SELECTED_AUDIT_STEPS=()
+SELECTED_AUDIT_RUNNERS=()
+AUDIT_PLAN_REASON=""
+AUDIT_RECEIPT_REUSED="false"
+
+resolve_audit_plan() {
+  local receipt_path="$1"
+  local plan_path="$2"
+  local head_sha
+  head_sha="$(git rev-parse HEAD)"
+  local args=(
+    run scripts/release_audit_contract.harn --
+    --contract scripts/release_audit_contract.json
+    --check-ci .github/workflows/ci.yml
+    --head-sha "$head_sha"
+  )
+  if [[ -n "$receipt_path" ]]; then
+    args+=(--receipt "$receipt_path")
+    local warm_binary_sha256=""
+    if [[ -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]]; then
+      warm_binary_sha256="$(file_sha256 "$HARN_BIN")"
+    fi
+    args+=(--warm-binary-sha256 "$warm_binary_sha256")
+  fi
+  harn_cmd "${args[@]}" > "$plan_path"
+
+  local meta
+  meta="$(python3 - "$plan_path" <<'PY'
+import json
+import re
+import sys
+
+plan = json.load(open(sys.argv[1], encoding="utf-8"))
+required = {
+    "ok", "receipt_reused", "reason", "proof_kind", "head_sha",
+    "lane_names", "lane_runners", "lanes", "errors",
+}
+if set(plan) != required or plan["ok"] is not True:
+    raise SystemExit("invalid release audit plan envelope")
+if not isinstance(plan["receipt_reused"], bool) or not isinstance(plan["reason"], str):
+    raise SystemExit("invalid release audit plan metadata")
+names = plan["lane_names"]
+runners = plan["lane_runners"]
+if not isinstance(names, list) or not isinstance(runners, list) or len(names) != len(runners) or not names:
+    raise SystemExit("invalid release audit plan lanes")
+name_re = re.compile(r"^[a-z0-9-]+$")
+runner_re = re.compile(r"^[a-z0-9_]+$")
+if any(not isinstance(v, str) or not name_re.fullmatch(v) for v in names):
+    raise SystemExit("invalid release audit lane name")
+if any(not isinstance(v, str) or not runner_re.fullmatch(v) for v in runners):
+    raise SystemExit("invalid release audit lane runner")
+if len(set(names)) != len(names) or len(set(runners)) != len(runners):
+    raise SystemExit("duplicate release audit lane identity")
+print(("true" if plan["receipt_reused"] else "false") + "\t" + plan["reason"])
+PY
+)"
+  IFS=$'\t' read -r AUDIT_RECEIPT_REUSED AUDIT_PLAN_REASON <<< "$meta"
+  SELECTED_AUDIT_STEPS=()
+  SELECTED_AUDIT_RUNNERS=()
+  local name runner
+  while IFS=$'\t' read -r name runner; do
+    if ! declare -F "$runner" >/dev/null; then
+      echo "error: missing audit lane runner for $name: $runner" >&2
+      return 1
+    fi
+    SELECTED_AUDIT_STEPS+=("$name")
+    SELECTED_AUDIT_RUNNERS+=("$runner")
+  done < <(python3 - "$plan_path" <<'PY'
+import json
+import sys
+
+plan = json.load(open(sys.argv[1], encoding="utf-8"))
+for name, runner in zip(plan["lane_names"], plan["lane_runners"]):
+    print(f"{name}\t{runner}")
+PY
+)
+}
+
 cmd_audit() {
+  local receipt_path=""
+  local validate_only=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --receipt)
+        if [[ $# -lt 2 || -z "${2:-}" ]]; then
+          echo "error: audit --receipt requires a path" >&2
+          exit 1
+        fi
+        receipt_path="$2"
+        shift 2
+        ;;
+      --validate-only)
+        validate_only=1
+        shift
+        ;;
+      *)
+        echo "error: unknown audit arg: $1" >&2
+        usage
+        exit 1
+        ;;
+    esac
+  done
+
+  local plan_path
+  plan_path="$(mktemp)"
+  if ! resolve_audit_plan "$receipt_path" "$plan_path"; then
+    rm -f "$plan_path"
+    exit 1
+  fi
+  rm -f "$plan_path"
+
+  printf 'audit plan: %s (receipt_reused=%s, lanes=%s)\n' \
+    "$AUDIT_PLAN_REASON" "$AUDIT_RECEIPT_REUSED" "${SELECTED_AUDIT_STEPS[*]}"
+  if [[ "$validate_only" -eq 1 ]]; then
+    return 0
+  fi
+
   echo "=== Parallel release audit ==="
   export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
   local audit_started
@@ -309,17 +455,20 @@ cmd_audit() {
   # plain Harn invocation, without front-loading a duplicate workspace build.
   local prebuild_started prebuild_elapsed
   prebuild_started="$(date +%s)"
-  echo ">>> warm-prebuild (cargo build -p harn-cli --bin harn)"
-  if ! cargo build -p harn-cli --bin harn --quiet; then
-    echo "error: warm prebuild failed; rerun without --quiet for details"
-    exit 1
+  local cargo_harn_bin=""
+  if [[ "$AUDIT_RECEIPT_REUSED" == "true" && -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]]; then
+    cargo_harn_bin="$HARN_BIN"
+    echo ">>> warm-prebuild (reuse exact receipt-warmed HARN_BIN)"
+  else
+    echo ">>> warm-prebuild (cargo build -p harn-cli --bin harn)"
+    if ! cargo build -p harn-cli --bin harn --quiet; then
+      echo "error: warm prebuild failed; rerun without --quiet for details"
+      exit 1
+    fi
+    cargo_harn_bin="$(debug_harn_binary)"
   fi
   prebuild_elapsed=$(( $(date +%s) - prebuild_started ))
   printf 'ok: %-15s (%ss)\n' "warm-prebuild" "$prebuild_elapsed"
-  local cargo_harn_bin="${HARN_BIN:-}"
-  if [[ -z "$cargo_harn_bin" ]]; then
-    cargo_harn_bin="$(debug_harn_binary)"
-  fi
   if [[ ! -x "$cargo_harn_bin" ]]; then
     echo "error: warm prebuild completed but HARN_BIN is not executable: $cargo_harn_bin"
     exit 1
@@ -375,13 +524,10 @@ cmd_audit() {
     pids+=("$!")
   }
 
-  launch_step rust-audit run_rust_audit
-  launch_step harn-audit run_harn_audit
-  launch_step docs-audit run_docs_audit
-  launch_step grammar-audit run_grammar_audit
-  launch_step security-audit run_security_audit
-  launch_step package-audit ./scripts/verify_crate_packages.sh
-  launch_step smoke-audit run_smoke_audit
+  local lane_idx
+  for lane_idx in "${!SELECTED_AUDIT_STEPS[@]}"; do
+    launch_step "${SELECTED_AUDIT_STEPS[$lane_idx]}" "${SELECTED_AUDIT_RUNNERS[$lane_idx]}"
+  done
 
   local failed=0
   local idx

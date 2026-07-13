@@ -60,7 +60,7 @@ log_step() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_ship.sh --prepare --bump patch|minor|major [--skip-audit] [--skip-dry-run]  # release_harn.harn only
+  ./scripts/release_ship.sh --prepare --bump patch|minor|major [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
   ./scripts/release_ship.sh --bump patch|minor|major [--skip-dry-run] [--base main]   # recovery
   ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--base main]
 
@@ -112,8 +112,10 @@ PREPARE MODE
   - Runs from a non-main branch with the release content already authored.
   - Detects bump type via --bump and confirms it matches the CHANGELOG
     top entry (CHANGELOG must be at the next vX.Y.Z heading already).
-  - Runs the full audit (skip with --skip-audit) and publish dry-run
-    (skip with --skip-dry-run) so failures surface before push.
+  - Runs the full audit by default. A closed exact-HEAD receipt may authorize
+    only the residual lanes owned by Harn's release-audit contract.
+  - Runs a publish dry-run (skip with --skip-dry-run) so failures surface before
+    push.
   - Bumps Cargo.toml + crates/*/Cargo.toml + Cargo.lock to vX.Y.Z.
   - Regenerates derived files (`docs/src/language-spec.md`,
     `docs/theme/harn-keywords.js`).
@@ -169,6 +171,15 @@ FINALIZE MODE
   Set RELEASE_FINALIZE_REAUDIT=1 (or pass --reaudit) to opt back into
   the full release-gate audit before finalizing — useful when running
   --finalize locally after manual repo edits.
+
+==============================================================================
+AUDIT RECEIPT
+==============================================================================
+
+  --audit-receipt path
+    Present the closed Harn release-audit receipt during harness-driven
+    --prepare. Missing, unreadable, stale, skipped, or failed evidence selects
+    the full local audit; callers cannot select a profile directly.
 
 ==============================================================================
 ENVIRONMENT VARIABLES
@@ -409,12 +420,6 @@ require_release_harness_prepare() {
 
 # Verify the top CHANGELOG.md heading matches the expected next version.
 # The human is expected to have authored "## vX.Y.Z" before running prepare.
-#
-# Convenience: if the first H2 is `## Unreleased` (the convention for
-# accumulating bullets between releases), promote it to `## v$expected`
-# in-place rather than failing after the audit has already burned ~7
-# minutes of wall time. The `git add -u` in the staging step picks the
-# rename up; if --prepare is later cancelled the rename is harmless.
 require_changelog_top_matches() {
   local expected="$1"
   python3 - "$expected" <<'PY'
@@ -447,15 +452,8 @@ if m:
     )
     sys.exit(1)
 
-if re.match(r"^## Unreleased\s*$", top):
-    lines[top_index] = f"## v{expected}\n"
-    path.write_text("".join(lines))
-    print(f"note: renamed CHANGELOG.md top heading '## Unreleased' -> '## v{expected}'")
-    sys.exit(0)
-
 sys.stderr.write(
-    f"error: CHANGELOG.md top heading '{top}' is neither '## Unreleased' "
-    f"nor '## v$expected'\n"
+    f"error: CHANGELOG.md top heading '{top}' is not '## v{expected}'\n"
     f"hint: edit CHANGELOG.md to add '## v{expected}' as the new top entry, then re-run\n"
 )
 sys.exit(1)
@@ -533,15 +531,82 @@ run_common_gates() {
 
   if [[ "$SKIP_AUDIT" -eq 0 ]]; then
     log_step "Release audit"
-    "$RELEASE_GATE_SCRIPT" audit
+    local audit_args=(audit)
+    if [[ -n "$AUDIT_RECEIPT" ]]; then
+      audit_args+=(--receipt "$AUDIT_RECEIPT")
+    fi
+    "$RELEASE_GATE_SCRIPT" "${audit_args[@]}"
   else
-    log_step "Skipping release audit (already proved by merge-queue CI)"
+    log_step "Skipping release audit (legacy finalize/recovery semantics)"
   fi
 
   if [[ "$SKIP_DRY_RUN" -eq 0 ]]; then
     log_step "Publish dry run"
     "$RELEASE_GATE_SCRIPT" publish --dry-run
   fi
+}
+
+validate_audit_plan() {
+  local args=(audit --validate-only)
+  if [[ -n "$AUDIT_RECEIPT" ]]; then
+    args+=(--receipt "$AUDIT_RECEIPT")
+  fi
+  log_step "Validate release audit plan"
+  "$RELEASE_GATE_SCRIPT" "${args[@]}"
+}
+
+PREPARE_TXN_ARMED=0
+PREPARE_TXN_INDEX=""
+PREPARE_TXN_ORIGINAL_INDEX=""
+PREPARE_TXN_PATCH=""
+PREPARE_TXN_BASELINE_TREE=""
+
+capture_prepare_tree() {
+  local index_path="$1"
+  local source_index
+  source_index="$(git rev-parse --git-path index)"
+  cp "$source_index" "$index_path"
+  GIT_INDEX_FILE="$index_path" git add -A -- .
+  GIT_INDEX_FILE="$index_path" git write-tree
+}
+
+rollback_prepare_transaction() {
+  local current_tree
+  current_tree="$(capture_prepare_tree "$PREPARE_TXN_INDEX")"
+  git diff --binary --full-index "$PREPARE_TXN_BASELINE_TREE" "$current_tree" -- > "$PREPARE_TXN_PATCH"
+  if [[ -s "$PREPARE_TXN_PATCH" ]]; then
+    git apply --reverse --whitespace=nowarn "$PREPARE_TXN_PATCH"
+  fi
+  cp "$PREPARE_TXN_ORIGINAL_INDEX" "$(git rev-parse --git-path index)"
+}
+
+prepare_transaction_exit() {
+  local rc=$?
+  trap - EXIT
+  if [[ "$PREPARE_TXN_ARMED" -eq 1 ]]; then
+    rollback_prepare_transaction || {
+      echo "error: failed to restore the pre-prepare release tree" >&2
+      rc=1
+    }
+  fi
+  rm -f "$PREPARE_TXN_INDEX" "$PREPARE_TXN_ORIGINAL_INDEX" "$PREPARE_TXN_PATCH"
+  exit "$rc"
+}
+
+begin_prepare_transaction() {
+  PREPARE_TXN_INDEX="$(mktemp)"
+  PREPARE_TXN_ORIGINAL_INDEX="$(mktemp)"
+  PREPARE_TXN_PATCH="$(mktemp)"
+  cp "$(git rev-parse --git-path index)" "$PREPARE_TXN_ORIGINAL_INDEX"
+  PREPARE_TXN_BASELINE_TREE="$(capture_prepare_tree "$PREPARE_TXN_INDEX")"
+  PREPARE_TXN_ARMED=1
+  trap prepare_transaction_exit EXIT
+}
+
+commit_prepare_transaction() {
+  PREPARE_TXN_ARMED=0
+  trap - EXIT
+  rm -f "$PREPARE_TXN_INDEX" "$PREPARE_TXN_ORIGINAL_INDEX" "$PREPARE_TXN_PATCH"
 }
 
 regenerate_derived_files() {
@@ -643,17 +708,12 @@ prepare_here() {
   local branch
   branch="$(git branch --show-current)"
 
-  # Run audit + dry-run from the dirty release branch. The audit's
-  # cargo steps don't care about uncommitted changes; the publish
-  # dry-run already auto-detects dirtiness and falls back to
-  # --allow-dirty (see scripts/publish.sh).
-  run_common_gates
-
   export_warmed_harn_bin
-  # Language-spec and highlight outputs derive from the audited source tree,
-  # not release metadata. Generate them while the audited CLI is still fresh;
-  # the version bump below intentionally makes Cargo manifests newer than it.
   disable_prepare_cargo_cache_wrappers
+  begin_prepare_transaction
+
+  # Build the exact candidate tree before auditing it. Any failure before the
+  # final staging step restores the authored release content byte-for-byte.
   regenerate_derived_files
 
   log_step "Version bump (in place)"
@@ -665,6 +725,8 @@ prepare_here() {
     exit 1
   fi
 
+  run_common_gates
+
   log_step "Stage release content"
   # Stage the version bump deterministically and then sweep tracked
   # changes (changelog, code, docs, generated mirrors) so the human's
@@ -672,6 +734,7 @@ prepare_here() {
   stage_version_bump_manifests
   git add docs/src/language-spec.md docs/src/spec/language docs/src/SUMMARY.md docs/theme/harn-keywords.js
   git add -u
+  commit_prepare_transaction
 
   log_step "Prepare-here ready"
   TOTAL_NS=$(( $(_ship_now_ns) - SHIP_START_NS ))
@@ -722,6 +785,7 @@ ensure_tag_at_head() {
 BUMP="patch"
 SKIP_DRY_RUN=0
 SKIP_AUDIT=0
+AUDIT_RECEIPT=""
 MODE="bump-pr"
 BASE_BRANCH="main"
 NOTES_OUTPUT=""
@@ -749,9 +813,13 @@ while [[ $# -gt 0 ]]; do
       SKIP_DRY_RUN=1
       shift
       ;;
-    --skip-audit)
-      SKIP_AUDIT=1
-      shift
+    --audit-receipt)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "error: --audit-receipt requires a path" >&2
+        exit 1
+      fi
+      AUDIT_RECEIPT="$2"
+      shift 2
       ;;
     --reaudit)
       # --finalize defaults to skipping the audit (merge-queue CI just
@@ -793,6 +861,11 @@ case "$BUMP" in
     ;;
 esac
 
+if [[ -n "$AUDIT_RECEIPT" && "$MODE" != "prepare-here" ]]; then
+  echo "error: --audit-receipt is only valid with harness-driven --prepare" >&2
+  exit 1
+fi
+
 # Mode-specific guards. Each mode runs against a different baseline:
 #   prepare-here: feature branch with dirty tree (release content authored)
 #   bump-pr:      clean main, opens recovery release branch
@@ -831,6 +904,9 @@ if [[ "$MODE" == "prepare-here" ]]; then
     exit 1
   fi
   require_changelog_top_matches "$NEXT_VERSION"
+  require_no_unfolded_fragments
+  export_warmed_harn_bin
+  validate_audit_plan
   prepare_here "$PREVIOUS_VERSION" "$NEXT_VERSION"
   exit 0
 fi
