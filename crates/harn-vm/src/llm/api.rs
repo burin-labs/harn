@@ -117,10 +117,43 @@ fn parse_displayed_categorized_error(message: &str) -> Option<(ErrorCategory, &s
     Some((ErrorCategory::parse(category), rest))
 }
 
-/// Execute an LLM call. Always goes through the streaming path with a
-/// discarding receiver so all callers share one code path for status/error
-/// handling; non-streaming callers just drop the receiver.
+/// Route a logical call when policy is present. The boxed boundary breaks the
+/// intentional async cycle: routing executes links through observability, which
+/// reaches the explicit single-route primitives after clearing the policy.
+fn routed_llm_call<'a>(
+    opts: &'a LlmCallOptions,
+    delta_tx: Option<DeltaSender>,
+) -> Option<impl std::future::Future<Output = Result<LlmResult, VmError>> + 'a> {
+    let policy = opts.routing_policy.as_ref()?;
+    Some(async move {
+        Box::pin(super::routing::execute_with_routing(
+            policy,
+            opts.clone(),
+            None,
+            delta_tx,
+        ))
+        .await
+        .map(|(result, _trace)| result)
+    })
+}
+
+/// Execute a logical LLM call. A configured routing policy runs first; each
+/// routed link re-enters the single-route path with its policy cleared. Calls
+/// without routing always go through the streaming path with a discarding
+/// receiver so status/error handling stays shared.
 pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
+    if let Some(call) = routed_llm_call(opts, None) {
+        return call.await;
+    }
+    vm_call_llm_full_single_route(opts).await
+}
+
+/// Execute exactly one provider/model route. Observability calls this primitive
+/// after it has established the physical-attempt span; routing calls back into
+/// observability with `routing_policy` cleared on each link.
+pub(crate) async fn vm_call_llm_full_single_route(
+    opts: &LlmCallOptions,
+) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
@@ -155,6 +188,16 @@ pub(crate) async fn vm_call_llm_full_streaming(
     opts: &LlmCallOptions,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
+    if let Some(call) = routed_llm_call(opts, Some(delta_tx.clone())) {
+        return call.await;
+    }
+    vm_call_llm_full_streaming_single_route(opts, delta_tx).await
+}
+
+pub(crate) async fn vm_call_llm_full_streaming_single_route(
+    opts: &LlmCallOptions,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
     let result = vm_call_llm_full_inner(opts, Some(delta_tx)).await?;
     super::cost::record_llm_usage_for_provider(
@@ -169,7 +212,18 @@ pub(crate) async fn vm_call_llm_full_streaming(
 
 /// Execute provider I/O on Tokio's multithreaded scheduler while keeping
 /// VM-local values and transcript assembly on the caller's LocalSet.
+#[cfg(test)]
 pub(crate) async fn vm_call_llm_full_streaming_offthread(
+    opts: &LlmCallOptions,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
+    if let Some(call) = routed_llm_call(opts, Some(delta_tx.clone())) {
+        return call.await;
+    }
+    vm_call_llm_full_streaming_offthread_single_route(opts, delta_tx).await
+}
+
+pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
     opts: &LlmCallOptions,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
@@ -295,13 +349,10 @@ async fn vm_call_llm_full_inner_request(
     super::ensure_real_llm_allowed(&request.provider)?;
     request.emit_reminder_lifecycle();
 
-    let result = match vm_call_llm_api(request, delta_tx).await {
-        Ok(result) => result,
-        Err(primary_error) => match try_fallback_provider(request).await {
-            Some(result) => result,
-            None => return Err(primary_error),
-        },
-    };
+    // Provider/model failover is owned by `routing::execute_with_routing`.
+    // This layer executes exactly one route so no attempt can bypass the
+    // canonical ledger, quarantine, or exhaustion contract.
+    let result = vm_call_llm_api(request, delta_tx).await?;
 
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
@@ -355,22 +406,11 @@ async fn vm_call_llm_full_inner_offthread(
 
     super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
 
-    let primary_error = match vm_call_llm_api(request, delta_tx).await {
-        Ok(result) => {
-            if replay_mode == LlmReplayMode::Record {
-                save_fixture(&hash, &result);
-            }
-            super::trigger_predicate::note_result(request, &result);
-            record_cli_llm_result(request, &result);
-            return Ok(result);
-        }
-        Err(primary_error) => OffthreadLlmError::from_vm_error(primary_error),
-    };
-
-    let result = match try_fallback_provider(request).await {
-        Some(result) => result,
-        None => return Err(primary_error),
-    };
+    // Keep the off-thread transport primitive single-route as well. The caller
+    // routing executor owns all retries across provider/model alternatives.
+    let result = vm_call_llm_api(request, delta_tx)
+        .await
+        .map_err(OffthreadLlmError::from_vm_error)?;
 
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
@@ -379,66 +419,6 @@ async fn vm_call_llm_full_inner_offthread(
     record_cli_llm_result(request, &result);
 
     Ok(result)
-}
-
-/// Attempt the request on the configured fallback provider.
-async fn try_fallback_provider(request: &LlmRequestPayload) -> Option<LlmResult> {
-    for route in &request.route_fallbacks {
-        if route.provider == request.provider && route.model == request.model {
-            continue;
-        }
-        let Ok(fb_key) = super::resolve_api_key(&route.provider) else {
-            continue;
-        };
-
-        let mut fb_request = request.clone();
-        fb_request.provider = route.provider.clone();
-        fb_request.model = route.model.clone();
-        fb_request.api_key = fb_key;
-        if super::ensure_real_llm_allowed(&fb_request.provider).is_err() {
-            continue;
-        }
-        if let Ok(result) = vm_call_llm_api(&fb_request, None).await {
-            return Some(result);
-        }
-    }
-
-    let mut fallback_providers = Vec::<String>::new();
-    for provider in &request.fallback_chain {
-        if provider != &request.provider && !fallback_providers.contains(provider) {
-            fallback_providers.push(provider.clone());
-        }
-    }
-    if let Some(pdef) = crate::llm_config::provider_config(&request.provider) {
-        if let Some(fallback_provider) = pdef.fallback {
-            if fallback_provider != request.provider
-                && !fallback_providers.contains(&fallback_provider)
-            {
-                fallback_providers.push(fallback_provider);
-            }
-        }
-    }
-    if fallback_providers.is_empty() {
-        return None;
-    }
-
-    for fallback_provider in fallback_providers {
-        let Ok(fb_key) = super::resolve_api_key(&fallback_provider) else {
-            continue;
-        };
-
-        let mut fb_request = request.clone();
-        fb_request.provider = fallback_provider;
-        fb_request.api_key = fb_key;
-        if super::ensure_real_llm_allowed(&fb_request.provider).is_err() {
-            continue;
-        }
-        if let Ok(result) = vm_call_llm_api(&fb_request, None).await {
-            return Some(result);
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -960,6 +940,54 @@ mod tests {
         })
     }
 
+    fn spawn_openai_empty_stub(
+        request_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> LlmStub {
+        spawn_openai_empty_stub_many(request_count, 2)
+    }
+
+    fn spawn_openai_empty_stub_many(
+        request_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        max_requests: usize,
+    ) -> LlmStub {
+        spawn_llm_stub_many(
+            "openai empty stub",
+            max_requests,
+            move |_attempt, stream| {
+                use std::io::{Read, Write};
+                request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = vec![0u8; 16_384];
+                let n = stream.read(&mut buf).expect("read request");
+                let request = String::from_utf8_lossy(&buf[..n]);
+                assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"));
+                let body = r#"{"id":"empty","object":"chat.completion","created":0,"model":"empty-primary","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}"#;
+                let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+            },
+        )
+    }
+
+    fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay.providers.insert(
+            provider.to_string(),
+            crate::llm_config::ProviderDef {
+                base_url: format!("http://{addr}/v1"),
+                auth_style: "none".to_string(),
+                auth_env: crate::llm_config::AuthEnv::None,
+                chat_endpoint: "/chat/completions".to_string(),
+                ..Default::default()
+            },
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+    }
+
     fn spawn_ollama_stub_with_body_capture(
         captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     ) -> LlmStub {
@@ -1205,6 +1233,415 @@ mod tests {
             assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 2);
             assert_eq!(result.text, "retried");
             assert_eq!(deltas.join(""), "retried");
+        });
+    }
+
+    #[test]
+    fn empty_generation_exhausts_primary_then_recovers_on_routed_backup() {
+        use crate::llm::fake::{
+            install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+        };
+
+        let _guard = env_guard();
+        let _allow_llm_transport = allow_stubbed_llm_transport();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = spawn_openai_empty_stub(request_count.clone());
+            install_openai_stub_provider("empty-primary", server.addr());
+            let _fake =
+                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("recovered on backup".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])));
+
+            let mut opts = base_opts("empty-primary");
+            opts.model = "empty-primary-model".to_string();
+            opts.stream = false;
+            let policy = crate::llm::routing::build_transport_failover_policy(
+                &opts.provider,
+                &opts.model,
+                &[super::LlmRouteFallback {
+                    provider: "fake".to_string(),
+                    model: "fake-backup-model".to_string(),
+                }],
+                &[],
+            )
+            .expect("credentialed backup creates routing policy");
+
+            let local = tokio::task::LocalSet::new();
+            let (result, trace) = local
+                .run_until(crate::llm::routing::execute_with_routing(
+                    &policy, opts, None, None,
+                ))
+                .await
+                .expect("empty primary must recover transparently on backup");
+
+            assert_eq!(result.provider, "fake");
+            assert_eq!(result.text, "recovered on backup");
+            assert_eq!(
+                request_count.load(std::sync::atomic::Ordering::SeqCst),
+                2,
+                "primary receives the initial request plus one bounded same-route retry"
+            );
+            assert_eq!(trace.attempts.len(), 2);
+            let primary_error = trace.attempts[0]
+                .error
+                .as_ref()
+                .expect("primary route failure receipt");
+            assert_eq!(primary_error.reason.as_deref(), Some("empty_generation"));
+            assert_eq!(primary_error.attempt_count, Some(2));
+            assert!(matches!(
+                trace.attempts[1].status,
+                crate::llm::routing::AttemptStatus::Succeeded
+            ));
+
+            crate::llm_config::clear_user_overrides();
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn repeated_empty_generations_quarantine_primary_without_a_phantom_request() {
+        use crate::llm::fake::{
+            install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+        };
+
+        let _guard = env_guard();
+        let _allow_llm_transport = allow_stubbed_llm_transport();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = spawn_openai_empty_stub_many(
+                request_count.clone(),
+                2 * crate::llm::rate_limit::UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD as usize,
+            );
+            install_openai_stub_provider("empty-storm-primary", server.addr());
+
+            let mut opts = base_opts("empty-storm-primary");
+            opts.model = "empty-storm-model".to_string();
+            opts.stream = false;
+
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    for _ in 0..crate::llm::rate_limit::UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD {
+                        crate::llm::agent_observe::observed_llm_call(
+                            &opts, None, None, None, false, false, None, None,
+                        )
+                        .await
+                        .expect_err("each terminal empty generation must exhaust its route");
+                    }
+                })
+                .await;
+            let requests_before_quarantine =
+                request_count.load(std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(
+                requests_before_quarantine,
+                2 * crate::llm::rate_limit::UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD as usize,
+                "each admitted route performs one initial request and one bounded retry"
+            );
+
+            let _fake =
+                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("recovered after quarantine".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])));
+            let policy = crate::llm::routing::build_transport_failover_policy(
+                &opts.provider,
+                &opts.model,
+                &[super::LlmRouteFallback {
+                    provider: "fake".to_string(),
+                    model: "fake-after-quarantine".to_string(),
+                }],
+                &[],
+            )
+            .expect("backup creates routing policy");
+            let (result, trace) = local
+                .run_until(crate::llm::routing::execute_with_routing(
+                    &policy, opts, None, None,
+                ))
+                .await
+                .expect("routing must advance past the quarantined primary");
+
+            assert_eq!(result.text, "recovered after quarantine");
+            assert_eq!(result.provider, "fake");
+            assert_eq!(
+                request_count.load(std::sync::atomic::Ordering::SeqCst),
+                requests_before_quarantine,
+                "the quarantined primary must perform zero additional HTTP requests"
+            );
+            let quarantined = trace.attempts.first().expect("primary attempt receipt");
+            let error = quarantined
+                .error
+                .as_ref()
+                .expect("quarantine error receipt");
+            assert_eq!(error.code.as_deref(), Some("route_quarantined"));
+            assert_eq!(error.attempt_count, Some(0));
+            assert!(matches!(
+                trace.attempts[1].status,
+                crate::llm::routing::AttemptStatus::Succeeded
+            ));
+
+            crate::llm_config::clear_user_overrides();
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn empty_generation_without_backup_returns_typed_attempted_chain() {
+        let _guard = env_guard();
+        let _allow_llm_transport = allow_stubbed_llm_transport();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = spawn_openai_empty_stub(request_count.clone());
+            install_openai_stub_provider("empty-alone", server.addr());
+            let mut opts = base_opts("empty-alone");
+            opts.model = "empty-alone-model".to_string();
+            opts.stream = false;
+
+            let local = tokio::task::LocalSet::new();
+            let error = local
+                .run_until(crate::llm::agent_observe::observed_llm_call(
+                    &opts, None, None, None, false, false, None, None,
+                ))
+                .await
+                .expect_err("an empty route with no backup must exhaust");
+
+            assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+            let consumer_error =
+                crate::llm::call::build_llm_error_dict(&error, &opts.provider, &opts.model);
+            let consumer_fields = consumer_error
+                .as_dict()
+                .expect("llm_call consumer error envelope");
+            assert_eq!(
+                consumer_fields
+                    .get("code")
+                    .map(crate::value::VmValue::display),
+                Some("provider_exhausted".to_string()),
+                "llm_call must preserve the dispatch-owned typed error"
+            );
+            assert!(
+                matches!(
+                    consumer_fields.get("attempts"),
+                    Some(crate::value::VmValue::List(attempts)) if attempts.len() == 1
+                ),
+                "llm_call must preserve the complete attempted-route receipt"
+            );
+            let crate::value::VmError::Thrown(crate::value::VmValue::Dict(fields)) = error else {
+                panic!("expected structured provider exhaustion");
+            };
+            assert_eq!(
+                fields.get("code").map(crate::value::VmValue::display),
+                Some("provider_exhausted".to_string())
+            );
+            assert_eq!(
+                fields.get("reason").map(crate::value::VmValue::display),
+                Some("empty_generation".to_string())
+            );
+            assert_eq!(
+                fields
+                    .get("attempt_count")
+                    .and_then(crate::value::VmValue::as_int),
+                Some(2)
+            );
+            let Some(crate::value::VmValue::List(attempts)) = fields.get("attempts") else {
+                panic!("expected attempted route ledger");
+            };
+            assert_eq!(attempts.len(), 1);
+            let attempt = attempts[0].as_dict().expect("attempt receipt");
+            assert_eq!(
+                attempt.get("provider").map(crate::value::VmValue::display),
+                Some("empty-alone".to_string())
+            );
+            assert_eq!(
+                attempt
+                    .get("attempt_count")
+                    .and_then(crate::value::VmValue::as_int),
+                Some(2)
+            );
+            assert!(
+                attempt
+                    .get("duration_ms")
+                    .and_then(crate::value::VmValue::as_int)
+                    .is_some(),
+                "the terminal chain must retain measured route latency"
+            );
+
+            crate::llm_config::clear_user_overrides();
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn direct_vm_call_entrypoint_honors_routing_policy() {
+        use crate::llm::fake::{
+            install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+            crate::llm::agent_observe::push_llm_transcript_dir(
+                transcript_dir.path().to_str().expect("utf8 tempdir"),
+            );
+            let _fake = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::error(
+                        crate::value::ErrorCategory::CircuitOpen,
+                        "primary route unavailable",
+                    ))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("direct entrypoint recovered".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let mut opts = base_opts("fake");
+            opts.model = "fake-primary".to_string();
+            opts.routing_policy = crate::llm::routing::build_transport_failover_policy(
+                &opts.provider,
+                &opts.model,
+                &[super::LlmRouteFallback {
+                    provider: "fake".to_string(),
+                    model: "fake-backup".to_string(),
+                }],
+                &[],
+            );
+
+            let result = vm_call_llm_full(&opts)
+                .await
+                .expect("direct VM caller must use the configured routing chain");
+            crate::llm::agent_observe::pop_llm_transcript_dir();
+            assert_eq!(result.text, "direct entrypoint recovered");
+            assert_eq!(result.model, "fake-backup");
+
+            let transcript =
+                std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                    .expect("routing transcript");
+            let requests: Vec<serde_json::Value> = transcript
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("valid transcript JSON"))
+                .filter(|event: &serde_json::Value| event["type"] == "provider_call_request")
+                .collect();
+            assert_eq!(
+                requests.len(),
+                2,
+                "each physical route must emit exactly one request; no outer logical-call phantom"
+            );
+            assert_eq!(requests[0]["model"], "fake-primary");
+            assert_eq!(requests[1]["model"], "fake-backup");
+        });
+    }
+
+    #[test]
+    fn routing_stream_fails_over_before_output_and_emits_only_backup_text() {
+        use crate::llm::fake::{
+            install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let _fake = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::error(
+                        crate::value::ErrorCategory::CircuitOpen,
+                        "primary unavailable before output",
+                    ))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("backup only".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let mut opts = base_opts("fake");
+            opts.model = "fake-primary".to_string();
+            opts.routing_policy = crate::llm::routing::build_transport_failover_policy(
+                &opts.provider,
+                &opts.model,
+                &[super::LlmRouteFallback {
+                    provider: "fake".to_string(),
+                    model: "fake-backup".to_string(),
+                }],
+                &[],
+            );
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let result = vm_call_llm_full_streaming(&opts, tx)
+                .await
+                .expect("pre-output failure should recover on backup");
+            let mut deltas = Vec::new();
+            while let Ok(delta) = rx.try_recv() {
+                deltas.push(delta);
+            }
+            assert_eq!(result.text, "backup only");
+            assert_eq!(deltas, vec!["backup only".to_string()]);
+            assert_eq!(crate::llm::fake::fake_llm_captured_calls().len(), 2);
+        });
+    }
+
+    #[test]
+    fn routing_stream_never_splices_backup_after_primary_output() {
+        use crate::llm::fake::{
+            install_fake_llm_script, FakeLlmError, FakeLlmEvent, FakeLlmScript,
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let _fake = install_fake_llm_script(FakeLlmScript::streaming(vec![
+                FakeLlmEvent::Token("partial primary".into()),
+                FakeLlmEvent::Error(FakeLlmError::new(
+                    crate::value::ErrorCategory::TransientNetwork,
+                    "connection reset after response bytes",
+                )),
+            ]));
+            let mut opts = base_opts("fake");
+            opts.model = "fake-primary".to_string();
+            opts.routing_policy = crate::llm::routing::build_transport_failover_policy(
+                &opts.provider,
+                &opts.model,
+                &[super::LlmRouteFallback {
+                    provider: "fake".to_string(),
+                    model: "fake-backup".to_string(),
+                }],
+                &[],
+            );
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            vm_call_llm_full_streaming(&opts, tx)
+                .await
+                .expect_err("a committed primary stream must surface its own failure");
+            let mut deltas = Vec::new();
+            while let Ok(delta) = rx.try_recv() {
+                deltas.push(delta);
+            }
+            assert_eq!(deltas, vec!["partial primary".to_string()]);
+            assert_eq!(
+                crate::llm::fake::fake_llm_captured_calls().len(),
+                1,
+                "no backup call may run after public output commits the primary"
+            );
         });
     }
 

@@ -531,8 +531,6 @@ mod tests {
             region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
             messages: vec![serde_json::json!({
                 "role": "user",
                 "content": "hello",
@@ -587,8 +585,6 @@ mod tests {
             region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
             messages: vec![serde_json::json!({
                 "role": "user",
                 "content": [
@@ -652,8 +648,6 @@ mod tests {
             region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
             messages: vec![serde_json::json!({
                 "role": "user",
                 "content": [
@@ -721,8 +715,6 @@ mod tests {
             region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
             messages: vec![serde_json::json!({
                 "role": "user",
                 "content": [

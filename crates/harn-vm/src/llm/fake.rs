@@ -99,6 +99,9 @@ pub enum FakeLlmEvent {
     /// Pause mid-stream. Like `FakeLlmTurn::Stalled`, this honors
     /// `tokio::time::pause`.
     Stall(Duration),
+    /// Fail after any earlier deltas in this stream have already been sent.
+    /// Models a body read/reset failure after the provider committed output.
+    Error(FakeLlmError),
     /// Finalize the turn with the given stop reason. Optional — when
     /// omitted, the turn ends with `EndTurn` after the last event.
     Done(FakeStopReason),
@@ -426,6 +429,7 @@ async fn play_stream(
                     tokio::time::sleep(duration).await;
                 }
             }
+            FakeLlmEvent::Error(error) => return Err(fake_error_to_vm_error(&error)),
             FakeLlmEvent::Done(reason) => {
                 stop_reason = Some(reason);
                 break;
@@ -504,7 +508,7 @@ fn count_input_tokens(messages: &[serde_json::Value]) -> i64 {
 mod tests {
     use super::*;
     use crate::llm::api::{LlmApiMode, ThinkingConfig};
-    use crate::llm::api::{LlmRequestPayload, LlmRouteFallback, OutputFormat};
+    use crate::llm::api::{LlmRequestPayload, OutputFormat};
 
     fn fake_request() -> LlmRequestPayload {
         LlmRequestPayload {
@@ -513,8 +517,6 @@ mod tests {
             region: None,
             api_key: String::new(),
             api_mode: LlmApiMode::ChatCompletions,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::<LlmRouteFallback>::new(),
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
             system: None,
             max_tokens: 64,

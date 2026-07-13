@@ -2623,8 +2623,6 @@ thinking_modes = ["enabled"]
             region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
             session_id: None,
             messages: vec![json!({"role": "user", "content": "hello"})],
             system: None,

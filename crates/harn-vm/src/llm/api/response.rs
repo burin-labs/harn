@@ -587,11 +587,14 @@ pub(crate) fn parse_openai_responses_response(
 
     let has_blocks = !blocks.is_empty();
     if text.is_empty() && thinking_summary.is_empty() && tool_calls.is_empty() && !has_blocks {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(empty_generation_error(
+            provider,
+            model,
+            json["usage"]["output_tokens"].as_i64(),
             format!(
                 "openai Responses model {model} delivered no content, reasoning, or tool calls"
             ),
-        ))));
+        ));
     }
 
     let usage = &json["usage"];
@@ -717,6 +720,49 @@ pub(crate) fn billed_noncommittal_completion_error(
     ))))
 }
 
+/// Typed provider-empty contract shared by complete and streaming parsers.
+/// Dispatch branches on `code`; `message` is diagnostic and may evolve.
+pub(crate) fn empty_generation_error(
+    provider: &str,
+    model: &str,
+    output_tokens: Option<i64>,
+    message: String,
+) -> VmError {
+    let mut fields = crate::value::DictMap::from_iter([
+        (
+            "category".to_string(),
+            VmValue::String(arcstr::ArcStr::from("server_error")),
+        ),
+        (
+            "code".to_string(),
+            VmValue::String(arcstr::ArcStr::from("empty_generation")),
+        ),
+        (
+            "reason".to_string(),
+            VmValue::String(arcstr::ArcStr::from("empty_generation")),
+        ),
+        (
+            "provider".to_string(),
+            VmValue::String(arcstr::ArcStr::from(provider)),
+        ),
+        (
+            "model".to_string(),
+            VmValue::String(arcstr::ArcStr::from(model)),
+        ),
+        (
+            "message".to_string(),
+            VmValue::String(arcstr::ArcStr::from(message)),
+        ),
+    ]);
+    if let Some(tokens) = output_tokens {
+        fields.insert(
+            crate::value::intern_key("output_tokens"),
+            VmValue::Int(tokens),
+        );
+    }
+    VmError::Thrown(VmValue::dict(fields))
+}
+
 /// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
 pub(crate) fn parse_llm_response(
     json: &serde_json::Value,
@@ -825,11 +871,14 @@ pub(crate) fn parse_llm_response(
 
         if text.is_empty() && thinking_text.is_empty() && tool_calls.is_empty() && blocks.is_empty()
         {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(empty_generation_error(
+                provider,
+                model,
+                json["usage"]["output_tokens"].as_i64(),
                 format!(
                     "anthropic-style model {model} delivered no content, reasoning, or tool calls"
                 ),
-            ))));
+            ));
         }
 
         let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
@@ -1058,11 +1107,14 @@ pub(crate) fn parse_llm_response(
             && !has_tool_search_block
             && !billed_length_truncation
         {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(empty_generation_error(
+                provider,
+                model,
+                Some(output_tokens),
                 format!(
-                "openai-compatible model {model} delivered no content, reasoning, or tool calls"
-            ),
-            ))));
+                    "openai-compatible model {model} delivered no content, reasoning, or tool calls"
+                ),
+            ));
         }
         // Deterministic upstream contract-violation backstop. A clean,
         // tool-offered completion that billed output but committed no visible
@@ -1225,6 +1277,8 @@ pub(crate) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use crate::value::{VmError, VmValue};
+
     use super::{
         extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
         is_billed_noncommittal_completion, parse_llm_response, parse_openai_responses_response,
@@ -1765,6 +1819,17 @@ mod tests {
         let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false, false)
             .expect_err("empty provider message must be rejected");
 
+        let VmError::Thrown(VmValue::Dict(fields)) = &error else {
+            panic!("empty generation must be structured: {error:?}");
+        };
+        assert_eq!(
+            fields.get("code").map(VmValue::display).as_deref(),
+            Some("empty_generation")
+        );
+        assert_eq!(
+            fields.get("output_tokens").and_then(VmValue::as_int),
+            Some(0)
+        );
         assert!(error.to_string().contains("delivered no content"));
     }
 

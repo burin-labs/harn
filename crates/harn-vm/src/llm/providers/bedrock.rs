@@ -1019,8 +1019,6 @@ aws_secret_access_key = dev-secret
             region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
             messages: vec![json!({"role": "user", "content": "hello"})],
             system: Some("be brief".to_string()),
             max_tokens: 32,

@@ -125,10 +125,9 @@ fn test_equivalent_model_with_context(
 
 fn install_equivalent_routes() {
     let mut overlay = ProvidersConfig::default();
-    overlay.providers.insert(
-        "primary".to_string(),
-        test_provider("https://primary.example/v1"),
-    );
+    let mut primary = test_provider("https://primary.example/v1");
+    primary.fallback = Some("backup-b".to_string());
+    overlay.providers.insert("primary".to_string(), primary);
     overlay.providers.insert(
         "backup-a".to_string(),
         test_provider("https://backup-a.example/v1"),
@@ -541,6 +540,18 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
     assert_eq!(opts.route_fallbacks.len(), 1);
     assert_eq!(opts.route_fallbacks[0].provider, "fast");
     assert_eq!(opts.route_fallbacks[0].model, "fast-mid-model");
+    let routing = opts
+        .routing_policy
+        .expect("preference fallbacks lower to the canonical routing executor");
+    let routes: Vec<(&str, &str)> = routing
+        .chain
+        .iter()
+        .map(|link| (link.provider.as_str(), link.model.as_str()))
+        .collect();
+    assert_eq!(
+        routes,
+        vec![("cheap", "cheap-mid-model"), ("fast", "fast-mid-model")]
+    );
     crate::llm_config::clear_user_overrides();
 }
 
@@ -548,7 +559,7 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
 fn equivalent_failover_builds_catalog_backed_routing_policy() {
     install_equivalent_routes();
     let mut failover = crate::value::DictMap::new();
-    failover.insert(crate::value::intern_key("max_routes"), VmValue::Int(2));
+    failover.insert(crate::value::intern_key("max_routes"), VmValue::Int(3));
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
@@ -569,17 +580,41 @@ fn equivalent_failover_builds_catalog_backed_routing_policy() {
     assert_eq!(opts.provider, "primary");
     assert_eq!(opts.model, "primary-model");
     assert_eq!(policy.label, "equivalent_failover(primary:primary-model)");
-    assert_eq!(policy.chain.len(), 2);
+    assert_eq!(policy.chain.len(), 3);
     assert_eq!(policy.chain[0].provider, "primary");
     assert_eq!(policy.chain[0].model, "primary-model");
-    assert_eq!(policy.chain[1].provider, "backup-a");
-    assert_eq!(policy.chain[1].model, "backup-a-model");
-    assert!(policy
-        .chain
-        .iter()
-        .all(|link| link.model != "same-provider-model"));
-    assert_eq!(policy.failover.max_attempts, Some(2));
+    assert_eq!(policy.chain[1].provider, "primary");
+    assert_eq!(policy.chain[1].model, "same-provider-model");
+    assert_eq!(policy.chain[2].provider, "backup-a");
+    assert_eq!(policy.chain[2].model, "backup-a-model");
+    assert_eq!(policy.failover.max_attempts, Some(3));
     assert!(!policy.failover.on_no_dispatch);
+
+    crate::llm_config::clear_user_overrides();
+}
+
+#[test]
+fn provider_config_fallback_fills_only_without_explicit_route_owner() {
+    install_equivalent_routes();
+    let opts = extract_with_options(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("primary")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("primary-model")),
+        ),
+    ]))
+    .expect("options");
+
+    let policy = opts
+        .routing_policy
+        .expect("provider-config fallback lowers to routing");
+    assert_eq!(policy.label, "transport_failover(primary:primary-model)");
+    assert_eq!(policy.chain.len(), 2);
+    assert_eq!(policy.chain[1].provider, "backup-b");
+    assert_eq!(policy.chain[1].model, "primary-model");
 
     crate::llm_config::clear_user_overrides();
 }

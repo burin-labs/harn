@@ -161,6 +161,10 @@ pub enum AgentTraceEvent {
     EmptyCompletionRetry {
         iteration: usize,
         attempt: usize,
+        provider: String,
+        model: String,
+        reason: String,
+        duration_ms: u64,
         error: String,
     },
     /// Emitted when a `models:`/`ladder:` model ladder advances from one rung
