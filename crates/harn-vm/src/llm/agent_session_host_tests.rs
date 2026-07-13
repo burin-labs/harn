@@ -568,7 +568,7 @@ fn native_tool_calls_replay_with_openai_wire_shape() {
 }
 
 #[test]
-fn gpt_oss_harmony_leak_persists_clean_reasoning_and_tool_calls() {
+fn gpt_oss_harmony_leak_persists_clean_tool_call_without_dirty_reasoning() {
     // Guard: the test model must resolve to a native-tools route, or the
     // backstop (which only fires for native-tools models) would no-op and the
     // assertion below would silently pass for the wrong reason.
@@ -612,9 +612,9 @@ fn gpt_oss_harmony_leak_persists_clean_reasoning_and_tool_calls() {
     );
     // The recovered call must be attached as a structured tool call.
     assert_eq!(message["tool_calls"][0]["function"]["name"], "read");
-    // The leaked reasoning trace is preserved privately in `reasoning`, not in
-    // `content`, so it is available for transcripts but stripped from the wire.
-    assert_eq!(message["reasoning"], json!(dirty));
+    // The provider did not supply a distinct reasoning field, so the dirty
+    // content blob is not promoted into reasoning either.
+    assert!(message.get("reasoning").is_none());
     // And the dirty blob (incl. the "game the verifier" plan) is gone from the
     // public content surface.
     assert!(
