@@ -54,6 +54,7 @@ GATES=(
   check-run-view-fixtures
   check-provider-catalog
   check-provider-catalog-drift
+  check-source-file-lengths
   check-python-boundary
   check-harn-syntax-sensitive-scans
   check-crate-sibling-versions

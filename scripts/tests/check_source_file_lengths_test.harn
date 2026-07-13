@@ -1,0 +1,286 @@
+import { with_temp_dir } from "std/testing"
+import "../check_source_file_lengths.harn"
+
+fn mkdirs(path: string) -> nil {
+  if path == "" || path == "." || harness.fs.exists(path) {
+    return nil
+  }
+  const parent = dirname(path) ?? ""
+  if parent != "" && parent != path {
+    mkdirs(parent)
+  }
+  harness.fs.mkdir(path)
+  return nil
+}
+
+fn write_text(root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(dirname(path) ?? root)
+  harness.fs.write_text(path, text)
+  return nil
+}
+
+fn source_text(lines: int) -> string {
+  return "source line\n".repeat(lines)
+}
+
+fn write_source(root: string, rel: string, lines: int) -> nil {
+  write_text(root, rel, source_text(lines))
+  return nil
+}
+
+fn write_baseline(root: string, source_path: string, lines: int) -> nil {
+  write_text(root, baseline_path_for(source_path), to_string(lines) + "\n")
+  return nil
+}
+
+fn finding_kinds(findings: list<SourceLengthFinding>) -> list<string> {
+  return findings.map({ finding -> finding.kind }).to_list()
+}
+
+@test
+pipeline test_logical_line_count_handles_final_lines_and_crlf(task) {
+  assert_eq(logical_line_count(""), 0)
+  assert_eq(logical_line_count("one"), 1)
+  assert_eq(logical_line_count("one\n"), 1)
+  assert_eq(logical_line_count("one\ntwo"), 2)
+  assert_eq(logical_line_count("one\ntwo\n"), 2)
+  assert_eq(logical_line_count("one\r\ntwo\r\n"), 2)
+}
+
+@test
+pipeline test_cap_and_new_oversized_source_rules(task) {
+  const at_cap = [{path: "crates/example/src/cap.rs", lines: 1500}]
+  assert_eq(evaluate_inventory(at_cap, []).count, 0)
+  const findings = evaluate_inventory([{path: "crates/example/src/large.rs", lines: 1501}], [])
+  assert_eq(findings.count, 1)
+  assert_eq(findings[0]?.kind, "new_oversized_source")
+  assert_eq(findings[0]?.actual, 1501)
+}
+
+@test
+pipeline test_exact_grandfathered_count_passes_and_growth_fails(task) {
+  const baseline = [
+    {
+      kind: "valid",
+      shard_path: baseline_path_for("crates/example/src/lib.rs"),
+      source_path: "crates/example/src/lib.rs",
+      lines: 1800,
+    },
+  ]
+  assert_eq(evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1800}], baseline).count, 0)
+  const findings = evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1801}], baseline)
+  assert_eq(findings.count, 1)
+  assert_eq(findings[0]?.kind, "growth")
+  assert_eq(findings[0]?.baseline, 1800)
+}
+
+@test
+pipeline test_shrink_requires_tightening_or_shard_deletion(task) {
+  const baseline = [
+    {
+      kind: "valid",
+      shard_path: baseline_path_for("crates/example/src/lib.rs"),
+      source_path: "crates/example/src/lib.rs",
+      lines: 1800,
+    },
+  ]
+  let findings = evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1700}], baseline)
+  assert_eq(finding_kinds(findings), ["stale_baseline"])
+  findings = evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1500}], baseline)
+  assert_eq(finding_kinds(findings), ["obsolete_baseline"])
+}
+
+@test
+pipeline test_invalid_and_orphan_baselines_fail_closed(task) {
+  const malformed = parse_baseline(baseline_path_for("crates/example/src/malformed.rs"), "not-a-number\n")
+  const under_cap = parse_baseline(baseline_path_for("crates/example/src/under.rs"), "1400\n")
+  const orphan = parse_baseline(baseline_path_for("crates/example/src/orphan.rs"), "1800\n")
+  const empty_path = parse_baseline("scripts/source-file-length-baseline/.lines", "1800\n")
+  const sources = [
+    {path: "crates/example/src/malformed.rs", lines: 1800},
+    {path: "crates/example/src/under.rs", lines: 1800},
+  ]
+  const findings = evaluate_inventory(sources, [malformed, under_cap, orphan, empty_path])
+  assert_eq(
+    findings.map({ finding -> finding.path }).to_list(),
+    [
+      "crates/example/src/malformed.rs",
+      "crates/example/src/orphan.rs",
+      "crates/example/src/under.rs",
+      "scripts/source-file-length-baseline/.lines",
+    ],
+  )
+  assert_eq(
+    finding_kinds(findings),
+    ["malformed_baseline", "orphan_baseline", "invalid_baseline", "malformed_baseline"],
+  )
+}
+
+@test
+pipeline test_baseline_parser_requires_canonical_positive_integer(task) {
+  const path = baseline_path_for("crates/example/src/lib.rs")
+  assert_eq(
+    baseline_path_for("tools\\new.rs"),
+    "scripts/source-file-length-baseline/tools/new.rs.lines",
+  )
+  assert_eq(
+    normalize_source_path("spec\\protocol-artifacts\\generated.rs"),
+    "spec/protocol-artifacts/generated.rs",
+  )
+  assert_eq(parse_baseline(path, "1800\n").lines, 1800)
+  assert_eq(parse_baseline(path, "01800\n").error != nil, true)
+  assert_eq(parse_baseline(path, "1800 trailing\n").error != nil, true)
+  assert_eq(parse_baseline(path, "0\n").error != nil, true)
+  assert_eq(
+    parse_baseline("scripts/source-file-length-baseline/bad.txt", "1800\n").error != nil,
+    true,
+  )
+  assert_eq(parse_baseline("scripts/source-file-length-baseline/.lines", "1800\n").error != nil, true)
+}
+
+@test
+pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
+  with_temp_dir(
+    { root ->
+      write_source(root, "crates/app/src/lib.rs", 1)
+      write_source(root, "crates/app/tests/integration.rs", 1)
+      write_source(root, "crates/app/benches/latency.rs", 1)
+      write_source(root, "perf/src/bin/bench.rs", 1)
+      write_source(root, "tree-sitter-harn/bindings/rust/lib.rs", 1)
+      write_source(root, "tools/new.rs", 1)
+      write_source(root, "spec/protocol-artifacts/harn-protocol.rs", 1)
+      write_source(root, "crates/harn-stdlib/src/stdlib/agent/loop.harn", 1)
+      write_source(root, "crates/harn-stdlib/tests/fixture.harn", 1)
+      write_source(root, "conformance/tests/case.harn", 1)
+      write_source(root, "scripts/helper.harn", 1)
+      write_source(root, "crates/app/target/debug/generated.rs", 1)
+      write_source(root, "tree-sitter-harn/node_modules/pkg/binding.rs", 1)
+      write_text(root, "crates/app/src/not-source.txt", "text\n")
+      assert_eq(
+        source_files(root),
+        [
+          "crates/app/benches/latency.rs",
+          "crates/app/src/lib.rs",
+          "crates/app/tests/integration.rs",
+          "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+          "perf/src/bin/bench.rs",
+          "tools/new.rs",
+          "tree-sitter-harn/bindings/rust/lib.rs",
+        ],
+      )
+    },
+  )
+}
+
+@test
+pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(task) {
+  const sources = [
+    {path: "crates/z/src/lib.rs", lines: 1700},
+    {path: "crates/a/src/lib.rs", lines: 1600},
+    {path: "crates/b/src/lib.rs", lines: 1490},
+    {path: "crates/new/src/lib.rs", lines: 1600},
+  ]
+  const baselines = [
+    {
+      kind: "valid",
+      shard_path: baseline_path_for("crates/z/src/lib.rs"),
+      source_path: "crates/z/src/lib.rs",
+      lines: 1800,
+    },
+    {
+      kind: "valid",
+      shard_path: baseline_path_for("crates/a/src/lib.rs"),
+      source_path: "crates/a/src/lib.rs",
+      lines: 1700,
+    },
+    {
+      kind: "valid",
+      shard_path: baseline_path_for("crates/b/src/lib.rs"),
+      source_path: "crates/b/src/lib.rs",
+      lines: 1600,
+    },
+    {
+      kind: "valid",
+      shard_path: baseline_path_for("crates/orphan/src/lib.rs"),
+      source_path: "crates/orphan/src/lib.rs",
+      lines: 1600,
+    },
+  ]
+  const edits = plan_baseline_update(sources, baselines)
+  assert_eq(
+    edits.map({ edit -> edit.source_path }).to_list(),
+    ["crates/a/src/lib.rs", "crates/b/src/lib.rs", "crates/orphan/src/lib.rs", "crates/z/src/lib.rs"],
+  )
+  assert_eq(edits.map({ edit -> edit.kind }).to_list(), ["write", "delete", "delete", "write"])
+  assert_eq(edits.map({ edit -> edit.lines }).to_list(), [1600, nil, nil, 1700])
+  assert_eq(
+    edits.map({ edit -> edit.source_path }).to_list().contains("crates/new/src/lib.rs"),
+    false,
+  )
+}
+
+@test
+pipeline test_tightening_and_removal_apply_end_to_end(task) {
+  with_temp_dir(
+    { root ->
+      const big = "crates/example/src/big.rs"
+      const small = "crates/example/src/small.rs"
+      write_source(root, big, 1600)
+      write_source(root, small, 20)
+      write_baseline(root, big, 1600)
+      assert_eq(check_source_file_lengths(root).findings.count, 0)
+      write_source(root, big, 1550)
+      const report = check_source_file_lengths(root)
+      assert_eq(finding_kinds(report.findings), ["stale_baseline"])
+      const tighten = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      assert_eq(tighten.count, 1)
+      assert_eq(tighten[0]?.kind, "write")
+      assert_eq(tighten[0]?.lines, 1550)
+      apply_baseline_edits(root, tighten)
+      assert_eq(check_source_file_lengths(root).findings.count, 0)
+      write_source(root, big, 1500)
+      const remove = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      assert_eq(remove.count, 1)
+      assert_eq(remove[0]?.kind, "delete")
+      apply_baseline_edits(root, remove)
+      assert_eq(check_source_file_lengths(root).findings.count, 0)
+    },
+  )
+}
+
+@test
+pipeline test_normal_update_never_grandfathers_or_records_growth(task) {
+  with_temp_dir(
+    { root ->
+      const old = "crates/example/src/old.rs"
+      const added = "crates/example/src/added.rs"
+      write_source(root, old, 1601)
+      write_baseline(root, old, 1600)
+      write_source(root, added, 1501)
+      const edits = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      assert_eq(edits.count, 0)
+      const report = check_source_file_lengths(root)
+      assert_eq(finding_kinds(report.findings), ["new_oversized_source", "growth"])
+      assert_eq(report.findings[0]?.path, added)
+      assert_eq(report.findings[1]?.path, old)
+    },
+  )
+}
+
+@test
+pipeline test_deleted_source_leaves_stale_shard_until_update(task) {
+  with_temp_dir(
+    { root ->
+      const deleted = "crates/example/src/deleted.rs"
+      write_baseline(root, deleted, 1600)
+      const report = check_source_file_lengths(root)
+      assert_eq(finding_kinds(report.findings), ["orphan_baseline"])
+      const edits = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      assert_eq(edits.count, 1)
+      assert_eq(edits[0]?.kind, "delete")
+      apply_baseline_edits(root, edits)
+      assert_eq(check_source_file_lengths(root).findings.count, 0)
+    },
+  )
+}
