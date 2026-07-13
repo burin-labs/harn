@@ -353,14 +353,18 @@ CI can pipe through `jq`.
 
 ```text
 $ harn skill list
-Embedded canonical skills (7):
+Embedded canonical skills (11):
   harn-agent          Agent runtime, supervisor wiring, and tool callers.
+  harn-de-slop        Remove duplicated policy and weak contracts.
   harn-diagnostics    Diagnostic codes, severity rules, suppression hints.
   harn-language       Harn syntax, modules, types, diagnostics, script structure.
   harn-orchestration  Triggers, orchestrator handoffs, parallelism primitives.
+  harn-probe          Evidence-first codebase and runtime investigation.
   harn-providers      Provider catalog, model packs, fallback policy.
+  harn-rules          Rules engine authoring and validation.
   harn-testing        Conformance suite, deterministic test patterns.
   harn-tracing        Transcripts, eval replay, observability surfaces.
+  release-harn        Harn release preparation and shipping.
 
 Run `harn skill get <name>` for one entry's frontmatter.
 Run `harn skill get <name> --full` to include the body.
@@ -372,7 +376,7 @@ same frontmatter fields shown above:
 
 ```bash
 $ harn skill list --json | jq '.data.skills | length'
-7
+11
 ```
 
 ### `harn skill get <name>`

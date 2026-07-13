@@ -129,6 +129,7 @@ impl std::error::Error for SkillDiscoveryError {}
 
 const SOURCES: &[&str] = &[
     include_str!("corpus/harn-agent/SKILL.md"),
+    include_str!("corpus/harn-de-slop/SKILL.md"),
     include_str!("corpus/harn-diagnostics/SKILL.md"),
     include_str!("corpus/harn-language/SKILL.md"),
     include_str!("corpus/harn-orchestration/SKILL.md"),
@@ -386,6 +387,7 @@ mod tests {
             names,
             [
                 "harn-agent",
+                "harn-de-slop",
                 "harn-diagnostics",
                 "harn-language",
                 "harn-orchestration",
@@ -485,6 +487,7 @@ mod tests {
     fn skill_bodies_are_focused_and_not_placeholders() {
         let expectations = [
             ("harn-agent", ["agent_loop", "session id", "approval"]),
+            ("harn-de-slop", ["typed", "structural guard", "rebase"]),
             ("harn-diagnostics", ["diagnostic", "repair", "conformance"]),
             ("harn-language", ["quickref", "type", "conformance"]),
             ("harn-orchestration", ["agent_loop", "workflow", "host"]),
