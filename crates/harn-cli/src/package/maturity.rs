@@ -355,6 +355,9 @@ pub(crate) fn audit_packages_in(
 
     let manifest_aliases: BTreeMap<&String, &Dependency> =
         ctx.manifest.dependencies.iter().collect();
+    let snapshot = (!skip_materialized)
+        .then(|| current_package_snapshot(&ctx))
+        .transpose()?;
 
     for entry in &lock.packages {
         let alias = entry.name.clone();
@@ -383,7 +386,11 @@ pub(crate) fn audit_packages_in(
         }
 
         if matches!(kind, "git" | "registry" | "archive") {
-            if let Err(error) = audit_git_entry_integrity(workspace, entry, skip_materialized) {
+            if let Err(error) = audit_git_entry_integrity(
+                workspace,
+                snapshot.as_ref().map(|snapshot| snapshot.packages_root()),
+                entry,
+            ) {
                 findings.push(AuditFinding {
                     alias: Some(alias.clone()),
                     severity: AuditSeverity::Error,
@@ -392,9 +399,14 @@ pub(crate) fn audit_packages_in(
                 });
             }
             if !skip_materialized {
-                if let Some((expected, actual)) =
-                    detect_manifest_digest_drift(&ctx, entry, workspace)
-                {
+                if let Some((expected, actual)) = detect_manifest_digest_drift(
+                    snapshot
+                        .as_ref()
+                        .expect("materialized audit has snapshot")
+                        .packages_root(),
+                    entry,
+                    workspace,
+                ) {
                     findings.push(AuditFinding {
                         alias: Some(alias.clone()),
                         severity: AuditSeverity::Error,
@@ -653,8 +665,8 @@ fn git_ls_remote_ref(url: &str, refname: &str) -> Result<Option<String>, Package
 
 fn audit_git_entry_integrity(
     workspace: &PackageWorkspace,
+    packages_root: Option<&Path>,
     entry: &LockEntry,
-    skip_materialized: bool,
 ) -> Result<(), PackageError> {
     let Some(commit) = entry.commit.as_deref() else {
         return Err(format!("{} is missing a locked commit", entry.name).into());
@@ -672,8 +684,8 @@ fn audit_git_entry_integrity(
         .into());
     }
     verify_content_hash_or_compute(&cache_dir, expected_hash)?;
-    if !skip_materialized {
-        let workspace_pkg = workspace.manifest_dir().join(PKG_DIR).join(&entry.name);
+    if let Some(packages_root) = packages_root {
+        let workspace_pkg = packages_root.join(&entry.name);
         if workspace_pkg.exists() {
             verify_content_hash_or_compute(&workspace_pkg, expected_hash)?;
         }
@@ -682,12 +694,12 @@ fn audit_git_entry_integrity(
 }
 
 fn detect_manifest_digest_drift(
-    ctx: &ManifestContext,
+    packages_root: &Path,
     entry: &LockEntry,
     workspace: &PackageWorkspace,
 ) -> Option<(String, String)> {
     let expected = entry.manifest_digest.as_deref()?;
-    let materialized = ctx.packages_dir().join(&entry.name);
+    let materialized = packages_root.join(&entry.name);
     let manifest_path = materialized.join(MANIFEST);
     let bytes = fs::read(&manifest_path).ok()?;
     let actual = format!("sha256:{}", sha256_hex(&bytes));

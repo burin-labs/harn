@@ -36,7 +36,7 @@ hardcoded provider logic in core:
 ```toml
 [[providers]]
 id = "acme"
-connector = { harn = ".harn/packages/acme-connector/lib.harn" }
+connector = { harn = "acme-connector/lib" }
 oauth = {
   resource = "https://mcp.example.com/mcp",
   authorization_endpoint = "https://auth.example.com/oauth/authorize",
@@ -53,7 +53,7 @@ package should declare a `setup` table on its `[[providers]]` entry:
 ```toml
 [[providers]]
 id = "acme"
-connector = { harn = ".harn/packages/acme-connector/lib.harn" }
+connector = { harn = "acme-connector/lib" }
 capabilities = ["webhook", "oauth"]
 
 [providers.setup]

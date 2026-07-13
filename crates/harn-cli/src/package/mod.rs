@@ -25,13 +25,13 @@ const LOCK_FILE_VERSION: u32 = 4;
 const REGISTRY_INDEX_VERSION: u32 = 1;
 const PACKAGE_ARCHIVE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const PACKAGE_ARCHIVE_MAX_UNPACKED_BYTES: u64 = 64 * 1024 * 1024;
-const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
 const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 
 pub(crate) mod errors;
 mod extensions;
+mod generations;
 mod lockfile;
 mod manifest;
 mod maturity;
@@ -44,6 +44,7 @@ mod validation;
 pub use errors::{PackageError, PackageResult};
 
 pub use extensions::*;
+pub(crate) use generations::*;
 #[cfg(test)]
 pub use lockfile::add_package;
 pub(crate) use lockfile::*;

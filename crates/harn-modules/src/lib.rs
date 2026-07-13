@@ -1,14 +1,19 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
+use crate::package_imports::{acquire_package_snapshots, resolve_import_path_with_snapshots};
+use crate::package_snapshot::PackageSnapshot;
 use harn_lexer::Span;
 use harn_parser::{BindingPattern, Node, Parser, SNode};
-use serde::Deserialize;
 
 pub mod asset_paths;
 pub mod fingerprint;
+mod package_imports;
+pub mod package_snapshot;
 pub mod personas;
 mod stdlib;
+
+pub use package_imports::resolve_import_path;
 
 /// Kind of symbol that can be exported by a module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,6 +52,8 @@ pub enum WildcardResolution {
 #[derive(Debug, Default)]
 pub struct ModuleGraph {
     modules: HashMap<PathBuf, ModuleInfo>,
+    // Resolved definition/import paths remain valid for the graph lifetime.
+    _package_snapshots: Vec<PackageSnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,12 +162,6 @@ pub struct ModuleImport {
     pub selective_names: Option<Vec<String>>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct PackageManifest {
-    #[serde(default)]
-    exports: HashMap<String, String>,
-}
-
 /// Return the source for a resolved module path.
 ///
 /// Real paths are read from disk. `<std>/<module>` virtual paths are backed by
@@ -196,6 +197,7 @@ fn build_inner(
     files: &[PathBuf],
     parsed_source_targets: Option<&HashSet<PathBuf>>,
 ) -> ModuleGraphBuild {
+    let package_snapshots = acquire_package_snapshots(files);
     let mut modules: HashMap<PathBuf, ModuleInfo> = HashMap::new();
     let mut parsed_sources: HashMap<PathBuf, ParsedModuleSource> = HashMap::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
@@ -214,7 +216,7 @@ fn build_inner(
     // nearly all the parse work is, so the serial-BFS tail on deep import
     // chains does not matter in practice.
     while !wave.is_empty() {
-        let loaded = load_wave(&wave);
+        let loaded = load_wave(&wave, &package_snapshots);
         let mut next_wave: Vec<PathBuf> = Vec::new();
         for (path, (module, parsed)) in wave.drain(..).zip(loaded) {
             let retain_parsed_source =
@@ -254,7 +256,10 @@ fn build_inner(
     }
     resolve_re_exports(&mut modules);
     ModuleGraphBuild {
-        graph: ModuleGraph { modules },
+        graph: ModuleGraph {
+            modules,
+            _package_snapshots: package_snapshots,
+        },
         parsed_sources,
     }
 }
@@ -265,7 +270,10 @@ pub const MODULE_GRAPH_JOBS_ENV: &str = "HARN_MODULE_GRAPH_JOBS";
 
 /// Load one BFS wave of module paths, in parallel when the wave is large
 /// enough to pay for the threads. Results are index-aligned with `paths`.
-fn load_wave(paths: &[PathBuf]) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
+fn load_wave(
+    paths: &[PathBuf],
+    package_snapshots: &[PackageSnapshot],
+) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
     const MIN_PARALLEL_WAVE: usize = 8;
     let configured = std::env::var(MODULE_GRAPH_JOBS_ENV)
         .ok()
@@ -279,7 +287,10 @@ fn load_wave(paths: &[PathBuf]) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)>
         })
         .min(paths.len());
     if workers <= 1 || paths.len() < MIN_PARALLEL_WAVE {
-        return paths.iter().map(|path| load_module(path)).collect();
+        return paths
+            .iter()
+            .map(|path| load_module(path, package_snapshots))
+            .collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let mut produced: Vec<(usize, (ModuleInfo, Option<ParsedModuleSource>))> =
@@ -293,7 +304,7 @@ fn load_wave(paths: &[PathBuf]) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)>
                             let Some(path) = paths.get(index) else {
                                 break;
                             };
-                            local.push((index, load_module(path)));
+                            local.push((index, load_module(path, package_snapshots)));
                         }
                         local
                     })
@@ -348,159 +359,6 @@ fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
             break;
         }
     }
-}
-
-/// Resolve an import string relative to the importing file.
-///
-/// Returns the path as-constructed (not canonicalized) so callers that
-/// compare against their own `PathBuf::join` result get matching values.
-/// The module graph canonicalizes internally via `normalize_path` when
-/// keying modules, so call-site canonicalization is not required for
-/// dedup.
-///
-/// `std/<module>` imports resolve to a virtual path (`<std>/<module>`)
-/// backed by the embedded stdlib sources in [`stdlib`]. This lets the
-/// module graph model stdlib symbols even though they have no on-disk
-/// location.
-pub fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<PathBuf> {
-    if let Some(module) = import_path
-        .strip_prefix("std/")
-        .or_else(|| (import_path == "observability").then_some("observability"))
-    {
-        if stdlib::get_stdlib_source(module).is_some() {
-            return Some(stdlib::stdlib_virtual_path(module));
-        }
-        return None;
-    }
-
-    let base = current_file.parent().unwrap_or(Path::new("."));
-    let mut file_path = base.join(import_path);
-    if !file_path.exists() && file_path.extension().is_none() {
-        file_path.set_extension("harn");
-    }
-    if file_path.exists() {
-        return Some(file_path);
-    }
-
-    if let Some(path) = resolve_package_import(base, import_path) {
-        return Some(path);
-    }
-
-    None
-}
-
-fn resolve_package_import(base: &Path, import_path: &str) -> Option<PathBuf> {
-    for anchor in base.ancestors() {
-        let packages_root = anchor.join(".harn/packages");
-        if !packages_root.is_dir() {
-            if anchor.join(".git").exists() {
-                break;
-            }
-            continue;
-        }
-        if let Some(path) = resolve_from_packages_root(&packages_root, import_path) {
-            return Some(path);
-        }
-        if anchor.join(".git").exists() {
-            break;
-        }
-    }
-    None
-}
-
-fn resolve_from_packages_root(packages_root: &Path, import_path: &str) -> Option<PathBuf> {
-    let safe_import_path = safe_package_relative_path(import_path)?;
-    let package_name = package_name_from_relative_path(&safe_import_path)?;
-    let package_root = packages_root.join(package_name);
-
-    let pkg_path = packages_root.join(&safe_import_path);
-    if let Some(path) = finalize_package_target(&package_root, &pkg_path) {
-        return Some(path);
-    }
-
-    let export_name = export_name_from_relative_path(&safe_import_path)?;
-    let manifest_path = packages_root.join(package_name).join("harn.toml");
-    let manifest = read_package_manifest(&manifest_path)?;
-    let rel_path = manifest.exports.get(export_name)?;
-    let safe_export_path = safe_package_relative_path(rel_path)?;
-    finalize_package_target(&package_root, &package_root.join(safe_export_path))
-}
-
-fn read_package_manifest(path: &Path) -> Option<PackageManifest> {
-    let content = std::fs::read_to_string(path).ok()?;
-    toml::from_str::<PackageManifest>(&content).ok()
-}
-
-fn safe_package_relative_path(raw: &str) -> Option<PathBuf> {
-    if raw.is_empty() || raw.contains('\\') {
-        return None;
-    }
-    let mut out = PathBuf::new();
-    let mut saw_component = false;
-    for component in Path::new(raw).components() {
-        match component {
-            Component::Normal(part) => {
-                saw_component = true;
-                out.push(part);
-            }
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-    saw_component.then_some(out)
-}
-
-fn package_name_from_relative_path(path: &Path) -> Option<&str> {
-    match path.components().next()? {
-        Component::Normal(name) => name.to_str(),
-        _ => None,
-    }
-}
-
-fn export_name_from_relative_path(path: &Path) -> Option<&str> {
-    let mut components = path.components();
-    components.next()?;
-    let rest = components.as_path();
-    if rest.as_os_str().is_empty() {
-        None
-    } else {
-        rest.to_str()
-    }
-}
-
-fn path_is_within(root: &Path, path: &Path) -> bool {
-    let Ok(root) = root.canonicalize() else {
-        return false;
-    };
-    let Ok(path) = path.canonicalize() else {
-        return false;
-    };
-    path == root || path.starts_with(root)
-}
-
-fn target_within_package_root(package_root: &Path, path: PathBuf) -> Option<PathBuf> {
-    path_is_within(package_root, &path).then_some(path)
-}
-
-fn finalize_package_target(package_root: &Path, path: &Path) -> Option<PathBuf> {
-    if path.is_dir() {
-        let lib = path.join("lib.harn");
-        if lib.exists() {
-            return target_within_package_root(package_root, lib);
-        }
-        return target_within_package_root(package_root, path.to_path_buf());
-    }
-    if path.exists() {
-        return target_within_package_root(package_root, path.to_path_buf());
-    }
-    if path.extension().is_none() {
-        let mut with_ext = path.to_path_buf();
-        with_ext.set_extension("harn");
-        if with_ext.exists() {
-            return target_within_package_root(package_root, with_ext);
-        }
-    }
-    None
 }
 
 impl ModuleGraph {
@@ -1117,7 +975,10 @@ pub struct NonExportedImport {
     pub module: String,
 }
 
-fn load_module(path: &Path) -> (ModuleInfo, Option<ParsedModuleSource>) {
+fn load_module(
+    path: &Path,
+    package_snapshots: &[PackageSnapshot],
+) -> (ModuleInfo, Option<ParsedModuleSource>) {
     let Some(source) = read_module_source(path) else {
         return (ModuleInfo::default(), None);
     };
@@ -1152,7 +1013,7 @@ fn load_module(path: &Path) -> (ModuleInfo, Option<ParsedModuleSource>) {
 
     let mut module = ModuleInfo::default();
     for node in &program {
-        collect_module_info(path, node, &mut module);
+        collect_module_info(path, node, &mut module, package_snapshots);
         collect_type_declarations(node, &mut module.type_declarations);
         collect_callable_declarations(node, &mut module.callable_declarations);
     }
@@ -1174,7 +1035,12 @@ fn stdlib_module_from_path(path: &Path) -> Option<&str> {
     s.strip_prefix("<std>/")
 }
 
-fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
+fn collect_module_info(
+    file: &Path,
+    snode: &SNode,
+    module: &mut ModuleInfo,
+    package_snapshots: &[PackageSnapshot],
+) {
     match &snode.node {
         Node::FnDecl {
             name,
@@ -1277,7 +1143,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
             }
         }
         Node::ImportDecl { path, is_pub } => {
-            let import_path = resolve_import_path(file, path);
+            let import_path = resolve_import_path_with_snapshots(file, path, package_snapshots);
             if import_path.is_none() {
                 module.has_unresolved_wildcard_import = true;
             }
@@ -1300,7 +1166,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
             path,
             is_pub,
         } => {
-            let import_path = resolve_import_path(file, path);
+            let import_path = resolve_import_path_with_snapshots(file, path, package_snapshots);
             if import_path.is_none() {
                 module.has_unresolved_selective_import = true;
             }
@@ -1326,7 +1192,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
             });
         }
         Node::AttributedDecl { inner, .. } => {
-            collect_module_info(file, inner, module);
+            collect_module_info(file, inner, module, package_snapshots);
         }
         _ => {}
     }
@@ -1448,6 +1314,39 @@ mod tests {
         let path = dir.join(name);
         fs::write(&path, contents).unwrap();
         path
+    }
+
+    fn package_fixture(root: &Path) -> PathBuf {
+        use crate::package_snapshot::{
+            generation_root, package_current_path, package_publication_lock_path,
+            PackageGenerationManifest, PackageGenerationPointer, GENERATION_LEASE_FILE,
+            GENERATION_LOCK_FILE, GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
+        };
+
+        let generation = "generation-test";
+        let generation_root = generation_root(root, generation);
+        let packages_root = generation_root.join(GENERATION_PACKAGES_DIR);
+        fs::create_dir_all(&packages_root).unwrap();
+        fs::write(generation_root.join(GENERATION_LOCK_FILE), "version = 4\n").unwrap();
+        fs::write(generation_root.join(GENERATION_LEASE_FILE), []).unwrap();
+        let manifest = PackageGenerationManifest::new(
+            generation,
+            crate::package_snapshot::package_lock_digest(b"version = 4\n"),
+        )
+        .unwrap();
+        fs::write(
+            generation_root.join(GENERATION_MANIFEST_FILE),
+            toml::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        let pointer = PackageGenerationPointer::new(generation).unwrap();
+        fs::write(
+            package_current_path(root),
+            toml::to_string_pretty(&pointer).unwrap(),
+        )
+        .unwrap();
+        fs::File::create(package_publication_lock_path(root)).unwrap();
+        packages_root
     }
 
     #[test]
@@ -1786,10 +1685,11 @@ mod tests {
     fn package_export_map_resolves_declared_module() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        let packages = root.join(".harn/packages/acme/runtime");
+        let packages_root = package_fixture(root);
+        let packages = packages_root.join("acme/runtime");
         fs::create_dir_all(&packages).unwrap();
         fs::write(
-            root.join(".harn/packages/acme/harn.toml"),
+            packages_root.join("acme/harn.toml"),
             "[exports]\ncapabilities = \"runtime/capabilities.harn\"\n",
         )
         .unwrap();
@@ -1815,7 +1715,7 @@ mod tests {
     fn package_direct_import_cannot_escape_packages_root() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        fs::create_dir_all(package_fixture(root).join("acme")).unwrap();
         fs::write(root.join("secret.harn"), "pub fn leaked() { 1 }\n").unwrap();
         let entry = write_file(root, "entry.harn", "");
 
@@ -1827,10 +1727,11 @@ mod tests {
     fn package_export_map_cannot_escape_package_root() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        let packages_root = package_fixture(root);
+        fs::create_dir_all(packages_root.join("acme")).unwrap();
         fs::write(root.join("secret.harn"), "pub fn leaked() { 1 }\n").unwrap();
         fs::write(
-            root.join(".harn/packages/acme/harn.toml"),
+            packages_root.join("acme/harn.toml"),
             "[exports]\nleak = \"../../secret.harn\"\n",
         )
         .unwrap();
@@ -1856,11 +1757,11 @@ mod tests {
             "pub fn exported_capability() { 1 }\n",
         )
         .unwrap();
-        fs::create_dir_all(root.join(".harn/packages")).unwrap();
+        let packages_root = package_fixture(root);
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&source, root.join(".harn/packages/acme")).unwrap();
+        std::os::unix::fs::symlink(&source, packages_root.join("acme")).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&source, root.join(".harn/packages/acme")).unwrap();
+        std::os::windows::fs::symlink_dir(&source, packages_root.join("acme")).unwrap();
         let entry = write_file(root, "entry.harn", "");
 
         let resolved = resolve_import_path(&entry, "acme/capabilities")
@@ -1873,15 +1774,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join(".git")).unwrap();
-        fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
-        fs::create_dir_all(root.join(".harn/packages/shared")).unwrap();
+        let packages_root = package_fixture(root);
+        fs::create_dir_all(packages_root.join("acme")).unwrap();
+        fs::create_dir_all(packages_root.join("shared")).unwrap();
         fs::write(
-            root.join(".harn/packages/shared/lib.harn"),
+            packages_root.join("shared/lib.harn"),
             "pub fn shared_helper() { 1 }\n",
         )
         .unwrap();
         fs::write(
-            root.join(".harn/packages/acme/lib.harn"),
+            packages_root.join("acme/lib.harn"),
             "import \"shared\"\npub fn use_shared() { shared_helper() }\n",
         )
         .unwrap();
@@ -1892,7 +1794,7 @@ mod tests {
             .imported_names_for_file(&entry)
             .expect("nested package import should resolve");
         assert!(imported.contains("use_shared"));
-        let acme_path = root.join(".harn/packages/acme/lib.harn");
+        let acme_path = packages_root.join("acme/lib.harn");
         let acme_imports = graph
             .imported_names_for_file(&acme_path)
             .expect("package module imports should resolve");

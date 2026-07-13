@@ -45,10 +45,13 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     validate_handoff_routes(&handoff_routes, &root_manifest)?;
     let mut provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
-    provider_connectors.extend(installed_package_provider_connectors(&ManifestContext {
-        manifest: root_manifest.clone(),
-        dir: manifest_dir.clone(),
-    })?);
+    let package_snapshot = dependency_package_snapshot(&root_manifest, &manifest_dir)?;
+    if let Some(snapshot) = package_snapshot.as_ref() {
+        provider_connectors.extend(installed_package_provider_connectors(
+            snapshot,
+            snapshot.packages_root(),
+        )?);
+    }
     provider_connectors = dedupe_provider_connectors(provider_connectors);
 
     Ok(RuntimeExtensions {
@@ -65,13 +68,16 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
 }
 
 fn installed_package_provider_connectors(
-    ctx: &ManifestContext,
+    snapshot: &harn_modules::package_snapshot::PackageSnapshot,
+    packages_dir: &Path,
 ) -> Result<Vec<ResolvedProviderConnectorConfig>, PackageError> {
-    let Some(lock) = LockFile::load(&ctx.lock_path())? else {
-        return Ok(Vec::new());
-    };
+    let lock = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
+        PackageError::Lockfile(format!(
+            "published package generation is missing {}",
+            snapshot.lock_path().display()
+        ))
+    })?;
     let mut providers = Vec::new();
-    let packages_dir = ctx.packages_dir();
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
         let package_dir = packages_dir.join(&entry.name);

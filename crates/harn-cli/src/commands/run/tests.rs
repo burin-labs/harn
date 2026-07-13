@@ -581,8 +581,8 @@ length: 20,
 /// End-to-end regression for the dependency-package source-dir leak.
 ///
 /// A project whose entry pipeline renders a top-level `@alias/...` asset, WITH
-/// a materialized path-dependency provider connector under
-/// `.harn/packages/<dep>/`, is run the way a user runs it: `cd project && harn
+/// a materialized path-dependency provider connector in the current package
+/// generation, is run the way a user runs it: `cd project && harn
 /// run main.harn` (a bare filename, so the entry path has an empty parent).
 ///
 /// `harn run` startup loads the dependency's provider-connector contract to
@@ -590,7 +590,7 @@ length: 20,
 /// dir into the caller's resting thread-local, so the entry pipeline's first
 /// `render("@promptdir/...")` resolved against the dependency's `harn.toml`
 /// (which lacks the alias) and threw `asset alias 'promptdir' is not defined in
-/// [asset_roots] of .../.harn/packages/dep-connector/harn.toml`.
+/// [asset_roots] of the dependency generation's `dep-connector/harn.toml`.
 ///
 /// Red before the fix (exit 1 + asset-alias error), green after (exit 0): the
 /// entry asset resolves against the PROJECT root even though a `[dependencies]`
@@ -620,7 +620,8 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
     // Materialized path-dependency provider connector. Its own manifest does
     // NOT define the `promptdir` alias, so a leaked source dir surfaces as an
     // asset-alias error anchored on this package's harn.toml.
-    let dep = project.join(".harn").join("packages").join("dep-connector");
+    let dep =
+        crate::package::test_support::create_test_package_generation(project).join("dep-connector");
     std::fs::create_dir_all(dep.join("src")).expect("dep src dir");
     std::fs::write(
         dep.join("harn.toml"),
@@ -636,7 +637,7 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
     // Lockfile so `harn run` startup loads the installed provider connector.
     std::fs::write(
         project.join("harn.lock"),
-        "version = 4\n\n[[package]]\nname = \"dep-connector\"\nsource = \"path+.harn/packages/dep-connector\"\n",
+        "version = 4\n\n[[package]]\nname = \"dep-connector\"\nsource = \"path+file:///tmp/dep-connector\"\n",
     )
     .expect("write lockfile");
 

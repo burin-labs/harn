@@ -309,7 +309,7 @@ surface without adding provider-specific Rust code:
 ```toml
 [[providers]]
 id = "acme"
-connector = { harn = ".harn/packages/acme-connector/lib.harn" }
+connector = { harn = "acme-connector/lib" }
 oauth = {
   resource = "https://api.acme.example/",
   authorization_endpoint = "https://auth.acme.example/oauth/authorize",

@@ -5,7 +5,7 @@
 //! discovery code ([`super::discovery::LayeredDiscovery`]) stacks
 //! multiple sources on top of each other — filesystem walks for
 //! `--skill-dir`, `$HARN_SKILLS_PATH`, `.harn/skills/`, `harn.toml`,
-//! `~/.harn/skills`, `.harn/packages/**/skills`, `/etc/harn/skills`,
+//! `~/.harn/skills`, installed package-generation skills, `/etc/harn/skills`,
 //! `$XDG_CONFIG_HOME/harn/skills`, plus a host-backed source for
 //! bridge-mode runs. Each layer tags every manifest with the layer
 //! label so higher-priority layers can shadow lower ones cleanly and

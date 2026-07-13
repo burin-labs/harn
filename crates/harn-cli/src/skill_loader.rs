@@ -50,6 +50,7 @@ pub struct LoadedSkills {
     #[allow(dead_code)]
     pub discovery: Arc<LayeredDiscovery>,
     fetcher: SkillFetcher,
+    _package_snapshot: Option<harn_modules::package_snapshot::PackageSnapshot>,
 }
 
 const REQUIRE_SIGNED_SKILLS_ENV: &str = "HARN_REQUIRE_SIGNED_SKILLS";
@@ -68,13 +69,20 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
         }
     }
 
-    if let Some(project_root) = inputs
+    let project_root = inputs
         .source_path
         .as_deref()
-        .and_then(harn_vm::stdlib::process::find_project_root)
-    {
+        .and_then(harn_vm::stdlib::process::find_project_root);
+    let package_snapshot = project_root.as_deref().and_then(|project_root| {
+        harn_modules::package_snapshot::PackageSnapshot::acquire(project_root)
+            .ok()
+            .flatten()
+    });
+    if let Some(project_root) = project_root.as_ref() {
         cfg.project_root = Some(project_root.clone());
-        cfg.packages_dir = Some(project_root.join(".harn").join("packages"));
+    }
+    if let Some(snapshot) = package_snapshot.as_ref() {
+        cfg.packages_dir = Some(snapshot.packages_root().to_path_buf());
     }
 
     let resolved = load_skills_config(inputs.source_path.as_deref());
@@ -196,6 +204,7 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
         loader_warnings,
         discovery,
         fetcher,
+        _package_snapshot: package_snapshot,
     }
 }
 
@@ -466,8 +475,8 @@ fn manifest_source_to_vm(entry: &SkillSourceEntry) -> Option<ManifestSource> {
             tag,
             namespace,
         } => {
-            // Git deps are materialized by `harn install` under
-            // `.harn/packages/<name>`. We can't know the name from just
+            // Git deps are materialized by `harn install` in the current
+            // package generation. We can't know the name from just
             // the URL without parsing, and we don't want to re-clone on
             // every `harn run` — so the fs source that covers the
             // installed copy is already layered in via the Package layer
@@ -599,6 +608,37 @@ mod tests {
             !entry.contains_key("body"),
             "startup registry should not eagerly include the full body"
         );
+    }
+
+    #[test]
+    fn dependency_free_project_still_discovers_project_skills() {
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = set_home(home.path());
+        fs::write(
+            tmp.path().join("harn.toml"),
+            "[package]\nname = \"skill-project\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        write_skill(
+            &tmp.path().join(".harn/skills"),
+            "review",
+            "review",
+            "Review the project",
+        );
+        let source = tmp.path().join("main.harn");
+        fs::write(&source, "pipeline main(_task) { return nil }\n").unwrap();
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![],
+            source_path: Some(source),
+        });
+
+        assert!(loaded._package_snapshot.is_none());
+        assert_eq!(loaded.report.winners.len(), 1);
+        assert_eq!(loaded.report.winners[0].id, "review");
+        assert_eq!(loaded.report.winners[0].layer, Layer::Project);
     }
 
     #[test]

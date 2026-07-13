@@ -429,7 +429,7 @@ harn test package --evals
 ```
 
 After `harn install`, this also includes eval packs declared by installed
-dependency packages under `.harn/packages/<alias>/`. Dependency eval packs are
+dependency packages in the leased current generation. Dependency eval packs are
 passive until this command or a root `eval_pack://...` trigger references them.
 
 `[package].evals` is optional when the package root contains

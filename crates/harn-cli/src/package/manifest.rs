@@ -999,13 +999,7 @@ impl Dependency {
 }
 
 pub(crate) fn validate_package_alias(alias: &str) -> Result<(), PackageError> {
-    let valid = !alias.is_empty()
-        && alias != "."
-        && alias != ".."
-        && alias
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'));
-    if valid {
+    if harn_modules::package_snapshot::is_valid_package_name(alias) {
         Ok(())
     } else {
         Err(PackageError::Validation(format!(
@@ -1611,11 +1605,17 @@ fn eval_pack_paths_from_manifest(
 }
 
 fn installed_package_eval_pack_paths(ctx: &ManifestContext) -> Result<Vec<PathBuf>, PackageError> {
-    let Some(lock) = LockFile::load(&ctx.lock_path())? else {
+    let Some(snapshot) = dependency_package_snapshot(&ctx.manifest, &ctx.dir)? else {
         return Ok(Vec::new());
     };
+    let lock = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
+        PackageError::Lockfile(format!(
+            "published package generation is missing {}",
+            snapshot.lock_path().display()
+        ))
+    })?;
     let mut paths = Vec::new();
-    let packages_dir = ctx.packages_dir();
+    let packages_dir = snapshot.packages_root();
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
         let package_dir = packages_dir.join(&entry.name);
@@ -1653,10 +1653,6 @@ impl ManifestContext {
 
     pub(crate) fn lock_path(&self) -> PathBuf {
         self.dir.join(LOCK_FILE)
-    }
-
-    pub(crate) fn packages_dir(&self) -> PathBuf {
-        self.dir.join(PKG_DIR)
     }
 }
 
@@ -1785,7 +1781,7 @@ impl PackageWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::test_support::TestWorkspace;
+    use crate::package::test_support::{current_packages_dir, TestWorkspace};
 
     #[test]
     fn rules_table_parses_camel_and_kebab_dir_keys() {
@@ -1861,6 +1857,10 @@ fast_mode = true
         let paths = load_package_eval_pack_paths(Some(&root.join("src/main.harn"))).unwrap();
 
         assert_eq!(paths, vec![root.join("evals/webhook.toml")]);
+        assert!(
+            !root.join(".harn").exists(),
+            "loading project eval packs without dependencies must remain read-only"
+        );
     }
 
     #[test]
@@ -1973,8 +1973,7 @@ helper-lib = {{ path = {} }}
         let paths = load_package_eval_pack_paths(Some(&root.join("src/main.harn"))).unwrap();
         assert_eq!(
             paths,
-            vec![root
-                .join(PKG_DIR)
+            vec![current_packages_dir(root)
                 .join("coding-pack")
                 .join("evals/coding.toml")]
         );

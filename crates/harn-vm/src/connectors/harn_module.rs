@@ -871,7 +871,7 @@ async fn load_module_runtime(
 ) -> Result<(Vm, BTreeMap<String, Arc<VmClosure>>), ConnectorError> {
     // `set_source_dir` writes the *shared* thread-local source dir. This
     // connector module lives outside the caller's project (e.g. under
-    // `<project>/.harn/packages/<dep>/`), so leaking that write would re-anchor
+    // a dependency package generation), so leaking that write would re-anchor
     // the caller's top-level `render("@alias/...")` / source-relative asset
     // resolution on the dependency's `harn.toml` instead of the project root.
     // Snapshot and restore the thread-local around the load so the isolated
@@ -1871,7 +1871,7 @@ mod tests {
         let before = crate::stdlib::process::source_root_path();
 
         // The connector module lives in a *different* dir, like a materialized
-        // `<project>/.harn/packages/<dep>/` dependency.
+        // dependency package generation.
         let (_dir, module_path) = write_connector(
             r#"
 pub fn provider_id() { return "webhook" }

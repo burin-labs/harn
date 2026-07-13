@@ -281,7 +281,7 @@ pub(crate) struct PackageCacheCleanArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct PackageCacheVerifyArgs {
-    /// Also verify materialized packages under .harn/packages/.
+    /// Also verify packages in the currently published generation.
     #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
     pub materialized: bool,
 }
@@ -307,7 +307,7 @@ pub(crate) struct PackageAuditArgs {
     /// Override the registry index URL or path used for yanked-version checks.
     #[arg(long, value_name = "URL|PATH")]
     pub registry: Option<String>,
-    /// Skip integrity hashing of materialized packages under .harn/packages/.
+    /// Skip integrity hashing of the currently published package generation.
     #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
     pub skip_materialized: bool,
     /// Emit JSON instead of a human-readable report.

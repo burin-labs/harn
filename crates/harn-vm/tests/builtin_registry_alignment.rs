@@ -268,22 +268,30 @@ fn llm_config_builtins_publish_runtime_metadata() {
 #[test]
 fn migrated_stdlib_modules_publish_runtime_metadata() {
     let metadata = harn_vm::stdlib::stdlib_builtin_metadata();
-    let migrated_categories = [
-        ("concurrency", 53usize),
-        ("fs", 23usize),
-        ("io", 35usize),
-        ("tui", 3usize),
-    ];
+    let migrated_categories = ["concurrency", "fs", "io", "tui"];
 
-    for (category, expected_count) in migrated_categories {
+    for category in migrated_categories {
         let entries = metadata
             .iter()
             .filter(|entry| entry.category() == Some(category))
             .collect::<Vec<_>>();
+        let actual_names = entries
+            .iter()
+            .map(|entry| entry.name())
+            .collect::<BTreeSet<_>>();
+        let expected_names = harn_vm::stdlib::macros::ALL_BUILTIN_DEFS
+            .iter()
+            .filter(|def| def.category == Some(category))
+            .filter(|def| !matches!(def.handler, harn_vm::stdlib::macros::VmBuiltinHandler::None))
+            .flat_map(|def| std::iter::once(def.sig.name).chain(def.aliases.iter().copied()))
+            .collect::<BTreeSet<_>>();
+        assert!(
+            !expected_names.is_empty(),
+            "migrated builtin category `{category}` must retain at least one runtime definition"
+        );
         assert_eq!(
-            entries.len(),
-            expected_count,
-            "unexpected builtin count for `{category}` category"
+            actual_names, expected_names,
+            "runtime metadata for `{category}` must match its builtin definitions"
         );
 
         for entry in entries {

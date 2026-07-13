@@ -13,7 +13,7 @@
 //!
 //! Install resolves a git URL or local path into
 //! `.harn/skills-cache/<namespace?>/<name>/` — mirroring
-//! `.harn/packages/` so the filesystem package walker picks it up on
+//! the current package generation so the filesystem package walker finds it on
 //! the next run. `new` scaffolds a SKILL.md + skills directory with
 //! sensible defaults.
 
@@ -397,7 +397,7 @@ fn emit_get_not_found(name: &str, json: bool, corpus: &SkillCorpus) {
 /// project, manifest, user, package, and host layers the same way the
 /// VM does, and reports collisions and shadowing.
 pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
-    let discovery = build_discovery(&args.skill_dir, args.from.as_deref());
+    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
     let report = discovery.build_report();
 
     if args.json {
@@ -489,7 +489,7 @@ pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
 }
 
 pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
-    let discovery = build_discovery(&args.skill_dir, args.from.as_deref());
+    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
     let skill = match discovery.fetch(&args.name) {
         Ok(skill) => skill,
         Err(err) => {
@@ -564,7 +564,7 @@ pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
 }
 
 pub(crate) fn run_match(args: &SkillsMatchArgs) {
-    let discovery = build_discovery(&args.skill_dir, args.from.as_deref());
+    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
     let report = discovery.build_report();
     let mut skills: Vec<Skill> = Vec::new();
     for winner in &report.winners {
@@ -812,7 +812,13 @@ struct RankedSkill {
     reason: String,
 }
 
-fn build_discovery(cli_dirs: &[String], from: Option<&str>) -> LayeredDiscovery {
+fn build_discovery(
+    cli_dirs: &[String],
+    from: Option<&str>,
+) -> (
+    LayeredDiscovery,
+    Option<harn_modules::package_snapshot::PackageSnapshot>,
+) {
     let anchor = from
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -830,9 +836,15 @@ fn build_discovery(cli_dirs: &[String], from: Option<&str>) -> LayeredDiscovery 
         }
     }
 
-    if let Some(project_root) = harn_vm::stdlib::process::find_project_root(&anchor) {
-        cfg.project_root = Some(project_root.clone());
-        cfg.packages_dir = Some(project_root.join(".harn").join("packages"));
+    let package_snapshot =
+        harn_vm::stdlib::process::find_project_root(&anchor).and_then(|project_root| {
+            harn_modules::package_snapshot::PackageSnapshot::acquire(&project_root)
+                .ok()
+                .flatten()
+        });
+    if let Some(snapshot) = package_snapshot.as_ref() {
+        cfg.project_root = Some(snapshot.project_root().to_path_buf());
+        cfg.packages_dir = Some(snapshot.packages_root().to_path_buf());
     }
 
     let resolved = load_skills_config(Some(&anchor));
@@ -872,7 +884,7 @@ fn build_discovery(cli_dirs: &[String], from: Option<&str>) -> LayeredDiscovery 
         }
     }
 
-    build_fs_discovery(&cfg, options)
+    (build_fs_discovery(&cfg, options), package_snapshot)
 }
 
 fn manifest_source_to_vm(entry: &SkillSourceEntry) -> Option<ManifestSource> {

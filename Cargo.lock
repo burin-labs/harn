@@ -3308,10 +3308,12 @@ version = "0.10.15"
 dependencies = [
  "blake3",
  "croner",
+ "fs2",
  "harn-lexer",
  "harn-parser",
  "harn-stdlib",
  "serde",
+ "sha2 0.11.0",
  "tempfile",
  "toml",
 ]
@@ -3407,6 +3409,7 @@ dependencies = [
  "globset",
  "harn-clock",
  "harn-hostlib",
+ "harn-modules",
  "harn-parser",
  "harn-session-store",
  "harn-vm",

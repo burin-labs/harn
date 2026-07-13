@@ -48,7 +48,7 @@ order of highest to lowest priority — are:
 | 3 | Project | `.harn/skills/<name>/SKILL.md` walking up from the script | Default for repo-scoped skills |
 | 4 | Manifest | `[skills] paths` + `[[skill.source]]` in harn.toml | Multi-root, shared across siblings |
 | 5 | User | `~/.harn/skills/<name>/SKILL.md` | Personal skills across projects |
-| 6 | Package | `.harn/packages/**/skills/<name>/SKILL.md` | Skills shipped via `[dependencies]` |
+| 6 | Package | current generation `packages/**/skills/<name>/SKILL.md` | Skills shipped via `[dependencies]` |
 | 7 | System | `/etc/harn/skills/` + `$XDG_CONFIG_HOME/harn/skills/` | Managed / enterprise |
 | 8 | Host | Registered via the bridge at runtime | Cloud / embedded hosts |
 
@@ -286,8 +286,8 @@ name = "acme/ops"
 - User and system layer skills are also omitted when they carry a failed
   provenance check; unsigned entries can still load, but executable hook
   frontmatter is only surfaced for verified skills.
-- `[[skill.source]]` entries of type `git` expect their materialized
-  checkout to live under `.harn/packages/<name>/skills/` — run
+- `[[skill.source]]` entries of type `git` expect their materialized checkout
+  under the current package generation's `packages/<name>/skills/` — run
   `harn install` to populate it.
 - `registry` entries are accepted but inert until a Harn Skills
   marketplace exists.
@@ -483,7 +483,7 @@ attract the intended prompts.
 
 Materializes a git ref or local path into `.harn/skills-cache/` so
 the filesystem package walker picks it up on the next run. The
-`.harn/skills-cache/` layout mirrors `.harn/packages/`:
+`.harn/skills-cache/` uses the same package-per-directory shape as a generation's `packages/`:
 
 ```text
 $ harn skill install acme/harn-skills --tag v1.2.0

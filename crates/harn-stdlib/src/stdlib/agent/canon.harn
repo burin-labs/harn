@@ -1,5 +1,5 @@
 import { agent_session_inject_feedback, agent_session_inject_reminder } from "std/agent/state"
-import { find_files, read_json_typed, read_toml } from "std/fs"
+import { read_json_typed, read_toml } from "std/fs"
 import { ext, is_absolute } from "std/path"
 import "std/schema"
 
@@ -339,12 +339,20 @@ fn __canon_manifest_from_installed_packages(project_root_value) -> dict? {
   if root == "" {
     return nil
   }
-  const packages_dir = path_join(root, ".harn", "packages")
-  if !harness.fs.exists(packages_dir) {
+  const snapshot = package_snapshot_open(root)
+  if snapshot == nil {
     return nil
   }
+  defer {
+    package_snapshot_close(snapshot.handle)
+  }
+  const packages_dir = snapshot.packages_root
   let packs = []
-  for manifest_path in find_files(root, ".harn/packages/*/harn.toml").sort() {
+  for package_name in snapshot.packages {
+    const manifest_path = path_join(packages_dir, package_name, "harn.toml")
+    if !harness.fs.exists(manifest_path) {
+      continue
+    }
     const manifest = read_toml(manifest_path, nil)
     if manifest == nil {
       continue
@@ -460,7 +468,7 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
  *   packs | pack_ids: strings or `{id, invariants, title?, predicates?}` dicts
  *   files: file records used for language inference when packs are omitted
  *
- * Default project-local roots are merged with installed `.harn/packages`
+ * Default project-local roots are merged with installed package-generation
  * contributions of kind `harn.canon`. Explicit `canon_root`, `HARN_CANON_ROOT`,
  * and `manifest` values stay authoritative.
  *
