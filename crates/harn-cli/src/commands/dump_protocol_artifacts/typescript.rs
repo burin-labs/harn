@@ -10,10 +10,15 @@ use super::support::*;
 use super::swift::{deprecated_wire_value, deprecation_message, wire_value_property_name};
 use super::values::*;
 
+#[cfg(test)]
 pub(super) fn generate_typescript() -> String {
+    generate_typescript_for_version(env!("CARGO_PKG_VERSION"))
+}
+
+pub(super) fn generate_typescript_for_version(artifact_version: &str) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "typescript");
     out.push_str("export const HARN_PROTOCOL_ARTIFACT_VERSION = ");
-    out.push_str(&json_string_literal(env!("CARGO_PKG_VERSION")));
+    out.push_str(&json_string_literal(artifact_version));
     out.push_str("\n\n");
     for (name, value) in [
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),

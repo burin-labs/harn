@@ -1448,7 +1448,11 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);
         }
         Command::DumpProtocolArtifacts(args) => {
-            commands::dump_protocol_artifacts::run(&args.output_dir, args.check);
+            commands::dump_protocol_artifacts::run(
+                &args.output_dir,
+                args.check,
+                args.artifact_version.as_deref(),
+            );
         }
         Command::ConnectorSchemaCodegen(args) => {
             let code = commands::connector_schema_codegen::run(&args);
