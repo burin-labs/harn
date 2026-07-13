@@ -7,45 +7,10 @@
 //! Rendering lives in `crates/harn-stdlib/src/stdlib/cli/doctor.harn`.
 
 use std::collections::HashSet;
-use std::process::{Command, Output};
 
-fn harn_binary() -> &'static str {
-    env!("CARGO_BIN_EXE_harn")
-}
+mod test_util;
 
-struct SubprocessOutcome {
-    stdout: String,
-    stderr: String,
-    exit_code: i32,
-}
-
-/// Spawn `harn` with a controlled environment. The fixture scrubs
-/// `NO_COLOR` / `HARN_COLOR` so the test owns terminal detection, and
-/// accepts any number of per-test env overrides. It inherits the rest
-/// of the env (PATH, HOME, the user's keyring backend) so toolchain and
-/// credential probes stay representative.
-fn run(argv: &[&str], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
-    let mut cmd = Command::new(harn_binary());
-    for arg in argv {
-        cmd.arg(arg);
-    }
-    for key in ["NO_COLOR", "HARN_COLOR"] {
-        cmd.env_remove(key);
-    }
-    for (k, v) in extra_env {
-        cmd.env(k, v);
-    }
-    let Output {
-        status,
-        stdout,
-        stderr,
-    } = cmd.output().expect("spawn harn");
-    SubprocessOutcome {
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        exit_code: status.code().unwrap_or(-1),
-    }
-}
+use test_util::process::{harn_e2e_command, run_harn_e2e as run};
 
 fn parse_json(s: &str, label: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|err| {
@@ -159,7 +124,7 @@ fn doctor_in_empty_dir_renders_no_manifest_path() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let cwd = tmp.path().to_string_lossy().into_owned();
 
-    let mut cmd = Command::new(harn_binary());
+    let mut cmd = harn_e2e_command();
     cmd.arg("doctor").current_dir(&cwd);
     for key in ["NO_COLOR", "HARN_COLOR"] {
         cmd.env_remove(key);
