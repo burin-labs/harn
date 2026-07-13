@@ -679,9 +679,7 @@ fn config_limiters_from_effective_config() -> HashMap<String, RouteLimiter> {
     limiters
 }
 
-/// Load rate limits from provider/model config and environment variables.
-/// Safe to call multiple times (replaces existing config-derived entries).
-pub(crate) fn init_from_config() {
+fn limiters_from_config_and_runtime_overrides() -> HashMap<String, RouteLimiter> {
     let mut limiters = config_limiters_from_effective_config();
     for (provider, limits) in runtime_overrides()
         .lock()
@@ -690,19 +688,44 @@ pub(crate) fn init_from_config() {
     {
         insert_limiter(&mut limiters, provider_key(provider), limits.clone());
     }
+    limiters
+}
+
+/// Load rate limits from provider/model config and environment variables.
+/// Safe to call multiple times (replaces existing config-derived entries).
+#[allow(
+    dead_code,
+    reason = "explicit reload entry point is distinct from non-destructive lazy initialization"
+)]
+pub(crate) fn init_from_config() {
+    let limiters = limiters_from_config_and_runtime_overrides();
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     registry.limiters = limiters;
     registry.initialized_from_config = true;
 }
 
 fn ensure_initialized_from_config() {
-    let initialized = registry()
+    ensure_initialized_from_config_with(limiters_from_config_and_runtime_overrides);
+}
+
+fn ensure_initialized_from_config_with(
+    build_candidate: impl FnOnce() -> HashMap<String, RouteLimiter>,
+) {
+    if registry()
         .lock()
         .expect("rate limiter mutex poisoned")
-        .initialized_from_config;
-    if !initialized {
-        init_from_config();
+        .initialized_from_config
+    {
+        return;
     }
+
+    let limiters = build_candidate();
+    let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+    if registry.initialized_from_config {
+        return;
+    }
+    registry.limiters = limiters;
+    registry.initialized_from_config = true;
 }
 
 /// Set or update the provider rate limits at runtime.
@@ -1520,6 +1543,86 @@ mod tests {
         assert_eq!(model_limits.input_tpm, Some(300));
         assert_eq!(model_limits.output_tpm, Some(400));
         assert_eq!(model_limits.concurrency, Some(1));
+        reset_test_rate_limit_state();
+    }
+
+    #[test]
+    fn lazy_config_initialization_has_one_winner_and_preserves_live_state() {
+        let _guard = crate::llm::env_guard();
+        reset_test_rate_limit_state();
+        let _queue_limit = EnvVarGuard::set_value("HARN_RATE_LIMIT_QUEUE", "2");
+
+        let candidate_ready = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let resume_stale_initializer = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let stale_initializer = {
+            let candidate_ready = std::sync::Arc::clone(&candidate_ready);
+            let resume_stale_initializer = std::sync::Arc::clone(&resume_stale_initializer);
+            std::thread::spawn(move || {
+                ensure_initialized_from_config_with(|| {
+                    let candidate = limiters_from_config_and_runtime_overrides();
+                    candidate_ready.wait();
+                    resume_stale_initializer.wait();
+                    candidate
+                });
+            })
+        };
+
+        // The spawned caller has observed an uninitialized registry and built
+        // the candidate it would install. Let the main caller win initialization,
+        // then open a live route breaker before the stale caller resumes.
+        candidate_ready.wait();
+        ensure_initialized_from_config();
+        let route_key = provider_key("queue");
+        let now_ms = 1_000;
+        let breaker_was_opened = {
+            let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+            let limiter = registry
+                .limiters
+                .get_mut(&route_key)
+                .expect("winning initializer installed queue route");
+            for _ in 0..UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD {
+                limiter.observe_unproductive_completion(now_ms);
+            }
+            limiter.breaker_block(now_ms).is_some()
+        };
+
+        resume_stale_initializer.wait();
+        stale_initializer
+            .join()
+            .expect("stale initializer thread completed");
+
+        let breaker_survived_stale_initializer = registry()
+            .lock()
+            .expect("rate limiter mutex poisoned")
+            .limiters
+            .get_mut(&route_key)
+            .expect("queue route remains installed")
+            .breaker_block(now_ms)
+            .is_some();
+        assert!(
+            breaker_was_opened,
+            "winning caller must open the live breaker"
+        );
+        assert!(
+            breaker_survived_stale_initializer,
+            "a stale lazy initializer must not replace live route state"
+        );
+
+        // Explicit reload remains destructive by design; only lazy
+        // initialization is single-winner and non-destructive.
+        init_from_config();
+        assert!(
+            registry()
+                .lock()
+                .expect("rate limiter mutex poisoned")
+                .limiters
+                .get_mut(&route_key)
+                .expect("explicit reload reinstalls queue route")
+                .breaker_block(now_ms)
+                .is_none(),
+            "explicit init_from_config must continue to reload route state"
+        );
+
         reset_test_rate_limit_state();
     }
 
