@@ -60,6 +60,22 @@ enum GitDataParser {
     Rebase,
 }
 
+impl GitDataParser {
+    fn requires_utf8_stdout(&self) -> bool {
+        matches!(
+            self,
+            Self::Discover { .. }
+                | Self::Status
+                | Self::Conflicts
+                | Self::MergeBase
+                | Self::TagList
+                | Self::Describe
+                | Self::LsRemote { .. }
+                | Self::Diff
+        )
+    }
+}
+
 pub(crate) fn register_git_builtins(vm: &mut Vm) {
     register_git_namespace(vm);
 
@@ -233,6 +249,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
                     "git".to_string(),
                     "status".to_string(),
                     "--porcelain=v1".to_string(),
+                    "-z".to_string(),
                     "--branch".to_string(),
                 ],
                 mutation: GitMutation::Read,
@@ -255,6 +272,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
                     "git".to_string(),
                     "status".to_string(),
                     "--porcelain=v1".to_string(),
+                    "-z".to_string(),
                 ],
                 mutation: GitMutation::Read,
                 affected_paths: Vec::new(),
@@ -506,7 +524,8 @@ async fn run_git_command(
 
     let approval = enforce_git_approval(ctx, &command).await?;
     let result = exec_argv(&command).await?;
-    let result_json = crate::llm::vm_value_to_json(&result);
+    let mut result_json = crate::llm::vm_value_to_json(&result);
+    fail_closed_on_invalid_structured_output(&command, &mut result_json);
     let status = command_status(&result_json);
     let success = result_json
         .get("success")
@@ -981,7 +1000,11 @@ fn build_receipt(
         "action": command.action,
         "status": status,
         "success": success,
-        "exit_category": exit_category(status_from_result(result), exit_code, success),
+        "exit_category": if result.get("encoding_error").is_some() {
+            "output_encoding"
+        } else {
+            exit_category(status_from_result(result), exit_code, success)
+        },
         "exit_code": exit_code,
         "command_args": command.argv.clone(),
         "argv": command.argv.clone(),
@@ -995,9 +1018,41 @@ fn build_receipt(
         "stderr": output_ref("stderr", stderr),
         "command_policy": result.get("command_policy").cloned().unwrap_or(JsonValue::Null),
         "approval": approval,
+        "encoding_error": result.get("encoding_error").cloned().unwrap_or(JsonValue::Null),
         "data": data,
         "repo": data.get("repo").cloned().unwrap_or(JsonValue::Null),
     })
+}
+
+fn fail_closed_on_invalid_structured_output(command: &GitCommand, result: &mut JsonValue) {
+    if !command.data_parser.requires_utf8_stdout()
+        || result.get("stdout_utf8_valid").and_then(JsonValue::as_bool) != Some(false)
+    {
+        return;
+    }
+
+    let existing_stderr = result
+        .get("stderr")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("")
+        .trim();
+    let message = format!(
+        "{}: stdout contains non-UTF-8 bytes; structured Git data cannot preserve canonical identity",
+        command.operation
+    );
+    let stderr = if existing_stderr.is_empty() {
+        message
+    } else {
+        format!("{existing_stderr}\n{message}")
+    };
+    let Some(fields) = result.as_object_mut() else {
+        return;
+    };
+    fields.insert("success".to_string(), JsonValue::Bool(false));
+    fields.insert("status".to_string(), json!("failed"));
+    fields.insert("stdout".to_string(), json!(""));
+    fields.insert("stderr".to_string(), json!(stderr));
+    fields.insert("encoding_error".to_string(), json!("non_utf8_stdout"));
 }
 
 async fn persist_receipt_and_trust(
@@ -1152,45 +1207,78 @@ fn parse_discover(stdout: &str, input: &str) -> JsonValue {
     })
 }
 
-fn parse_status(stdout: &str) -> JsonValue {
-    let mut branch = JsonValue::Null;
+struct PorcelainStatusEntry<'a> {
+    xy: &'a str,
+    path: &'a str,
+    original_path: Option<&'a str>,
+}
+
+struct PorcelainStatus<'a> {
+    branch: Option<&'a str>,
+    entries: Vec<PorcelainStatusEntry<'a>>,
+}
+
+fn parse_porcelain_status(stdout: &str) -> PorcelainStatus<'_> {
+    let mut branch = None;
     let mut entries = Vec::new();
-    for line in stdout.lines() {
-        if let Some(rest) = line.strip_prefix("## ") {
-            branch = json!(rest);
+    let mut records = stdout.split_terminator('\0');
+    while let Some(record) = records.next() {
+        if let Some(rest) = record.strip_prefix("## ") {
+            branch = Some(rest);
             continue;
         }
-        if line.len() < 3 {
+        if record.len() < 3 {
             continue;
         }
-        let xy = &line[0..2];
-        let path = line[3..].to_string();
-        entries.push(json!({
-            "xy": xy,
-            "index": &xy[0..1],
-            "worktree": &xy[1..2],
-            "path": path,
-            "conflict_kind": conflict_kind(xy),
-        }));
+        let xy = &record[0..2];
+        let original_path = if xy.bytes().any(|status| matches!(status, b'R' | b'C')) {
+            records.next()
+        } else {
+            None
+        };
+        entries.push(PorcelainStatusEntry {
+            xy,
+            path: &record[3..],
+            original_path,
+        });
     }
+    PorcelainStatus { branch, entries }
+}
+
+fn parse_status(stdout: &str) -> JsonValue {
+    let parsed = parse_porcelain_status(stdout);
+    let entries = parsed
+        .entries
+        .iter()
+        .map(|entry| {
+            let xy = entry.xy;
+            json!({
+                "xy": xy,
+                "index": &xy[0..1],
+                "worktree": &xy[1..2],
+                "path": entry.path,
+                "original_path": entry.original_path,
+                "conflict_kind": conflict_kind(xy),
+            })
+        })
+        .collect::<Vec<_>>();
+    let dirty = !entries.is_empty();
     json!({
-        "branch": branch,
+        "branch": parsed.branch,
         "entries": entries,
-        "dirty": !entries.is_empty(),
+        "dirty": dirty,
     })
 }
 
 fn parse_conflicts(stdout: &str) -> JsonValue {
-    let conflicts = stdout
-        .lines()
-        .filter_map(|line| {
-            if line.len() < 3 {
-                return None;
-            }
-            let xy = &line[0..2];
+    let conflicts = parse_porcelain_status(stdout)
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            let xy = entry.xy;
             conflict_kind(xy).map(|kind| {
                 json!({
-                    "path": line[3..].to_string(),
+                    "path": entry.path,
                     "xy": xy,
                     "kind": kind,
                 })

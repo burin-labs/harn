@@ -22,6 +22,7 @@ pub type GitStatusEntry = {
   index: string,
   worktree: string,
   path: string,
+  original_path: string?,
   conflict_kind: string?,
 }
 
@@ -58,6 +59,7 @@ type GitReceipt = {
   stderr: GitOutputRef,
   command_policy: dict?,
   approval: dict?,
+  encoding_error: string?,
   data: dict?,
   repo: GitRepo?,
 }

@@ -1238,6 +1238,8 @@ async fn dispatch_process_exec_after_policy(
     };
     drop(cleanup_registration);
 
+    let stdout_utf8_valid = std::str::from_utf8(&stdout).is_ok();
+    let stderr_utf8_valid = std::str::from_utf8(&stderr).is_ok();
     let stdout = String::from_utf8_lossy(&stdout).to_string();
     let stderr = String::from_utf8_lossy(&stderr).to_string();
     let response = process_exec_response(ProcessExecResponse {
@@ -1250,6 +1252,8 @@ async fn dispatch_process_exec_after_policy(
         status,
         success,
         timed_out,
+        stdout_utf8_valid,
+        stderr_utf8_valid,
     });
     crate::orchestration::run_command_policy_postflight_with_ctx(
         ctx,
@@ -1416,6 +1420,8 @@ struct ProcessExecResponse<'a> {
     status: &'a str,
     success: bool,
     timed_out: bool,
+    stdout_utf8_valid: bool,
+    stderr_utf8_valid: bool,
 }
 
 fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
@@ -1465,6 +1471,14 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.put_str("stdout", response.stdout);
     result.put_str("stderr", response.stderr);
+    result.insert(
+        crate::value::intern_key("stdout_utf8_valid"),
+        VmValue::Bool(response.stdout_utf8_valid),
+    );
+    result.insert(
+        crate::value::intern_key("stderr_utf8_valid"),
+        VmValue::Bool(response.stderr_utf8_valid),
+    );
     result.put_str("combined", combined);
     result.insert(
         crate::value::intern_key("exit_status"),

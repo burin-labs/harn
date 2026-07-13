@@ -55,7 +55,7 @@ async fn git_status_returns_receipt_and_trust_record() {
     crate::event_log::reset_active_event_log();
     crate::stdlib::reset_stdlib_state();
     let repo = init_repo();
-    fs::write(repo.path().join("README.md"), "changed\n").expect("modify readme");
+    git(repo.path(), &["mv", "README.md", "renamed file.md"]);
 
     run_on_local(async {
         let receipt = run_git_command(
@@ -68,6 +68,7 @@ async fn git_status_returns_receipt_and_trust_record() {
                     "git".to_string(),
                     "status".to_string(),
                     "--porcelain=v1".to_string(),
+                    "-z".to_string(),
                     "--branch".to_string(),
                 ],
                 mutation: GitMutation::Read,
@@ -82,7 +83,8 @@ async fn git_status_returns_receipt_and_trust_record() {
         assert_eq!(json["operation"], "git.status");
         assert_eq!(json["success"], true);
         assert_eq!(json["data"]["dirty"], true);
-        assert_eq!(json["data"]["entries"][0]["path"], "README.md");
+        assert_eq!(json["data"]["entries"][0]["path"], "renamed file.md");
+        assert_eq!(json["data"]["entries"][0]["original_path"], "README.md");
 
         let log = active_event_log().expect("git receipt installed event log");
         let records = query_trust_records(
@@ -102,6 +104,111 @@ async fn git_status_returns_receipt_and_trust_record() {
         );
     })
     .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+async fn git_status_fails_closed_on_non_utf8_paths() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    if !require_git() {
+        return;
+    }
+    crate::event_log::reset_active_event_log();
+    crate::stdlib::reset_stdlib_state();
+    let repo = init_repo();
+    let filename = OsString::from_vec(b"invalid-\xff.txt".to_vec());
+    fs::write(repo.path().join(&filename), "content\n").expect("write non-UTF-8 path");
+    let mut add = Command::new("git");
+    add.arg("add")
+        .arg("--")
+        .arg(&filename)
+        .current_dir(repo.path());
+    for name in super::GIT_ENV_OVERRIDES {
+        add.env_remove(name);
+    }
+    assert!(add.status().expect("git add non-UTF-8 path").success());
+
+    run_on_local(async {
+        let receipt = run_git_command(
+            None,
+            GitCommand {
+                operation: "git.status",
+                action: "git.status",
+                cwd: repo.path().to_path_buf(),
+                argv: vec![
+                    "git".to_string(),
+                    "status".to_string(),
+                    "--porcelain=v1".to_string(),
+                    "-z".to_string(),
+                    "--branch".to_string(),
+                ],
+                mutation: GitMutation::Read,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::Status,
+            },
+        )
+        .await
+        .expect("invalid output returns a failure receipt");
+        let json = crate::llm::vm_value_to_json(&receipt);
+        assert_eq!(json["success"], false);
+        assert_eq!(json["status"], "failed");
+        assert_eq!(json["exit_category"], "output_encoding");
+        assert_eq!(json["encoding_error"], "non_utf8_stdout");
+        assert_eq!(json["stdout"]["inline"], "");
+        assert_eq!(json["data"]["entries"], json!([]));
+        assert_eq!(json["data"]["dirty"], false);
+        assert!(json["stderr"]["inline"]
+            .as_str()
+            .is_some_and(|value| value.contains("cannot preserve canonical identity")));
+    })
+    .await;
+}
+
+#[test]
+fn structured_git_output_marks_invalid_utf8_as_a_typed_failure() {
+    let command = GitCommand {
+        operation: "git.status",
+        action: "git.status",
+        cwd: PathBuf::from("."),
+        argv: vec!["git".to_string(), "status".to_string()],
+        mutation: GitMutation::Read,
+        affected_paths: Vec::new(),
+        data_parser: GitDataParser::Status,
+    };
+    let mut result = json!({
+        "success": true,
+        "status": "completed",
+        "exit_code": 0,
+        "stdout": "?? invalid-\u{fffd}.txt\0",
+        "stderr": "",
+        "stdout_utf8_valid": false,
+    });
+
+    fail_closed_on_invalid_structured_output(&command, &mut result);
+
+    assert_eq!(result["success"], false);
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["stdout"], "");
+    assert_eq!(result["encoding_error"], "non_utf8_stdout");
+    assert!(result["stderr"]
+        .as_str()
+        .is_some_and(|value| value.contains("cannot preserve canonical identity")));
+}
+
+#[test]
+fn status_parser_preserves_unquoted_paths_and_rename_sources() {
+    let parsed = parse_status(
+        "## main...origin/main\0R  new name.txt\0old name.txt\0 M line\nbreak.txt\0?? quote\"file.txt\0",
+    );
+    assert_eq!(parsed["branch"], "main...origin/main");
+    assert_eq!(parsed["dirty"], true);
+    assert_eq!(parsed["entries"][0]["path"], "new name.txt");
+    assert_eq!(parsed["entries"][0]["original_path"], "old name.txt");
+    assert_eq!(parsed["entries"][1]["path"], "line\nbreak.txt");
+    assert_eq!(parsed["entries"][1]["original_path"], JsonValue::Null);
+    assert_eq!(parsed["entries"][2]["path"], "quote\"file.txt");
 }
 
 #[tokio::test(flavor = "current_thread")]

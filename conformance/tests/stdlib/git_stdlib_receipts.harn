@@ -30,8 +30,14 @@ pipeline default() {
   const remove: GitReceipt = git.worktree_remove(path_join(root, "missing-worktree"), {force: true})
   __io_println(status.schema == "harn-stdlib-git-receipt-v1")
   __io_println(status.operation == "git.status" && status.success)
-  __io_println(status.data.dirty && status_entry.path == "README.md")
-  __io_println(status_fn.operation == "git.status" && status_fn.data.dirty)
+  __io_println(
+    status.data.dirty && status_entry.path == "README.md" && status_entry.original_path == nil,
+  )
+  __io_println(
+    status_fn.operation == "git.status"
+      && status_fn.data.dirty
+      && status_fn.encoding_error == nil,
+  )
   __io_println(len(records) >= 1 && records[len(records) - 1]?.action == "git.status")
   __io_println(remove.status == "no_op" && remove.data.idempotent)
   const branch = git_current_branch(root)
