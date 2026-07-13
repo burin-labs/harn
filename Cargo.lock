@@ -1675,18 +1675,6 @@ dependencies = [
 
 [[package]]
 name = "cranelift-frontend"
-version = "0.132.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efa2826c80dff1d93b19b3cfbcaf9fae44c78d739a98d146dd5bd89c51e14367"
-dependencies = [
- "cranelift-codegen 0.132.3",
- "log",
- "smallvec",
- "target-lexicon",
-]
-
-[[package]]
-name = "cranelift-frontend"
 version = "0.133.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da4adbf760207fdbbe130f1191cce01cdef66831a9f648b1f39ff2800d126d45"
@@ -3242,7 +3230,7 @@ name = "harn-codegen"
 version = "0.10.15"
 dependencies = [
  "cranelift-codegen 0.132.3",
- "cranelift-frontend 0.132.3",
+ "cranelift-frontend",
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native 0.132.3",
@@ -9304,7 +9292,7 @@ dependencies = [
  "cranelift-codegen 0.133.1",
  "cranelift-control 0.133.1",
  "cranelift-entity 0.133.1",
- "cranelift-frontend 0.133.1",
+ "cranelift-frontend",
  "cranelift-native 0.133.1",
  "gimli",
  "itertools 0.14.0",
