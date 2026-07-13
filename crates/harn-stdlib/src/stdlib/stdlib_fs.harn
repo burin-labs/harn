@@ -4,10 +4,13 @@ import { get_typed_result } from "std/schema"
 
 type WriteDataOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
 
-pub type JsonReadFailureKind = "absent" | "unreadable" | "malformed" | "recursion_limit"
+pub type StructuredDataFormat = "json" | "yaml" | "toml"
 
-pub type JsonReadFailure = {
-  kind: JsonReadFailureKind,
+pub type StructuredReadFailureKind = "absent" | "unreadable" | "malformed" | "recursion_limit"
+
+pub type StructuredReadFailure = {
+  kind: StructuredReadFailureKind,
+  format: StructuredDataFormat,
   path: string,
   detail: string,
   line?: int,
@@ -16,10 +19,13 @@ pub type JsonReadFailure = {
 
 pub type SchemaValidationFailure = {
   kind: "schema_invalid",
+  format: StructuredDataFormat,
   path: string,
   detail: string,
   issues: list<unknown>,
 }
+
+pub type TypedReadResult<T> = Result<T, StructuredReadFailure | SchemaValidationFailure>
 
 fn __fs_norm(path) -> string {
   return replace(path ?? "", "\\", "/")
@@ -34,6 +40,90 @@ fn __fs_with_newline(text, trailing_newline) {
     return text
   }
   return text + "\n"
+}
+
+fn __fs_parse_structured(format: StructuredDataFormat, text: string) -> unknown {
+  if format == "json" {
+    return json_parse(text)
+  }
+  if format == "yaml" {
+    return yaml_parse(text)
+  }
+  return toml_parse(text)
+}
+
+fn __fs_structured_failure(
+  kind: StructuredReadFailureKind,
+  format: StructuredDataFormat,
+  path: string,
+  detail: string,
+  line: int? = nil,
+  column: int? = nil,
+) -> StructuredReadFailure {
+  let failure: StructuredReadFailure = {kind: kind, format: format, path: path, detail: detail}
+  if line != nil {
+    failure = failure + {line: line}
+  }
+  if column != nil {
+    failure = failure + {column: column}
+  }
+  return failure
+}
+
+fn __fs_read_structured_result(path: string, format: StructuredDataFormat) -> Result<unknown, StructuredReadFailure> {
+  const read = harness.fs.read_text_result(path)
+  if !is_ok(read) {
+    const failure = unwrap_err(read)
+    const kind: StructuredReadFailureKind = if failure.kind == "not_found" {
+      "absent"
+    } else {
+      "unreadable"
+    }
+    return Err(__fs_structured_failure(kind, format, path, to_string(failure.message)))
+  }
+  const parsed = try {
+    __fs_parse_structured(format, unwrap(read))
+  }
+  if is_ok(parsed) {
+    return Ok(unwrap(parsed))
+  }
+  const failure = unwrap_err(parsed)
+  return Err(
+    __fs_structured_failure(failure.kind, format, path, failure.message, failure.line, failure.column),
+  )
+}
+
+fn __fs_read_structured_typed_result<T>(
+  path: string,
+  format: StructuredDataFormat,
+  schema: Schema<T>,
+  apply_defaults: bool,
+) -> TypedReadResult<T> {
+  const parsed = __fs_read_structured_result(path, format)
+  if !is_ok(parsed) {
+    return Err(unwrap_err(parsed))
+  }
+  const validated = get_typed_result(unwrap(parsed), schema, apply_defaults)
+  if is_ok(validated) {
+    return Ok(unwrap(validated))
+  }
+  const failure = unwrap_err(validated)
+  return Err(
+    {
+      kind: "schema_invalid",
+      format: format,
+      path: path,
+      detail: failure.message,
+      issues: failure.issues,
+    },
+  )
+}
+
+fn __fs_require_result<T, E>(result: Result<T, E>) -> T {
+  if is_ok(result) {
+    return unwrap(result)
+  }
+  throw unwrap_err(result)
 }
 
 /**
@@ -53,17 +143,13 @@ pub fn ensure_parent_dir(path: string) {
 }
 
 /**
- * Read and parse a required JSON file, throwing a typed `JsonReadFailure`.
+ * Read and parse a required JSON file, throwing a typed `StructuredReadFailure`.
  *
  * @effects: [fs.read]
- * @errors: [JsonReadFailure]
+ * @errors: [StructuredReadFailure]
  */
 pub fn read_json(path: string) -> unknown {
-  const result = read_json_result(path)
-  if is_ok(result) {
-    return unwrap(result)
-  }
-  throw unwrap_err(result)
+  return __fs_require_result(read_json_result(path))
 }
 
 /**
@@ -72,41 +158,8 @@ pub fn read_json(path: string) -> unknown {
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_json_result(path: string) -> Result<unknown, JsonReadFailure> {
-  const read = harness.fs.read_text_result(path)
-  if !is_ok(read) {
-    const failure = unwrap_err(read)
-    return try {
-      throw {
-        kind: if failure.kind == "not_found" {
-          "absent"
-        } else {
-          "unreadable"
-        },
-        path: path,
-        detail: failure.message,
-      }
-    }
-  }
-  const raw = unwrap(read)
-  const parsed = try {
-    json_parse(raw)
-  }
-  if is_ok(parsed) {
-    return try {
-      unwrap(parsed)
-    }
-  }
-  const failure = unwrap_err(parsed)
-  return try {
-    throw {
-      kind: failure.kind,
-      path: path,
-      detail: failure.message,
-      line: failure.line,
-      column: failure.column,
-    }
-  }
+pub fn read_json_result(path: string) -> Result<unknown, StructuredReadFailure> {
+  return __fs_read_structured_result(path, "json")
 }
 
 /**
@@ -115,37 +168,18 @@ pub fn read_json_result(path: string) -> Result<unknown, JsonReadFailure> {
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_json_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> Result<T, JsonReadFailure | SchemaValidationFailure> {
-  const parsed = read_json_result(path)
-  if !is_ok(parsed) {
-    return try {
-      throw unwrap_err(parsed)
-    }
-  }
-  const validated = get_typed_result(unwrap(parsed), schema, apply_defaults)
-  if is_ok(validated) {
-    return try {
-      unwrap(validated)
-    }
-  }
-  const failure = unwrap_err(validated)
-  return try {
-    throw {kind: "schema_invalid", path: path, detail: failure.message, issues: failure.issues}
-  }
+pub fn read_json_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
+  return __fs_read_structured_typed_result(path, "json", schema, apply_defaults)
 }
 
 /**
  * Read, parse, and validate required JSON, throwing the typed failure.
  *
  * @effects: [fs.read]
- * @errors: [JsonReadFailure, SchemaValidationFailure]
+ * @errors: [StructuredReadFailure, SchemaValidationFailure]
  */
 pub fn read_json_typed<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> T {
-  const result = read_json_typed_result(path, schema, apply_defaults)
-  if is_ok(result) {
-    return unwrap(result)
-  }
-  throw unwrap_err(result)
+  return __fs_require_result(read_json_typed_result(path, schema, apply_defaults))
 }
 
 /**
@@ -174,16 +208,41 @@ pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
  * @errors: []
  */
 pub fn read_yaml(path: string, fallback = nil) {
-  if !harness.fs.exists(path) {
-    return fallback
-  }
-  const parsed = try {
-    yaml_parse(harness.fs.read_text(path))
-  }
-  if is_ok(parsed) {
-    return unwrap(parsed)
+  const result = read_yaml_result(path)
+  if is_ok(result) {
+    return unwrap(result)
   }
   return fallback
+}
+
+/**
+ * Read and parse YAML without erasing the owning failure stage.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_yaml_result(path: string) -> Result<unknown, StructuredReadFailure> {
+  return __fs_read_structured_result(path, "yaml")
+}
+
+/**
+ * Read, parse, and validate YAML with one closed Result contract.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_yaml_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
+  return __fs_read_structured_typed_result(path, "yaml", schema, apply_defaults)
+}
+
+/**
+ * Read, parse, and validate required YAML, throwing the typed failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure, SchemaValidationFailure]
+ */
+pub fn read_yaml_typed<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> T {
+  return __fs_require_result(read_yaml_typed_result(path, schema, apply_defaults))
 }
 
 /**
@@ -208,16 +267,41 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
  * @errors: []
  */
 pub fn read_toml(path: string, fallback = nil) {
-  if !harness.fs.exists(path) {
-    return fallback
-  }
-  const parsed = try {
-    toml_parse(harness.fs.read_text(path))
-  }
-  if is_ok(parsed) {
-    return unwrap(parsed)
+  const result = read_toml_result(path)
+  if is_ok(result) {
+    return unwrap(result)
   }
   return fallback
+}
+
+/**
+ * Read and parse TOML without erasing the owning failure stage.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_toml_result(path: string) -> Result<unknown, StructuredReadFailure> {
+  return __fs_read_structured_result(path, "toml")
+}
+
+/**
+ * Read, parse, and validate TOML with one closed Result contract.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_toml_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
+  return __fs_read_structured_typed_result(path, "toml", schema, apply_defaults)
+}
+
+/**
+ * Read, parse, and validate required TOML, throwing the typed failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure, SchemaValidationFailure]
+ */
+pub fn read_toml_typed<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> T {
+  return __fs_require_result(read_toml_typed_result(path, schema, apply_defaults))
 }
 
 /**

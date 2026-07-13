@@ -1,0 +1,247 @@
+import {
+  StructuredDataFormat,
+  StructuredReadFailure,
+  TypedReadResult,
+  read_json,
+  read_json_result,
+  read_json_typed,
+  read_json_typed_result,
+  read_toml_result,
+  read_toml_typed,
+  read_toml_typed_result,
+  read_yaml_result,
+  read_yaml_typed,
+  read_yaml_typed_result,
+  write_json,
+} from "std/fs"
+import "std/schema"
+
+type User = {name: string, role?: string}
+
+type Owner = {name: string, active: bool}
+
+type Settings = {enabled: bool}
+
+type Manifest = {
+  name: string,
+  mode: "strict" | "relaxed",
+  owners: list<Owner>,
+  settings: Settings,
+  retries?: int,
+  note?: string,
+}
+
+type StructuredCase = {
+  format: StructuredDataFormat,
+  extension: string,
+  valid: string,
+  invalid: string,
+  malformed: string,
+}
+
+fn manifest_schema() -> Schema<Manifest> {
+  return schema_closed_object(
+    {
+      name: schema_field(schema_string()),
+      mode: schema_field(schema_enum(["strict", "relaxed"])),
+      owners: schema_field(
+        schema_list(
+          schema_closed_object({name: schema_field(schema_string()), active: schema_field(schema_bool())}),
+        ),
+      ),
+      settings: schema_field(schema_closed_object({enabled: schema_field(schema_bool())})),
+      retries: schema_default(schema_int(), 3),
+      note: schema_field(schema_string(), false),
+    },
+  )
+}
+
+fn read_structured_result(format: StructuredDataFormat, path: string) -> Result<unknown, StructuredReadFailure> {
+  if format == "json" {
+    return read_json_result(path)
+  }
+  if format == "yaml" {
+    return read_yaml_result(path)
+  }
+  return read_toml_result(path)
+}
+
+fn read_manifest_result(
+  format: StructuredDataFormat,
+  path: string,
+  schema: Schema<Manifest>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<Manifest> {
+  if format == "json" {
+    return read_json_typed_result(path, schema, apply_defaults)
+  }
+  if format == "yaml" {
+    return read_yaml_typed_result(path, schema, apply_defaults)
+  }
+  return read_toml_typed_result(path, schema, apply_defaults)
+}
+
+fn read_manifest_required(format: StructuredDataFormat, path: string, schema: Schema<Manifest>) -> Manifest {
+  if format == "json" {
+    return read_json_typed(path, schema)
+  }
+  if format == "yaml" {
+    return read_yaml_typed(path, schema)
+  }
+  return read_toml_typed(path, schema)
+}
+
+pipeline default(task) {
+  const root = path_join(harness.fs.temp_dir(), "harn-fs-structured-results-" + uuid_v7())
+  harness.fs.mkdir(root)
+  const object_path = path_join(root, "object.json")
+  write_json(object_path, {})
+  __io_println(type_of(read_json(object_path)))
+  const array_path = path_join(root, "array.json")
+  harness.fs.write_text(array_path, "[1,2,3]")
+  __io_println(len(unwrap(read_json_result(array_path))))
+  const scalar_path = path_join(root, "scalar.json")
+  harness.fs.write_text(scalar_path, "\"hello\"")
+  __io_println(unwrap(read_json_result(scalar_path)))
+  const number_path = path_join(root, "number.json")
+  harness.fs.write_text(number_path, "42")
+  __io_println(unwrap(read_json_result(number_path)))
+  const bool_path = path_join(root, "bool.json")
+  harness.fs.write_text(bool_path, "true")
+  __io_println(unwrap(read_json_result(bool_path)))
+  const null_path = path_join(root, "null.json")
+  harness.fs.write_text(null_path, "null")
+  const null_result = read_json_result(null_path)
+  __io_println(is_ok(null_result))
+  __io_println(unwrap(null_result) == nil)
+  const absent = read_json_result(path_join(root, "missing.json"))
+  __io_println(unwrap_err(absent).kind)
+  const required_absent = try {
+    read_json(path_join(root, "missing.json"))
+  }
+  __io_println(unwrap_err(required_absent).kind)
+  const directory = read_json_result(root)
+  __io_println(unwrap_err(directory).kind)
+  const malformed_path = path_join(root, "malformed.json")
+  harness.fs.write_text(malformed_path, "{bad")
+  const malformed = unwrap_err(read_json_result(malformed_path))
+  __io_println(malformed.kind)
+  __io_println(malformed.line > 0 && malformed.column > 0)
+  const depth_127_path = path_join(root, "depth-127.json")
+  harness.fs.write_text(depth_127_path, "[".repeat(127) + "0" + "]".repeat(127))
+  __io_println(is_ok(read_json_result(depth_127_path)))
+  const depth_128_path = path_join(root, "depth-128.json")
+  harness.fs.write_text(depth_128_path, "[".repeat(128) + "0" + "]".repeat(128))
+  const too_deep = unwrap_err(read_json_result(depth_128_path))
+  __io_println(too_deep.kind)
+  __io_println(too_deep.line > 0 && too_deep.column > 0)
+  const deep_malformed_path = path_join(root, "deep-malformed.json")
+  harness.fs
+    .write_text(deep_malformed_path, "[".repeat(128) + "x" + "]".repeat(128))
+  const deep_malformed = unwrap_err(read_json_result(deep_malformed_path))
+  __io_println(deep_malformed.kind)
+  const typed_path = path_join(root, "typed.json")
+  harness.fs.write_text(typed_path, "{\"name\":\"Ada\"}")
+  const user_schema = schema_closed_object(
+    {name: schema_field(schema_string()), role: schema_default(schema_string(), "user")},
+  )
+  const typed = read_json_typed_result(typed_path, user_schema, true)
+  __io_println(unwrap(typed).name)
+  __io_println(unwrap(typed).role)
+  const invalid_path = path_join(root, "invalid.json")
+  harness.fs.write_text(invalid_path, "{\"name\":42}")
+  const invalid = unwrap_err(read_json_typed_result(invalid_path, schema_of(User)))
+  __io_println(invalid.kind)
+  __io_println(len(invalid.issues) > 0)
+  const required_invalid = try {
+    read_json_typed(invalid_path, schema_of(User))
+  }
+  __io_println(unwrap_err(required_invalid).kind)
+  const manifest_schema = manifest_schema()
+  const cases: list<StructuredCase> = [
+    {
+      format: "json",
+      extension: "json",
+      valid: "{\"name\":\"Ada\",\"mode\":\"strict\",\"owners\":[{\"name\":\"Lin\",\"active\":true}],\"settings\":{\"enabled\":true}}",
+      invalid: "{\"name\":\"Ada\",\"mode\":\"unsafe\",\"owners\":[{\"name\":\"Lin\",\"active\":true}],\"settings\":{\"enabled\":true,\"extra\":\"no\"}}",
+      malformed: "{bad",
+    },
+    {
+      format: "yaml",
+      extension: "yaml",
+      valid: "name: Ada\nmode: strict\nowners:\n  - name: Lin\n    active: true\nsettings:\n  enabled: true\n",
+      invalid: "name: Ada\nmode: unsafe\nowners:\n  - name: Lin\n    active: true\nsettings:\n  enabled: true\n  extra: no\n",
+      malformed: "name: [\n",
+    },
+    {
+      format: "toml",
+      extension: "toml",
+      valid: "name = \"Ada\"\nmode = \"strict\"\nowners = [{ name = \"Lin\", active = true }]\n[settings]\nenabled = true\n",
+      invalid: "name = \"Ada\"\nmode = \"unsafe\"\nowners = [{ name = \"Lin\", active = true }]\n[settings]\nenabled = true\nextra = \"no\"\n",
+      malformed: "name = [\n",
+    },
+  ]
+  for case in cases {
+    const valid_path = path_join(root, "manifest-valid." + case.extension)
+    harness.fs.write_text(valid_path, case.valid)
+    const manifest = unwrap(read_manifest_result(case.format, valid_path, manifest_schema, true))
+    __io_println(
+      case.format
+        + ":"
+        + manifest.name
+        + ":"
+        + manifest.mode
+        + ":"
+        + manifest.owners[0].name
+        + ":"
+        + to_string(manifest.settings.enabled)
+        + ":"
+        + to_string(manifest.retries)
+        + ":"
+        + (manifest.note ?? "none"),
+    )
+    const invalid_manifest_path = path_join(root, "manifest-invalid." + case.extension)
+    harness.fs.write_text(invalid_manifest_path, case.invalid)
+    const schema_failure = unwrap_err(read_manifest_result(case.format, invalid_manifest_path, manifest_schema))
+    const issue_json = json_stringify(schema_failure.issues)
+    __io_println(
+      schema_failure.format
+        + ":"
+        + schema_failure.kind
+        + ":"
+        + to_string(contains(issue_json, "\"path\":\"mode\""))
+        + ":"
+        + to_string(contains(issue_json, "\"path\":\"settings\""))
+        + ":"
+        + to_string(contains(issue_json, "\"code\":\"schema.validation\"")),
+    )
+    const thrown_schema = try {
+      read_manifest_required(case.format, invalid_manifest_path, manifest_schema)
+    }
+    const thrown_failure = unwrap_err(thrown_schema)
+    __io_println(
+      thrown_failure.format
+        + ":"
+        + thrown_failure.kind
+        + ":"
+        + to_string(thrown_failure.path == invalid_manifest_path),
+    )
+    const absent_failure = unwrap_err(read_structured_result(case.format, path_join(root, "missing." + case.extension)))
+    __io_println(absent_failure.format + ":" + absent_failure.kind)
+    const unreadable_failure = unwrap_err(read_structured_result(case.format, root))
+    __io_println(unreadable_failure.format + ":" + unreadable_failure.kind)
+    const malformed_structured_path = path_join(root, "malformed." + case.extension)
+    harness.fs.write_text(malformed_structured_path, case.malformed)
+    const parse_failure = unwrap_err(read_structured_result(case.format, malformed_structured_path))
+    __io_println(
+      parse_failure.format
+        + ":"
+        + parse_failure.kind
+        + ":"
+        + to_string((parse_failure.line ?? 0) > 0)
+        + ":"
+        + to_string((parse_failure.column ?? 0) > 0),
+    )
+  }
+  harness.fs.delete(root)
+}
