@@ -12,8 +12,29 @@ use crate::types::{
     TerminalError, WaitIdleResult,
 };
 
+#[derive(Default)]
+struct ParserTelemetry {
+    errors: usize,
+}
+
+impl ParserTelemetry {
+    fn record_error(&mut self) {
+        self.errors = self.errors.saturating_add(1);
+    }
+}
+
+impl vt100::Callbacks for ParserTelemetry {
+    fn unhandled_char(&mut self, _: &mut vt100::Screen, _: char) {
+        self.record_error();
+    }
+
+    fn unhandled_control(&mut self, _: &mut vt100::Screen, _: u8) {
+        self.record_error();
+    }
+}
+
 struct TerminalState {
-    parser: vt100::Parser,
+    parser: vt100::Parser<ParserTelemetry>,
     raw: VecDeque<u8>,
     raw_capacity: usize,
     raw_truncated: bool,
@@ -88,7 +109,12 @@ impl TerminalSession {
         let now = Instant::now();
         let shared = Arc::new(SharedState {
             state: Mutex::new(TerminalState {
-                parser: vt100::Parser::new(options.rows, options.cols, 0),
+                parser: vt100::Parser::new_with_callbacks(
+                    options.rows,
+                    options.cols,
+                    0,
+                    ParserTelemetry::default(),
+                ),
                 raw: VecDeque::with_capacity(options.raw_capacity.min(16 * 1024)),
                 raw_capacity: options.raw_capacity,
                 raw_truncated: false,
@@ -226,7 +252,7 @@ impl TerminalSession {
             revision: state.revision,
             bytes_received: state.bytes_received,
             raw_truncated: state.raw_truncated,
-            parser_errors: screen.errors(),
+            parser_errors: state.parser.callbacks().errors,
             reader_error: state.reader_error.clone(),
             status: state.status.clone(),
             cells,
@@ -244,7 +270,7 @@ impl TerminalSession {
             .map_err(|error| TerminalError::Io(error.to_string()))?;
         drop(master);
         let mut state = lock(&self.shared.state)?;
-        state.parser.set_size(rows, columns);
+        state.parser.screen_mut().set_size(rows, columns);
         state.revision = state.revision.saturating_add(1);
         drop(state);
         self.shared.changed.notify_all();
@@ -425,7 +451,7 @@ fn capture_cells(screen: &vt100::Screen, region: CellRegion) -> Vec<CellCapture>
                 cells.push(CellCapture {
                     row,
                     column,
-                    text: cell.contents(),
+                    text: cell.contents().to_owned(),
                     foreground: cell.fgcolor().into(),
                     background: cell.bgcolor().into(),
                     bold: cell.bold(),
