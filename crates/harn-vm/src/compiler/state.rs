@@ -705,8 +705,8 @@ impl Compiler {
                 }
                 let branches = members
                     .iter()
-                    .filter_map(Self::type_expr_to_schema_value)
-                    .collect::<Vec<_>>();
+                    .map(Self::type_expr_to_schema_value)
+                    .collect::<Option<Vec<_>>>()?;
                 if branches.is_empty() {
                     None
                 } else {
@@ -722,8 +722,8 @@ impl Compiler {
                 // value must validate against every branch.
                 let branches = members
                     .iter()
-                    .filter_map(Self::type_expr_to_schema_value)
-                    .collect::<Vec<_>>();
+                    .map(Self::type_expr_to_schema_value)
+                    .collect::<Option<Vec<_>>>()?;
                 if branches.is_empty() {
                     None
                 } else {
