@@ -16,7 +16,8 @@ type GitRepo = {
   input: string,
 }
 
-type GitStatusEntry = {
+/** One path-level row returned by `git_status`. */
+pub type GitStatusEntry = {
   xy: string,
   index: string,
   worktree: string,
@@ -154,7 +155,8 @@ type GitTagListData = {tags: list<string>}
 
 type GitDescribeData = {describe: string, tag: string?, distance: int?, sha: string, dirty: bool}
 
-type GitRemoteRef = {oid: string, ref: string, name: string, peeled: bool}
+/** One remote ref returned by `git_ls_remote`. */
+pub type GitRemoteRef = {oid: string, ref: string, name: string, peeled: bool}
 
 type GitLsRemoteData = {remote: string, refs: list<GitRemoteRef>}
 

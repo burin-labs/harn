@@ -25,11 +25,12 @@ pipeline default() {
   harness.fs.write_text(path_join(root, "README.md"), "changed\n")
   const status: GitReceipt = git.status(root)
   const status_fn: GitStatusReceipt = git_status(root)
+  const status_entry: GitStatusEntry = status_fn.data.entries[0]
   const records: list<TrustRecord> = trust_query({action: "git.status"})
   const remove: GitReceipt = git.worktree_remove(path_join(root, "missing-worktree"), {force: true})
   __io_println(status.schema == "harn-stdlib-git-receipt-v1")
   __io_println(status.operation == "git.status" && status.success)
-  __io_println(status.data.dirty && status.data.entries[0].path == "README.md")
+  __io_println(status.data.dirty && status_entry.path == "README.md")
   __io_println(status_fn.operation == "git.status" && status_fn.data.dirty)
   __io_println(len(records) >= 1 && records[len(records) - 1]?.action == "git.status")
   __io_println(remove.status == "no_op" && remove.data.idempotent)
@@ -69,9 +70,11 @@ pipeline default() {
   run_git(root, ["git", "push", "-u", "origin", "main"])
   run_git(root, ["git", "push", "origin", "v1.0.0"])
   const remote_refs: GitLsRemoteReceipt = git_ls_remote("origin", {repo: root, tags: true, refs: ["refs/tags/v*"]})
+  const remote_ref: GitRemoteRef = remote_refs.data.refs[0]
   __io_println(
     remote_refs.success
       && remote_refs.data.remote == "origin"
+      && remote_ref.name == "refs/tags/v1.0.0"
       && remote_refs.data.refs.any({ row -> row.ref == "refs/tags/v1.0.0" }),
   )
   const pull = git_pull_ff_only(root, "origin", "main", {quiet: true})
