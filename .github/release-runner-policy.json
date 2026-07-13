@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "pricing": {
+    "as_of": "2026-07-13",
+    "source": "https://docs.github.com/en/enterprise-cloud@latest/billing/reference/actions-runner-pricing",
+    "macos_large_usd_per_minute": 0.077
+  },
+  "targets": [
+    {
+      "target": "x86_64-apple-darwin",
+      "release_codegen_units": 16,
+      "use_sccache": "false",
+      "runners": {
+        "warm": "macos-15-intel",
+        "primary": "macos-15-intel",
+        "recovery": "macos-15-intel",
+        "standard": "macos-15-intel",
+        "fast": "macos-15-large"
+      }
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "release_codegen_units": 16,
+      "use_sccache": "false",
+      "runners": {
+        "warm": "macos-latest",
+        "primary": "macos-latest",
+        "recovery": "macos-latest",
+        "standard": "macos-latest",
+        "fast": "macos-15-xlarge"
+      }
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "release_codegen_units": 16,
+      "use_sccache": "true",
+      "runners": {
+        "warm": "ubuntu-latest",
+        "primary": "ubuntu-latest",
+        "recovery": "ubuntu-latest",
+        "standard": "ubuntu-latest",
+        "fast": "ubuntu-latest"
+      }
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "release_codegen_units": 16,
+      "use_sccache": "true",
+      "runners": {
+        "warm": "ubuntu-24.04-arm",
+        "primary": "ubuntu-24.04-arm",
+        "recovery": "ubuntu-24.04-arm",
+        "standard": "ubuntu-24.04-arm",
+        "fast": "ubuntu-24.04-arm"
+      }
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "release_codegen_units": 16,
+      "use_sccache": "false",
+      "runners": {
+        "warm": "windows-latest",
+        "primary": "windows-latest",
+        "recovery": "windows-latest",
+        "standard": "windows-latest",
+        "fast": "windows-latest"
+      }
+    }
+  ]
+}
