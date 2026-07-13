@@ -58,6 +58,8 @@ mod read_command_output;
 mod response;
 mod run_build_command;
 mod run_command;
+pub(crate) use run_command::policy_blocked_response as policy_blocked_run_command_response;
+pub(crate) use run_command::request_is_background as run_command_request_is_background;
 mod run_test;
 mod search;
 mod test_parsers;
@@ -113,7 +115,7 @@ impl HostlibCapability for ToolsCapability {
         );
         registry.register_gated_fn("tools", "hostlib_tools_git", "git", git::run);
 
-        registry.register_gated_fn(
+        registry.register_gated_command_fn(
             "tools",
             "hostlib_tools_run_command",
             "run_command",

@@ -698,7 +698,7 @@ fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> String {
     }
 }
 
-fn sandbox_kind() -> &'static str {
+pub(crate) fn sandbox_kind() -> &'static str {
     if cfg!(target_os = "linux") {
         "landlock"
     } else if cfg!(target_os = "macos") {
@@ -710,7 +710,7 @@ fn sandbox_kind() -> &'static str {
     }
 }
 
-fn sandbox_enforced() -> bool {
+pub(crate) fn sandbox_enforced() -> bool {
     harn_vm::orchestration::current_execution_policy().is_some()
 }
 

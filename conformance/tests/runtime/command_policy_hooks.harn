@@ -1,6 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
+  hostlib_enable("tools:deterministic")
   const root = path_join(harness.fs.temp_dir(), "harn_command_policy_hooks")
   if harness.fs.exists(root) {
     harness.fs.delete(root)
@@ -13,7 +14,7 @@ pipeline default() {
       deny_patterns: ["*policy-deny-marker*"],
       require_approval: ["credential_file_read"],
       pre: { ctx ->
-        let argv = ctx?.request?.argv ?? []
+        const argv = ctx?.request?.argv ?? []
         if len(argv) > 0 && argv[0] == "printf" {
           return {rewrite: {argv: ["printf", "rewritten"]}}
         }
@@ -38,11 +39,27 @@ pipeline default() {
   )
   assert(denied?.status == "blocked", "deny decision returns blocked envelope")
   assert(!harness.fs.exists(marker), "blocked command must not spawn")
+  const hostlib_marker = path_join(root, "hostlib_should_not_spawn")
+  const hostlib_denied = hostlib_tools_run_command(
+    {
+      argv: ["sh", "-c", "echo spawned > \"" + hostlib_marker + "\"; echo policy-deny-marker"],
+      cwd: root,
+    },
+  )
+  assert(hostlib_denied?.status == "blocked", "hostlib command observes the same deny policy")
+  assert(hostlib_denied?.handle_id == nil, "blocked hostlib command does not return a process handle")
+  assert(!harness.fs.exists(hostlib_marker), "blocked hostlib command must not spawn")
   const rewritten = host_call("process.exec", {mode: "argv", argv: ["printf", "original"], cwd: root})
   assert(rewritten?.stdout == "rewritten", "pre-hook rewrite updates argv")
   assert(
     rewritten?.command_policy?.annotation?.annotations?.checked,
     "post-hook annotation is recorded in command audit",
+  )
+  const hostlib_rewritten = hostlib_tools_run_command({argv: ["printf", "original"], cwd: root})
+  assert(hostlib_rewritten?.stdout == "rewritten", "pre-hook rewrite applies to hostlib argv")
+  assert(
+    hostlib_rewritten?.command_policy?.annotation?.annotations?.checked,
+    "post-hook annotation is recorded on the hostlib result",
   )
   harness.fs.write_text(path_join(root, ".env"), "TOKEN=secret\n")
   const approval = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
@@ -51,6 +68,8 @@ pipeline default() {
     "approval risk blocks before spawn without a host approval grant",
   )
   assert(contains(approval?.stderr ?? "", "requires approval"), "approval reason is surfaced")
+  const hostlib_approval = hostlib_tools_run_command({argv: ["cat", path_join(root, ".env")], cwd: root})
+  assert(hostlib_approval?.status == "blocked", "hostlib approval risk blocks before spawn")
   command_policy_pop()
   // ---- Consent gate ----
   // With a `consent` closure configured (the `with_consent` prompt_fn
@@ -101,6 +120,9 @@ pipeline default() {
   assert(refused?.status == "consent_denied", "denied consent yields a consent_denied disposition")
   assert(!harness.fs.exists(deny_marker), "consent-denied command must not spawn")
   assert(contains(refused?.stderr ?? "", "not this time"), "consent denial reason is surfaced")
+  const hostlib_refused = hostlib_tools_run_command({argv: ["cat", path_join(root, ".env")], cwd: root})
+  assert(hostlib_refused?.status == "consent_denied", "hostlib preserves consent-denied status")
+  assert(contains(hostlib_refused?.stderr ?? "", "not this time"), "hostlib surfaces consent reason")
   command_policy_pop()
   // Bool-false shorthand denies too (with_consent prompt_fn parity).
   const bool_deny = command_policy(
@@ -165,6 +187,20 @@ pipeline default() {
     "wrapped catastrophic reason is surfaced",
   )
   assert(atomic_get(floor_asks) == 0, "wrapped catastrophic floor never consults the consent gate")
+  command_policy_pop()
+  const background_marker = path_join(root, "background_should_not_spawn")
+  const background_policy = command_policy({workspace_roots: [root], deny_patterns: ["*background-policy-deny*"]})
+  command_policy_push(background_policy)
+  const background_blocked = hostlib_tools_run_command(
+    {
+      argv: ["sh", "-c", "echo x > \"" + background_marker + "\"; echo background-policy-deny"],
+      cwd: root,
+      background: true,
+    },
+  )
+  assert(background_blocked?.status == "blocked", "background hostlib command is denied before spawn")
+  assert(background_blocked?.handle_id == nil, "denied background command has no process handle")
+  assert(!harness.fs.exists(background_marker), "denied background command never starts")
   command_policy_pop()
   let tools = tool_registry()
   tools = tool_define(
