@@ -1,6 +1,7 @@
 //! Production [`ProcessSpawner`] implementation backed by
 //! `std::process::Command` + `harn_vm::process_sandbox`.
 
+use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Stdio};
 use std::sync::{Arc, LazyLock};
@@ -10,8 +11,8 @@ use std::time::{Duration, Instant};
 use harn_vm::process_sandbox;
 
 use super::handle::{
-    EnvMode, ExitStatus, ProcessCleanupReport, ProcessError, ProcessHandle, ProcessKiller,
-    ProcessSpawner, SpawnSpec, WaitOutcome,
+    EnvMode, ExitStatus, OutputCapture, ProcessCleanupReport, ProcessError, ProcessHandle,
+    ProcessKiller, ProcessSpawner, SpawnSpec, WaitOutcome,
 };
 
 /// Spawner that produces real OS processes via `std::process::Command`.
@@ -119,8 +120,33 @@ impl ProcessSpawner for RealSpawner {
             &cleanup_token,
         );
 
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
+        match &spec.output_capture {
+            OutputCapture::Pipe => {
+                command.stdout(Stdio::piped());
+                command.stderr(Stdio::piped());
+            }
+            OutputCapture::File {
+                stdout_path,
+                stderr_path,
+            } => {
+                let stdout = OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(stdout_path)
+                    .map_err(|error| {
+                        ProcessError::Spawn(format!("open stdout capture: {error}"))
+                    })?;
+                let stderr = OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(stderr_path)
+                    .map_err(|error| {
+                        ProcessError::Spawn(format!("open stderr capture: {error}"))
+                    })?;
+                command.stdout(Stdio::from(stdout));
+                command.stderr(Stdio::from(stderr));
+            }
+        }
         command.stdin(if spec.use_stdin {
             Stdio::piped()
         } else {

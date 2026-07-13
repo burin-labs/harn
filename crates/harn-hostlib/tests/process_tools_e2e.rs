@@ -77,6 +77,10 @@ fn python3() -> Option<String> {
     status.success().then_some(candidate)
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (*map).clone(),
@@ -299,6 +303,31 @@ fn real_run_command_kills_child_when_timeout_elapses() {
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert!(require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "timed_out");
+}
+
+#[test]
+fn real_run_command_file_capture_kills_child_when_timeout_elapses() {
+    let mut capture: harn_vm::value::DictMap = Default::default();
+    capture.insert("transport".into(), vstr("file"));
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "5"]));
+    req.insert("timeout_ms".into(), VmValue::Int(150));
+    req.insert("capture".into(), VmValue::dict(capture));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert!(require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "status"), "timed_out");
+    assert_eq!(require_int(&resp, "exit_code"), -1);
+    assert_eq!(require_str(&resp, "signal"), "SIGKILL");
+    let pid = require_int(&resp, "pid");
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    assert_eq!(require_int(&cleanup, "root_pid"), pid);
+    let pgid = require_int(&resp, "process_group_id");
+    assert!(
+        wait_for_group_death(pgid, std::time::Duration::from_secs(5)),
+        "timed-out file-capture process group {pgid} must be gone"
+    );
 }
 
 #[test]
@@ -750,4 +779,65 @@ print("parent-exit", flush=True)
         !unix_process_exists(descendant_pid),
         "reparented descendant {descendant_pid} must be gone after token cleanup"
     );
+}
+
+#[test]
+fn real_run_command_file_capture_does_not_wait_for_reparented_pipe_holder() {
+    let Some(python) = python3() else {
+        return;
+    };
+    let temp = tempfile::tempdir().expect("pid tempdir");
+    let pid_path = temp.path().join("descendant.pid");
+    let script_path = temp.path().join("parent.py");
+    let _cleanup_guard = PidFileCleanup {
+        path: pid_path.clone(),
+    };
+    let parent = r#"
+import pathlib
+import subprocess
+import sys
+import time
+
+pid_path = sys.argv[1]
+child = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); print('descendant-ready', flush=True); time.sleep(30)"
+subprocess.Popen([sys.executable, "-c", child, pid_path], start_new_session=True)
+for _ in range(100):
+    if pathlib.Path(pid_path).exists():
+        break
+    time.sleep(0.01)
+print("parent-exit", flush=True)
+"#;
+    std::fs::write(&script_path, parent).expect("write parent script");
+
+    let mut capture: harn_vm::value::DictMap = Default::default();
+    capture.insert("transport".into(), vstr("file"));
+    let started = std::time::Instant::now();
+    let mut req = dict();
+    let command = format!(
+        "{} {} {}",
+        shell_quote(&python),
+        shell_quote(&script_path.to_string_lossy()),
+        shell_quote(&pid_path.to_string_lossy())
+    );
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("command".into(), vstr(&command));
+    req.insert("shell_id".into(), vstr("sh"));
+    req.insert("timeout_ms".into(), VmValue::Int(500));
+    req.insert("capture".into(), VmValue::dict(capture));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(8),
+        "file capture should return on direct-child exit, took {:?}",
+        started.elapsed()
+    );
+    assert!(!require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "status"), "completed");
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    let stdout = require_str(&resp, "stdout");
+    assert!(
+        stdout.contains("descendant-ready") && stdout.contains("parent-exit"),
+        "file capture should preserve direct-run output: {stdout:?}"
+    );
+    assert!(resp.get("process_cleanup").is_none());
 }

@@ -235,6 +235,7 @@ pub(crate) fn spawn_long_running_with_options(
         env_mode: options.env_mode,
         use_stdin: false,
         configure_process_group: true,
+        output_capture: process_handle::OutputCapture::Pipe,
     };
     let handle = process_handle::spawn_process(spec)
         .map_err(|e| proc::process_error_to_hostlib(builtin, e))?;

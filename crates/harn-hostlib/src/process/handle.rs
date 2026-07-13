@@ -152,6 +152,22 @@ pub struct SpawnSpec {
     /// Set the child's process group to its own pid (`setpgid(0, 0)`). Used
     /// for long-running handles so the kill-by-pgid path works.
     pub configure_process_group: bool,
+    /// How stdout/stderr should be attached for this child.
+    pub output_capture: OutputCapture,
+}
+
+/// Child stdout/stderr attachment strategy for a spawned process.
+#[derive(Clone, Debug)]
+pub enum OutputCapture {
+    /// Capture stdout/stderr through pipes owned by the parent process.
+    Pipe,
+    /// Capture stdout/stderr through pre-created private files.
+    File {
+        /// Path attached to the child's stdout handle.
+        stdout_path: PathBuf,
+        /// Path attached to the child's stderr handle.
+        stderr_path: PathBuf,
+    },
 }
 
 /// Handle to a running (or finished) process. Used by both the synchronous

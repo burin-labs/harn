@@ -131,6 +131,15 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .unwrap_or(capture.max_inline_bytes);
     let policy_context = optional_dict(NAME, &map, "policy_context")?;
     let snapshot_binding = optional_dict(NAME, &map, "snapshot_binding")?;
+    if (background || background_after_ms.is_some())
+        && capture.transport == proc::CaptureTransport::File
+    {
+        return Err(HostlibError::InvalidParameter {
+            builtin: NAME,
+            param: "capture.transport",
+            message: "file transport is only supported for foreground command_run".to_string(),
+        });
+    }
 
     let _sandbox_guard = harn_vm::process_sandbox::push_process_sandbox_scope(sandbox_scope)
         .map_err(sandbox_scope_error_to_hostlib)?;
@@ -415,6 +424,21 @@ fn parse_capture(map: &harn_vm::value::DictMap) -> Result<CaptureConfig, Hostlib
                 capture.merge_stderr = optional_bool(NAME, dict, "merge_stderr")?.unwrap_or(false);
                 if let Some(bytes) = optional_u64(NAME, dict, "max_inline_bytes")? {
                     capture.max_inline_bytes = usize::try_from(bytes).unwrap_or(usize::MAX);
+                }
+                if let Some(transport) = optional_string(NAME, dict, "transport")? {
+                    capture.transport = match transport.as_str() {
+                        "pipe" => proc::CaptureTransport::Pipe,
+                        "file" => proc::CaptureTransport::File,
+                        other => {
+                            return Err(HostlibError::InvalidParameter {
+                                builtin: NAME,
+                                param: "capture.transport",
+                                message: format!(
+                                    "unsupported transport {other:?}; expected pipe or file"
+                                ),
+                            });
+                        }
+                    };
                 }
             }
             VmValue::Nil => {}

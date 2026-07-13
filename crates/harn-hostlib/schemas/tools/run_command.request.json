@@ -84,7 +84,13 @@
         "stdout": { "type": "boolean", "default": true },
         "stderr": { "type": "boolean", "default": true },
         "merge_stderr": { "type": "boolean", "default": false },
-        "max_inline_bytes": { "type": "integer", "minimum": 0, "default": 50000 }
+        "max_inline_bytes": { "type": "integer", "minimum": 0, "default": 50000 },
+        "transport": {
+          "type": "string",
+          "enum": ["pipe", "file"],
+          "default": "pipe",
+          "description": "Capture stdout/stderr through host pipes (default) or private temporary files. File transport is foreground-only and returns when the direct child exits even if descendants retain stdio handles."
+        }
       },
       "additionalProperties": false
     },

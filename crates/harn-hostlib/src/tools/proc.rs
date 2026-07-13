@@ -28,7 +28,9 @@ use harn_vm::VmValue;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::error::HostlibError;
-use crate::process::{self as process_handle, ProcessError, ProcessKiller, SpawnSpec};
+use crate::process::{
+    self as process_handle, OutputCapture, ProcessError, ProcessKiller, SpawnSpec,
+};
 use crate::tools::args::to_agent_path;
 use crate::tools::response::ResponseBuilder;
 
@@ -91,6 +93,13 @@ pub(crate) struct CaptureConfig {
     pub(crate) stderr: bool,
     pub(crate) merge_stderr: bool,
     pub(crate) max_inline_bytes: usize,
+    pub(crate) transport: CaptureTransport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CaptureTransport {
+    Pipe,
+    File,
 }
 
 impl Default for CaptureConfig {
@@ -100,6 +109,7 @@ impl Default for CaptureConfig {
             stderr: true,
             merge_stderr: false,
             max_inline_bytes: DEFAULT_MAX_INLINE_BYTES,
+            transport: CaptureTransport::Pipe,
         }
     }
 }
@@ -134,6 +144,10 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     let mut env = req.env.clone();
     apply_toolchain_path(req.cwd.as_deref(), &mut env, req.env_mode);
+    let file_capture = match req.capture.transport {
+        CaptureTransport::Pipe => None,
+        CaptureTransport::File => Some(FileCapture::new(req.builtin)?),
+    };
 
     let spec = SpawnSpec {
         builtin: req.builtin,
@@ -148,6 +162,10 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         // interrupt path below (scope cancellation / deadline expiry) can
         // reap grandchildren with a single group signal.
         configure_process_group: true,
+        output_capture: file_capture
+            .as_ref()
+            .map(FileCapture::output_capture)
+            .unwrap_or(OutputCapture::Pipe),
     };
     let mut handle = process_handle::spawn_process(spec)
         .map_err(|e| process_error_to_hostlib(req.builtin, e))?;
@@ -165,26 +183,8 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         }
     }
 
-    let stdout_reader = handle.take_stdout();
-    let stderr_reader = handle.take_stderr();
-
-    let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
-    let (err_tx, err_rx) = mpsc::channel::<Vec<u8>>();
-
-    let stdout_thread = stdout_reader.map(|mut reader| {
-        thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = reader.read_to_end(&mut buf);
-            let _ = out_tx.send(buf);
-        })
-    });
-    let stderr_thread = stderr_reader.map(|mut reader| {
-        thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = reader.read_to_end(&mut buf);
-            let _ = err_tx.send(buf);
-        })
-    });
+    let (out_rx, stdout_thread) = spawn_reader_thread(handle.take_stdout());
+    let (err_rx, stderr_thread) = spawn_reader_thread(handle.take_stderr());
 
     // Poll `harn_vm::op_interrupt::requested` alongside the child wait so
     // scope cancellation, `deadline` expiry, and VM drop terminate the
@@ -205,21 +205,28 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         outcome,
         process_handle::WaitOutcome::TimedOut(_) | process_handle::WaitOutcome::Interrupted(_)
     );
-    let stdout_drain = drain_output(out_rx, deadline, wait_killed, &killer);
-    let stderr_drain = drain_output(
-        err_rx,
-        deadline,
-        wait_killed || stdout_drain.process_cleanup.is_some(),
-        &killer,
-    );
+    let (stdout_drain, stderr_drain) = if file_capture.is_some() {
+        (DrainResult::empty(), DrainResult::empty())
+    } else {
+        let stdout_drain = drain_output(out_rx, deadline, wait_killed, &killer);
+        let stderr_drain = drain_output(
+            err_rx,
+            deadline,
+            wait_killed || stdout_drain.process_cleanup.is_some(),
+            &killer,
+        );
+        (stdout_drain, stderr_drain)
+    };
     // Do not join unconditionally: a descendant that inherited stdout/stderr can
     // keep the pipe open after the direct child exits. The drain helper enforces
     // the same command deadline/interrupt and kills the cleanup-token family.
     drop(stdout_thread);
     drop(stderr_thread);
 
-    let stdout_bytes = stdout_drain.bytes;
-    let stderr_bytes = stderr_drain.bytes;
+    let (stdout_bytes, stderr_bytes) = match file_capture.as_ref() {
+        Some(files) => files.read(req.builtin)?,
+        None => (stdout_drain.bytes, stderr_drain.bytes),
+    };
     let drain_timed_out = stdout_drain.timed_out || stderr_drain.timed_out;
     let drain_interrupted = stdout_drain.interrupted || stderr_drain.interrupted;
     let mut drain_cleanup = stdout_drain.process_cleanup;
@@ -305,6 +312,77 @@ struct DrainResult {
     timed_out: bool,
     interrupted: bool,
     process_cleanup: Option<process_handle::ProcessCleanupReport>,
+}
+
+impl DrainResult {
+    fn empty() -> Self {
+        Self {
+            bytes: Vec::new(),
+            timed_out: false,
+            interrupted: false,
+            process_cleanup: None,
+        }
+    }
+}
+
+struct FileCapture {
+    stdout: tempfile::NamedTempFile,
+    stderr: tempfile::NamedTempFile,
+}
+
+impl FileCapture {
+    fn new(builtin: &'static str) -> Result<Self, HostlibError> {
+        let stdout = tempfile::Builder::new()
+            .prefix("harn-command-stdout-")
+            .tempfile()
+            .map_err(|error| HostlibError::Backend {
+                builtin,
+                message: format!("create stdout capture: {error}"),
+            })?;
+        let stderr = tempfile::Builder::new()
+            .prefix("harn-command-stderr-")
+            .tempfile()
+            .map_err(|error| HostlibError::Backend {
+                builtin,
+                message: format!("create stderr capture: {error}"),
+            })?;
+        Ok(Self { stdout, stderr })
+    }
+
+    fn output_capture(&self) -> OutputCapture {
+        OutputCapture::File {
+            stdout_path: self.stdout.path().to_path_buf(),
+            stderr_path: self.stderr.path().to_path_buf(),
+        }
+    }
+
+    fn read(&self, builtin: &'static str) -> Result<(Vec<u8>, Vec<u8>), HostlibError> {
+        let stdout = std::fs::read(self.stdout.path()).map_err(|error| HostlibError::Backend {
+            builtin,
+            message: format!("read stdout capture: {error}"),
+        })?;
+        let stderr = std::fs::read(self.stderr.path()).map_err(|error| HostlibError::Backend {
+            builtin,
+            message: format!("read stderr capture: {error}"),
+        })?;
+        Ok((stdout, stderr))
+    }
+}
+
+fn spawn_reader_thread(
+    reader: Option<Box<dyn Read + Send>>,
+) -> (mpsc::Receiver<Vec<u8>>, Option<thread::JoinHandle<()>>) {
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let Some(mut reader) = reader else {
+        drop(tx);
+        return (rx, None);
+    };
+    let handle = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = reader.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    (rx, Some(handle))
 }
 
 fn drain_output(
