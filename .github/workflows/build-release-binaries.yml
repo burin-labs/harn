@@ -1134,7 +1134,6 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Report repository cache inventory
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/report_ci_cache_budget.sh

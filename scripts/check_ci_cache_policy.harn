@@ -38,6 +38,12 @@ const UPSTREAM_CACHE_SAVE_PREFIX = "actions/cache/save@"
 
 const DOCKER_BUILD_PREFIX = "docker/build-push-action@"
 
+const CACHE_BUDGET_WORKFLOW = "build-release-binaries.yml"
+
+const CACHE_BUDGET_JOB = "cache_budget"
+
+const CACHE_BUDGET_SCRIPT = "./scripts/report_ci_cache_budget.sh"
+
 fn policy_schema() {
   return schema_closed_object(
     {
@@ -190,9 +196,33 @@ fn ephemeral_cache_writer_error(workflow: string, job: string, step, policy: CiC
   return nil
 }
 
+fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
+  const job = workflows[CACHE_BUDGET_WORKFLOW]?.jobs?.[CACHE_BUDGET_JOB]
+  if job == nil {
+    return ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must define the cache-budget reporter"]
+  }
+  let errors: list<string> = []
+  if trim(job?.permissions?.actions ?? "") != "read" {
+    errors = errors + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must grant actions: read"]
+  }
+  const reporters = (job?.steps ?? [])
+    .filter({ step -> trim(step?.run ?? "") == CACHE_BUDGET_SCRIPT })
+    .to_list()
+  if len(reporters) != 1 {
+    return errors
+      + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once"]
+  }
+  if reporters[0]?.["continue-on-error"] ?? false {
+    errors = errors + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must fail when cache telemetry fails"]
+  }
+  return errors
+}
+
 /** Return every policy violation without stopping at the first workflow. */
 pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workflows: dict) -> list<string> {
-  let errors = cache_action_errors(policy, action) + node_cache_action_errors(node_action)
+  let errors = cache_action_errors(policy, action)
+    + node_cache_action_errors(node_action)
+    + cache_budget_reporter_errors(workflows)
   let observed_writers: list<string> = []
   for workflow in workflows.keys().sort() {
     const document = workflows[workflow]
