@@ -56,7 +56,7 @@ fn load_json(path: string, input_findings: list, required: bool, print_lines: bo
     findings = record(
       findings,
       "FAIL",
-      basename(path) + " is not valid JSON: " + to_string(unwrap_err(parsed)),
+      basename(path) + " is not valid JSON: " + unwrap_err(parsed).message,
       print_lines,
     )
     return {value: nil, findings: findings}
@@ -88,7 +88,7 @@ fn load_jsonl(path: string, input_findings: list, required: bool, print_lines: b
         findings,
         "FAIL",
         basename(path) + ":" + to_string(lineno) + " is not valid JSON: "
-          + to_string(unwrap_err(parsed)),
+          + unwrap_err(parsed).message,
         print_lines,
       )
       continue

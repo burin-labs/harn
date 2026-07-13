@@ -26,7 +26,7 @@ fn __load_plan(harness: Harness) -> dict {
   return try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("canon: internal error - failed to parse check plan: " + to_string(e))
+    harness.stdio.eprintln("canon: internal error - failed to parse check plan: " + e.message)
     exit(70)
   }
 }

@@ -103,8 +103,10 @@ pub fn compile_module_artifact(
     let init_chunk = if init_nodes.is_empty() {
         None
     } else {
+        let mut compiler = crate::Compiler::new();
+        compiler.collect_type_aliases(program);
         Some(
-            crate::Compiler::new()
+            compiler
                 .compile(&init_nodes)
                 .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?
                 .freeze_for_cache(),
@@ -240,7 +242,34 @@ pub fn compile_module_artifact_from_source(
 mod tests {
     use std::path::Path;
 
-    use super::compile_module_artifact_from_source;
+    use harn_lexer::Lexer;
+    use harn_parser::Parser;
+
+    use super::{compile_module_artifact, compile_module_artifact_from_source};
+    use crate::chunk::Constant;
+
+    #[test]
+    fn module_init_schema_of_uses_full_program_aliases() {
+        let source = r"
+pub type Item = {id: string}
+const ITEM_SCHEMA: Schema<Item> = schema_of(Item)
+";
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let artifact = compile_module_artifact(&program, None).unwrap();
+        let constants = &artifact.init_chunk.expect("init chunk").constants;
+        let strings = constants
+            .iter()
+            .filter_map(|constant| match constant {
+                Constant::String(value) => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(strings.contains(&"id"), "{strings:?}");
+        assert!(!strings.contains(&"Item"), "{strings:?}");
+    }
 
     #[test]
     fn type_only_modules_export_schemas_without_init_bytecode() {

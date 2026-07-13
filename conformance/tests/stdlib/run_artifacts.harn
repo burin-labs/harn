@@ -1,5 +1,7 @@
 import "std/run_artifacts"
 
+type Facts = {status: string, count?: int}
+
 pipeline test(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-run-artifacts-" + uuid_v7())
   const open_options: RunArtifactsOpenOptions = {root: root, run_id: "run-a"}
@@ -11,12 +13,14 @@ pipeline test(task) {
   __io_println(harness.fs.exists(run.dir))
   __io_println(path_relative_to(paths.facts, run.dir))
   run_artifact_write_json(run, "facts.json", {status: "ok", count: 2}, {pretty: true})
-  const facts = run_artifact_read_json(run, "facts.json")
+  const facts = run_artifact_read_json_typed(run, "facts.json", schema_of(Facts))
   __io_println(facts.status)
   __io_println(facts.count)
-  __io_println(run_artifact_read_json(run, "missing.json", {status: "missing"}).status)
+  const missing = run_artifact_read_json_result(run, "missing.json")
+  __io_println(unwrap_err(missing).kind)
   harness.fs.write_text(run_artifact_path(run, "bad.json"), "{bad")
-  __io_println(run_artifact_read_json(run, "bad.json", {status: "malformed"}).status)
+  const malformed = run_artifact_read_json_result(run, "bad.json")
+  __io_println(unwrap_err(malformed).kind)
   run_artifact_write_text(run, "review.md", "hello")
   __io_println(run_artifact_read_text(run, "review.md", "") == "hello\n")
   __io_println(path_relative_to(run_artifact_transcript_dir(run), run.dir))

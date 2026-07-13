@@ -2,6 +2,7 @@ import {
   coord_acquire_dir_lock,
   coord_dir_lock_path,
   coord_dir_lock_reaper_path,
+  coord_dir_lock_record_path,
   coord_release_dir_lock,
   coord_with_dir_lock,
 } from "std/coordination"
@@ -90,5 +91,24 @@ pipeline default() {
   }
   __io_println(scoped_throw)
   __io_println(harness.fs.exists(coord_dir_lock_path(resource)))
+  const malformed_resource = path_join(root, "malformed.json")
+  const malformed_lock = coord_dir_lock_path(malformed_resource)
+  harness.fs.mkdir(malformed_lock)
+  harness.fs.write_text(coord_dir_lock_record_path(malformed_lock), "{bad")
+  const malformed = coord_acquire_dir_lock(malformed_resource, {id: "run-malformed"}, {throw_on_conflict: false})
+  __io_println(malformed.acquired)
+  __io_println(malformed.reason)
+  __io_println(malformed.failure.kind)
+  __io_println(harness.fs.exists(malformed_lock))
+  harness.fs.delete(malformed_lock)
+  const unreadable_resource = path_join(root, "unreadable.json")
+  const unreadable_lock = coord_dir_lock_path(unreadable_resource)
+  harness.fs.mkdir(coord_dir_lock_record_path(unreadable_lock))
+  const unreadable = coord_acquire_dir_lock(unreadable_resource, {id: "run-unreadable"}, {throw_on_conflict: false})
+  __io_println(unreadable.acquired)
+  __io_println(unreadable.reason)
+  __io_println(unreadable.failure.kind)
+  __io_println(harness.fs.exists(unreadable_lock))
+  harness.fs.delete(unreadable_lock)
   unmock_time()
 }

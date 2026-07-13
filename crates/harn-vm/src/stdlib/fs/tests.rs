@@ -41,6 +41,16 @@ fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
     }
 }
 
+fn result_error(value: &VmValue) -> &VmValue {
+    match value {
+        VmValue::EnumVariant(result) if result.is_variant("Result", "Err") => result
+            .fields
+            .first()
+            .expect("Result.Err must contain an error payload"),
+        other => panic!("expected Result.Err, got {other:?}"),
+    }
+}
+
 fn drain_feedback(session_id: &str, handle_id: &str) -> serde_json::Value {
     const FEEDBACK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -100,14 +110,13 @@ fn file_exists_outside_sandbox_reads_as_absent_not_error() {
     // Reading its content is still denied with a sandbox violation.
     let read_err = call(&mut vm, "read_file", vec![s(&outside_arg)])
         .expect_err("reading content outside the sandbox must still be denied");
-    let message = match read_err {
-        VmError::Thrown(VmValue::String(text)) => text.to_string(),
-        other => format!("{other:?}"),
-    };
-    assert!(
-        message.contains("sandbox violation"),
-        "expected a sandbox violation, got: {message}"
-    );
+    match read_err {
+        VmError::CategorizedError { message, category } => {
+            assert_eq!(category, crate::value::ErrorCategory::ToolRejected);
+            assert!(message.contains("sandbox violation"));
+        }
+        other => panic!("expected a categorized sandbox denial, got {other:?}"),
+    }
 
     // A path inside the workspace still reports its true presence.
     let inside = workspace.path().join("inside.txt");
@@ -890,4 +899,93 @@ fn read_file_missing_throws_typed_io_error() {
     }
 
     pop_execution_policy();
+}
+
+#[test]
+fn read_file_result_preserves_structured_io_failure_kinds() {
+    let workspace = tempfile::tempdir().unwrap();
+    let missing = workspace.path().join("missing.json");
+    let invalid_utf8 = workspace.path().join("invalid-utf8.json");
+    std::fs::write(&invalid_utf8, [0xff, 0xfe]).unwrap();
+    let mut vm = vm();
+
+    for (path, expected_kind) in [
+        (missing.as_path(), "not_found"),
+        (invalid_utf8.as_path(), "invalid_data"),
+    ] {
+        let result = call(
+            &mut vm,
+            "read_file_result",
+            vec![s(&path.to_string_lossy())],
+        )
+        .expect("read failures are returned as Result.Err");
+        let failure = result_error(&result);
+        assert_eq!(field(failure, "error").display(), "io_error");
+        assert_eq!(field(failure, "kind").display(), expected_kind);
+        assert!(!field(failure, "message").display().is_empty());
+    }
+
+    let directory = call(
+        &mut vm,
+        "read_file_result",
+        vec![s(&workspace.path().to_string_lossy())],
+    )
+    .expect("directory read failure is returned as Result.Err");
+    let directory_kind = field(result_error(&directory), "kind").display();
+    assert!(
+        matches!(
+            directory_kind.as_str(),
+            "is_a_directory" | "permission_denied" | "other"
+        ),
+        "directory read must stay an unreadable I/O kind, got {directory_kind}"
+    );
+}
+
+#[test]
+fn read_file_result_returns_sandbox_denial_instead_of_absence() {
+    use crate::orchestration::{
+        clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
+        CapabilityPolicy, SandboxProfile,
+    };
+
+    clear_execution_policy_stacks();
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("present.json");
+    std::fs::write(&outside_file, "{}").unwrap();
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    let mut vm = vm();
+    let result = call(
+        &mut vm,
+        "read_file_result",
+        vec![s(&outside_file.to_string_lossy())],
+    )
+    .expect("sandbox failures are returned as Result.Err");
+    assert_eq!(
+        field(result_error(&result), "kind").display(),
+        "sandbox_denied"
+    );
+    assert_eq!(
+        field(result_error(&result), "category").display(),
+        "tool_rejected"
+    );
+
+    pop_execution_policy();
+}
+
+#[test]
+fn unknown_prompt_asset_is_a_typed_not_found_result() {
+    let mut vm = vm();
+    let result = call(
+        &mut vm,
+        "read_file_result",
+        vec![s("std/does-not-exist.harn.prompt")],
+    )
+    .expect("unknown assets are returned as Result.Err");
+    assert_eq!(field(result_error(&result), "kind").display(), "not_found");
 }

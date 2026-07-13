@@ -24,6 +24,26 @@ fn try_compile(source: &str) -> Result<Chunk, CompileError> {
 }
 
 #[test]
+fn public_type_schema_preserves_nested_alias_items() {
+    let source = r"
+pub type Item = {id: string, enabled?: bool}
+pub type Manifest = {schema_version: 1, items: list<Item>}
+";
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let schemas = Compiler::lower_public_type_schemas(&program);
+    let schema = schemas.get("Manifest").expect("Manifest schema");
+    let rendered = crate::stdlib::json::vm_value_to_json(schema);
+    let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+    assert_eq!(
+        parsed["properties"]["items"]["items"]["properties"]["id"]["type"], "string",
+        "{rendered}"
+    );
+}
+
+#[test]
 fn oversized_function_chunk_is_a_compile_error_not_a_miscompile() {
     // Jump operands are u16 chunk offsets; a body that compiles past
     // 64 KiB used to silently truncate jump targets (`loop_start as

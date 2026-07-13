@@ -1,0 +1,167 @@
+/**
+ * Typed readers for file-backed `harn models batch` inputs and receipts.
+ *
+ * This is an internal dependency leaf. Provider transport, lifecycle policy,
+ * artifact rendering, and CLI dispatch stay in `models/batch_plan`; this module
+ * owns only the repeated read/parse/hash/shape boundary.
+ */
+import { safe_dict, safe_list, safe_string } from "std/cli/render"
+
+pub type BatchArtifactKind = "manifest" | "prepare_receipt" | "submission_receipt" | "status_receipt" | "cancel_source_receipt"
+
+pub type BatchRequestSourceRow = {line_no: int, row: dict}
+
+pub type BatchRequestRowsRead = {
+  rows: list<BatchRequestSourceRow>,
+  source_sha256: string,
+  errors: list<string>,
+}
+
+pub type BatchArtifactRead = {artifact: dict, source_sha256: string, errors: list<string>}
+
+type BatchArtifactContract = {
+  required_error: string,
+  missing_prefix: string,
+  malformed_error: string,
+  object_error: string,
+  accepted_kinds: list<string>,
+  unsupported_prefix: string,
+  collection_field: string,
+  empty_error: string,
+}
+
+fn __batch_artifact_contract(kind: BatchArtifactKind) -> BatchArtifactContract {
+  if kind == "manifest" {
+    return {
+      required_error: "--manifest is required",
+      missing_prefix: "batch manifest not found: ",
+      malformed_error: "invalid batch manifest JSON: ",
+      object_error: "batch manifest must be a JSON object",
+      accepted_kinds: ["harn.model_batch_manifest"],
+      unsupported_prefix: "unsupported batch manifest kind: ",
+      collection_field: "groups",
+      empty_error: "batch manifest contains no groups",
+    }
+  }
+  if kind == "prepare_receipt" {
+    return {
+      required_error: "--receipt is required",
+      missing_prefix: "batch prepare receipt not found: ",
+      malformed_error: "invalid batch prepare receipt JSON: ",
+      object_error: "batch prepare receipt must be a JSON object",
+      accepted_kinds: ["harn.model_batch_prepare_receipt"],
+      unsupported_prefix: "unsupported batch prepare receipt kind: ",
+      collection_field: "jobs",
+      empty_error: "batch prepare receipt contains no jobs",
+    }
+  }
+  if kind == "submission_receipt" {
+    return {
+      required_error: "--submission is required",
+      missing_prefix: "batch submission receipt not found: ",
+      malformed_error: "invalid batch submission receipt JSON: ",
+      object_error: "batch submission receipt must be a JSON object",
+      accepted_kinds: ["harn.model_batch_submission_receipt"],
+      unsupported_prefix: "unsupported batch submission receipt kind: ",
+      collection_field: "jobs",
+      empty_error: "batch submission receipt contains no jobs",
+    }
+  }
+  if kind == "status_receipt" {
+    return {
+      required_error: "--status is required",
+      missing_prefix: "batch status receipt not found: ",
+      malformed_error: "invalid batch status receipt JSON: ",
+      object_error: "batch status receipt must be a JSON object",
+      accepted_kinds: ["harn.model_batch_status_receipt"],
+      unsupported_prefix: "unsupported batch status receipt kind: ",
+      collection_field: "jobs",
+      empty_error: "batch status receipt contains no jobs",
+    }
+  }
+  return {
+    required_error: "--receipt is required",
+    missing_prefix: "batch receipt not found: ",
+    malformed_error: "invalid batch receipt JSON: ",
+    object_error: "batch receipt must be a JSON object",
+    accepted_kinds: ["harn.model_batch_submission_receipt", "harn.model_batch_status_receipt"],
+    unsupported_prefix: "unsupported batch cancel receipt kind: ",
+    collection_field: "jobs",
+    empty_error: "batch cancel receipt contains no jobs",
+  }
+}
+
+/**
+ * Read request JSONL with stable line diagnostics and a raw-source digest.
+ *
+ * @api_stability: internal
+ * @effects: [fs.read]
+ * @errors: [runtime]
+ */
+pub fn __batch_request_rows_read(harness: Harness, requests_path: string) -> BatchRequestRowsRead {
+  let rows: list<BatchRequestSourceRow> = []
+  let errors: list<string> = []
+  if requests_path == "" {
+    return {rows: rows, source_sha256: "", errors: ["--requests is required"]}
+  }
+  if !harness.fs.exists(requests_path) {
+    return {rows: rows, source_sha256: "", errors: ["request JSONL not found: " + requests_path]}
+  }
+  const source = harness.fs.read_text(requests_path)
+  let line_no = 0
+  for line in source.split("\n") {
+    line_no = line_no + 1
+    const trimmed = trim(line)
+    if trimmed == "" {
+      continue
+    }
+    const parsed = try {
+      json_parse(trimmed)
+    } catch (failure) {
+      errors = errors.push("line " + to_string(line_no) + ": invalid JSON: " + failure.message)
+      continue
+    }
+    if type_of(parsed) != "dict" {
+      errors = errors.push("line " + to_string(line_no) + ": expected a JSON object")
+      continue
+    }
+    rows = rows.push({line_no: line_no, row: parsed})
+  }
+  return {rows: rows, source_sha256: sha256(source), errors: errors}
+}
+
+/**
+ * Read one manifest or receipt under its exact kind and non-empty contract.
+ *
+ * @api_stability: internal
+ * @effects: [fs.read]
+ * @errors: [runtime]
+ */
+pub fn __batch_artifact_read(harness: Harness, path: string, kind: BatchArtifactKind) -> BatchArtifactRead {
+  const contract = __batch_artifact_contract(kind)
+  let errors: list<string> = []
+  if path == "" {
+    return {artifact: {}, source_sha256: "", errors: [contract.required_error]}
+  }
+  if !harness.fs.exists(path) {
+    return {artifact: {}, source_sha256: "", errors: [contract.missing_prefix + path]}
+  }
+  const source = harness.fs.read_text(path)
+  const parsed = try {
+    json_parse(source)
+  } catch (failure) {
+    return {artifact: {}, source_sha256: sha256(source), errors: [contract.malformed_error + failure.message]}
+  }
+  if type_of(parsed) != "dict" {
+    return {artifact: {}, source_sha256: sha256(source), errors: [contract.object_error]}
+  }
+  const artifact = safe_dict(parsed)
+  const artifact_kind = safe_string(artifact["kind"], "")
+  if !contract.accepted_kinds.contains(artifact_kind) {
+    errors = errors.push(contract.unsupported_prefix + artifact_kind)
+  }
+  if len(safe_list(artifact[contract.collection_field])) == 0 {
+    errors = errors.push(contract.empty_error)
+  }
+  return {artifact: artifact, source_sha256: sha256(source), errors: errors}
+}

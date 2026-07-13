@@ -1,6 +1,41 @@
 import { agent_session_inject_feedback, agent_session_inject_reminder } from "std/agent/state"
-import { find_files, read_json, read_toml } from "std/fs"
+import { find_files, read_json_typed, read_toml } from "std/fs"
 import { ext, is_absolute } from "std/path"
+import "std/schema"
+
+pub type CanonManifestPack = {
+  id: string,
+  title?: string,
+  invariants: string,
+  fixtures?: string,
+  extensions?: list<string>,
+  file_names?: list<string>,
+  predicates?: unknown,
+}
+
+pub type CanonManifest = {schema_version: 1, packs: list<CanonManifestPack>}
+
+fn __canon_manifest_schema() -> Schema<CanonManifest> {
+  const optional_string = schema_field(schema_string(), false)
+  return schema_closed_object(
+    {
+      schema_version: schema_literal(1),
+      packs: schema_list(
+        schema_closed_object(
+          {
+            id: schema_string(),
+            title: optional_string,
+            invariants: schema_string(),
+            fixtures: optional_string,
+            extensions: schema_field(schema_list(schema_string()), false),
+            file_names: schema_field(schema_list(schema_string()), false),
+            predicates: schema_field(schema_any(), false),
+          },
+        ),
+      ),
+    },
+  )
+}
 
 fn __canon_text(value) -> string {
   return trim(to_string(value ?? ""))
@@ -225,17 +260,13 @@ pub fn canon_slice_from_paths(paths, options = nil) -> dict {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_load_manifest(canon_root: string) -> dict {
+pub fn canon_load_manifest(canon_root: string) -> CanonManifest {
   const root = __canon_text(canon_root)
   if root == "" {
     throw "canon_load_manifest: canon_root is required"
   }
   const path = __canon_manifest_path(root)
-  const manifest = read_json(path, nil)
-  if manifest == nil {
-    throw "canon_load_manifest: failed to read " + path
-  }
-  return manifest
+  return read_json_typed<CanonManifest>(path, __canon_manifest_schema())
 }
 
 fn __canon_manifest_pack(manifest, id) {
@@ -328,7 +359,7 @@ fn __canon_manifest_from_installed_packages(project_root_value) -> dict? {
         packs = __canon_append_manifest_packs(
           packs,
           dirname(contribution_manifest_path),
-          read_json(contribution_manifest_path, nil),
+          read_json_typed<CanonManifest>(contribution_manifest_path, __canon_manifest_schema()),
         )
         continue
       }
@@ -461,7 +492,7 @@ pub fn canon_resolve_packs(options = nil) -> list<dict> {
   const needs_manifest = len(requested) == 0 || __canon_requested_needs_manifest(requested)
   const manifest = opts?.manifest
     ?? if needs_manifest && canon_root != nil && __canon_text(canon_root) != "" {
-    let root_manifest = canon_load_manifest(canon_root)
+    const root_manifest = canon_load_manifest(canon_root)
     if configured_root {
       root_manifest
     } else {

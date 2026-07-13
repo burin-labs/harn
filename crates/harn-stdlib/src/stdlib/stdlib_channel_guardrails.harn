@@ -125,7 +125,7 @@ fn __guardrails_parse_verdict(text) {
       confidence: 0.0,
       reason: "non-JSON classifier response",
       category: "none",
-      error: to_string(unwrap_err(parsed)),
+      error: unwrap_err(parsed).message,
     }
   }
   const value = unwrap(parsed)

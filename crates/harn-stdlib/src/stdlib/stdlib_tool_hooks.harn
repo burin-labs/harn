@@ -371,7 +371,7 @@ fn __classifier_parse_verdict(text) {
     json_parse(trimmed)
   }
   if is_err(parsed) {
-    return {kind: "error", error: "non-JSON classifier response: " + to_string(unwrap_err(parsed))}
+    return {kind: "error", error: "non-JSON classifier response: " + unwrap_err(parsed).message}
   }
   const value = unwrap(parsed)
   if type_of(value) != "dict" {

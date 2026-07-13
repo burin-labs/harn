@@ -59,7 +59,7 @@ fn __load_cases(harness: Harness, path: string, max_cases) {
   const decoded = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("error: failed to parse scope-triage dataset " + path + ": " + to_string(e))
+    harness.stdio.eprintln("error: failed to parse scope-triage dataset " + path + ": " + e.message)
     return nil
   }
   let cases = if type_of(decoded) == "list" {

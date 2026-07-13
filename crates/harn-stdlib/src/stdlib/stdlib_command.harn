@@ -1067,7 +1067,7 @@ fn __command_json_empty_error(label, stream, step) {
 
 fn __command_json_parse_error(label, stream, text, parsed, step, options) {
   const opts = __command_options(options)
-  const reason = to_string(unwrap_err(parsed))
+  const reason = unwrap_err(parsed).message
   return __command_json_error(
     "invalid_json",
     label,

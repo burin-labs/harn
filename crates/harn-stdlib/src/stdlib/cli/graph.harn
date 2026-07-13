@@ -208,7 +208,7 @@ fn main(harness: Harness) -> int {
     json_parse(raw)
   } catch (e) {
     harness.stdio
-      .eprintln("internal error: failed to parse HARN_GRAPH_VIEW_JSON: " + to_string(e))
+      .eprintln("internal error: failed to parse HARN_GRAPH_VIEW_JSON: " + e.message)
     return 70
   }
   if type_of(report) != "dict" {

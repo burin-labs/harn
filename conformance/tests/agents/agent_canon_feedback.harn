@@ -9,6 +9,7 @@ import {
   canon_inject_paths_feedback,
   canon_install_feedback_sink,
   canon_pack_ids_for_path,
+  canon_resolve_packs,
   canon_resolve_root,
   canon_slice_from_files,
   canon_slice_from_paths,
@@ -268,6 +269,66 @@ pipeline main(task) {
         ),
       )
       agent_session_close(package_manifest_session_id)
+    },
+  )
+  with_fs(
+    {"paper.tex": "bad macro"},
+    { dir ->
+      write_manifest_canon_package(dir)
+      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      harness.fs.write_text(manifest_path, "{bad")
+      const malformed = try {
+        canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
+      }
+      require unwrap_err(malformed).kind == "malformed", "malformed contribution manifest fails closed"
+      __io_println(is_err(malformed))
+    },
+  )
+  with_fs(
+    {"paper.tex": "bad macro"},
+    { dir ->
+      write_manifest_canon_package(dir)
+      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      harness.fs
+        .write_text(
+        manifest_path,
+        "{\"schema_version\":1,\"packs\":[{\"id\":7,\"invariants\":true}]}",
+      )
+      const invalid = try {
+        canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
+      }
+      require unwrap_err(invalid).kind == "schema_invalid", "mistyped contribution manifest fails closed"
+      __io_println(is_err(invalid))
+    },
+  )
+  with_fs(
+    {"paper.tex": "bad macro"},
+    { dir ->
+      write_manifest_canon_package(dir)
+      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      harness.fs
+        .write_text(
+        manifest_path,
+        "{\"schema_version\":2,\"packs\":[{\"id\":\"latex\",\"invariants\":\"latex/invariants.harn\"}]}",
+      )
+      const unsupported = try {
+        canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
+      }
+      require unwrap_err(unsupported).kind == "schema_invalid", "unsupported manifest version fails closed"
+      __io_println(is_err(unsupported))
+    },
+  )
+  with_fs(
+    {"paper.tex": "bad macro"},
+    { dir ->
+      write_manifest_canon_package(dir)
+      const manifest_path = path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json")
+      harness.fs.delete(manifest_path)
+      const missing = try {
+        canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
+      }
+      require unwrap_err(missing).kind == "absent", "missing contribution manifest fails closed"
+      __io_println(is_err(missing))
     },
   )
 }

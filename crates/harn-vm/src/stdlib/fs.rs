@@ -133,12 +133,35 @@ fn io_error_kind_str(error: &std::io::Error) -> &'static str {
 /// lets `.harn` consumers branch on conditions (ENOSPC, permission, not-found)
 /// rather than matching the prose in `message`, which stays intact so a
 /// stringifying `catch` still renders sensibly.
-fn io_error_value(message: impl AsRef<str>, error: &std::io::Error) -> VmValue {
+fn io_error_value_with_kind(kind: &'static str, message: impl AsRef<str>) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("error", "io_error");
-    dict.put_str("kind", io_error_kind_str(error));
+    dict.put_str("kind", kind);
     dict.put_str("message", message);
     VmValue::dict(dict)
+}
+
+fn io_error_value(message: impl AsRef<str>, error: &std::io::Error) -> VmValue {
+    io_error_value_with_kind(io_error_kind_str(error), message)
+}
+
+fn sandbox_read_error_value(
+    builtin: &str,
+    violation: &crate::stdlib::sandbox::SandboxViolation,
+) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.put_str("error", "io_error");
+    dict.put_str("kind", "sandbox_denied");
+    dict.put_str("message", violation.message(builtin));
+    dict.put_str(
+        "category",
+        crate::value::ErrorCategory::ToolRejected.as_str(),
+    );
+    VmValue::dict(dict)
+}
+
+fn unknown_prompt_asset_error_value(path: &str) -> VmValue {
+    io_error_value_with_kind("not_found", format!("Unknown stdlib prompt asset {path}"))
 }
 
 /// [`VmError::Thrown`] wrapping [`io_error_value`] — the fs builtins' single
@@ -384,9 +407,7 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         return Ok(VmValue::String(arcstr::ArcStr::from(source)));
     }
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("Unknown stdlib prompt asset {path}"),
-        ))));
+        return Err(VmError::Thrown(unknown_prompt_asset_error_value(&path)));
     }
     let resolved = resolve_fs_path(&path);
     crate::stdlib::sandbox::enforce_fs_path(
@@ -411,9 +432,9 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
-    sig = "read_file_result(path: string) -> dict",
+    sig = "read_file_result(path: string) -> Result<string, {error: \"io_error\", kind: \"not_found\" | \"permission_denied\" | \"already_exists\" | \"storage_full\" | \"quota_exceeded\" | \"file_too_large\" | \"read_only_filesystem\" | \"not_a_directory\" | \"is_a_directory\" | \"directory_not_empty\" | \"crosses_devices\" | \"too_many_links\" | \"invalid_input\" | \"invalid_data\" | \"timed_out\" | \"interrupted\" | \"unexpected_eof\" | \"would_block\" | \"out_of_memory\" | \"resource_busy\" | \"executable_file_busy\" | \"sandbox_denied\" | \"other\", message: string, category: \"tool_rejected\"?}>",
     category = "fs",
-    doc = "Read a UTF-8 file and return Result.Ok or Result.Err."
+    doc = "Read a UTF-8 file and return Result.Ok(content) or a structured Result.Err."
 )]
 fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
@@ -421,19 +442,17 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
         return Ok(result_ok(VmValue::String(arcstr::ArcStr::from(source))));
     }
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
-        return Ok(result_err(VmValue::String(arcstr::ArcStr::from(format!(
-            "Unknown stdlib prompt asset {path}"
-        )))));
+        return Ok(result_err(unknown_prompt_asset_error_value(&path)));
     }
     let resolved = resolve_fs_path(&path);
-    if let Err(error) = crate::stdlib::sandbox::enforce_fs_path(
-        "read_file_result",
+    if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
     ) {
-        return Ok(result_err(VmValue::String(arcstr::ArcStr::from(
-            error.to_string(),
-        ))));
+        return Ok(result_err(sandbox_read_error_value(
+            "read_file_result",
+            &violation,
+        )));
     }
     if let Some(cached) = read_cached_text(&resolved) {
         return Ok(result_ok(VmValue::String(cached)));
@@ -444,10 +463,10 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
             write_cached_text(resolved.clone(), shared.clone());
             Ok(result_ok(VmValue::String(shared)))
         }
-        Err(e) => Ok(result_err(VmValue::String(arcstr::ArcStr::from(format!(
-            "Failed to read file {}: {e}",
-            resolved.display()
-        ))))),
+        Err(e) => Ok(result_err(io_error_value(
+            format!("Failed to read file {}: {e}", resolved.display()),
+            &e,
+        ))),
     }
 }
 

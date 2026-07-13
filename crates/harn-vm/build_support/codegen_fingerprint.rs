@@ -28,12 +28,17 @@ pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {
         collect_rs_files(&root, logical_prefix, &mut inputs);
     }
 
-    let chunk = manifest_dir.join("src").join("chunk.rs");
-    if chunk.is_file() {
-        inputs.push(CompilerInput {
-            logical_path: "harn-vm/src/chunk.rs".to_string(),
-            disk_path: chunk,
-        });
+    for (file_name, logical_path) in [
+        ("chunk.rs", "harn-vm/src/chunk.rs"),
+        ("module_artifact.rs", "harn-vm/src/module_artifact.rs"),
+    ] {
+        let disk_path = manifest_dir.join("src").join(file_name);
+        if disk_path.is_file() {
+            inputs.push(CompilerInput {
+                logical_path: logical_path.to_string(),
+                disk_path,
+            });
+        }
     }
 
     inputs.sort_by(|left, right| left.logical_path.cmp(&right.logical_path));

@@ -1,5 +1,13 @@
 // std/run_artifacts - directory-backed run artifact helpers for harnesses.
-import { is_dir, read_json, write_json, write_lines } from "std/fs"
+import {
+  JsonReadFailure,
+  is_dir,
+  read_json,
+  read_json_result,
+  read_json_typed,
+  write_json,
+  write_lines,
+} from "std/fs"
 
 type RunArtifactsOpenOptions = {root?: string, namespace?: string, run_id?: string}
 
@@ -91,7 +99,7 @@ fn __run_artifacts_default_run_id() -> string {
   return to_string(to_int(harness.clock.timestamp())) + "-" + uuid_v7()
 }
 
-fn __run_artifacts_run_dir(run: {dir: string}) -> string {
+fn __run_artifacts_run_dir(run: {dir: string, ...rest}) -> string {
   const dir = to_string(run.dir ?? "")
   if dir == "" {
     throw "std/run_artifacts: run.dir is required"
@@ -99,7 +107,7 @@ fn __run_artifacts_run_dir(run: {dir: string}) -> string {
   return dir
 }
 
-fn __run_artifacts_path(run: {dir: string}, name) -> string {
+fn __run_artifacts_path(run: {dir: string, ...rest}, name) -> string {
   const rel = __run_artifacts_clean_relative(name, "artifact path")
   const root = path_normalize(__run_artifacts_run_dir(run))
   const joined = path_normalize(path_join(root, rel))
@@ -110,7 +118,7 @@ fn __run_artifacts_path(run: {dir: string}, name) -> string {
   return joined
 }
 
-fn __run_artifacts_standard_paths(run: {dir: string}) -> RunArtifactPaths {
+fn __run_artifacts_standard_paths(run: {dir: string, ...rest}) -> RunArtifactPaths {
   return {
     facts: __run_artifacts_path(run, "facts.json"),
     audit: __run_artifacts_path(run, "audit.json"),
@@ -162,7 +170,7 @@ pub fn run_artifact_path(run: RunArtifactsRun, name: string) -> string {
 /**
  * Write a JSON artifact using the standard `std/fs.write_json` conventions.
  *
- * @effects: [fs.write]
+ * @effects: [fs.read, fs.write]
  * @errors: [validation, fs]
  * @example: run_artifact_write_json(run, "facts.json", facts, {pretty: true})
  */
@@ -176,20 +184,40 @@ pub fn run_artifact_write_json(
 }
 
 /**
- * Read a JSON artifact, returning `fallback` when the file is missing or malformed.
+ * Read a required JSON artifact, throwing a typed JSON read failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [validation, JsonReadFailure]
+ * @example: run_artifact_read_json(run, "facts.json")
+ */
+pub fn run_artifact_read_json(run: RunArtifactsRun, name: string) -> unknown {
+  return read_json(run_artifact_path(run, name))
+}
+
+/**
+ * Read and validate a required JSON artifact against its consumer-owned schema.
+ *
+ * @effects: [fs.read]
+ * @errors: [validation, JsonReadFailure, SchemaValidationFailure]
+ */
+pub fn run_artifact_read_json_typed<T>(run: RunArtifactsRun, name: string, schema: Schema<T>) -> T {
+  return read_json_typed(run_artifact_path(run, name), schema)
+}
+
+/**
+ * Read a JSON artifact as a typed Result when absence is an expected state.
  *
  * @effects: [fs.read]
  * @errors: [validation]
- * @example: run_artifact_read_json(run, "facts.json", {})
  */
-pub fn run_artifact_read_json(run: RunArtifactsRun, name: string, fallback = nil) {
-  return read_json(run_artifact_path(run, name), fallback)
+pub fn run_artifact_read_json_result(run: RunArtifactsRun, name: string) -> Result<unknown, JsonReadFailure> {
+  return read_json_result(run_artifact_path(run, name))
 }
 
 /**
  * Write a text artifact with standard parent-directory and newline handling.
  *
- * @effects: [fs.write]
+ * @effects: [fs.read, fs.write]
  * @errors: [validation, fs]
  * @example: run_artifact_write_text(run, "review.md", body)
  */

@@ -340,9 +340,7 @@ fn main(harness: Harness) -> int {
       json_parse(raw)
     } catch (e) {
       harness.stdio
-        .eprintln(
-        "internal error: failed to parse provider-tool-scorecard payload: " + to_string(e),
-      )
+        .eprintln("internal error: failed to parse provider-tool-scorecard payload: " + e.message)
       return 70
     }
     const kind = __safe_string(report["kind"], "report")

@@ -136,7 +136,8 @@ It evaluates the body and wraps the result in a `Result`:
 
 ```harn
 const result = try { json_parse(raw_input) }
-// result is Result.Ok(parsed_data) or Result.Err("invalid JSON: ...")
+// result is Result.Ok(parsed_data) or
+// Result.Err({error: "json_parse_error", kind, message, line, column})
 
 const checked = try { schema_check(data, schema) }
 // checked is schema_check's Result directly, not Result.Ok(Result.Ok(...))

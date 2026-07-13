@@ -211,7 +211,7 @@ fn __try_json(text) {
     const value = json_parse(__extract_json(text))
     return {ok: true, value: value, error: nil}
   } catch (e) {
-    return {ok: false, value: nil, error: to_string(e)}
+    return {ok: false, value: nil, error: e.message}
   }
 }
 

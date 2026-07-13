@@ -223,7 +223,7 @@ pub fn parse_json_typed_report<T>(text: string, schema: Schema<T>, apply_default
     json_parse(text ?? "")
   }
   if !is_ok(parsed) {
-    const message = to_string(unwrap_err(parsed))
+    const message = unwrap_err(parsed).message
     return {ok: false, message: message, errors: [message], issues: [], stage: "json_parse"}
   }
   return get_typed_report(unwrap(parsed), schema, apply_defaults) + {stage: "schema"}
