@@ -33,7 +33,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  SCCACHE_GHA_ENABLED: "true"
   # Match ci.yml so warnings don't slip in via a path that only this
   # workflow exercises.
   RUSTFLAGS: "-D warnings"
@@ -64,7 +63,7 @@ jobs:
       - name: Configure Cargo to use sccache
         if: steps.scope.outputs.run_gate == 'true' && env.SCCACHE_PATH != ''
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: ./.github/actions/rust-cache
         if: steps.scope.outputs.run_gate == 'true'
         continue-on-error: true
         with:

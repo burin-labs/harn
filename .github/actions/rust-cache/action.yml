@@ -1,0 +1,36 @@
+name: Restore Rust cache
+description: Restore the shared Cargo cache and save only from an explicitly authorized main-branch writer.
+
+inputs:
+  shared-key:
+    description: Stable cache identity shared by compatible jobs.
+    required: true
+  cache-on-failure:
+    description: Save an authorized cache even when the build fails.
+    required: false
+    default: "false"
+  cache-bin:
+    description: Include Cargo-installed binaries in the cache.
+    required: false
+    default: "false"
+  save:
+    description: Request a persistent save; non-main refs remain restore-only.
+    required: false
+    default: "false"
+
+outputs:
+  cache-hit:
+    description: Whether the exact cache key was restored.
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      continue-on-error: true
+      with:
+        shared-key: ${{ inputs.shared-key }}
+        cache-on-failure: ${{ inputs.cache-on-failure }}
+        cache-bin: ${{ inputs.cache-bin }}
+        save-if: ${{ inputs.save == 'true' && github.ref == 'refs/heads/main' }}

@@ -1,0 +1,119 @@
+import { ci_cache_policy_errors, ci_cache_policy_parse } from "../check_ci_cache_policy"
+
+fn gha_expression(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn policy() -> CiCachePolicy {
+  return {
+    schema_version: 2,
+    rust_cache_action: "./.github/actions/rust-cache",
+    node_cache_action: "./.github/actions/node-cache",
+    persistent_ref: "refs/heads/main",
+    storage_limit_bytes: 10737418240,
+    remote_sccache: false,
+    writers: [{workflow: "build-release-binaries.yml", job: "build"}],
+  }
+}
+
+fn node_action() {
+  return {
+    runs: {
+      steps: [
+        {uses: "actions/setup-node@exact-pin"},
+        {
+          uses: "actions/cache/restore@exact-pin",
+          if: "github.ref != 'refs/heads/main'",
+          "continue-on-error": true,
+        },
+        {uses: "actions/cache@exact-pin", if: "github.ref == 'refs/heads/main'", "continue-on-error": true},
+      ],
+    },
+  }
+}
+
+fn action() {
+  return {
+    runs: {
+      steps: [
+        {
+          uses: "Swatinem/rust-cache@exact-pin",
+          "continue-on-error": true,
+          with: {"save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'")},
+        },
+      ],
+    },
+  }
+}
+
+fn workflows() {
+  return {
+    "build-release-binaries.yml": {
+      jobs: {
+        build: {
+          steps: [
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {save: gha_expression("needs.setup.outputs.build_mode == 'warm'")},
+            },
+          ],
+        },
+      },
+    },
+    "ci.yml": {
+      env: {SCCACHE_GHA_ENABLED: "false"},
+      jobs: {
+        test: {
+          steps: [
+            {uses: "./.github/actions/rust-cache"},
+            {uses: "./.github/actions/node-cache"},
+            {
+              uses: "docker/build-push-action@exact-pin",
+              with: {"cache-to": gha_expression("github.ref == 'refs/heads/main' && 'type=gha' || ''")},
+            },
+          ],
+        },
+      },
+    },
+  }
+}
+
+pipeline test_ci_cache_policy_accepts_one_main_guarded_writer(task) {
+  assert(ci_cache_policy_parse(policy()) != nil)
+  assert_eq(ci_cache_policy_errors(policy(), action(), node_action(), workflows()), [])
+}
+
+pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(task) {
+  const invalid = {
+    ...workflows(),
+    "ci.yml": {
+      env: {SCCACHE_GHA_ENABLED: "true"},
+      jobs: {
+        test: {
+          steps: [
+            {uses: "Swatinem/rust-cache@floating"},
+            {uses: "./.github/actions/rust-cache", with: {save: true}},
+            {uses: "actions/setup-node@floating", with: {cache: "npm"}},
+            {uses: "actions/cache/save@floating"},
+            {uses: "docker/build-push-action@floating", with: {"cache-to": "type=gha"}},
+          ],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(errors.contains("ci.yml.env.SCCACHE_GHA_ENABLED enables the per-object GHA sccache backend"))
+  assert(errors.contains("ci.yml:test bypasses ./.github/actions/rust-cache"))
+  assert(errors.contains("ci.yml:test is not an authorized persistent cache writer"))
+  assert(errors.contains("ci.yml:test bypasses ./.github/actions/node-cache with setup-node caching"))
+  assert(
+    errors.contains("ci.yml:test bypasses Harn-owned cache actions with actions/cache/save@floating"),
+  )
+  assert(errors.contains("ci.yml:test enables an ungated BuildKit cache writer"))
+}
+
+pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(task) {
+  assert_eq(ci_cache_policy_parse({...policy(), unexpected: true}), nil)
+  assert_eq(ci_cache_policy_parse({...policy(), writers: policy().writers + policy().writers}), nil)
+  assert_eq(ci_cache_policy_parse({...policy(), writers: []}), nil)
+}

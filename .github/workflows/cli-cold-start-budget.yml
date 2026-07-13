@@ -40,7 +40,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  SCCACHE_GHA_ENABLED: "true"
   # Match ci.yml so warnings don't slip in via a path that only this
   # workflow exercises.
   RUSTFLAGS: "-D warnings"
@@ -75,15 +74,11 @@ jobs:
       - name: Configure Cargo to use sccache
         if: env.SCCACHE_PATH != ''
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
           shared-key: cli-cold-start-budget
           cache-bin: false
-          # PRs only need to restore the shared budget cache. Saving from every
-          # PR branch adds post-job latency and can wedge an otherwise-passed
-          # advisory benchmark behind cache upload/finalization.
-          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Build release harn
         timeout-minutes: 40
         run: cargo build --release --bin harn

@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "rust_cache_action": "./.github/actions/rust-cache",
+  "node_cache_action": "./.github/actions/node-cache",
+  "persistent_ref": "refs/heads/main",
+  "storage_limit_bytes": 10737418240,
+  "remote_sccache": false,
+  "writers": [
+    {"workflow": "build-release-binaries.yml", "job": "build"}
+  ]
+}

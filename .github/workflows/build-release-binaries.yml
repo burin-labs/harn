@@ -117,7 +117,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  SCCACHE_GHA_ENABLED: "true"
   # Keep a narrow release-size ratchet while allowing the current stripped
   # Linux x86_64 binary, which is 199.28 MiB at v0.10.13.
   BINARY_SIZE_BUDGET_MB: "200.00"
@@ -648,7 +647,7 @@ jobs:
       # cache slot. Letting only main-push + cron save (and tag-push +
       # workflow_dispatch restore) keeps the per-repo 10 GB cache budget
       # focused on the entries we can actually read back.
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: ./.github/actions/rust-cache
         id: rust-cache
         # Cache restore/save is a release latency optimization, not a release
         # precondition. The Windows cache backend has had transient misses and
@@ -659,7 +658,7 @@ jobs:
           shared-key: release-${{ matrix.target }}
           cache-on-failure: true
           cache-bin: false
-          save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main') }}
+          save: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main') }}
 
       - name: Summarize cache mode
         shell: bash
@@ -1123,6 +1122,23 @@ jobs:
             echo "| Duration | ${duration}s |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  cache_budget:
+    name: Report cache budget
+    needs: [setup, build]
+    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Report repository cache inventory
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/report_ci_cache_budget.sh
+
   container:
     name: Publish container
     needs: [setup, release]
@@ -1212,7 +1228,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
 
       - name: Verify public container tags
         env:
