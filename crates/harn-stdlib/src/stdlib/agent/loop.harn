@@ -352,7 +352,7 @@ fn __autocontinue_should_continue(call, turn_opts) {
   if type_of(llm_result) != "dict" {
     return false
   }
-  const raw_text = llm_result?.text ?? ""
+  const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
   const parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
   let tool_calls = __resolve_tool_calls(llm_result, parsed)
   const has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
@@ -4112,7 +4112,7 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     return false
   }
   const llm_result = call.value
-  const raw_text = llm_result?.text ?? ""
+  const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
   const parsed = agent_parse_tool_calls(raw_text, nil, wrapup_opts?.tool_format)
   const wrapup_tool_calls = __resolve_tool_calls(llm_result, parsed)
   if len(wrapup_tool_calls) > 0 {
@@ -4547,7 +4547,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         const llm_result = call.value
         consecutive_failure_count = 0
         iteration = iteration + 1
-        const raw_text = llm_result?.text ?? ""
+        const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
         const parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
         const visible_text = __visible_text(parsed, raw_text)
         const normalized = llm_result

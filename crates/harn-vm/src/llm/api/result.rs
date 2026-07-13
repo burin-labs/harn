@@ -178,6 +178,51 @@ fn merge_reasoning_channels(existing: &Option<String>, inline: Option<String>) -
     }
 }
 
+struct TextToolProjection {
+    parsed: Option<crate::llm::tools::TextToolParseResult>,
+    public_text: String,
+    visible_text: String,
+}
+
+fn build_text_tool_projection(
+    visible_text_src: &str,
+    tools_val: Option<&VmValue>,
+    native_tool_calls: &[serde_json::Value],
+) -> TextToolProjection {
+    let has_tagged_blocks = [
+        "<assistant_prose>",
+        "<user_response>",
+        "<done>",
+        "<tool_call>",
+    ]
+    .iter()
+    .any(|tag| visible_text_src.contains(tag));
+    let has_text_tool_protocol =
+        tools_val.is_some() || !native_tool_calls.is_empty() || has_tagged_blocks;
+    let parsed = has_text_tool_protocol
+        .then(|| crate::llm::tools::parse_text_tool_calls_with_tools(visible_text_src, tools_val));
+
+    let has_native_tool_calls = !native_tool_calls.is_empty();
+    let parsed_has_calls = parsed.as_ref().is_some_and(|parse| !parse.calls.is_empty());
+
+    let public_text = match parsed.as_ref() {
+        Some(parse) if !parse.prose.is_empty() => parse.prose.clone(),
+        Some(_) if parsed_has_calls || has_native_tool_calls => String::new(),
+        _ => visible_text_src.to_string(),
+    };
+    let visible_text = if parsed_has_calls || has_native_tool_calls || tools_val.is_some() {
+        public_text.clone()
+    } else {
+        crate::visible_text::sanitize_visible_assistant_text(visible_text_src, false)
+    };
+
+    TextToolProjection {
+        parsed,
+        public_text,
+        visible_text,
+    }
+}
+
 pub(crate) fn vm_build_llm_result(
     result: &LlmResult,
     parsed_json: Option<VmValue>,
@@ -193,7 +238,6 @@ pub(crate) fn vm_build_llm_result(
     let (visible_text_src, inline_reasoning) = split_inline_reasoning_if_capable(result);
 
     let mut dict = crate::value::DictMap::new();
-    dict.put_str("text", visible_text_src.as_str());
     dict.put_str("model", result.model.as_str());
     dict.put_str("provider", result.provider.as_str());
     dict.insert(
@@ -255,25 +299,16 @@ pub(crate) fn vm_build_llm_result(
         dict.insert(crate::value::intern_key("data"), json_val);
     }
 
-    let has_tagged_blocks = [
-        "<assistant_prose>",
-        "<user_response>",
-        "<done>",
-        "<tool_call>",
-    ]
-    .iter()
-    .any(|tag| visible_text_src.contains(tag));
-    let has_text_tool_protocol =
-        tools_val.is_some() || !result.tool_calls.is_empty() || has_tagged_blocks;
     // Keep parsing available for tool-calling responses so llm_call can
     // expose canonical/prose/tool metadata, but do not surface tagged-protocol
     // violations for ordinary plain-text completions with no tools.
-    let tagged = has_text_tool_protocol
-        .then(|| crate::llm::tools::parse_text_tool_calls_with_tools(&visible_text_src, tools_val));
+    let projection = build_text_tool_projection(&visible_text_src, tools_val, &result.tool_calls);
+    dict.put_str("raw_text", visible_text_src.as_str());
+    dict.put_str("text", projection.public_text.as_str());
 
     let merged_tool_calls: Vec<serde_json::Value> = if !result.tool_calls.is_empty() {
         result.tool_calls.clone()
-    } else if let Some(parse) = tagged.as_ref() {
+    } else if let Some(parse) = projection.parsed.as_ref() {
         parse.calls.clone()
     } else {
         Vec::new()
@@ -295,7 +330,7 @@ pub(crate) fn vm_build_llm_result(
         VmValue::List(std::sync::Arc::new(native_calls)),
     );
 
-    if let Some(parse) = tagged.as_ref() {
+    if let Some(parse) = projection.parsed.as_ref() {
         if !parse.violations.is_empty() {
             let violations: Vec<VmValue> = parse
                 .violations
@@ -320,6 +355,7 @@ pub(crate) fn vm_build_llm_result(
         }
         if let Some(ref body) = parse.done_marker {
             dict.put_str("done_marker", body.as_str());
+            dict.put_str("parsed_done_marker", body.as_str());
         }
         if !parse.canonical.is_empty() {
             dict.put_str("canonical_text", parse.canonical.as_str());
@@ -327,12 +363,7 @@ pub(crate) fn vm_build_llm_result(
         // Always emit `prose` (fall back to raw text) so callers have a
         // single reliable "the answer" key regardless of whether the model
         // used the tagged protocol.
-        let prose = if parse.prose.is_empty() {
-            visible_text_src.clone()
-        } else {
-            parse.prose.clone()
-        };
-        dict.put_str("prose", prose.as_str());
+        dict.put_str("prose", projection.public_text.as_str());
     } else {
         dict.put_str("prose", visible_text_src.as_str());
     }
@@ -356,16 +387,7 @@ pub(crate) fn vm_build_llm_result(
         dict.insert(crate::value::intern_key("transcript"), transcript);
     }
 
-    // Prose with fenceless TS tool-call expressions stripped. Agent_loop
-    // applies the same semantics on its final iteration.
-    let visible_text = if tools_val.is_some() && result.tool_calls.is_empty() {
-        let parse_result =
-            crate::llm::tools::parse_text_tool_calls_with_tools(&visible_text_src, tools_val);
-        parse_result.prose
-    } else {
-        crate::visible_text::sanitize_visible_assistant_text(&visible_text_src, false)
-    };
-    dict.put_str("visible_text", visible_text.as_str());
+    dict.put_str("visible_text", projection.visible_text.as_str());
     dict.insert(
         crate::value::intern_key("blocks"),
         VmValue::List(std::sync::Arc::new(
@@ -432,6 +454,29 @@ mod cache_supported_serde_tests {
     use crate::value::VmValue;
 
     use super::{mock_completion_response, vm_build_llm_result, LlmResult};
+    use std::collections::BTreeMap;
+
+    fn run_tool_registry() -> VmValue {
+        let parameters = VmValue::dict(BTreeMap::from([
+            ("type".to_string(), VmValue::string("object")),
+            (
+                "properties".to_string(),
+                VmValue::dict(Vec::<(String, VmValue)>::new()),
+            ),
+        ]));
+        let tool = VmValue::dict(BTreeMap::from([
+            ("name".to_string(), VmValue::string("run")),
+            (
+                "description".to_string(),
+                VmValue::string("Run a shell command."),
+            ),
+            ("parameters".to_string(), parameters),
+        ]));
+        VmValue::dict(BTreeMap::from([(
+            "tools".to_string(),
+            VmValue::List(std::sync::Arc::new(vec![tool])),
+        )]))
+    }
 
     #[test]
     fn cache_supported_true_is_omitted_from_serialization() {
@@ -496,6 +541,140 @@ mod cache_supported_serde_tests {
                 .map(VmValue::display)
                 .as_deref(),
             result.thinking.as_deref()
+        );
+    }
+
+    #[test]
+    fn text_tool_protocol_action_only_response_does_not_leak_as_public_text() {
+        let mut result = mock_completion_response("hi", None);
+        result.provider = "fireworks".to_string();
+        result.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
+        result.text = concat!(
+            "<|start|>assistant<|channel|>commentary<|message|>",
+            "<tool_call>\n",
+            "run({ command: \"cargo test\" })\n",
+            "</tool_call>",
+            "<|end|>"
+        )
+        .to_string();
+
+        let tools = run_tool_registry();
+        let value = vm_build_llm_result(&result, None, None, Some(&tools));
+        let dict = value.as_dict().expect("result dict");
+
+        assert_eq!(dict.get("text").map(VmValue::display).as_deref(), Some(""));
+        assert_eq!(dict.get("prose").map(VmValue::display).as_deref(), Some(""));
+        assert_eq!(
+            dict.get("visible_text").map(VmValue::display).as_deref(),
+            Some("")
+        );
+        assert!(
+            dict.get("raw_text")
+                .map(VmValue::display)
+                .is_some_and(|text| text.contains("<tool_call>")),
+            "raw parser text must preserve the text-tool protocol source"
+        );
+
+        let Some(VmValue::List(tool_calls)) = dict.get("tool_calls") else {
+            panic!("missing dispatchable tool call: {dict:?}");
+        };
+        assert_eq!(tool_calls.len(), 1);
+        let call = tool_calls[0].as_dict().expect("tool call dict");
+        assert_eq!(
+            call.get("name").map(VmValue::display).as_deref(),
+            Some("run")
+        );
+        let args = call
+            .get("arguments")
+            .and_then(VmValue::as_dict)
+            .expect("tool call arguments");
+        assert_eq!(
+            args.get("command").map(VmValue::display).as_deref(),
+            Some("cargo test")
+        );
+
+        let canonical = dict
+            .get("canonical_text")
+            .map(VmValue::display)
+            .expect("canonical replay text");
+        assert!(canonical.contains("<tool_call>"));
+        assert!(!canonical.contains("<|channel|>"));
+    }
+
+    #[test]
+    fn text_tool_protocol_done_marker_survives_clean_public_projection() {
+        let mut result = mock_completion_response("hi", None);
+        result.text = concat!(
+            "<assistant_prose>Finished.</assistant_prose>\n",
+            "<done>##DONE##</done>"
+        )
+        .to_string();
+
+        let tools = run_tool_registry();
+        let value = vm_build_llm_result(&result, None, None, Some(&tools));
+        let dict = value.as_dict().expect("result dict");
+
+        assert_eq!(
+            dict.get("text").map(VmValue::display).as_deref(),
+            Some("Finished.")
+        );
+        assert_eq!(
+            dict.get("visible_text").map(VmValue::display).as_deref(),
+            Some("Finished.")
+        );
+        assert!(
+            dict.get("raw_text")
+                .map(VmValue::display)
+                .is_some_and(|text| text.contains("##DONE##")),
+            "raw parser text must preserve the done sentinel"
+        );
+        assert_eq!(
+            dict.get("parsed_done_marker")
+                .map(VmValue::display)
+                .as_deref(),
+            Some("##DONE##")
+        );
+        assert_eq!(
+            dict.get("done_marker").map(VmValue::display).as_deref(),
+            Some("##DONE##")
+        );
+    }
+
+    #[test]
+    fn native_tool_call_action_only_response_does_not_leak_wrapper_text() {
+        let mut result = mock_completion_response("hi", None);
+        result.text = concat!(
+            "<|start|>assistant<|channel|>commentary<|message|>",
+            "<tool_call>\n",
+            "run({ command: \"cargo test\" })\n",
+            "</tool_call>",
+            "<|end|>"
+        )
+        .to_string();
+        result.tool_calls = vec![serde_json::json!({
+            "id": "call_run",
+            "type": "tool_call",
+            "name": "run",
+            "arguments": {"command": "cargo test"},
+        })];
+
+        let value = vm_build_llm_result(&result, None, None, None);
+        let dict = value.as_dict().expect("result dict");
+
+        assert_eq!(dict.get("text").map(VmValue::display).as_deref(), Some(""));
+        assert_eq!(dict.get("prose").map(VmValue::display).as_deref(), Some(""));
+        assert_eq!(
+            dict.get("visible_text").map(VmValue::display).as_deref(),
+            Some("")
+        );
+        let Some(VmValue::List(tool_calls)) = dict.get("tool_calls") else {
+            panic!("missing native tool call: {dict:?}");
+        };
+        assert_eq!(tool_calls.len(), 1);
+        let call = tool_calls[0].as_dict().expect("tool call dict");
+        assert_eq!(
+            call.get("name").map(VmValue::display).as_deref(),
+            Some("run")
         );
     }
 }

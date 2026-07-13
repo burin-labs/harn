@@ -1435,11 +1435,11 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         // `content` blob (empty `reasoning` field, empty `tool_calls`). The
         // tagged-parser merge in `vm_build_llm_result` recovers the call into
         // the unified `tool_calls` (the `tool`-key dialect now recovers too,
-        // see native_json.rs), but the recovered prose is discarded, so the
-        // dirty `text` would still be persisted verbatim. Replaying that raw
-        // blob back into history wastes input tokens AND re-feeds the model its
-        // own private chain-of-thought (incl. "game the verifier" plans) on
-        // every later turn.
+        // see native_json.rs) and suppresses action-only wrapper text from the
+        // public text/prose fields. Replaying that raw blob back into history
+        // would waste input tokens AND re-feed the model its own private
+        // chain-of-thought (incl. "game the verifier" plans) on every later
+        // turn.
         //
         // For a native-tools model the canonical persisted shape is structured
         // `tool_calls` + a private `reasoning` trace + a clean `content` (this
@@ -1467,19 +1467,15 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
             .map(vm_to_json)
             .collect::<Vec<_>>();
             if !recovered_calls.is_empty() {
-                // A call was recovered from the dirty content. The accompanying
-                // prose is private analysis CoT — route it to `reasoning`
-                // (preferring the wire `thinking` field when the provider did
-                // populate it) and keep `content` empty, matching a clean turn.
-                let reasoning = thinking
-                    .as_deref()
-                    .filter(|t| !t.is_empty())
-                    .unwrap_or(text.as_str());
+                // A call was recovered from dirty content. Keep content empty,
+                // matching a clean native-tool turn; preserve only an explicit
+                // wire reasoning field when the provider supplied one.
+                let reasoning = thinking.as_deref().filter(|t| !t.is_empty());
                 let msg = build_assistant_response_message(
                     "",
                     &[],
                     &recovered_calls,
-                    Some(reasoning),
+                    reasoning,
                     &provider,
                     &model,
                 );
