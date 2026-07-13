@@ -687,7 +687,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install cargo-bloat
-        if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.is_release != 'true'
+        if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
           tool: cargo-bloat
@@ -1040,7 +1040,7 @@ jobs:
           fi
 
       - name: Generate cargo-bloat report (warm only)
-        if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.is_release != 'true'
+        if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'
         shell: bash
         continue-on-error: true
         env:
