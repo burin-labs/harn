@@ -1,0 +1,139 @@
+// Run: harn test tests/agent/post_turn_feedback_kind_test.harn
+//
+// Rich callback verdicts may give injected feedback a stable semantic kind.
+// Consumers should route on that kind instead of matching the feedback prose.
+import {
+  agent_capture_events,
+  agent_event_report,
+  agent_event_value,
+  agent_feedback_injected_event_schema,
+} from "std/agent/events"
+import { AgentLoopOptions } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn __feedback_event_by_kind(captured, kind: string) {
+  for event in captured.events {
+    if event.type == "feedback_injected" {
+      const feedback = agent_event_value(event, agent_feedback_injected_event_schema())
+      if feedback.kind == kind {
+        return feedback
+      }
+    }
+  }
+  return nil
+}
+
+fn __feedback_event_count_by_kind(captured, kind: string) -> int {
+  let count = 0
+  for event in captured.events {
+    if event.type == "feedback_injected" {
+      const feedback = agent_event_value(event, agent_feedback_injected_event_schema())
+      if feedback.kind == kind {
+        count = count + 1
+      }
+    }
+  }
+  return count
+}
+
+pipeline test_post_turn_feedback_kind_threads_to_event(task) {
+  with_llm_script(
+    [llm_text("Need one more turn."), llm_text("Finished. ##DONE##")],
+    { ->
+      const session = "post-turn-feedback-kind-" + uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        post_turn_callback: { info ->
+          if info.iteration == 0 {
+            return {feedback_kind: "typed_policy_feedback", message: "Policy feedback wording may evolve."}
+          }
+          return nil
+        },
+      }
+      const captured = agent_capture_events(session, fn() { return agent_loop("Finish after the callback.", nil, opts) })
+      const feedback = __feedback_event_by_kind(captured, "typed_policy_feedback")
+      assert(feedback != nil, "typed callback feedback should emit a structured event")
+      assert(agent_event_report(feedback, agent_feedback_injected_event_schema()).ok)
+      assert_eq(captured.result.status, "done")
+    },
+  )
+}
+
+pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(task) {
+  with_llm_script(
+    [llm_text("Keep going."), llm_text("Still going."), llm_text("Finished. ##DONE##")],
+    { ->
+      const session = "post-turn-feedback-default-" + uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 4,
+        post_turn_callback: { info ->
+          if info.iteration == 0 {
+            return {message: "Default post-turn kind."}
+          }
+          if info.iteration == 1 {
+            return {feedback_kind: "  ", message: "Empty kind keeps the default."}
+          }
+          return nil
+        },
+      }
+      const captured = agent_capture_events(session, fn() { return agent_loop("Finish after two callbacks.", nil, opts) })
+      assert_eq(__feedback_event_count_by_kind(captured, "post_turn"), 2)
+      assert_eq(captured.result.status, "done")
+    },
+  )
+}
+
+pipeline test_terminal_feedback_kind_threads_to_event(task) {
+  with_llm_script(
+    [llm_text("Budget exhausted before done."), llm_text("Finished. ##DONE##")],
+    { ->
+      const session = "terminal-feedback-kind-" + uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0},
+        terminal_callback: { _info -> return {feedback_kind: "terminal_rescue_policy", message: "Terminal rescue wording may evolve."} },
+      }
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Finish after terminal rescue.", nil, opts) },
+      )
+      const feedback = __feedback_event_by_kind(captured, "terminal_rescue_policy")
+      assert(feedback != nil, "terminal callback feedback should emit a structured event")
+      assert_eq(captured.result.status, "done")
+    },
+  )
+}
+
+pipeline test_feedback_kind_rejects_non_string(task) {
+  with_llm_script(
+    [llm_text("The callback will reject.")],
+    { ->
+      const session = "post-turn-feedback-kind-invalid-" + uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        max_iterations: 1,
+        post_turn_callback: { _info -> return {feedback_kind: 7, message: "Invalid kind."} },
+      }
+      let threw = false
+      try {
+        agent_loop("Reject invalid feedback kind.", nil, opts)
+      } catch (err) {
+        threw = true
+      }
+      assert(threw, "non-string feedback_kind should fail at the callback verdict boundary")
+    },
+  )
+}

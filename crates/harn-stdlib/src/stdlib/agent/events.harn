@@ -175,6 +175,28 @@ pub fn agent_typed_checkpoint_event_schema() {
 }
 
 /**
+ * Schema for runtime feedback injected into an agent session.
+ *
+ * The `kind` field is the semantic identity consumers should route on; the
+ * human-facing `content` may change without invalidating the event contract.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_feedback_injected_event_schema() {
+  return schema_object(
+    {
+      type: schema_literal("feedback_injected"),
+      kind: schema_string() + {min_length: 1},
+      content: schema_string(),
+      streak: schema_field(__agent_event_nonnegative_int_schema(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
  * Schema for convergence-guard receipts emitted by std/agent/governors.
  *
  * @effects: []

@@ -67,6 +67,22 @@ fn __post_turn_callback_verdict(opts, payload) {
   return __interpret_verdict(verdict)
 }
 
+fn __callback_feedback_kind(verdict) -> string? {
+  const feedback_kind = verdict?.feedback_kind
+  if feedback_kind == nil {
+    return nil
+  }
+  if type_of(feedback_kind) != "string" {
+    throw "agent_loop: callback verdict `feedback_kind` must be a string or nil; got "
+      + type_of(feedback_kind)
+  }
+  const normalized = trim(feedback_kind)
+  if normalized == "" {
+    return nil
+  }
+  return normalized
+}
+
 fn __interpret_verdict(verdict) {
   if verdict == nil || verdict == "" {
     return {kind: "none"}
@@ -99,6 +115,7 @@ fn __interpret_verdict(verdict) {
       stop_reason: verdict?.stop_reason,
       needs_verify: verdict?.needs_verify,
       message: verdict?.message,
+      feedback_kind: __callback_feedback_kind(verdict),
       next_options: verdict?.next_options,
       llm_options: llm_options,
     }
@@ -597,15 +614,16 @@ fn __post_turn_verdict_result(session, _opts, verdict, feedback_kind = "post_tur
   if verdict.kind == "stop" {
     return {kind: "break", stop_reason: "post_turn_stop", needs_verify: false}
   }
+  const effective_feedback_kind = verdict?.feedback_kind ?? feedback_kind
   if verdict.kind == "inject" {
-    agent_session_inject_feedback(session.session_id, feedback_kind, verdict.message)
+    agent_session_inject_feedback(session.session_id, effective_feedback_kind, verdict.message)
     return {kind: "continue"}
   }
   if verdict.kind != "rich" {
     return nil
   }
   if verdict.message != nil {
-    agent_session_inject_feedback(session.session_id, feedback_kind, verdict.message)
+    agent_session_inject_feedback(session.session_id, effective_feedback_kind, verdict.message)
   }
   if verdict.stop {
     const stop_reason = if verdict?.stop_reason != nil && verdict.stop_reason != "" {

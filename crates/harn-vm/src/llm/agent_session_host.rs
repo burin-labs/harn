@@ -2606,6 +2606,12 @@ fn host_agent_session_inject_feedback_builtin(
         super::agent_config::agent_feedback_message(&kind, &content),
     )
     .map_err(VmError::Runtime)?;
+    super::agent_runtime::emit_agent_event_sync(&AgentEvent::FeedbackInjected {
+        session_id,
+        kind,
+        content,
+        streak: None,
+    });
     Ok(VmValue::Nil)
 }
 
