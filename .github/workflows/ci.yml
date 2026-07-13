@@ -725,12 +725,13 @@ jobs:
   # Deterministic, always-on Windows *compile* gate. Unlike the path-gated
   # `windows` job above (which skips on routine PRs + the whole merge queue and
   # is subject to Windows-runner flakiness), this runs on every PR, merge_group,
-  # and push, on a Linux runner, and is a hard-required check in `ci-status`.
+  # and push, in a pinned cross-rs image on a Linux runner, and is a hard-required
+  # check in `ci-status`.
   # It exists to catch the recurring cfg-gating / missing-`#[cfg(unix)]` break
   # class (#4199 scoped-write, #3914 hostlib) at merge time instead of letting
   # it slip to main and resurface as phantom "Windows flakiness" on an unrelated
-  # PR. `cargo check` performs no linking, so the windows-gnu (mingw) target
-  # compiles the C-dependency graph on Linux and reaches the workspace Rust —
+  # PR. `cross check` performs no linking, so the windows-gnu target compiles the
+  # C-dependency graph in the digest-pinned MinGW image and reaches workspace Rust —
   # `x86_64-pc-windows-msvc` cannot (it needs the Windows SDK headers). The
   # `cfg(windows)` / `cfg(not(unix))` surface is identical across gnu/msvc, so a
   # missing unix cfg-gate is caught here regardless of the ABI difference. The
@@ -745,23 +746,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: stable
-      - name: Add windows-gnu target to the repo-pinned toolchain
-        # rust-toolchain.toml pins a specific channel (e.g. 1.95.0), and cargo
-        # respects that override in-repo — NOT the `stable` the action installs.
-        # So the cross target must be added to the PINNED toolchain (rustup reads
-        # the override from the working directory here), otherwise cargo check
-        # fails with `can't find crate for core`. Do not pass the target via the
-        # toolchain action's `targets:` — that adds it to the wrong toolchain.
-        run: rustup target add x86_64-pc-windows-gnu
-      - name: Install mingw-w64 cross toolchain
-        # Use the POSIX thread-model packages directly instead of the broad
-        # target meta packages; the meta packages also pull the unused Win32
-        # compiler/runtime variants and can exhaust the required gate timeout
-        # on slow hosted-runner apt mirrors.
-        uses: ./.github/actions/apt-install
+      - name: Install pinned cross CLI
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
-          packages: binutils-mingw-w64-x86-64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix nasm cmake
-          check-command: x86_64-w64-mingw32-ar x86_64-w64-mingw32-gcc-posix x86_64-w64-mingw32-g++-posix nasm cmake
+          tool: cross@0.2.5
+          fallback: none
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -769,22 +758,15 @@ jobs:
           cache-on-failure: true
       - name: cargo check (x86_64-pc-windows-gnu)
         env:
-          # cargo check does not link; keep sccache out of the way and let
-          # rust-cache handle incrementality (mirrors the Windows job's rationale).
+          # cross check does not link; keep incrementality off and let rust-cache
+          # handle the mounted target directory.
           CARGO_INCREMENTAL: "0"
-          # Point the C build scripts + linker at the mingw POSIX toolchain
-          # explicitly rather than relying on cc-rs target auto-detection or
-          # update-alternatives state from broader meta packages.
-          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc-posix
-          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++-posix
-          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc-posix
         run: |
           # --workspace (libs + bins + build scripts), not --all-targets: keep
           # the required gate reliable by not depending on dev-only deps
           # cross-compiling cleanly. The recurring cfg-gate break class lives in
           # lib/bin code; test-only cfg breaks stay covered by windows-nightly.yml.
-          cargo check --workspace --target x86_64-pc-windows-gnu
+          cross check --workspace --target x86_64-pc-windows-gnu
 
   macos-plan:
     name: macOS CI routing
