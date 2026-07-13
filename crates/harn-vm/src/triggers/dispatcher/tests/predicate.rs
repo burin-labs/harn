@@ -542,7 +542,7 @@ pub fn local_fn(event: TriggerEvent) -> dict {
         autonomy_tier: crate::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::Local {
             raw: "local_fn".to_string(),
-            closure: exports["local_fn"].clone(),
+            callable: crate::value::VmCallable::Eager(exports["local_fn"].clone()),
         },
         dispatch_priority: crate::WorkerQueuePriority::Normal,
         when: None,
@@ -650,7 +650,7 @@ pub fn local_fn(event: TriggerEvent) {
         autonomy_tier: crate::AutonomyTier::Suggest,
         handler: TriggerHandlerSpec::Local {
             raw: "local_fn".to_string(),
-            closure: exports["local_fn"].clone(),
+            callable: crate::value::VmCallable::Eager(exports["local_fn"].clone()),
         },
         dispatch_priority: crate::WorkerQueuePriority::Normal,
         when: None,

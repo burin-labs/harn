@@ -459,7 +459,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 autonomy_tier: crate::AutonomyTier::ActAuto,
                 handler: TriggerHandlerSpec::Local {
                     raw: "local_fn".to_string(),
-                    closure: handler,
+                    callable: crate::value::VmCallable::Eager(handler),
                 },
                 dispatch_priority: crate::WorkerQueuePriority::Normal,
                 when: None,
@@ -655,7 +655,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                 autonomy_tier: crate::AutonomyTier::ActAuto,
                 handler: TriggerHandlerSpec::Local {
                     raw: "slow_handler".to_string(),
-                    closure: handler,
+                    callable: crate::value::VmCallable::Eager(handler),
                 },
                 dispatch_priority: crate::WorkerQueuePriority::Normal,
                 when: None,

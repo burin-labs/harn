@@ -26,6 +26,8 @@ pub(crate) fn default_run_dir() -> PathBuf {
 
 mod hooks;
 pub use hooks::*;
+#[cfg(test)]
+mod tests_lazy_hooks;
 
 mod pipeline_lifecycle;
 pub use pipeline_lifecycle::*;

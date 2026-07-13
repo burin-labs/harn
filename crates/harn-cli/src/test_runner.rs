@@ -1430,7 +1430,7 @@ async fn execute_case(
             let extensions = crate::package::load_runtime_extensions(&case.file);
             register_manifest_host_operations(&extensions);
             crate::package::install_runtime_extensions(&extensions);
-            crate::package::install_manifest_triggers(&mut vm, &extensions)
+            crate::package::install_manifest_triggers_with_mode(&mut vm, &extensions, true)
                 .await
                 .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
             // Install manifest hooks lazily: a pure-logic unit test that

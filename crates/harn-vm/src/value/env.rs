@@ -41,6 +41,31 @@ pub struct VmClosure {
     pub retained_module_scope: Option<Arc<RetainedModuleScope>>,
 }
 
+/// A VM function that is either already resolved or can be resolved from a
+/// module export against the VM that will invoke it.
+#[derive(Clone, Debug)]
+pub enum VmCallable {
+    Eager(Arc<VmClosure>),
+    Lazy(LazyVmCallable),
+}
+
+/// Module/export coordinates for a callable whose import graph should not be
+/// instantiated until it is actually invoked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LazyVmCallable {
+    pub(crate) module_path: PathBuf,
+    pub(crate) function_name: String,
+}
+
+impl LazyVmCallable {
+    pub fn new(module_path: PathBuf, function_name: impl Into<String>) -> Self {
+        Self {
+            module_path,
+            function_name: function_name.into(),
+        }
+    }
+}
+
 pub type ModuleFunctionRegistry = Arc<VmMutex<BTreeMap<String, Arc<VmClosure>>>>;
 pub type WeakModuleFunctionRegistry = Weak<VmMutex<BTreeMap<String, Arc<VmClosure>>>>;
 pub type ModuleState = Arc<VmMutex<VmEnv>>;

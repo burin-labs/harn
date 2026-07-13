@@ -278,9 +278,10 @@ pub(crate) fn split_trigger_priority(
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct TriggerFunctionSignature {
+pub(crate) struct ModuleFunctionSignature {
     pub(crate) params: Vec<Option<harn_parser::TypeExpr>>,
     pub(crate) return_type: Option<harn_parser::TypeExpr>,
+    pub(crate) is_pub: bool,
 }
 
 pub(crate) fn manifest_trigger_location(trigger: &ResolvedTriggerConfig) -> String {
@@ -1144,9 +1145,9 @@ pub(crate) fn manifest_module_source_path(
     }
 }
 
-pub(crate) fn load_trigger_function_signatures(
+pub(crate) fn load_module_function_signatures(
     path: &Path,
-) -> Result<BTreeMap<String, TriggerFunctionSignature>, PackageError> {
+) -> Result<BTreeMap<String, ModuleFunctionSignature>, PackageError> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let program = harn_parser::parse_source(&source)
@@ -1158,14 +1159,16 @@ pub(crate) fn load_trigger_function_signatures(
             name,
             params,
             return_type,
+            is_pub,
             ..
         } = &inner.node
         {
             signatures.insert(
                 name.clone(),
-                TriggerFunctionSignature {
+                ModuleFunctionSignature {
                     params: params.iter().map(|param| param.type_expr.clone()).collect(),
                     return_type: return_type.clone(),
+                    is_pub: *is_pub,
                 },
             );
         }

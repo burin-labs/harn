@@ -173,6 +173,8 @@ pub async fn install_manifest_hooks_with_mode(
 ) -> Result<(), PackageError> {
     harn_vm::orchestration::clear_runtime_hooks();
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
+    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>> =
+        HashMap::new();
     for hook in &extensions.hooks {
         let Some((module_name, function_name)) = hook.handler.rsplit_once("::") else {
             return Err(format!(
@@ -181,22 +183,28 @@ pub async fn install_manifest_hooks_with_mode(
             )
             .into());
         };
+        let module_path = crate::package::manifest_module_source_path(
+            &hook.manifest_dir,
+            hook.package_name.as_deref(),
+            &hook.exports,
+            Some(module_name),
+        )?;
+        let signatures = cached_module_function_signatures(&mut module_signatures, &module_path)?;
+        if signatures
+            .get(function_name)
+            .is_none_or(|signature| !signature.is_pub)
+        {
+            return Err(format!(
+                "hook handler '{function_name}' is not exported by module '{module_name}'"
+            )
+            .into());
+        }
         if lazy {
-            let module_path = crate::package::manifest_module_source_path(
-                &hook.manifest_dir,
-                hook.package_name.as_deref(),
-                &hook.exports,
-                Some(module_name),
-            )?;
             harn_vm::orchestration::register_vm_hook_lazy(
                 hook.event,
                 hook.pattern.clone(),
                 hook.handler.clone(),
-                harn_vm::orchestration::LazyVmHookHandler {
-                    manifest_dir: hook.manifest_dir.clone(),
-                    module_path,
-                    function_name: function_name.to_string(),
-                },
+                harn_vm::LazyVmCallable::new(module_path, function_name),
             );
             continue;
         }
@@ -239,51 +247,49 @@ pub async fn collect_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
+    collect_manifest_triggers_with_mode(vm, extensions, false).await
+}
+
+async fn collect_manifest_triggers_with_mode(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+    lazy_vm_callables: bool,
+) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
     let _provider_schema_guard = lock_manifest_provider_schemas().await;
     let provider_catalog = build_manifest_provider_catalog(extensions).await?;
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
-    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, TriggerFunctionSignature>> =
+    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>> =
         HashMap::new();
+    let mut validated = Vec::with_capacity(extensions.triggers.len());
+    for trigger in &extensions.triggers {
+        validated.push(validate_trigger_callable_declarations(
+            trigger,
+            &mut module_signatures,
+        )?);
+    }
     let mut collected = Vec::new();
 
-    for trigger in &extensions.triggers {
-        let handler = parse_trigger_handler_uri(trigger)?;
-        let collected_handler = match handler {
+    for (trigger, declarations) in extensions.triggers.iter().zip(validated) {
+        let collected_handler = match declarations.handler {
             TriggerHandlerUri::Local(reference) => {
-                let cache_key = (
-                    trigger.manifest_dir.clone(),
-                    trigger.package_name.clone(),
-                    reference.module_name.clone(),
-                );
-                if !loaded_exports.contains_key(&cache_key) {
-                    let exports = resolve_manifest_exports(
-                        vm,
-                        &trigger.manifest_dir,
-                        trigger.package_name.as_deref(),
-                        &trigger.exports,
-                        reference.module_name.as_deref(),
-                    )
-                    .await
-                    .map_err(|error| trigger_error(trigger, error))?;
-                    loaded_exports.insert(cache_key.clone(), exports);
-                }
-                let exports = loaded_exports
-                    .get(&cache_key)
-                    .expect("manifest trigger exports cached");
-                let Some(closure) = exports.get(&reference.function_name) else {
-                    return Err(trigger_error(
-                        trigger,
-                        format!(
-                            "handler '{}' is not exported by the resolved module",
-                            reference.raw
-                        ),
-                    ));
-                };
+                let module_path = declarations
+                    .local_handler_path
+                    .expect("validated local trigger handler has a source path");
+                let callable = collect_manifest_vm_callable(
+                    vm,
+                    &mut loaded_exports,
+                    trigger,
+                    &reference,
+                    &module_path,
+                    lazy_vm_callables,
+                    "handler",
+                )
+                .await?;
                 CollectedTriggerHandler::Local {
                     reference,
-                    closure: closure.clone(),
+                    callable,
                 }
             }
             TriggerHandlerUri::A2a {
@@ -309,92 +315,21 @@ pub async fn collect_manifest_triggers(
             }
         };
 
-        let collected_when = if let Some(when_raw) = &trigger.when {
-            let reference = parse_local_trigger_ref(when_raw, "when", trigger)?;
-            let cache_key = (
-                trigger.manifest_dir.clone(),
-                trigger.package_name.clone(),
-                reference.module_name.clone(),
-            );
-            if !loaded_exports.contains_key(&cache_key) {
-                let exports = resolve_manifest_exports(
-                    vm,
-                    &trigger.manifest_dir,
-                    trigger.package_name.as_deref(),
-                    &trigger.exports,
-                    reference.module_name.as_deref(),
-                )
-                .await
-                .map_err(|error| trigger_error(trigger, error))?;
-                loaded_exports.insert(cache_key.clone(), exports);
-            }
-            let exports = loaded_exports
-                .get(&cache_key)
-                .expect("manifest trigger predicate exports cached");
-            let Some(closure) = exports.get(&reference.function_name) else {
-                return Err(trigger_error(
-                    trigger,
-                    format!(
-                        "when predicate '{}' is not exported by the resolved module",
-                        reference.raw
-                    ),
-                ));
-            };
-
-            let source_path = manifest_module_source_path(
-                &trigger.manifest_dir,
-                trigger.package_name.as_deref(),
-                &trigger.exports,
-                reference.module_name.as_deref(),
+        let collected_when = if let Some((reference, source_path)) = declarations.when {
+            let callable = collect_manifest_vm_callable(
+                vm,
+                &mut loaded_exports,
+                trigger,
+                &reference,
+                &source_path,
+                lazy_vm_callables,
+                "when predicate",
             )
-            .map_err(|error| trigger_error(trigger, error))?;
-            if !module_signatures.contains_key(&source_path) {
-                let signatures = load_trigger_function_signatures(&source_path)
-                    .map_err(|error| trigger_error(trigger, error))?;
-                module_signatures.insert(source_path.clone(), signatures);
-            }
-            let signatures = module_signatures
-                .get(&source_path)
-                .expect("module signatures cached");
-            let Some(signature) = signatures.get(&reference.function_name) else {
-                return Err(trigger_error(
-                    trigger,
-                    format!(
-                        "when predicate '{}' must resolve to a function declaration",
-                        reference.raw
-                    ),
-                ));
-            };
-            if signature.params.len() != 1
-                || signature.params[0]
-                    .as_ref()
-                    .is_none_or(|param| !is_trigger_event_type(param))
-            {
-                return Err(trigger_error(
-                    trigger,
-                    format!(
-                        "when predicate '{}' must have signature fn(TriggerEvent) -> bool",
-                        reference.raw
-                    ),
-                ));
-            }
-            if signature
-                .return_type
-                .as_ref()
-                .is_none_or(|return_type| !is_predicate_return_type(return_type))
-            {
-                return Err(trigger_error(
-                    trigger,
-                    format!(
-                        "when predicate '{}' must have signature fn(TriggerEvent) -> bool or Result<bool, _>",
-                        reference.raw
-                    ),
-                ));
-            }
+            .await?;
 
             Some(CollectedTriggerPredicate {
                 reference,
-                closure: closure.clone(),
+                callable,
             })
         } else {
             None
@@ -412,6 +347,171 @@ pub async fn collect_manifest_triggers(
 
     harn_vm::install_provider_catalog(provider_catalog);
     Ok(collected)
+}
+
+struct ValidatedTriggerCallableDeclarations {
+    handler: TriggerHandlerUri,
+    local_handler_path: Option<PathBuf>,
+    when: Option<(TriggerFunctionRef, PathBuf)>,
+}
+
+fn validate_trigger_callable_declarations(
+    trigger: &ResolvedTriggerConfig,
+    module_signatures: &mut HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>>,
+) -> Result<ValidatedTriggerCallableDeclarations, PackageError> {
+    let handler = parse_trigger_handler_uri(trigger)?;
+    let local_handler_path = if let TriggerHandlerUri::Local(reference) = &handler {
+        let module_path = trigger_function_source_path(trigger, reference)?;
+        let signatures = cached_module_function_signatures(module_signatures, &module_path)
+            .map_err(|error| trigger_error(trigger, error))?;
+        if signatures
+            .get(&reference.function_name)
+            .is_none_or(|signature| !signature.is_pub)
+        {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "handler '{}' is not exported by the resolved module",
+                    reference.raw
+                ),
+            ));
+        }
+        Some(module_path)
+    } else {
+        None
+    };
+    let when = if let Some(when_raw) = &trigger.when {
+        let reference = parse_local_trigger_ref(when_raw, "when", trigger)?;
+        let source_path = trigger_function_source_path(trigger, &reference)?;
+        let signatures = cached_module_function_signatures(module_signatures, &source_path)
+            .map_err(|error| trigger_error(trigger, error))?;
+        let Some(signature) = signatures.get(&reference.function_name) else {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' must resolve to a function declaration",
+                    reference.raw
+                ),
+            ));
+        };
+        if !signature.is_pub {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' is not exported by the resolved module",
+                    reference.raw
+                ),
+            ));
+        }
+        if signature.params.len() != 1
+            || signature.params[0]
+                .as_ref()
+                .is_none_or(|param| !is_trigger_event_type(param))
+        {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' must have signature fn(TriggerEvent) -> bool",
+                    reference.raw
+                ),
+            ));
+        }
+        if signature
+            .return_type
+            .as_ref()
+            .is_none_or(|return_type| !is_predicate_return_type(return_type))
+        {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' must have signature fn(TriggerEvent) -> bool or Result<bool, _>",
+                    reference.raw
+                ),
+            ));
+        }
+        Some((reference, source_path))
+    } else {
+        None
+    };
+    Ok(ValidatedTriggerCallableDeclarations {
+        handler,
+        local_handler_path,
+        when,
+    })
+}
+
+fn trigger_function_source_path(
+    trigger: &ResolvedTriggerConfig,
+    reference: &TriggerFunctionRef,
+) -> Result<PathBuf, PackageError> {
+    manifest_module_source_path(
+        &trigger.manifest_dir,
+        trigger.package_name.as_deref(),
+        &trigger.exports,
+        reference.module_name.as_deref(),
+    )
+    .map_err(|error| trigger_error(trigger, error))
+}
+
+async fn collect_manifest_vm_callable(
+    vm: &mut harn_vm::Vm,
+    loaded_exports: &mut HashMap<ManifestModuleCacheKey, ManifestModuleExports>,
+    trigger: &ResolvedTriggerConfig,
+    reference: &TriggerFunctionRef,
+    module_path: &Path,
+    lazy: bool,
+    role: &str,
+) -> Result<harn_vm::VmCallable, PackageError> {
+    if lazy {
+        return Ok(harn_vm::VmCallable::Lazy(harn_vm::LazyVmCallable::new(
+            module_path.to_path_buf(),
+            reference.function_name.clone(),
+        )));
+    }
+
+    let cache_key = (
+        trigger.manifest_dir.clone(),
+        trigger.package_name.clone(),
+        reference.module_name.clone(),
+    );
+    if !loaded_exports.contains_key(&cache_key) {
+        let exports = resolve_manifest_exports(
+            vm,
+            &trigger.manifest_dir,
+            trigger.package_name.as_deref(),
+            &trigger.exports,
+            reference.module_name.as_deref(),
+        )
+        .await
+        .map_err(|error| trigger_error(trigger, error))?;
+        loaded_exports.insert(cache_key.clone(), exports);
+    }
+    let exports = loaded_exports
+        .get(&cache_key)
+        .expect("manifest trigger exports cached");
+    let closure = exports.get(&reference.function_name).ok_or_else(|| {
+        trigger_error(
+            trigger,
+            format!(
+                "{role} '{}' is not exported by the resolved module",
+                reference.raw
+            ),
+        )
+    })?;
+    Ok(harn_vm::VmCallable::Eager(closure.clone()))
+}
+
+fn cached_module_function_signatures<'a>(
+    cache: &'a mut HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>>,
+    source_path: &Path,
+) -> Result<&'a BTreeMap<String, ModuleFunctionSignature>, PackageError> {
+    match cache.entry(source_path.to_path_buf()) {
+        std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            let signatures = load_module_function_signatures(source_path)?;
+            Ok(entry.insert(signatures))
+        }
+    }
 }
 
 pub(crate) async fn collect_trigger_flow_control(
@@ -712,7 +812,7 @@ pub(crate) async fn compile_trigger_expression(
     })?;
     Ok(harn_vm::TriggerExpressionSpec {
         raw: expr.to_string(),
-        closure: closure.clone(),
+        callable: harn_vm::VmCallable::Eager(closure.clone()),
     })
 }
 
@@ -743,10 +843,13 @@ pub fn manifest_trigger_binding_spec(
     let flow_control = trigger.flow_control.clone();
     let config = trigger.config;
     let (handler, handler_descriptor) = match trigger.handler {
-        CollectedTriggerHandler::Local { reference, closure } => (
+        CollectedTriggerHandler::Local {
+            reference,
+            callable,
+        } => (
             harn_vm::TriggerHandlerSpec::Local {
                 raw: reference.raw.clone(),
-                closure,
+                callable,
             },
             serde_json::json!({
                 "kind": "local",
@@ -818,7 +921,7 @@ pub fn manifest_trigger_binding_spec(
         .map(|predicate| predicate.reference.raw.clone());
     let when = trigger.when.map(|predicate| harn_vm::TriggerPredicateSpec {
         raw: predicate.reference.raw,
-        closure: predicate.closure,
+        callable: predicate.callable,
     });
     let mut when_budget = config
         .when_budget
@@ -933,8 +1036,20 @@ pub async fn install_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<(), PackageError> {
+    install_manifest_triggers_with_mode(vm, extensions, false).await
+}
+
+/// Install manifest triggers, optionally deferring VM-backed handlers and
+/// predicates until dispatch. Production remains eager so invalid handlers
+/// fail at startup; the test runner uses lazy resolution so tests that never
+/// dispatch a trigger do not instantiate an unrelated handler graph.
+pub async fn install_manifest_triggers_with_mode(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+    lazy_vm_callables: bool,
+) -> Result<(), PackageError> {
     install_orchestrator_budget(extensions);
-    let collected = collect_manifest_triggers(vm, extensions).await?;
+    let collected = collect_manifest_triggers_with_mode(vm, extensions, lazy_vm_callables).await?;
     let mut bindings: Vec<_> = collected
         .iter()
         .cloned()
@@ -1371,3 +1486,7 @@ pub(crate) fn known_persona_tools(manifest: &Manifest) -> BTreeSet<String> {
 #[cfg(test)]
 #[path = "extensions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "extensions_lazy_tests.rs"]
+mod lazy_tests;

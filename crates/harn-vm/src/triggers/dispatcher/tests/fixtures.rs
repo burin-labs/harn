@@ -43,7 +43,7 @@ pub(super) async fn compile_trigger_expr(
         .expect("compile trigger expression");
     crate::triggers::TriggerExpressionSpec {
         raw: expr.to_string(),
-        closure: exports["__expr"].clone(),
+        callable: crate::value::VmCallable::Eager(exports["__expr"].clone()),
     }
 }
 
@@ -155,10 +155,12 @@ pub(super) async fn dispatcher_fixture_with_budget_strategy(
         .clone();
     let when = when_name.map(|name| TriggerPredicateSpec {
         raw: name.to_string(),
-        closure: exports
-            .get(name)
-            .unwrap_or_else(|| panic!("missing predicate export {name}"))
-            .clone(),
+        callable: crate::value::VmCallable::Eager(
+            exports
+                .get(name)
+                .unwrap_or_else(|| panic!("missing predicate export {name}"))
+                .clone(),
+        ),
     });
 
     install_manifest_triggers(vec![TriggerBindingSpec {
@@ -169,7 +171,7 @@ pub(super) async fn dispatcher_fixture_with_budget_strategy(
         autonomy_tier: crate::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::Local {
             raw: handler_name.to_string(),
-            closure: handler,
+            callable: crate::value::VmCallable::Eager(handler),
         },
         dispatch_priority: crate::WorkerQueuePriority::Normal,
         when,

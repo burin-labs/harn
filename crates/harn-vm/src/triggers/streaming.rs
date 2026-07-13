@@ -817,7 +817,7 @@ mod tests {
             autonomy_tier: AutonomyTier::ActAuto,
             handler: TriggerHandlerSpec::Local {
                 raw: "local_fn".to_string(),
-                closure: handler,
+                callable: crate::value::VmCallable::Eager(handler),
             },
             dispatch_priority: crate::triggers::WorkerQueuePriority::Normal,
             when: None,

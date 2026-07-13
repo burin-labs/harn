@@ -22,7 +22,7 @@ impl Dispatcher {
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn invoke_vm_callable(
         &self,
-        closure: &crate::value::VmClosure,
+        callable: &crate::value::VmCallable,
         binding_key: &str,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
@@ -55,8 +55,6 @@ impl Dispatcher {
         let _execution_context_guard = DispatchProcessContextGuard::install(&vm);
         crate::orchestration::push_execution_policy(effective_policy);
         let _policy_guard = DispatchExecutionPolicyGuard;
-        let future = vm.call_closure_pub(closure, &args);
-        pin_mut!(future);
         let (binding_id, binding_version) = split_binding_key(binding_key);
         let prior_context = ACTIVE_DISPATCH_CONTEXT.with(|slot| {
             slot.borrow_mut().replace(DispatchContext {
@@ -73,6 +71,11 @@ impl Dispatcher {
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), wait_lease));
         let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
         crate::stdlib::hitl::reset_hitl_state();
+        let future = async {
+            let closure = vm.resolve_callable(callable).await?;
+            vm.call_closure_pub(&closure, &args).await
+        };
+        pin_mut!(future);
         let mut poll = tokio::time::interval(Duration::from_millis(100));
         let result = loop {
             tokio::select! {
@@ -134,7 +137,7 @@ impl Dispatcher {
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn invoke_vm_callable_with_timeout(
         &self,
-        closure: &crate::value::VmClosure,
+        callable: &crate::value::VmCallable,
         binding_key: &str,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
@@ -145,7 +148,7 @@ impl Dispatcher {
         timeout: Option<Duration>,
     ) -> Result<VmValue, DispatchError> {
         let future = self.invoke_vm_callable(
-            closure,
+            callable,
             binding_key,
             event,
             replay_of_event_id,

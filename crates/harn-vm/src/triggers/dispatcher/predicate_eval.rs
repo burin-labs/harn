@@ -122,7 +122,7 @@ impl Dispatcher {
         let started = Instant::now();
         let eval = self
             .invoke_vm_callable_with_timeout(
-                &predicate.closure,
+                &predicate.callable,
                 &binding.binding_key(),
                 event,
                 replay_of_event_id,
