@@ -11,7 +11,7 @@ description = "Durable Harn session event store primitives"
 [dependencies]
 async-trait = "0.1"
 base64 = "0.22"
-ed25519-dalek = { version = "2", features = ["rand_core"] }
+ed25519-dalek = { version = "3", features = ["rand_core"] }
 harn-vm = { path = "../harn-vm", version = "=0.10.15", default-features = false }
 hex = "0.4"
 rusqlite = { version = "0.40", features = ["bundled"] }

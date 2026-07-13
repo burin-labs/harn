@@ -79,7 +79,7 @@ tokio-stream = "0.1"
 base64 = "0.22"
 bytes = "1"
 data-encoding = "2"
-ed25519-dalek = { version = "2", features = ["pem", "pkcs8", "rand_core"] }
+ed25519-dalek = { version = "3", features = ["pem", "pkcs8", "rand_core"] }
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 hex = "0.4"
 hmac = "0.13"
