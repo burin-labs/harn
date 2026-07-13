@@ -123,7 +123,7 @@ impl Compiler {
     /// keeps schema lowering (`type_expr_to_schema_value`) finite — a
     /// cycle-broken `Named(T)` lowers to no runtime constraint at that nested
     /// position rather than overflowing the stack.
-    pub(super) fn expand_alias(&self, ty: &TypeExpr) -> TypeExpr {
+    pub(crate) fn expand_alias(&self, ty: &TypeExpr) -> TypeExpr {
         let mut visiting = std::collections::HashSet::new();
         self.expand_alias_inner(ty, &mut visiting)
     }

@@ -355,6 +355,9 @@ impl ExportCatalog {
             DispatchError::Validation(format!("failed to parse {}: {error}", path.display()))
         })?;
 
+        // Resolve `type` aliases declared in the module so a parameter typed as a
+        // named alias projects its real shape/enum instead of erasing to `{}`.
+        let schema_resolver = harn_vm::SchemaAliasResolver::from_program(&program);
         let mut functions = BTreeMap::new();
         let mut diagnostics = Vec::new();
         for node in &program {
@@ -385,12 +388,12 @@ impl ExportCatalog {
                 ExportedFunction {
                     name: name.clone(),
                     kind: ExportedCallableKind::Function,
-                    params: exported_params(params),
+                    params: exported_params(params, &schema_resolver),
                     return_type: return_type.clone(),
-                    input_schema: harn_vm::json_schema_for_typed_params(params),
+                    input_schema: schema_resolver.json_schema_for_typed_params(params),
                     output_schema: return_type
                         .as_ref()
-                        .and_then(harn_vm::json_schema_for_type_expr),
+                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
                     required_scopes: scopes.baseline,
                     method_scopes: scopes.per_method,
                     policy,
@@ -439,7 +442,7 @@ impl ExportCatalog {
                     input_schema: pipeline_input_schema(params),
                     output_schema: return_type
                         .as_ref()
-                        .and_then(harn_vm::json_schema_for_type_expr),
+                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
                     required_scopes: scopes.baseline,
                     method_scopes: scopes.per_method,
                     policy,
@@ -474,7 +477,10 @@ impl ExportCatalog {
     }
 }
 
-fn exported_params(params: &[harn_parser::TypedParam]) -> Vec<ExportedParam> {
+fn exported_params(
+    params: &[harn_parser::TypedParam],
+    resolver: &harn_vm::SchemaAliasResolver,
+) -> Vec<ExportedParam> {
     params
         .iter()
         .map(|param| ExportedParam {
@@ -483,7 +489,7 @@ fn exported_params(params: &[harn_parser::TypedParam]) -> Vec<ExportedParam> {
             input_schema: param
                 .type_expr
                 .as_ref()
-                .and_then(harn_vm::json_schema_for_type_expr)
+                .and_then(|type_expr| resolver.json_schema_for_type_expr(type_expr))
                 .unwrap_or_else(|| serde_json::json!({})),
             has_default: param.default_value.is_some(),
             rest: param.rest,
