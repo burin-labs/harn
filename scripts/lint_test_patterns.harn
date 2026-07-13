@@ -567,6 +567,26 @@ pub fn direct_harn_binary_baseline(rel: string) -> int {
   return 0
 }
 
+/** Return duplicate path keys from a file/count baseline. */
+pub fn duplicate_baseline_paths(items: list) -> list<string> {
+  let seen = {}
+  let duplicates = []
+  for item in items {
+    if seen[item.path] ?? false {
+      if !duplicates.contains(item.path) {
+        duplicates = duplicates + [item.path]
+      }
+    } else {
+      seen[item.path] = true
+    }
+  }
+  return duplicates
+}
+
+pub fn direct_harn_binary_baseline_duplicates() -> list<string> {
+  return duplicate_baseline_paths(DIRECT_HARN_BINARY_BASELINE)
+}
+
 pub fn spawn_orchestrator_pattern() -> string {
   return r"spawn_orchestrator\("
 }
@@ -731,6 +751,11 @@ pipeline main(task) {
     ],
   )
   __io_println("--- direct Cargo harn binary access (file-level ratchet) ---")
+  for path in direct_harn_binary_baseline_duplicates() {
+    __io_println("  duplicate baseline path: " + path)
+    __io_println("    hint: keep exactly one canonical expected-count row per file")
+    violations = violations + 1
+  }
   for f in test_files {
     if !f.rel.starts_with("crates/harn-cli/tests/")
       || f.rel == "crates/harn-cli/tests/test_util/process.rs" {

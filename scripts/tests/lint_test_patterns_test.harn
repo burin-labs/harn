@@ -143,6 +143,18 @@ pipeline test_direct_harn_binary_ratchet(task) {
   assert_eq(find_hits(direct, direct_harn_binary_pattern()).count, 2)
   assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/codemod_dispatch.rs"), 3)
   assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/models_dispatch.rs"), 0)
+  assert_eq(direct_harn_binary_baseline_duplicates(), [])
+  assert_eq(
+    duplicate_baseline_paths(
+      [
+        {path: "a.rs", count: 1},
+        {path: "b.rs", count: 2},
+        {path: "a.rs", count: 3},
+        {path: "a.rs", count: 4},
+      ],
+    ),
+    ["a.rs"],
+  )
 }
 
 @test
