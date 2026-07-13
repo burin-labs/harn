@@ -14,6 +14,13 @@ updates:
       cranelift:
         patterns:
           - "cranelift-*"
+      wasmtime:
+        patterns:
+          - "wasmtime*"
+      opentelemetry:
+        patterns:
+          - "opentelemetry*"
+          - "tracing-opentelemetry"
     cooldown:
       default-days: 7
 

@@ -1,0 +1,73 @@
+import "../check_dependabot_groups.harn"
+
+fn valid_groups() {
+  return {
+    cranelift: {patterns: ["cranelift-*"]},
+    wasmtime: {patterns: ["wasmtime*"]},
+    opentelemetry: {patterns: ["opentelemetry*", "tracing-opentelemetry"]},
+  }
+}
+
+@test
+pipeline test_actual_dependabot_document(task) {
+  const text = harness.fs.read_text("../../.github/dependabot.yml")
+  const groups = cargo_groups_from_text(text)
+  assert_eq(cargo_group_errors(groups), [])
+  assert_eq(matching_groups(groups, "serde"), [])
+}
+
+@test
+pipeline test_wildcard_positions(task) {
+  assert_eq(dependabot_pattern_matches("wasmtime*", "wasmtime-wasi"), true)
+  assert_eq(dependabot_pattern_matches("*-wasi", "wasmtime-wasi"), true)
+  assert_eq(dependabot_pattern_matches("wasm*-wasi", "wasmtime-wasi"), true)
+  assert_eq(dependabot_pattern_matches("wasm*-wasi", "wasmtime"), false)
+}
+
+@test
+pipeline test_overlap_is_rejected(task) {
+  const groups = valid_groups() + {wasi: {patterns: ["*-wasi"]}}
+  const errors = cargo_group_errors(groups)
+  assert_eq(
+    errors,
+    [
+      {
+        kind: "ambiguous_membership",
+        group: "wasmtime",
+        dependency: "wasmtime-wasi",
+        matches: ["wasi", "wasmtime"],
+      },
+    ],
+  )
+}
+
+@test
+pipeline test_missing_group_is_rejected(task) {
+  const errors = cargo_group_errors({cranelift: valid_groups().cranelift})
+  assert_eq(
+    errors.filter({ error -> error.kind == "missing_group" }).map({ error -> error.group }),
+    ["opentelemetry", "wasmtime"],
+  )
+}
+
+@test
+pipeline test_cargo_catch_all_is_rejected(task) {
+  const errors = cargo_group_errors(valid_groups() + {everything: {patterns: ["**"]}})
+  assert_eq(
+    errors.filter({ error -> error.kind == "catch_all" }),
+    [{kind: "catch_all", group: "everything", dependency: "", matches: []}],
+  )
+}
+
+@test
+pipeline test_yaml_boundary_rejects_malformed_groups(task) {
+  const invalid = "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      wasmtime:\n        patterns: wasmtime*\n"
+  assert_eq(
+    is_err(
+      try {
+        cargo_groups_from_text(invalid)
+      },
+    ),
+    true,
+  )
+}

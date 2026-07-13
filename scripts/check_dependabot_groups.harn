@@ -1,0 +1,155 @@
+import "std/schema"
+
+type DependabotGroup = {patterns: list<string>}
+
+pub type CargoGroupError = {
+  kind: "catch_all" | "missing_group" | "ambiguous_membership",
+  group: string,
+  dependency: string,
+  matches: list<string>,
+}
+
+const CARGO_FAMILIES: dict<string, list<string>> = {
+  cranelift: [
+    "cranelift-codegen",
+    "cranelift-frontend",
+    "cranelift-jit",
+    "cranelift-module",
+    "cranelift-native",
+    "cranelift-object",
+  ],
+  wasmtime: ["wasmtime", "wasmtime-wasi"],
+  opentelemetry: ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"],
+}
+
+fn dependabot_schema() {
+  const group = schema_object({patterns: schema_field(schema_list(schema_string()))})
+  const update = schema_object(
+    {
+      "package-ecosystem": schema_field(schema_string()),
+      groups: schema_field(schema_dict(group), false),
+    },
+    {additional_properties: true},
+  )
+  return schema_object(
+    {version: schema_field(schema_int()), updates: schema_field(schema_list(update))},
+    {additional_properties: true},
+  )
+}
+
+/** Parse and normalize the Cargo group map at the owning YAML boundary. */
+pub fn cargo_groups_from_text(text: string) -> dict<string, DependabotGroup> {
+  const document = unwrap(schema_check(yaml_parse(text), dependabot_schema()))
+  for update in document.updates {
+    if update.get("package-ecosystem") == "cargo" {
+      return update.get("groups") ?? {}
+    }
+  }
+  throw "Dependabot config has no Cargo update entry"
+}
+
+/** GitHub Dependabot `patterns` use `*` as a zero-or-more wildcard. */
+pub fn dependabot_pattern_matches(pattern: string, dependency: string) -> bool {
+  const pchars = chars(pattern)
+  const dchars = chars(dependency)
+  let p = 0
+  let d = 0
+  let star = -1
+  let retry_at = 0
+  while d < dchars.count {
+    if p < pchars.count && pchars[p] == dchars[d] {
+      p = p + 1
+      d = d + 1
+    } else if p < pchars.count && pchars[p] == "*" {
+      star = p
+      retry_at = d
+      p = p + 1
+    } else if star >= 0 {
+      retry_at = retry_at + 1
+      d = retry_at
+      p = star + 1
+    } else {
+      return false
+    }
+  }
+  while p < pchars.count && pchars[p] == "*" {
+    p = p + 1
+  }
+  return p == pchars.count
+}
+
+pub fn matching_groups(groups: dict<string, DependabotGroup>, dependency: string) -> list<string> {
+  let matches: list<string> = []
+  for group in groups {
+    for pattern in group.value.patterns {
+      if dependabot_pattern_matches(pattern, dependency) {
+        matches = matches + [group.key]
+        break
+      }
+    }
+  }
+  return matches.sort()
+}
+
+fn dependabot_pattern_is_catch_all(pattern: string) -> bool {
+  if pattern == "" {
+    return false
+  }
+  for character in chars(pattern) {
+    if character != "*" {
+      return false
+    }
+  }
+  return true
+}
+
+pub fn cargo_group_errors(
+  groups: dict<string, DependabotGroup>,
+  families: dict<string, list<string>> = CARGO_FAMILIES,
+) -> list<CargoGroupError> {
+  let errors: list<CargoGroupError> = []
+  for group in groups {
+    for pattern in group.value.patterns {
+      if dependabot_pattern_is_catch_all(pattern) {
+        errors = errors + [{kind: "catch_all", group: group.key, dependency: "", matches: []}]
+        break
+      }
+    }
+  }
+  for family in families {
+    if groups.get(family.key) == nil {
+      errors = errors + [{kind: "missing_group", group: family.key, dependency: "", matches: []}]
+    }
+    for dependency in family.value {
+      const matches = matching_groups(groups, dependency)
+      if matches != [family.key] {
+        errors = errors
+          + [{kind: "ambiguous_membership", group: family.key, dependency: dependency, matches: matches}]
+      }
+    }
+  }
+  return errors
+}
+
+pub fn cargo_group_error_message(error: CargoGroupError) -> string {
+  if error.kind == "catch_all" {
+    return "Cargo group '${error.group}' is a catch-all"
+  }
+  if error.kind == "missing_group" {
+    return "missing Cargo group '${error.group}'"
+  }
+  return "${error.dependency} must match only '${error.group}', matched ${json_stringify(error.matches)}"
+}
+
+pipeline main(task) {
+  const groups = cargo_groups_from_text(harness.fs.read_text(".github/dependabot.yml"))
+  const errors = cargo_group_errors(groups)
+  if errors.count > 0 {
+    for error in errors {
+      __io_eprintln("error: ${cargo_group_error_message(error)}")
+    }
+    return 1
+  }
+  __io_println("Dependabot Cargo compatibility groups OK")
+  return 0
+}
