@@ -212,17 +212,32 @@ pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
   return __call(method, merge(options, args ?? {}))
 }
 
-/** Read one pull request through the canonical typed connector method. */
+/**
+ * Read one pull request through the canonical typed connector method.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
 pub fn pr_view(repo: string, number: int, options: GitHubCallOptions = {}) -> GitHubPullRequestResponse {
   return __call("github.pr.view", merge(options, {repo: repo, number: number}))
 }
 
-/** Read the normalized check rollup for one pull request. */
+/**
+ * Read the normalized check rollup for one pull request.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
 pub fn pr_checks(repo: string, number: int, options: GitHubCallOptions = {}) -> GitHubPullRequestChecksResponse {
   return __call("github.pr.checks", merge(options, {repo: repo, number: number}))
 }
 
-/** Update one pull request using the connector-owned closed edit contract. */
+/**
+ * Update one pull request using the connector-owned closed edit contract.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
 pub fn pr_edit(
   repo: string,
   number: int,
@@ -232,7 +247,12 @@ pub fn pr_edit(
   return __call("github.pr.edit", merge(merge(options, edits), {repo: repo, number: number}))
 }
 
-/** Read one release by exact tag, or the latest release when tag is nil. */
+/**
+ * Read one release by exact tag, or the latest release when tag is nil.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
 pub fn release_view(repo: string, tag: string? = nil, options: GitHubCallOptions = {}) -> GitHubRelease {
   return __call("github.release.view", merge(options, {repo: repo, tag: tag}))
 }
