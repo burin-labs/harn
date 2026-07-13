@@ -59,6 +59,7 @@ GATES=(
   check-harn-syntax-sensitive-scans
   check-crate-sibling-versions
   check-docs-workflow-quickstart
+  check-release-audit-contract
   check-vm-rss-soak
 )
 

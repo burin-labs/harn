@@ -1,0 +1,467 @@
+import { parse_args } from "std/cli"
+import { read_json_result, read_yaml } from "std/fs"
+import {
+  schema_closed_object,
+  schema_enum,
+  schema_int,
+  schema_list,
+  schema_literal,
+  schema_string,
+  schema_validator,
+} from "std/schema"
+
+pub type ReleaseAuditLane = {name: string, runner: string, proof: "merge_group" | "residual"}
+
+pub type ReleaseAuditCiStep = {id: string, condition: string, run: string}
+
+pub type ReleaseAuditCiJob = {
+  name: string,
+  job_id: string,
+  matrix_kind: string,
+  proofs: list<string>,
+  steps: list<ReleaseAuditCiStep>,
+}
+
+pub type ReleaseAuditContract = {
+  schema_version: "harn.release_audit_contract.v1",
+  lanes: list<ReleaseAuditLane>,
+  merge_group_jobs: list<ReleaseAuditCiJob>,
+}
+
+pub type ReleaseAuditPlan = {
+  ok: bool,
+  receipt_reused: bool,
+  reason: string,
+  proof_kind: string,
+  head_sha: string,
+  lane_names: list<string>,
+  lane_runners: list<string>,
+  lanes: list<ReleaseAuditLane>,
+  errors: list<string>,
+}
+
+fn sha_schema() {
+  return schema_string() + {pattern: "^[0-9a-f]{40}$"}
+}
+
+fn lane_schema() {
+  return schema_closed_object(
+    {
+      name: schema_string() + {pattern: "^[a-z0-9-]+$"},
+      runner: schema_string() + {pattern: "^[a-z0-9_]+$"},
+      proof: schema_enum(["merge_group", "residual"]),
+    },
+  )
+}
+
+fn ci_job_schema() {
+  return schema_closed_object(
+    {
+      name: schema_string() + {min_len: 1},
+      job_id: schema_string() + {pattern: "^[a-z0-9-]+$"},
+      matrix_kind: schema_string() + {pattern: "^$|^[a-z0-9-]+$"},
+      proofs: schema_list(schema_string()),
+      steps: schema_list(
+        schema_closed_object(
+          {
+            id: schema_string() + {pattern: "^[a-z0-9-]+$"},
+            condition: schema_string(),
+            run: schema_string() + {min_len: 1},
+          },
+        ),
+      ),
+    },
+  )
+}
+
+fn contract_schema() {
+  return schema_closed_object(
+    {
+      schema_version: schema_literal("harn.release_audit_contract.v1"),
+      lanes: schema_list(lane_schema()),
+      merge_group_jobs: schema_list(ci_job_schema()),
+    },
+  )
+}
+
+fn receipt_job_schema() {
+  return schema_closed_object(
+    {
+      id: schema_int() + {minimum: 1},
+      name: schema_string() + {min_len: 1},
+      url: schema_string()
+        + {pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+/job/[0-9]+$"},
+      status: schema_literal("completed"),
+      conclusion: schema_literal("success"),
+    },
+  )
+}
+
+fn warm_schema() {
+  return schema_closed_object(
+    {
+      head_sha: sha_schema(),
+      command: schema_literal("cargo build -p harn-cli --bin harn --locked"),
+      binary_sha256: schema_string() + {pattern: "^[0-9a-f]{64}$"},
+      status: schema_literal("success"),
+    },
+  )
+}
+
+fn merge_group_receipt_schema() {
+  return schema_closed_object(
+    {
+      schema_version: schema_literal("harn.release_audit_receipt.v1"),
+      proof_kind: schema_literal("merge_group"),
+      head_sha: sha_schema(),
+      run: schema_closed_object(
+        {
+          id: schema_int() + {minimum: 1},
+          url: schema_string()
+            + {pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+$"},
+          event: schema_literal("merge_group"),
+          workflow: schema_literal("CI"),
+          head_sha: sha_schema(),
+          status: schema_literal("completed"),
+          conclusion: schema_literal("success"),
+        },
+      ),
+      jobs: schema_list(receipt_job_schema()),
+      warm: warm_schema(),
+    },
+  )
+}
+
+fn receipt_schema() {
+  return merge_group_receipt_schema()
+}
+
+fn unique_strings(values: list<string>) -> bool {
+  let seen: list<string> = []
+  for value in values {
+    if seen.contains(value) {
+      return false
+    }
+    seen = seen + [value]
+  }
+  return true
+}
+
+fn contract_from_validated(value) -> ReleaseAuditContract {
+  let lanes: list<ReleaseAuditLane> = []
+  for lane in value.lanes {
+    lanes = lanes
+      + [{name: lane.name, runner: lane.runner, proof: lane.proof}]
+  }
+  let jobs: list<ReleaseAuditCiJob> = []
+  for job in value.merge_group_jobs {
+    let steps: list<ReleaseAuditCiStep> = []
+    for step in job.steps {
+      steps = steps + [{id: step.id, condition: step.condition, run: step.run}]
+    }
+    jobs = jobs
+      + [
+      {name: job.name, job_id: job.job_id, matrix_kind: job.matrix_kind, proofs: job.proofs, steps: steps},
+    ]
+  }
+  return {schema_version: "harn.release_audit_contract.v1", lanes: lanes, merge_group_jobs: jobs}
+}
+
+/** Validate the machine-readable lane and CI proof mapping once at its boundary. */
+pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
+  const report = schema_validator(contract_schema()).report(value)
+  if !report.ok {
+    return nil
+  }
+  const contract = contract_from_validated(report.value)
+  const lane_names = contract.lanes.map({ lane -> lane.name }).to_list()
+  const lane_runners = contract.lanes.map({ lane -> lane.runner }).to_list()
+  const job_names = contract.merge_group_jobs.map({ job -> job.name }).to_list()
+  const job_keys = contract.merge_group_jobs.map({ job -> job.job_id + ":" + job.matrix_kind }).to_list()
+  if !unique_strings(lane_names) || !unique_strings(lane_runners) || !unique_strings(job_names)
+    || !unique_strings(job_keys) {
+    return nil
+  }
+  if len(contract.lanes.filter({ lane -> lane.proof == "residual" }).to_list()) == 0 {
+    return nil
+  }
+  for job in contract.merge_group_jobs {
+    const step_ids = job.steps.map({ step -> step.id }).to_list()
+    if len(job.proofs) == 0 || !unique_strings(job.proofs) || len(job.steps) == 0
+      || !unique_strings(step_ids) {
+      return nil
+    }
+    for proof in job.proofs {
+      const lane = contract.lanes.find({ candidate -> candidate.name == proof })
+      if lane == nil || lane.proof != "merge_group" {
+        return nil
+      }
+    }
+  }
+  for lane in contract.lanes.filter({ candidate -> candidate.proof == "merge_group" }).to_list() {
+    if !contract.merge_group_jobs.any({ job -> job.proofs.contains(lane.name) }) {
+      return nil
+    }
+  }
+  return contract
+}
+
+pub fn release_audit_contract_read(path: string) -> ReleaseAuditContract? {
+  const loaded = read_json_result(path)
+  if !is_ok(loaded) {
+    return nil
+  }
+  return release_audit_contract_parse(unwrap(loaded))
+}
+
+fn exact_rows(observed: list<string>, required: list<string>) -> dict {
+  const missing = required.filter({ name -> !observed.contains(name) }).to_list()
+  const unknown = observed.filter({ name -> !required.contains(name) }).to_list()
+  return {
+    ok: len(observed) == len(required) && len(missing) == 0 && len(unknown) == 0
+      && unique_strings(observed),
+    missing: missing,
+    unknown: unknown,
+  }
+}
+
+fn residual_lanes(contract: ReleaseAuditContract) -> list<ReleaseAuditLane> {
+  return contract.lanes.filter({ lane -> lane.proof == "residual" }).to_list()
+}
+
+fn audit_plan(
+  lanes: list<ReleaseAuditLane>,
+  receipt_reused: bool,
+  reason: string,
+  proof_kind: string,
+  head_sha: string,
+  errors: list<string> = [],
+) -> ReleaseAuditPlan {
+  return {
+    ok: true,
+    receipt_reused: receipt_reused,
+    reason: reason,
+    proof_kind: proof_kind,
+    head_sha: head_sha,
+    lane_names: lanes.map({ lane -> lane.name }).to_list(),
+    lane_runners: lanes.map({ lane -> lane.runner }).to_list(),
+    lanes: lanes,
+    errors: errors,
+  }
+}
+
+/** Return the fail-safe full local audit plan for absent or rejected evidence. */
+pub fn release_audit_full_plan(
+  contract: ReleaseAuditContract,
+  reason: string = "no_receipt",
+  expected_head_sha: string = "",
+  errors: list<string> = [],
+) -> ReleaseAuditPlan {
+  return audit_plan(contract.lanes, false, reason, "full_local", lowercase(trim(expected_head_sha)), errors)
+}
+
+/** Validate one closed proof receipt and return the only audit plan it may authorize. */
+pub fn release_audit_receipt_plan(
+  contract: ReleaseAuditContract,
+  value,
+  expected_head_sha: string,
+  observed_warm_binary_sha256: string = "",
+) -> ReleaseAuditPlan {
+  const report = schema_validator(receipt_schema()).report(value)
+  if !report.ok {
+    return release_audit_full_plan(
+      contract,
+      "invalid_receipt",
+      expected_head_sha,
+      report.errors.map({ error -> json_stringify(error) }).to_list(),
+    )
+  }
+  const receipt = report.value
+  const expected = lowercase(trim(expected_head_sha))
+  if receipt.head_sha != expected || receipt.warm.head_sha != expected {
+    return release_audit_full_plan(contract, "head_sha_mismatch", expected)
+  }
+  if receipt.warm.binary_sha256 != lowercase(trim(observed_warm_binary_sha256)) {
+    return release_audit_full_plan(contract, "warm_binary_sha256_mismatch", expected)
+  }
+  const expected_run_url = "https://github.com/burin-labs/harn/actions/runs/${receipt.run.id}"
+  if receipt.run.url != expected_run_url {
+    return release_audit_full_plan(contract, "run_url_identity_mismatch", expected)
+  }
+  if receipt.run.head_sha != expected {
+    return release_audit_full_plan(contract, "run_head_sha_mismatch", expected)
+  }
+  const observed_jobs = receipt.jobs.map({ job -> job.name }).to_list()
+  const observed_job_ids = receipt.jobs.map({ job -> "${job.id}" }).to_list()
+  if !unique_strings(observed_job_ids) {
+    return release_audit_full_plan(contract, "duplicate_merge_group_job_id", expected)
+  }
+  for job in receipt.jobs {
+    if job.url != expected_run_url + "/job/${job.id}" {
+      return release_audit_full_plan(contract, "job_url_identity_mismatch", expected)
+    }
+  }
+  const required_jobs = contract.merge_group_jobs.map({ job -> job.name }).to_list()
+  const rows = exact_rows(observed_jobs, required_jobs)
+  if !rows.ok {
+    return release_audit_full_plan(
+      contract,
+      "merge_group_jobs_mismatch",
+      expected,
+      ["missing=" + join(rows.missing, ","), "unknown=" + join(rows.unknown, ",")],
+    )
+  }
+  const lanes = residual_lanes(contract)
+  return audit_plan(lanes, true, "receipt_accepted", receipt.proof_kind, expected)
+}
+
+fn ci_job(ci, job_id: string) {
+  const jobs = ci?.jobs
+  if jobs == nil {
+    return nil
+  }
+  return jobs[job_id]
+}
+
+fn ci_matrix_row(job, matrix_kind: string) {
+  for entry in job?.strategy?.matrix?.include ?? [] {
+    if trim(entry?.kind ?? "") == matrix_kind {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn ci_step(job, step_id: string) {
+  for step in job?.steps ?? [] {
+    if trim(step?.id ?? "") == step_id {
+      return step
+    }
+  }
+  return nil
+}
+
+/** Check exact CI job, matrix, condition, and canonical-command proof identities. */
+pub fn release_audit_ci_contract_report(contract: ReleaseAuditContract, ci) -> dict {
+  if ci == nil {
+    return {ok: false, reason: "invalid_ci_yaml", errors: ["ci document is nil"]}
+  }
+  let errors: list<string> = []
+  for expected in contract.merge_group_jobs {
+    const job = ci_job(ci, expected.job_id)
+    if job == nil {
+      errors = errors + ["missing job: " + expected.job_id]
+      continue
+    }
+    if expected.matrix_kind == "" {
+      if trim(job?.name ?? "") != expected.name {
+        errors = errors + ["job name drift: " + expected.job_id]
+      }
+    } else {
+      const matrix = ci_matrix_row(job, expected.matrix_kind)
+      if matrix == nil {
+        errors = errors + ["missing matrix kind: " + expected.job_id + ":" + expected.matrix_kind]
+      } else if trim(matrix?.name ?? "") != expected.name {
+        errors = errors + ["matrix name drift: " + expected.job_id + ":" + expected.matrix_kind]
+      }
+    }
+    for required in expected.steps {
+      const observed = ci_step(job, required.id)
+      if observed == nil {
+        errors = errors + ["missing proof step: " + required.id]
+        continue
+      }
+      if trim(observed?.run ?? "") != trim(required.run) {
+        errors = errors + ["proof command drift: " + required.id]
+      }
+      if trim(observed?.if ?? "") != trim(required.condition) {
+        errors = errors + ["proof condition drift: " + required.id]
+      }
+    }
+  }
+  const ok = len(errors) == 0
+  return {
+    ok: ok,
+    reason: if ok {
+      "ci_contract_matches"
+    } else {
+      "ci_contract_drift"
+    },
+    errors: errors,
+  }
+}
+
+fn arg_spec() -> list {
+  return [
+    {kind: "option", name: "contract", flags: ["--contract"], default: ""},
+    {kind: "option", name: "receipt", flags: ["--receipt"], default: ""},
+    {kind: "option", name: "head_sha", flags: ["--head-sha"], default: ""},
+    {kind: "option", name: "warm_binary_sha256", flags: ["--warm-binary-sha256"], default: ""},
+    {kind: "option", name: "check_ci", flags: ["--check-ci"], default: ""},
+  ]
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio
+      .println(
+      "usage: harn run scripts/release_audit_contract.harn -- --contract PATH [--check-ci PATH | --receipt PATH --head-sha SHA]",
+    )
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    harness.stdio.eprintln(join((parsed?._errors ?? []) + (parsed?._extras ?? []), "\n"))
+    exit(2)
+  }
+  const contract_path = trim(parsed?.contract ?? "")
+  const contract = release_audit_contract_read(contract_path)
+  guard contract != nil else {
+    const loaded = read_json_result(contract_path)
+    const errors = if is_ok(loaded) {
+      schema_validator(contract_schema())
+        .report(unwrap(loaded)).errors
+        .map({ error -> json_stringify(error) })
+        .to_list()
+    } else {
+      [json_stringify(unwrap_err(loaded))]
+    }
+    harness.stdio
+      .eprintln(
+      json_stringify({ok: false, reason: "invalid_release_audit_contract", errors: errors}),
+    )
+    exit(1)
+  }
+  const ci_path = trim(parsed?.check_ci ?? "")
+  if ci_path != "" {
+    const report = release_audit_ci_contract_report(contract, read_yaml(ci_path, nil))
+    if !report.ok {
+      harness.stdio.println(json_stringify(report))
+      exit(1)
+    }
+  }
+  const receipt_path = trim(parsed?.receipt ?? "")
+  const expected_sha = trim(parsed?.head_sha ?? "")
+  const warm_binary_sha256 = trim(parsed?.warm_binary_sha256 ?? "")
+  if receipt_path == "" && expected_sha == "" {
+    if ci_path != "" {
+      harness.stdio
+        .println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
+      return nil
+    }
+    harness.stdio.eprintln("--head-sha is required when rendering an audit plan")
+    exit(2)
+  }
+  if receipt_path == "" {
+    harness.stdio.println(json_stringify(release_audit_full_plan(contract, "no_receipt", expected_sha)))
+    return nil
+  }
+  const loaded = read_json_result(receipt_path)
+  const plan = if is_ok(loaded) {
+    release_audit_receipt_plan(contract, unwrap(loaded), expected_sha, warm_binary_sha256)
+  } else {
+    release_audit_full_plan(contract, "receipt_unreadable", expected_sha)
+  }
+  harness.stdio.println(json_stringify(plan))
+  return nil
+}

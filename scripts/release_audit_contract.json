@@ -1,0 +1,64 @@
+{
+  "schema_version": "harn.release_audit_contract.v1",
+  "lanes": [
+    {"name": "rust-audit", "runner": "run_rust_audit", "proof": "merge_group"},
+    {"name": "harn-audit", "runner": "run_harn_audit", "proof": "merge_group"},
+    {"name": "generated-audit", "runner": "run_generated_audit", "proof": "residual"},
+    {"name": "docs-audit", "runner": "run_docs_audit", "proof": "residual"},
+    {"name": "grammar-audit", "runner": "run_grammar_audit", "proof": "residual"},
+    {"name": "security-audit", "runner": "run_security_audit", "proof": "residual"},
+    {"name": "package-audit", "runner": "run_package_audit", "proof": "merge_group"},
+    {"name": "smoke-audit", "runner": "run_smoke_audit", "proof": "residual"}
+  ],
+  "merge_group_jobs": [
+    {
+      "name": "Format check",
+      "job_id": "fmt",
+      "matrix_kind": "",
+      "proofs": ["rust-audit", "package-audit"],
+      "steps": [
+        {"id": "release-audit-format", "condition": "", "run": "make fmt-check"},
+        {"id": "release-audit-package", "condition": "", "run": "./scripts/verify_crate_packages.sh"}
+      ]
+    },
+    {
+      "name": "Rust lint",
+      "job_id": "rust-builds",
+      "matrix_kind": "lint",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-lint",
+          "condition": "matrix.kind == 'lint'",
+          "run": "./scripts/ci/run_rust_lint_lane.sh"
+        }
+      ]
+    },
+    {
+      "name": "Rust test",
+      "job_id": "rust-builds",
+      "matrix_kind": "test",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "matrix.kind == 'test' && github.event_name != 'pull_request'",
+          "run": "scripts/ci/run_rust_test_lane.sh make test"
+        }
+      ]
+    },
+    {
+      "name": "Harn conformance + audit",
+      "job_id": "rust-builds",
+      "matrix_kind": "audit",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "matrix.kind == 'audit'",
+          "run": "./scripts/audit_gates.sh"
+        }
+      ]
+    }
+  ]
+}
