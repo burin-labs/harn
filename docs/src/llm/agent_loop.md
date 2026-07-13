@@ -396,7 +396,7 @@ Same as `llm_call`, plus additional options:
 | `timestamp_messages` | bool | `false` | Decorate prompt-visible transcript messages with the current harness timestamp before each LLM call without mutating the stored transcript |
 | `message_decorator` | closure | nil | Per-message hook called as `message_decorator(message, context)` before each LLM call. The context includes `session_id`, `iteration`, `index`, and `timestamp` |
 | `prompts` / `prompt_overrides` | dict | nil | Override validated logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure. Unknown ids are rejected. For typo-resistant authoring, pass the typed override shape through `agent_prompt_overrides(...)` from `std/agent/prompts` |
-| `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, or merge next-turn options such as `llm_options: {tool_choice: "none"}` |
+| `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, or merge next-turn options such as `llm_options: {tool_choice: "none"}`. Rich verdicts may include `feedback_kind: string` to give injected feedback a stable semantic identity |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
 | `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, `feedback_fallback`, and `max_invocations` (alias `max_feedback`, default `5`) to cap repeated vetoes. Once the cap is hit the judge stops firing and the loop ends with status `verify_capped` and stop_reason `completion_judge_cap_reached`; set `max_invocations: 0` to disable the cap |
 | `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning`. Dict configs may include `max_invocations` (alias `max_feedback`) to terminally cap repeated vetoes, plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}` to control when the judge is due |
@@ -1179,8 +1179,11 @@ It may return:
 
 - a `string` to inject as the next user-visible message
 - a `bool` where `true` stops the current stage immediately after the turn
-- a `dict` with optional `message`, `stop`, `stop_reason`, `next_options`, and
-  `llm_options` fields. `message` is injected as runtime feedback.
+- a `dict` with optional `message`, `feedback_kind`, `stop`, `stop_reason`,
+  `next_options`, and `llm_options` fields. `message` is injected as runtime
+  feedback. `feedback_kind` labels the resulting `feedback_injected` event and
+  ACP `feedbackKind`; omit it to use `"post_turn"`. `terminal_callback` rich
+  verdicts use the same field and default to `"terminal_callback"`.
   `stop_reason` overrides the default `"post_turn_stop"` reason when `stop` is
   true. `next_options` merges into the next loop iteration's options;
   `llm_options` merges into the next LLM call's `llm_options` dict.
