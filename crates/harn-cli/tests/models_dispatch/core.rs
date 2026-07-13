@@ -1,0 +1,216 @@
+use super::support::{parse_json, run};
+
+#[test]
+fn models_list_human_text_renders_catalog_groups() {
+    let harn = run(&["models", "list"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    assert!(
+        harn.stdout.contains("anthropic\n"),
+        "stdout={}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("  claude-haiku-4-5-20251001"),
+        "stdout={}",
+        harn.stdout
+    );
+}
+
+#[test]
+fn models_list_provider_filter_limits_groups() {
+    let harn = run(&["models", "list", "--provider", "openai"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    assert!(
+        harn.stdout.starts_with("openai\n"),
+        "stdout={}",
+        harn.stdout
+    );
+    assert!(!harn.stdout.contains("\nmock\n"), "stdout={}", harn.stdout);
+}
+
+#[test]
+fn models_list_installed_only_is_well_formed() {
+    let harn = run(&["models", "list", "--installed-only"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    assert!(!harn.stdout.trim().is_empty(), "stdout should not be empty");
+}
+
+#[test]
+fn models_list_json_has_provider_array() {
+    let harn = run(&["models", "list", "--json"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let providers = harn_value["providers"].as_array().expect("providers array");
+    let anthropic = providers
+        .iter()
+        .find(|provider| provider["name"] == "anthropic")
+        .expect("anthropic provider group");
+    let models = anthropic["models"].as_array().expect("anthropic models");
+    assert!(
+        models
+            .iter()
+            .any(|model| model["id"] == "claude-haiku-4-5-20251001"),
+        "anthropic models={models:?}"
+    );
+}
+
+// - models recommend ------------------------------------------------------
+
+#[test]
+fn models_recommend_human_text_has_model_and_rationale() {
+    let harn = run(&["models", "recommend"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let lines: Vec<&str> = harn.stdout.lines().collect();
+    assert!(lines.len() >= 2, "stdout={}", harn.stdout);
+    assert!(!lines[0].trim().is_empty(), "stdout={}", harn.stdout);
+    assert!(lines[1].contains("->"), "stdout={}", harn.stdout);
+}
+
+#[test]
+fn models_recommend_json_shape_is_stable() {
+    let harn = run(&["models", "recommend", "--json"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    for key in [
+        "model_id",
+        "harn_selector",
+        "provider",
+        "rationale",
+        "ram_bucket",
+        "gpu",
+        "has_provider_key",
+    ] {
+        assert!(!harn_value[key].is_null(), "missing recommend.{key}");
+    }
+    let harn_hw = &harn_value["hardware"];
+    for key in ["ram", "gpu", "disk"] {
+        assert!(
+            harn_hw[key].is_object(),
+            "harn hardware.{key} should be an object"
+        );
+    }
+    assert!(harn_value["rationale"]
+        .as_str()
+        .unwrap_or("")
+        .contains("->"));
+}
+
+// - models test -----------------------------------------------------------
+
+#[test]
+fn models_test_mock_human_line_shape_is_stable() {
+    let harn = run(&["models", "test", "mock", "--provider", "mock"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "model_id=mock",
+        "provider=mock",
+        "latency_ms=",
+        "first_token_ms=",
+        "input_tokens=",
+        "output_tokens=",
+        "estimated_cost_usd=0",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+    let keys = test_line_keys(&harn.stdout);
+    assert_eq!(
+        keys,
+        vec![
+            "model_id",
+            "provider",
+            "latency_ms",
+            "first_token_ms",
+            "input_tokens",
+            "output_tokens",
+            "estimated_cost_usd",
+        ],
+        "models test stdout key order diverged"
+    );
+}
+
+#[test]
+fn models_test_mock_json_shape_is_stable() {
+    let harn = run(
+        &["models", "test", "mock", "--provider", "mock", "--json"],
+        &[],
+    );
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    for key in [
+        "model_id",
+        "provider",
+        "input_tokens",
+        "output_tokens",
+        "estimated_cost_usd",
+    ] {
+        assert!(!harn_value[key].is_null(), "missing models test {key}");
+    }
+    let latency_key = "latency_ms";
+    assert!(
+        harn_value[latency_key].is_u64() || harn_value[latency_key].is_i64(),
+        "harn {latency_key} should be integer; got: {}",
+        harn_value[latency_key]
+    );
+    assert_eq!(harn_value["estimated_cost_usd"].as_f64(), Some(0.0));
+}
+
+#[test]
+fn models_test_failure_json_envelope_is_stable() {
+    // Drop every provider credential env var so the smoke-test fails
+    // deterministically with the missing-API-key error.
+    let scrubbers: Vec<(&str, &str)> = vec![
+        ("OPENAI_API_KEY", ""),
+        ("ANTHROPIC_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_API_KEY", ""),
+        ("AZURE_OPENAI_API_KEY", ""),
+        ("AZURE_OPENAI_AD_TOKEN", ""),
+        ("AZURE_OPENAI_BEARER_TOKEN", ""),
+        ("CEREBRAS_API_KEY", ""),
+        ("DASHSCOPE_API_KEY", ""),
+        ("DEEPSEEK_API_KEY", ""),
+        ("FIREWORKS_API_KEY", ""),
+        ("GOOGLE_APPLICATION_CREDENTIALS", ""),
+        ("GOOGLE_OAUTH_ACCESS_TOKEN", ""),
+        ("GROQ_API_KEY", ""),
+        ("HF_TOKEN", ""),
+        ("HUGGINGFACE_API_KEY", ""),
+        ("OPENROUTER_API_KEY", ""),
+        ("TOGETHER_AI_API_KEY", ""),
+        ("VERTEX_AI_ACCESS_TOKEN", ""),
+        ("HARN_LLM_PROVIDER", ""),
+        ("LLM_PROVIDER", ""),
+    ];
+    let harn = run(
+        &[
+            "models",
+            "test",
+            "foo-not-real",
+            "--provider",
+            "openai",
+            "--json",
+        ],
+        &scrubbers,
+    );
+    assert_eq!(
+        harn.exit_code, 1,
+        "harn should fail; stderr={}",
+        harn.stderr
+    );
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["ok"], serde_json::Value::Bool(false));
+    assert!(
+        harn_value["error"].is_string(),
+        "failure envelope missing 'error' string field"
+    );
+}
+
+fn test_line_keys(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .filter_map(|kv| kv.split('=').next().map(str::to_string))
+        .collect()
+}
